@@ -35,6 +35,34 @@ function diagnostic(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Code language read contracts", () => {
+  it("requires an acknowledged revision for bounded rename and quick-fix previews", () => {
+    const request = {
+      kind: "rename",
+      ...scope,
+      newName: "renamed",
+      position: { line: 0, character: 1 },
+      expectedVersion: 1,
+      expectedRevision: "90000000-0000-4000-8000-000000000001",
+    };
+    expect(decodeCodeLanguageReadRequest(request)).toEqual(request);
+    for (const change of [
+      { newName: "" },
+      { newName: "a\nb" },
+      { expectedRevision: undefined },
+      { expectedVersion: 0 },
+    ])
+      expect(() => decodeCodeLanguageReadRequest({ ...request, ...change })).toThrow();
+    expect(() =>
+      decodeCodeLanguageReadResult({
+        status: "edit-previews",
+        ...scope,
+        documentVersion: 1,
+        documentRevision: request.expectedRevision,
+        previews: new Array(17).fill({ title: "fix", files: [] }),
+      }),
+    ).toThrow();
+  });
+
   it("decodes a diagnostics read and a definition read for one file of a Code thread", () => {
     expect(decodeCodeLanguageReadRequest({ kind: "diagnostics", ...scope })).toEqual({
       kind: "diagnostics",

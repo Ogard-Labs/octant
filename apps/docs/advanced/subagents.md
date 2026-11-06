@@ -189,7 +189,7 @@ thread. See [Privacy and security](/advanced/privacy-and-security).
 - **Code** children get **isolated worktrees** by default; the worktree must
   be verified before the child starts, and failure prevents running in the
   parent checkout. Concurrent children use separate worktrees, starting from
-  the parent's committed revision. Uncommitted parent edits are not copied.
+  the parent's committed revision by default. To include unfinished edits, the person reviews and selects a stable snapshot in the parent task's **Worktrees → Child source**. Each child records that source and receives an independent copy with staging preserved; stale or incomplete copies refuse before admission.
 
 ## Lifecycle, cancellation, and recovery
 
@@ -206,8 +206,8 @@ saved session is missing, or its authority no longer matches, Octant refuses
 Resume and asks you to use **Retry**, which starts a new execution.
 
 When a child needs an approval or an answer, the composer shows **A subagent
-needs your input**. **Review request** opens its detail view. The request names
-the child, provider, and model. Allowing a child action covers that request
+needs your input**. Answer beside the composer, switch between pending requests, or choose **Open child** for the full detail. The request names
+the child, provider/account, model and recorded target folder. A disconnected view must reconnect before answering. Allowing a child action covers that request
 only; it does not grant access to siblings or later requests. Unanswered
 requests expire when the child stops or Octant restarts.
 
@@ -260,7 +260,14 @@ sending it again.
 
 When the lead includes parent context, the child receives a bounded, attributed
 selection of accepted prompts and completed replies. Missing or omitted text
-is identified; private reasoning and tool bodies are excluded.
+is identified; private reasoning and tool bodies are excluded. Original images
+and documents are included when the selected model supports them, up to eight
+inputs and 32 MiB. Their names, types and inclusion or omission appear under
+**Original inputs** in the child's conversation. An unavailable or unsupported
+input stops the handoff; choose a capable model or explicitly ask for text-only
+parent context. The text-only receipt records what was omitted. Original inputs
+remain separate from the lead's brief and the child's report, and deleting the
+source thread revokes them.
 
 Child results must be **acknowledged** by the parent. On a terminal parent
 turn, unacknowledged, failed, interrupted, waiting, or unfinished descendants
@@ -283,6 +290,12 @@ provider that never reports usage, such as an ACP agent, is not measured
 against the token or money budget, and the ceiling says so; a child on a
 provider that can report usage but did not is never counted as free. See
 [Spend ceilings](/advanced/usage-and-limits#spend-ceilings).
+
+In **Settings → Octant Harness → Helper agents**, **Working minutes per attempt** chooses the next attempt's active-work window (30 minutes by default, between 1 and 240). Approval and answer waits do not count. Retry and Resume start a fresh window at the current setting; they do not extend the running attempt or remove Project/thread ceilings. Provider acquisition and startup keep their separate two-minute readiness bounds. The child detail shows recorded active time and partial totals where older, cancelled or interrupted attempts have no measurement.
+
+On a paired phone, you can answer requests raised by children of your own turn, once or deny. You cannot answer a request raised by another phone, a local window or a host-owned execution. Reconnecting and reading a thread do not transfer ownership.
+
+New sibling messages expire after 24 hours if still queued. Agents lists **Expired after 24 hours** separately from delivery or acknowledgement. Older messages without a recorded deadline keep their prior lifetime.
 
 ## Next steps
 

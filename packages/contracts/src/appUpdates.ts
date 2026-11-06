@@ -83,6 +83,19 @@ export const PREVIEW_PRERELEASE_TAG = "preview";
 export const CANDIDATE_PRERELEASE_TAG = "candidate";
 
 /**
+ * Which app a release is for.
+ *
+ * Octant and Octant Nightly are two apps, and each updater installs only its
+ * own. The ring already separates them (Octant follows `stable` and
+ * `candidate`, Nightly only `preview`), but Octant builds were once published
+ * on `preview`, and on Linux nothing below the feed checks which app a
+ * portable image is. Naming the app inside the signature makes the refusal
+ * the feed's own, on every platform.
+ */
+export const AppUpdateProduct = Schema.Literal("octant", "octant-nightly");
+export type AppUpdateProduct = typeof AppUpdateProduct.Type;
+
+/**
  * The release a feed offers.
  *
  * These are exactly the fields that are signed. Anything the app decides from
@@ -90,6 +103,12 @@ export const CANDIDATE_PRERELEASE_TAG = "candidate";
  * the signature, or the signature is decoration.
  */
 export const AppUpdateRelease = Schema.Struct({
+  /**
+   * The app this release is. Signed, and required: a feed without it is
+   * malformed, because every signer has emitted it since the field was added
+   * and nothing published before then is read at a name that carries it.
+   */
+  product: AppUpdateProduct,
   version: AppVersion,
   platform: AppUpdatePlatform,
   arch: AppUpdateArchitecture,
@@ -161,6 +180,11 @@ export const AppUpdateRefusal = Schema.Literal(
    */
   "wrong-ring",
   /**
+   * The release is genuine, but it is the other app: an Octant Nightly build
+   * offered to Octant, or the reverse.
+   */
+  "wrong-app",
+  /**
    * The running launch is not a portable image this app can replace. A
    * package or an unpacked archive has to be replaced by hand.
    */
@@ -209,6 +233,94 @@ export const AppUpdateState = Schema.Struct({
 export type AppUpdateState = typeof AppUpdateState.Type;
 
 /**
+ * Why the Octant Nightly row did not install, open or remove Nightly.
+ *
+ * Each names the check that refused, so the row can say which one it was. The
+ * feed and artifact reasons mean what they mean for Octant's own updates.
+ */
+export const NightlyInstallRefusal = Schema.Literal(
+  "unreachable",
+  "malformed",
+  "untrusted-signature",
+  "wrong-platform",
+  "wrong-ring",
+  /** The Nightly feed held a build of Octant rather than Octant Nightly. */
+  "wrong-app",
+  "corrupt-artifact",
+  /** The preview feed holds no published Nightly build. */
+  "no-release",
+  /** The downloaded app is not Nightly signed by Octant's own Developer ID team. */
+  "code-signature",
+  /** The installed Nightly is the same build or newer; installing would not move it forward. */
+  "not-newer",
+  /** The installed Nightly's version could not be read, so no build can be shown to be newer. */
+  "installed-version-unreadable",
+  /** The app at Nightly's location did not verify as Nightly, so Remove left it alone. */
+  "remove-unverified",
+  /** Octant Nightly is running; replacing or removing it waits until it is quit. */
+  "nightly-running",
+  /** macOS did not open the verified Nightly. */
+  "launch-failed",
+  /** The download did not finish within its deadline; nothing was changed. */
+  "timed-out",
+  /** The code-signature check could not run or ran out of time; nothing was changed. */
+  "check-unavailable",
+  /** Something other than Octant Nightly already sits at the install location. */
+  "occupied",
+  /** Octant cannot write beside itself. */
+  "not-writable",
+  /** This copy of Octant is not where Nightly can be placed beside it. */
+  "unsupported-install",
+  /** Only packaged macOS Octant places Nightly beside itself. */
+  "unsupported-platform",
+  /** Installing is offered only while Octant follows Preview. */
+  "not-on-preview",
+  /** Nightly is not installed, so there is nothing to open or remove. */
+  "not-installed",
+);
+export type NightlyInstallRefusal = typeof NightlyInstallRefusal.Type;
+
+/**
+ * The Octant Nightly row in Octant's Settings › Updates.
+ *
+ * `unavailable` hides the row: Nightly itself, a development build, or Octant
+ * on Stable with no Nightly installed. `not-installed` offers the install,
+ * which only Octant on Preview does; `installed` offers open and remove on
+ * either ring.
+ */
+export const NightlyInstallState = Schema.Struct({
+  status: Schema.Literal("unavailable", "not-installed", "installing", "installed", "removing"),
+  refusal: Schema.optional(NightlyInstallRefusal),
+  message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type NightlyInstallState = typeof NightlyInstallState.Type;
+
+/**
+ * Octant Nightly's Data setting: Octant's data through Octant's host, or a
+ * host of its own on separate test data. `running` is the role this launch
+ * started with; `chosen` applies on the next launch. `removal` reports the
+ * last request to move the test data to the Trash.
+ */
+export const NightlyDataChoice = Schema.Literal("octant", "test-data");
+export type NightlyDataChoice = typeof NightlyDataChoice.Type;
+export const NightlyDataState = Schema.Struct({
+  running: NightlyDataChoice,
+  chosen: NightlyDataChoice,
+  testDataPresent: Schema.Boolean,
+  removal: Schema.optional(
+    Schema.Literal(
+      "removed",
+      "absent",
+      "test-host-running",
+      "unsafe-folder",
+      "not-nightly",
+      "failed",
+    ),
+  ),
+}).annotations(strict);
+export type NightlyDataState = typeof NightlyDataState.Type;
+
+/**
  * Everything an update check discloses, in the words the user guide uses.
  *
  * Kept in the contract rather than only in prose so the claim and the code
@@ -241,3 +353,4 @@ export const decodeAppReleaseRing = Schema.decodeUnknownSync(AppReleaseRing);
 export const decodeAppUpdateFeed = Schema.decodeUnknownSync(AppUpdateFeed);
 export const decodeAppUpdateRelease = Schema.decodeUnknownSync(AppUpdateRelease);
 export const decodeAppUpdateState = Schema.decodeUnknownSync(AppUpdateState);
+export const decodeNightlyInstallState = Schema.decodeUnknownSync(NightlyInstallState);

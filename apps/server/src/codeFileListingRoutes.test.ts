@@ -71,6 +71,32 @@ function get(url = listingUrl) {
 }
 
 describe("Code file listing route", () => {
+  it("keeps folder identity while multiplexing approved watch targets and rejects invalid sets", async () => {
+    const watchFiles = vi.fn(async (_window: unknown, _input: unknown) =>
+      (async function* () {
+        yield { ...notice(["added.txt"]), folder: "/approved/third" };
+      })(),
+    );
+    const { handler } = createRoute({ watchFiles });
+    const folders = [".", "/approved/third"];
+    const response = await handler(
+      get(`${watchUrl}&folders=${encodeURIComponent(JSON.stringify(folders))}`),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.text()).toContain('"folder":"/approved/third"');
+    expect(watchFiles.mock.calls[0]?.[1]).toMatchObject({ folders });
+    for (const targets of [
+      [],
+      [".", "."],
+      ["relative"],
+      Array.from({ length: 18 }, (_, index) => `/extra/${index}`),
+    ])
+      expect(
+        (await handler(get(`${watchUrl}&folders=${encodeURIComponent(JSON.stringify(targets))}`)))
+          ?.status,
+      ).toBe(400);
+    expect(watchFiles).toHaveBeenCalledOnce();
+  });
   it("returns the host's typed listing", async () => {
     const { handler, listFiles } = createRoute();
     const response = await handler(get());

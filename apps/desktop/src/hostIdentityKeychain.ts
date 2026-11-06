@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
-import { KEYCHAIN_STORE_SCOPE_PATTERN } from "./keychainCredentialStore";
+import {
+  KEYCHAIN_STORE_SCOPE_PATTERN,
+  keychainHelperArguments,
+  type KeychainServiceFamily,
+} from "./keychainCredentialStore";
 
 export const HOST_IDENTITY_KEYCHAIN_NAMESPACE = "app.octant.host-identity.v1" as const;
 export const HOST_IDENTITY_KEY_ID = "host-identity" as const;
@@ -94,10 +98,11 @@ export function hostSigningHelperSpec(
   command: string,
   request: HostSigningHelperRequest,
   storeScope: string,
+  serviceFamily: KeychainServiceFamily = "octant",
 ): HostSigningHelperSpec {
   return {
     command,
-    args: [],
+    args: keychainHelperArguments(serviceFamily),
     stdin: `${JSON.stringify({ version: 1, namespace: HOST_IDENTITY_KEYCHAIN_NAMESPACE, storeScope, ...request })}\n`,
   };
 }
@@ -152,6 +157,7 @@ export interface MakeHostIdentitySigningServiceOptions {
   readonly execute?: KeychainHelperExecutor;
   /** Opaque host-derived identity for the selected local data store. */
   readonly storeScope: string;
+  readonly serviceFamily?: KeychainServiceFamily;
   /**
    * Reads only the current public fingerprint from the server-authoritative
    * projection. It proves ownership before the native helper may migrate the
@@ -185,7 +191,12 @@ export function makeHostIdentitySigningService(
 
   const invoke = async (request: HostSigningHelperRequest): Promise<HostSigningResponse> => {
     const normalized = normalizeRequest(request);
-    const spec = hostSigningHelperSpec(helperPath, normalized, options.storeScope);
+    const spec = hostSigningHelperSpec(
+      helperPath,
+      normalized,
+      options.storeScope,
+      options.serviceFamily,
+    );
     if (Buffer.byteLength(spec.stdin) > HOST_IDENTITY_HELPER_MAX_BYTES) {
       throw new HostIdentitySigningFailure("invalid");
     }

@@ -271,8 +271,9 @@ entries are excluded.
 ## Process topology
 
 On macOS, both trusted desktop executables use sealed ASAR entries and fixed
-launch roles. Stable's separately identified, same-version bundled runtime runs
-its host, managed tools, scoped terminal CLI and executable extensions as Node. The worker runtime is
+launch roles. Each app's separately identified, same-version bundled runtime runs
+its host, managed tools and executable extensions as Node (Stable's also runs its
+scoped terminal CLI; Nightly's host is only its test-data host). The worker runtime is
 not a trusted desktop peer, and Node consumers keep physical server files and
 stdin supervision. The runtime has independent Framework/fuse bytes; no arbitrary
 script runs under the trusted desktop executable's identity. See the owning
@@ -302,6 +303,17 @@ authority; it never changes Stable's channel or stops Stable's host. See
 Lease loss destroys the old Nightly renderer before a bounded fresh native
 registration retry; only an already retained current client receives managed
 restart grace. See [reconnect rules](design/nightly-app.md#reconnecting-after-host-loss).
+Packaged Linux has no signature or audit token, so the same status and window
+protocols run over a `0600` `SOCK_SEQPACKET` path socket in the private
+per-user runtime folder. Each side admits the other only for the same user, a
+pidfd-held process incarnation with the same mount, user and PID namespaces
+and root, and a kernel credential on every message; pidfd exit or EOF revokes
+leases. Executable paths and `$APPIMAGE` grant nothing, and a Nightly whose
+renderers run unsandboxed registers no window. A closed Linux Octant starts
+only from the launcher record its last packaged launch wrote, by descriptor,
+with the host-only role and a minimal environment. Same-user unconfined code
+can pass this check, an accepted limit. See
+[Linux client trust](design/nightly-app.md#linux-client-trust).
 Full IME reconversion, accessibility, native popups and full lifecycle
 acceptance remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
@@ -599,7 +611,7 @@ and Keychain sharing for the notification service extension), testers are
 maintainer-controlled App Store Connect users, and external groups, public
 links, and store listing stay closed until
 [public store distribution](design/mobile-maturity.md#phase-e-public-store-distribution),
-an authorized post-preview track, opens with a separate maintainer action for
+a track in scope for the first preview, opens with a separate maintainer action for
 submission. A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
 Apple finishes processing it. Internal Android builds carry the same client
@@ -739,7 +751,10 @@ change to it re-bills the whole conversation:
 - **Codex** takes its tools in `thread/start.dynamicTools`, which
   `thread/resume` does not accept, so a Codex thread keeps the tools it
   started with; one not offered in a later turn is refused by the host's tool
-  policy, and one first offered later does not reach that thread.
+  policy, and one first offered later does not reach that thread. The driver
+  records definition fingerprints with the starting names. New or changed
+  definitions require the person's explicit fresh-session text handoff choice;
+  the host never pretends a resume changed Codex's fixed catalogue.
 
 Each mode offers only its admitted tools, so every runtime receives the same
 definitions without a separate global tool installation or prompt catalogue,
@@ -908,6 +923,12 @@ can open a thread it is asked for. The read is local-window only, like pending
 requests. Titles never enter the public health response or redacted
 diagnostics. Separately managed hosts retain their existing lifecycle
 restrictions. Nothing here writes provider MCP or hook configuration.
+
+Chromium's developer tools (View › Toggle Developer Tools and Reload, and their
+shortcut) stay in development builds and in packaged Preview and candidate
+builds, and are hidden in a packaged stable release, decided by the build's
+version (maintainer decision, 2026-11-06). Octant Nightly hides them whenever
+it is packaged.
 
 ### Desktop context menus
 
@@ -1197,14 +1218,21 @@ person with its time, and replays like any other thread update.
 Stop asks the runtime to end a turn. When the runtime does not end it, a
 provider whose sessions each own a process (reported as the `forceStop`
 capability, Claude today) lets the person **Force stop** the turn ten seconds
-after pressing Stop in Chat. The server's `force-stop-chat-turn` command kills
+after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
 `forceStop` unsupported: the command is refused, the UI never offers it, and
 Stop settles the attempt at once as before. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
-did not take stays visible. Work and Code do not offer Force stop yet.
+did not take stays visible. Work returns `stop-requested` while its exact
+request-owned supported runtime is still ending. Its force command requires the
+same request/thread/turn and an already-aborted owned controller. Code's force
+command additionally names the original turn operation, rejects replacement
+operations and requires that Stop already reached that controller. Neither path
+accepts a PID or kills a shared runtime; the provider owns process verification.
+The normal turn lifecycle records completion/cancellation, preserving queued
+messages and history. A kill failure leaves an explicit recovery error.
 
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for
@@ -1867,8 +1895,10 @@ now also move back in place. Chat's differences are under **Chat** below.
   marked when its source is, and leaves the source untouched. The carried turns
   are copied into the fork's own journal in the same unit that creates it,
   each naming the source turn it came from, so every later read is of the
-  fork's own turns; attachments, tool steps, and changed-file records stay with
-  the source. Its first turn on a provider that keeps its own session starts a
+  fork's own turns. Original attachment references retain their source identity;
+  bytes are read only for an admitted continuation, as described under
+  **Original inputs in continuations** below. Tool steps and changed-file
+  records stay with the source. Its first turn on a provider that keeps its own session starts a
   new session with the carried turns as a disclosed text handoff; a host that
   rebuilds the conversation reads them from the copies.
 - **Rewind to here** on a person's message removes that turn and every later
@@ -2041,10 +2071,33 @@ choice reads as off.
 Each Code child allocation is keyed by its parent and delegation request. Two
 sibling requests receive distinct managed worktrees; only the same request can
 reuse its verified receipt. The host checks the actual Git worktree inventory
-and records the starting commit. Children start from committed source only; the
-parent checkout's uncommitted edits are not copied into a child worktree, and
-there is no opt-in to seed one from the parent's working tree. A child that
-must see an edit starts after the parent commits it.
+and records the starting commit. Committed revision is the default source.
+The person can instead open the parent task's **Worktrees → Child source**,
+capture **Current edits snapshot**, inspect the included paths, then explicitly
+select it for children prepared from that task. Capturing alone does not enable
+it. Selecting **Committed revision** clears the selection. Existing children
+never change when this selection or the parent's files change.
+
+A current-edits source reuses Git checkpoints, with a separate worktree tree and
+index tree, without committing to or changing the parent's branch, files or
+staging. Capture enumerates tracked changes and eligible untracked files,
+including nested untracked files; ignored files are excluded. Protected changes,
+truncated or oversized manifests (over 256 paths), unreadable objects, and an
+unstable capture refuse rather than silently copying a subset. A capture has a
+thirty second bound and is checked against a second capture and observation.
+The selected snapshot is bound to the parent thread, checkout, binding and base
+revision; a stale selection must be replaced or explicitly cleared before a
+child can start.
+
+Each child records its committed base, snapshot identity and included paths in
+its managed receipt and admitted workspace. The parent's child details and the
+child's provider context identify the source. Copying preserves staging in that
+child's independent checkout. The host journals applying and completed copy
+states before admission; an incomplete, failed or interrupted copy refuses
+confirmation and execution. It is never automatically reapplied over a child's
+files, including after a lost reply or restart. Prepare a new child to recover
+an incomplete copy. The checkpoint anchors follow existing checkout retention.
+This source choice transfers files, not model attachments.
 
 Provider-owned child reports are read-only observations through the existing
 `child-agent-activity` SDK event. Chat attempts, Work turn updates, Code operation
@@ -2102,10 +2155,11 @@ frame, and a parent purge removes all generations' text and evidence. Nested
 observations retain the authorized root thread and identify their managed parent
 separately. Result reads do not consume or acknowledge delivery.
 
+Settled managed attempts record active milliseconds and the chosen limit through the existing subject-owned result evidence, atomically with lifecycle persistence. Waiting intervals are excluded. The child detail shows its latest recorded attempt and cumulative recorded time, and labels historical, cancelled or lost-startup gaps as unavailable rather than inventing wall-time totals. Existing cumulative Project/thread ceilings remain independent and authoritative.
+
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, may work for at most 30
-minutes (`MANAGED_AGENT_RUN_TURN_DEADLINE_MS`); a turn that reaches that bound
+from provider acquisition to its terminal event, has a default 30-minute working-time limit. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
 is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
@@ -2129,7 +2183,7 @@ live parent and child authority before and after the answer. A child approval
 permits only that request, never consumes or creates a remembered lead-session
 grant, and cannot approve an opaque provider action in Plan mode. Cancelled or
 expired requests and requests whose transport was lost at restart cannot be
-answered. The composer signals pending child input and opens its detail view. The same
+answered. The composer lists eligible child approvals and questions beside the parent's own request, in a bounded scroll region with keyboard-selectable requests and an Open child action. It reads and answers the same authoritative pending IDs as Agents, names the child, provider/account and recorded target folder, and disables responses on a failed refresh or lost connection. A paired device receives a restricted child-request view with only eligible approvals and questions; parent sessions, turns, tool results, tasks, steering and follow-ups are never included. It may read and answer only requests from a child execution admitted by that device's own turn, approve once or deny; another device's, a local window's and host-owned executions remain unavailable. Admission and explicit Retry/Resume bind the execution to the authenticated scope; reads never transfer ownership, restart loses live ownership, and live parent/child authority is rechecked before the response can run. Settings, launch, pause, steering and remembered grants gain no remote route. The same
 request is a Needs you row naming the parent thread and the child (see
 pending requests across modes); the row has one action, which opens the parent's
 Agents tab on that child, and no way to answer.
@@ -2163,6 +2217,23 @@ unfinished reply is disclosed as omitted. The selection is read before a child
 workspace is allocated, so a refusal names the reason (for example, no readable
 messages yet or a conversation that changed during the read) and leaves no
 worktree behind.
+
+When parent context includes original user attachments, admission captures at
+most eight immutable input references (32 MiB in all), including source mode,
+thread and attachment identity, media type, name, length and digest. These
+references share the purgeable context snapshot; the journal records only the
+input count and preserve/text-only policy. The destination's observed native
+attachment capability and model modality must support every selected input.
+Missing source metadata or unsupported input refuses creation; the caller can
+choose another model or explicitly request text-only context. A waiting pool
+route checks the eventual target before provider startup. Execution re-reads
+exact bytes, verifies their digest and source lifecycle, and refuses the whole
+send if any required input changed, disappeared or was revoked. Restart uses
+the same recorded selection. A native follow-up verifies the selection without
+appending duplicate original inputs to the retained session. A separate input
+receipt distinguishes original user inputs from the coordinator's brief and
+report, both in provider context and the child's conversation view. Deleting
+the parent destroys its manifest together with its derived conversation.
 
 Finished siblings currently owing a result to the same parent can be delivered
 in one ordinary parent turn, capped at 16 members and 32,768 prompt characters.
@@ -2899,7 +2970,7 @@ thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
 the thread it came from.
 
-- **File arrivals.** A person configures the existing main Work Project root,
+- **File arrivals.** A person configures the existing main Work or Code Project root,
   a relative existing input directory, included suffixes, excluded directories,
   a settling interval of 2–60 seconds and at most 1–32 automatic starts per
   explicit arm (default 8). Configuration and reviewed re-arm are local-window
@@ -2965,9 +3036,82 @@ the thread it came from.
   runs makes quiescence unknown rather than dropping older ownership: finish and
   review the Project's tasks and cleanup, then archive that routine and explicitly
   configure a new one; neither Resume nor Save clears this hold. Existing timed/manual
-  routines retain their behavior. Code input transfer is a separate remaining
-  implementation gate, since its managed checkout does not inherit uncommitted
-  Work input files.
+  routines retain their behavior. A Code run copies only its selected batch
+  into `octant-routine-inputs/<run-id>` in its new managed checkout before its
+  first turn. Confined reads must match every observed digest and size; a
+  changed or unavailable source refuses admission. Confined exclusive writes
+  never overwrite a different existing file or follow a linked destination.
+  An identical partial copy may be reused after a crash. The framed input names
+  these copied paths, and the ordinary Code evidence store retains the exact
+  task and framed metadata. A recorded start recovers that input before any
+  fresh source read or copy. These are ordinary checkout files: review them
+  before committing or pushing. The copy changes neither the main checkout nor
+  ignore rules and grants no authority beyond the selected batch and child checkout.
+- **Integration events.** A person at a local window selects a connected source,
+  its filters, fixed task, profile, effective authority and new-thread delivery
+  before enabling a Work or Code routine. The host binds an immutable account
+  and repository/workspace identity through a read-only contribution in
+  `@octant/plugin-api/integration`; discovery grants no authority. The scheduler
+  consumes the normalized source port, never credentials or vendor clients.
+  GitHub contributes recent completed workflow runs for a selected repository,
+  with optional workflow number, branch and conclusions. Its selected OAuth
+  repository reader observes the latest 100 completed runs and their latest
+  known attempts; the identity is repository/run/attempt. Unseen attempts and
+  older runs outside that window are not history the host can reconstruct.
+  Linear contributes the complete current set assigned to the connected person,
+  optionally filtered by team key and project identifier, bounded at 256 issues
+  and three pages. Its identity binds the viewer and workspace, and ordinary
+  issue updates do not repeat an assignment: an issue must be observed absent
+  and then present to produce another assignment occurrence.
+  The existing host scheduler polls at the person's 1–60 minute interval,
+  with at most two source observations in flight and a 20-second observation
+  stage bound. Rate-limited sources preserve their cursor and honor a bounded
+  retry delay. Incomplete, malformed, over-limit or revoked observations never
+  replace the baseline. The first complete observation is a quiet baseline.
+  The journal retains at most 256 seen identities and 32 pending events. Loss
+  of the entire full CI window requires explicit review, rather than assuming
+  every visible old run is new. The source supplies bounded window identities
+  before conclusion filtering, so an unmatched run can prove overlap and a
+  filtered subset cannot hide a lost full window. The journal retains that
+  coverage receipt independently from matching-event deduplication. Failed
+  observations preserve the last complete observation time, so recovery still
+  applies the selected offline policy to the whole gap. Exhausted cursor bounds
+  also require review.
+  Each automatic claim first commits its deterministic ordinary run, then its
+  source/occurrence ledger; recovery completes the same claim and allowance
+  debit. The finite allowance is 1–32 starts per explicit arm, default 8.
+  Events arriving while a run is active, and CI from the routine's reserved
+  `automation/` branches, are held for review. This conservative attribution
+  and the finite allowance bound feedback without claiming to identify every
+  outside writer. The activity check retains at most 64 owned runs, including
+  cancelled runs whose ordinary turn or children remain active. Missing or
+  overflowing evidence is unknown and blocks automatic admission and re-arm;
+  finish and review tasks and children, then archive and explicitly configure a
+  new routine when its history is full. Code completion is observed from the
+  exact recorded operation, session, prompt, checkout and provider, never from
+  the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
+  Explicit Review/Re-arm requires current local-window/source/Project authority,
+  no active run, and the displayed definition version. It skips held events,
+  restores the allowance and establishes a fresh quiet baseline. A lost response
+  remains unconfirmed and is never automatically resent.
+  After host absence or restart, Skip records surviving observations without a
+  run; Run once retains only the newest surviving unobserved event. Coverage
+  gaps remain visible. No policy reconstructs intermediate offline assignment
+  changes or unseen CI attempts. Event metadata enters the ordinary Work or
+  Code turn as framed external data and is recorded for exact-input recovery;
+  it cannot edit the task or grant permissions. Cancellation, history, run
+  authority and first-turn idempotency stay with the existing routine path.
+  The CI failures Start-screen card remains a read-only draft producer and adds
+  no CI poll. Its bounded routine-history read shows existing routine work and
+  the source CI link for the same Project/repository/branch before another fix
+  is drafted. The older check rollup has no workflow-attempt identity, so the
+  card labels this as branch correlation, never proof that one job is repaired.
+- **Run Retry.** A person may retry a failed, interrupted or cancelled run of
+  an unchanged enabled routine. This creates a new ordinary manual run linked
+  to the original and retains its file/event receipt. It never resets the
+  automatic source allowance, revives an ambiguous active launch, adopts newer
+  input or silently widens authority. Changed definitions require a new manual
+  decision through Run now; one-shot same-thread follow-ups are not retried.
 - **Authority ceiling.** A definition captures an execution profile (an existing
   agent profile: provider, model, policy, permission persistence) and an
   authority snapshot whose effective authority never widens the requested one
@@ -3234,7 +3378,18 @@ mentions name no Chat thread is not offered the tool, and a Work or Code
 thread named in a call refuses. In Work and Code, an `@file`
 mention completes a path inside the thread's bound root; the host refuses a path
 outside that root before reading it. Chat Projects have no filesystem authority,
-so `@file` is absent there. Unknown `@` text stays ordinary text. `@` is the one composer
+so `@file` is absent there. In local desktop Work and Code composers (drafts and
+existing threads), dropping a native folder or local `file:` URI inserts an editable
+absolute `@folder/` reference after the host validates the current Project or
+checkout roots, extra folders, and pinned filesystem identity. The window names
+this computer and the canonical folder. Validation reads metadata only: no
+recursive listing, attachment contents, turn, grant, or working-directory change.
+Remote client paths, inaccessible/deleted directories, and escaping symlinks refuse
+with an explanation. A draft targeting a future managed checkout refuses until
+that thread exists; it never remaps a dropped Project path into another checkout.
+Names retain spaces and Unicode; duplicate canonical references are inserted once.
+Draft edits and ordinary image attachments survive validation and refusal.
+Unknown `@` text stays ordinary text. `@` is the one composer
 picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), plus the thread's files in Work and Code. Choosing a
@@ -3456,11 +3611,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   refused in Plan, on excluded profiles and cancelled turns; managed children,
   Chat and Work gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
-- **Expiry not implemented.** Queued messages currently have no recorded
-  lifetime and can wait indefinitely for a recipient turn. No timestamp is
-  inferred to be expiry and no receipt claims Expired. A new expiry policy
-  requires an explicit deadline/authorizer and journal-before-cleanup rule.
-  The Chat mention path is unchanged.
+- **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -3600,8 +3751,7 @@ steers, completes, archives, or stops a thread.
 A Work or Code Project has one **main folder** (its bound root) and any
 number of **extra folders** the person adds, up to 16 (maintainer decision,
 2026-10-31). An extra folder gets the same access as the main folder at each
-thread's [guardrail level](#security-and-authority); commands, checkouts and
-Git start in the main folder. Built.
+thread's [guardrail level](#security-and-authority). New tasks may choose an approved working folder; Code checkouts and Git remain bound to their own checkout. Built.
 
 - **Adding and removing.** Only a person adds or removes one, from the
   Project page's folders card. Add folder… opens the native folder picker on
@@ -3613,6 +3763,22 @@ Git start in the main folder. Built.
   when) and `project.extra-folder-removed@1` (the folder, who removed it,
   and when), each with the whole Project after the change, so replay rebuilds
   the list. A Project journaled before the field existed replays with none.
+- **Task working folder.** At creation, the person chooses a server-issued
+  folder identity from the current Project and an optional relative subdirectory.
+  The identity binds the Project's main binding revision and the extra folder's
+  journaled addition revision; remove/re-add produces a new identity even if the
+  path and timestamp match. A request supplies no arbitrary absolute root.
+  The provider, terminal default, saved actions and new Work artifacts use this
+  choice. The composer and Environment show it. The choice is immutable for that
+  task, including its subdirectory; a different choice starts a new task. Existing
+  threads without an identity retain their main-folder/checkout interpretation and
+  their existing relative-directory control. This avoids resuming a retained native
+  session against a different root. Missing, removed, relinked or replaced working
+  folders refuse rather than redirect output. A running turn checks its selected
+  identity and physical directory until settlement and cancels on revocation.
+  An extra working folder is shared, including for a child worktree. Code Git,
+  PRs, changed-file receipts and Review still describe that thread's primary
+  checkout only; the UI states that limit.
 - **What can be a folder.** The domain policy refuses the home folder and
   any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
   `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
@@ -3671,24 +3837,25 @@ Git start in the main folder. Built.
   path, the root authority places it in one of the Project's current extra
   folders after resolving the checkout, and the folder is then the file's
   root. The explorer lists each extra folder as its own tree beneath the
-  checkout's, labelled with the folder's last component. The host watches an
-  extra folder as it does the checkout: the explorer opens a watch for each
-  of the first two folders, naming it by the absolute path the Project lists, and the root
-  authority places that path as the root of a current extra folder or the
-  watch is refused (a path inside a folder, or one that resolves into the
-  checkout, is not a folder to watch). A notice names paths relative to that
-  folder and the folder's tree relists on it and on Refresh. Further folders relist on
-  Refresh only. _Rationale:_ each watch is a long-lived HTTP/1.1 stream and a
-  browser allows about six per origin, shared with the checkout's watch and the
-  window's other streams, so a Project with many folders could starve ordinary
-  requests; multiplexing the watches over one stream is left for a larger
-  change. A save there is
+  checkout's, labelled with the folder's last component. The explorer watches
+  the checkout and all sixteen eligible extra folders over one shared authenticated
+  stream per thread/window authority. Duplicate views share that stream; the host
+  shares an OS watcher for the same physical root. Each notice identifies its root
+  and names paths relative to it. The host rechecks the current binding and folder
+  membership before registration and delivery; removal or relink ends the stream.
+  Reconnection and truncated notices reconcile every visible tree. Language services
+  watch extra roots too and reconcile open documents after a dropped watch.
+  Requests may name only the checkout or an exact current extra root; a child path
+  is refused. A save there is
   journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
-  folder unless the person picks an extra folder, and a saved action runs
-  under the folder they pick (the action's own directory is relative to it).
-  The host accepts only the main folder or a folder the Project record lists,
-  compared as the exact path, and refuses any other. Every Project terminal
+  folder unless the person picks an extra folder. A saved action previews its
+  host-resolved task working folder when selected, otherwise the active checkout
+  in a Code thread. Work task actions and new terminals use their task folder;
+  Project-level actions without a task use the main folder. The action's directory is relative to that
+  folder. Explicit picks accept only the main folder or an extra folder the
+  Project record lists, compared as the exact path. See the Project actions
+  rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
   header's action buttons and the start screen's quick tools offer the pick
@@ -3698,12 +3865,11 @@ Git start in the main folder. Built.
   lists; the host refuses any other, and a folder missing on disk is left out
   of the binding. The Terminal tab's menu offers **Restart in** each extra
   folder (a Project with none shows no pick, and Plan shows none). The pick
-  stops a running shell and starts a fresh one in that folder, because a
-  running shell cannot change where it started; the first terminal a tab opens
-  still starts in the thread's working directory.
-  _Rationale:_ restarting on the pick, rather than a separate start control,
-  keeps one terminal per tab and reuses the stop-then-start path the Browser
-  grant already takes.
+  opens a confirmation naming the destination and explaining that restart stops
+  the shell and every command running in it. Only an explicit confirmation stops
+  it; Cancel preserves it, and New terminal offers a separate shell when available.
+  This terminal-only choice does not change the task's recorded working folder.
+  The first terminal a task opens starts in its recorded working directory.
 - **Work files.** A path relative to the main folder is always the main
   folder's; a file in an extra folder is named by its absolute path, and the
   host honours an absolute path only inside one of the Project's current
@@ -3717,15 +3883,13 @@ Git start in the main folder. Built.
   every folder the same way, so a file written in an extra folder lists as
   Work's own. An artifact the host creates for a Work thread takes a name with
   no path and is placed in the folder that thread works in: its working
-  directory, which is always inside the main folder, read from the thread by
-  the host and never from the request, and refused for a thread of another
-  Project. Without a thread it goes to the main folder. The artifact's record
-  keeps that folder, so revising, renaming, converting and exporting it act on
-  the same folder.
-  _Rationale:_ a thread's working directory is a path relative to the main
-  folder by contract, so no thread works in an extra folder, and an artifact
-  never lands in one. Letting a request name an extra folder would widen what
-  a create request may reach beyond what it reaches today.
+  directory relative to its selected approved root, read from the thread by
+  the host and never from the create request. Without a thread it goes to the
+  main folder. The artifact's record retains its folder identity and relative
+  destination, so revise, rename, conversion, export and preview continue there
+  after replay; a later thread change cannot retarget it. Removing/re-adding or
+  relinking that root refuses these operations without a fallback. Legacy records
+  without an identity retain their main-folder interpretation.
 - **`@file` picker and Code search.** A mention is the main folder's relative
   path or the absolute path of a file inside one of the Project's current
   extra folders; the host reads an absolute path only there and reports any
@@ -4089,6 +4253,13 @@ flowchart LR
     thread marks the thread reading it (see the Code fork rule under Modes).
     A Canvas written while its writer was marked keeps that mark after the
     writer is cleared, and marks the next thread that reads it.
+  - Measured deterministic Auto/Shield scenario (2026-11-06): research ingestion,
+    an in-root edit, then the declared local `bun run test` command produces zero
+    outside-content prompts with or without a person clearing after review. A
+    subsequent GET to a configured safe network produces one such prompt without
+    clear and zero after clear. This is a policy/journal fixture measurement,
+    not a live provider turn count; provider-owned review can differ. It gives
+    no basis for weakening taint policy or recommending Full access.
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
@@ -4856,8 +5027,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; the catalog lists effective outside drivers in their own group from
-  the registry snapshot. Third-party provider-driver plugins are an authorized
-  post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  the registry snapshot. Third-party provider-driver plugins are in scope for the
+  first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -6270,9 +6441,10 @@ prompt is therefore built to be appended, never rewritten:
   Codex needs this: a thread keeps the tools it started with for good, since
   `thread/resume` accepts other tools and ignores them, and nothing reports
   them back (0.164.0 against a local stand-in endpoint). The Codex driver
-  records the thread's starting tools in its resume cursor, so a resume after
-  a restart still knows them; a cursor written before that record keeps every
-  rule. Without it, a tool first offered later in a thread was described to a
+  records the thread's starting tool names and definition fingerprints in its
+  resume cursor, so a resume after a restart still knows them. A cursor written
+  before the name record keeps every rule; one without fingerprints requires
+  explicit text-handoff continuation before offering nonempty tools. Without it, a tool first offered later in a thread was described to a
   model that could not call it.
 - **Standing text stays fixed.** Anything that varies from turn to turn is a
   `turn-instructions` block or a keyed block, never a change to a standing
@@ -6401,6 +6573,38 @@ Work thread's model picker offers its own provider's models only where its
 next turn will accept them, and every other provider. A Chat or Work thread
 whose own provider is gone is offered every provider.
 
+**Original inputs in continuations.** Child delegation, provider/model switches,
+rewind, Work and Code forks, Chat branches and Code fork merge-back preserve
+original user inputs separately from the selected conversation text. Only the
+modes that support each action may supply inputs. A source reference names the
+original thread, Project where known, attachment identity, display name, media
+type, length and digest. Repeated matching references select one original before
+input bounds; conflicting metadata for the same identity refuses the selection.
+A nested fork or branch retains that identity instead
+of pretending the receiving thread owns the original bytes. Each destination
+reopens the existing attachment store, checks current source and destination
+scope, verifies exact bytes and observes the target model's attachment support.
+It refuses a missing, changed, unsupported or revoked input before provider send;
+no description, transcript excerpt or model summary substitutes for the original.
+Only an explicit text-only choice may omit original inputs, and its receipt names
+those omissions. A text-only selection retains at most eight individual input
+references and counts additional omitted inputs within the bounded 384-input
+source selection; unavailable original metadata is marked unknown rather than
+inventing filenames or a count. Those unlisted or unknown originals cannot be
+restored by upgrading the same admission: a fresh handoff must select them
+explicitly. New-turn inputs and retained product feedback share the provider's
+attachment bound; an oversized pending feedback batch stays pending.
+
+The bounded manifest lives in the receiving thread's existing purgeable attachment
+scope. The journal stores its identity, digest, purpose, policy and counts, without
+filenames or bodies. A recovered admitted turn reopens that manifest rather than
+selecting replacement originals. Source deletion or Project movement refuses later
+preserving sends; destination purge removes its manifests. A successful native
+fork or rewind keeps the runtime's own input state and does not duplicate those
+attachments in a text handoff. Ordinary follow-ups in an existing native session
+keep their existing turn-only attachment behavior. These references grant no
+filesystem, Project, execution or native-writer authority.
+
 **Provider-switch handoff (Code).** A Code turn whose last recorded session
 belongs to another provider instance on the same checkout starts a new session
 on the thread's current provider; it never resumes or names the previous
@@ -6414,7 +6618,8 @@ so a switch to a small-context model does not overflow its window, each
 attributed to its provider and model, with
 the thread's taint and every omission counted (earlier messages, purged or
 oversized bodies, empty bodies, unfinished replies, attachments, truncation).
-Reasoning, tool bodies and attachments are never read. The switching turn's
+Reasoning and tool bodies are never read. Original user inputs are admitted
+separately under **Original inputs in continuations** below. The switching turn's
 own prompt is excluded from the selection because it is sent as the prompt.
 The host checks that what the selector returned is this thread's in this
 Project before using it.
@@ -6589,8 +6794,10 @@ conversation, at most 24 blocks of 4,000 characters including the summary,
 each message attributed to its provider and model, with the thread's taint and
 every omission counted (earlier messages, purged or oversized or empty bodies,
 unfinished replies, attachments, truncation). Superseded turns, reasoning, tool
-activity, research and attachment bodies, `#thread` mention and preview
-context, and Project memory are never part of it; the host adds the ordinary
+activity, research, `#thread` mention and preview
+context, and Project memory are never part of the text selection; original
+user inputs are admitted separately under **Original inputs in continuations**
+below; the host adds the ordinary
 per-turn context beside it as it does for any turn. Chat has no filesystem or
 shell authority and gains none: the handoff is text the thread already
 holds. The turn being sent is not in the thread yet, so it is never part of
@@ -8747,9 +8954,20 @@ same. This holds in Chat, Work, and Code.
   the current mode, Project, thread, trust and enablement; another explicit
   invocation is needed to call a tool. Sibling sessions remain independent.
   Reconnecting the same tool catalog changes no task, transcript, draft or
-  provider session. A changed tool catalog on a provider that fixes its tools
-  at session start still needs separate provider continuation support; this
-  transport recovery does not claim that support is built.
+  provider session. When a provider fixes tools at session start, the driver
+  compares current definitions with its persisted starting fingerprints before
+  resume. Withdrawing tools keeps the native session and host refusal policy;
+  adding a tool or changing its definition refuses continuation. Chat and Work
+  refuse before accepting the draft. Code parks the recorded, unsent turn and
+  restores the draft. **Continue with updated tools** explicitly sends that
+  draft in a fresh session through the existing bounded, journaled conversation
+  text handoff. The previous native session and full task history remain
+  preserved; hidden reasoning and tool activity do not transfer, and omissions
+  are disclosed. The choice grants no tools or authority, never replays a failed
+  call, and is not made by routine dispatch. Drivers report this through the
+  provider SDK rather than vendor checks in the host. Legacy fixed-tool cursors
+  without definition fingerprints require the same choice before offering a
+  nonempty catalogue.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
@@ -8810,8 +9028,8 @@ same. This holds in Chat, Work, and Code.
   observe/execute/cleanup. A host with no destination reports the capability
   absent and refuses actions as a value rather than throwing.
   Thread-leased disposable Linux desktops, their provider seam, artifact
-  transfer, and verified lease teardown are post-preview design, accepted on
-  2026-10-26, in
+  transfer, and verified lease teardown are in scope for the first preview
+  (design accepted on 2026-10-26), in
   [Disposable desktops](design/disposable-desktops.md). The lease contract,
   the `desktop-provider` seam with its conformance suite, the host lease
   service, the host-local provider (a virtual X display in a dedicated
@@ -9131,7 +9349,10 @@ address and how it is reached: sign-in through the MCP authorization flow,
 a key the vendor issues sent in one header, or nothing. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
-installed package under the one activation ladder. Connect makes an
+installed package under the one activation ladder. A remote browser's disabled
+Connect action names the local-host requirement in its own row, describes the
+service's sign-in/app-registration/key requirement, and links to the concrete
+host-window setup steps. It never implies that a browser can complete that flow. Connect makes an
 ordinary user-added server for the entry's address and then starts the
 sign-in, or takes the key (kept in the broker like any user-added secret),
 or just connects. The add request carries the entry's id; the host accepts it
@@ -9159,6 +9380,48 @@ sight on this computer and Show hidden brings every entry back; that
 preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
+
+**Atlassian and Airtable setup.** Both non-featured entries use the existing
+MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
+uses `https://mcp.atlassian.com/v2/mcp`; its path-scoped issuer, published DCR and
+S256 metadata were checked on 2026-11-06. A Cloud account and organization
+permission for the client are required; site restrictions and IP allowlists
+still apply. Do not switch a failed connection to a legacy SSE endpoint.
+Airtable uses `https://mcp.airtable.com/mcp`, with the exact origin resource
+`https://mcp.airtable.com` advertised by its protected-resource metadata. Only
+that exact transport has this resource alias; arbitrary sibling paths and
+queries retain exact resource matching. Its issuer advertises S256, public DCR
+and metadata-document identities. Shared Client setup also supports a manually
+registered public client and retained exact callback before separate consent.
+
+A separate Airtable personal-token entry sends a broker-held Bearer token at the
+same vendor endpoint. The person limits scopes and selected bases/workspaces in
+Airtable; OAuth selection and the vendor's third-party integrations page control
+OAuth base access. The catalog and Library do not invent a list of accessible
+bases from a credential: authorized task tools report accessible resources, and
+permission errors remain visible. Read-only tokens omit write scopes. Revoked
+OAuth credentials follow normal refresh/reconnect without tool replay; a missing
+or revoked PAT is replaced explicitly through the existing key flow. An admin
+may need to allowlist the integration. No vendor CLI or extra authority is
+required for either HTTP connector.
+Sources: [Atlassian setup](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/)
+and [Airtable setup](https://airtable.com/developers/agents/mcp/getting-started).
+
+**HubSpot setup.** The non-featured HubSpot entry uses the vendor's Streamable
+HTTP address `https://mcp.hubspot.com/` and opens the shared registered-client
+setup before separate account consent. A person creates a HubSpot MCP connector,
+registers the exact retained callback, and links its client secret through the
+existing broker. The public discovery checked on 2026-11-06 advertised resource
+and issuer `https://mcp.hubspot.com`, PKCE S256, `client_secret_post`, empty scope
+lists and no dynamic registration. No fixed scope list is invented: permissions
+are chosen in HubSpot consent and depend on the person's account. Consent can
+permit reads and writes; task activation and tool approvals still apply.
+Subscription, user permissions and Sensitive Data settings affect tool and object
+availability. Setup does not prove authenticated tool readiness. After consent,
+use `get_user_details` in an authorized task to inspect the reported access;
+expired or revoked grants follow existing refresh/reconnect without replaying a
+failed tool. No HubSpot-hosted registration service or shared app secret is added.
+Source: [HubSpot MCP setup](https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server).
 
 **Local Paper setup.** Paper is a local MCP server, separate from the hosted
 connector catalog. The Library includes one bundled setup entry that adds an
@@ -9283,8 +9546,9 @@ token endpoint is `https://slack.com/api/oauth.v2.user.access`. Configuration,
 discovery, broker descriptors and persisted grants retain and check the
 transport/issuer/resource/endpoints independently; the origin is never a
 wildcard for bearer delivery. The dedicated endpoints cannot fall back to a
-generic dialect for another transport or resource. Every other MCP server
-keeps exact transport/resource equality.
+generic dialect for another transport or resource. Apart from the exact Airtable
+transport-to-origin alias described above, other MCP servers keep exact
+transport/resource equality.
 
 The observed dedicated metadata advertises `client_secret_post`, not public
 `none`, Basic or dynamic registration. A supplied registered app therefore uses
@@ -9376,8 +9640,9 @@ store write, and only then deletes. Unavailable deletion retains retirement and
 the local sign-out owner for explicit retry; a caller timeout cannot claim
 success while a late write may resurrect a grant. Siblings remain usable.
 Runtime retirement is in memory; native failures and process loss do not imply
-a durable recovery engine. Changed-catalog continuation for a retained provider
-thread remains separate code work.
+a durable recovery engine. Changed fixed-tool catalogues use the explicit
+conversation continuation described under MCP HTTP session recovery; transport
+retirement itself never replaces a provider session.
 
 The authenticated broker also accepts cancellation of a retained MCP PKCE
 attempt only under the actor and descriptor recorded at Begin. It takes no
@@ -9786,6 +10051,30 @@ mechanisms are:
   the person proves presence, or for a short administration window after one
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
   Paired remote clients keep their own device-session path, unchanged.
+  **A native Nightly main is admitted per window.** Octant Nightly never holds
+  the bridge secret. Its window registration adds a main-only token, distinct
+  from the window capability and renderer identity, that Stable's main hands
+  only to the registered Nightly main and to the host. With that window's
+  capability and token, the Nightly main may call a closed list of brokered
+  routes in place of the secret, for that window alone: Project, plugin, skill
+  and runtime-binary picker receipts, the Code external editor and checkout
+  open targets, preview handoff, support bundle save, Code operation approval
+  prepare, confirm and cancel, provider key status, set and clear, and the
+  API key pool's list, add, rename, replace, remove, set active and move. The
+  host keeps the list in one place and advertises its features in the window
+  bootstrap. The token is valid only while that window's native lease lives:
+  expiry, revocation and lease loss end it. A request with a renderer origin,
+  a forwarded remote principal, an ordinary local window's capability, or
+  another window's capability or window ID is refused. Administrative routes
+  (hub, private listener, remote devices and pairing, launch sessions, owner
+  unlock, host identity, window registration, provider sign-in and provider
+  removal) stay secret-only. Ordinary renderer requests have the token header
+  stripped, and the Nightly main keeps the token in memory only
+  ([Octant Nightly](design/nightly-app.md)). On Linux the window registration
+  that carries the token is admitted by kernel peer checks on a private path
+  socket instead of code signatures, and any same-user unconfined process can
+  pass them, the same reach it already has to the bridge secret
+  ([Linux client trust](design/nightly-app.md#linux-client-trust)).
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority
@@ -10444,7 +10733,7 @@ access` agree); a thread's own change is journaled as
   | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
   | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
   | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                        | No turn runs                                                                                                                                                                                                                               |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
 
   Wherever a row names the root or the checkout, a Project's extra folders
   get the same rule ([Projects with several folders](#projects-with-several-folders)).
@@ -10811,10 +11100,24 @@ access` agree); a thread's own change is journaled as
   Its environment is an allowlist (path, locale, user, terminal, time zone,
   its scratch directory, and the family's guards), so provider credentials
   and config-home variables are dropped; its process group is killed when the
-  read settles. Credential-reading readiness probes are not version reads and
-  still run unconfined: Claude's `auth status --json` and discovery's
-  `authProbeArgs` read the person's own sign-in state, a standing gap like
-  Oh My Pi's probe.
+  read settles. Credential-reading readiness probes have their own narrow
+  boundary through the same builder. Discovery's Codex `login status` may
+  read the selected account's `auth.json` and `config.toml`; Claude's
+  standalone `auth status --json` reads its `.credentials.json`,
+  `settings.json` and global `.claude.json`. On macOS the status probe may
+  also read the one login Keychain file and reach the two security services,
+  preserving native Keychain interaction without a whole-home grant. These
+  probes may exec and fork for installed launchers and `security`, but their
+  descendants inherit the same file boundary and no network. Oh My Pi's
+  declaration probe reads only its isolated account directory, with its
+  existing no-tools, no-extensions, no-skills and no-session switches. Only
+  the private scratch directory is writable. Scratch outlives the owned
+  process and is released on completion or cancellation. A missing sandbox
+  refuses the probe rather than running it unconfined; a discovery timeout,
+  locked store or failed process reports unknown instead of guessing signed
+  out. A Claude check immediately before a confined turn still attests that
+  turn's own profile, so a successful standalone status does not promise
+  that a particular turn can reach its sign-in.
   OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
   Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
   the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a
@@ -11229,33 +11532,57 @@ access` agree); a thread's own change is journaled as
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
 - **Project actions.** A Work or Code Project keeps up to twelve named
-  actions (for example Run, Test, Dev) on its record: a name unique within the
-  Project, a one-line command, and a folder inside the bound root. The person
-  saves the whole list from the Project overview
-  (`project.code-actions-changed@1`, `project.work-actions-changed@1`); a
-  paired device is refused, because a saved line is later typed into the
-  person's own shell. An archived Project has none. A Work Project's actions
-  appear once its Developer tools are on (maintainer decision, 2026-10-31:
-  Work has the shell, so Project actions come to Work Projects too).
-  The host suggests
-  actions from the root `package.json` scripts (with the package manager the
-  lockfile names, leaving out install and publish hooks) and the root
-  `Makefile` targets; it reads them without running anything, and nothing is
-  saved until the person confirms. Running an action is the Project terminal's
-  `run-action` command: the caller names the action, never its text, and the
-  host reads the line from the Project record now, then types it into a
-  terminal the window already owns, entering the action's folder from the root
-  first, grouping the whole command behind that folder change so a folder that
-  has gone away stops every statement of it, and rechecking the window's
-  authority and binding after the root resolves. It therefore runs under that terminal's confinement and posture with
-  the same authority checks as any other write, and typing into a shell that is
-  running another program reaches that program. The header buttons (the first
-  three, with the rest in a menu) and the command palette's Actions group ask
-  the window to run one; the window reuses a Project terminal it already
-  pinned, otherwise opens and pins one, and shows it in Zen, the Project
-  terminal's only surface. A refusal means nothing was typed, so the window may try
-  another terminal; a lost reply leaves the outcome unknown, so it is reported
-  and never retried, since the command may not be safe to run twice.
+  actions on its record: a unique name, a one-line command and a relative
+  directory. The person saves the list from the Project overview through the
+  existing versioned Project events; paired devices cannot save or launch them.
+  Suggestions from package scripts and Makefile targets remain read-only until
+  confirmed. Running first previews the host-resolved folder and branch.
+  A task with a recorded working-folder choice defaults to that approved folder
+  and relative subdirectory; a legacy Code thread defaults to its active checkout.
+  The Project folder and approved extra folders remain explicit choices. A selected extra folder
+  is shared, not a child worktree. A Project-level run uses the Project folder.
+  Changed checkout identities, revisions, bindings, task authority or saved
+  commands refuse stale launch. Plan never starts an action. A task-bound run
+  stops when its task, checkout or execution authority is revoked.
+
+  `start-action` launches a fresh command process under the existing terminal
+  confinement and sanitized environment, not input into a running shell. The
+  request names a saved action and checkout identities, never executable text.
+  Its terminal start is journaled before launch; a repeated request identity,
+  including after host restart, never starts another process. The legacy
+  `run-action` command refuses rather than writing into an existing shell.
+  Output, completion, exit status and cancellation use the terminal lifecycle.
+  The action dialog stays beside the task without entering Zen; **Open terminal**
+  is the explicit handoff to that view. Closing the dialog leaves the run alone;
+  the window retains its run identity in session storage and reattaches on
+  reopening, with host authority checked again. A lost response is unknown,
+  never automatically retried. Preparing a new run is an explicit decision;
+  an interrupted run is never restarted by reopening or restarting the host.
+
+- **Worktree setup.** A Code Project may designate one saved action as its
+  optional worktree preparation recipe. The person reviews the command and
+  relative folder before enabling automatic use. Each new managed worktree
+  records the reviewed recipe separately from its Git readiness. The first
+  agent task waits for preparation; child runs use their admitted task access.
+  Plan and tasks without shell/write authority cannot execute setup. A child’s admitted network ceiling remains enforced. Enabling a recipe does not grant wider access.
+  The shared confined process runner owns the recipe's shell, bounded output,
+  ten minute timeout, cancellation and descendant cleanup; an existing task startup ceiling may end automatic child preparation earlier. Its environment is
+  allowlisted; no secret files, arbitrary credentials or parent environment are
+  copied. The recipe folder resolves inside the new checkout. A changed recipe
+  or revoked task authority refuses launch and cancels an active preparation.
+
+  Pending, running, succeeded, failed, cancelled, interrupted, skipped and
+  uncertain cleanup are separate recorded states. Running is journaled before
+  spawn. Retry carries a durable decision identity; replay never starts it again, even after another attempt or host restart. Failure needs an explicit Retry or Skip in **Worktrees → Setup**, beside
+  the task; child checkouts are selectable there. A skipped preparation stays
+  visible. Restart first reconciles owned processes, then exposes interrupted
+  setup without replaying it. Unconfirmed descendant cleanup blocks Retry and
+  Skip. Failed startup reconciliation leaves the host usable and refuses setup
+  launches and Skip until cleanup is confirmed and the host restarts.
+  Output is a bounded host-lifetime tail, not journal content, and is
+  unavailable after restart. The recipe’s ordinary action button opens this same lifecycle for a managed checkout, avoiding an independent second preparation. A new recipe does not retroactively alter an
+  existing worktree's recorded recipe.
+
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
@@ -12016,7 +12343,11 @@ access` agree); a thread's own change is journaled as
     `secret-tool` on standard input. It is never in a process argument, the
     environment, the journal, logs, diagnostics, a provider child, or a
     response; the routes answer only `stored`, `missing`, `removed`, or a
-    typed refusal.
+    typed refusal. They refuse to set or clear a key that points into a
+    linked secret store; that pointer changes only through the secret-store
+    routes. Key-pool routes under `keys/` (list, add, rename, replace,
+    remove, set active, move) serve Octant Nightly's Settings the same way
+    and answer only labels; the command line does not use them yet.
   - **Not the browser.** The loopback browser client cannot save a key, even
     on the host itself. The host cannot tell who is behind a loopback
     connection: the local session (`/api/shell/local-session`) is granted to
@@ -12139,6 +12470,16 @@ access` agree); a thread's own change is journaled as
   `viewer { id }` request to `https://api.linear.app/graphql`. It is available
   in Code when the provider carries app-managed tools, the profile allows the
   tool, the thread is active and outside Plan, and the integration is effective.
+  A bundled Azure integration also registers `azure-subscriptions-check`: one
+  fixed HTTPS GET to `https://management.azure.com/subscriptions?api-version=2022-12-01`,
+  using the person's unexpired short-lived Resource Manager bearer. The card
+  displays the entire approved URL and returns only HTTP status, cancelling the
+  response body without parsing it so a large subscription list stays valid; subscription data
+  and token material never reach the agent. The token's actual account and RBAC
+  can be broader than this request; Octant neither guesses nor narrows those
+  claims. The descriptor admits GET without a body or the existing fixed POST
+  with a body; redirects and pagination links are never followed. Azure CLI
+  credentials, token-file leases and ambient Azure stores remain unavailable.
   The host supplies the label, purpose, destination and action text from the
   registered consumer; agents cannot supply a URL, query, credential reference,
   file destination or command. Consumer descriptors use the public
@@ -12898,13 +13239,22 @@ access` agree); a thread's own change is journaled as
   meaningless. The stable key may sign previews because its holder can already
   sign stable, and it is how installs that predate the preview key reach a
   build that knows it. Those installs read `<ring>/<platform>-<arch>.json`;
-  key-aware builds read preview and candidate feeds at
-  `<ring>/<platform>-<arch>.preview-key.json`, which is all the preview
-  workflow writes. The old name holds a bridge feed that the
+  key-aware builds before the release named its app read
+  `<ring>/<platform>-<arch>.preview-key.json`, and current builds read the
+  app-named files above. Installs built before `product` existed decode a feed
+  strictly and call a document carrying it malformed, so no product-bearing
+  document is written at a name they read. Each candidate run also writes an
+  old-shape document (no `product`, signed over the old encoding) at
+  `candidate/<platform>-<arch>.preview-key.json`, moving those Octant installs
+  to a build that reads the new name. The old preview names are left as last
+  published (the last Octant preview build), because the installs reading them
+  are Octant and the ring now carries Nightly: they are offered nothing and
+  move on by choosing Octant's Preview channel (`candidate`). The bare
+  `candidate/<platform>-<arch>.json` holds an old-shape bridge feed that the
   approval-gated `release-preview-bridge.yml` signs once with the stable key,
-  pointing at a published build that ships the preview key and reads the new
-  name. Nothing overwrites it, so an install offline for any length of time
-  still finds a release it can verify. The release wizard mints a ring's key
+  pointing at a published candidate build that ships the preview key; it
+  refuses preview tags. Nothing overwrites it, so an install offline for any
+  length of time still finds a release it can verify. The release wizard mints a ring's key
   only when the app ships none for it: replacing a deployed key strands every
   install that trusts it, and rotation would need a staged overlap. The private
   halves are environment secrets:
@@ -12945,9 +13295,10 @@ in this document describe the build as it ships.
 Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
-no prompts": a shell command there can read a protected file. Built, except
-the Azure command line's general short-lived credential channel. The Google
-Cloud channel is the bounded `gcloud` service-account adapter below.
+no prompts": a shell command there can read a protected file. The Google
+Cloud channel is the bounded `gcloud` service-account adapter below. Azure uses
+only the fixed one-use Resource Manager HTTP read described under credential
+cards; general Azure CLI credentials remain unavailable by design.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -13021,7 +13372,10 @@ Cloud channel is the bounded `gcloud` service-account adapter below.
   The Google Cloud `gcloud` command line in Octant's own shell receives a
   command-owned access-token file and private configuration from the broker
   after exact account/scopes consent ([linked secret stores](#linked-secret-stores)).
-  Allowed; not built yet: the Azure command line's general credential channel.
+  Azure offers only the fixed broker-owned Resource Manager GET through a
+  private one-use credential card; it exports no token to a CLI or file.
+  General Azure CLI credentials remain unavailable. A confined command must not
+  bypass a protected Azure store through another tool.
   - _Rationale._ AWS first because a session needs nothing on disk: the
     session's three values go in the command's environment, which the AWS
     command line and every AWS SDK read before any file. The Google Cloud
@@ -13029,6 +13383,10 @@ Cloud channel is the bounded `gcloud` service-account adapter below.
     directory to bound each command's resources; it does not assume that
     Google supports only file input. Azure needs its own consumer-specific
     contract rather than an invented generic access-token environment variable.
+    The tested `az rest` interface follows same-origin redirects with the bearer;
+    a fixed initial URL therefore does not bound the final authenticated path.
+    The approved Azure HTTP alternative enforces the fixed URL itself and refuses
+    every redirect instead of giving a command a credential lease.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,
@@ -13039,7 +13397,15 @@ Cloud channel is the bounded `gcloud` service-account adapter below.
   where the runtime runs outside Octant's profile (approval-gated,
   auto-accept-edits, and Full access), run in its unwrapped process, so a search rooted at or
   above an existing protected file, or inside a protected folder, is refused
-  whole (`secretGuardSearchRefusal`); its own sandbox cannot carry the list,
+  whole (`secretGuardSearchRefusal`). The refusal names the resolved search
+  root and protected rule/channel, explicitly says no results were returned,
+  and suggests an ordinary subfolder with no protected entry. It never claims
+  partial results or recommends bypassing the protected entry through another
+  tool. Relative roots and a relative Glob's fixed `..` prefix are resolved
+  against the bound search folder before the same lexical/real-path check.
+  Parent traversals retain both lexical and kernel symlink interpretations;
+  direct file-tool paths are resolved against the bound Project root too.
+  Its own sandbox cannot carry the list,
   because its `allowRead` takes precedence over `denyRead`. Protected entries
   are matched in their lexical and resolved forms, so a linked folder's target
   is refused too. In the Seatbelt profiles each exception follows only its own
@@ -13702,12 +14068,17 @@ nothing first-party.
 This section is the one statement of what the first release includes and
 defers, and it owns the architectural rules behind it.
 
-**Where the release stands (2026-11-02).** The first release is the Apple
+**Where the release stands (2026-11-05).** The first release is the Apple
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
-Builds of `main` publish daily on the `preview` ring as the second app Octant
-Nightly, and on-demand builds publish on the `candidate` ring, as GitHub
-pre-releases named `v0.1.0-preview.<date>.<build>`; each carries a macOS zip
-and a linux-x64 AppImage. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
+Builds of `main` are meant to publish daily on the `preview` ring as the second
+app Octant Nightly, and on-demand pre-releases of the next stable on the
+`candidate` ring as Octant's Preview channel, as GitHub pre-releases named
+`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip and a linux-x64
+AppImage. Nightly is a usable client; a scheduled or rollback Nightly run is
+built and published only after its secret-free
+[usable-client preflight](design/nightly-app.md#the-usable-client-preflight)
+passes, and the first scheduled publication still needs a maintainer's
+approval. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
 in the `stable` environment) has not been used, so Octant itself has not
 shipped. The first release counts as shipped when a maintainer approves the
 first stable version; daily builds stay previews. That first stable release is
@@ -13723,14 +14094,15 @@ signing credentials a maintainer holds is unsigned.
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and
 Windows Work and Code only after an explicitly approved Windows confinement
-design is documented. The following are authorized as post-preview work
-(maintainer decision, 2026-10-26) and are not part of the technical preview:
-mobile maturity (Android internal builds, redacted push, capture and voice,
-public store distribution), a full LSP /
+design is documented. Everything on the work board is in scope for the first
+proper preview release (maintainer decision, 2026-11-06, which replaces the
+2026-10-26 post-preview track): mobile maturity (Android internal builds,
+redacted push, capture and voice, public store distribution), a full LSP /
 extension host / debugger companion, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, third-party
-provider-driver plugins, and the EU/GDPR compliance package (pending legal
-review). Public store distribution, the Windows sequence below, and the full
+provider-driver plugins, and the EU/GDPR compliance package (legal review is
+still required before it ships). There is no separate post-preview track.
+Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
 maintainers schedule, not safety rules; none of them protects an invariant by
 itself.
@@ -13798,21 +14170,16 @@ architecture.
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
-server on every OS. The sequence is the Linux desktop shell, then the Linux
-AppImage with its signed feed, then Windows. Windows comes after the macOS
-technical preview has shipped and a Linux self-update from the signed feed
-has been seen on a real image; until both exist, no Windows packaging,
-installer, feed, packaging CI, or confinement work starts (maintainer
-decision, 2026-10-16). This is a release-scope choice a maintainer may
-change, not a safety rule. The reason is sequencing, not a technical
-dependency: one person is today both the only maintainer and the only acceptance
-tester, the macOS preview has waited on acceptance since September, and a third
-platform's packaging and confinement questions would compete for the same
-sittings. The Linux self-update gate exists because the signed-feed update
-path is the shared trust root for every non-macOS platform and has never
-been exercised on a real image, so Windows should not build on it until it
-has. Windows Work and Code stay unavailable until an
-approved Windows confinement design is documented: the confinement port
+server on every OS. server. The sequence is the Linux desktop shell, then the Linux
+AppImage with its signed feed, then Windows. Windows packaging, installer,
+feed, and packaging CI work may start now (maintainer decision, 2026-11-06,
+which lifts the 2026-10-16 ordering gate that held Windows until the macOS
+preview had shipped and a Linux self-update from the signed feed had been seen
+on a real image). That ordering was a release-scope choice, not a safety
+rule. The Linux signed-feed update path is still the shared trust root for
+every non-macOS platform, so a Windows feed builds on it and is not trusted
+before the path has been exercised on a real image. Windows Work and Code stay
+unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
@@ -13824,7 +14191,12 @@ macOS-only.
   Ed25519 signature over the canonical encoding of the feed's `release`
   object (the wrapper's `schemaVersion` is validated, not signed) against a
   public key compiled into the app, then requires the offered release to be strictly newer and to name
-  this platform, architecture, and the ring the app asked for. The artifact's
+  this app (`product`: `octant` or `octant-nightly`), platform, architecture,
+  and the ring the app asked for. A release for the other app is refused as
+  `wrong-app` ("This update is for Octant Nightly, not Octant."), on Linux
+  too, where nothing after the feed checks which app an image is. Every
+  signer emits `product` and every reader requires it; a feed without it is
+  malformed. The artifact's
   SHA-256 is inside the signature and the downloaded bytes are hashed before
   anything installs.
 - On macOS the platform updater is then handed the verified bytes through a
@@ -13842,25 +14214,39 @@ macOS-only.
   with no signed channel (`supportsSignedDesktopUpdateChannel`:
   macOS and Linux today) refuses with "untrusted-signature".
 - Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
-  version that is not strictly newer, wrong platform or ring, unreachable
+  version that is not strictly newer, wrong app, platform or ring, unreachable
   service, or mismatched artifact yields no install, no override, and a
   refusal naming the check. The exact two-field empty document
   (`"status": "empty"`, schema version 1) means no release in this channel,
   not that the build is current.
 - Rings are `stable` (tags), `preview` (scheduled `main` builds), and
   `candidate` (on-demand builds of a chosen ref, so a test install exercises
-  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. Settings labels
+  the real update path) at `<base>/stable/<platform>-<arch>.json`,
+  `<base>/candidate/<platform>-<arch>.octant.json` and
+  `<base>/preview/<platform>-<arch>.octant-nightly.json`. Settings labels
   the rings Stable, Preview (`candidate`), and Nightly (`preview`); the ids
   stay, since feed paths and version tags that installed builds follow carry
   them. A build's default ring is read from
   its version; the signed ring field is what separates the streams. The base
-  is overridable but must be HTTPS. Stable ships as Octant; preview and
-  candidate ship as a second app, Octant Nightly, with its own bundle id, link
-  scheme, command-line name, and icon. Nightly shares Octant's data through
-  Octant's running host and never runs a host of its own on that folder, so the
-  journal keeps one writer and no nightly migrates data Octant must still open.
-  The first technical preview therefore ships as Octant on `stable`
-  ([Octant Nightly](design/nightly-app.md)). Identity and packaging foundations
+  is overridable but must be HTTPS. Stable and candidate ship as Octant, one
+  binary whose ring is the person's in-app channel choice (Stable or Preview);
+  preview ships as a second app, Octant Nightly, with its own bundle id, link
+  scheme, command-line name, and icon (maintainer decision, 2026-11-05). Nightly
+  shares Octant's data through Octant's running host and never runs a host on
+  that folder, so the journal keeps one writer and no nightly migrates data
+  Octant must still open. For development and testing it can instead run its
+  own host on separate test data. Its command-line tool, `octant-nightly`,
+  follows the same rule: it attaches to Octant's host (or, with test data,
+  Nightly's test host) and never starts or migrates one
+  ([the `octant-nightly` command](design/nightly-app.md#the-octant-nightly-command)). A person's first install is therefore Octant
+  ([Octant Nightly](design/nightly-app.md)). The channel split and the
+  Nightly-channel install row (packaged macOS Octant, person-started,
+  feed signature, artifact hash and a Nightly-specific code requirement) are
+  built; a signed install from a published Nightly build has not been
+  exercised. Nightly's own host on separate test data (macOS and Linux: its own
+  folder, port, logs and Keychain service names or Secret Service `service`
+  values, chosen in Settings and decided once at launch) is built; a signed Nightly running it has not been
+  exercised. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
   Nightly's own renderer with a short server-enforced lease. It never loads
@@ -13878,6 +14264,20 @@ macOS-only.
   evidence that a signed Nightly peer or embedded Browser bridge is usable;
   the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
   preserve authenticated registration and the functional publication gate.
+- Rollback is a roll-forward. The updater accepts only a strictly newer
+  version, so a bad Nightly is replaced by dispatching the preview workflow
+  from `main` with `rollback_ref`: it rebuilds a published `v*-preview.*` tag
+  whose commit is on `main` as Nightly under a new version from the workflow's
+  own date and run number. Any other ref is refused before checkout, because
+  the build runs the source's own code beside the Apple credentials. The feed
+  key lives only in a separate `feed` job that runs the workflow's own commit
+  against the uploaded archive. Each published Octant release
+  (stable and candidate) also carries `octant-host-features.json`: the native
+  client protocol and the brokered features its host offers a Nightly window
+  (`NIGHTLY_HOST_FEATURES`), for the Nightly preflight's compatibility check
+  ([Octant Nightly](design/nightly-app.md#nightlys-own-updates)). It is
+  unsigned and advisory; it must be signed or hash-pinned before it gates a
+  release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.

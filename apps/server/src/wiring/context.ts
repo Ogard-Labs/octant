@@ -1,5 +1,6 @@
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   DEFAULT_WORK_ACCESS,
   decodeChatThreadId,
@@ -354,7 +355,7 @@ export function wireContext(deps: ContextDependencies) {
                 instanceId: thread.providerInstanceId,
                 // The folder the session's turns ran in, inside the bound root.
                 projectRoot: await resolveThreadWorkingDirectory(
-                  project.binding.canonicalRoot,
+                  approvedWorkingFolderRoot(project, thread.workingFolderId) ?? "",
                   session.workingDirectory,
                 ),
                 mode: "work",

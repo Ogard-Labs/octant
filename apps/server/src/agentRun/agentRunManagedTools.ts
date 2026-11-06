@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   AGENT_RUN_TERMINAL_STATUSES,
   MAX_AGENT_RUN_DEPENDENCIES,
@@ -108,6 +109,12 @@ const AGENTS_TOOL_DEFINITION = {
         type: "boolean",
         description: "Give the child this thread's recent conversation.",
       },
+      contextInputPolicy: {
+        type: "string",
+        enum: ["preserve", "text-only"],
+        description:
+          "Preserve original parent inputs by default. Use text-only only when the person explicitly chose to omit the original inputs.",
+      },
       targetMemberId: {
         type: "string",
         maxLength: 36,
@@ -169,6 +176,7 @@ interface AgentsToolInput {
   readonly providerInstanceId?: string;
   readonly modelId?: string;
   readonly includeParentContext?: boolean;
+  readonly contextInputPolicy?: ConversationInputPolicy;
   readonly reasoning?: string;
   readonly after?: ReadonlyArray<string>;
   readonly targetMemberId?: string;
@@ -241,6 +249,13 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
   const includeParentContext = record.includeParentContext;
   if (includeParentContext !== undefined && typeof includeParentContext !== "boolean")
     return undefined;
+  const contextInputPolicy = record.contextInputPolicy;
+  if (
+    contextInputPolicy !== undefined &&
+    contextInputPolicy !== "preserve" &&
+    contextInputPolicy !== "text-only"
+  )
+    return undefined;
   const targetMemberId = record.targetMemberId;
   if (targetMemberId !== undefined && typeof targetMemberId !== "string") return undefined;
   const targetProjectId = record.targetProjectId;
@@ -272,6 +287,7 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
     ...(modelId === undefined ? {} : { modelId }),
     ...(includeParentContext === undefined ? {} : { includeParentContext }),
+    ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(after === undefined ? {} : { after }),
     ...(targetMemberId === undefined ? {} : { targetMemberId }),

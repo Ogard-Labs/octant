@@ -1166,7 +1166,7 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
   }
   if (
     definition.lifecycle === "enabled" &&
-    (definition.trigger.kind === "file-arrival"
+    (definition.trigger.kind === "file-arrival" || definition.trigger.kind === "integration-event"
       ? definition.nextDueAt !== null
       : definition.trigger.kind === "once"
         ? definition.nextDueAt !== definition.trigger.scheduledAt

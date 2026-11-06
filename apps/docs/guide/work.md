@@ -11,6 +11,18 @@ conversation with no file access, and **In a folder** starts work in one folder
 you choose. Both kinds of thread show in the same sidebar list, and each keeps
 the kind it started as.
 
+## Choose the task's working folder
+
+Before creating a task, choose **Task working folder** and, if needed, a relative
+subfolder. The list contains folders already approved for this Project. Adding or
+naming a folder does not change its permissions. The provider, terminal defaults,
+saved actions and new Work artifacts use the recorded choice. Choose another root
+or subfolder in a new task; an existing native conversation keeps its original root.
+
+The composer and Environment show the choice. A removed or unavailable folder
+stops the task rather than sending output elsewhere. Work artifacts retain their
+own original destination through revision, rename, conversion, export and replay.
+
 ## Work Projects
 
 Create a Work Project from the sidebar:
@@ -58,11 +70,19 @@ Turn on **Developer tools** in the Work Project's overview (under Access and lim
 
 ## Continue a terminal session
 
-A new Work task can start from a Claude Code or Codex session you had in a
-terminal in the same folder. Choose **Create from…**, then **Terminal**, and
-pick the session. The task shows that conversation as folded, read-only
-history, and the assistant reads it once at the start. The session stays on
-this Mac, and the task is marked as holding outside content.
+In a new Work task with a Project, choose **Create from…**, then **Terminal**.
+The picker lists Claude Code and Codex sessions from the Project folder and
+its subfolders; a Code Project also includes its verified managed worktrees.
+Each session names its original working directory.
+
+Choosing one is a **text handoff into a new session**. The assistant reads the
+bounded visible conversation once as outside content; it also appears above
+the thread as folded, read-only history. Original inputs, tool activity,
+hidden reasoning and the provider's native session are omitted. The current
+adapters cannot prove the source account binding and exclusive native session
+ownership, so native adoption is unavailable. Octant never resumes that
+unverified session or changes its files. This step is available only from an
+Octant window on this computer.
 
 ## Work settings
 
@@ -207,9 +227,46 @@ citation, child-run, recovery, and delivery evidence. A thread is Done when
 you mark it Done; no evidence text is needed. Opening a card activates
 that Project and thread. Chat has no board.
 
+## Routines from integrations
+
+In Automation Center on this computer, choose **When an integration event arrives**
+for a Work or Code routine. Select a connected source, its filters and the fixed
+task. GitHub watches the latest 100 completed workflow runs in the selected
+repository, with optional workflow number, branch and conclusions. A rerun has
+its own attempt identity. Older runs and unseen intermediate attempts are outside
+this bounded observation. Linear watches issues assigned to your connected
+account, optionally by team key or project identifier. Editing an assigned issue
+does not start another task; reassignment starts one only after Octant observed
+the issue leave and return to your assignment set.
+
+Checks run every 1–60 minutes while this host runs, with at most two source checks
+in flight. The first complete check is a baseline and starts no task. After
+absence or restart, **Skip missed runs** records surviving events without a task;
+**Run the newest missed occurrence once** starts at most one. The status records
+coverage gaps. Intermediate offline assignment changes and unseen CI attempts
+cannot be reconstructed. A disconnected, rate-limited or incomplete source keeps
+its cursor and allowance until it can be checked again.
+
+The automatic allowance is 8 runs per arm by default, adjustable from 1 to 32.
+New events during a run, and CI from routine output branches, wait for review.
+Finish or cancel current work, inspect the held events and choose **Review and
+re-arm**. **Re-arm and skip held events** restores the allowance and begins a
+fresh baseline without starting existing events. Pause, restart and ordinary
+Save do not reset it. Refresh details and history after an unconfirmed response;
+Octant never automatically resends that decision. A different account or source
+needs a newly configured routine.
+
+Events enter as external data beside your fixed task and grant no authority.
+Each task uses ordinary run history and cancellation. **Retry run** on stopped
+history creates a new run with its original file/event input; it refuses a
+changed definition and does not reset the automatic allowance. Changed or missing
+file bytes can still stop admission. The CI failures card continues to open a
+manual draft. When routine work exists for CI on the same Project and branch,
+it offers the routine and source CI link to review before starting another fix.
+
 ## Routines for arriving files
 
-From **Automation Center** on this computer, create a Work routine and choose
+From **Automation Center** on this computer, create a Work or Code routine and choose
 **When files arrive or change**. Select an existing input folder relative to the Project's
 main folder, optional file suffixes and excluded subfolders, and a settling
 interval. The preview shows the task, profile, authority, delivery target and
@@ -243,8 +300,13 @@ exceeded, review and finish the Project's tasks and cleanup, archive that
 routine, then explicitly create a new one; its old source cannot prove it is
 quiet.
 
-File-trigger setup and re-arm require a window on this host. File input is not
-available for Code routines yet, and a thread agent cannot propose a file
+For Code, the exact observed files are copied into the new run's checkout under
+`octant-routine-inputs/<run-id>`. Changed or unavailable source files stop the
+run instead of substituting newer content, and existing different files are
+never overwritten. These copied inputs are ordinary checkout files; review
+them before committing or pushing. The main checkout and ignore rules stay unchanged.
+
+File-trigger setup and re-arm require a window on this host. A thread agent cannot propose a file
 trigger. Timed routines and follow-ups keep their existing behavior.
 
 ## Routines from a thread
@@ -352,3 +414,18 @@ Nothing is sent until you send it.
 - [Promotions](/guide/promotions) for escalating Work work to a Code thread
 - [Projects](/guide/projects) for managing Work Projects
 - [Code](/guide/code) for repository engineering
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

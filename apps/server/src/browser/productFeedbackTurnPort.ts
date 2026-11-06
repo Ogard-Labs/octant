@@ -21,6 +21,7 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
     readonly threadId: string;
     readonly operationId: string;
     readonly supportsImages: boolean;
+    readonly maxAttachments?: number;
   }): {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
@@ -28,6 +29,7 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
     const carried = deps.service.deliver({
       threadId: String(input.threadId),
       operationId: String(input.operationId),
+      ...(input.maxAttachments === undefined ? {} : { maxImages: input.maxAttachments }),
     });
     if (carried.length === 0) return { attachments: [] };
 

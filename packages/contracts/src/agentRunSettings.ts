@@ -28,7 +28,14 @@ export type AgentRunConcurrency = typeof AgentRunConcurrency.Type;
 
 export const DEFAULT_AGENT_RUN_CONCURRENCY: AgentRunConcurrency = { perThread: 4, onHost: 8 };
 
+export const DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES = 30;
+export const MAX_AGENT_RUN_WORKING_TIME_MINUTES = 240;
+const AgentRunWorkingTimeLimit = Schema.Int.pipe(
+  Schema.between(1, MAX_AGENT_RUN_WORKING_TIME_MINUTES),
+);
+
 export const AgentRunPolicySettings = Schema.Struct({
+  workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
   creationPosture: AgentRunCreationPosture,
   /** Optional so settings journaled before it existed replay as the defaults. */
   concurrency: Schema.optional(AgentRunConcurrency),
@@ -52,6 +59,7 @@ export const DEFAULT_AGENT_RUN_POLICY_SETTINGS: Omit<AgentRunPolicySettings, "up
 };
 
 export const UpdateAgentRunPolicySettings = Schema.Struct({
+  workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
   creationPosture: AgentRunSelectableCreationPosture,
   /** Absent keeps the current limits. */
   concurrency: Schema.optional(AgentRunConcurrency),

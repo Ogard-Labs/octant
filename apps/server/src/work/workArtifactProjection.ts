@@ -5,13 +5,14 @@ import type {
   WorkExportHandoffKind,
   WorkArtifactMutationFrame,
 } from "@octant/contracts/work-artifacts";
-import type { ProjectId } from "@octant/contracts/projects";
+import type { ProjectId, ProjectWorkingFolderId } from "@octant/contracts";
 import type { PreviewSourceVersion } from "@octant/contracts/previews";
 import { hydrateJournalProjection } from "../persistence/journalHydration";
 
 export interface WorkArtifactEntry {
   readonly artifactId: WorkArtifactId;
   readonly projectId: ProjectId;
+  readonly workingFolderId?: ProjectWorkingFolderId;
   readonly format: WorkArtifactFormat;
   readonly artifactRef: string;
   readonly displayName: string;
@@ -55,6 +56,9 @@ export class WorkArtifactProjection {
         this.#entries.set(artifact.artifactId, {
           artifactId: artifact.artifactId,
           projectId: artifact.projectId,
+          ...(artifact.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: artifact.workingFolderId }),
           format: artifact.format,
           artifactRef: artifact.artifactRef,
           displayName: artifact.displayName,
@@ -69,9 +73,17 @@ export class WorkArtifactProjection {
       case "revised": {
         const artifact = frame.outcome.artifact;
         const previous = this.#entries.get(artifact.artifactId);
+        if (
+          previous !== undefined &&
+          String(previous.workingFolderId) !== String(artifact.workingFolderId)
+        )
+          throw new Error("Artifact revision changed its recorded working folder.");
         this.#entries.set(artifact.artifactId, {
           artifactId: artifact.artifactId,
           projectId: artifact.projectId,
+          ...(artifact.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: artifact.workingFolderId }),
           format: artifact.format,
           artifactRef: artifact.artifactRef,
           displayName: artifact.displayName,

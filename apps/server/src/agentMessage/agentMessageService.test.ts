@@ -68,6 +68,7 @@ function journal(events: Array<{ readonly eventName: string; readonly payload: u
 }
 
 interface FixtureOptions {
+  readonly clock?: () => string;
   readonly resolveEndpoint?: AgentMessageEndpointResolver;
   readonly ingestion?: "recorded" | "refused";
   readonly projection?: AgentMessageProjection;
@@ -94,11 +95,12 @@ function fixture(options: FixtureOptions = {}) {
     [String(otherProjectThreadId), { mode: "work", projectId: PROJECT_B, terminal: false }],
   ]);
   const bodyStore = new AgentMessageBodyStore(root);
+  const journalPort = journal(events);
   const service = new AgentMessageService({
-    journal: journal(events) as never,
+    journal: journalPort as never,
     connection: connection(),
     uuid: randomUUID,
-    clock: () => "2026-09-10T12:00:00.000Z",
+    clock: options.clock ?? (() => "2026-09-10T12:00:00.000Z"),
     actor,
     projection,
     bodyStore,
@@ -114,12 +116,61 @@ function fixture(options: FixtureOptions = {}) {
     openModes: ["chat", "work", "code"],
   });
   const names = () => events.map((event) => event.eventName);
-  return { service, events, names, ingested, projection, root, endpoints, bodyStore };
+  return { service, events, names, ingested, projection, root, endpoints, bodyStore, journalPort };
 }
 
 const handoff = "Handoff: CI on the branch head is green.";
 
 describe("the agent message delivery service", () => {
+  it("expires a queued message after its recorded 24-hour deadline before carrying it", async () => {
+    let now = "2026-11-06T12:00:00.000Z";
+    const { service, projection, events, bodyStore, journalPort, root } = fixture({
+      clock: () => now,
+    });
+    await service.send({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      body: handoff,
+    });
+    const record = projection.inFlight()[0];
+    expect(record).toMatchObject({ expiresAt: "2026-11-07T12:00:00.000Z" });
+    now = "2026-11-07T12:00:00.000Z";
+    const append = journalPort.append;
+    journalPort.append = () => {
+      throw new Error("journal unavailable");
+    };
+    await expect(service.expireQueued()).rejects.toThrow("journal unavailable");
+    expect(await bodyStore.read(record?.bodyReference.contentReference ?? "missing")).toBe(handoff);
+    expect(projection.lookup(String(record?.messageId))?.state).toBe("in-flight");
+    journalPort.append = append;
+    expect(await service.carryIntoTurn(String(recipientThreadId))).toEqual([]);
+    expect(projection.lookup(String(record?.messageId))?.state).toBe("expired");
+    expect(events.at(-1)?.eventName).toBe("agent.message-expired@1");
+    const replay = new AgentMessageProjection();
+    hydrateAgentMessageProjectionFromJournal({
+      replay: () =>
+        events.map((event, index) => ({
+          ...event,
+          globalSequence: index + 1,
+          aggregateType: "agent-message",
+          eventVersion: 1,
+        })),
+      projection: replay,
+    });
+    const restarted = fixture({ projection: replay, root, clock: () => now });
+    await restarted.service.confirmDelivered([String(record?.messageId)]);
+    expect(replay.lookup(String(record?.messageId))?.state).toBe("expired");
+    expect(replay.messagingFacts(20)).toMatchObject({
+      openInFlight: 0,
+      delivered: 0,
+      refused: 0,
+      recent: [{ state: "expired" }],
+    });
+    expect(
+      await bodyStore.read(record?.bodyReference.contentReference ?? "missing"),
+    ).toBeUndefined();
+  });
+
   it("tells the sender a message is sent, and delivers nothing until a turn carries it", async () => {
     const { service, events, names, ingested, projection } = fixture();
     const outcomes = await service.send({

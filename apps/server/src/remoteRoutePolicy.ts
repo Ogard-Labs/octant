@@ -665,6 +665,15 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 4_096,
   },
+  {
+    id: "conversation-inputs",
+    match: { kind: "exact", path: "/api/conversation-inputs" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxResponseBytes: 128 * 1_024,
+  },
   // Reply detail: the presentation level a paired device draws a thread at.
   // Read only; changing it stays with a window on the host.
   {
@@ -690,6 +699,15 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 ];
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
+  {
+    kind: "prefix" as const,
+    path: "/api/native-harness/sessions/",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+    maxResponseBytes: 512 * 1_024,
+  },
   {
     kind: "exact" as const,
     path: "/api/github/authentication",

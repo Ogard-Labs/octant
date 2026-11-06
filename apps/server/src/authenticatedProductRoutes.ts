@@ -62,6 +62,12 @@ export function classifyProductAction(request: Request): string | undefined {
   // Private credential entry is host-local and is never a forwarded product action.
   if (path === "/api/credential-requests") return undefined;
 
+  if (/^\/api\/native-harness\/sessions\/[^/]+(?:\/(?:approvals|questions))?$/.test(path)) {
+    return (method === "GET" && !path.endsWith("/approvals") && !path.endsWith("/questions")) ||
+      (method === "POST" && (path.endsWith("/approvals") || path.endsWith("/questions")))
+      ? "agent-run.request.answer-once"
+      : undefined;
+  }
   if (path.startsWith("/api/chat/")) {
     if (method === "POST" && (path.endsWith("/commands") || path === "/api/chat/attachments")) {
       return "chat.send-turn";
@@ -222,6 +228,8 @@ export function classifyProductAction(request: Request): string | undefined {
   }
   // The Reply detail default and the threads' own levels: a presentation read,
   // never a write. Changing either is the shell route's, which a device never reaches.
+  if (path === "/api/conversation-inputs")
+    return method === "GET" ? "project.overview.read" : undefined;
   if (path === "/api/reply-detail") {
     return method === "GET" ? "settings.read-non-secret" : undefined;
   }

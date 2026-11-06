@@ -2,6 +2,38 @@ import { describe, expect, it, vi } from "vitest";
 import { MAX_TERMINAL_TRANSCRIPT_BYTES, TerminalService } from "./terminalService";
 
 describe("TerminalService", () => {
+  it("refuses a command when its authority is revoked during credential resolution", async () => {
+    const process = fakeProcess();
+    const port = { start: vi.fn(() => process) };
+    let current = true;
+    const service = new TerminalService({
+      port,
+      inheritedEnvironment: {},
+      credentials: {
+        resolve: async () => {
+          current = false;
+          return "synthetic";
+        },
+      },
+    });
+    await expect(
+      service.launch({
+        terminalId: "terminal-action",
+        shell: "/bin/sh",
+        command: "printf should-not-run",
+        cwd: "/repo",
+        stateScope: "action",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [
+          { environmentName: "OCTANT_ACTION_CREDENTIAL", reference: "fixture" },
+        ],
+        admit: () => current,
+      }),
+    ).rejects.toThrow("authority changed");
+    expect(port.start).not.toHaveBeenCalled();
+  });
+
   it("launches with allowlisted environment plus launch-only credential references", async () => {
     const process = fakeProcess();
     const port = { start: vi.fn(() => process) };

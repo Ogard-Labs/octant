@@ -1,3 +1,4 @@
+import type { ConversationInputManifest } from "@octant/contracts/conversation-inputs";
 import { observedChildren } from "./agentObservedChildren";
 import {
   decodeAgentRunResultsResponse,
@@ -79,6 +80,7 @@ export interface AgentRunRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly persistence: AgentRunPersistenceService;
   readonly liveConversations: AgentRunLiveConversationStore;
+  readonly readInputManifest?: (run: AgentRun) => ConversationInputManifest | undefined;
   readonly orchestration: AgentRunOrchestrationService;
   /**
    * Resolves the actual parent thread/window authority a retried or resumed
@@ -509,7 +511,7 @@ async function handleConversation(
   });
   return json(
     {
-      ...conversationIdentity(run),
+      ...conversationIdentity(run, dependencies),
       ...agentRunConversationDisclosure(dependencies, run, {
         surface: "snapshot",
         ...(afterSequence === undefined ? {} : { afterSequence }),
@@ -598,7 +600,7 @@ async function* conversationStreamFrames(
         const lastSequence = snapshot.entries.at(-1)?.sequence;
         yield {
           kind: first ? "snapshot" : "delta",
-          ...conversationIdentity(latestRun),
+          ...conversationIdentity(latestRun, dependencies),
           ...snapshot,
           ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
         };
@@ -617,7 +619,7 @@ async function* conversationStreamFrames(
   const lastSequence = disclosure.entries.at(-1)?.sequence;
   yield {
     kind: "snapshot",
-    ...conversationIdentity(latestRun),
+    ...conversationIdentity(latestRun, dependencies),
     ...disclosure,
     ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
   };
@@ -625,11 +627,14 @@ async function* conversationStreamFrames(
 
 function conversationIdentity(
   run: AgentRun,
+  dependencies: AgentRunRouteDependencies,
 ): Omit<
   AgentRunConversationResponse,
   "status" | "entries" | "truncated" | "nextCursor" | "staleReason"
 > {
+  const inputManifest = dependencies.readInputManifest?.(run);
   return {
+    ...(inputManifest === undefined ? {} : { inputManifest }),
     runId: run.id,
     parentThreadId: run.parentThreadId,
     executionKind: run.executionKind,
@@ -942,6 +947,9 @@ function serializeCenterSummary(
     executionKind: run.executionKind,
     authority: run.authority,
     workspaceKind: workspaceKindForRun(run),
+    ...(run.workspaceReceipt.kind !== "code-worktree" || run.workspaceReceipt.source === undefined
+      ? {}
+      : { source: run.workspaceReceipt.source }),
     usageQuality: run.routingReceipt.usageQuality,
     route,
     resultAcknowledgement: run.resultAcknowledgement,

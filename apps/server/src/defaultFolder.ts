@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { DefaultFolder, type ShellSettings } from "@octant/contracts";
+import { DEFAULT_FOLDER_ENVIRONMENT } from "@octant/host-runtime";
 import { Schema } from "effect";
 import {
   isInsideHomeDirectory,
@@ -24,8 +25,14 @@ export const DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER = "Artifacts";
  * privacy prompt on a fresh host. A folder the settings already store,
  * including the earlier `~/Documents/Octant`, stays where it is.
  */
-export function hostDefaultFolder(home: string = homedir()): DefaultFolder {
-  return decodeDefaultFolder(join(home, "Octant"));
+export function hostDefaultFolder(
+  home: string = homedir(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): DefaultFolder {
+  // Octant Nightly's own test host names its own folder, so Work and Code
+  // without a Project and the artifact mirror never touch Octant's files.
+  const configured = env[DEFAULT_FOLDER_ENVIRONMENT];
+  return decodeDefaultFolder(configured ?? join(home, "Octant"));
 }
 
 export function effectiveDefaultFolder(

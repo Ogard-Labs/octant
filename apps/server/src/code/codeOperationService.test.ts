@@ -2025,6 +2025,52 @@ describe("CodeOperationService", () => {
     });
   });
 
+  it("prepares host input once before a fresh turn and refuses a stale input without a checkpoint", async () => {
+    const fixture = providerTurnFixture();
+    const prepareTurnInput = vi.fn(async () => undefined);
+    const result = await fixture.service.execute(ids.window, startProviderTurn, {
+      prepareTurnInput,
+    });
+    expect(prepareTurnInput).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ kind: "operation-failed", admission: "refused" });
+    expect(fixture.git.checkpoint).not.toHaveBeenCalled();
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
+  it("retains the prepared input fence through provider startup", async () => {
+    const fixture = providerTurnFixture();
+    let current = true;
+    fixture.evidence.read.mockImplementation(async () => {
+      current = false;
+      return "process the selected files";
+    });
+    await expect(
+      fixture.service.execute(ids.window, startProviderTurn, {
+        prepareTurnInput: async ({ checkoutRoot, current: admissionCurrent }) => {
+          expect(checkoutRoot).toBe("/checkout");
+          expect(admissionCurrent()).toBe(true);
+          return () => current;
+        },
+      }),
+    ).resolves.toMatchObject({ kind: "operation-failed", admission: "refused" });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
+  it("recovers an accepted turn without preparing its live source again", async () => {
+    const fixture = providerTurnFixture({ recordEvents: true });
+    const prepareTurnInput = vi.fn(async () => () => true);
+    await fixture.service.execute(ids.window, startProviderTurn, { prepareTurnInput });
+    expect(prepareTurnInput).toHaveBeenCalledOnce();
+    prepareTurnInput.mockRejectedValue(new Error("The source is now unavailable"));
+    await expect(
+      fixture.service.execute(ids.window, startProviderTurn, { prepareTurnInput }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(prepareTurnInput).toHaveBeenCalledOnce();
+    expect(fixture.turns.start.mock.calls[1]?.[0]).toMatchObject({
+      sessionId: fixture.turns.start.mock.calls[0]?.[0].sessionId,
+    });
+  });
+
   it("refuses a host turn revoked while its checkout checkpoint is being prepared", async () => {
     const release = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
@@ -2241,6 +2287,17 @@ describe("CodeOperationService", () => {
     );
     // The journal names the image by what the host measured, never its bytes.
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
+  });
+
+  it("does not start a provider while required worktree preparation is refused", async () => {
+    const prepareWorktree = vi.fn(async () => "Worktree setup failed. Retry or Skip setup first.");
+    const fixture = providerTurnFixture({ prepareWorktree });
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { message: "Worktree setup failed. Retry or Skip setup first." },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(prepareWorktree).toHaveBeenCalledOnce();
   });
 
   it("refuses a Code follow-up when its Project provider policy no longer accepts it", async () => {
@@ -3327,6 +3384,7 @@ function providerTurnFixture(
   options: Partial<
     Pick<
       CodeOperationServiceOptions,
+      | "prepareWorktree"
       | "resolveSideChatReturns"
       | "resolveThreadMentionContext"
       | "resolveProfileSkills"

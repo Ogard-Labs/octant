@@ -888,6 +888,86 @@ describe("admitted Chat conversation context", () => {
     ...overrides,
   });
 
+  it.each(
+    (["child-delegation", "provider-switch", "branch"] as const).flatMap((purpose) =>
+      (["finalized", "carried"] as const).map((source) => ({ purpose, source })),
+    ),
+  )("selects one repeated $source original before $purpose input bounds", ({ purpose, source }) => {
+    const original = {
+      source: {
+        mode: "chat" as const,
+        threadId: String(chatThreadId),
+        attachmentId: id(9_000),
+        projectId: null,
+      },
+      displayName: "original.txt",
+      mediaType: "text/plain",
+      byteLength: 8,
+      digest,
+    };
+    const turns = Array.from({ length: 9 }, (_, index) =>
+      decodeChatTurn({
+        ...turn(index + 1),
+        ...(source === "carried"
+          ? { originalInputs: [original] }
+          : { attachmentIds: [original.source.attachmentId] }),
+      }),
+    );
+    const result = admittedChatConversationContext(
+      input(turns, {
+        purpose,
+        readView: () =>
+          ({
+            turns,
+            contents: bodies(turns),
+            attachments: [
+              {
+                id: original.source.attachmentId,
+                threadId: chatThreadId,
+                status: "finalized",
+                ...original,
+              },
+            ],
+          }) as never,
+      }),
+    );
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.inputs).toEqual([original]);
+  });
+
+  it.each(["displayName", "mediaType", "byteLength", "digest", "projectId"] as const)(
+    "refuses conflicting %s metadata for one original identity",
+    (field) => {
+      const original = {
+        source: {
+          mode: "chat" as const,
+          threadId: String(chatThreadId),
+          attachmentId: id(9_000),
+          projectId: null,
+        },
+        displayName: "original.txt",
+        mediaType: "text/plain",
+        byteLength: 8,
+        digest,
+      };
+      const changed =
+        field === "projectId"
+          ? { ...original, source: { ...original.source, projectId: String(projectId) } }
+          : {
+              ...original,
+              [field]: field === "byteLength" ? 9 : field === "digest" ? "c".repeat(64) : "changed",
+            };
+      const turns = [
+        decodeChatTurn({ ...turn(1), originalInputs: [original] }),
+        decodeChatTurn({ ...turn(2), originalInputs: [changed] }),
+      ];
+      expect(admittedChatConversationContext(input(turns))).toEqual({
+        status: "unavailable",
+        reason: "source-changed",
+      });
+    },
+  );
+
   it("reads the active conversation with each message attributed to the provider and model that wrote it", () => {
     const result = admittedChatConversationContext(input([turn(1), turn(2)]));
 

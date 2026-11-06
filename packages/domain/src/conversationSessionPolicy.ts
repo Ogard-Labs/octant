@@ -39,6 +39,8 @@ export interface ConversationSessionInput {
      * the person cannot act on.
      */
     readonly modelSwitchHandoff?: boolean;
+    /** The person explicitly chose to replace the session's fixed tool catalogue. */
+    readonly toolCatalogHandoff?: boolean;
     /**
      * That attempt started a new session with a handoff and never completed.
      * Its session may have started without the provider ever receiving the
@@ -123,6 +125,11 @@ export function decideConversationSession(
       : { kind: "refuse", reason: "handoff-unavailable" };
   }
   if (previous.providerInstanceId === input.recipient.providerInstanceId) {
+    if (previous.toolCatalogHandoff === true) {
+      return input.handoff === "allowed"
+        ? { kind: "new-session-with-handoff", reason: "provider-switch" }
+        : { kind: "refuse", reason: "handoff-unavailable" };
+    }
     if (previous.undeliveredHandoff !== undefined) {
       return input.handoff === "allowed"
         ? { kind: "new-session-with-handoff", reason: previous.undeliveredHandoff }

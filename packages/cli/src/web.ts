@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +39,10 @@ export interface WebCommandOptions {
   readonly stdout?: { write: (chunk: string) => unknown };
   readonly stderr?: { write: (chunk: string) => unknown };
   readonly servicePolicyStore?: HostServicePolicyReader;
+  /** False for `octant-nightly`: attach to a running host, never start one. */
+  readonly mayStartHost?: boolean;
+  /** What to say when no host is running and this command may not start one. */
+  readonly hostNotRunning?: string;
 }
 
 export interface DevServerOptions {
@@ -123,6 +128,8 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
         }
       : {}),
     ...(developmentEnvironment === undefined ? {} : { environment: developmentEnvironment }),
+    ...(options.mayStartHost === undefined ? {} : { mayStartHost: options.mayStartHost }),
+    ...(options.hostNotRunning === undefined ? {} : { hostNotRunning: options.hostNotRunning }),
     policyStore:
       options.servicePolicyStore ?? createDefaultServicePolicyStore(bridgeSecretInput.env),
   });
@@ -326,10 +333,14 @@ function defaultBridgeSecretInput(developmentDataDirectory?: string): BridgeSecr
   };
 }
 
+/** Node's spawn, not Bun's: `octant-nightly` runs under the app's Node runtime. */
 async function defaultOpenBrowser(url: URL): Promise<void> {
   const command = process.platform === "darwin" ? "open" : "xdg-open";
-  const child = Bun.spawn({ cmd: [command, url.toString()], stdout: "ignore", stderr: "ignore" });
-  await child.exited;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, [url.toString()], { stdio: "ignore" });
+    child.once("error", reject);
+    child.once("exit", () => resolve());
+  });
 }
 
 export type { HostLauncherResult, HostInfo };

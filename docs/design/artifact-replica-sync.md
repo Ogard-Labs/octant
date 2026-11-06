@@ -518,18 +518,44 @@ them in.
   `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
   pull does not import the erased content again. Published slots keep
   their content-free record. Copies already in the store are not deleted.
-- **Not built yet.** While a computer waits to be approved, the interval
-  pull and Check the store read its unread slots, artifact entries
-  included, in one pass without progress. Binding selects
-  an existing compatible thread; it
-  does not create one. Keep and Merge resolve version heads only: a
-  tombstone beside a revision stays a head, and the artifact stays
-  visible. A pull through the membership route rather than the sync
-  service takes `ahead` versions into bound Canvases on the next interval.
-  No product surface deletes an artifact today; a local erase or purge
-  stays local and publishes nothing. Versions committed before this host
-  had a replica identity are not published, and neither is the library a
-  computer kept when it left one replica and joined another.
+- **Publish existing versions.** A local library card's Versions dialog previews
+  historical local versions without reading or writing the store. It names the
+  exact folder or bucket destination, computer identity, each version's size and
+  eligibility, queued/published state, and exclusions from the share filter,
+  bundle limit, Project and current thread write authority. Only explicit selected
+  versions (at most 24 per publication) leave after a separate consent to the
+  readable text, previews, Project name and computer identity sent there. A
+  digest binds consent to the identity, destination, local history and known
+  replica heads; a changed preview refuses and must be reviewed again. No
+  unselected ancestor is implicitly published. Each selected version names the
+  nearest earlier local version already published or explicitly queued, even
+  across separate publication requests; consecutive batches do not invent
+  independent roots. The journal records selection,
+  queue entries and stop/resume; retry and restart reuse the same entries. Progress
+  counts actual published versions, names pending membership or store failures,
+  and Stop takes effect after the current atomic upload. A stopped publication
+  stays stopped across restart, while unrelated queued work can continue. Source
+  authority is rechecked before queueing and each upload; sync off calls no store.
+- **Synchronized deletion.** A separate, explicitly confirmed action in Versions
+  publishes a tombstone for the known version heads, preserving local history and
+  the provider's stored copies. It uses an already published bundle, so deletion
+  does not disclose unpublished local text. A changed preview refuses; a
+  concurrent revision remains a visible conflict until a person chooses again.
+  Pending historical publication stops when a deletion is queued locally or
+  learned on pull, before any subsequent upload. Restore remains available when
+  an unpublished local revision stands beside that deletion. A durable intent
+  binds the person’s explicit Restore to its new version and a digest of the
+  known deletion slots before committing it. Historical publication can resume
+  only once that restored version is published; queued/offline restoration does
+  not suffice. A subsequently learned deletion requires a fresh Restore. The
+  same rule survives restart, and local purge removes the intent with its batch. Local erase/purge stays local and publishes nothing;
+  it also erases queued historical bundles from both journal and live projection.
+- **Remaining limits.** Binding selects an existing compatible thread; it does
+  not create one. Keep and Merge resolve version heads only: a tombstone beside
+  a revision stays a head, and the artifact stays visible. A pull through the
+  membership route rather than the sync service takes `ahead` versions into bound
+  Canvases on the next interval. Old versions are never published automatically,
+  including the library retained when leaving one replica and joining another.
 
 ## Store selection
 

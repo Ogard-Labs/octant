@@ -455,7 +455,7 @@ describe("discoveryService", () => {
     expect(readinessCall?.[2].env?.CODEX_HOME).toBe("/Users/test/.codex");
   });
 
-  it("reports unauthenticated when auth probe fails", async () => {
+  it("reports unknown rather than signed out when the authentication check cannot finish", async () => {
     const fs = makeFakeFs(new Map([["/usr/local/bin/codex", { file: true }]]));
     const exec = makeFakeExec(
       new Map([
@@ -474,7 +474,7 @@ describe("discoveryService", () => {
     const snapshot = await service.scan();
     const codex = snapshot.candidates.find((c) => c.driverKind === "codex");
     expect(codex).toBeDefined();
-    expect(codex!.readiness).toBe("unauthenticated");
+    expect(codex!.readiness).toBe("unknown");
   });
 
   it("reports unknown readiness when no auth probe is defined", async () => {

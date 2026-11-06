@@ -52,6 +52,9 @@ export function workTurnDecision(
         ...latest.authority,
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
         ...(thread.bindingRevisionId === undefined
           ? {}
           : { bindingRevisionId: thread.bindingRevisionId }),

@@ -1,3 +1,4 @@
+import { eligibleTerminalSessionFolders } from "../terminalSessions/terminalSessionScopes";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import { GithubCapabilityService } from "../github/githubCapabilityService";
 import { GithubCatalogueService } from "../github/githubCatalogueService";
 import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
+import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
 import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
@@ -23,6 +25,7 @@ import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
   isGithubIntegrationEffective,
   isLinearIntegrationEffective,
+  isFirstPartyIntegrationEffective,
 } from "../github/githubIntegrationEffective";
 import { createGithubRouteHandler } from "../githubRoutes";
 import {
@@ -30,6 +33,9 @@ import {
   createUnavailableSecretVault,
 } from "../integration/integrationCredentialVault";
 import { createFileConnectionStore } from "../integration/integrationConnectionStore";
+import { createAzureIntegration } from "../plugins/azure/azureIntegration";
+import { IntegrationCredentialOperations } from "../integration/integrationCredentialOperations";
+import { createIntegrationHostPort } from "../integration/integrationHostPort";
 import { createLinearIntegrationService } from "../integration/integrationService";
 import { createIntegrationRouteHandler } from "../integrationRoutes";
 import { makeCredentialBrokerClient } from "../providers/credentialBrokerClient";
@@ -70,7 +76,7 @@ import { threadOfActiveSession } from "../code/codeOperationRuntime";
 
 export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore" | "codeActiveTurns"> &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<HarnessStateWiring, "shieldHolder">;
 
@@ -78,6 +84,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
   const {
     codeActiveTurns,
     externalContentIngestionStore,
+    managedWorktreeReceipts,
     options,
     persistence,
     shieldHolder,
@@ -373,6 +380,13 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               token: options.credentialBrokerToken,
             }),
           ));
+    const azureOperations = new IntegrationCredentialOperations();
+    const azureRuntime = createAzureIntegration(
+      createIntegrationHostPort({
+        registerCredentialOperation: (operation) => azureOperations.register(operation),
+      }),
+    );
+    yield* Effect.addFinalizer(() => Effect.promise(() => azureRuntime.close()));
     const linearRedirectUri =
       options.linearOAuthRedirectUri ?? "http://127.0.0.1:52693/oauth/linear/callback";
     const integrationService = createLinearIntegrationService({
@@ -412,6 +426,14 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
         codexSessions: join(codexHome, "sessions"),
         codexSessionIndex: join(codexHome, "session_index.jsonl"),
       }),
+      eligibleFolders: (folder, projectId) =>
+        eligibleTerminalSessionFolders({
+          project: projectId === undefined ? undefined : persistence.readProject(projectId),
+          projectFolder: folder,
+          threads: persistence.readCodeThreads(),
+          readCheckout: (threadId) => persistence.readCodeThreadView(threadId)?.checkout,
+          loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+        }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -455,8 +477,21 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       githubReadToolService,
       githubRoutes,
       integrationRoutes,
-      credentialOperations: () => integrationService.credentialOperations?.() ?? [],
+      credentialOperations: () => [
+        ...(integrationService.credentialOperations?.() ?? []),
+        ...(isFirstPartyIntegrationEffective(
+          githubExtensionSnapshot.read(),
+          "azure-arm-integration",
+          { missingRow: "effective" },
+        )
+          ? azureOperations.list()
+          : []),
+      ],
       linearIssueContextService,
+      linearRoutineEventSources: linearRoutineEventSources(
+        integrationService,
+        linearIntegrationIsEffective,
+      ),
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,

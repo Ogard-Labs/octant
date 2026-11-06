@@ -1,3 +1,8 @@
+import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
+import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
+import { ConversationInputs } from "../continuity/ConversationInputs";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
@@ -26,6 +31,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -269,11 +275,21 @@ export interface CodeThreadWorkspaceProps {
  * Overview/Git/Terminal remain secondary surfaces opened from the thread toolbar.
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
+  const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
     props.controller.activeView?.thread.id === props.threadId
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
+  const forceStop = useDelayedForceStop(
+    props.controller.turnStatus === "running" &&
+      props.controller.latestProviderTurnOperationId !== undefined
+      ? String(props.controller.latestProviderTurnOperationId)
+      : undefined,
+    (props.providerGroups ?? []).find(
+      (group) => String(group.instance.id) === String(view?.thread.providerInstanceId),
+    )?.forceStop === "supported",
+  );
   // A thread whose checkout is a folder on a server. The host runs only its
   // Octant Harness turns; every control below that would act on a folder of
   // this host (checkpoints, rewind, forks, changed files, path mentions,
@@ -622,6 +638,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     pathMentions.sync(value, caret);
   }
 
+  const folderDrops = useDroppedFolderMentions({
+    scope:
+      view === undefined
+        ? undefined
+        : { mode: "code", threadId: props.threadId, checkoutId: view.checkout.id },
+    draft,
+    onDraftChange: (text, caret) => {
+      setDraft(text);
+      props.controller.setPendingDraft?.(text, caret);
+    },
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.hostId,
+    refused: serverCheckout || props.pairedDevice === true,
+    onFiles: (files) => {
+      if (boundModelReadsImages(providerGroups, thread) === false)
+        attachments.refuse("Choose a vision model to attach images.");
+      else void attachments.attach(files);
+    },
+  });
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -669,7 +706,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // Keyed on the journaled failure category, not on the absence of a request
   // or a limit, which a future provider could park without refusing a resume.
   const parkedTurn =
-    props.controller.turnStatus === "waiting" && props.controller.turnErrorCategory === "stale";
+    props.controller.turnStatus === "waiting" &&
+    (props.controller.turnErrorCategory === "stale" ||
+      props.controller.turnErrorCategory === "tools-changed");
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
@@ -680,6 +719,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     messageQueue.snapshot?.paused === true ||
     messageQueue.snapshot?.holdReason !== undefined;
   const providerTurnOperationId = props.controller.latestProviderTurnOperationId;
+
   // A waiting turn tells its error in its own status row. A terminal turn is
   // already in the transcript with its reason, so a second notice above it said
   // the same thing louder; the callout stays for a history the host cannot
@@ -855,7 +895,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
-  async function submitFollowUp() {
+  async function submitFollowUp(toolCatalogHandoff = false) {
     if (props.controller.draftReviewFindingReferencesInvalid) {
       setSendNotice(
         "A saved review reference is unreadable. Clear this draft and prepare the findings again from Review before sending.",
@@ -892,6 +932,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         await messageQueue.enqueue(
           {
             mode: "code",
+            ...(continuation.policy === "text-only"
+              ? { contextInputPolicy: continuation.policy }
+              : {}),
             prompt: draft,
             attachmentIds: captured.map((entry) => entry.reference.attachmentId),
             threadMentionIds,
@@ -902,6 +945,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
           () => {
             attachments.acceptQueueClaim(captured);
+            continuation.reset();
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
             if (
               (props.controller.readDraftRevision?.(originThreadKey) ??
@@ -942,8 +986,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (props.controller.draftRevision !== undefined)
       sendArguments[9] = props.controller.draftRevision;
     if (reviewFindingReferences.length > 0) sendArguments[10] = reviewFindingReferences;
+    if (toolCatalogHandoff) sendArguments[11] = true;
+    if (continuation.policy === "text-only") sendArguments[12] = continuation.policy;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
+      continuation.reset();
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
       // bumps the revision, and that newer draft stays. The host keeps the
@@ -1092,6 +1139,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setMerging(true);
     try {
       const outcome = await props.controller.mergeForkContext({
+        ...(continuation.policy === "text-only" ? { contextInputPolicy: continuation.policy } : {}),
         threadId: view.thread.id,
         throughOperationId: String(operationId),
       });
@@ -1437,6 +1485,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </OctantAlert>
         )}
 
+        {props.controller.turnErrorCategory === "tools-changed" ? (
+          <ToolCatalogContinuation
+            disabled={!canSend || queueFollowUp}
+            onContinue={() => void submitFollowUp(true)}
+          />
+        ) : null}
+
         {/* The transcript row repeats the failure's own sentence; only this
           notice carries what the provider reported about the limit itself —
           its kind and any reset time. Waiting turns already show it in place
@@ -1654,6 +1709,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         })}
                       </OctantSeparatorWithLabel>
                     ) : null}
+                    {message.role === "assistant" &&
+                    message.operationId !== undefined &&
+                    message.handoff !== undefined &&
+                    "inputReceipt" in message.handoff &&
+                    message.handoff.inputReceipt !== undefined ? (
+                      <ConversationInputs
+                        mode="code"
+                        threadId={String(message.sourceThreadId ?? props.threadId)}
+                        admissionId={String(message.operationId)}
+                        receipt={message.handoff.inputReceipt}
+                        serverUrl={props.serverUrl}
+                        windowCapability={props.windowCapability}
+                      />
+                    ) : null}
                     {message.role === "assistant" && message.handoff !== undefined ? (
                       <p className="code-thread-workspace__handoff" role="note">
                         {conversationHandoffDisclosure(message.handoff, (selection) =>
@@ -1663,13 +1732,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     ) : null}
                     {message.role === "assistant"
                       ? (message.forkMergeBacks ?? []).map((mergeBack) => (
-                          <p
+                          <div
                             className="code-thread-workspace__handoff"
                             key={`${String(mergeBack.forkThreadId)}:${String(mergeBack.throughOperationId)}`}
                             role="note"
                           >
                             {forkMergeBackDisclosure(mergeBack)}
-                          </p>
+                            {mergeBack.inputReceipt === undefined ||
+                            message.operationId === undefined ? null : (
+                              <ConversationInputs
+                                mode="code"
+                                threadId={String(message.sourceThreadId ?? props.threadId)}
+                                admissionId={String(message.operationId)}
+                                receipt={mergeBack.inputReceipt}
+                                serverUrl={props.serverUrl}
+                                windowCapability={props.windowCapability}
+                              />
+                            )}
+                          </div>
                         ))
                       : null}
                     <article
@@ -2064,6 +2144,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId={decodeBrowserThreadId(String(thread.id))}
           />
         )}
+        <ContinueElsewhere
+          mode="code"
+          threadId={String(thread.id)}
+          groups={threadModelGroups}
+          selected={thread}
+          policy={continuation.policy}
+          onPolicyChange={continuation.change}
+          onProviderChange={changeProvider}
+          disabled={busy}
+        />
         {props.controller.providerRequests.length === 0 ? null : (
           <div
             aria-label="Pending provider requests"
@@ -2128,6 +2218,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={busy}
         />
+        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2310,11 +2401,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onDragOver={(event) => {
-                if (props.attachmentClient === undefined) return;
                 event.preventDefault();
               }}
               onDrop={(event) => {
-                if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+                if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                  event.preventDefault();
               }}
               onKeyDown={onKeyDown}
               onKeyUp={(event) => {
@@ -2504,7 +2595,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ...(props.controller.turnStatus === "sending"
                   ? { disabledReason: "Stopping is available once the turn has started." }
                   : {}),
-                onStop: () => void props.controller.cancelTurn(),
+                onStop: () => {
+                  forceStop.requestStop();
+                  void props.controller.cancelTurn();
+                },
+                ...(forceStop.offered
+                  ? { forceStop: { onForceStop: () => void props.controller.forceStopTurn() } }
+                  : {}),
               },
             },
           }}

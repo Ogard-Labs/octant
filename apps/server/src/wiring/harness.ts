@@ -484,6 +484,7 @@ export function wireHarness(deps: HarnessDependencies) {
     return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
   };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
+    mayAnswerChildFromDevice: agentRunInteractions.mayAnswerFromDevice,
     windowAuthorityStore,
     store: {
       read: (threadId) => {

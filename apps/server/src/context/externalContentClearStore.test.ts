@@ -17,6 +17,7 @@ import {
   type ClearExternalContentInput,
 } from "./externalContentClearStore";
 import { ExternalContentIngestionStore } from "./externalContentIngestionStore";
+import { judgeShieldCallByRules, type ShieldCall } from "@octant/domain/shield-judge-policy";
 import { readThreadExternalContentTaint } from "./externalContentTaintProjection";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -106,6 +107,65 @@ function openHost() {
 }
 
 describe("clearing a thread's outside-content mark", () => {
+  it("counts outside-content prompts for the same research, edit and test sequence before and after review", () => {
+    const measure = (reviewed: boolean) => {
+      const host = openHost();
+      try {
+        host.ingest(mcpResult, "research-page");
+        if (reviewed) expect(host.clear()).toMatchObject({ kind: "cleared" });
+        const base = {
+          tool: "edit",
+          kind: "edit" as const,
+          paths: ["src/example.ts"],
+          urls: [],
+          arguments: "{}",
+          workingDirectory: "/project",
+        };
+        const calls: ReadonlyArray<ShieldCall> = [
+          base,
+          {
+            ...base,
+            tool: "shell",
+            kind: "command",
+            paths: [],
+            command: "bun run test",
+            approvalClass: "shell-commands",
+          },
+        ];
+        const judge = (call: ShieldCall) =>
+          judgeShieldCallByRules({
+            call,
+            boundRoot: "/project",
+            tainted: host.tainted(),
+            projectCommands: ["bun run test"],
+            safePlaces: [{ kind: "host", host: "docs.example.test", port: 443 }],
+          });
+        const answers = calls.map(judge);
+        expect(
+          answers.map((answer) => (answer.kind === "decided" ? answer.verdict : "model")),
+        ).toEqual(["allow", "allow"]);
+        const nextFetch = judge({
+          ...base,
+          tool: "fetch",
+          kind: "fetch",
+          paths: [],
+          urls: ["https://docs.example.test/next"],
+        });
+        expect(nextFetch).toMatchObject({ kind: "decided", verdict: reviewed ? "allow" : "ask" });
+        return {
+          localPrompts: answers.filter(
+            (answer) => answer.kind === "decided" && answer.stage === "taint-limit",
+          ).length,
+          followupPrompt: nextFetch.kind === "decided" && nextFetch.stage === "taint-limit" ? 1 : 0,
+        };
+      } finally {
+        host.connection.close();
+      }
+    };
+    expect(measure(false)).toEqual({ localPrompts: 0, followupPrompt: 1 });
+    expect(measure(true)).toEqual({ localPrompts: 0, followupPrompt: 0 });
+  });
+
   it("marks the thread again when the same MCP result or issue context comes back", () => {
     const host = openHost();
     expect(host.ingest(mcpResult, "mcp-tool")).toMatchObject({ kind: "recorded" });

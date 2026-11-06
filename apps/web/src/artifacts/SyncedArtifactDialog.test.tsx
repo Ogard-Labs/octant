@@ -172,3 +172,92 @@ describe("when no thread here can take a Work artifact", () => {
     expect(screen.getByRole("button", { name: "Keep it in the library" })).toBeTruthy();
   });
 });
+
+describe("publishing existing versions", () => {
+  it("offers explicit restore when a pulled deletion stops a local historical selection", async () => {
+    const onRestore = vi.fn();
+    dialog(
+      {
+        ...twoVersions,
+        status: "current",
+        publication: {
+          destination: "Reviewed replica store",
+          instanceId: "60000000-0000-4000-8000-000000000001",
+          previewToken: "a".repeat(64),
+          available: true,
+          versions: [],
+          truncated: false,
+          deletionAvailable: false,
+          deletionPending: false,
+          deletionConflict: true,
+          backfill: {
+            id: "70000000-0000-4000-8000-000000000001",
+            state: "stopped",
+            done: 0,
+            total: 1,
+            restoreAvailable: true,
+            message: "A synchronized deletion stopped this publication.",
+          },
+        },
+      },
+      { onRestore },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Restore artifact" }));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires version selection and explicit destination consent before publication and deletion", async () => {
+    const onBackfill = vi.fn();
+    const onDeleteSynced = vi.fn();
+    const detail: ArtifactSyncedDetail = {
+      ...twoVersions,
+      status: "current",
+      publication: {
+        destination: "https://store.example.test · artifacts/",
+        instanceId: "60000000-0000-4000-8000-000000000001",
+        previewToken: "a".repeat(64),
+        available: true,
+        versions: [
+          {
+            versionId:
+              twoVersions.versions[0]?.versionId ??
+              (studio as ArtifactSyncedDetail["versions"][number]["versionId"]),
+            sequence: 1,
+            byteLength: 1024,
+            status: "eligible",
+          },
+          {
+            versionId:
+              twoVersions.versions[1]?.versionId ??
+              (laptop as ArtifactSyncedDetail["versions"][number]["versionId"]),
+            sequence: 2,
+            byteLength: 300,
+            status: "excluded",
+            reason: "The share filter excludes this content.",
+          },
+        ],
+        truncated: false,
+        deletionPending: false,
+        deletionAvailable: true,
+        deletionConflict: false,
+      },
+    };
+    dialog(detail, { onBackfill, onDeleteSynced });
+    expect(screen.getByText(/Destination: https/)).toBeTruthy();
+    const publish = screen.getByRole("button", { name: "Publish selected versions" });
+    expect(publish).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Version 1/ }));
+    expect(publish).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /Version 2/ })).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: /I have reviewed/ }));
+    await userEvent.click(publish);
+    expect(onBackfill).toHaveBeenCalledWith([studio], "a".repeat(64));
+    const deletion = screen.getByRole("button", { name: "Delete from synced library" });
+    expect(deletion).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "Delete these known versions from my synced library." }),
+    );
+    await userEvent.click(deletion);
+    expect(onDeleteSynced).toHaveBeenCalledWith("a".repeat(64));
+  });
+});

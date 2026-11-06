@@ -19,6 +19,7 @@ import {
   type AggregateVersion,
   type UtcTimestamp,
   decodeThreadWorkingDirectory,
+  decodeProjectExtraFolder,
   decodeWorkThread,
   decodeProviderModel,
   decodeWorkThreadBootstrap,
@@ -41,6 +42,7 @@ import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { TerminalSessionImportPort } from "../terminalSessions/terminalSessionImports";
 import { WorkThreadProjection } from "./workThreadProjection";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkThreadService,
@@ -1658,6 +1660,50 @@ describe("WorkThreadService", () => {
     );
   });
 
+  it("creates a task in a server-issued approved folder and refuses a withdrawn choice", async () => {
+    const base = workProject();
+    if (base.type !== "work") throw new Error("Expected a Work Project");
+    const extra = decodeProjectExtraFolder({
+      canonicalRoot: "/approved/notes",
+      addedAt: now,
+      addedBy: base.bindingHistory[0]?.actor,
+    });
+    const project = { ...base, extraFolders: [extra] };
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw new Error("Missing approved folder");
+    const fixture = serviceFixture({ project, threads: [] });
+    const created = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Notes",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+      workingFolderId: choice.id,
+      workingDirectory: "drafts",
+    });
+    expect(created).toMatchObject({
+      kind: "thread-created",
+      thread: { workingFolderId: choice.id, workingDirectory: "drafts" },
+    });
+    expect(fixture.workingDirectories.resolve).toHaveBeenCalledWith("/approved/notes", "drafts");
+    const withdrawn = serviceFixture({
+      project: base,
+      threads: [thread({ workingFolderId: choice.id })],
+    });
+    await expect(
+      withdrawn.service.execute(ids.window, {
+        kind: "change-work-thread-working-directory",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        workingDirectory: ".",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(withdrawn.workingDirectories.resolve).not.toHaveBeenCalled();
+  });
+
   it("persists a host-validated working directory and rejects unavailable paths", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });
@@ -2551,6 +2597,19 @@ describe("forking a Work thread from one of its turns", () => {
         providerSessionId: "72000000-0000-4000-8000-000000000060" as never,
         resumeCursor: { driverKind: "pi", value: "source-session" },
         prompt,
+        ...(requestId === first
+          ? {
+              attachments: [
+                {
+                  attachmentId: "30000000-0000-4000-8000-000000000001" as never,
+                  displayName: "Original.png",
+                  mediaType: "image/png" as const,
+                  byteLength: 12,
+                  digest: "a".repeat(64) as never,
+                },
+              ],
+            }
+          : {}),
         capabilities: WORK_TURN_CAPABILITIES,
         acceptedAt: now,
       });
@@ -2616,6 +2675,15 @@ describe("forking a Work thread from one of its turns", () => {
     ]);
     // A carried copy names its source turn and none of the source's session.
     expect(carried[0]?.carriedFrom).toEqual({ threadId: ids.thread, requestId: first });
+    expect(carried[0]?.attachments?.[0]).toMatchObject({
+      displayName: "Original.png",
+      source: {
+        mode: "work",
+        threadId: String(ids.thread),
+        attachmentId: "30000000-0000-4000-8000-000000000001",
+        projectId: String(ids.project),
+      },
+    });
     expect(carried[0]?.resumeCursor).toBeUndefined();
     expect(String(carried[0]?.requestId)).not.toBe(String(first));
     expect(fixture.turns.listForThread(ids.thread).map((turn) => turn.requestId)).toEqual([

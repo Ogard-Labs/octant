@@ -2,6 +2,41 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("offers Atlassian v2 and Airtable sign-in with a distinct scoped Airtable PAT alternative", () => {
+    expect(connectorCatalog().find((e) => e.id === "atlassian")).toMatchObject({
+      url: "https://mcp.atlassian.com/v2/mcp",
+      auth: { kind: "sign-in" },
+    });
+    expect(connectorCatalog().find((e) => e.id === "airtable")).toMatchObject({
+      url: "https://mcp.airtable.com/mcp",
+      auth: { kind: "sign-in" },
+    });
+    expect(connectorCatalog().find((e) => e.id === "airtable-pat")).toMatchObject({
+      url: "https://mcp.airtable.com/mcp",
+      auth: {
+        kind: "key",
+        header: "Authorization",
+        prefix: "Bearer",
+        keyPage: "https://airtable.com/create/tokens",
+      },
+    });
+  });
+
+  it("requires owned confidential client setup for HubSpot without inventing fixed scopes", () => {
+    expect(connectorCatalog().find((entry) => entry.id === "hubspot")).toMatchObject({
+      displayName: "HubSpot",
+      url: "https://mcp.hubspot.com/",
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        permissionNotice: expect.stringContaining("read and write"),
+      },
+    });
+    const entry = connectorCatalog().find((entry) => entry.id === "hubspot");
+    expect(entry?.auth).not.toHaveProperty("requestedScopes");
+    expect(featuredConnectors().map((entry) => entry.id)).not.toContain("hubspot");
+  });
+
   it("requires separate public-client setup and read-only consent for each Google preview service", () => {
     const google = connectorCatalog().filter((entry) => entry.id.startsWith("google-"));
     expect(google).toHaveLength(3);

@@ -41,6 +41,10 @@ export interface HostLauncherDependencies {
   readonly environment?: NodeJS.ProcessEnv;
   /** Persisted automatic-startup policy. Launch paths inject a real store. */
   readonly policyStore?: HostServicePolicyReader;
+  /** False attaches only: `octant-nightly` never starts a host. */
+  readonly mayStartHost?: boolean;
+  /** The refusal when no host is running and none may be started. */
+  readonly hostNotRunning?: string;
 }
 
 export type HostServicePolicyReader = Pick<ServicePolicyStore, "read">;
@@ -129,6 +133,12 @@ export async function attachOrCreateHost(
     };
   }
 
+  if (dependencies.mayStartHost === false) {
+    return {
+      kind: "start-failed",
+      reason: dependencies.hostNotRunning ?? "No Octant host is running here.",
+    };
+  }
   if (dependencies.bridgeSecret === undefined) {
     return {
       kind: "start-failed",

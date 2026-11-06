@@ -78,7 +78,15 @@ struct State {
 };
 std::shared_ptr<State> state = std::make_shared<State>();
 std::atomic<bool> start_pending = false, status_pending = false,
-                  close_pending = false, launch_pending = false;
+                  close_pending = false, launch_pending = false,
+                  nightly_pending = false;
+constexpr auto nightly_operation_bound = std::chrono::seconds(20);
+bool nightly_path_operation(const std::string &operation) {
+  return operation == "verifyNightly" || operation == "openNightly";
+}
+bool nightly_operation(const std::string &operation) {
+  return nightly_path_operation(operation) || operation == "nightlyRunning";
+}
 std::atomic<unsigned> validations = 0, launches = 0;
 
 bool expired(Deadline deadline) { return Clock::now() >= deadline; }
@@ -191,9 +199,7 @@ bool validate_artifact(SecStaticCodeRef disk, SecCodeRef dynamic, bool stable,
                         kCFNumberSInt32Type, &flags))
     return false;
   if ((flags & kSecCodeSignatureAdhoc) || !(flags & kSecCodeSignatureRuntime) ||
-      team.size() != 10 ||
-      team.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") !=
-          std::string::npos) {
+      !octant::desktop_peer::developer_team(team)) {
     reason = "unsigned-build";
     return false;
   }
@@ -202,15 +208,15 @@ bool validate_artifact(SecStaticCodeRef disk, SecCodeRef dynamic, bool stable,
     reason = "invalid-peer";
     return false;
   }
-  const std::string requirement_text =
-      "anchor apple generic and identifier \"" + identifier +
-      "\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
-      "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and "
-      "certificate leaf[subject.OU] = \"" +
-      team + "\"";
+  const auto requirement_text =
+      octant::desktop_peer::developer_id_requirement(identifier, team);
+  if (!requirement_text) {
+    reason = "invalid-peer";
+    return false;
+  }
   OwnedCF<CFStringRef> requirement_string;
   requirement_string.value = CFStringCreateWithCString(
-      nullptr, requirement_text.c_str(), kCFStringEncodingUTF8);
+      nullptr, requirement_text->c_str(), kCFStringEncodingUTF8);
   OwnedCF<SecRequirementRef> requirement;
   if (!requirement_string.value ||
       SecRequirementCreateWithString(requirement_string.value,
@@ -645,6 +651,46 @@ void finish_launch(const std::shared_ptr<PendingLaunch> &launch,
   launch->changed.notify_all();
 }
 
+// Open a validated primary bundle URL, never a command found on PATH. A host
+// launch stays in the background with the host-only role; an ordinary open
+// brings the app forward with no arguments.
+Result open_validated_application(const std::string &root, bool host_only,
+                                  Deadline deadline, Result failure) {
+  @autoreleasepool {
+    NSURL *url =
+        [NSURL fileURLWithPath:[NSString stringWithUTF8String:root.c_str()]
+                   isDirectory:YES];
+    auto launch = std::make_shared<PendingLaunch>();
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (expired(deadline) || state->stopping) {
+        finish_launch(launch, false);
+        return;
+      }
+      NSWorkspaceOpenConfiguration *configuration =
+          [NSWorkspaceOpenConfiguration configuration];
+      configuration.activates = host_only ? NO : YES;
+      configuration.addsToRecentItems = NO;
+      configuration.promptsUserIfNeeded = NO;
+      configuration.createsNewApplicationInstance = NO;
+      configuration.allowsRunningApplicationSubstitution = NO;
+      configuration.arguments = host_only ? @[ @"--octant-host-only" ] : @[];
+      [NSWorkspace.sharedWorkspace
+          openApplicationAtURL:url
+                 configuration:configuration
+             completionHandler:^(NSRunningApplication *application,
+                                 NSError *error) {
+               finish_launch(launch, application != nil && error == nil &&
+                                         !expired(deadline) && !state->stopping);
+             }];
+    });
+    std::unique_lock guard(launch->lock);
+    launch->changed.wait_until(guard, deadline, [&] { return launch->finished; });
+    if (expired(deadline))
+      return {"refused", "deadline-exceeded", {}};
+    return launch->accepted ? Result{"started", {}, {}} : failure;
+  }
+}
+
 Result launch_stable_host(Deadline deadline) {
   Result result;
   Identity self;
@@ -674,40 +720,67 @@ Result launch_stable_host(Deadline deadline) {
         text(field(static_cast<CFDictionaryRef>(raw_plist),
                    CFSTR("OctantHostLaunchPolicy"))) != "host-only-v1")
       return {"refused", "incompatible-host", {}};
-    // Open the validated primary bundle URL, never a command found on PATH.
-    NSURL *url = [NSURL
-        fileURLWithPath:[NSString stringWithUTF8String:installed.root.c_str()]
-            isDirectory:YES];
-    auto launch = std::make_shared<PendingLaunch>();
-    dispatch_async(dispatch_get_main_queue(), ^{
-      if (expired(deadline) || state->stopping) {
-        finish_launch(launch, false);
-        return;
-      }
-      NSWorkspaceOpenConfiguration *configuration =
-          [NSWorkspaceOpenConfiguration configuration];
-      configuration.activates = NO;
-      configuration.addsToRecentItems = NO;
-      configuration.promptsUserIfNeeded = NO;
-      configuration.createsNewApplicationInstance = NO;
-      configuration.allowsRunningApplicationSubstitution = NO;
-      configuration.arguments = @[ @"--octant-host-only" ];
-      [NSWorkspace.sharedWorkspace
-          openApplicationAtURL:url
-                 configuration:configuration
-             completionHandler:^(NSRunningApplication *application,
-                                 NSError *error) {
-               finish_launch(launch, application != nil && error == nil &&
-                                         !expired(deadline) &&
-                                         !state->stopping);
-             }];
-    });
-    std::unique_lock guard(launch->lock);
-    launch->changed.wait_until(guard, deadline,
-                               [&] { return launch->finished; });
-    if (expired(deadline))
-      return {"refused", "deadline-exceeded", {}};
-    return launch->accepted ? Result{"started", {}, {}} : result;
+    return open_validated_application(installed.root, true, deadline, result);
+  }
+}
+
+// Stable checks a Nightly bundle at an exact path against the requirement
+// written for Nightly: its own bundle identifier, signed by the running
+// Stable's Developer ID team. The installer runs this on the extracted copy
+// before it moves anything into place, and again before opening it.
+Result verify_nightly_at(const std::string &path, Deadline deadline,
+                         Identity &installed) {
+  Result result;
+  Identity self;
+  if (!self_identity(true, self, deadline, result.reason))
+    return result;
+  if (state->stopping)
+    return {"refused", "deadline-exceeded", {}};
+  char canonical[PATH_MAX]{};
+  if (path.empty() || path.front() != '/' ||
+      !realpath(path.c_str(), canonical))
+    return {"refused", "not-installed", {}};
+  OwnedCF<CFURLRef> url;
+  url.value = CFURLCreateFromFileSystemRepresentation(
+      nullptr, reinterpret_cast<const UInt8 *>(canonical), std::strlen(canonical),
+      true);
+  OwnedCF<SecStaticCodeRef> disk;
+  if (!url.value || SecStaticCodeCreateWithPath(url.value, kSecCSDefaultFlags,
+                                                &disk.value) != errSecSuccess)
+    return {"refused", "invalid-peer", {}};
+  // Several validation exits (an unsigned Mach-O has no signing flags) name
+  // no reason. For a download they all mean the bundle is not a signed
+  // Nightly, so only the deadline and busy paths keep their own reasons.
+  result.reason = "invalid-peer";
+  if (!validate_artifact(disk.value, nullptr, false, self.team, installed,
+                         deadline, result.reason))
+    return result;
+  // The bundle the signature names must be the one asked about, not a bundle
+  // a symlink or a nested path resolved to.
+  char root[PATH_MAX]{};
+  if (!realpath(installed.root.c_str(), root) ||
+      std::strcmp(root, canonical) != 0)
+    return {"refused", "invalid-peer", {}};
+  return {"verified", {}, installed.version};
+}
+
+Result open_nightly_at(const std::string &path, Deadline deadline) {
+  Identity installed;
+  Result verified = verify_nightly_at(path, deadline, installed);
+  if (verified.kind != "verified")
+    return verified;
+  return open_validated_application(installed.root, false, deadline,
+                                    {"refused", "launch-failed", {}});
+}
+
+// Replacing or trashing a bundle that is running would pull it out from under
+// the person's windows, so the installer asks first.
+Result nightly_running() {
+  @autoreleasepool {
+    NSArray<NSRunningApplication *> *running = [NSRunningApplication
+        runningApplicationsWithBundleIdentifier:@(nightly_id)];
+    return running.count == 0 ? Result{"not-running", {}, {}}
+                              : Result{"running", {}, {}};
   }
 }
 
@@ -730,7 +803,7 @@ Result close_status(Deadline deadline) {
 struct Work {
   napi_async_work work = nullptr;
   napi_deferred deferred = nullptr;
-  std::string operation;
+  std::string operation, path;
   Result result;
   Deadline deadline;
   bool executed = false;
@@ -745,6 +818,13 @@ void execute(napi_env, void *data) {
       job.result = query_status(job.deadline);
     else if (job.operation == "launchStableHost")
       job.result = launch_stable_host(job.deadline);
+    else if (job.operation == "verifyNightly") {
+      Identity installed;
+      job.result = verify_nightly_at(job.path, job.deadline, installed);
+    } else if (job.operation == "openNightly")
+      job.result = open_nightly_at(job.path, job.deadline);
+    else if (job.operation == "nightlyRunning")
+      job.result = nightly_running();
     else
       job.result = close_status(job.deadline);
   } catch (...) {
@@ -771,6 +851,8 @@ void complete(napi_env env, napi_status, void *data) {
   set(env, value, "kind", job->result.kind);
   if (!job->result.reason.empty())
     set(env, value, "reason", job->result.reason);
+  if (job->result.kind == "verified")
+    set(env, value, "version", job->result.version);
   if (job->result.kind == "ready") {
     set(env, value, "version", job->result.version);
     napi_value protocol;
@@ -785,25 +867,44 @@ void complete(napi_env env, napi_status, void *data) {
     status_pending = false;
   if (job->operation == "launchStableHost")
     launch_pending = false;
+  if (nightly_operation(job->operation))
+    nightly_pending = false;
   if (job->operation == "close")
     close_pending = false;
 }
 napi_value operation(napi_env env, napi_callback_info info) {
   void *raw = nullptr;
-  size_t argc = 0;
-  napi_get_cb_info(env, info, &argc, nullptr, nullptr, &raw);
+  size_t argc = 1;
+  napi_value args[1]{};
+  napi_get_cb_info(env, info, &argc, args, nullptr, &raw);
   const char *name = static_cast<const char *>(raw);
   auto job = std::make_unique<Work>();
   job->operation = name;
-  job->deadline = Clock::now() + operation_bound;
+  const bool nightly = nightly_operation(job->operation);
+  // Strict nested validation of a freshly extracted bundle hashes every file
+  // once, which a host status query never has to do.
+  job->deadline = Clock::now() + (nightly ? nightly_operation_bound : operation_bound);
   napi_value promise;
   napi_create_promise(env, &job->deferred, &promise);
-  bool busy = !pthread_main_np() || argc != 0;
+  const bool with_path = nightly_path_operation(job->operation);
+  bool busy = !pthread_main_np() || argc != (with_path ? 1 : 0);
+  if (!busy && with_path) {
+    napi_valuetype type = napi_undefined;
+    char buffer[PATH_MAX]{};
+    size_t length = 0;
+    busy = napi_typeof(env, args[0], &type) != napi_ok || type != napi_string ||
+           napi_get_value_string_utf8(env, args[0], buffer, sizeof(buffer),
+                                      &length) != napi_ok ||
+           length == 0 || length >= sizeof(buffer) - 1;
+    if (!busy)
+      job->path.assign(buffer, length);
+  }
   if (!busy)
     busy = (job->operation == "start" && start_pending.exchange(true)) ||
            (job->operation == "status" && status_pending.exchange(true)) ||
            (job->operation == "launchStableHost" &&
             launch_pending.exchange(true)) ||
+           (nightly && nightly_pending.exchange(true)) ||
            (job->operation == "close" && close_pending.exchange(true));
   if (busy) {
     job->result = {"refused", "native-unavailable", {}};
@@ -832,6 +933,8 @@ napi_value operation(napi_env env, napi_callback_info info) {
       status_pending = false;
     if (job->operation == "launchStableHost")
       launch_pending = false;
+    if (nightly)
+      nightly_pending = false;
     if (job->operation == "close")
       close_pending = false;
     if (job->work)
@@ -848,7 +951,9 @@ napi_value operation(napi_env env, napi_callback_info info) {
 }
 napi_value initialize(napi_env env, napi_value exports) {
   install_window_exports(env, exports);
-  for (const char *name : {"start", "status", "launchStableHost", "close"}) {
+  for (const char *name : {"start", "status", "launchStableHost",
+                           "verifyNightly", "openNightly", "nightlyRunning",
+                           "close"}) {
     napi_value function;
     napi_create_function(env, name, NAPI_AUTO_LENGTH, operation,
                          const_cast<char *>(name), &function);

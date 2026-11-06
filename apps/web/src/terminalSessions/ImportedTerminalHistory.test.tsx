@@ -17,6 +17,12 @@ describe("ImportedTerminalHistory", () => {
           provider: "claude",
           sessionId: "0b4c1f2e-1111-4111-8111-111111111111" as never,
           title: "Upload test flake",
+          workingDirectory: "/Project/packages/app",
+          continuity: {
+            kind: "text-handoff",
+            native: "unavailable",
+            reason: "account-binding-unavailable",
+          },
           updatedAt: "2026-10-30T09:00:00.000Z" as never,
           importedAt: "2026-10-31T09:00:00.000Z" as never,
           entries: [
@@ -37,6 +43,10 @@ describe("ImportedTerminalHistory", () => {
     expect(screen.getByText("Fix the flaky upload test")).toBeVisible();
     expect(screen.getByText(/Outside content, read from this Mac/)).toHaveTextContent(
       "Older messages were left out.",
+    );
+    expect(screen.getByText("Original folder: /Project/packages/app")).toBeVisible();
+    expect(screen.getByText(/Text handoff into a new session/)).toHaveTextContent(
+      "Native session, original inputs, tool activity and hidden reasoning were not transferred.",
     );
     expect(screen.queryByRole("textbox")).toBeNull();
   });

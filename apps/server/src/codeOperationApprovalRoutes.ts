@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import {
   decodeCodeOperationApprovalChallenge,
   decodeCodeOperationApprovalConfirmation,
@@ -10,6 +9,7 @@ import {
   type CodeOperationApprovalRequest,
   type WindowId,
 } from "@octant/contracts";
+import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -38,11 +38,16 @@ export function createCodeOperationApprovalRouteHandler(options: {
     const isConfirm = url.pathname === "/api/desktop/code-operation-approval-confirmations";
     const isCancel = url.pathname === "/api/desktop/code-operation-approval-cancellations";
     if (!isPrepare && !isConfirm && !isCancel) return undefined;
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore: options.windowAuthorityStore,
+      now: now(),
+    });
     if (
       options.desktopBridgeSecret === undefined ||
       !isLoopbackHostname(url.hostname) ||
-      request.headers.has("origin") ||
-      !equal(options.desktopBridgeSecret, request.headers.get("x-octant-desktop-secret") ?? "")
+      admission.status !== "admitted"
     ) {
       return failure("unauthorized", 401);
     }
@@ -63,6 +68,7 @@ export function createCodeOperationApprovalRouteHandler(options: {
     } catch (error) {
       return failure(error instanceof WindowAuthorityError ? "unauthorized" : "invalid", 401);
     }
+    if (!admitsWindow(admission, windowId)) return failure("unauthorized", 401);
     try {
       const bytes = new Uint8Array(await request.arrayBuffer());
       if (bytes.byteLength > MAX_BODY_BYTES) return failure("invalid", 413);
@@ -93,12 +99,6 @@ export function createCodeOperationApprovalRouteHandler(options: {
       return failure("invalid", 400);
     }
   };
-}
-
-function equal(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function failure(category: "invalid" | "unauthorized" | "unavailable", status: number): Response {

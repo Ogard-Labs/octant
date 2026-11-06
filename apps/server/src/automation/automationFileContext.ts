@@ -1,4 +1,8 @@
-import type { AutomationRun } from "@octant/contracts";
+import type {
+  AutomationRun,
+  AutomationFileArrivalReceipt,
+  AutomationIntegrationEventReceipt,
+} from "@octant/contracts";
 import {
   frameExternalContentForModel,
   type FramedExternalContent,
@@ -9,16 +13,59 @@ export interface AutomationFileContext {
   readonly content: FramedExternalContent;
 }
 
+export function automationCodeInputDirectory(run: AutomationRun): string {
+  return `octant-routine-inputs/${run.id}`;
+}
+
+export function automationRunFileSource(
+  run: AutomationRun,
+): AutomationFileArrivalReceipt | undefined {
+  return run.occurrence.kind === "file-arrival"
+    ? run.occurrence.source
+    : run.occurrence.kind === "manual"
+      ? run.occurrence.fileSource
+      : undefined;
+}
+
+export function automationRunEventSource(
+  run: AutomationRun,
+): AutomationIntegrationEventReceipt | undefined {
+  return run.occurrence.kind === "integration-event"
+    ? run.occurrence.source
+    : run.occurrence.kind === "manual"
+      ? run.occurrence.eventSource
+      : undefined;
+}
+
 /** Immutable bounded filename data; the person's instruction remains the fixed task. */
 export function automationFileContext(run: AutomationRun): AutomationFileContext | undefined {
-  if (
-    run.occurrence.kind !== "file-arrival" ||
-    run.definitionSnapshot.trigger.kind !== "file-arrival"
-  )
+  const eventSource = automationRunEventSource(run);
+  if (eventSource !== undefined)
+    return {
+      referenceId: `automation-event:${run.occurrenceKey}`,
+      content: frameExternalContentForModel({
+        origin: "external-content",
+        sourceLabel: "routine-integration-event",
+        body: JSON.stringify({
+          source:
+            run.definitionSnapshot.trigger.kind === "integration-event"
+              ? run.definitionSnapshot.trigger.sourceLabel
+              : "Integration event",
+          event: eventSource.event,
+          observedAt: eventSource.checkpoint.observedAt,
+        }),
+        section: "workspace-context",
+      }),
+    };
+  const source = automationRunFileSource(run);
+  if (source === undefined || run.definitionSnapshot.trigger.kind !== "file-arrival")
     return undefined;
-  const directory = run.definitionSnapshot.trigger.directory;
-  const all = run.occurrence.source.files;
-  const observedAt = run.occurrence.source.checkpoint.observedAt;
+  const directory =
+    run.definitionSnapshot.mode === "code"
+      ? automationCodeInputDirectory(run)
+      : run.definitionSnapshot.trigger.directory;
+  const all = source.files;
+  const observedAt = source.checkpoint.observedAt;
   const files: string[] = [];
   const body = () =>
     JSON.stringify({

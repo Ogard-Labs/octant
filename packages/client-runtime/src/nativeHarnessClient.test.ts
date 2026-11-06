@@ -1,3 +1,4 @@
+import { loadMobileNativeHarnessSession } from "./mobileNativeHarnessClient";
 import { describe, expect, it } from "vitest";
 import { createNativeHarnessClient, NativeHarnessClientFailure } from "./nativeHarnessClient";
 
@@ -96,6 +97,26 @@ describe("native harness client", () => {
     expect(seen).toBe(
       `POST ${baseUrl}/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020`,
     );
+  });
+
+  it("reads the restricted child request shape without exposing a parent session to either client", async () => {
+    const view = { kind: "child-requests", approvals: [], questions: [] };
+    const subject = client(async () => Response.json({ view }));
+    expect(await subject.childRequests("thread")).toEqual(view);
+    expect(await subject.session("thread")).toBeNull();
+    expect(
+      await loadMobileNativeHarnessSession({
+        threadId: "thread",
+        transport: {
+          hostId: "00000000-0000-4000-8000-000000000099",
+          authenticatedFetch: async () => Response.json({ view }),
+        },
+      }),
+    ).toEqual(view);
+    const contaminated = client(async () =>
+      Response.json({ view: { ...view, tasks: [{ title: "private parent data" }] } }),
+    );
+    expect(await contaminated.childRequests("thread")).toEqual(view);
   });
 
   it("treats a thread without a session as null, not a decode failure", async () => {

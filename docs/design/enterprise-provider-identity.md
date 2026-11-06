@@ -10,8 +10,8 @@ provider SDK seam, and who may change credentials
 [Providers and model endpoints](model-endpoints.md) owns the Settings rows and
 Add endpoint flow.
 
-Status: authorized post-preview scope, and its decisions accepted by the
-maintainer, on 2026-10-26. Slice 1 is built: 1a (the seam and its
+Status: in scope for the first preview (maintainer decision, 2026-11-06), and
+its decisions accepted by the maintainer on 2026-10-26. Slice 1 is built: 1a (the seam and its
 conformance), 1b (the broker's `directory-oidc` dialect), and 1c (the Azure AI
 Foundry driver, Settings, and user guide). An Azure AI Foundry endpoint can
 sign in with the organization's Microsoft Entra ID account against fakes;

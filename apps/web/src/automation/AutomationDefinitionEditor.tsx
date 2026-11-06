@@ -242,7 +242,10 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   function changeMode(nextMode: AutomationMode) {
     if (nextMode === mode) return;
     setMode(nextMode);
-    if (nextMode !== "work" && trigger.kind === "file-arrival")
+    if (
+      nextMode === "chat" &&
+      (trigger.kind === "file-arrival" || trigger.kind === "integration-event")
+    )
       setTrigger((previous) => ({ ...previous, kind: "once" }));
     setProjectId("");
     setExecutionProfileId("");
@@ -467,7 +470,10 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       </div>
 
       <RoutineScheduleFields
-        allowFileArrivals={mode === "work"}
+        fileMode={mode === "code" ? "code" : "work"}
+        allowIntegrationEvents={mode === "work" || mode === "code"}
+        eventSources={catalog.eventSources ?? []}
+        allowFileArrivals={mode === "work" || mode === "code"}
         missedRunPolicy={missedRunPolicy}
         onMissedRunPolicyChange={setMissedRunPolicy}
         onTriggerChange={setTrigger}

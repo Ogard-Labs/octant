@@ -167,10 +167,19 @@ describe("signAndNotarizeDesktop", () => {
     expect(targets).toContain(
       "/repo/out/Octant Nightly.app/Contents/Resources/app.asar.unpacked/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
     );
+    // Nightly carries the worker host tree and runtime as Octant does.
     expect(targets).toContain(
-      "/repo/out/Octant Nightly.app/Contents/Resources/app.asar.unpacked/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
+      "/repo/out/Octant Nightly.app/Contents/Resources/app/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
     );
-    expect(targets.some((target) => target?.includes("/Resources/app/"))).toBe(false);
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Runtime.app",
+    );
+    expect(
+      targets.indexOf("/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Runtime.app"),
+    ).toBeLessThan(targets.indexOf("/repo/out/Octant Nightly.app"));
+    expect(
+      targets.some((target) => target?.includes("/Resources/app.asar.unpacked/apps/server/")),
+    ).toBe(false);
   });
 
   it("signs every nested payload before the bundle that contains them", async () => {
@@ -187,11 +196,9 @@ describe("signAndNotarizeDesktop", () => {
       signed.indexOf("/repo/out/Octant.app/Contents/Frameworks/Octant Runtime.app"),
     ).toBeLessThan(signed.length - 1);
     for (const nested of SIGNING_ORDER) {
-      expect(
-        signed.indexOf(
-          `/repo/out/Octant.app/${packagedNativePath(nested, desktopIdentity("stable"))}`,
-        ),
-      ).toBeLessThan(signed.length - 1);
+      expect(signed.indexOf(`/repo/out/Octant.app/${packagedNativePath(nested)}`)).toBeLessThan(
+        signed.length - 1,
+      );
     }
   });
 

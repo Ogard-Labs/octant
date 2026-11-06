@@ -6,7 +6,7 @@ import {
   type WorkMutationRequest,
 } from "@octant/contracts/work-artifacts";
 import { EventActor } from "@octant/contracts/events";
-import { decodeProjectId } from "@octant/contracts/projects";
+import { decodeProjectId, decodeProjectWorkingFolderId } from "@octant/contracts";
 import { decodePreviewHostId } from "@octant/contracts/previews";
 import { WorkResolutionService, type WorkRootBinding } from "./workResolutionService";
 import { WorkArtifactProjection } from "./workArtifactProjection";
@@ -92,6 +92,77 @@ describe("WorkMutationService", () => {
     expect(reply.outcome.version.sequence).toBe(1);
   });
 
+  it("records the folder identity and refuses a re-added folder with the same path", async () => {
+    const filesystem = workFilesystemFixture("/approved/notes");
+    const { service, projection } = createService(filesystem);
+    const original = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const replacement = decodeProjectWorkingFolderId(`folder_${"b".repeat(64)}`);
+    const context = {
+      ...fullContext,
+      binding: {
+        ...availableBinding,
+        canonicalRoot: "/approved/notes",
+        knownCanonicalRoot: "/approved/notes",
+      },
+      workingFolderId: original,
+    };
+    const created = await service.mutate(
+      {
+        kind: "create-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        format: "markdown",
+        displayName: "brief.md",
+        content: "# Original",
+      },
+      context,
+    );
+    if (created.outcome.kind !== "created") throw new Error("Expected an artifact");
+    expect(created.outcome.artifact.workingFolderId).toBe(original);
+    expect(projection.lookup(created.outcome.artifact.artifactId)?.workingFolderId).toBe(original);
+    const reply = await service.mutate(
+      {
+        kind: "revise-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId: created.outcome.artifact.artifactId,
+        expectedArtifactVersion: 1,
+        content: "# Replacement",
+      },
+      { ...context, workingFolderId: replacement },
+    );
+    expect(reply.outcome.kind).toBe("unauthorized");
+    expect(new TextDecoder().decode(filesystem.readBytes("/approved/notes/brief.md"))).toBe(
+      "# Original",
+    );
+  });
+
+  it("refuses a folder revoked while its path is being resolved before creating bytes", async () => {
+    const filesystem = workFilesystemFixture();
+    let current = true;
+    const { service } = createService({
+      ...filesystem,
+      realpath: async (path) => {
+        const root = await filesystem.realpath(path);
+        current = false;
+        return root;
+      },
+    });
+    const result = await service.mutate(
+      {
+        kind: "create-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        format: "markdown",
+        displayName: "brief.md",
+        content: "# Kept private",
+      },
+      { ...fullContext, isCurrent: () => current },
+    );
+    expect(result.outcome.kind).toBe("unauthorized");
+    expect(filesystem.readBytes("/work/brief.md")).toBeUndefined();
+  });
+
   it("creates an artifact in the folder the host names, and in the root when none is named", async () => {
     const filesystem = workFilesystemFixture();
     const { service } = createService(filesystem);
@@ -119,17 +190,19 @@ describe("WorkMutationService", () => {
 
   it("keeps revising, renaming and exporting an artifact in the folder it was created in", async () => {
     const filesystem = workFilesystemFixture();
-    const { service } = createService(filesystem);
+    const { service, projection } = createService(filesystem);
+    const workingFolderId = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const context = { ...fullContext, workingFolderId };
     const created = await service.mutate(
       {
         kind: "create-artifact",
         requestId: ids.request,
         projectId: ids.project,
-        format: "markdown",
-        displayName: "brief.md",
+        format: "docx",
+        displayName: "brief.docx",
         content: "# Hello",
       } satisfies WorkMutationRequest,
-      { ...fullContext, directory: "research/brief" },
+      { ...context, directory: "research/brief" },
     );
     if (created.outcome.kind !== "created") throw new Error("create failed");
     const artifactId = created.outcome.artifact.artifactId;
@@ -143,13 +216,11 @@ describe("WorkMutationService", () => {
         content: "# Updated",
         expectedArtifactVersion: 1,
       } satisfies WorkMutationRequest,
-      fullContext,
+      context,
     );
     expect(revised.outcome.kind).toBe("revised");
-    expect(
-      new TextDecoder().decode(filesystem.readBytes("/work/research/brief/brief.md")),
-    ).toContain("Updated");
-    expect(filesystem.readBytes("/work/brief.md")).toBeUndefined();
+    expect(filesystem.readBytes("/work/research/brief/brief.docx")).toBeDefined();
+    expect(filesystem.readBytes("/work/brief.docx")).toBeUndefined();
 
     const renamed = await service.mutate(
       {
@@ -157,14 +228,44 @@ describe("WorkMutationService", () => {
         requestId: ids.request,
         projectId: ids.project,
         artifactId,
-        displayName: "final.md",
+        displayName: "final.docx",
         expectedArtifactVersion: 2,
       } satisfies WorkMutationRequest,
-      fullContext,
+      context,
     );
     expect(renamed.outcome.kind).toBe("revised");
-    expect(filesystem.readBytes("/work/research/brief/final.md")).toBeDefined();
-    expect(filesystem.readBytes("/work/final.md")).toBeUndefined();
+    expect(filesystem.readBytes("/work/research/brief/final.docx")).toBeDefined();
+    expect(filesystem.readBytes("/work/final.docx")).toBeUndefined();
+    const transformed = await service.mutate(
+      {
+        kind: "transform-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId,
+        targetFormat: "markdown",
+        expectedArtifactVersion: 3,
+      },
+      context,
+    );
+    expect(transformed.outcome.kind).toBe("revised");
+    if (transformed.outcome.kind !== "revised") throw new Error("Expected converted artifact");
+    expect(transformed.outcome.artifact.workingFolderId).toBe(workingFolderId);
+    expect(
+      new TextDecoder().decode(filesystem.readBytes("/work/research/brief/final.md")),
+    ).toContain("Updated");
+    const exported = await service.mutate(
+      {
+        kind: "export-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId,
+        exportFormat: "markdown",
+        expectedArtifactVersion: 4,
+      },
+      context,
+    );
+    expect(exported.outcome.kind).toBe("exported");
+    expect(projection.lookup(artifactId)?.workingFolderId).toBe(workingFolderId);
   });
 
   it("uses production-registered format adapters for document creation", async () => {

@@ -151,9 +151,12 @@ describe("secret guard refusals for host file tools", () => {
   it("refuses a search above a protected file and allows one beside it", () => {
     const home = fakeHome();
     const options = { platform: "darwin" as const, homeDirectory: home };
-    expect(secretGuardSearchRefusal(join(home, ".aws"), options)).toContain(
-      "This search would read it",
-    );
+    const mixed = secretGuardSearchRefusal(join(home, ".aws"), options);
+    expect(mixed).toContain("This search would read it");
+    expect(mixed).toContain(JSON.stringify(join(home, ".aws")));
+    expect(mixed).toContain("no search results were returned");
+    expect(mixed).toContain("ordinary subfolder");
+    expect(mixed).toContain("Cloud command-line credentials");
     expect(secretGuardSearchRefusal(home, options)).toContain("Refused");
     expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
   });

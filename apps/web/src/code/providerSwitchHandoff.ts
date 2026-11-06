@@ -19,6 +19,7 @@ export function handoffSummary(
         messages: event.messages,
         omissions: event.omissions,
         externalContentIngested: event.externalContentIngested,
+        ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
       };
     case "fork":
@@ -28,6 +29,7 @@ export function handoffSummary(
         messages: event.messages,
         omissions: event.omissions,
         externalContentIngested: event.externalContentIngested,
+        ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
       };
     case "fork-native-session":
       return { reason: event.reason, forkedFrom: event.forkedFrom };
@@ -178,6 +180,7 @@ const MERGE_BACK_REFUSALS: Record<
 
 /** What the person sees on the fork after asking to merge it back. */
 export function forkMergeBackOutcomeMessage(outcome: CodeForkMergeBackOutcome): string {
+  if (outcome.status === "refused" && outcome.message !== undefined) return outcome.message;
   if (outcome.status === "refused") return MERGE_BACK_REFUSALS[outcome.reason];
   return `Merged ${count(outcome.messages, "message", "messages")} back into the thread this was forked from. Its next message carries them; nothing runs until then.`;
 }

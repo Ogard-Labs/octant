@@ -1,3 +1,8 @@
+import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
+import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
+import { ConversationInputs } from "../continuity/ConversationInputs";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -82,6 +87,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -304,6 +310,8 @@ function withNewestWorkTurns(
  * the failure's words; the notice is the provider-reported fact about why.
  */
 function WorkTurnHeader(props: {
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
@@ -329,6 +337,16 @@ function WorkTurnHeader(props: {
         {...(workedFor === undefined ? {} : { workedFor })}
         {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
       />
+      {props.turn.inputReceipt === undefined ? null : (
+        <ConversationInputs
+          mode="work"
+          threadId={String(props.turn.threadId)}
+          admissionId={String(props.turn.requestId)}
+          receipt={props.turn.inputReceipt}
+          serverUrl={props.serverUrl}
+          windowCapability={props.windowCapability}
+        />
+      )}
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -734,6 +752,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const serverWorkProject = serverCodeProjectFor(useServerCodeProjects().workProjects, projectId);
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
+  const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -780,6 +799,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   );
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const [toolCatalogHandoffRequired, setToolCatalogHandoffRequired] = useState(false);
   const [creating, setCreating] = useState(false);
   const [providerChanging, setProviderChanging] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -814,6 +834,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (thread === undefined || accessChanging || access === thread.access) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const result = await props.threadClient.execute({
         kind: "change-work-thread-access",
@@ -844,6 +865,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (thread === undefined || deliveryChanging) return;
     setDeliveryChanging(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const result = await props.threadClient.execute({
         kind: "change-work-thread-document-delivery",
@@ -1038,7 +1060,29 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     String(runningTurn.threadId) === String(props.threadId)
       ? runningTurn
       : undefined;
+  const forceStop = useDelayedForceStop(
+    stoppableTurn === undefined ? undefined : String(stoppableTurn.requestId),
+    (props.providerGroups ?? []).find(
+      (group) => String(group.instance.id) === String(stoppableTurn?.authority.providerInstanceId),
+    )?.forceStop === "supported",
+  );
+  const onForceStop = async () => {
+    if (props.turnClient === undefined || stoppableTurn === undefined) return;
+    try {
+      await props.turnClient.cancelFirstTurn({
+        kind: "force-stop-work-turn",
+        requestId: stoppableTurn.requestId,
+        threadId: stoppableTurn.threadId,
+        turnId: stoppableTurn.turnId,
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "The owned attempt could not be force-stopped.",
+      );
+    }
+  };
   const onStop = useCallback(async () => {
+    forceStop.requestStop();
     const turnClient = props.turnClient;
     const turn = stoppableTurn;
     if (turnClient === undefined || turn === undefined) return;
@@ -1058,7 +1102,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           : "The Work turn could not be stopped. Try again.",
       );
     }
-  }, [props.threadId, props.turnClient, stoppableTurn]);
+  }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
     async (
       request: WorkRequest,
@@ -1089,6 +1133,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   useEffect(() => {
     setPendingRequests([]);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     setEarlierState("idle");
     return () => earlierAbort.current?.abort();
@@ -1562,6 +1607,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
       setProviderChanging(true);
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       setStatus(undefined);
       try {
         const result = await props.threadClient.execute({
@@ -1681,7 +1727,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   }, [props, thread]);
 
   const sendWorkTurn = useCallback(
-    async (enqueue = false): Promise<boolean> => {
+    async (enqueue = false, toolCatalogHandoff = false): Promise<boolean> => {
       if (
         thread !== undefined &&
         thread.bindingRevisionId === undefined &&
@@ -1726,6 +1772,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       };
       setCreating(true);
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       setStatus(undefined);
       try {
         if (String(props.threadId) !== sendingThreadId) return false;
@@ -1751,6 +1798,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           const result = await messageQueue.enqueue(
             {
               mode: "work",
+              ...(continuation.policy === "text-only"
+                ? { contextInputPolicy: continuation.policy }
+                : {}),
               prompt: promptText,
               attachmentIds,
               threadMentionIds,
@@ -1759,6 +1809,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               extensionSelections,
             },
             () => {
+              continuation.reset();
               if (currentThreadKeyRef.current !== sendingThreadId) return;
               images.consume(staged);
               if (composerDraft.revisionFor(sendingThreadId) === draftRevision) {
@@ -1775,6 +1826,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         }
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
+          ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+          ...(continuation.policy === "text-only"
+            ? { contextInputPolicy: continuation.policy }
+            : {}),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
@@ -1785,6 +1840,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             projectId,
             bindingRevisionId: thread.bindingRevisionId,
             workingDirectory: thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
             confinementPosture: "project-root-confined",
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
@@ -1800,6 +1858,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           return false;
         }
         {
+          continuation.reset();
           images.consume(staged);
           threadMentions.clear();
           fileMentions.clear();
@@ -1819,6 +1878,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         return true;
       } catch (error) {
         await discardUploadedAttachments();
+        setToolCatalogHandoffRequired(
+          error instanceof WorkTurnClientFailure && error.category === "tools-changed",
+        );
         setErrorMessage(
           error instanceof WorkTurnClientFailure
             ? error.message
@@ -1830,6 +1892,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
     },
     [
+      continuation.policy,
       composerDraft,
       fileMentions,
       images,
@@ -1865,6 +1928,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (props.mutationClient === undefined) return;
     setCreating(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     try {
       const reply = await props.mutationClient.mutate({
@@ -1912,6 +1976,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     setCompleting(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     try {
       const result = await props.threadClient.execute({
@@ -1935,6 +2000,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [completing, props.threadClient, thread]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope: { mode: "work", threadId: props.threadId },
+    draft: prompt,
+    onDraftChange: (text, caret) => rememberDraft(text, caret),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.hostId,
+    refused: serverWorkProject !== undefined || creating || completionLocked,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -1980,16 +2059,26 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
   );
   const projectLabel = project?.name ?? serverWorkProject?.name;
+  const chosenFolder =
+    project?.type === "work"
+      ? project.workingFolders?.find((folder) => folder.id === thread?.workingFolderId)
+      : undefined;
+  const folderUnavailable = thread?.workingFolderId !== undefined && chosenFolder === undefined;
   const folder = thread?.workingDirectory;
   // A server thread's folder is named where it is: `alias:folder` on its server.
   const root =
     serverWorkProject !== undefined
       ? serverWorkProject.location
       : project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
-        ? project.binding.canonicalRoot
+        ? chosenFolder?.kind === "extra"
+          ? chosenFolder.label
+          : folderUnavailable
+            ? undefined
+            : project.binding.canonicalRoot
         : undefined;
-  const path =
-    root === undefined
+  const path = folderUnavailable
+    ? "Working folder unavailable"
+    : root === undefined
       ? folder
       : folder === undefined || folder === "."
         ? root
@@ -2170,6 +2259,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       {row.head === undefined ? null : (
                         <>
                           <WorkTurnHeader
+                            serverUrl={props.serverUrl}
+                            windowCapability={props.windowCapability}
                             copyValue={row.entry.text}
                             onRestorePrompt={composerDraft.setDraft}
                             onCancelResume={cancelUsageResume}
@@ -2210,6 +2301,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 return (
                   <div className="turn-agent">
                     <WorkTurnHeader
+                      serverUrl={props.serverUrl}
+                      windowCapability={props.windowCapability}
                       onCancelResume={cancelUsageResume}
                       onRestorePrompt={composerDraft.setDraft}
                       onScheduleResume={scheduleUsageResume}
@@ -2475,6 +2568,26 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
+        {folderDrops.notice}
+        {thread === undefined ? null : (
+          <ContinueElsewhere
+            mode="work"
+            threadId={String(thread.id)}
+            groups={
+              turns.length > 0
+                ? startedConversationPickerGroups(props.providerGroups ?? [], {
+                    providerInstanceId: thread.providerInstanceId,
+                    modelId: thread.modelId,
+                  })
+                : (props.providerGroups ?? [])
+            }
+            selected={thread}
+            policy={continuation.policy}
+            onPolicyChange={continuation.change}
+            onProviderChange={changeProvider}
+            disabled={providerChanging || creating || completionLocked || turnRunning}
+          />
+        )}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2490,9 +2603,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               )}
               {path === undefined ? null : (
                 <span className="work-folder-bar__folder" title={path}>
-                  {folder === undefined || folder === "."
-                    ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
-                    : folder}
+                  {folderUnavailable
+                    ? "Working folder unavailable"
+                    : folder === undefined || folder === "."
+                      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+                      : folder}
                 </span>
               )}
             </div>
@@ -2583,6 +2698,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onKeyUp={(event) => {
                 rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                  event.preventDefault();
               }}
               onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
                 if ((creating && !preparingQueue.current) || completionLocked) return;
@@ -2796,6 +2916,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ? { disabledReason: "Stopping is available once the turn has started." }
                   : {}),
                 onStop: () => void onStop(),
+                ...(forceStop.offered
+                  ? { forceStop: { onForceStop: () => void onForceStop() } }
+                  : {}),
               },
             },
           }}
@@ -2807,6 +2930,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   {errorMessage}
                 </span>
               )}
+              {toolCatalogHandoffRequired ? (
+                <ToolCatalogContinuation
+                  disabled={!canSubmit || queueFollowUp || creating}
+                  onContinue={() => void sendWorkTurn(false, true)}
+                />
+              ) : null}
               {handoffNotice === undefined || completionLocked || turnRunning ? null : (
                 <span className="composer-status__hint" role="status">
                   {handoffNotice}

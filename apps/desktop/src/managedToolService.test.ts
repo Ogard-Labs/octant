@@ -92,6 +92,11 @@ describe("managed tool service", () => {
       dataDirectory: directory,
       execPath: process.execPath,
       smokeTimeoutMs: 250,
+      confineDeviceTool: (input) => ({
+        command: input.runtime,
+        args: [input.entrypoint, ...input.args],
+        env: input.environment,
+      }),
       ...(fetchBytes === undefined ? {} : { fetchBytes }),
     });
   }
@@ -205,6 +210,41 @@ describe("managed tool service", () => {
       if (previous === undefined) delete process.env.OCTANT_TEST_PROVIDER_API_KEY;
       else process.env.OCTANT_TEST_PROVIDER_API_KEY = previous;
     }
+  });
+
+  it("prepares the selected Android SDK before confinement and refuses an unsafe installed stream", async () => {
+    const prepare = vi.fn<
+      NonNullable<Parameters<typeof createManagedToolService>[0]["confineDeviceTool"]>
+    >(() => undefined);
+    const service = createManagedToolService({
+      bundledToolsDirectory: bundledDirectory,
+      dataDirectory: directory,
+      execPath: process.execPath,
+      confineDeviceTool: prepare,
+    });
+    let stateDirectory: string | undefined;
+    try {
+      expect(
+        await service.launchSpec("serve-avd", ["emulator-5554"], "/selected/android-sdk"),
+      ).toBeUndefined();
+      expect(prepare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: "serve-avd",
+          environment: expect.objectContaining({
+            ANDROID_HOME: "/selected/android-sdk",
+            ANDROID_SDK_ROOT: "/selected/android-sdk",
+          }),
+        }),
+      );
+      stateDirectory = prepare.mock.calls[0]?.[0].stateDirectory;
+      expect(existsSync(stateDirectory ?? "")).toBe(true);
+      expect(
+        (await service.status()).tools.find((tool) => tool.tool === "serve-avd")?.message,
+      ).toMatch(/Cannot start.*safely/);
+    } finally {
+      await service.close();
+    }
+    expect(existsSync(stateDirectory ?? "")).toBe(false);
   });
 
   it("remembers the update preference across restarts", async () => {

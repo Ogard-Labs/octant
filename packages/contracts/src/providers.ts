@@ -209,7 +209,7 @@ const MAX_PROVIDER_JSON_ENTRIES = 256;
 const MAX_PROVIDER_JSON_KEY_LENGTH = 128;
 const MAX_PROVIDER_JSON_STRING_LENGTH = 4_096;
 const MAX_PROVIDER_ATTACHMENT_BYTES = 26_214_400;
-const MAX_PROVIDER_ATTACHMENTS = 16;
+export const MAX_PROVIDER_ATTACHMENTS = 16;
 export const MAX_PROVIDER_CONTEXT_BLOCKS = 256;
 // The native harness offers twelve tools beside research and extension tools;
 // the wire protocols this bound guards accept far more than that.
@@ -2437,6 +2437,15 @@ export const ProviderResumeCursor = Schema.Struct({
    * means unknown, and every rule is kept.
    */
   tools: Schema.optional(Schema.Array(BoundedProviderToolName).pipe(Schema.maxItems(256))),
+  /** Fingerprints of the immutable starting definitions; schemas and secrets are never retained here. */
+  toolDefinitions: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: BoundedProviderToolName,
+        digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type ProviderResumeCursor = typeof ProviderResumeCursor.Type;
 
@@ -2470,6 +2479,7 @@ export const ProviderUsageLimit = Schema.Struct({
 export type ProviderUsageLimit = typeof ProviderUsageLimit.Type;
 
 export const ProviderFailure = Schema.Struct({
+  toolCatalogHandoffRequired: Schema.optional(Schema.Literal(true)),
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
   reason: Schema.optional(ProviderRefusalReason),

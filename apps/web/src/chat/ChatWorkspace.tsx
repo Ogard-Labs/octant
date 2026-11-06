@@ -1,3 +1,6 @@
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
+import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
@@ -195,6 +198,11 @@ const IDLE_TOOL_APPROVAL_POLL_MS = 5_000;
 
 export function ChatWorkspace(props: ChatWorkspaceProps) {
   const view = props.controller.activeView;
+  const continuation = useContinuationInputPolicy(
+    "chat",
+    String(view?.thread.id ?? ""),
+    props.serverUrl,
+  );
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<PendingAttachment>>(
     [],
   );
@@ -859,7 +867,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }
   }
 
-  const submitTurn = async (draft: string): Promise<boolean> => {
+  const submitTurn = async (draft: string, toolCatalogHandoff = false): Promise<boolean> => {
     if (props.controller.draftSideChatReturnsInvalid) {
       setSendNotice(
         "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
@@ -919,9 +927,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ];
         if (previous !== undefined && previous.threadId === String(thread.id))
           args[6] = previous.version;
-        if (sendingDraftRevision !== undefined)
-          args[7] = { composerDraft: "consume", draftRevision: sendingDraftRevision };
+        if (sendingDraftRevision !== undefined || continuation.policy === "text-only")
+          args[7] = {
+            composerDraft: "consume",
+            ...(continuation.policy === "text-only"
+              ? { contextInputPolicy: continuation.policy }
+              : {}),
+            ...(sendingDraftRevision === undefined ? {} : { draftRevision: sendingDraftRevision }),
+          };
         if (sideChatReturns.length > 0) args[8] = sideChatReturns;
+        if (toolCatalogHandoff) args[9] = true;
         return { value: await props.controller.sendTurn(...args) };
       });
     } catch (error) {
@@ -937,6 +952,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       throw error;
     }
     if (sent) {
+      continuation.reset();
       consumeContext(context);
     } else {
       recoverClaimedAttachments(
@@ -962,6 +978,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {props.controller.errorMessage}
             </OctantAlert>
           )}
+          {props.controller.toolCatalogHandoffRequired === true ? (
+            <ToolCatalogContinuation
+              disabled={connectionLost || props.controller.pendingDraft.trim().length === 0}
+              onContinue={() => void submitTurn(props.controller.pendingDraft, true)}
+            />
+          ) : null}
           <div className="chat-workspace__conversation">
             <header className="chat-workspace__header">
               <h1 className="sr-only">{view.thread.title}</h1>
@@ -1147,6 +1169,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               />
             )}
             <ChatTranscript
+              serverUrl={props.serverUrl}
+              windowCapability={props.windowCapability}
               {...(props.onReturnSideChatReply === undefined
                 ? {}
                 : { onReturnSideChatReply: props.onReturnSideChatReply })}
@@ -1396,6 +1420,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             invalid={props.controller.draftSideChatReturnsInvalid === true}
             onClear={() => props.controller.setPendingDraft("")}
           />
+          <ContinueElsewhere
+            mode="chat"
+            threadId={String(view.thread.id)}
+            groups={props.providerGroups ?? []}
+            selected={view.thread}
+            policy={continuation.policy}
+            onPolicyChange={continuation.change}
+            onProviderChange={(selection) => selectProviderModel(selection)}
+            disabled={isSending || branchPending}
+          />
           <ChatComposer
             key={String(thread.id)}
             attachment={attachmentCapability}
@@ -1623,6 +1657,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 const result = await messageQueue.enqueue(
                   {
                     mode: "chat",
+                    ...(continuation.policy === "text-only"
+                      ? { contextInputPolicy: continuation.policy }
+                      : {}),
                     prompt: formatOutgoingMessageWithQuotes({ draft, quotes: context.quotes }),
                     attachmentIds: context.attachmentIds,
                     previewSelections: context.previewSelections,
@@ -1635,6 +1672,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   },
                   () => {
                     releaseClaim();
+                    continuation.reset();
                     if (!mountedRef.current || activeThreadIdRef.current !== origin) return;
                     consumeContext({ ...context, threadMentionIds });
                     if (

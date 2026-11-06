@@ -177,6 +177,202 @@ async function signIn(options: {
 }
 
 describe("signing in to a hosted MCP server", () => {
+  it.each([
+    {
+      name: "Atlassian",
+      transport: "https://mcp.atlassian.com/v2/mcp",
+      resource: "https://mcp.atlassian.com/v2/mcp",
+      issuer: "https://auth.atlassian.com/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3",
+      authorization: "https://auth.atlassian.com/authorize",
+      token: "https://auth.atlassian.com/oauth/token",
+      registration: "https://auth.atlassian.com/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3/dcr/register",
+    },
+    {
+      name: "Airtable",
+      transport: "https://mcp.airtable.com/mcp",
+      resource: "https://mcp.airtable.com",
+      issuer: "https://airtable.com/oauth2/v1",
+      authorization: "https://airtable.com/oauth2/v1/authorize",
+      token: "https://airtable.com/oauth2/v1/token",
+      registration: "https://airtable.com/oauth2/v1/register",
+    },
+  ])("uses $name discovery and public registration through the existing broker", async (vendor) => {
+    const { oauth, begun } = fakeOauth();
+    const metadataUrl = `${new URL(vendor.transport).origin}/.well-known/oauth-protected-resource`;
+    const issuerUrl = new URL(vendor.issuer);
+    const calls: string[] = [];
+    let wrongResource = false;
+    const fetchImpl = Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === vendor.transport)
+          return new Response(null, {
+            status: 401,
+            headers: { "www-authenticate": `Bearer resource_metadata="${metadataUrl}"` },
+          });
+        if (url === metadataUrl)
+          return json({
+            resource: wrongResource ? "https://other.example" : vendor.resource,
+            authorization_servers: [vendor.issuer],
+            scopes_supported: ["data.records:read"],
+          });
+        if (
+          url === `${issuerUrl.origin}/.well-known/oauth-authorization-server${issuerUrl.pathname}`
+        )
+          return json({
+            issuer: vendor.issuer,
+            authorization_endpoint: vendor.authorization,
+            token_endpoint: vendor.token,
+            registration_endpoint: vendor.registration,
+            code_challenge_methods_supported: ["S256"],
+            token_endpoint_auth_methods_supported: ["none", "client_secret_basic"],
+          });
+        if (url === vendor.registration) {
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            token_endpoint_auth_method: "none",
+            redirect_uris: ["http://127.0.0.1:43125/oauth/callback"],
+          });
+          return json({ client_id: "owned-public-client" }, 201);
+        }
+        throw new Error(`Unexpected vendor request ${url}`);
+      },
+      { preconnect: () => undefined },
+    );
+    const { service } = await signIn({ fetchImpl, oauth, serverUrl: vendor.transport });
+    expect(await service.begin(EXTENSION, COMPONENT, "remote-device")).toMatchObject({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    expect(calls).toEqual([]);
+    expect(await service.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "awaiting-consent",
+    });
+    expect(begun[0]).toMatchObject({
+      flow: "authorization-code-pkce",
+      resource: vendor.resource,
+      tokenEndpoint: vendor.token,
+      authorizationEndpoint: vendor.authorization,
+    });
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    await service.signOut(EXTENSION, COMPONENT, "local-window");
+    wrongResource = true;
+    expect(await service.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "refused",
+    });
+    expect(begun).toHaveLength(1);
+  });
+
+  it("keeps HubSpot confidential registration separate from account consent and reuses it after restart", async () => {
+    const resource = "https://mcp.hubspot.com";
+    const tokenEndpoint = `${resource}/oauth/v3/token`;
+    const point = vi.fn<LinkedSecretPointers["point"]>(async () => ({ status: "pointed" }));
+    const { oauth, begun } = fakeOauth();
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === `${resource}/`)
+        return new Response(null, {
+          status: 401,
+          headers: {
+            "www-authenticate": `Bearer resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+          },
+        });
+      if (url === `${resource}/.well-known/oauth-protected-resource`)
+        return json({
+          resource,
+          authorization_servers: [resource],
+          scopes_supported: [],
+        });
+      if (url === `${resource}/.well-known/oauth-authorization-server`)
+        return json({
+          issuer: resource,
+          authorization_endpoint: `${resource}/oauth/authorize/user`,
+          token_endpoint: tokenEndpoint,
+          scopes_supported: [],
+          response_types_supported: ["code"],
+          grant_types_supported: ["authorization_code", "refresh_token"],
+          token_endpoint_auth_methods_supported: ["client_secret_post"],
+          code_challenge_methods_supported: ["S256"],
+        });
+      throw new Error(`Unexpected discovery request ${url}`);
+    });
+    const { service, statePath } = await signIn({
+      fetchImpl: Object.assign(fetchImpl, { preconnect: () => undefined }),
+      oauth,
+      serverUrl: `${resource}/`,
+      linkedSecrets: { point, forget: async () => undefined },
+    });
+    expect(await service.prepareClient(EXTENSION, COMPONENT, "remote-device")).toMatchObject({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    const prepared = await service.prepareClient(EXTENSION, COMPONENT, "local-window");
+    expect(prepared).toMatchObject({
+      kind: "client-setup",
+      resource,
+      issuer: resource,
+      tokenEndpoint,
+      authenticationMethods: ["client_secret_post"],
+    });
+    if (prepared.kind !== "client-setup") throw new Error("HubSpot setup unavailable");
+    const setup = {
+      kind: "registered",
+      clientId: "owned-hubspot-connector",
+      authentication: "client_secret_post",
+      binding: {
+        resource: prepared.resource,
+        issuer: prepared.issuer,
+        tokenEndpoint,
+        callback: prepared.callback,
+      },
+      secret: { store: "onepassword", reference: "op://Private/HubSpot/client-secret" },
+    } as const;
+    expect(
+      await service.saveClient(
+        EXTENSION,
+        COMPONENT,
+        { ...setup, authentication: "none" },
+        "local-window",
+      ),
+    ).toMatchObject({ kind: "refused" });
+    expect(await service.saveClient(EXTENSION, COMPONENT, setup, "local-window")).toEqual({
+      kind: "client-configured",
+    });
+    expect(begun).toHaveLength(0);
+    expect(await service.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "awaiting-consent",
+    });
+    expect(begun[0]).toMatchObject({
+      flow: "authorization-code-pkce",
+      resource,
+      scopes: [],
+      tokenEndpoint,
+      clientAuthentication: { method: "client_secret_post", tokenEndpoint },
+    });
+    await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    await service.signOut(EXTENSION, COMPONENT, "local-window");
+    const restarted = new McpServerSignIn({
+      statePath,
+      oauth,
+      fetch: Object.assign(fetchImpl, { preconnect: () => undefined }),
+      serverUrl: async () => `${resource}/`,
+      access: async () => ({ kind: "unavailable" }),
+      actorId: "66000000-0000-4000-8000-000000000001",
+      pickPort: async () => {
+        throw new Error("must retain callback");
+      },
+    });
+    expect(await restarted.prepareClient(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "client-setup",
+      callback: prepared.callback,
+    });
+    expect(await restarted.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "awaiting-consent",
+    });
+    expect(point).toHaveBeenCalledTimes(1);
+    expect(await readFile(statePath, "utf8")).not.toContain(setup.secret.reference);
+  });
+
   it("does not create a hidden completed-cleanup owner during prepared package removal", async () => {
     const { oauth } = fakeOauth();
     const { service } = await signIn({ fetchImpl: issuerFetch().fetchImpl, oauth });

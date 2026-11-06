@@ -107,7 +107,8 @@
     "./mobile-code-operations-client": "./src/mobileCodeOperationsClient.ts",
     "./mobile-push-token-client": "./src/mobilePushTokenClient.ts",
     "./zen-client": "./src/zenClient.ts",
-    "./command-credentials-client": "./src/commandCredentialsClient.ts"
+    "./command-credentials-client": "./src/commandCredentialsClient.ts",
+    "./conversation-input-client": "./src/conversationInputClient.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

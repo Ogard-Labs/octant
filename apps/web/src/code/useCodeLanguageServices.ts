@@ -58,7 +58,21 @@ export type CodeLanguageReferencesOutcome =
   | Extract<CodeLanguageReadResult, { readonly status: "references" | "unsupported" }>
   | { readonly status: "unavailable"; readonly message: string; readonly reloadLanguage?: true };
 
+export type CodeLanguageEditOutcome =
+  | Extract<
+      CodeLanguageReadResult,
+      { status: "edit-previews" | "edit-unavailable" | "unsupported" }
+    >
+  | { readonly status: "unavailable"; readonly message: string; readonly reloadLanguage?: true };
+type EditQuery =
+  | { readonly kind: "rename"; readonly newName: string }
+  | { readonly kind: "quick-fixes" };
+
 export interface CodeLanguageServices {
+  readonly prepareEdits: (
+    position: CodeLanguagePosition,
+    query: EditQuery,
+  ) => Promise<CodeLanguageEditOutcome | undefined>;
   readonly state: CodeLanguageEditorState;
   /** The server's diagnostics, or undefined while no server serves the file. */
   readonly diagnostics: ReadonlyArray<CodeLanguageDiagnostic> | undefined;
@@ -420,8 +434,11 @@ export function useCodeLanguageServices(
     referenceAbort.current?.abort();
   }, [text]);
 
-  const references = useCallback(
-    async (position: CodeLanguagePosition): Promise<CodeLanguageReferencesOutcome | undefined> => {
+  const queryCompanion = useCallback(
+    async (
+      position: CodeLanguagePosition,
+      query?: EditQuery,
+    ): Promise<CodeLanguageReferencesOutcome | CodeLanguageEditOutcome | undefined> => {
       const unavailable = (message: string): CodeLanguageReferencesOutcome => ({
         status: "unavailable",
         message,
@@ -493,15 +510,24 @@ export function useCodeLanguageServices(
             : unavailable(
                 "References are not available from this host. Retry or open this file externally.",
               );
-      const operation = async (): Promise<CodeLanguageReferencesOutcome | undefined> => {
+      const operation = async (): Promise<
+        CodeLanguageReferencesOutcome | CodeLanguageEditOutcome | undefined
+      > => {
         const support = await read(
           { kind: "capabilities", threadId, checkoutId, fileId: opened },
           controller.signal,
         );
         if (!current()) return stopped();
         if (support.status !== "capabilities" || !matches(support)) return unanswered(support);
-        if (support.references !== "supported")
-          return { status: "unsupported", capability: "references", support: support.references };
+        const capability = query?.kind ?? "references";
+        const available =
+          query?.kind === "rename"
+            ? (support.rename ?? "unknown")
+            : query?.kind === "quick-fixes"
+              ? (support.quickFixes ?? "unknown")
+              : support.references;
+        if (available !== "supported")
+          return { status: "unsupported", capability, support: available };
         // This is an acknowledgement of the person's current draft, not a save.
         const expectedRevision = documentRevision.current;
         if (expectedRevision === undefined)
@@ -563,12 +589,11 @@ export function useCodeLanguageServices(
         if (documentRevision.current !== acknowledged.documentRevision) return reloadRequired();
         const answer = await read(
           {
-            kind: "references",
+            ...(query ?? { kind: "references", includeDeclaration: true }),
             threadId,
             checkoutId,
             fileId: opened,
             position,
-            includeDeclaration: true,
             expectedVersion: acknowledged.documentVersion,
             expectedRevision: acknowledged.documentRevision,
           },
@@ -576,7 +601,9 @@ export function useCodeLanguageServices(
         );
         if (!current()) return stopped();
         if (answer.status === "unsupported") return answer;
-        if (answer.status !== "references") return unanswered(answer);
+        if (answer.status === "edit-unavailable") return answer;
+        if (answer.status !== "references" && answer.status !== "edit-previews")
+          return unanswered(answer);
         if (
           !matches(answer) ||
           answer.documentVersion !== acknowledged.documentVersion ||
@@ -597,14 +624,16 @@ export function useCodeLanguageServices(
                 )
               : stopped(),
           ),
-          new Promise<CodeLanguageReferencesOutcome | undefined>((resolve) => {
-            controller.signal.addEventListener(
-              "abort",
-              () => resolve(live() ? timedOut : undefined),
-              { once: true },
-            );
-            timer = setTimeout(() => controller.abort(), 15000);
-          }),
+          new Promise<CodeLanguageReferencesOutcome | CodeLanguageEditOutcome | undefined>(
+            (resolve) => {
+              controller.signal.addEventListener(
+                "abort",
+                () => resolve(live() ? timedOut : undefined),
+                { once: true },
+              );
+              timer = setTimeout(() => controller.abort(), 15000);
+            },
+          ),
         ]);
         return current() ? answer : stopped();
       } finally {
@@ -614,6 +643,26 @@ export function useCodeLanguageServices(
       }
     },
     [active, checkoutId, client, referenceIdentity, threadId],
+  );
+
+  const references = useCallback(
+    async (position: CodeLanguagePosition): Promise<CodeLanguageReferencesOutcome | undefined> => {
+      const answer = await queryCompanion(position);
+      return answer?.status === "edit-previews" || answer?.status === "edit-unavailable"
+        ? undefined
+        : answer;
+    },
+    [queryCompanion],
+  );
+  const prepareEdits = useCallback(
+    async (
+      position: CodeLanguagePosition,
+      query: EditQuery,
+    ): Promise<CodeLanguageEditOutcome | undefined> => {
+      const answer = await queryCompanion(position, query);
+      return answer?.status === "references" ? undefined : answer;
+    },
+    [queryCompanion],
   );
 
   const retry = useCallback(() => setOpenGeneration((generation) => generation + 1), []);
@@ -644,5 +693,15 @@ export function useCodeLanguageServices(
     };
   }, [checkoutId, client, path, retry, show, threadId]);
 
-  return { state, diagnostics, definition, references, cancelReferences, retry, refresh, approve };
+  return {
+    state,
+    diagnostics,
+    definition,
+    references,
+    prepareEdits,
+    cancelReferences,
+    retry,
+    refresh,
+    approve,
+  };
 }

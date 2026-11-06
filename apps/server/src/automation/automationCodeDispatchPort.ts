@@ -2,9 +2,7 @@ import { createHash } from "node:crypto";
 import {
   automationFollowUpTurnPrompt,
   decodeCodeDeliveryTarget,
-  decodeCodeOperationId,
   type AutomationRun,
-  type AutomationRunReference,
   type AutomationRunLevel,
   type CodeEvidenceContentId,
   type CodeEvidenceReference,
@@ -28,6 +26,10 @@ import type {
   AutomationThreadCreationOutcome,
 } from "./automationModeDispatchPorts";
 import { automationThreadTitle } from "./automationDispatchService";
+import { automationDispatchPromptText, automationFileContext } from "./automationFileContext";
+import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
+import { automationPromptDigest } from "./automationAuthorityRevalidation";
+import { automationCodeOperationId } from "./automationRunIdentity";
 
 export interface AutomationCodeRouteService {
   readonly execute: (
@@ -46,7 +48,7 @@ export interface AutomationCodeOperationService {
   readonly execute: (
     windowId: WindowId,
     command: unknown,
-    options?: { readonly routineRun?: AutomationRunReference },
+    options?: CodeOperationExecuteOptions,
   ) => Promise<CodeOperationResult>;
 }
 
@@ -66,6 +68,7 @@ export interface CreateAutomationCodeDispatchPortOptions {
    * delivery branch is derived deterministically from the occurrence.
    */
   readonly sourceBranch?: string;
+  readonly sourceBranchForRun?: (run: AutomationRun) => string | undefined;
   readonly startFromOrigin?: boolean;
   readonly remoteName?: string;
   /**
@@ -74,6 +77,10 @@ export interface CreateAutomationCodeDispatchPortOptions {
    * the person opted into its Project's level.
    */
   readonly projectLevel?: (projectId: ProjectId) => PermissionMode;
+  readonly prepareFileInput?: (
+    run: AutomationRun,
+    input: Parameters<NonNullable<CodeOperationExecuteOptions["prepareTurnInput"]>>[0],
+  ) => Promise<(() => boolean) | undefined>;
 }
 
 /**
@@ -120,11 +127,21 @@ async function createManagedThread(
     };
   }
   const now = options.clock();
+  const sourceBranch =
+    options.sourceBranchForRun === undefined
+      ? (options.sourceBranch ?? "development")
+      : options.sourceBranchForRun(input.run);
+  if (sourceBranch === undefined)
+    return {
+      kind: "failed",
+      reason: "unavailable",
+      message: "The bound Project checkout has no available source branch.",
+    };
   const deliveryTarget = decodeCodeDeliveryTarget({
     branchIntent: automationDeliveryBranch(String(input.run.occurrenceKey)),
     remoteName: options.remoteName ?? "origin",
     proposedBaseRepository: String(snapshot.binding.repositoryId),
-    proposedBaseBranch: options.sourceBranch ?? "development",
+    proposedBaseBranch: sourceBranch,
     outcomeKind: "local-implementation",
     confirmedAt: snapshot.deliveryTarget.confirmedAt,
   });
@@ -149,7 +166,7 @@ async function createManagedThread(
           : { executionPolicy: "approval-gated" as const }),
       permissionPersistence: snapshot.executionProfile.permissionPersistence,
       deliveryTarget,
-      sourceBranch: options.sourceBranch ?? "development",
+      sourceBranch,
       startFromOrigin: options.startFromOrigin ?? false,
       ...(options.remoteName === undefined ? {} : { remoteName: options.remoteName }),
     });
@@ -193,16 +210,18 @@ async function startOrRecover(
 ): Promise<AutomationFirstTurnLaunchOutcome> {
   const snapshot = input.run.definitionSnapshot;
   const followUp = snapshot.targetPolicy === "same-thread";
+  if (input.promptDigest !== automationPromptDigest(automationDispatchPromptText(input.run)))
+    return {
+      kind: "failed",
+      reason: "recovery-failed",
+      message: "The retained Code routine input does not match its dispatch intent.",
+    };
   const prompt = options.evidence.put(
-    followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+    followUp
+      ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+      : automationDispatchPromptText(input.run),
   );
-  if (prompt.digest !== input.promptDigest && input.promptDigest.length > 0) {
-    // Digest mismatch is still launched with the immutable task prompt; the
-    // dispatch intent digest is the audit trail for the prompt bytes used.
-  }
-  const operationId = decodeCodeOperationId(
-    deterministicOperationUuid(`automation-code-op:${String(input.run.occurrenceKey)}`),
-  );
+  const operationId = automationCodeOperationId(input.run);
   const sessionId = input.firstTurnRequestId;
   const checkoutId = await resolveCheckoutId(options, input);
   if (checkoutId === undefined) {
@@ -237,6 +256,12 @@ async function startOrRecover(
     // this turn can report the run's result.
     const result = await options.operations.execute(input.scopeId, command, {
       routineRun: { automationId: input.run.automationId, runId: input.run.id },
+      ...(automationFileContext(input.run) !== undefined
+        ? {
+            prepareTurnInput: (preparation) =>
+              options.prepareFileInput?.(input.run, preparation) ?? Promise.resolve(undefined),
+          }
+        : {}),
     });
     if (
       result.kind === "provider-turn-state" &&
@@ -318,14 +343,6 @@ function automationDeliveryBranch(occurrenceKey: string): string {
     .digest("hex")
     .slice(0, 12);
   return `automation/${digest}`;
-}
-
-function deterministicOperationUuid(seed: string): string {
-  const bytes = createHash("sha256").update(seed).digest();
-  bytes[6] = ((bytes[6] as number) & 0x0f) | 0x40;
-  bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80;
-  const hex = bytes.subarray(0, 16).toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function mapCreationFailure(

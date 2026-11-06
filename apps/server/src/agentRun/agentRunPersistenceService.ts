@@ -203,7 +203,7 @@ export class AgentRunPersistenceService {
       // The admitted selection is stored against the parent thread by this
       // append, never journaled with it: the receipt records the snapshot id
       // and the block count, and the blocks themselves stay purgeable.
-      this.#store.appendRequested(run, input.command.admittedContext);
+      this.#store.appendRequested(run, input.command.admittedContext, input.command.admittedInputs);
     } catch (error) {
       if (error instanceof AgentRunEventStoreError && error.category === "invalid") {
         // concurrent request-id race: re-check projection/request map after conflict
@@ -585,6 +585,7 @@ export class AgentRunPersistenceService {
             reviewStatus: review === undefined ? ("unavailable" as const) : ("available" as const),
           },
           checks: evidence?.checks ?? { status: "unavailable", items: [] },
+          ...(evidence?.workingTime === undefined ? {} : { workingTime: evidence.workingTime }),
           blockers:
             run.recoveryReason === undefined
               ? { status: "unavailable", items: [] }

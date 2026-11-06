@@ -589,3 +589,12 @@ Voice & images** instead.
 - [Editor and terminals](/advanced/editor-and-terminals) for editing and command surfaces
 - [Git and worktrees](/advanced/git-worktrees) for repository-scoped files
 - [Privacy and security](/advanced/privacy-and-security) for path and preview boundaries
+
+In a local desktop Work or Code composer, drop a folder from Finder or a local
+file tree to insert an editable `@folder/` reference at the caret. Octant checks
+that the folder exists inside the current Project or checkout, including its
+extra folders, and names this computer and the canonical path. It reads no folder
+contents and grants no access. Text and images already in the draft stay intact.
+A folder outside those roots needs an explicit Project folder change first.
+Remote client paths cannot identify folders on the execution host. For a draft
+that will create a managed checkout, open the thread before dropping its folders.

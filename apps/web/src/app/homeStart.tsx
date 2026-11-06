@@ -42,6 +42,8 @@ type HostFederation = NonNullable<ReturnType<typeof useHostFederationLifecycle>>
 type LaunchedShellClients = ReturnType<typeof createLaunchedShellClients>;
 
 export interface HomeStartInput {
+  readonly routineClient?: import("@octant/client-runtime").AutomationClient;
+  readonly onOpenRoutine?: (automationId: string) => void;
   readonly actions: Pick<
     ShellActions,
     | "closeWorkspaceReaders"
@@ -311,6 +313,8 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       },
     }),
     createCiFailuresCard({
+      ...(input.routineClient === undefined ? {} : { routines: input.routineClient }),
+      ...(input.onOpenRoutine === undefined ? {} : { onOpenRoutine: input.onOpenRoutine }),
       available: pullRequestCardAvailable({
         mode: activeMode,
         pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,

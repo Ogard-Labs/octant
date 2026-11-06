@@ -1,3 +1,4 @@
+import { decodeProjectWorkingFolderId, decodeThreadWorkingDirectory } from "@octant/contracts";
 import { decodeCodeCommandResult, type CodeCommandResult } from "@octant/contracts/code";
 import { describe, expect, it } from "vitest";
 import type { CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
@@ -91,6 +92,29 @@ describe("planCodeThreadCreate", () => {
     },
   );
 
+  it.each(["current-checkout", "managed-worktree"] as const)(
+    "carries the server-issued working choice into %s without accepting a host path",
+    (workspace) => {
+      const workingFolder = {
+        workingFolderId: decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`),
+        workingDirectory: decodeThreadWorkingDirectory("資料 folder"),
+      };
+      const result = planCodeThreadCreate({
+        composer: composer(workspace, { workingFolder }),
+        modelId: "qwen-3.6" as never,
+        prepared: prepared() as never,
+        projectId: ids.project as never,
+        providerInstanceId: ids.provider as never,
+        threadId: ids.thread,
+        timestamp: now,
+        title: "Fix search",
+      });
+      expect(result).toMatchObject({
+        kind: "command",
+        command: workspace === "managed-worktree" ? workingFolder : { thread: workingFolder },
+      });
+    },
+  );
   it("creates a managed worktree for the managed-worktree habit", () => {
     const result = plan("managed-worktree");
     expect(result).toMatchObject({

@@ -361,6 +361,64 @@ describe("automation command service", () => {
     });
   });
 
+  it("retries a stopped run once under a new run identity and refuses active or foreign history", () => {
+    const harness = createHarness();
+    const definition = created(harness, automationId("3062"));
+    const request = {
+      kind: "run-now-automation" as const,
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runNowRequestId: AUTOMATION_TEST_IDS.runNowRequest,
+    };
+    const original = harness.service.execute(request as AutomationCommand);
+    if (original.kind !== "automation-run-accepted") throw new Error("Expected run");
+    const retry = {
+      ...request,
+      runNowRequestId: AUTOMATION_TEST_IDS.firstTurnRequest,
+      retryRunId: original.run.id,
+    } as AutomationCommand;
+    expect(harness.service.execute(retry)).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "blocked",
+    });
+    harness.service.execute({
+      kind: "cancel-current-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: original.run.id,
+      expectedRunVersion: 1,
+      cancelRunRequestId: AUTOMATION_TEST_IDS.cancelRequest,
+    } as AutomationCommand);
+    const accepted = harness.service.execute(retry);
+    expect(accepted).toMatchObject({
+      kind: "automation-run-accepted",
+      run: {
+        occurrence: { kind: "manual", retryOfRunId: original.run.id },
+        lifecycle: "queued",
+      },
+    });
+    if (accepted.kind !== "automation-run-accepted") throw new Error("Expected retry");
+    expect(accepted.run.id).not.toBe(original.run.id);
+    expect(harness.service.execute(retry)).toEqual(accepted);
+    expect(
+      harness.projection.listRuns({ automationId: definition.id, limit: 10 }).runs,
+    ).toHaveLength(2);
+    expect(
+      harness.service.execute({
+        ...request,
+        retryRunId: AUTOMATION_TEST_IDS.run,
+        runNowRequestId: AUTOMATION_TEST_IDS.cancelRequest,
+      } as AutomationCommand),
+    ).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "blocked",
+    });
+  });
+
   it("cancels the current run atomically, idempotently, and only once", () => {
     const harness = createHarness();
     const { service } = harness;

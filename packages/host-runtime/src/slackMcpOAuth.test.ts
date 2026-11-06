@@ -409,8 +409,13 @@ describe("Slack MCP dedicated user-token dialect", () => {
   });
   it("maps only the exact documented transport to its distinct OAuth origin", () => {
     expect(mcpOAuthResourceForTransport(slack.transportUrl)).toBe(slack.resource);
+    expect(mcpOAuthResourceForTransport("https://mcp.airtable.com/mcp")).toBe(
+      "https://mcp.airtable.com",
+    );
     for (const transport of [
       "https://generic.example/mcp",
+      "https://mcp.airtable.com/other",
+      "https://mcp.airtable.com/mcp?tools=all",
       "https://mcp.slack.com/other",
       "https://mcp.slack.com/mcp?tools=all",
     ])
