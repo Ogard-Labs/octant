@@ -1,9 +1,15 @@
+import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { confineManagedDeviceTool } from "./managedDeviceToolConfinement";
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...actual, accessSync: vi.fn(actual.accessSync) };
+});
 
 const roots: string[] = [];
 afterEach(() => {
@@ -21,6 +27,35 @@ function fixture() {
 }
 
 describe("managed device tool confinement", () => {
+  it("keeps a linked SDK reachable through the paths passed to the Linux tool", async () => {
+    const f = fixture();
+    const sdk = join(f.root, "sdk-target");
+    const sdkLink = join(f.home, "sdk-link");
+    mkdirSync(sdk);
+    symlinkSync(sdk, sdkLink);
+    const { accessSync: access } = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const availability = vi.mocked(fs.accessSync).mockImplementation((path, mode) => {
+      if (path !== "/usr/bin/bwrap") access(path, mode);
+    });
+    try {
+      const spec = confineManagedDeviceTool({
+        tool: "serve-avd",
+        runtime: "/usr/bin/node",
+        entrypoint: join(f.tool, "serve-avd.js"),
+        args: [],
+        stateDirectory: f.state,
+        environment: { HOME: f.home, ANDROID_HOME: sdkLink, ANDROID_SDK_ROOT: sdkLink },
+        platform: "linux",
+      });
+      expect(spec).toBeDefined();
+      expect(spec?.env.ANDROID_HOME).toBe(sdk);
+      expect(spec?.env.ANDROID_SDK_ROOT).toBe(sdk);
+      expect(spec?.args).toEqual(expect.arrayContaining(["--ro-bind", sdk, sdk]));
+    } finally {
+      availability.mockReset();
+    }
+  });
+
   it("refuses a configured SDK that grants the whole home", () => {
     const f = fixture();
     expect(

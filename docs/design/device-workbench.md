@@ -434,7 +434,9 @@ the OS still applies the runtime's privacy (TCC) identity. Networking permits
 only loopback listeners and connections, for the stream, input and shared adb
 server. On Linux the capsule has its own user, PID, IPC and UTS namespaces,
 drops all capabilities, mounts the named system/SDK/package roots read-only and
-only device/private state writable. It shares the host network so the existing
+only device/private state writable. Android SDK and device-state environment
+paths name those canonical mounted locations, so a selected SDK symlink stays
+usable without granting its parent folder. It shares the host network so the existing
 adb server and browser can reach it; Bubblewrap does not enforce macOS's
 loopback-only egress. A confined tool still controls the permitted device
 services: confinement does not make the guest's content trusted or approve

@@ -59,7 +59,15 @@ export function confineManagedDeviceTool(input: {
       )
     )
       return undefined;
-    const env = { ...input.environment, TMPDIR: state, TMP: state, TEMP: state };
+    const env: NodeJS.ProcessEnv = { ...input.environment, TMPDIR: state, TMP: state, TEMP: state };
+    // The Linux capsule mounts canonical paths; the helper must name those
+    // same locations when a configured SDK or device-state folder is a link.
+    if (input.tool === "serve-avd") {
+      for (const key of ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_USER_HOME"]) {
+        const path = env[key];
+        if (path !== undefined) env[key] = canonical(path);
+      }
+    }
     if (platform === "darwin") {
       const sandbox = "/usr/bin/sandbox-exec";
       accessSync(sandbox, constants.X_OK);
