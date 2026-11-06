@@ -637,3 +637,168 @@ details{color:var(--approval-muted);font-size:12px}summary{cursor:pointer}
 button{border:1px solid var(--approval-border);border-radius:8px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:2px solid var(--approval-primary);outline-offset:2px}button:disabled{opacity:.5;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
 </style></head><body><main id="approval" role="alertdialog" aria-labelledby="message" aria-describedby="detail" aria-live="polite"><div class="content"><div class="heading"><span class="heading-icon" aria-hidden="true">◉</span><div class="heading-text"><div class="eyebrow">Permission requested</div><h1 id="message">Preparing approval…</h1></div></div><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details></div><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Allow</button></div></main></body></html>`;
 }
+
+/** The window an approval view is placed in, in content coordinates. */
+export interface ApprovalHostWindow {
+  readonly isDestroyed: () => boolean;
+  readonly getContentBounds: () => { readonly width: number; readonly height: number };
+}
+
+const APPROVAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isStrictRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value as object)
+      .sort()
+      .join("\0") === [...keys].sort().join("\0")
+  );
+}
+
+export function codeApprovalBoundsForAnchor(
+  window: ApprovalHostWindow,
+  anchor: CodeOperationApprovalAnchor,
+  pendingCount: number,
+): CodeOperationApprovalBounds | undefined {
+  if (window.isDestroyed()) return undefined;
+  const content = window.getContentBounds();
+  const bounds = anchor.bounds;
+  if (
+    ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
+    bounds.width < 1 ||
+    bounds.height < 1 ||
+    bounds.x < 0 ||
+    bounds.y < 36 ||
+    bounds.x + bounds.width > content.width ||
+    bounds.y + bounds.height > content.height
+  ) {
+    return undefined;
+  }
+  const width = Math.min(560, Math.max(320, Math.floor(bounds.width)), content.width - 24);
+  const maxHeight = pendingCount > 1 ? 260 : 216;
+  const height = Math.min(maxHeight, Math.max(180, Math.floor(bounds.y - 44)));
+  if (width < 320 || height < 180) return undefined;
+  const x = Math.min(Math.max(12, Math.floor(bounds.x)), content.width - width - 12);
+  const y = Math.floor(bounds.y - height - 8);
+  if (y < 36) return undefined;
+  return { x, y, width, height };
+}
+
+export function codeApprovalFallbackBounds(
+  window: ApprovalHostWindow,
+  pendingCount: number,
+): CodeOperationApprovalBounds | undefined {
+  if (window.isDestroyed()) return undefined;
+  const content = window.getContentBounds();
+  const width = Math.min(560, content.width - 24);
+  const maxHeight = pendingCount > 1 ? 260 : 216;
+  const height = Math.min(maxHeight, content.height - 44);
+  if (width < 320 || height < 180) return undefined;
+  return {
+    x: content.width - width - 12,
+    y: Math.max(36, content.height - height - 12),
+    width,
+    height,
+  };
+}
+
+export function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprovalAnchor {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("kind" in value) ||
+    (value.kind !== "thread" && value.kind !== "draft")
+  ) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const record = value as Record<string, unknown>;
+  const expectedKeys =
+    record.kind === "thread"
+      ? ["bounds", "kind", "projectId", "threadId"]
+      : ["bounds", "composerId", "kind", "projectId"];
+  if (!isStrictRecord(record, expectedKeys)) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const bounds = record.bounds;
+  if (!isStrictRecord(bounds, ["height", "width", "x", "y"])) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const { x, y, width, height } = bounds;
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    ![x, y, width, height].every(Number.isFinite) ||
+    [x, y, width, height].some((entry) => entry < 0 || entry > 32_768) ||
+    typeof record.projectId !== "string" ||
+    !APPROVAL_UUID_PATTERN.test(record.projectId) ||
+    (record.kind === "thread" &&
+      (typeof record.threadId !== "string" || !APPROVAL_UUID_PATTERN.test(record.threadId))) ||
+    (record.kind === "draft" &&
+      (typeof record.composerId !== "string" || !APPROVAL_UUID_PATTERN.test(record.composerId)))
+  ) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  return {
+    projectId: record.projectId,
+    ...(record.kind === "thread"
+      ? { kind: "thread" as const, threadId: record.threadId as string }
+      : { kind: "draft" as const, composerId: record.composerId as string }),
+    bounds: {
+      x,
+      y,
+      width,
+      height,
+    },
+  };
+}
+
+export function decodeCodeOperationApprovalViewDecision(value: unknown): {
+  readonly token: string;
+  readonly challengeId: string;
+  readonly decision: "approve" | "cancel" | "next" | "previous";
+} {
+  if (!isStrictRecord(value, ["challengeId", "decision", "token"])) {
+    throw new Error("Octant rejected invalid Code approval decision.");
+  }
+  if (
+    typeof value.token !== "string" ||
+    value.token.length < 32 ||
+    value.token.length > 128 ||
+    typeof value.challengeId !== "string" ||
+    !APPROVAL_UUID_PATTERN.test(value.challengeId) ||
+    (value.decision !== "approve" &&
+      value.decision !== "cancel" &&
+      value.decision !== "next" &&
+      value.decision !== "previous")
+  ) {
+    throw new Error("Octant rejected invalid Code approval decision.");
+  }
+  return {
+    token: value.token,
+    challengeId: value.challengeId,
+    decision: value.decision,
+  };
+}
+
+export function decodeCodeOperationApprovalPresentation(value: unknown): {
+  readonly projectId: string;
+  readonly composerId: string;
+} {
+  if (
+    !isStrictRecord(value, ["composerId", "projectId"]) ||
+    typeof value.projectId !== "string" ||
+    !APPROVAL_UUID_PATTERN.test(value.projectId) ||
+    typeof value.composerId !== "string" ||
+    !APPROVAL_UUID_PATTERN.test(value.composerId)
+  ) {
+    throw new Error("Octant rejected invalid Code approval presentation.");
+  }
+  return { projectId: value.projectId, composerId: value.composerId };
+}
+

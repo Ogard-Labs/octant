@@ -21,6 +21,8 @@ import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
 import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
 import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
+import { installNightlyCodeApprovals } from "./nightlyCodeApprovals";
+import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
@@ -47,7 +49,7 @@ import {
 } from "./bundledWhatsNew";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
-import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
+import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 import {
   createNightlyDataControl,
   createRelaunchIntent,
@@ -192,6 +194,18 @@ export async function runNightlyClient(
     register,
     bootstrap: (id) => bootstraps.get(id),
     nativeMain,
+    fetch: globalThis.fetch,
+  });
+  const approvals = installNightlyCodeApprovals({
+    register,
+    handleViewDecision: (channel, handler) => ipcMain.handle(channel, handler),
+    owns,
+    bootstrap: (id) => bootstraps.get(id),
+    nativeMain,
+    views: createNativeCodeApprovalViewHost(
+      resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
+      (id) => approvals.viewDestroyed(id),
+    ),
     fetch: globalThis.fetch,
   });
   let updates: Awaited<ReturnType<typeof createNightlyAppUpdates>> | undefined;
@@ -465,6 +479,9 @@ export async function runNightlyClient(
                   closingPresentations.delete(closing);
                 },
               );
+              // While the window's token is still held, so a pending
+              // challenge is cancelled on the host rather than left to expire.
+              approvals.closeWindow(String(bootstrap.windowId));
               capabilities.delete(id);
               bootstraps.delete(id);
               nativeMain.forget(id);
