@@ -4,12 +4,15 @@ description: Draft data processing agreement template for any future Octant-oper
 
 # DPA template
 
-::: warning Draft pending legal review
-This page is a **draft** template. It is **not** a signed data processing
-agreement, **not** legal advice, and **not** a claim that Ogard Labs currently
-processes personal data as a processor for customers. Qualified counsel must
-review and complete every bracketed field before anyone treats this as an
-executable contract.
+::: warning Draft pending legal review — not in force
+This page is a **draft** template kept for a possible future hosted component.
+It is **not** a signed data processing agreement, **not** legal advice, and
+**not** in force: Ogard Labs currently operates no Octant-hosted component, so
+there is no processing by Ogard Labs on a customer's behalf to paper. The public
+Canvas share service is **self-hosted by each user** (reference app at
+`apps/share` in this repository), so no Ogard Labs DPA applies to it. Qualified
+counsel must review and complete every bracketed field before any future
+hosted component treats this as an executable contract.
 :::
 
 ## When this template would apply
@@ -27,44 +30,19 @@ controls. For that on-device store:
   sub-processors. See [Sub-processors](/advanced/sub-processors).
 
 A data processing agreement with Ogard Labs is therefore **not** the ordinary
-document for single-machine use of the technical preview. This template
-exists for the narrower case where Ogard Labs processes personal data
-**on behalf of** a customer in connection with an Octant-operated hosted
-component. The public Canvas share service (below) is that component and is
-in the current release boundary, so this DPA is its instrument from launch;
+document for single-machine use of the technical preview, and today it is not
+needed at all: Ogard Labs operates no hosted component. The public Canvas
+share service is **not Ogard-operated** — each user runs the reference app
+(`apps/share` in this repository) on their own server, or points Octant at
+another service they choose, so the publisher's relationship with that service
+is the publisher's own, under the operator's terms. If an Octant-operated
+hosted component ever ships, this template is its instrument from launch;
 hosted relay remains outside the release boundary. Until counsel signs it,
 this page remains a draft, not a live contract.
 
 A later shared-host design would still place controllership with the team
 that runs the host, not with Ogard Labs by default. That design is not the
 current preview.
-
-### The first hosted component in the release scope: public Canvas links
-
-The public Canvas share service (`https://canvas.octant.sh`, in the
-`octant-webapp` repository) is the one Octant-operated component in the
-current release boundary. It is off by default, and nothing reaches it
-until a person turns Public links on and approves a publish. When it does:
-
-- The **publisher stays controller** of the Canvas content they publish.
-  The payload is a frozen, filtered copy: no host, Project, thread, or
-  Canvas ids, no file contents, and a Canvas holding an action block is
-  refused outright.
-- **Ogard Labs operates the service**, stores the payload, and can read it
-  to draw the page and link previews — so for that published content Ogard
-  Labs is the **processor** acting on the publisher's documented
-  instruction (the approved publish card), and this DPA is the instrument
-  for it. Annex A below carries the service's current values; counsel
-  confirms them at sign-off.
-- The service is hosted in **Norway (EEA)** on Gigahost AS, with encrypted
-  offsite backups on Hetzner in Finland (EU), so no transfer tool is needed
-  while it stays EEA-hosted; see the [SCC position](/advanced/scc-position).
-  Moving it outside the EEA/UK requires the controller-to-processor SCC
-  module before that traffic starts.
-- The service writes no IP or user-agent logs and keeps an aggregate view
-  count; revoke, expiry, or deleting the Canvas deletes the content, with a
-  content-free tombstone kept 90 days. See
-  [Share a Canvas with a public link](/guide/public-links).
 
 ## Parties and roles
 
@@ -148,22 +126,15 @@ that constrain those clauses:
 
 ## Annex A: processing description
 
-For the public Canvas share service (the one hosted component in the current
-release scope), the current draft values are:
+**NONE: DPA NOT IN FORCE.** Ogard Labs operates no hosted component, so there
+is no Ogard Labs processing to describe. The public Canvas share service is
+self-hosted by each user (reference app at `apps/share`); its processing
+description belongs to that operator, not to this template.
 
-| Item                                          | Value                                                                                                                                                                                                                                                                                                                                                                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Hosted component name                         | Public Canvas share service (`https://canvas.octant.sh`; self-hosted URLs are the customer's own deployment, not an Ogard Labs component)                                                                                                                                                                                                                                      |
-| Processing purposes                           | Store, serve, draw, and link-preview Canvas share documents the publisher approved; honour update, revoke, expiry, password, and abuse-report requests; count aggregate views                                                                                                                                                                                                  |
-| Retention                                     | Until the link expires (default 30 days, at most 365, or no expiry if the publisher chooses it) or is revoked/deleted; then a content-free tombstone (id and time) for 90 days                                                                                                                                                                                                 |
-| Sub-processors (Ogard Labs)                   | Gigahost AS — server hosting in Norway (EEA); Hetzner Online GmbH — encrypted offsite backups in Finland (EU)                                                                                                                                                                                                                                                                  |
-| Transfer tools                                | None while hosted in the EEA. If the service is ever moved outside the EEA/UK or a third-country sub-processor is added, execute the matching SCC module before that processing starts (see [SCC position](/advanced/scc-position))                                                                                                                                            |
-| Technical and organizational measures summary | TLS in front of two origins that must differ (public API/viewer and user-content frames); viewer CSP with no third-party loads; `noindex`, `no-referrer`; strict contract decoding; payload size caps; per-IP in-memory rate limits with no IP/user-agent logs; owner secret and password stored only as hashes; operator takedown via a loopback listener with a bearer token |
-
-For any later hosted component, replace these rows with that component's real
-values — `[NAME]`, `[LIST]`, `[DURATION / TRIGGER]`, `[LIST OR NONE]`,
-`[SCC MODULES / ADEQUACY / NONE]`, `[POINTER TO SECURITY EXHIBIT]` — or write
-`NONE: DPA NOT IN FORCE` when no such component exists.
+For any later Ogard-operated hosted component, replace this with that
+component's real values — `[NAME]`, `[LIST]`, `[DURATION / TRIGGER]`,
+`[LIST OR NONE]`, `[SCC MODULES / ADEQUACY / NONE]`,
+`[POINTER TO SECURITY EXHIBIT]`.
 
 ## Annex B: relationship to local-first software
 

@@ -92,24 +92,19 @@ makes on its own, or because you asked, are different relationships:
   endpoints you pointed Octant at. That includes a Canvas export to a GitHub
   Gist: once you approve it, GitHub receives the exported Markdown as the
   account you approved. See [Privacy notice](/advanced/privacy-notice#destinations-you-choose).
-- **Public Canvas share service** is operated by Ogard Labs at
-  `canvas.octant.sh`, or by you if you enter your own URL. Once you turn on
-  Public links and approve a publish, it receives the Canvas and can read it.
-  See [Privacy notice](/advanced/privacy-notice#destinations-you-choose). Its
-  hosting sub-processors are **Gigahost AS** (servers in Norway, EEA) and
-  **Hetzner Online GmbH** (encrypted offsite backups in Finland, EU) — the same
-  infrastructure Ogard Labs runs its other services on. Both are in the EEA, so
-  no transfer tool is needed while the service stays hosted there; moving it
-  outside the EEA/UK would require the SCC module named in the
-  [SCC position](/advanced/scc-position).
+- **Public Canvas share service** is a service you run or choose: Octant
+  operates none. Enter its address in **Settings › Permissions › Public
+  links**; the reference app ships in this repository at `apps/share` and runs
+  on any host you control. Once you turn on Public links and approve a publish,
+  that service receives the Canvas and can read it. See
+  [Privacy notice](/advanced/privacy-notice#destinations-you-choose) and
+  [Share a Canvas with a public link](/guide/public-links).
 
-For the public Canvas share service this draft does close the question:
-Ogard Labs is the **processor** of published Canvases under the
-[DPA template](/advanced/dpa-template), with Gigahost AS and Hetzner Online
-GmbH as its hosting sub-processors. For the other parties above, whether each
-is a processor, a sub-processor, or neither is a legal question this draft
-does not close. The product fact is that none of them is on the BYO inference
-path.
+Ogard Labs has **no sub-processors** for this traffic: it never sits on the path
+to a share service, because the service is not ours. For every party above,
+whether each is a processor, a sub-processor, or neither is a legal question
+this draft does not close. The product fact is that none of them is on the BYO
+inference path, and none of them is engaged by Ogard Labs.
 
 ## Shared hosts
 

@@ -72,7 +72,7 @@ export function canvasExportTargetBindings(
       : [
           { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
         ]),
-    ...(links === undefined || !links.enabled()
+    ...(links === undefined || !links.enabled() || links.settings().serviceUrl === ""
       ? []
       : [{ facts: publicLinkActivationFacts(links), target: createPublicLinkExportTarget(links) }]),
   ];

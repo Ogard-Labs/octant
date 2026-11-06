@@ -221,14 +221,13 @@ title and a local snapshot of the file you approved publishing, and never
 downloads the page. Take a page down on claude.ai. See
 [Claude artifacts](/advanced/providers#claude-artifacts).
 
-A Canvas published as a public link goes to the public Canvas share service.
-The service is operated by **Ogard Labs** (organisation number 996 198 510,
-Stavanger, Norway), at `https://canvas.octant.sh` unless you enter another URL
-in **Settings › Permissions › Public links**, which is off by default. It is
-hosted in **Norway (EEA)** on Ogard Labs' own infrastructure (Gigahost AS),
-with encrypted offsite backups in Finland (EEA); no data leaves the EEA for
-this service.
-Turning it on sends nothing; the first request is your first publish, after you
+A Canvas published as a public link goes to the share service whose address you
+enter in **Settings › Permissions › Public links** — a service you run yourself
+(the reference app ships in this repository at `apps/share`) or another service
+you choose. Octant operates no share service of its own, so the service's
+location, operator, and terms are yours to pick; the reference app runs wherever
+you host it. Public links are off by default and no address is set until you
+enter one. Turning it on sends nothing; the first request is your first publish, after you
 approve a card that shows the exact content, the audience (anyone with the
 link), the expiry, and an optional password. The service receives the Canvas's
 title, a summary of up to 200 characters, its blocks, and the markup of any
@@ -243,9 +242,9 @@ stays for 90 days. The service writes no IP address or user-agent logs and
 keeps an aggregate view count. Anyone can report a link, without giving their
 address. See [Share a Canvas with a public link](/guide/public-links).
 
-The abuse contact shown on link pages is `hello@octant.sh`. The operator can
-take a link down; a removed link answers "removed". Reports are stored without
-the reporter's address.:
+The abuse contact shown on link pages is the one the service operator sets
+(`OCTANT_SHARE_ABUSE_CONTACT`). The operator can take a link down; a removed
+link answers "removed". Reports are stored without the reporter's address.
 
 ### Provider update checks
 
