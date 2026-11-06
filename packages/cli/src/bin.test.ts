@@ -125,7 +125,9 @@ describe("octant-nightly", () => {
     } finally {
       await rm(home, { recursive: true, force: true });
     }
-  });
+    // Seven fresh CLI processes run one after another here; on a hosted Linux
+    // runner each cold start took about 2 s, so the default 15 s ran out.
+  }, 60_000);
 
   it.runIf(process.platform === "darwin")(
     "names Nightly's test host when the Data choice is test data and that host is not running",
