@@ -1,3 +1,5 @@
+import type { BrowserAgentAvailability } from "@octant/contracts";
+import { BrowserAgentStatus } from "./BrowserAgentStatus";
 import { BrowserCredentialBindingControl } from "./BrowserCredentialBindingControl";
 import {
   BrowserAutomationClientFailure,
@@ -82,6 +84,9 @@ const BROWSER_MAX_REFRESH_INTERVAL_MS = 5_000;
 
 export interface BrowserWorkspaceProps {
   readonly client: BrowserAutomationClient;
+  readonly onAgentBrowserRecovery?: (
+    reason: "no-tool-transport" | "excluded-by-thread-constraints" | "host-lends-no-browser",
+  ) => void;
   readonly hostBridge?: OctantHostBridge;
   readonly tab: Extract<WorkspaceTab, { kind: "browser" }>;
   readonly serverUrl?: string;
@@ -115,6 +120,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [addressTyped, setAddressTyped] = useState(false);
   const [scope, setScope] = useState<BrowserThreadScope>();
   const [snapshot, setSnapshot] = useState<BrowserAutomationSnapshot>();
+  const [agentRead, setAgentRead] = useState<{
+    readonly client: BrowserAutomationClient;
+    readonly threadId: string;
+    readonly availability: BrowserAgentAvailability | undefined;
+  }>();
+  const agentAvailability =
+    agentRead?.client === props.client && agentRead.threadId === props.tab.threadId
+      ? agentRead.availability
+      : undefined;
+
   const [status, setStatus] = useState<BrowserWorkspaceStatus>(
     props.tab.threadId === undefined ? "unavailable" : "ready",
   );
@@ -393,6 +408,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 controller.signal,
               );
         if (!active || controller.signal.aborted) return;
+        setAgentRead((previous) =>
+          previous?.client === props.client &&
+          previous.threadId === String(props.tab.threadId) &&
+          JSON.stringify(previous.availability) === JSON.stringify(next.agentAvailability)
+            ? previous
+            : {
+                client: props.client,
+                threadId: String(props.tab.threadId),
+                availability: next.agentAvailability,
+              },
+        );
         const revision = snapshotRevision(next);
         const changed = revision !== lastPolledRevision.current;
         lastPolledRevision.current = revision;
@@ -422,6 +448,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         }
       } catch (error) {
         if (!active || controller.signal.aborted) return;
+        setAgentRead(undefined);
         // A refusal is a state, not a reason to ask harder. Without this the
         // loop re-asks a refused context at the base interval and the renderer
         // logs an HTTP error for every attempt; a snapshot that changes still
@@ -1073,6 +1100,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             />
           </span>
         </form>
+        <BrowserAgentStatus
+          agentDriving={nativeState?.control === "agent"}
+          availability={agentAvailability}
+          {...(props.onAgentBrowserRecovery === undefined
+            ? {}
+            : { onRecover: props.onAgentBrowserRecovery })}
+        />
         <span
           className="browser-workspace__control-state"
           title={
@@ -1557,6 +1591,7 @@ function snapshotRevision(snapshot: BrowserAutomationSnapshot | undefined): stri
   if (snapshot === undefined) return "none";
   return JSON.stringify([
     snapshot.status,
+    snapshot.agentAvailability,
     snapshot.context?.contextId,
     snapshot.context?.state,
     snapshot.context?.presentation,
