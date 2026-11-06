@@ -40,7 +40,12 @@ describe("which host octant-nightly attaches to", () => {
     expect(target("test-data", { PATH: "/usr/bin" }).resolved).toEqual({
       kind: "test-host",
       serverPort: 13_774,
-      environment: { PATH: "/usr/bin", OCTANT_DATA_DIR: testData, OCTANT_SERVER_PORT: "13774" },
+      environment: {
+        PATH: "/usr/bin",
+        OCTANT_DATA_DIR: testData,
+        OCTANT_SERVER_PORT: "13774",
+        OCTANT_LOGS_DIR: join(home, "Library", "Logs", "Octant Nightly"),
+      },
     });
   });
 

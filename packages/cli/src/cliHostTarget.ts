@@ -77,6 +77,10 @@ export function resolveCliHostTarget(
       ...location.env,
       OCTANT_DATA_DIR: role.dataDirectory,
       OCTANT_SERVER_PORT: String(serverPort),
+      // The desktop gives its test host this log folder, so reads find its log.
+      OCTANT_LOGS_DIR:
+        location.env.OCTANT_LOGS_DIR ??
+        join(location.home, "Library", "Logs", identity.productName),
     },
   };
 }

@@ -1170,7 +1170,10 @@ so the link scheme does not appear in it.
   runs a host, and never writes a login or boot service, so it can never own or
   migrate Octant's data. `server start|stop|restart|enable|disable|run|install|upgrade|uninstall`,
   `web --dev`, `hub enable --install-service` and `hub disable --remove-service`
-  refuse before anything runs, and help lists only what it offers. When no
+  refuse before anything runs, and help lists only what it offers. `hub enable`
+  and `hub disable` never print a boot-service command either. With test data,
+  `server status` and `server logs` refuse and name `octant-nightly status` and
+  the test host's log, because the only service they read is Octant's. When no
   host is running, a command that `octant` would answer by starting one says
   which host is missing and how to start it: Octant (the app or
   `octant server start`) or, with test data, Octant Nightly.

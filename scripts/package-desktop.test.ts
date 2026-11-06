@@ -1537,6 +1537,30 @@ describe("the octant-nightly command Octant Nightly ships", () => {
     }
   });
 
+  it("refuses a link loop on PATH instead of following it forever", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-nightly-loop-"));
+    try {
+      const script = resolve(root, "launcher");
+      await writeFile(
+        script,
+        nightlyCommandLauncherScript(desktopIdentity("nightly"), "1.0.0-preview.20261106.1"),
+        { mode: 0o755 },
+      );
+      await symlink(resolve(root, "b"), resolve(root, "a"));
+      await symlink(resolve(root, "a"), resolve(root, "b"));
+      // $0 is the looping link, as a PATH lookup through it would give.
+      let stderr = "";
+      try {
+        execFileSync("/bin/sh", ["-c", `. "${script}"`, resolve(root, "a")], { stdio: "pipe" });
+      } catch (error) {
+        stderr = String((error as { readonly stderr?: unknown }).stderr);
+      }
+      expect(stderr).toBe("octant-nightly: too many links\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("is Nightly's alone and refuses a version that could leave its quotes", () => {
     expect(() => nightlyCommandLauncherScript(desktopIdentity("stable"), "1.0.0")).toThrow(
       "Only Octant Nightly ships octant-nightly.",

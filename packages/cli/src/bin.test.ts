@@ -106,6 +106,19 @@ describe("octant-nightly", () => {
       expect(start.stderr).toContain(
         "octant-nightly never starts, stops, installs or upgrades a host.",
       );
+      for (const administers of [
+        ["server", "run"],
+        ["server", "install", "--artifact", home, "--pair"],
+        ["web", "--dev", "--no-open"],
+        ["hub", "enable", "--install-service"],
+        ["hub", "disable", "--remove-service"],
+      ]) {
+        const refused = await runNightly(administers, home);
+        expect(refused.code).toBe(1);
+        expect(refused.stderr).toContain(
+          "octant-nightly never starts, stops, installs or upgrades a host.",
+        );
+      }
       // No host wrote anything: no receipt, secret, journal or service file.
       expect(await filesUnder(join(home, "Library", "Application Support"))).toEqual([]);
       expect(await filesUnder(join(home, "Library", "LaunchAgents"))).toEqual([]);
@@ -128,6 +141,11 @@ describe("octant-nightly", () => {
         expect(project.code).toBe(1);
         expect(project.stderr).toBe(
           "Octant Nightly's test host is not running. Open Octant Nightly with Data set to Separate test data to start it; octant-nightly never starts a host.\n",
+        );
+        const logs = await runNightly(["server", "logs"], home);
+        expect(logs.code).toBe(1);
+        expect(logs.stderr).toBe(
+          `Octant Nightly's test host has no service. Use \`octant-nightly status\` for its state; its log is ${join(home, "Library", "Logs", "Octant Nightly")}/service.log.\n`,
         );
         expect(await filesUnder(storage)).toEqual(["data-choice.json"]);
       } finally {

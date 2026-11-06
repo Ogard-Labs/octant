@@ -187,8 +187,8 @@ octant-nightly --help
 - When your Octant is too old for a command, it says "Needs a newer Octant".
 - `octant-nightly agent` uses its line view; the full-screen view needs
   `octant`.
-- `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` choose another host, as for
-  `octant`.
+- `OCTANT_DATA_DIR` chooses another data folder's host, as for `octant`;
+  `OCTANT_SERVER_PORT` moves the test host's port.
 - The command is available on macOS only.
 
 ### Separate test data in Nightly
