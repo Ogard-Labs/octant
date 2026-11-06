@@ -8,7 +8,6 @@ import {
   FuseVersion,
   getCurrentFuseWire,
 } from "@electron/fuses";
-import { desktopIdentity, type DesktopIdentity } from "@octant/host-runtime";
 
 const DESKTOP_FUSES = {
   version: FuseVersion.V1,
@@ -64,7 +63,6 @@ export const DESKTOP_UNPACKED_FILES = [
 export function readDesktopArchive(
   archive: string,
   integrity: unknown,
-  identity: DesktopIdentity = desktopIdentity("nightly"),
 ): ReadonlyArray<{ readonly path: string; readonly content?: string }> {
   uncache(archive);
   const expected =
@@ -82,12 +80,12 @@ export function readDesktopArchive(
   ) {
     throw new Error("Desktop archive integrity does not match its bundle metadata.");
   }
-  const unpacked = new Set<string>(desktopUnpackedFiles(identity));
+  const unpacked = new Set<string>(desktopUnpackedFiles());
   const entries: Array<{ readonly path: string; readonly content?: string }> = [];
   for (const filename of listPackage(archive, { isPack: false })) {
     const path = filename.replace(/^\//, "");
     const entry = statFile(archive, path, false);
-    if (identity.flavor === "stable" && path.startsWith("apps/server/"))
+    if (path.startsWith("apps/server/"))
       throw new Error("Trusted desktop archive contains the worker server tree.");
     if ("files" in entry) continue;
     if ("link" in entry) throw new Error(`Desktop archive contains a symbolic link: ${path}.`);
@@ -107,20 +105,19 @@ export function readDesktopArchive(
 }
 
 /** Native addons and adjacent libraries need stable physical paths under ASAR. */
-export function packagedNativePath(path: string, identity: DesktopIdentity): string {
+export function packagedNativePath(path: string): string {
   const prefix = "Contents/Resources/app/";
   if (!path.startsWith(prefix)) return path;
   const payload = path.slice(prefix.length);
-  if (identity.flavor === "stable" && payload.startsWith("apps/server/")) return path;
-  if (!new Set<string>(desktopUnpackedFiles(identity)).has(payload))
+  if (payload.startsWith("apps/server/")) return path;
+  if (!new Set<string>(desktopUnpackedFiles()).has(payload))
     throw new Error(`Unexpected native application path: ${payload}.`);
   return `Contents/Resources/app.asar.unpacked/${payload}`;
 }
 
-export function desktopUnpackedFiles(identity: DesktopIdentity): ReadonlyArray<string> {
-  return identity.flavor === "nightly"
-    ? DESKTOP_UNPACKED_FILES
-    : DESKTOP_UNPACKED_FILES.filter((path) => path.startsWith("apps/desktop/"));
+/** The worker host tree is physical in both apps, so only desktop natives unpack. */
+export function desktopUnpackedFiles(): ReadonlyArray<string> {
+  return DESKTOP_UNPACKED_FILES.filter((path) => path.startsWith("apps/desktop/"));
 }
 
 /** This executable intentionally runs approved scripts and is not a desktop peer. */

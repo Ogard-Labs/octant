@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { EmbeddedBrowserAccessibility } from "./EmbeddedBrowserAccessibility";
 import { EmbeddedBrowserTextInput } from "./EmbeddedBrowserTextInput";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -354,6 +355,35 @@ export function EmbeddedBrowserSurface(props: {
           style={{ width: "100%", height: "100%", display: "block" }}
         />
       )}
+      <EmbeddedBrowserAccessibility
+        presentationId={
+          frame !== undefined && frame.presentationId === currentPresentation.current
+            ? frame.presentationId
+            : undefined
+        }
+        execute={async (request) =>
+          (await props.bridge.presentBrowser?.(
+            decodeHumanBrowserRequest({
+              contextId: props.contextId,
+              threadId: props.threadId,
+              ...request,
+            }),
+          )) ?? { status: "refused" }
+        }
+        scaleX={
+          frame === undefined
+            ? 1
+            : (mount.current?.getBoundingClientRect().width ?? frame.width) / frame.width
+        }
+        scaleY={
+          frame === undefined
+            ? 1
+            : (mount.current?.getBoundingClientRect().height ?? frame.height) / frame.height
+        }
+        secureText={(text) => {
+          for (const character of text) sendInput.current({ type: "char", keyCode: character });
+        }}
+      />
       <EmbeddedBrowserTextInput
         editor={
           frame !== undefined && frame.presentationId === currentPresentation.current
@@ -373,6 +403,9 @@ export function EmbeddedBrowserSurface(props: {
             : (mount.current?.getBoundingClientRect().height ?? frame.height) / frame.height
         }
         compose={(composition) => compose.current(composition)}
+        secureText={(text) => {
+          for (const character of text) sendInput.current({ type: "char", keyCode: character });
+        }}
       />
       {failed ? (
         <OctantButton onClick={() => setAttempt((value) => value + 1)}>

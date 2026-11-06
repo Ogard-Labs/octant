@@ -63,8 +63,10 @@ export class BrowserTextComposition {
         if (this.#owned !== undefined) return { status: "refused" };
         const source = this.#options.source();
         const editor = await source.editor().catch(() => undefined);
+        // A password field never composes through Nightly's input context.
         if (
           editor === undefined ||
+          "secure" in editor ||
           editor.id !== edit.editorId ||
           generation !== this.#generation ||
           !this.#options.current() ||

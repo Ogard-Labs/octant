@@ -190,16 +190,25 @@ when you are ready to share what it shows.
 ## One-time token requests in Code
 
 An agent can use the `octant_credential` tool to open a private card in its
-Code conversation. Currently this supports a one-time Linear account access check.
+Code conversation. This supports a one-time Linear account access check and an Azure Resource Manager subscriptions-access check.
 Enter the API token and choose **Check access**, or choose **Decline**. The token
-is sent only to Linear for the displayed check; it does not become a chat
+is sent only to the displayed service for that check; it does not become a chat
 message or a saved sign-in. The destination and one-use scope are shown above
 the field. Use **Show token** to check your entry, or expand **Not saved or added
 to chat** for handling details.
 
+For Azure, obtain an unexpired short-lived Resource Manager access token yourself
+through your organization's approved sign-in, then enter it only in the private
+card. The complete approved subscriptions URL is shown; Octant sends one GET,
+refuses redirects and returns status only (the fixed [Azure subscriptions read](https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/list?view=rest-resources-2022-12-01)). It does not save, refresh or export
+the token, follow pagination, return subscription data to the agent, or provide
+Azure CLI credentials. Your token's own account and RBAC may allow more than this
+check; the fixed request does not narrow those permissions. If it expires or is
+refused, verify its access and ask for a fresh card; no broader sign-in is tried.
+
 The request expires after ten minutes and ends when the turn is cancelled or
 loses access. If the connection fails, Octant clears your entry and does not
-retry automatically. A token already sent to Linear cannot be recalled.
+retry automatically. A token already sent cannot be recalled.
 
 This card is available at the originating local window, outside Plan mode, for
 providers that support app-managed tools. It does not accept administrator

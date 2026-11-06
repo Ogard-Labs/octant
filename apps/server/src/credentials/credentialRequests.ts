@@ -95,7 +95,7 @@ export class CredentialRequests {
           label: input.operation.label,
           reason: input.operation.reason,
           consumer: input.operation.consumer,
-          destination: url.origin,
+          destination: input.operation.request.method === "GET" ? url.href : url.origin,
           actionLabel: input.operation.actionLabel,
           state: "pending",
         },
@@ -165,7 +165,7 @@ export class CredentialRequests {
       const spec = entry.operation.request;
       const response = await this.#fetch(
         new Request(spec.url, {
-          method: "POST",
+          method: spec.method ?? "POST",
           redirect: "error",
           credentials: "omit",
           cache: "no-store",
@@ -173,11 +173,16 @@ export class CredentialRequests {
             "content-type": "application/json",
             authorization: spec.authorization === "bearer" ? `Bearer ${secret}` : secret,
           },
-          body: spec.body,
+          ...(spec.method === "GET" ? {} : { body: spec.body }),
           signal: entry.controller.signal,
         }),
       );
-      const body = await boundedJson(response);
+      let body: unknown;
+      if (entry.operation.response === "status-only") {
+        await response.body?.cancel().catch(() => undefined);
+      } else {
+        body = await boundedJson(response);
+      }
       if (entry.state !== "using") return true;
       if (!entry.current()) this.#settle(entry, "cancelled");
       else this.#settle(entry, response.ok && entry.operation.accepted(body) ? "used" : "failed");

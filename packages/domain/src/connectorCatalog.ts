@@ -92,6 +92,50 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     },
   },
   {
+    id: "atlassian",
+    displayName: "Atlassian",
+    description: "Work with permitted Jira, Confluence and other Atlassian Cloud content.",
+    category: "business",
+    url: "https://mcp.atlassian.com/v2/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "airtable",
+    displayName: "Airtable",
+    description: "Read and update the bases you select during Airtable consent.",
+    category: "business",
+    url: "https://mcp.airtable.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "airtable-pat",
+    displayName: "Airtable personal token",
+    description: "Use a personal token limited to selected bases and read or write permissions.",
+    category: "business",
+    url: "https://mcp.airtable.com/mcp",
+    auth: {
+      kind: "key",
+      header: "Authorization",
+      prefix: "Bearer",
+      keyPage: "https://airtable.com/create/tokens",
+    },
+  },
+  {
+    id: "hubspot",
+    displayName: "HubSpot",
+    description: "Read and update CRM data with a connector you register in your HubSpot account.",
+    category: "business",
+    url: "https://mcp.hubspot.com/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide:
+        "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+      permissionNotice:
+        "Can read and write CRM data allowed by your HubSpot permissions and consent. Available tools depend on your subscription and account configuration. Create your own MCP connector and link its client secret before signing in.",
+    },
+  },
+  {
     id: "linear",
     displayName: "Linear",
     description: "Find, create, and update issues, projects, and comments.",

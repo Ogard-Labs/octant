@@ -1,4 +1,9 @@
 import {
+  readWorkspaceContent,
+  writeWorkspaceContent,
+  workspaceContentStorageKey,
+} from "./workspaceContentPersistence";
+import {
   rememberWorkspaceContent,
   settleThreadPreview,
   type ThreadPreview,
@@ -300,6 +305,18 @@ export function useShellController(options: ShellControllerOptions) {
   const [status, setStatus] = useState<ShellControllerStatus>("loading");
   const [authoritative, setAuthoritative] = useState<AuthoritativeShell>();
   const [contentTabs, setContentTabs] = useState<WorkspaceContentTabs>(new Map());
+  const contentStorageKey = workspaceContentStorageKey(options.serverUrl, options.windowId);
+  const contentOwner = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (authoritative !== undefined && contentOwner.current === contentStorageKey)
+      writeWorkspaceContent(
+        contentStorageKey,
+        authoritative.workspace,
+        contentTabs,
+        currentPreviewSet(previewThreads.current),
+      );
+  }, [authoritative, contentStorageKey, contentTabs]);
+
   // Threads opened with a single click from the sidebar; the next open in
   // their pane takes their tab. A double click keeps one (see workspace.md,
   // Opening into tabs). Read at commit time, so a ref rather than state.
@@ -317,6 +334,7 @@ export function useShellController(options: ShellControllerOptions) {
       ...(current === undefined || current === threadId ? {} : { current }),
       ...(pending === undefined || pending === threadId ? {} : { pending }),
     };
+    setContentTabs((current) => new Map(current));
   }, []);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [crossContextOffer, setCrossContextOffer] = useState<
@@ -364,11 +382,20 @@ export function useShellController(options: ShellControllerOptions) {
           );
           if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
           const next = fromBootstrap(bootstrap);
-          const previousWorkspace = committedShell.current?.workspace ?? next.workspace;
+          const sameContentOwner =
+            committedShell.current !== undefined && contentOwner.current === contentStorageKey;
+          const previousWorkspace = sameContentOwner
+            ? (committedShell.current?.workspace ?? next.workspace)
+            : next.workspace;
+          if (!sameContentOwner) previewThreads.current = {};
+          const restored = sameContentOwner
+            ? undefined
+            : readWorkspaceContent(contentStorageKey, next.workspace);
+          contentOwner.current = contentStorageKey;
           // Read the preview before settling it: the updater runs later.
           const preview = currentPreviewSet(previewThreads.current);
           setContentTabs((tabs) =>
-            rememberWorkspaceContent(tabs, previousWorkspace, next.workspace, preview),
+            rememberWorkspaceContent(restored ?? tabs, previousWorkspace, next.workspace, preview),
           );
           previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
           committedShell.current = next;
@@ -401,7 +428,7 @@ export function useShellController(options: ShellControllerOptions) {
       });
       return task;
     },
-    [bootstrapTimeoutMs, client, options.windowId],
+    [bootstrapTimeoutMs, client, options.windowId, contentStorageKey],
   );
 
   useEffect(() => {

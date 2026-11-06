@@ -44,6 +44,7 @@ describe("the agent message contract", () => {
     expect(AGENT_MESSAGE_AGGREGATE).toBe("agent-message");
     expect(AGENT_MESSAGE_EVENT_NAMES).toEqual({
       sent: "agent.message-sent@1",
+      expired: "agent.message-expired@1",
       delivered: "agent.message-delivered@1",
       refused: "agent.message-refused@1",
       acknowledged: "agent.message-acknowledged@1",

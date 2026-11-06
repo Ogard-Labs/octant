@@ -40,6 +40,35 @@ function confinedOptions(overrides: ConstructorParameters<typeof TerminalProcess
 }
 
 describe("TerminalProcessPort", () => {
+  it("runs a saved command as the process and reports its exit code without terminal input", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-action-process-"));
+    directories.push(directory);
+    const handle = new TerminalProcessPort(confinedOptions()).start({
+      shell: "/bin/sh",
+      command: "printf action-ready; exit 7",
+      cwd: directory,
+      stateScope: "saved-action",
+      environment: { PATH: "/usr/bin:/bin", HOME: directory },
+      columns: 80,
+      rows: 24,
+    });
+    let output = "";
+    let exitCode: number | undefined;
+    handle.onData((data) => {
+      output += data;
+    });
+    handle.onExit((result) => {
+      exitCode = result.exitCode;
+    });
+    try {
+      await handle.receiptReady;
+      await vi.waitFor(() => expect(exitCode).toBe(7));
+      expect(output).toContain("action-ready");
+    } finally {
+      await handle.close();
+    }
+  });
+
   it("reports only live terminal roots whose process identity still matches", async () => {
     const pty = fakePty();
     const identity = vi.fn(async () => "original");

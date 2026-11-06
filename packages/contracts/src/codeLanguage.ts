@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CodeCheckoutId, CodeFileId, CodeProjectFilePath, CodeThreadId } from "./code";
+import { CodeCheckoutId, CodeFileId, CodeProjectFilePath, CodeThreadId, CodeDigest } from "./code";
 import { ProjectId } from "./projects";
 import type { ProviderToolDefinition } from "./providers";
 
@@ -48,7 +48,44 @@ export const CodeLanguageRange = Schema.Struct({
   );
 export type CodeLanguageRange = typeof CodeLanguageRange.Type;
 
+export const CodeLanguageEditFile = Schema.Struct({
+  path: CodeProjectFilePath,
+  fileId: CodeFileId,
+  identity: Schema.Struct({
+    device: Schema.NonEmptyTrimmedString,
+    inode: Schema.NonEmptyTrimmedString,
+  }),
+  digest: CodeDigest,
+  before: Schema.String.pipe(Schema.maxLength(256 * 1024)),
+  after: Schema.String.pipe(Schema.maxLength(256 * 1024)),
+}).annotations(strict);
+export type CodeLanguageEditFile = typeof CodeLanguageEditFile.Type;
+
+export const CodeLanguageEditPreview = Schema.Struct({
+  title: Schema.String.pipe(Schema.maxLength(256)),
+  files: Schema.Array(CodeLanguageEditFile).pipe(Schema.maxItems(16)),
+}).annotations(strict);
+export type CodeLanguageEditPreview = typeof CodeLanguageEditPreview.Type;
+
 export const CodeLanguageReadRequest = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("rename"),
+    ...scope,
+    position: CodeLanguagePosition,
+    newName: Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(256),
+      Schema.filter((name) => !name.includes("\r") && !name.includes("\n") && !name.includes("\0")),
+    ),
+    expectedVersion: Schema.Int.pipe(Schema.positive()),
+    expectedRevision: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("quick-fixes"),
+    ...scope,
+    position: CodeLanguagePosition,
+    expectedVersion: Schema.Int.pipe(Schema.positive()),
+    expectedRevision: Schema.UUID,
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("diagnostics"), ...scope }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("definition"),
@@ -142,6 +179,19 @@ export const CodeLanguageReadResult = Schema.Union(
     status: Schema.Literal("capabilities"),
     ...scope,
     references: CodeLanguageReferenceSupport,
+    rename: Schema.optional(CodeLanguageReferenceSupport),
+    quickFixes: Schema.optional(CodeLanguageReferenceSupport),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("edit-previews"),
+    ...scope,
+    documentVersion: Schema.Int.pipe(Schema.positive()),
+    documentRevision: Schema.UUID,
+    previews: Schema.Array(CodeLanguageEditPreview).pipe(Schema.maxItems(16)),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("edit-unavailable"),
+    reason: Schema.Literal("unsafe-edit", "unsaved-edits", "invalid-edit", "too-large"),
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("references"),
@@ -163,7 +213,7 @@ export const CodeLanguageReadResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("unsupported"),
-    capability: Schema.Literal("references"),
+    capability: Schema.Literal("references", "rename", "quick-fixes"),
     support: Schema.Literal("unsupported", "unknown"),
   }).annotations(strict),
   Schema.Struct({ status: Schema.Literal("stale") }).annotations(strict),

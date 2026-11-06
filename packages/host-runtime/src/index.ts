@@ -116,8 +116,13 @@ export {
   type CredentialStoreFailureCategory,
 } from "./credentialStore";
 export {
+  clearSecretServiceTestData,
   makeSecretServiceCredentialStore,
   probeSecretService,
+  secretServiceAttribute,
+  SECRET_SERVICE_NAMESPACES,
+  SECRET_SERVICE_TEST_DATA_PREFIX,
+  type SecretServiceNamespace,
   SECRET_SERVICE_ATTRIBUTE,
   SECRET_SERVICE_BUSCTL_PATH,
   SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE,
@@ -221,14 +226,27 @@ export {
   type BrowserDownloadHoldKind,
 } from "./browserDownloadHold";
 export {
+  DEFAULT_FOLDER_ENVIRONMENT,
+  DESKTOP_DATA_CHOICE_FILE,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+  decodeKeychainServiceFamily,
+  keychainServicePrefix,
+  type KeychainServiceFamily,
   DESKTOP_FLAVOR_IDENTITIES,
+  decodeDesktopDataChoice,
+  desktopDataDirectoriesOverlap,
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  encodeDesktopDataChoice,
+  resolveDesktopHostRole,
   resolveDesktopPackageFlavor,
+  type DesktopDataChoice,
   type DesktopFlavor,
+  type DesktopHostRole,
   type DesktopIdentity,
 } from "./desktopIdentity";
+export { readStoredDesktopDataChoice } from "./desktopDataChoice";
 
 export {
   SLACK_MCP_USER_OAUTH,

@@ -1,3 +1,10 @@
+import {
+  decodeConversationInputReference,
+  type ConversationInputPolicy,
+  type ConversationInputReceipt,
+} from "@octant/contracts/conversation-inputs";
+import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
@@ -564,8 +571,10 @@ interface ChatTurnContextPlan {
 }
 
 interface PreparedChatTurn {
+  readonly inputsCurrent?: () => boolean;
   readonly sideChatSourceReceipt?: SideChatSourceReceipt;
   readonly nativeSession?: ChatAttempt;
+  readonly inputReceipt?: ConversationInputReceipt;
   /**
    * Set when the turn starts a new provider session with the thread's earlier
    * conversation handed over as text. The record is journaled with the turn's
@@ -639,6 +648,7 @@ export interface ChatServiceOptions {
    * the thread needs the person.
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -996,6 +1006,7 @@ export class ChatService {
   readonly #gatherMultiModelRuntimeFacts: NonNullable<
     ChatServiceOptions["gatherMultiModelRuntimeFacts"]
   >;
+  readonly #conversationInputTransfer: ChatServiceOptions["conversationInputTransfer"];
   readonly #attachmentStore: ChatAttachmentStore;
   readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
@@ -1060,6 +1071,7 @@ export class ChatService {
       ((input) => this.#probeMultiModelRuntimeFacts(input.pool));
     this.#attachmentStore =
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
+    this.#conversationInputTransfer = options.conversationInputTransfer;
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
@@ -2580,6 +2592,10 @@ export class ChatService {
           if (
             content === undefined ||
             content.body !== command.prompt ||
+            (existing.toolCatalogHandoff === true) !== (command.toolCatalogHandoff === true) ||
+            (existing.attempts[0]?.inputReceipt !== undefined &&
+              existing.attempts[0].inputReceipt.policy !==
+                (command.contextInputPolicy ?? "preserve")) ||
             JSON.stringify(existing.sideChatReturns ?? []) !==
               JSON.stringify(command.sideChatReturns ?? [])
           ) {
@@ -2587,7 +2603,7 @@ export class ChatService {
               decodeChatFailure({
                 category: "invalid",
                 message:
-                  "Chat submission identity was reused for a different message or Side Chat reference.",
+                  "Chat submission identity was reused for a different message, continuation choice or Side Chat reference.",
               }),
             );
           }
@@ -2645,9 +2661,14 @@ export class ChatService {
         executionContext,
         resolvedExtensions,
         command.sideChatReturns,
+        command.toolCatalogHandoff === true,
+        command.contextInputPolicy,
       );
       const attachmentIds = command.attachmentIds;
       const turn = beginChatTurn(prepared.executionThread, {
+        ...(command.toolCatalogHandoff === undefined
+          ? {}
+          : { toolCatalogHandoff: command.toolCatalogHandoff }),
         turnId,
         ...(command.submissionId === undefined ? {} : { submissionId: command.submissionId }),
         attemptId: this.#uuid() as ChatAttempt["id"],
@@ -2657,6 +2678,7 @@ export class ChatService {
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -2858,6 +2880,7 @@ export class ChatService {
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -3004,10 +3027,10 @@ export class ChatService {
    * the source thread — the command cannot choose them — so a branch can never
    * widen authority or escape the source thread's Project.
    *
-   * A branch carries message text only. Attachments stay bound to the source
-   * thread and are counted in `branchedFrom.omittedAttachmentCount` rather than
-   * silently dropped, and only completed attempts with readable response
-   * content are carried, so the branch never shows an exchange that did not
+   * A branch carries message text and immutable original-input references.
+   * Attachment bytes stay bound to their source and are reopened under current
+   * scope when the branch starts its own turn. Only completed attempts with
+   * readable response content are carried, so the branch never shows an exchange that did not
    * happen. A source whose provider keeps its conversation in a session of its
    * own cannot lend that session to the branch, which would share the source's
    * later turns: the branch's first turn starts a new session with the carried
@@ -3038,7 +3061,7 @@ export class ChatService {
     const timestamp = decodeTimestamp(this.#clock());
     const copiedContent: PreparedChatContent[] = [];
     const branchTurns: ChatTurn[] = [];
-    let omittedAttachmentCount = 0;
+    const omittedAttachmentCount = 0;
     for (const sourceTurn of carried) {
       const userContent = contentById.get(String(sourceTurn.userMessageRef.contentId));
       if (userContent === undefined) {
@@ -3047,7 +3070,35 @@ export class ChatService {
           message: "Chat turn content is unavailable.",
         });
       }
-      omittedAttachmentCount += sourceTurn.attachmentIds.length;
+      const originalInputs = [
+        ...(sourceTurn.originalInputs ?? []),
+        ...sourceTurn.attachmentIds.map((id) => {
+          const attachment = view.attachments.find(
+            (item) =>
+              String(item.id) === String(id) &&
+              String(item.threadId) === String(source.id) &&
+              item.status === "finalized",
+          );
+          if (attachment === undefined)
+            throw new ChatServiceError({
+              category: "unavailable",
+              message:
+                "An original branch input is unavailable. Restore it before branching; the source conversation is unchanged.",
+            });
+          return decodeConversationInputReference({
+            source: {
+              mode: "chat",
+              threadId: String(source.id),
+              attachmentId: String(id),
+              projectId: source.projectId === undefined ? null : String(source.projectId),
+            },
+            displayName: attachment.displayName,
+            mediaType: attachment.mediaType,
+            byteLength: attachment.byteLength,
+            digest: attachment.digest,
+          });
+        }),
+      ];
       const turnId = this.#uuid() as ChatTurn["id"];
       const userMessage = this.#prepareContent(branchThreadId, "user", userContent.body);
       copiedContent.push(userMessage);
@@ -3092,6 +3143,7 @@ export class ChatService {
           sequence: branchTurns.length + 1,
           userMessageRef: userMessage.reference,
           attachmentIds: [],
+          ...(originalInputs.length === 0 ? {} : { originalInputs }),
           attempts,
           createdAt: sourceTurn.createdAt,
         }),
@@ -3213,6 +3265,7 @@ export class ChatService {
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
     readonly record: ChatAttemptHandoff;
+    readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }>;
   } {
     const subject = { thread: "Chat", cause: reason === "branch" ? "branch" : "switch" } as const;
     const refuse = (why: ConversationHandoffRefusal): never => {
@@ -3250,6 +3303,7 @@ export class ChatService {
     if (owned !== "ok") return refuse(owned);
     return {
       blocks: selection.blocks,
+      selection,
       record:
         reason === "rewind"
           ? restartHandoffRecord(selection, "rewind")
@@ -3350,6 +3404,9 @@ export class ChatService {
         executionContext,
         undefined,
         turn.sideChatReturns,
+        false,
+        command.contextInputPolicy,
+        attempt.inputReceipt,
       );
       const nextAttempt = retryChatTurn(thread, attempt, {
         turnId: command.turnId,
@@ -3361,6 +3418,7 @@ export class ChatService {
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -3700,6 +3758,8 @@ export class ChatService {
         executionContext,
         undefined,
         turn.sideChatReturns,
+        false,
+        command.contextInputPolicy,
       );
       const nextAttempt = resumeChatTurn(thread, attempt, {
         turnId: command.turnId,
@@ -3986,6 +4046,9 @@ export class ChatService {
       readonly toolSet?: AppManagedToolSet;
     },
     sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>,
+    toolCatalogHandoff = false,
+    contextInputPolicy?: ConversationInputPolicy,
+    admittedInputReceipt?: ConversationInputReceipt,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
     const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
@@ -4029,75 +4092,7 @@ export class ChatService {
     const previousTurn =
       sinceRewind?.turn ?? (rewoundTail && keptTurns.length === 0 ? undefined : tailTurn);
     const previous = sinceRewind?.attempt ?? previousTurn?.attempts.at(-1);
-    const sessionDecision = decideConversationSession({
-      recipient: {
-        providerInstanceId: String(thread.providerInstanceId),
-        owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
-      },
-      ...(previous === undefined
-        ? {}
-        : {
-            previous: {
-              ...(rewoundTail ? { rewound: true } : {}),
-              providerInstanceId: String(previous.providerInstanceId),
-              continuable: resumableHost
-                ? this.#hostResumableSessionContinues(thread, previous, threadView?.turns ?? [])
-                : previous.resumeCursor !== undefined &&
-                  (previous.modelId === thread.modelId ||
-                    probe.capabilities.modelSwitch === "supported"),
-              // A same-provider model swap the provider cannot carry on starts
-              // a fresh session with a handoff instead of refusing the turn.
-              ...(previous.modelId !== thread.modelId &&
-              probe.capabilities.modelSwitch !== "supported"
-                ? { modelSwitchHandoff: true }
-                : {}),
-              // The session cursor is recorded when the session starts, before
-              // the provider is sent anything, so an attempt that carried a
-              // handoff and did not complete may never have delivered it.
-              ...(previous.handoff === undefined || previous.outcome === "completed"
-                ? {}
-                : { undeliveredHandoff: previous.handoff.reason }),
-            },
-          }),
-      // A branch copies message text, never the source's session, so until it
-      // has run a turn of its own there is no session to resume.
-      branchWithoutSession:
-        thread.branchedFrom !== undefined &&
-        previousTurn !== undefined &&
-        previousTurn.sequence <= thread.branchedFrom.carriedTurnCount,
-      // A resume continues a conversation that already has a session. A new
-      // message may start a handed-over one, and so may a retry whose own
-      // earlier session may never have received its handoff.
-      handoff: extensionPhase !== "resume" ? "allowed" : "refused",
-    });
-    if (sessionDecision.kind === "refuse") {
-      throw new ChatServiceError({
-        category: "unavailable",
-        message:
-          "This Chat task's native session cannot be recovered under the selected provider and model. Its history has been preserved.",
-      });
-    }
-    let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
-    const handoff =
-      sessionDecision.kind === "new-session-with-handoff"
-        ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
-            // A handoff that never completed is made again from the provider
-            // the conversation came from, not the one that may not have got it.
-            from:
-              previous?.handoff?.reason === "provider-switch" && previous.outcome !== "completed"
-                ? {
-                    providerInstanceId: previous.handoff.previousProviderInstanceId,
-                    modelId: previous.handoff.previousModelId,
-                  }
-                : previous === undefined
-                  ? undefined
-                  : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
-            excludeTurnId: threadView?.turns.find(
-              (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
-            )?.id,
-          })
-        : undefined;
-    const attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
+    let attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
     const carriesAppTools =
@@ -4137,133 +4132,342 @@ export class ChatService {
       resolvedExtensions.toolSet,
       MAX_PROVIDER_TOOLS,
     );
-    this.#preflightChatTurn(probe, thread, attachments, tools);
-    const providerFacts = await this.#resolveProviderContextFacts(
-      driver,
-      probe,
-      decodeProviderModelId(thread.modelId),
-    );
-    const sideChatSourceRead = await this.#resolveSideChatSource(
-      thread,
-      executionContext,
-      (tools?.definitions ?? [])
-        .map((definition) => definition.name)
-        .filter((name) => SIDE_CHAT_READ_TOOL_NAMES.has(name)),
-    );
-    const sideChatSource = sideChatSourceRead?.text;
-    const sideChatSourceContext =
-      sideChatSource === undefined
-        ? undefined
-        : this.#sideChatSourceForTurn(thread.id, sideChatSource, {
-            // Only a fresh send on a provider-owned session can lean on what
-            // the session already holds. A host-owned conversation rebuilds
-            // its context every turn and never saw the earlier snapshot, and
-            // an edit, retry, or resume may rewind the session behind it.
-            // Only a continued session still holds the earlier snapshot; a new
-            // one, handed over or not, has never seen it.
-            reusable: sessionDecision.kind === "continue-session" && extensionPhase === "send",
-            previous,
+    let toolsPrepared = false;
+    try {
+      const catalogChanged =
+        previous?.resumeCursor !== undefined &&
+        String(previous.providerInstanceId) === String(thread.providerInstanceId) &&
+        driver.toolCatalogContinuation?.({
+          resumeCursor: previous.resumeCursor,
+          tools: tools?.definitions ?? [],
+        }) === "handoff-required";
+      if (catalogChanged && !toolCatalogHandoff) {
+        throw new ChatServiceError({
+          category: "tools-changed",
+          message:
+            "The saved session has different tools. Choose Continue with updated tools to start a fresh session with the conversation handed over as text. Your draft and saved conversation are preserved.",
+        });
+      }
+      const sessionDecision = decideConversationSession({
+        recipient: {
+          providerInstanceId: String(thread.providerInstanceId),
+          owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
+        },
+        ...(previous === undefined
+          ? {}
+          : {
+              previous: {
+                ...(toolCatalogHandoff && driver.toolCatalogContinuation !== undefined
+                  ? { toolCatalogHandoff: true }
+                  : {}),
+                ...(rewoundTail ? { rewound: true } : {}),
+                providerInstanceId: String(previous.providerInstanceId),
+                continuable: resumableHost
+                  ? this.#hostResumableSessionContinues(thread, previous, threadView?.turns ?? [])
+                  : previous.resumeCursor !== undefined &&
+                    (previous.modelId === thread.modelId ||
+                      probe.capabilities.modelSwitch === "supported"),
+                // A same-provider model swap the provider cannot carry on starts
+                // a fresh session with a handoff instead of refusing the turn.
+                ...(previous.modelId !== thread.modelId &&
+                probe.capabilities.modelSwitch !== "supported"
+                  ? { modelSwitchHandoff: true }
+                  : {}),
+                // The session cursor is recorded when the session starts, before
+                // the provider is sent anything, so an attempt that carried a
+                // handoff and did not complete may never have delivered it.
+                ...(previous.handoff === undefined || previous.outcome === "completed"
+                  ? {}
+                  : { undeliveredHandoff: previous.handoff.reason }),
+              },
+            }),
+        // A branch copies message text, never the source's session, so until it
+        // has run a turn of its own there is no session to resume.
+        branchWithoutSession:
+          thread.branchedFrom !== undefined &&
+          previousTurn !== undefined &&
+          previousTurn.sequence <= thread.branchedFrom.carriedTurnCount,
+        // A resume continues a conversation that already has a session. A new
+        // message may start a handed-over one, and so may a retry whose own
+        // earlier session may never have received its handoff.
+        handoff: extensionPhase !== "resume" ? "allowed" : "refused",
+      });
+      if (sessionDecision.kind === "refuse") {
+        throw new ChatServiceError({
+          category: "unavailable",
+          message:
+            "This Chat task's native session cannot be recovered under the selected provider and model. Its history has been preserved.",
+        });
+      }
+      let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
+      let handoff =
+        sessionDecision.kind === "new-session-with-handoff"
+          ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
+              // A handoff that never completed is made again from the provider
+              // the conversation came from, not the one that may not have got it.
+              from:
+                previous?.handoff?.reason === "provider-switch" && previous.outcome !== "completed"
+                  ? {
+                      providerInstanceId: previous.handoff.previousProviderInstanceId,
+                      modelId: previous.handoff.previousModelId,
+                    }
+                  : previous === undefined
+                    ? undefined
+                    : {
+                        providerInstanceId: previous.providerInstanceId,
+                        modelId: previous.modelId,
+                      },
+              excludeTurnId: threadView?.turns.find(
+                (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
+              )?.id,
+            })
+          : undefined;
+      const branchNeedsInputs =
+        thread.branchedFrom !== undefined &&
+        previousTurn !== undefined &&
+        previousTurn.sequence <= thread.branchedFrom.carriedTurnCount;
+      const hostInputReason =
+        sessionDecision.kind !== "host-rebuild" ||
+        !keptTurns.some(
+          (turn) => turn.attachmentIds.length > 0 || (turn.originalInputs?.length ?? 0) > 0,
+        )
+          ? undefined
+          : rewoundTail
+            ? "rewind"
+            : branchNeedsInputs
+              ? "branch"
+              : previous !== undefined &&
+                  (String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
+                    String(previous.modelId) !== String(thread.modelId))
+                ? "provider-switch"
+                : undefined;
+      const inputHandoff =
+        handoff ??
+        (hostInputReason === undefined
+          ? undefined
+          : this.#selectConversationHandoff(thread, threadView, hostInputReason, {
+              from:
+                previous === undefined
+                  ? undefined
+                  : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
+              excludeTurnId: threadView?.turns.find(
+                (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
+              )?.id,
+            }));
+      let inputReceipt: ConversationInputReceipt | undefined;
+      let inputsCurrent: (() => boolean) | undefined;
+      const inputOnlyBlocks: ProviderContextBlock[] = [];
+      const inputPurpose =
+        inputHandoff?.record.reason ??
+        (sessionDecision.kind === "host-rebuild" ? admittedInputReceipt?.purpose : undefined);
+      if (inputPurpose !== undefined) {
+        const transfer = this.#conversationInputTransfer;
+        const previousReceipt =
+          admittedInputReceipt?.purpose === inputPurpose
+            ? admittedInputReceipt
+            : previous?.outcome !== "completed" && previous?.inputReceipt?.purpose === inputPurpose
+              ? previous.inputReceipt
+              : undefined;
+        if (
+          transfer === undefined &&
+          ((inputHandoff?.selection.inputs?.length ?? 0) > 0 ||
+            inputHandoff?.selection.inputUnavailable === true ||
+            previousReceipt !== undefined)
+        )
+          throw new ChatServiceError({
+            category: "unavailable",
+            message: "Original source inputs cannot be transferred on this host. Nothing was sent.",
           });
-    let returnedProvenance: string | undefined;
-    if ((sideChatReturns?.length ?? 0) > 0) {
-      if (this.#resolveSideChatReturns === undefined)
-        throw new ChatServiceError({
-          category: "unavailable",
-          message: SIDE_CHAT_RETURN_UNAVAILABLE,
+        const prepared = await transfer?.prepare({
+          owner: {
+            mode: "chat",
+            threadId: String(thread.id),
+            projectId: thread.projectId === undefined ? null : String(thread.projectId),
+          },
+          purpose: inputPurpose,
+          ...(inputHandoff === undefined ? {} : { selection: inputHandoff.selection }),
+          ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
+          ...(contextInputPolicy === undefined ? {} : { policy: contextInputPolicy }),
+          target: {
+            providerInstanceId: String(thread.providerInstanceId),
+            modelId: String(thread.modelId),
+          },
+          current: () =>
+            executionContext?.admissionCurrent?.() !== false &&
+            this.#persistence.readChatThread(thread.id)?.lifecycle === "active",
         });
-      try {
-        returnedProvenance = await this.#resolveSideChatReturns({
-          references: sideChatReturns ?? [],
-          readerThreadId: String(thread.id),
-          mode: "chat",
-          ...(executionContext?.windowId === undefined
-            ? {}
-            : { windowId: executionContext.windowId }),
-        });
-      } catch {
-        throw new ChatServiceError({
-          category: "unavailable",
-          message: SIDE_CHAT_RETURN_UNAVAILABLE,
-        });
+        if (prepared?.status === "refused")
+          throw new ChatServiceError({ category: "unavailable", message: prepared.message });
+        if (prepared?.status === "ready" && prepared.receipt !== undefined) {
+          inputsCurrent = prepared.inputsCurrent;
+          attachments = [...attachments, ...prepared.attachments];
+          inputReceipt = prepared.receipt;
+          if (handoff === undefined)
+            inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
+          else
+            handoff = {
+              ...handoff,
+              blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
+              record: {
+                ...handoff.record,
+                inputReceipt: prepared.receipt,
+                omissions: {
+                  ...handoff.record.omissions,
+                  attachments: Math.max(
+                    0,
+                    handoff.record.omissions.attachments - prepared.receipt.included,
+                  ),
+                },
+              },
+            };
+        }
       }
-      if (returnedProvenance.trim().length === 0)
-        throw new ChatServiceError({
-          category: "unavailable",
-          message: SIDE_CHAT_RETURN_UNAVAILABLE,
-        });
-    }
-    const threadMentionContexts = await this.#resolveThreadMentions(
-      thread.id,
-      threadMentionIds,
-      executionContext,
-      tools?.definitions.some((definition) => definition.name === THREAD_DIALOGUE_TOOL_NAME) ===
-        true,
-    );
-    // A continued harness session already holds the conversation, but it is
-    // still planned in full: the plan is what admission and capacity size the
-    // request by (the session sends its transcript again with every request),
-    // what a requested compaction summarizes from, and what decides whether
-    // the conversation still fits. Only the send leaves it out.
-    const personMemoryText = this.#personMemoryBlock?.({
-      thread,
-      windowId: executionContext?.windowId,
-    });
-    const planWith = (sideChatContext: string | undefined) =>
-      this.#planContext(
-        thread,
-        prompt,
-        currentRef,
-        attachmentIds,
-        previewSelections,
-        canvasSelections,
-        resolvedExtensions.entries,
-        providerFacts.modelLimitObservations,
-        providerFacts.serviceLimits,
-        researchRoute,
-        nativeConversation ? [] : undefined,
-        [sideChatContext, returnedProvenance]
-          .filter((text) => text !== undefined && text.length > 0)
-          .join("\n\n") || undefined,
-        threadMentionContexts,
-        handoff?.blocks,
-        offersCanvasTool(tools?.definitions),
-        appToolHostLines(tools?.definitions),
-        personMemoryText,
+
+      this.#preflightChatTurn(probe, thread, attachments, tools);
+      const providerFacts = await this.#resolveProviderContextFacts(
+        driver,
+        probe,
+        decodeProviderModelId(thread.modelId),
       );
-    let context = planWith(sideChatSourceContext);
-    // A plan that leaves earlier conversation out to fit cannot be met by the
-    // continued session, which would carry all of it and drop older exchanges
-    // on its own without a summary. The host rebuilds the history in a fresh
-    // session instead and compacts what it drops, as for any host-planned turn.
-    if (resumableHost && nativeSession !== undefined && conversationLeftOut(context)) {
-      nativeSession = undefined;
-      // The fresh session never saw the sidecar source the continued one held.
-      if (sideChatSource !== undefined && sideChatSourceContext !== sideChatSource) {
-        context = planWith(
-          this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous }),
-        );
+      const sideChatSourceRead = await this.#resolveSideChatSource(
+        thread,
+        executionContext,
+        (tools?.definitions ?? [])
+          .map((definition) => definition.name)
+          .filter((name) => SIDE_CHAT_READ_TOOL_NAMES.has(name)),
+      );
+      const sideChatSource = sideChatSourceRead?.text;
+      const sideChatSourceContext =
+        sideChatSource === undefined
+          ? undefined
+          : this.#sideChatSourceForTurn(thread.id, sideChatSource, {
+              // Only a fresh send on a provider-owned session can lean on what
+              // the session already holds. A host-owned conversation rebuilds
+              // its context every turn and never saw the earlier snapshot, and
+              // an edit, retry, or resume may rewind the session behind it.
+              // Only a continued session still holds the earlier snapshot; a new
+              // one, handed over or not, has never seen it.
+              reusable: sessionDecision.kind === "continue-session" && extensionPhase === "send",
+              previous,
+            });
+      let returnedProvenance: string | undefined;
+      if ((sideChatReturns?.length ?? 0) > 0) {
+        if (this.#resolveSideChatReturns === undefined)
+          throw new ChatServiceError({
+            category: "unavailable",
+            message: SIDE_CHAT_RETURN_UNAVAILABLE,
+          });
+        try {
+          returnedProvenance = await this.#resolveSideChatReturns({
+            references: sideChatReturns ?? [],
+            readerThreadId: String(thread.id),
+            mode: "chat",
+            ...(executionContext?.windowId === undefined
+              ? {}
+              : { windowId: executionContext.windowId }),
+          });
+        } catch {
+          throw new ChatServiceError({
+            category: "unavailable",
+            message: SIDE_CHAT_RETURN_UNAVAILABLE,
+          });
+        }
+        if (returnedProvenance.trim().length === 0)
+          throw new ChatServiceError({
+            category: "unavailable",
+            message: SIDE_CHAT_RETURN_UNAVAILABLE,
+          });
       }
+      const threadMentionContexts = await this.#resolveThreadMentions(
+        thread.id,
+        threadMentionIds,
+        executionContext,
+        tools?.definitions.some((definition) => definition.name === THREAD_DIALOGUE_TOOL_NAME) ===
+          true,
+      );
+      // A continued harness session already holds the conversation, but it is
+      // still planned in full: the plan is what admission and capacity size the
+      // request by (the session sends its transcript again with every request),
+      // what a requested compaction summarizes from, and what decides whether
+      // the conversation still fits. Only the send leaves it out.
+      const personMemoryText = this.#personMemoryBlock?.({
+        thread,
+        windowId: executionContext?.windowId,
+      });
+      const planWith = (sideChatContext: string | undefined) =>
+        this.#planContext(
+          thread,
+          prompt,
+          currentRef,
+          attachmentIds,
+          previewSelections,
+          canvasSelections,
+          resolvedExtensions.entries,
+          providerFacts.modelLimitObservations,
+          providerFacts.serviceLimits,
+          researchRoute,
+          nativeConversation ? [] : undefined,
+          [sideChatContext, returnedProvenance]
+            .filter((text) => text !== undefined && text.length > 0)
+            .join("\n\n") || undefined,
+          threadMentionContexts,
+          handoff === undefined
+            ? inputOnlyBlocks.length === 0
+              ? undefined
+              : inputOnlyBlocks
+            : handoff.blocks,
+          offersCanvasTool(tools?.definitions),
+          appToolHostLines(tools?.definitions),
+          personMemoryText,
+        );
+      let context = planWith(sideChatSourceContext);
+      // A plan that leaves earlier conversation out to fit cannot be met by the
+      // continued session, which would carry all of it and drop older exchanges
+      // on its own without a summary. The host rebuilds the history in a fresh
+      // session instead and compacts what it drops, as for any host-planned turn.
+      if (resumableHost && nativeSession !== undefined && conversationLeftOut(context)) {
+        nativeSession = undefined;
+        // The fresh session never saw the sidecar source the continued one held.
+        if (sideChatSource !== undefined && sideChatSourceContext !== sideChatSource) {
+          context = planWith(
+            this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous }),
+          );
+        }
+      }
+      const maintained = nativeConversation
+        ? context
+        : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
+      toolsPrepared = true;
+      return {
+        executionThread: thread,
+        ...(inputsCurrent === undefined ? {} : { inputsCurrent }),
+        ...(inputReceipt === undefined ? {} : { inputReceipt }),
+        ...(nativeSession === undefined ? {} : { nativeSession }),
+        ...(handoff === undefined ? {} : { handoff: handoff.record }),
+        context:
+          resumableHost && nativeSession !== undefined
+            ? withoutHeldConversation(maintained)
+            : maintained,
+        attachments,
+        researchRoute,
+        serviceLimits: providerFacts.serviceLimits,
+        ...(tools === undefined ? {} : { appManagedTools: tools }),
+        extensionSelections: resolvedExtensions.selections,
+        ...(sideChatSourceRead?.receipt === undefined
+          ? {}
+          : { sideChatSourceReceipt: sideChatSourceRead.receipt }),
+      };
+    } finally {
+      if (!toolsPrepared)
+        await Effect.runPromise(
+          Effect.promise(async () => {
+            await tools?.close?.();
+          }).pipe(
+            Effect.timeout("2 seconds"),
+            Effect.catchAllCause(() => Effect.logWarning("Prepared Chat tool cleanup failed.")),
+          ),
+        );
     }
-    const maintained = nativeConversation
-      ? context
-      : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
-    return {
-      executionThread: thread,
-      ...(nativeSession === undefined ? {} : { nativeSession }),
-      ...(handoff === undefined ? {} : { handoff: handoff.record }),
-      context:
-        resumableHost && nativeSession !== undefined
-          ? withoutHeldConversation(maintained)
-          : maintained,
-      attachments,
-      researchRoute,
-      serviceLimits: providerFacts.serviceLimits,
-      ...(tools === undefined ? {} : { appManagedTools: tools }),
-      extensionSelections: resolvedExtensions.selections,
-      ...(sideChatSourceRead?.receipt === undefined
-        ? {}
-        : { sideChatSourceReceipt: sideChatSourceRead.receipt }),
-    };
   }
 
   /**
@@ -5969,6 +6173,9 @@ export class ChatService {
               reservationId,
               estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
               attachments: input.prepared.attachments,
+              ...(input.prepared.inputsCurrent === undefined
+                ? {}
+                : { inputsCurrent: input.prepared.inputsCurrent }),
               ...nativeSetupOption(
                 sessionNativeSetup(this.#persistence, {
                   providerInstanceId,

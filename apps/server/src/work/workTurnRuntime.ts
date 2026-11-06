@@ -80,6 +80,8 @@ export type WorkTurnRuntimeOutcome =
   | { readonly kind: "failed"; readonly failure: WorkTurnFailure };
 
 export interface WorkTurnRuntimePort {
+  canForceStop?(requestId: string): boolean;
+  forceStop?(requestId: string): Promise<boolean>;
   run(input: {
     readonly command: StartWorkThreadTurnCommand;
     readonly providerSessionId: ProviderSessionId;
@@ -176,6 +178,20 @@ export interface WorkTurnRuntimeOptions {
  */
 export class WorkTurnRuntime implements WorkTurnRuntimePort {
   readonly #timeoutMs: number;
+  readonly #forceStops = new Map<
+    string,
+    {
+      readonly kill: () => Promise<boolean>;
+      readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
+    }
+  >();
+
+  canForceStop(requestId: string): boolean {
+    return this.#forceStops.has(requestId);
+  }
+  async forceStop(requestId: string): Promise<boolean> {
+    return (await this.#forceStops.get(requestId)?.kill()) ?? false;
+  }
   /** Each running turn's review rows, by thread: one Work thread runs one turn at a time. */
   readonly #shieldReviews = new Map<string, (review: WorkShieldReview) => void>();
 
@@ -212,6 +228,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         },
       });
     } finally {
+      this.#forceStops.delete(String(input.command.requestId));
       input.liveTurn?.end();
     }
     try {
@@ -240,7 +257,15 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         ),
       ).pipe(Effect.map((outcome): LifecycleResult => ({ kind: "outcome", outcome })));
       const boundary = Effect.raceFirst(
-        abortEffect(input.signal).pipe(Effect.as<LifecycleResult>({ kind: "cancelled" })),
+        abortEffect(input.signal).pipe(
+          Effect.flatMap(() => {
+            const owned = this.#forceStops.get(String(input.command.requestId));
+            return owned === undefined
+              ? Effect.void
+              : owned.interrupt().pipe(Effect.catchAll(() => Effect.void));
+          }),
+          Effect.as<LifecycleResult>({ kind: "cancelled" }),
+        ),
         idle.expired.pipe(Effect.as<LifecycleResult>({ kind: "timeout" })),
       );
       const result = await Effect.runPromise(Effect.raceFirst(execution, boundary));
@@ -269,6 +294,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
     const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
     const shieldReviews = this.#shieldReviews;
+    const forceStops = this.#forceStops;
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
@@ -346,6 +372,18 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             modelId: input.command.authority.modelId,
             resumeCursor: input.resumeCursor,
           });
+      const kill = connection.forceStop;
+      if (kill !== undefined)
+        forceStops.set(String(input.command.requestId), {
+          kill: () =>
+            Effect.runPromise(
+              kill(input.providerSessionId).pipe(
+                Effect.as(true),
+                Effect.catchAll(() => Effect.succeed(false)),
+              ),
+            ),
+          interrupt: () => connection.interrupt(input.providerSessionId),
+        });
       if (input.onSessionReady !== undefined) {
         yield* Effect.try({
           try: () => input.onSessionReady?.(handle),

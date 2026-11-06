@@ -235,6 +235,7 @@ export function changeChatResearch(thread: ChatThread, input: ChangeChatResearch
 }
 
 export interface BeginChatTurnInput {
+  readonly toolCatalogHandoff?: boolean;
   readonly turnId: ChatTurnId;
   readonly submissionId?: ChatTurn["submissionId"];
   readonly attemptId: ChatAttempt["id"];
@@ -242,6 +243,7 @@ export interface BeginChatTurnInput {
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
   /** Set when this turn's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
+  readonly inputReceipt?: ChatAttempt["inputReceipt"];
   readonly contextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly sideChatReturns?: ChatTurn["sideChatReturns"];
@@ -276,6 +278,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     providerSessionId: input.providerSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
+    ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
     ...(input.sideChatSourceReceipt === undefined
@@ -292,6 +295,9 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     id: input.turnId,
     threadId: thread.id,
     ...(input.submissionId === undefined ? {} : { submissionId: input.submissionId }),
+    ...(input.toolCatalogHandoff === undefined
+      ? {}
+      : { toolCatalogHandoff: input.toolCatalogHandoff }),
     sequence: input.sequence,
     userMessageRef: input.userMessageRef,
     attachmentIds: input.attachmentIds ?? [],
@@ -420,6 +426,7 @@ export interface RetryChatTurnInput {
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
   /** Set when the retried attempt's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
+  readonly inputReceipt?: ChatAttempt["inputReceipt"];
   readonly newContextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
@@ -471,6 +478,7 @@ export function retryChatTurn(
     providerSessionId: input.newProviderSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
+    ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
     ...(input.sideChatSourceReceipt === undefined
@@ -531,6 +539,7 @@ export function resumeChatTurn(
     providerInstanceId: attempt.providerInstanceId,
     providerSessionId: attempt.providerSessionId,
     modelId: attempt.modelId,
+    ...(attempt.inputReceipt === undefined ? {} : { inputReceipt: attempt.inputReceipt }),
     contextManifestId: input.newContextManifestId,
     ...(input.sideChatSourceReceipt === undefined
       ? {}

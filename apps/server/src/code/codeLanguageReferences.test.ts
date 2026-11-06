@@ -1,8 +1,116 @@
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { codeLanguageReferencesFixture as fixture } from "./codeLanguageReferencesTestFixtures";
 describe("current document references through real companion and controlled stdio", () => {
+  it("prepares a bounded cross-file rename in Plan and only offers command-free quick fixes", async () => {
+    const f = fixture({ editCapabilities: true });
+    await f.open();
+    const range = { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } };
+    const changes = {
+      [pathToFileURL(join(f.checkout, "a.ts")).href]: [{ range, newText: "renamed" }],
+      [pathToFileURL(join(f.checkout, "b.ts")).href]: [
+        {
+          range: { start: { line: 0, character: 9 }, end: { line: 0, character: 14 } },
+          newText: "renamed",
+        },
+      ],
+    };
+    f.state.controls.result = { changes };
+    expect(await f.edits()).toMatchObject({
+      status: "edit-previews",
+      previews: [
+        { files: [{ path: "a.ts", after: "export const renamed = 1;\n" }, { path: "b.ts" }] },
+      ],
+    });
+    f.notify("textDocument/publishDiagnostics", {
+      uri: pathToFileURL(join(f.checkout, "b.ts")).href,
+      diagnostics: [{ range, message: "Missing import", code: 123 }],
+    });
+    f.state.controls.result = [
+      { title: "Run command", command: { command: "unsafe" }, edit: { changes } },
+      { title: "Fix import", edit: { changes } },
+    ];
+    expect(await f.edits("quick-fixes")).toMatchObject({
+      status: "edit-previews",
+      previews: [{ title: "Fix import" }],
+    });
+    expect(
+      f.received.find((call) => call.method === "textDocument/codeAction")?.params,
+    ).toMatchObject({
+      context: { diagnostics: [expect.objectContaining({ code: 123 })], only: ["quickfix"] },
+    });
+    expect(f.received.some((call) => call.method === "workspace/executeCommand")).toBe(false);
+    f.state.controls.result = {
+      changes: { [pathToFileURL(join(f.checkout, "escape.ts")).href]: [{ range, newText: "bad" }] },
+    };
+    expect(await f.edits()).toEqual({ status: "edit-unavailable", reason: "unsafe-edit" });
+  });
+  it("refuses a closed rename target changed while the server calculates its edits", async () => {
+    const f = fixture({ editCapabilities: true });
+    await f.open();
+    const uri = pathToFileURL(join(f.checkout, "a.ts")).href;
+    f.state.controls.result = {
+      changes: {
+        [uri]: [
+          {
+            range: { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } },
+            newText: "renamed",
+          },
+        ],
+      },
+    };
+    f.state.controls.beforeEdit = async () => {
+      writeFileSync(join(f.checkout, "a.ts"), "unrelated replacement contents\n");
+    };
+    expect(await f.edits()).toMatchObject({ status: "edit-unavailable", reason: "invalid-edit" });
+  });
+  it("includes current pull diagnostics when requesting a quick fix", async () => {
+    const f = fixture({ editCapabilities: true, pullsDiagnostics: true });
+    await f.open();
+    f.state.controls.diagnostics = [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+        message: "Missing import",
+        code: 321,
+      },
+    ];
+    f.state.controls.result = [];
+    await f.edits("quick-fixes");
+    expect(
+      f.received.find((call) => call.method === "textDocument/codeAction")?.params,
+    ).toMatchObject({ context: { diagnostics: [expect.objectContaining({ code: 321 })] } });
+  });
+  it("prepares rename independently of reference support and rejects an old document revision", async () => {
+    const f = fixture({ editCapabilities: true, capability: false });
+    const opened = await f.open();
+    if (opened.status !== "synced" || opened.documentRevision === undefined)
+      throw Error("Missing acknowledgement");
+    const change = await f.service.syncDocument(f.caller, {
+      kind: "change",
+      threadId: f.state.thread.id,
+      checkoutId: f.state.thread.checkoutId,
+      fileId: f.fileId,
+      expectedRevision: opened.documentRevision,
+      text: "unsaved replacement",
+    });
+    expect(change).toMatchObject({ status: "synced" });
+    expect(await f.edits()).toEqual({ status: "stale" });
+    expect(f.received.some((call) => call.method === "textDocument/rename")).toBe(false);
+  });
+  it("refuses stale and unavailable rename requests without inferring support from references", async () => {
+    const f = fixture();
+    await f.open();
+    expect(await f.edits()).toEqual({
+      status: "unsupported",
+      capability: "rename",
+      support: "unsupported",
+    });
+    f.state.reach = false;
+    expect(await f.edits()).toMatchObject({ status: "refused", reason: "no-reach" });
+  });
+
   it("maps cross-file references and redacts a hostile symlink without executing a server command", async () => {
     const f = fixture();
     expect(await f.open()).toMatchObject({ status: "synced" });

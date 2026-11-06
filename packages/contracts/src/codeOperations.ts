@@ -1,3 +1,4 @@
+import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
 import { Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import {
@@ -977,6 +978,9 @@ const PrepareReviewCorrection = Schema.Struct({
 }).annotations(strict);
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...OperationScope,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
@@ -1044,6 +1048,11 @@ const AnswerProviderApproval = Schema.Struct({
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
 }).annotations(strict);
+const ForceStopProviderTurn = Schema.Struct({
+  kind: Schema.Literal("force-stop-provider-turn"),
+  ...OperationScope,
+  turnOperationId: CodeOperationId,
+}).annotations(strict);
 const CancelProviderTurn = Schema.Struct({
   kind: Schema.Literal("cancel-provider-turn"),
   ...OperationScope,
@@ -1082,6 +1091,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "answer-provider-input",
   "answer-provider-approval",
   "cancel-provider-turn",
+  "force-stop-provider-turn",
 ] as const;
 
 export const CodeOperationCommand = Schema.Union(
@@ -1125,6 +1135,7 @@ export const CodeOperationCommand = Schema.Union(
   AnswerProviderInput,
   AnswerProviderApproval,
   CancelProviderTurn,
+  ForceStopProviderTurn,
 );
 export type CodeOperationCommand = typeof CodeOperationCommand.Type;
 
@@ -1689,6 +1700,7 @@ const OperationStateEvent = Schema.Struct({
   failure: Schema.optional(CodeOperationFailure),
 }).annotations(strict);
 const ConversationTurnStartedEvent = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   kind: Schema.Literal("conversation-turn-started"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -1937,6 +1949,7 @@ const handoffMessages = Schema.Int.pipe(
  * in the content store the event names.
  */
 const ProviderSwitchHandoff = Schema.Struct({
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   /**
    * `rewind`: the thread was rewound in place and its provider cannot cut its
    * own session back, so the next turn started a fresh session with the kept
@@ -1974,6 +1987,7 @@ const ProviderSwitchHandoff = Schema.Struct({
  * it, so the summary does not repeat them.
  */
 const ForkTextHandoff = Schema.Struct({
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   reason: Schema.Literal("fork"),
   forkedFrom: CodeThreadForkOrigin,
   messages: handoffMessages,
@@ -2018,6 +2032,7 @@ export const MAX_CODE_FORK_MERGE_BACKS_PER_TURN = 2;
  * fork's file changes reach the source only through Git review.
  */
 export const CodeForkMergeBack = Schema.Struct({
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   forkThreadId: CodeThreadId,
   /** The fork turn the previous merge back ended at; absent for the first one. */
   afterOperationId: Schema.optional(CodeOperationId),
@@ -2057,6 +2072,7 @@ const ProviderSwitchHandoffAttachedEvent = Schema.Struct({
   content: CodeEvidenceReference,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 
 /**
@@ -2072,6 +2088,7 @@ const ForkTextHandoffAttachedEvent = Schema.Struct({
   content: CodeEvidenceReference,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 
 /**
@@ -2098,6 +2115,7 @@ const ForkContextMergedEvent = Schema.Struct({
   content: CodeEvidenceReference,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 
 /**

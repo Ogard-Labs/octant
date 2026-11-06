@@ -1,5 +1,11 @@
 import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import {
+  CHILD_WORKTREE_SOURCE_UPDATED,
+  ChildWorktreeSourceUpdated,
+  CHILD_WORKTREE_SEED_UPDATED,
+  ChildWorktreeSeedUpdated,
+} from "@octant/contracts";
+import {
   OWNER_BROWSER_AUDIT_EVENT,
   OwnerBrowserAuditRecord,
 } from "@octant/contracts/owner-browser";
@@ -164,6 +170,8 @@ import {
   ExtensionProjectPinChanged,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
+  WORKTREE_PREPARATION_UPDATED,
+  WorktreePreparationUpdated,
   PROJECT_TERMINAL_EVENT_NAMES,
   ProjectTerminalEnded,
   ProjectTerminalStarted,
@@ -232,6 +240,7 @@ import {
   AgentMessageSent,
   AgentMessageDelivered,
   AgentMessageRefused,
+  AgentMessageExpired,
   AgentMessageAcknowledged,
   ThreadEgressDecisionsRecordedPayload,
   ThreadEgressLaunchStartedPayload,
@@ -613,6 +622,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
     .register(AGENT_MESSAGE_EVENT_NAMES.refused, 1, AgentMessageRefused)
+    .register(AGENT_MESSAGE_EVENT_NAMES.expired, 1, AgentMessageExpired)
     .register(AGENT_MESSAGE_EVENT_NAMES.acknowledged, 1, AgentMessageAcknowledged)
     .register("automation-notification-preferences-updated@1", 1, AutomationNotificationPreferences)
     .register(
@@ -670,6 +680,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
+    .register(WORKTREE_PREPARATION_UPDATED, 1, WorktreePreparationUpdated)
+    .register(CHILD_WORKTREE_SOURCE_UPDATED, 1, ChildWorktreeSourceUpdated)
+    .register(CHILD_WORKTREE_SEED_UPDATED, 1, ChildWorktreeSeedUpdated)
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)

@@ -90,6 +90,9 @@ export function CredentialRequestCard(props: {
           {props.card.failure === undefined
             ? statusText[props.card.state]
             : failureText[props.card.failure]}
+          {props.card.state === "failed" && props.card.failure === undefined
+            ? " · Check the credential's access and expiry, then ask for a new private card. Nothing is retried automatically."
+            : null}
         </span>
       </div>
     );

@@ -457,6 +457,7 @@ describe("Code operation contracts", () => {
         decision: "approved",
       },
       { kind: "cancel-provider-turn", ...scope },
+      { kind: "force-stop-provider-turn", ...scope, turnOperationId: ids.operation },
     ] as const;
 
     expect(commands.map((command) => decodeCodeOperationCommand(command))).toEqual(commands);

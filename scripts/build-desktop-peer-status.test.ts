@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("the main-process desktop status binding", () => {
+// Each case compiles native code, which already allows 20 s; the default 5 s
+// test timeout cut that off on loaded macOS runners.
+describe("the main-process desktop status binding", { timeout: 60_000 }, () => {
   it.skipIf(process.platform !== "darwin")(
     "refuses unsafe or malformed fuse artifacts before native peer admission",
     async () => {

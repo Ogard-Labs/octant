@@ -31,6 +31,7 @@ const RECEIPT_LABELS: Readonly<Record<AgentMessageStatusSummary["state"], string
   delivered: "Delivered to provider",
   acknowledged: "Acknowledged by recipient",
   refused: "Refused",
+  expired: "Expired after 24 hours",
 };
 
 /**

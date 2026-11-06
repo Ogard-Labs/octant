@@ -252,6 +252,7 @@ export interface CodeFileWatchInput {
   readonly checkoutId: typeof CodeCheckoutId.Type;
   /** An extra folder of the Project, by absolute path, in place of the checkout. */
   readonly folder?: CodeRelativePath | undefined;
+  readonly folders?: ReadonlyArray<CodeRelativePath | ".">;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -2036,15 +2037,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           const watchInput = decodeFileWatchQuery(url);
+          const closed = new AbortController();
           // Awaited here, not inside the stream: a watch the host refuses must
           // fail while this call can still answer with a status. Once the
           // response exists the only thing left to say is "the stream ended",
           // which the client cannot tell from a dropped connection.
           const notices = await dependencies.service.watchFiles(authenticatedWindowId, {
             ...watchInput,
-            signal: request.signal,
+            signal: AbortSignal.any([request.signal, closed.signal]),
           });
-          return noticeStreamResponse(notices, request.signal, origin);
+          return noticeStreamResponse(notices, request.signal, origin, () => closed.abort());
         }
         case "test-listing": {
           if (request.method !== "GET") {
@@ -2691,19 +2693,40 @@ function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
   const threadId = url.searchParams.get("threadId");
   const checkoutId = url.searchParams.get("checkoutId");
   const folder = url.searchParams.get("folder");
+  const folders = url.searchParams.get("folders");
   if (
     threadId === null ||
     checkoutId === null ||
-    url.searchParams.size > (folder === null ? 2 : 3)
+    (folder !== null && folders !== null) ||
+    url.searchParams.size > (folder === null && folders === null ? 2 : 3)
   ) {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
   }
   try {
     if (folder !== null && !folder.startsWith("/")) throw new Error("not absolute");
+    const values: unknown = folders === null ? undefined : JSON.parse(folders);
+    if (
+      values !== undefined &&
+      (!Array.isArray(values) ||
+        values.length < 1 ||
+        values.length > 17 ||
+        new Set(values).size !== values.length ||
+        values.some(
+          (value) => typeof value !== "string" || (value !== "." && !value.startsWith("/")),
+        ))
+    )
+      throw new Error("invalid folders");
     return {
       threadId: decodeCodeThreadId(threadId),
       checkoutId: decodeCheckoutId(checkoutId),
       ...(folder === null ? {} : { folder: decodeCodeProjectFilePath(folder) }),
+      ...(Array.isArray(values)
+        ? {
+            folders: values.map((value) =>
+              value === "." ? ("." as const) : decodeCodeProjectFilePath(value),
+            ),
+          }
+        : {}),
     };
   } catch {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
@@ -2879,6 +2902,7 @@ function noticeStreamResponse(
   notices: AsyncIterable<CodeFileChangeNotice>,
   signal: AbortSignal,
   origin: string | null,
+  onCancel?: () => void,
 ): Response {
   const encoder = new TextEncoder();
   const iterator = notices[Symbol.asyncIterator]();
@@ -2905,6 +2929,7 @@ function noticeStreamResponse(
       }
     },
     async cancel() {
+      onCancel?.();
       await iterator.return?.(undefined);
     },
   });

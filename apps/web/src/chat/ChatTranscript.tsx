@@ -1,3 +1,4 @@
+import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import type {
@@ -51,6 +52,8 @@ import {
 import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTranscriptWindow";
 
 export interface ChatTranscriptProps {
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   /** The decoded, authoritative transcript projection. */
   readonly view: ChatThreadView;
   readonly onReturnSideChatReply?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
@@ -582,6 +585,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
               {turn.attempts.map((attempt, index) => (
                 <AttemptBlock
+                  serverUrl={props.serverUrl}
+                  windowCapability={props.windowCapability}
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
@@ -787,6 +792,8 @@ const NO_CITATIONS: ChatThreadView["citations"] = [];
 
 const AttemptBlock = memo(function AttemptBlock(props: {
   readonly attempt: ChatAttempt;
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
   readonly onAnswerQuestion: ChatTranscriptProps["onAnswerQuestion"];
@@ -833,6 +840,16 @@ const AttemptBlock = memo(function AttemptBlock(props: {
     <>
       {handoff === undefined ? null : (
         <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
+      )}
+      {props.attempt.inputReceipt === undefined ? null : (
+        <ConversationInputs
+          mode="chat"
+          threadId={String(props.attempt.threadId)}
+          admissionId={String(props.attempt.id)}
+          receipt={props.attempt.inputReceipt}
+          serverUrl={props.serverUrl}
+          windowCapability={props.windowCapability}
+        />
       )}
       {props.attempt.handoff === undefined ? null : (
         <p className="chat-transcript__handoff" role="note">

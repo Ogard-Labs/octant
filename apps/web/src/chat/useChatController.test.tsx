@@ -1507,11 +1507,13 @@ describe("useChatController", () => {
     expect(result.current.pendingDraft).toBe("half a reply");
   });
 
-  it("keeps composer draft text on failed sends and clears it after success", async () => {
+  it("keeps the refused draft and carries the explicit updated-tools choice on the next send", async () => {
     const attachmentId = "00000000-0000-4000-8000-000000000906" as never;
     const execute = vi
       .fn()
-      .mockRejectedValueOnce(new Error("transport failed"))
+      .mockRejectedValueOnce(
+        new ChatClientFailure({ category: "tools-changed", message: "Choose updated tools" }),
+      )
       .mockResolvedValueOnce({
         kind: "turn-created",
         turn: {
@@ -1548,6 +1550,7 @@ describe("useChatController", () => {
       await result.current.sendTurn("draft stays");
     });
     expect(result.current.pendingDraft).toBe("draft stays");
+    expect(result.current.toolCatalogHandoffRequired).toBe(true);
     await act(async () => {
       await result.current.sendTurn(
         "draft stays",
@@ -1566,11 +1569,18 @@ describe("useChatController", () => {
             origin: { kind: "draft", reference: "draft-1" },
           },
         ],
+        [],
+        undefined,
+        { composerDraft: "consume" },
+        [],
+        true,
       );
     });
     expect(result.current.pendingDraft).toBe("");
+    expect(result.current.toolCatalogHandoffRequired).toBe(false);
     expect(execute).toHaveBeenLastCalledWith({
       kind: "send-chat-turn",
+      toolCatalogHandoff: true,
       threadId,
       expectedVersion: threadView(1).thread.version,
       prompt: "draft stays",

@@ -92,11 +92,13 @@ export interface ManagedSimulatorTools {
   launchSpec(
     tool: string,
     args: ReadonlyArray<string>,
+    sdkRoot?: string,
   ): Promise<
     | {
         readonly command: string;
         readonly args: ReadonlyArray<string>;
         readonly env: NodeJS.ProcessEnv;
+        readonly cwd?: string;
       }
     | undefined
   >;
@@ -109,6 +111,7 @@ export interface ManagedSimulatorHelpersOptions {
     args: ReadonlyArray<string>,
     options: {
       readonly env: NodeJS.ProcessEnv;
+      readonly cwd?: string;
       readonly stdio: ["ignore", "pipe", "pipe"];
     },
   ) => ChildProcess;
@@ -202,6 +205,7 @@ export function createManagedSimulatorHelpers(
     if (spec === undefined || disposed) return undefined;
     const child = spawn(spec.command, spec.args, {
       env: spec.env,
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     // An unread stderr pipe fills and stalls the tool. An unhandled spawn
@@ -282,6 +286,7 @@ export function createManagedSimulatorHelpers(
     if (signal.aborted) return "unavailable";
     const child = spawn(spec.command, spec.args, {
       env: spec.env,
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     discardChildNoise(child);

@@ -1,4 +1,10 @@
+import { ChildWorktreeSnapshot } from "./childWorktreeSources";
 import { Schema } from "effect";
+import {
+  ConversationInputManifest,
+  ConversationInputPolicy,
+  MAX_CONVERSATION_INPUT_SELECTIONS,
+} from "./conversationInputs";
 import { CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
@@ -154,6 +160,7 @@ export const AgentRunWorkspaceReceipt = Schema.Union(
     projectId: ProjectId,
     checkoutRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
     worktreeRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+    source: Schema.optional(ChildWorktreeSnapshot),
     verified: Schema.Boolean,
   }).annotations(strict),
 );
@@ -236,6 +243,10 @@ export const AgentRunRoutingReceipt = Schema.Struct({
       Schema.lessThanOrEqualTo(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
     ),
   ),
+  admittedInputCount: Schema.optional(
+    Schema.Int.pipe(Schema.between(0, MAX_CONVERSATION_INPUT_SELECTIONS)),
+  ),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   effectiveAuthorityDigest: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   capacityReservationId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   usageQuality: AgentRunUsageQuality,
@@ -327,7 +338,17 @@ export const AgentRunReviewSnapshot = Schema.Struct({
 export type AgentRunReviewSnapshot = typeof AgentRunReviewSnapshot.Type;
 export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(AgentRunReviewSnapshot);
 
+export const AgentRunWorkingTime = Schema.Struct({
+  attemptId: Schema.UUID,
+  activeMs: Schema.Int.pipe(Schema.nonNegative()),
+  totalActiveMs: Schema.Int.pipe(Schema.nonNegative()),
+  attempts: Schema.Int.pipe(Schema.positive()),
+  limitMs: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type AgentRunWorkingTime = typeof AgentRunWorkingTime.Type;
+
 export const AgentRunResultEvidence = Schema.Struct({
+  workingTime: Schema.optional(AgentRunWorkingTime),
   review: Schema.optional(AgentRunReviewSnapshot),
   files: Schema.Struct({
     reviewStatus: Schema.optional(Schema.Literal("available", "unavailable")),
@@ -535,6 +556,7 @@ export const AgentRunCommand = Schema.Union(
      * exactly when the receipt records `admittedContextBlocks`.
      */
     admittedContext: Schema.optional(AgentRunAdmittedContext),
+    admittedInputs: Schema.optional(ConversationInputManifest),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("confirm-agent-run"),
@@ -749,6 +771,7 @@ export const AgentRunCenterSummary = Schema.Struct({
   executionKind: AgentRunExecutionKind,
   authority: AgentRunAuthority,
   workspaceKind: AgentRunCenterWorkspaceKind,
+  source: Schema.optional(ChildWorktreeSnapshot),
   usageQuality: AgentRunUsageQuality,
   route: AgentRunCenterRoute,
   resultAcknowledgement: AgentRunResultAcknowledgement,
@@ -827,6 +850,7 @@ const AgentRunConversationFields = {
   modelId: ProviderModelId,
   lifecycleStatus: AgentRunLifecycleStatus,
   status: AgentRunConversationReadStatus,
+  inputManifest: Schema.optional(ConversationInputManifest),
   entries: Schema.Array(AgentRunConversationEntry).pipe(
     Schema.maxItems(MAX_AGENT_RUN_CONVERSATION_ENTRIES),
   ),

@@ -6,6 +6,23 @@ description: Code mode binds one folder for engineering work with approval-gated
 
 Code is the repository workspace. Each Code Project binds exactly one folder chosen through the native picker; when that folder is a Git repository, worktrees, branches, and pull-request tools become available. Code is always available; disabling it in Settings never deletes existing Code data.
 
+## Choose the task's working folder
+
+Before creating a task, choose **Task working folder** and, if needed, a relative
+subfolder. The list contains folders already approved for this Project. Adding or
+naming a folder does not change its permissions. The provider, terminal defaults,
+saved actions and new Work artifacts use the recorded choice. Choose another root
+or subfolder in a new task; an existing native conversation keeps its original root.
+
+The composer and Environment show the choice. A removed or unavailable folder
+stops the task rather than sending output elsewhere. Work artifacts retain their
+own original destination through revision, rename, conversion, export and replay.
+
+An extra working folder is **shared**, including for a task with its own worktree.
+Git, pull requests, changed files and Review still cover the Code checkout only.
+Choosing **Restart in** from a terminal asks before stopping its shell and running
+commands. Cancel keeps the process; **New terminal** opens a separate shell.
+
 ## Code Projects
 
 Create a Code Project from the sidebar:
@@ -28,11 +45,13 @@ optionally a folder inside the Project. Octant also looks in the Project's
 nothing is saved until you add one and choose **Save actions**.
 
 Each action becomes a button in the window header (the first three, with the
-rest under **More**) and an entry in the command palette. Choosing it types the
-command into the Project terminal and opens that terminal in Zen. It runs with
-the same sandbox and approvals as anything else you type there. If the terminal
-is already running a program, the command goes to that program, so stop it
-first. Actions are set from this computer's window, not from a paired device.
+rest under **More**) and an entry in the command palette. Choosing one previews
+its actual folder and branch. A thread defaults to its active checkout; use
+**Run in** to choose the Project folder or an approved extra folder explicitly.
+**Run action** starts a dedicated process and shows output, exit status and
+**Stop action** beside the task. **Open terminal** is an explicit Zen handoff.
+Closing the dialog leaves the run alone; reopening attaches to it. A lost reply
+is reported as unknown and never automatically launches a second command.
 
 ## Project planner
 
@@ -110,13 +129,19 @@ its draft.
 
 ## Continue a terminal session
 
-If you started something in Claude Code or Codex in a terminal, you can carry
-it into a new thread. In a new Code thread with a Project, choose
-**Create from…**, then **Terminal**, and pick a session from that Project's
-folder. Octant reads the session from this Mac and never uploads it. The
-thread starts with the conversation as folded, read-only history, and the
-assistant reads it once at the start. Tool runs from the old session are left
-out, and the thread is marked as holding outside content.
+In a new Code thread with a Project, choose **Create from…**, then **Terminal**.
+The picker lists Claude Code and Codex sessions from the Project folder and
+its subfolders; a Code Project also includes its verified managed worktrees.
+Each session names its original working directory.
+
+Choosing one is a **text handoff into a new session**. The assistant reads the
+bounded visible conversation once as outside content; it also appears above
+the thread as folded, read-only history. Original inputs, tool activity,
+hidden reasoning and the provider's native session are omitted. The current
+adapters cannot prove the source account binding and exclusive native session
+ownership, so native adoption is unavailable. Octant never resumes that
+unverified session or changes its files. This step is available only from an
+Octant window on this computer.
 
 ## Modes
 
@@ -405,7 +430,7 @@ its folder. A card under it says whether the checkout has uncommitted changes
 (click it to open Review) and offers **Commit or push** and **Create pull
 request**. Below that, one list: local servers, subagents (opens the Agents
 tool), computer use, pull requests, what the thread delivers, the working folder
-(with **Change working folder**), and usage. Switching the active pane shows that pane's Environment instead of
+(with the chosen folder and the legacy **Change working folder** control for older tasks), and usage. Switching the active pane shows that pane's Environment instead of
 leaving the previous thread's facts in place.
 
 Local servers are compact rows grouped by process and port, with this checkout
@@ -629,3 +654,47 @@ Select text in one of the agent's replies and choose **New thread from
 selection**, from the small button under the reply or the right-click menu. A
 new Code draft opens in the same Project with your selection quoted at the top.
 Nothing is sent until you send it.
+
+### Preparing a new worktree
+
+In the Project overview's Actions list, write a setup command and a folder
+relative to each new worktree. Check the review statement on that action and
+save to enable it for future worktrees. Only one action can prepare worktrees.
+
+**Worktrees → Setup** in the task header shows the recorded recipe and its result;
+choose a child checkout there to inspect its preparation. The first agent task
+waits for setup. You can Cancel a running setup, explicitly Retry a failed or
+interrupted one, or Skip it. Plan cannot run setup. A host restart never repeats
+a potentially non-idempotent recipe automatically. Output is retained only for
+the current host session. Setup uses task access and does not copy secret files
+or the parent environment.
+
+### Giving a child current edits
+
+Children normally start from committed revision. To delegate unfinished edits,
+open **Worktrees → Child source** on the parent task and choose **Review current
+edits**. Inspect the base revision and every included path, then choose **Use
+this snapshot**. Capturing a preview alone does not change the source.
+
+Children prepared from that task now receive independent copies of that stable
+snapshot, including its staging state. Later parent edits and sibling edits do
+not change their files. The child details record the snapshot and committed
+base. Choose **Committed revision** to return to the default for future children.
+Ignored files are excluded; protected or incomplete captures are refused. A
+stale revision needs a new capture or the committed choice. An interrupted copy
+never starts a child or overwrites one on retry; prepare a new child instead.
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

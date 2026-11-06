@@ -221,7 +221,7 @@ export class GitObservationPort {
   async observe(
     root: string,
     signal?: AbortSignal,
-    options: GitDiffOptions = {},
+    options: GitDiffOptions & { readonly untrackedFiles?: "normal" | "all" } = {},
   ): Promise<GitObservationResult> {
     if (!Number.isSafeInteger(this.#maxDiffBytes) || this.#maxDiffBytes < 1)
       return { status: "failed" };
@@ -267,7 +267,7 @@ export class GitObservationPort {
         "status",
         "--porcelain=v1",
         "-z",
-        "--untracked-files=normal",
+        `--untracked-files=${options.untrackedFiles ?? "normal"}`,
       ]);
       if (statusResult.exitCode !== 0) return { status: "failed" };
       const statusEntries = parseStatus(statusResult.stdout);

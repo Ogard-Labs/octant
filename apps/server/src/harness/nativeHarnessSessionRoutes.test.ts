@@ -275,7 +275,7 @@ describe("one harness session on every surface", () => {
     });
   }
 
-  it("shows the app window, the terminal, and the phone the same session, and each sees what another changed", async () => {
+  it("shares the local session between windows without exposing its prompts or controls to a phone", async () => {
     const store = journaledStore();
     store.ensure({
       threadId,
@@ -370,7 +370,7 @@ describe("one harness session on every surface", () => {
     expect(inApp.session.status).toBe("running");
     expect(inApp.approvals?.map((entry) => entry.summary)).toEqual(["write: summary.md"]);
     expect(await read("terminal")).toEqual(inApp);
-    expect(await read("phone")).toEqual(inApp);
+    expect(await (await phone(""))?.json()).toEqual({ view: null });
 
     // A pause from the terminal is the session every other surface reads next.
     expect((await command("terminal", "pause-native-harness-session", inApp.session))?.status).toBe(
@@ -379,14 +379,124 @@ describe("one harness session on every surface", () => {
     const paused = await read("app");
     expect(paused.session.status).toBe("paused-by-user");
     expect(paused.session.version).toBeGreaterThan(inApp.session.version);
-    expect(await read("phone")).toEqual(paused);
+    expect(await (await phone(""))?.json()).toEqual({ view: null });
     expect(await read("terminal")).toEqual(paused);
 
     // No surface acts on a copy of its own: the phone's resume against the
     // version it read before the pause is refused, and nothing changes.
     const stale = await command("phone", "resume-native-harness-session", inApp.session);
-    expect(stale?.status).toBe(409);
-    expect(await stale?.json()).toMatchObject({ reason: "stale-version" });
+    expect(stale?.status).toBe(403);
     expect(await read("app")).toEqual(paused);
+  });
+});
+
+describe("a paired device answering its own managed child's request", () => {
+  const deviceId = "00000000-0000-4000-8000-000000000622";
+  const runId = "00000000-0000-4000-8000-000000000633";
+  const approvalId = "00000000-0000-4000-8000-000000000644";
+  const questionId = "00000000-0000-4000-8000-000000000655";
+  function fixture() {
+    let current = true;
+    const approval = { id: approvalId, status: "pending", source: { runId } };
+    const question = { id: questionId, status: "pending", source: { runId } };
+    const decideApproval = vi.fn(() => {
+      approval.status = "approved";
+      return "decided" as const;
+    });
+    const answerQuestion = vi.fn(() => {
+      question.status = "answered";
+      return "answered" as const;
+    });
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: {
+        read: () => ({
+          session: { status: "running", detail: "private-parent-state" },
+          turns: [{ result: "private-tool-result" }],
+          tasks: [{ title: "private-parent-task" }],
+          steering: [{ text: "private-steering" }],
+          activeTools: [{ result: "private-live-result" }],
+          followUps: { prompt: "private-follow-up" },
+          approvals: [approval, { id: "lead", status: "pending" }],
+          questions: [question],
+        }),
+      } as never,
+      followUps: {} as never,
+      authorizeThread: () => false,
+      mayAnswerChildFromDevice: (input) =>
+        current &&
+        input.runId === runId &&
+        input.parentThreadId === threadId &&
+        input.deviceId === deviceId,
+      decideApproval,
+      answerQuestion,
+    });
+    const send = (action = "", body?: unknown, device = deviceId) => {
+      const request = new Request(
+        `http://127.0.0.1/api/native-harness/sessions/${threadId}${action === "" ? "" : `/${action}`}`,
+        {
+          method: body === undefined ? "GET" : "POST",
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        },
+      );
+      bindPrincipalRouteContext(request, {
+        principal: { kind: "remote-device", deviceId: device } as never,
+        scopeId: decodeWindowId(device),
+      });
+      return handler(request);
+    };
+    return {
+      send,
+      decideApproval,
+      answerQuestion,
+      revoke: () => {
+        current = false;
+      },
+    };
+  }
+  it("lists only its own child requests and sends one-use responses to their existing routes", async () => {
+    const { send, decideApproval, answerQuestion } = fixture();
+    expect(await (await send())?.json()).toMatchObject({
+      view: { approvals: [{ id: approvalId }], questions: [{ id: questionId }] },
+    });
+    const payload = await (await send())?.json();
+    expect(Object.keys(payload.view).sort()).toEqual(["approvals", "kind", "questions"]);
+    expect(JSON.stringify(payload)).not.toContain("private-");
+    expect((await send("approvals", { approvalId, decision: "approve" }))?.status).toBe(200);
+    expect(decideApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId,
+        approvalId,
+        decision: "approve",
+        answer: { principal: { kind: "remote-device", deviceId } },
+      }),
+    );
+    expect((await send("questions", { questionId, answer: "Strict" }))?.status).toBe(200);
+    expect(answerQuestion).toHaveBeenCalledExactlyOnceWith({
+      threadId,
+      questionId,
+      answer: "Strict",
+    });
+  });
+  it("refuses another device, remembered answers, revoked authority and session commands", async () => {
+    const { send, decideApproval } = fixture();
+    expect(
+      (
+        await send(
+          "approvals",
+          { approvalId, decision: "approve" },
+          "00000000-0000-4000-8000-000000000699",
+        )
+      )?.status,
+    ).toBe(403);
+    expect((await send("approvals", { approvalId, decision: "approve-always" }))?.status).toBe(403);
+    expect((await send("commands", {}))?.status).toBe(403);
+    expect(decideApproval).not.toHaveBeenCalled();
+    const revoked = fixture();
+    revoked.revoke();
+    expect((await revoked.send("approvals", { approvalId, decision: "approve" }))?.status).toBe(
+      403,
+    );
+    expect(revoked.decideApproval).not.toHaveBeenCalled();
   });
 });

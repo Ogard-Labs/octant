@@ -1,3 +1,4 @@
+import { createWorkspaceViewStore, WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
   MAX_CODE_DEBUG_BREAKPOINT_FILES,
@@ -19,6 +20,58 @@ import { decodeCodeFileMetadata } from "@octant/contracts/code";
 const codeStyles = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
 
 describe("MonacoEditorPane", () => {
+  it("restores the cursor and scroll for the same file version without saving, and drops the position on a changed file", async () => {
+    const namespace = `editor-view-${crypto.randomUUID()}`;
+    const store = createWorkspaceViewStore(namespace);
+    const file = textFile();
+    const code = client();
+    const first = runtime();
+    const mounted = render(
+      <WorkspaceViewStateContext.Provider value={store}>
+        <MonacoEditorPane client={code} file={file} loadRuntime={first.loadRuntime} />
+      </WorkspaceViewStateContext.Provider>,
+    );
+    await waitFor(() => expect(first.options).toBeDefined());
+    act(() =>
+      first.options?.onViewState?.({ lineNumber: 12, column: 4, scrollTop: 300, scrollLeft: 5 }),
+    );
+    mounted.unmount();
+    store.flush();
+    const restored = createWorkspaceViewStore(namespace);
+    const next = runtime();
+    const reopened = render(
+      <WorkspaceViewStateContext.Provider value={restored}>
+        <MonacoEditorPane client={code} file={file} loadRuntime={next.loadRuntime} />
+      </WorkspaceViewStateContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(next.options?.viewState).toMatchObject({
+        lineNumber: 12,
+        column: 4,
+        scrollTop: 300,
+        scrollLeft: 5,
+      }),
+    );
+    expect(code.save).not.toHaveBeenCalled();
+    reopened.unmount();
+    const changed = runtime();
+    render(
+      <WorkspaceViewStateContext.Provider value={restored}>
+        <MonacoEditorPane
+          client={code}
+          file={{
+            ...file,
+            metadata: decodeCodeFileMetadata({ ...file.metadata, digest: "b".repeat(64) }),
+          }}
+          loadRuntime={changed.loadRuntime}
+        />
+      </WorkspaceViewStateContext.Provider>,
+    );
+    await waitFor(() => expect(changed.options).toBeDefined());
+    expect(changed.options?.viewState).toBeUndefined();
+    expect(code.save).not.toHaveBeenCalled();
+  });
+
   it("persists actual gutter selections and shows changed restored locations unresolved rather than moving them", async () => {
     const values = new Map<string, string>();
     const storage: Storage = {

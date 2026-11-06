@@ -1,3 +1,7 @@
+import {
+  WorktreePreparationDialog,
+  type PreparationTarget,
+} from "./projects/WorktreePreparationDialog";
 import type { CodeReviewFileRequest } from "./code/codeReviewNavigation";
 import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
 import { autoReviewFor } from "./code/autoReview";
@@ -341,7 +345,10 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
-import { runProjectAction as runSavedProjectAction } from "./projects/runProjectAction";
+import {
+  ProjectActionRunDialog,
+  type ProjectActionTarget,
+} from "./projects/ProjectActionRunDialog";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
@@ -1630,6 +1637,11 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  const [preparationTarget, setPreparationTarget] = useState<PreparationTarget>();
+  const [projectActionRun, setProjectActionRun] = useState<{
+    readonly target: ProjectActionTarget;
+    readonly open: boolean;
+  }>();
   const [quitHintVisible, setQuitHintVisible] = useState(false);
   // The palette opens on what is waiting for the person. It reads the host's
   // list each time it opens, and only where the host lists it at all.
@@ -4948,6 +4960,8 @@ function LaunchedShell(
   const pendingRequestFeedRevision =
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   const homeStart = useHomeStart({
+    routineClient: launchedClients.automationClient,
+    onOpenRoutine: actions.openRoutine,
     actions,
     activeMode,
     activePaneId,
@@ -5937,6 +5951,9 @@ function LaunchedShell(
           hostId: destinationHostId,
           projectId: project.id,
           bindingRevisionId,
+          ...(created.thread.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: created.thread.workingFolderId }),
           workingDirectory: created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           confinementPosture: "project-root-confined",
           providerInstanceId,
@@ -6326,6 +6343,7 @@ function LaunchedShell(
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
     terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
+    workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice,
   ): Promise<boolean | void> {
     const paneToReset =
       initiatingPaneId ??
@@ -6508,6 +6526,7 @@ function LaunchedShell(
           bindingRevisionId: prepared.bindingRevisionId,
           repositoryId: prepared.checkout.repositoryId,
           checkoutId: prepared.checkout.id,
+          ...(workingFolder ?? {}),
           title,
           lifecycle: "active",
           providerInstanceId,
@@ -6623,7 +6642,7 @@ function LaunchedShell(
           ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           hostId: destinationHostId,
           bindingRevisionId,
-          workingDirectory: decodeThreadWorkingDirectory("."),
+          ...(workingFolder ?? { workingDirectory: decodeThreadWorkingDirectory(".") }),
           ...(issueContext === undefined || onServer ? {} : { issueContext }),
           ...(linearIssueContext === undefined || onServer ? {} : { linearIssueContext }),
           ...(terminalSession === undefined || onServer ? {} : { terminalSession }),
@@ -6656,6 +6675,9 @@ function LaunchedShell(
               hostId: destinationHostId,
               projectId: project.id,
               bindingRevisionId,
+              ...(created.thread.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: created.thread.workingFolderId }),
               workingDirectory:
                 created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
               confinementPosture: "project-root-confined",
@@ -6755,6 +6777,14 @@ function LaunchedShell(
         terminalId,
         columns: 100,
         rows: 30,
+        ...(activeMode === "work" &&
+        activeWorkThreadId !== undefined &&
+        workNavigation.bootstrap?.threads.some(
+          (thread) =>
+            String(thread.id) === String(activeWorkThreadId) && thread.projectId === projectId,
+        )
+          ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
+          : {}),
         ...(folder === undefined ? {} : { folder }),
       });
     } catch {
@@ -6775,36 +6805,55 @@ function LaunchedShell(
     return undefined;
   }
 
-  /**
-   * Types a saved action into the Project's terminal and shows it in Zen. A
-   * terminal this window already pinned for the Project is reused while its
-   * shell runs; otherwise a new one is opened and pinned. The host reads the
-   * line from the Project record and applies the terminal's own confinement
-   * and approval posture, so this only names the action.
-   */
   async function runProjectAction(
     projectId: ProjectId,
     action: ProjectAction,
     folder?: string,
   ): Promise<void> {
-    // Zen holds the card, so its space has to be loaded before a shell starts:
-    // a shell with no card to show it would only be stopped again.
-    if (!zen.active) await zen.enterZen();
-    await runSavedProjectAction(
-      {
-        execute: (command) => projectTerminalClient.execute(command),
-        pinnedTerminals: (zen.space?.elements ?? []).flatMap((element) =>
-          element.kind === "project-terminal" && String(element.projectId) === String(projectId)
-            ? [element.terminalId]
-            : [],
-        ),
-        openTerminal: () => addZenProjectTerminal(projectId, folder),
-        notify: setThreadExportNotice,
+    const view = activeCodeThreadView;
+    if (
+      action.preparesWorktrees === true &&
+      folder === undefined &&
+      activeMode === "code" &&
+      view?.checkout.kind === "managed-worktree" &&
+      String(view.thread.projectId) === String(projectId)
+    ) {
+      setPreparationTarget({
+        projectId,
+        thread: {
+          threadId: view.thread.id,
+          checkoutId: view.checkout.id,
+          ...(view.checkout.head.kind === "none" ? {} : { head: view.checkout.head.oid }),
+        },
+      });
+      return;
+    }
+    setProjectActionRun({
+      open: true,
+      target: {
+        projectId,
+        actionId: action.id,
+        ...(activeMode === "work" &&
+        activeWorkThreadId !== undefined &&
+        workNavigation.bootstrap?.threads.some(
+          (thread) => thread.id === activeWorkThreadId && thread.projectId === projectId,
+        )
+          ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
+          : {}),
         ...(folder === undefined ? {} : { folder }),
+        ...(activeMode !== "code" ||
+        view === undefined ||
+        String(view.thread.projectId) !== String(projectId)
+          ? {}
+          : {
+              thread: {
+                threadId: view.thread.id,
+                checkoutId: view.checkout.id,
+                ...(view.checkout.head.kind === "none" ? {} : { head: view.checkout.head.oid }),
+              },
+            }),
       },
-      projectId,
-      action,
-    );
+    });
   }
 
   function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {
@@ -7612,9 +7661,67 @@ function LaunchedShell(
             settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
           >
             <OctantCommandProvider commands={octantCommands}>
+              {projectActionRun === undefined ? null : (
+                <ProjectActionRunDialog
+                  key={JSON.stringify(projectActionRun.target)}
+                  client={projectTerminalClient}
+                  target={projectActionRun.target}
+                  storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                  open={projectActionRun.open}
+                  onClose={() =>
+                    setProjectActionRun((current) =>
+                      current === undefined ? undefined : { ...current, open: false },
+                    )
+                  }
+                  onOpenTerminal={(terminalId) => {
+                    void (async () => {
+                      if (!zen.active) await zen.enterZen();
+                      await zen.pinProjectTerminal({
+                        projectId: projectActionRun.target.projectId,
+                        terminalId,
+                      });
+                    })();
+                  }}
+                />
+              )}
+
+              {preparationTarget === undefined ? null : (
+                <WorktreePreparationDialog
+                  key={JSON.stringify(preparationTarget)}
+                  client={projectTerminalClient}
+                  runs={agentRunClient}
+                  target={preparationTarget}
+                  onClose={() => setPreparationTarget(undefined)}
+                />
+              )}
               {actionsProject === undefined ? null : (
                 <ProjectActionButtons
                   actions={activeProjectActions}
+                  {...(activeMode === "code" &&
+                  activeCodeThreadView !== undefined &&
+                  activeCodeThreadView.checkout.kind !== "remote-root" &&
+                  String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                    ? {
+                        onSetup: () => {
+                          const view = activeCodeThreadView;
+                          setPreparationTarget({
+                            projectId: actionsProject.id,
+                            thread: {
+                              threadId: view.thread.id,
+                              checkoutId: view.checkout.id,
+                              ...(view.checkout.head.kind === "none"
+                                ? {}
+                                : { head: view.checkout.head.oid }),
+                            },
+                          });
+                        },
+                      }
+                    : {})}
+                  {...(activeMode === "code" &&
+                  activeCodeThreadView !== undefined &&
+                  String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                    ? { defaultFolderLabel: "Active checkout" }
+                    : {})}
                   {...(actionsProject.type === "code"
                     ? {
                         mainFolder: actionsProject.binding.canonicalRoot,

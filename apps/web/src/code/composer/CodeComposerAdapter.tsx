@@ -1,3 +1,4 @@
+import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
 import {
@@ -219,6 +220,7 @@ export interface CodeComposerSuggestion {
 }
 
 export interface CodeComposerSubmitInput {
+  readonly workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice;
   readonly modelOptionValues?: ProviderModelOptionValues;
   readonly computerUseSelection?: ExtensionSelection;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
@@ -713,6 +715,27 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     props,
   ]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope:
+      props.projectId === undefined
+        ? undefined
+        : { mode: "code-draft", projectId: props.projectId },
+    draft: prompt,
+    onDraftChange: (text) => setPrompt(text),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.fixedHostId ?? props.selectedHostId,
+    refused:
+      isServer ||
+      workspace === "managed-worktree" ||
+      props.fixedPrompt !== undefined ||
+      props.creating === true,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -808,6 +831,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           ) : null}
         </div>
         <div className="composer-stack">
+          {folderDrops.notice}
           <ThreadComposer
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
             planUsage={{
@@ -901,6 +925,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                    event.preventDefault();
+                }}
                 onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();

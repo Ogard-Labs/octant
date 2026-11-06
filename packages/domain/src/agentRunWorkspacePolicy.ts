@@ -6,6 +6,7 @@ import {
   type AgentRunWorkspaceReceipt,
   type AgentRunWorkspaceRefusalReason,
   type OctantMode,
+  type ChildWorktreeSnapshot,
 } from "@octant/contracts";
 
 /**
@@ -40,6 +41,7 @@ export interface AgentRunIssuedWorkspaceGrant {
   readonly checkoutRoot?: string;
   readonly worktreeRoot?: string;
   readonly worktreeState?: string;
+  readonly source?: ChildWorktreeSnapshot;
 }
 
 export type AgentRunWorkspaceAdmissionResult =
@@ -204,6 +206,7 @@ function admitCode(input: {
       projectId: decodeProjectId(grant.projectId),
       checkoutRoot: grant.checkoutRoot,
       worktreeRoot: grant.worktreeRoot,
+      ...(grant.source === undefined ? {} : { source: grant.source }),
       verified: true,
     },
   };

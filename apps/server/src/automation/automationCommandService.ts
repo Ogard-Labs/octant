@@ -14,6 +14,8 @@ import {
   type AutomationWeeklyResolution,
   type UtcTimestamp,
 } from "@octant/contracts";
+import type { AutomationEventSourcePreparation } from "./automationEventSources";
+import { isDeepStrictEqual } from "node:util";
 import {
   AutomationPolicyRejected,
   buildAutomationWeeklyResolution,
@@ -91,6 +93,7 @@ export class AutomationCommandService {
     input: AutomationCommand,
     provenance?: AutomationProvenance,
     source?: AutomationFileSourcePreparation | AutomationFileSourceRearmPreparation,
+    eventSource?: AutomationEventSourcePreparation,
   ): AutomationCommandResult {
     let command: AutomationCommand;
     try {
@@ -107,6 +110,19 @@ export class AutomationCommandService {
     }
     const principalIssue = this.#checkPrincipalHost(command.principal);
     if (principalIssue !== undefined) return principalIssue;
+    if (
+      (command.kind === "create-automation" || command.kind === "update-automation") &&
+      command.definition.trigger.kind === "integration-event" &&
+      (command.principal.kind !== "local-window" ||
+        provenance !== undefined ||
+        eventSource === undefined ||
+        !eventSource.current() ||
+        !isDeepStrictEqual(eventSource.definition, command.definition))
+    )
+      return failure(
+        "blocked",
+        "Choose and verify a connected event source from a window on this host.",
+      );
 
     try {
       switch (command.kind) {
@@ -117,9 +133,14 @@ export class AutomationCommandService {
             command,
             provenance,
             source?.kind === "definition" ? source : undefined,
+            eventSource,
           );
         case "update-automation":
-          return this.#update(command, source?.kind === "definition" ? source : undefined);
+          return this.#update(
+            command,
+            source?.kind === "definition" ? source : undefined,
+            eventSource,
+          );
         case "pause-automation":
           return this.#changeLifecycle(command, "paused", "automation-paused");
         case "resume-automation":
@@ -238,6 +259,7 @@ export class AutomationCommandService {
     command: Extract<AutomationCommand, { readonly kind: "create-automation" }>,
     provenance: AutomationProvenance | undefined,
     source: AutomationFileSourcePreparation | undefined,
+    eventSource: AutomationEventSourcePreparation | undefined,
   ): AutomationCommandResult {
     if (String(command.definition.hostId) !== this.#hostId) {
       return failure("unauthorized", "Automation definitions are owned by exactly one host.", {
@@ -276,6 +298,7 @@ export class AutomationCommandService {
     );
     this.#store.appendDefinitionCreated({
       automation: definition,
+      ...(eventSource?.checkpoint === undefined ? {} : { eventSource: eventSource.checkpoint }),
       ...(command.definition.trigger.kind === "file-arrival" && source !== undefined
         ? { fileSource: source.checkpoint }
         : {}),
@@ -286,11 +309,18 @@ export class AutomationCommandService {
   #update(
     command: Extract<AutomationCommand, { readonly kind: "update-automation" }>,
     source: AutomationFileSourcePreparation | undefined,
+    eventSource: AutomationEventSourcePreparation | undefined,
   ): AutomationCommandResult {
     const existing = this.#projection.getDefinition(command.automationId);
     const gate = this.#gateDefinitionMutation(existing, command);
     if (gate !== undefined) return gate;
     const current = existing as AutomationDefinition;
+    if (command.rearmEvents === true && this.#projection.activeRun(current.id) !== undefined)
+      return failure(
+        "active-occurrence",
+        "Finish or cancel the current run before reviewing and re-arming its event source.",
+        { automationId: current.id },
+      );
     if (
       command.definition.trigger.kind === "file-arrival" &&
       !this.#sourcePrepared(command, source)
@@ -356,6 +386,7 @@ export class AutomationCommandService {
     }
     this.#store.appendDefinitionUpdated({
       automation: updated,
+      ...(eventSource?.checkpoint === undefined ? {} : { eventSource: eventSource.checkpoint }),
       ...(command.definition.trigger.kind === "file-arrival" && configuredSource !== undefined
         ? { fileSource: configuredSource }
         : {}),
@@ -428,11 +459,41 @@ export class AutomationCommandService {
       });
     }
 
+    const retry =
+      command.retryRunId === undefined ? undefined : this.#projection.getRun(command.retryRunId);
+    if (
+      command.retryRunId !== undefined &&
+      (retry === undefined ||
+        String(retry.automationId) !== String(current.id) ||
+        !["failed", "interrupted", "cancelled"].includes(retry.lifecycle) ||
+        retry.definitionSnapshot.definitionRevision !== current.definitionRevision)
+    )
+      return failure(
+        "blocked",
+        "Retry requires a stopped run of this unchanged routine. Review its history or use Run now.",
+        { automationId: current.id },
+      );
+
     const occurrence = {
       kind: "manual",
       automationId: current.id,
       definitionRevision: current.definitionRevision,
       runNowRequestId: command.runNowRequestId,
+      ...(retry === undefined
+        ? {}
+        : {
+            retryOfRunId: retry.id,
+            ...(retry.occurrence.kind === "file-arrival"
+              ? { fileSource: retry.occurrence.source }
+              : retry.occurrence.kind === "manual" && retry.occurrence.fileSource !== undefined
+                ? { fileSource: retry.occurrence.fileSource }
+                : {}),
+            ...(retry.occurrence.kind === "integration-event"
+              ? { eventSource: retry.occurrence.source }
+              : retry.occurrence.kind === "manual" && retry.occurrence.eventSource !== undefined
+                ? { eventSource: retry.occurrence.eventSource }
+                : {}),
+          }),
     } as const;
     const occurrenceKey = deriveAutomationOccurrenceKey(occurrence as never);
     const runId = automationRunIdForOccurrence(occurrenceKey);
@@ -441,6 +502,13 @@ export class AutomationCommandService {
     // the same request id always names the same run.
     const existingRun = this.#projection.getRun(runId);
     if (existingRun !== undefined) {
+      if (
+        existingRun.occurrence.kind !== "manual" ||
+        String(existingRun.occurrence.retryOfRunId ?? "") !== String(retry?.id ?? "")
+      )
+        return failure("invalid", "This request already names a different run input.", {
+          automationId: current.id,
+        });
       return { kind: "automation-run-accepted", run: existingRun };
     }
     const active = this.#projection.activeRun(current.id);
@@ -576,7 +644,8 @@ export class AutomationCommandService {
   }
 
   #dueState(trigger: AutomationTrigger): DueState {
-    if (trigger.kind === "file-arrival") return { nextDueAt: null };
+    if (trigger.kind === "file-arrival" || trigger.kind === "integration-event")
+      return { nextDueAt: null };
     if (trigger.kind === "once") return { nextDueAt: trigger.scheduledAt };
     const now = this.#now();
     const nextDueAt = resolveNextAutomationOccurrence({ trigger, after: now, inclusive: true });

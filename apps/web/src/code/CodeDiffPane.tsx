@@ -1,3 +1,4 @@
+import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeReviewLineSelection } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -17,7 +18,7 @@ import type {
 } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
@@ -160,10 +161,28 @@ function AvailableDiff(
     readonly snapshot: DiffSnapshot;
   },
 ) {
+  const viewStore = useContext(WorkspaceViewStateContext);
+  const viewKey = `review:${props.diff.threadId}:${props.diff.checkoutId}:${props.snapshot.evidence.digest}`;
+  const savedReview = useMemo(() => viewStore?.read(viewKey), [viewStore, viewKey]);
+  const reviewStack = useRef<HTMLDivElement>(null);
   const [loadedContent, setContent] = useState<ContentState>({ kind: "loading" });
   const content: ContentState =
     props.diff.state === "turn" ? { kind: "ready", text: props.diff.text } : loadedContent;
-  const [selectedPath, setSelectedPath] = useState<string>();
+  const [selectedPath, setSelectedPath] = useState<string | undefined>(() =>
+    savedReview?.kind === "review" ? savedReview.path : undefined,
+  );
+  function choosePath(path: string) {
+    setSelectedPath(path);
+    viewStore?.write(viewKey, {
+      kind: "review",
+      path,
+      scrollTop: reviewStack.current?.scrollTop ?? 0,
+    });
+  }
+  useLayoutEffect(() => {
+    if (content.kind === "ready" && savedReview?.kind === "review" && reviewStack.current !== null)
+      reviewStack.current.scrollTop = savedReview.scrollTop;
+  }, [viewKey, content.kind]);
   const navigatedRequest = useRef<CodeReviewFileRequest | undefined>(undefined);
   // The stacked unified list is how a change is read; side by side is how one
   // file is studied, so it keeps the file list and the editor.
@@ -295,7 +314,7 @@ function AvailableDiff(
     if (requested === undefined) return;
     const file = files.find((item) => item.path === requested.path);
     if (file !== undefined && navigatedRequest.current !== requested) {
-      setSelectedPath(file.path);
+      choosePath(file.path);
       navigatedRequest.current = requested;
     }
   }, [files, props.requestedCodeReviewFile]);
@@ -411,11 +430,7 @@ function AvailableDiff(
             <ul>
               {files.map((file) => (
                 <li key={file.path}>
-                  <OctantButton
-                    type="button"
-                    variant="bare"
-                    onClick={() => setSelectedPath(file.path)}
-                  >
+                  <OctantButton type="button" variant="bare" onClick={() => choosePath(file.path)}>
                     {file.path}
                   </OctantButton>
                 </li>
@@ -424,7 +439,17 @@ function AvailableDiff(
           </nav>
         )
       ) : !sideBySide ? (
-        <div className="code-diff-pane__stack">
+        <div
+          className="code-diff-pane__stack"
+          ref={reviewStack}
+          onScroll={(event) =>
+            viewStore?.write(viewKey, {
+              kind: "review",
+              ...(selectedPath === undefined ? {} : { path: selectedPath }),
+              scrollTop: event.currentTarget.scrollTop,
+            })
+          }
+        >
           <UnifiedDiffList
             files={displayFiles}
             {...(props.requestedCodeReviewFile === undefined
@@ -458,7 +483,7 @@ function AvailableDiff(
                   <OctantButton
                     aria-current={file.id === selected.id}
                     className="code-diff-pane__file"
-                    onClick={() => setSelectedPath(file.path)}
+                    onClick={() => choosePath(file.path)}
                     type="button"
                     variant="bare"
                   >

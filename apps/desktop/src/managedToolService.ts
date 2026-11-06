@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ManagedToolStatus, ManagedToolsStatus } from "@octant/contracts/managed-tooling";
@@ -19,6 +20,7 @@ import {
   type StagedManagedTool,
 } from "./managedToolRelease";
 import { createManagedToolUpdates, type ManagedToolUpdateState } from "./managedToolUpdates";
+import { confineManagedDeviceTool } from "./managedDeviceToolConfinement";
 
 interface ManagedToolInstance {
   readonly descriptor: ManagedToolDescriptor;
@@ -30,8 +32,8 @@ interface ManagedToolInstance {
 
 /**
  * The variables a managed tool may read from the desktop's environment. These
- * tools come from npm with integrity but no publisher signature and run
- * unconfined, so they get what `xcrun simctl`, `adb`, and Node need to start,
+ * tools come from npm with integrity but no publisher signature, so they get
+ * only what `xcrun simctl`, `adb`, and Node need to start,
  * never the provider keys, tokens, or broker secrets the desktop process holds.
  */
 const TOOL_ENVIRONMENT_ALLOWLIST: ReadonlyArray<string> = [
@@ -78,6 +80,8 @@ export function createManagedToolService(options: {
   readonly fetchBytes?: ManagedFetch;
   /** How long a staged tool must survive its smoke launch; injectable for tests. */
   readonly smokeTimeoutMs?: number;
+  /** Native boundary injectable for process fixtures; production uses the scoped device profile. */
+  readonly confineDeviceTool?: typeof confineManagedDeviceTool;
 }) {
   const rootDirectory = join(options.dataDirectory, "managed-tools");
   const settingsPath = join(rootDirectory, "settings.json");
@@ -89,6 +93,39 @@ export function createManagedToolService(options: {
   let closed = false;
   let closing: Promise<void> | undefined;
   const trackedProcesses = new Set<ChildProcess>();
+  let deviceState: Promise<string> | undefined;
+  const deviceStateDirectory = () =>
+    (deviceState ??= mkdtemp(join(tmpdir(), "octant-device-tools-")));
+  const prepareDeviceTool = options.confineDeviceTool ?? confineManagedDeviceTool;
+  const launchFailures = new Map<string, string>();
+
+  async function deviceLaunch(
+    tool: string,
+    entrypoint: string,
+    args: ReadonlyArray<string>,
+    sdkRoot?: string,
+  ) {
+    if (tool !== "serve-sim" && tool !== "serve-avd") return undefined;
+    const spec = prepareDeviceTool({
+      tool,
+      runtime: options.execPath,
+      entrypoint,
+      args,
+      environment: {
+        ...toolEnvironment(),
+        ...(tool === "serve-avd" ? { ADB_MDNS: "0" } : {}),
+        ...(sdkRoot === undefined ? {} : { ANDROID_HOME: sdkRoot, ANDROID_SDK_ROOT: sdkRoot }),
+      },
+      stateDirectory: await deviceStateDirectory(),
+    });
+    if (spec === undefined)
+      launchFailures.set(
+        tool,
+        "Cannot start the managed stream safely on this host. Check the SDK and device-tool setup.",
+      );
+    else launchFailures.delete(tool);
+    return spec;
+  }
 
   const bundledReleaseFor = (packageName: string) =>
     BUNDLED_MANAGED_TOOL_RELEASES.find((release) => release.packageName === packageName);
@@ -174,7 +211,7 @@ export function createManagedToolService(options: {
   ): Promise<boolean> {
     if (closed) return false;
     if (descriptor.runtime === "executable") return smokeExecutable(entrypoint);
-    return smokeNodeEntrypoint(entrypoint);
+    return smokeNodeEntrypoint(descriptor.tool, entrypoint);
   }
 
   async function smokeExecutable(entrypoint: string): Promise<boolean> {
@@ -202,7 +239,9 @@ export function createManagedToolService(options: {
     });
   }
 
-  async function smokeNodeEntrypoint(entrypoint: string): Promise<boolean> {
+  async function smokeNodeEntrypoint(tool: string, entrypoint: string): Promise<boolean> {
+    const spec = await deviceLaunch(tool, entrypoint, []);
+    if (spec === undefined) return false;
     return await new Promise<boolean>((resolvePromise) => {
       let settled = false;
       const finish = (value: boolean) => {
@@ -210,8 +249,9 @@ export function createManagedToolService(options: {
         settled = true;
         resolvePromise(value);
       };
-      const child = spawn(options.execPath, [entrypoint], {
-        env: toolEnvironment(),
+      const child = spawn(spec.command, [...spec.args], {
+        env: spec.env,
+        ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
         stdio: "ignore",
       });
       child.once("error", () => finish(false));
@@ -264,6 +304,7 @@ export function createManagedToolService(options: {
 
   function toolStatus(instance: ManagedToolInstance): ManagedToolStatus {
     const state: ManagedToolUpdateState = instance.updates.state();
+    const message = launchFailures.get(instance.descriptor.tool) ?? state.message;
     const available = existsSync(instance.state.active.entrypoint);
     const stable = join(instance.root, "current", instance.descriptor.entrypoint);
     const managedExecutable =
@@ -283,7 +324,7 @@ export function createManagedToolService(options: {
       version: available ? instance.state.active.version : "0.0.0",
       update: state.status,
       ...(state.availableVersion === undefined ? {} : { availableVersion: state.availableVersion }),
-      ...(state.message === undefined ? {} : { message: state.message }),
+      ...(message === undefined ? {} : { message }),
       ...(instance.descriptor.runtime === "executable" ? { managedDirectory: instance.root } : {}),
       ...(managedExecutable === undefined ? {} : { executablePath: managedExecutable }),
     };
@@ -294,8 +335,10 @@ export function createManagedToolService(options: {
     launchSpec: async (
       tool: string,
       args: ReadonlyArray<string>,
+      sdkRoot?: string,
     ): Promise<
-      { command: string; args: ReadonlyArray<string>; env: NodeJS.ProcessEnv } | undefined
+      | { command: string; args: ReadonlyArray<string>; env: NodeJS.ProcessEnv; cwd?: string }
+      | undefined
     > => {
       await initialize();
       const instance = instances.find((candidate) => candidate.descriptor.tool === tool);
@@ -308,11 +351,7 @@ export function createManagedToolService(options: {
           env: allowlistedEnvironment(),
         };
       }
-      return {
-        command: options.execPath,
-        args: [instance.state.active.entrypoint, ...args],
-        env: toolEnvironment(),
-      };
+      return await deviceLaunch(tool, instance.state.active.entrypoint, args, sdkRoot);
     },
     trackProcess: (tool: string, child: ChildProcess) => {
       const instance = instances.find((candidate) => candidate.descriptor.tool === tool);
@@ -388,6 +427,10 @@ export function createManagedToolService(options: {
             failed = true;
           }
         }
+        // The owning desktop stops tracked tools before closing the service.
+        // A live stream keeps its private state rather than losing it beneath its process.
+        if (deviceState !== undefined && trackedProcesses.size === 0)
+          await rm(await deviceState, { recursive: true, force: true });
         if (failed) throw new Error("Octant could not close managed-tool updaters.");
       })();
       return closing;

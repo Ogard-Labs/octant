@@ -1,3 +1,5 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
@@ -322,6 +324,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "providerDataDirectory"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
+    | "worktreePreparation"
   > &
   Pick<
     BrowserWiring,
@@ -347,6 +350,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     readonly threadMentionService: () => ThreadMentionService;
   } & Pick<
     FoundationsWiring,
+    | "conversationInputTransfer"
     | "browserAuthority"
     | "codeBoardEventStore"
     | "codeEvidence"
@@ -356,6 +360,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
+    conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
     agentRunPersistence,
@@ -422,6 +427,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     recordAppleEvidence,
     resolveSelectedExtensions,
     pinnedExtensionIds,
+    worktreePreparation,
     roots,
     runtimeOutsideContentMarks,
     selectCodeConversation,
@@ -576,6 +582,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        prepareWorktree: async (thread, root, current) => {
+          const checkout = persistence.readCodeCheckout(thread.checkoutId);
+          if (checkout?.kind !== "managed-worktree") return undefined;
+          const context = await worktreePreparation.context({
+            receiptId: String(checkout.ownershipReceiptId),
+            threadId: String(thread.id),
+            checkoutId: String(checkout.id),
+            projectId: String(thread.projectId),
+            root,
+            executionPolicy: thread.executionPolicy,
+            current: () =>
+              current() && persistence.readCodeThread(thread.id)?.lifecycle === "active",
+          });
+          return context === undefined
+            ? "Worktree setup ownership is unavailable."
+            : worktreePreparation.ensure(context);
+        },
+        conversationInputTransfer,
         shield: hostShield,
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({
@@ -657,14 +681,32 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             return serverCodeCheckoutRoot(serverProjectStore, thread);
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
           if (root === undefined) return undefined;
-          const workingDirectory = await resolveThreadWorkingDirectory(
+          const project = persistence.readProject(thread.projectId);
+          if (project?.type !== "code") return undefined;
+          const selectedRoot = approvedWorkingFolderRoot(
+            project,
+            thread.workingFolderId,
             root.rootPath,
+          );
+          if (selectedRoot === undefined) return undefined;
+          const workingDirectory = await resolveThreadWorkingDirectory(
+            selectedRoot,
             thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           );
+          const directoryCurrent = threadWorkingDirectoryCurrent(selectedRoot, workingDirectory);
           return {
             checkoutRoot: root.rootPath,
             rootIdentity: root.rootIdentity,
-            ...(root.current === undefined ? {} : { rootCurrent: root.current }),
+            rootCurrent: () => {
+              const latest = persistence.readProject(thread.projectId);
+              return (
+                directoryCurrent() &&
+                root.current?.() !== false &&
+                latest?.type === "code" &&
+                approvedWorkingFolderRoot(latest, thread.workingFolderId, root.rootPath) ===
+                  selectedRoot
+              );
+            },
             workingDirectory,
             shell: defaultTerminalShell(),
             credentialReferences: [],

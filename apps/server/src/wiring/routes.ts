@@ -29,6 +29,7 @@ import type { AutomationWiring } from "./automation";
 import type { WorkRequestsWiring } from "./workRequests";
 
 export type RoutesDependencies = {
+  readonly conversationInputRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
 } & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
@@ -146,6 +147,7 @@ export type RoutesDependencies = {
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
+    conversationInputRoutes,
     credentialRequestRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
@@ -261,6 +263,7 @@ export function wireRoutes(deps: RoutesDependencies) {
   const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
     (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
+    (await conversationInputRoutes(request)) ??
     (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??
     (await launchSessionRoutes(request)) ??

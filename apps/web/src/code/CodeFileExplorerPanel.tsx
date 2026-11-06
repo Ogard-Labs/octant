@@ -13,12 +13,10 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
- * How many extra folders the explorer follows live. Each watch is a long-lived
- * HTTP/1.1 stream, and a browser allows about six per origin, shared with the
- * checkout's watch and every other stream the window holds; more would starve
- * ordinary requests. Further folders relist on Refresh.
+ * The supported Project folder limit. The client multiplexes these observers
+ * with the checkout over one connection, including duplicate panes.
  */
-export const MAX_LIVE_EXTRA_FOLDER_WATCHES = 2;
+export const MAX_LIVE_EXTRA_FOLDER_WATCHES = 16;
 
 export interface CodeFileExplorerPanelProps {
   readonly threadId?: CodeThreadId | undefined;

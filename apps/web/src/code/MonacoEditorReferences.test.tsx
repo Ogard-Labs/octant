@@ -86,7 +86,13 @@ function fixture() {
         request.kind === "diagnostics"
           ? { status: "diagnostics", ...scope, diagnostics: [], truncated: false }
           : request.kind === "capabilities"
-            ? { status: "capabilities", ...scope, references: state.support }
+            ? {
+                status: "capabilities",
+                ...scope,
+                references: state.support,
+                rename: state.support,
+                quickFixes: state.support,
+              }
             : request.kind === "references"
               ? {
                   status: "references",
@@ -106,7 +112,29 @@ function fixture() {
                   ],
                   truncated: false,
                 }
-              : { status: "definition", ...scope, targets: [] },
+              : request.kind === "rename" || request.kind === "quick-fixes"
+                ? {
+                    status: "edit-previews",
+                    ...scope,
+                    documentVersion: request.expectedVersion,
+                    documentRevision: request.expectedRevision,
+                    previews: [
+                      {
+                        title: "Rename symbol",
+                        files: [
+                          {
+                            path: "b.ts",
+                            fileId,
+                            identity: { device: "1", inode: "2" },
+                            digest: "a".repeat(64),
+                            before: text,
+                            after: text.replaceAll("value", "renamed"),
+                          },
+                        ],
+                      },
+                    ],
+                  }
+                : { status: "definition", ...scope, targets: [] },
       );
     }),
   };
@@ -166,6 +194,60 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("references in the actual Code editor pane", () => {
+  it("reviews suggestions before saving and invalidates the preview when a draft changes", async () => {
+    const f = fixture();
+    const user = userEvent.setup();
+    const drafts = new Map<string, string>();
+    const store = {
+      read: (key: string) => drafts.get(key),
+      write: (key: string, value: string) => {
+        drafts.set(key, value);
+      },
+      clear: (key: string) => {
+        drafts.delete(key);
+      },
+    };
+    vi.mocked(f.client.save).mockResolvedValue({ status: "completed", metadata: f.file.metadata });
+    render(
+      <MonacoEditorPane
+        client={f.client}
+        file={{ ...f.file, executionPolicy: "full-access" }}
+        draftStore={store}
+        loadRuntime={f.loadRuntime}
+        checkoutLabel="feature/rename"
+        languageTiming={{ debounceMs: 10000, pollMs: 10000 }}
+      />,
+    );
+    await screen.findByText("No problems found");
+    await user.type(screen.getByRole("textbox", { name: "New symbol name" }), "renamed");
+    await user.click(screen.getByRole("button", { name: "Preview rename" }));
+    const changes = await screen.findByRole("region", { name: "Reviewed code changes" });
+    const apply = await within(changes).findByRole("button", { name: "Apply reviewed changes" });
+    expect(f.client.save).not.toHaveBeenCalled();
+    await user.click(within(changes).getByText("b.ts", { selector: "summary" }));
+    expect(
+      within(changes).getByText(
+        (_, element) =>
+          element?.tagName === "PRE" && element.textContent === text.replaceAll("value", "renamed"),
+      ),
+    ).toBeVisible();
+    await user.click(apply);
+    await screen.findByText("Saved 1 reviewed files.");
+    expect(f.client.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "b.ts",
+        expectedDigest: "a".repeat(64),
+        text: text.replaceAll("value", "renamed"),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Find quick fixes" }));
+    await within(changes).findByRole("button", { name: "Apply reviewed changes" });
+    act(() => f.options?.onChange("new unsaved text"));
+    expect(
+      within(changes).queryByRole("button", { name: "Apply reviewed changes" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("checks current capability and acknowledged unsaved text before showing bounded references in the explicit checkout", async () => {
     const f = fixture();
     const user = userEvent.setup();

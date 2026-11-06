@@ -1,11 +1,29 @@
-import { mkdir, mkdtemp, realpath, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { resolveThreadWorkingDirectory } from "./threadWorkingDirectoryAuthority";
+import {
+  resolveThreadWorkingDirectory,
+  threadWorkingDirectoryCurrent,
+} from "./threadWorkingDirectoryAuthority";
 
 describe("thread working-directory authority", () => {
+  it("invalidates a selected directory when it disappears or is replaced", async () => {
+    const parent = await realpath(await mkdtemp(join(tmpdir(), "octant-folder-proof-")));
+    try {
+      const root = join(parent, "root");
+      await mkdir(root);
+      const current = threadWorkingDirectoryCurrent(root, root);
+      expect(current()).toBe(true);
+      await rename(root, join(parent, "previous"));
+      expect(current()).toBe(false);
+      await mkdir(root);
+      expect(current()).toBe(false);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
   it("resolves the root and one existing nested directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-cwd-"));
     await mkdir(join(root, "packages", "app"), { recursive: true });

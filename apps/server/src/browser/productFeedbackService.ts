@@ -245,10 +245,20 @@ export class ProductFeedbackService {
   deliver(input: {
     readonly threadId: string;
     readonly operationId: string;
+    readonly maxImages?: number;
   }): ReadonlyArray<ProductFeedbackNote> {
     const pending = this.#options
       .readNotes(input.threadId)
       .filter((note) => note.lifecycle === "pending");
+    // Continuation inputs reserve their slots before feedback is consumed.
+    // Leave the whole note batch pending when its pictures cannot fit.
+    if (
+      input.maxImages !== undefined &&
+      (!Number.isSafeInteger(input.maxImages) ||
+        input.maxImages < 0 ||
+        pending.filter((note) => note.crop !== undefined).length > input.maxImages)
+    )
+      return [];
     const delivered: ProductFeedbackNote[] = [];
     for (const note of pending) {
       const timestamp = decodeTimestamp(this.#options.clock());

@@ -28,6 +28,8 @@ export type LanguageServerClientRequest =
   | "shutdown"
   | "textDocument/diagnostic"
   | "textDocument/definition"
+  | "textDocument/rename"
+  | "textDocument/codeAction"
   | "textDocument/references";
 
 export type LanguageServerClientNotification =
@@ -44,6 +46,8 @@ const CLIENT_REQUESTS: ReadonlySet<string> = new Set<LanguageServerClientRequest
   "shutdown",
   "textDocument/diagnostic",
   "textDocument/definition",
+  "textDocument/rename",
+  "textDocument/codeAction",
   "textDocument/references",
 ]);
 const CLIENT_NOTIFICATIONS: ReadonlySet<string> = new Set<LanguageServerClientNotification>([

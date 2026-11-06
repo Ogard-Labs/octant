@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { decodeProjectId } from "@octant/contracts";
 import { CLAUDE_ACCOUNT_PROFILE, CODEX_ACCOUNT_PROFILE } from "@octant/domain";
+import { keychainServicePrefix, type KeychainServiceFamily } from "@octant/host-runtime";
 import { localHostDisplayName } from "./localHostDisplayName";
 import type {
   HostDataMap,
@@ -15,14 +16,14 @@ import type {
 import type { HostControlServiceMode } from "@octant/contracts/host-control";
 
 const JOURNAL_FILENAME = "octant.sqlite3";
-const PROVIDER_CREDENTIAL_SERVICE = "app.octant.provider-credentials";
-const HOST_IDENTITY_CREDENTIAL_SERVICE = "app.octant.host-identity.v1";
-const REPLICA_DEVICE_KEY_CREDENTIAL_SERVICE = "app.octant.replica-device-keys.v1";
-const REPLICA_STORE_CREDENTIAL_SERVICE = "app.octant.replica-store-credentials.v1";
-const MCP_SERVER_CREDENTIAL_SERVICE = "app.octant.mcp-server-credentials.v1";
-const DESKTOP_PROVIDER_CREDENTIAL_SERVICE = "app.octant.desktop-provider-credentials.v1";
-const PUSH_PLATFORM_CREDENTIAL_SERVICE = "app.octant.push-platform-credentials.v1";
-const SSH_KEY_CREDENTIAL_SERVICE = "app.octant.ssh-keys.v1";
+const PROVIDER_CREDENTIAL_SERVICE = "provider-credentials";
+const HOST_IDENTITY_CREDENTIAL_SERVICE = "host-identity.v1";
+const REPLICA_DEVICE_KEY_CREDENTIAL_SERVICE = "replica-device-keys.v1";
+const REPLICA_STORE_CREDENTIAL_SERVICE = "replica-store-credentials.v1";
+const MCP_SERVER_CREDENTIAL_SERVICE = "mcp-server-credentials.v1";
+const DESKTOP_PROVIDER_CREDENTIAL_SERVICE = "desktop-provider-credentials.v1";
+const PUSH_PLATFORM_CREDENTIAL_SERVICE = "push-platform-credentials.v1";
+const SSH_KEY_CREDENTIAL_SERVICE = "ssh-keys.v1";
 
 const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
   { name: "Apple toolchain artifacts", relative: "artifacts" },
@@ -154,19 +155,23 @@ export function composeHostDataMap(input: ComposeHostDataMapInput): HostDataMap 
   };
 }
 
-export function desktopCredentialStore(): HostDataMapCredentialStoreInput {
+/** The Keychain services this host's desktop keeps, under its service family's names. */
+export function desktopCredentialStore(
+  family: KeychainServiceFamily = "octant",
+): HostDataMapCredentialStoreInput {
+  const prefix = keychainServicePrefix(family);
   return {
     backend: "keychain",
     entries: [
-      { service: PROVIDER_CREDENTIAL_SERVICE },
-      { service: HOST_IDENTITY_CREDENTIAL_SERVICE },
-      { service: REPLICA_DEVICE_KEY_CREDENTIAL_SERVICE },
-      { service: REPLICA_STORE_CREDENTIAL_SERVICE },
-      { service: MCP_SERVER_CREDENTIAL_SERVICE },
-      { service: DESKTOP_PROVIDER_CREDENTIAL_SERVICE },
-      { service: PUSH_PLATFORM_CREDENTIAL_SERVICE },
-      { service: SSH_KEY_CREDENTIAL_SERVICE },
-    ],
+      PROVIDER_CREDENTIAL_SERVICE,
+      HOST_IDENTITY_CREDENTIAL_SERVICE,
+      REPLICA_DEVICE_KEY_CREDENTIAL_SERVICE,
+      REPLICA_STORE_CREDENTIAL_SERVICE,
+      MCP_SERVER_CREDENTIAL_SERVICE,
+      DESKTOP_PROVIDER_CREDENTIAL_SERVICE,
+      PUSH_PLATFORM_CREDENTIAL_SERVICE,
+      SSH_KEY_CREDENTIAL_SERVICE,
+    ].map((service) => ({ service: `${prefix}${service}` })),
   };
 }
 

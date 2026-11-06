@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
 import {
   canonicalReleaseBytes,
+  canonicalReleaseBytesWithoutProduct,
   compareAppVersions,
+  resolveNightlyInstallRelease,
   resolveUpdateInstallReadiness,
   resolveUpdateOffer,
   ringForVersion,
@@ -15,6 +17,7 @@ function feed(overrides: Record<string, unknown> = {}): Record<string, unknown> 
   return {
     schemaVersion: 1,
     release: {
+      product: "octant",
       version: "0.3.0",
       platform: "darwin",
       arch: "arm64",
@@ -33,6 +36,7 @@ const app = {
   version: version("0.2.0"),
   platform: "darwin",
   arch: "arm64",
+  product: "octant" as const,
   ring: "stable" as const,
 };
 const accept = () => true;
@@ -54,6 +58,35 @@ describe("ringForVersion", () => {
 });
 
 describe("resolveUpdateOffer", () => {
+  it("refuses a genuine release for the other app", () => {
+    const nightlyBuild = feed({
+      release: { product: "octant-nightly", version: "0.3.0-preview.20261105.2", ring: "preview" },
+    });
+    expect(
+      resolveUpdateOffer({
+        document: nightlyBuild,
+        app: { ...app, ring: "preview" },
+        verifySignature: accept,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-app" });
+    expect(
+      resolveUpdateOffer({
+        document: feed({ release: { ring: "preview", version: "0.3.0-preview.20261105.2" } }),
+        app: { ...app, product: "octant-nightly", ring: "preview" },
+        verifySignature: accept,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-app" });
+  });
+
+  it("refuses a feed that does not name its app as malformed", () => {
+    const document = feed();
+    delete (document.release as Record<string, unknown>).product;
+    expect(resolveUpdateOffer({ document, app, verifySignature: accept })).toEqual({
+      kind: "refuse",
+      refusal: "malformed",
+    });
+  });
+
   it("offers a signed release that is newer and built for this machine", () => {
     const result = resolveUpdateOffer({ document: feed(), app, verifySignature: accept });
 
@@ -250,6 +283,27 @@ describe("resolveUpdateOffer", () => {
 });
 
 describe("canonicalReleaseBytes", () => {
+  it("signs the app a release is for", () => {
+    const release = {
+      product: "octant",
+      version: version("0.3.0"),
+      platform: "darwin",
+      arch: "arm64",
+      ring: "candidate",
+      url: "https://updates.example.test/Octant.zip",
+      sha256: "b".repeat(64),
+      releasedAt: "2026-08-19T09:00:00.000Z",
+    } as AppUpdateRelease;
+    const nightly = { ...release, product: "octant-nightly" } as AppUpdateRelease;
+
+    expect(canonicalReleaseBytes(release)).not.toEqual(canonicalReleaseBytes(nightly));
+    // Installs built before the field verify the same encoding without it.
+    const { product: _product, ...unnamed } = release;
+    expect(new TextDecoder().decode(canonicalReleaseBytesWithoutProduct(unnamed))).toBe(
+      new TextDecoder().decode(canonicalReleaseBytes(release)).replace('"product":"octant",', ""),
+    );
+  });
+
   it("covers every field the app decides from", () => {
     const release = {
       version: version("0.3.0"),
@@ -399,5 +453,106 @@ describe("resolveUpdateInstallReadiness", () => {
       activeAgentCount: 0,
       activityUnconfirmed: true,
     });
+  });
+});
+
+describe("resolveNightlyInstallRelease", () => {
+  const nightly = {
+    product: "octant-nightly",
+    version: "0.3.0-preview.20261105.2",
+    ring: "preview",
+  };
+  const machine = { platform: "darwin", arch: "arm64" };
+
+  it("offers a Nightly build signed for the preview ring, whatever Octant's own version", () => {
+    const verifySignature = vi.fn(() => true);
+    const result = resolveNightlyInstallRelease({
+      document: feed({ release: nightly }),
+      ...machine,
+      verifySignature,
+    });
+
+    expect(result.kind).toBe("offer");
+    // The preview ring's trust set is the one asked, not whatever ring the
+    // document names.
+    expect(verifySignature).toHaveBeenCalledWith(expect.any(Uint8Array), signature, "preview");
+  });
+
+  it("refuses a genuine release signed for another ring", () => {
+    for (const release of [
+      { product: "octant-nightly", version: "0.3.0-candidate.20261105.1", ring: "candidate" },
+      { product: "octant-nightly", version: "0.3.0", ring: "stable" },
+    ]) {
+      expect(
+        resolveNightlyInstallRelease({
+          document: feed({ release }),
+          ...machine,
+          verifySignature: accept,
+        }),
+      ).toEqual({ kind: "refuse", refusal: "wrong-ring" });
+    }
+  });
+
+  it("refuses a preview-ring feed whose version is not a Nightly build", () => {
+    expect(
+      resolveNightlyInstallRelease({
+        document: feed({
+          release: { product: "octant-nightly", version: "0.3.0", ring: "preview" },
+        }),
+        ...machine,
+        verifySignature: accept,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-ring" });
+  });
+
+  it("refuses a genuine Octant build published on the preview ring", () => {
+    // Octant builds were published on `preview` before Nightly took the ring.
+    expect(
+      resolveNightlyInstallRelease({
+        document: feed({ release: { ...nightly, product: "octant" } }),
+        ...machine,
+        verifySignature: accept,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-app" });
+  });
+
+  it("refuses a feed that does not name its app", () => {
+    const document = feed({ release: nightly });
+    delete (document.release as Record<string, unknown>).product;
+    expect(resolveNightlyInstallRelease({ document, ...machine, verifySignature: accept })).toEqual(
+      { kind: "refuse", refusal: "malformed" },
+    );
+  });
+
+  it("refuses a feed the preview trust set does not verify, before believing any field", () => {
+    expect(
+      resolveNightlyInstallRelease({
+        document: feed({ release: nightly }),
+        ...machine,
+        verifySignature: reject,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "untrusted-signature" });
+    expect(
+      resolveNightlyInstallRelease({
+        document: feed({ release: nightly }),
+        ...machine,
+        verifySignature: () => {
+          throw new Error("no key");
+        },
+      }),
+    ).toEqual({ kind: "refuse", refusal: "untrusted-signature" });
+  });
+
+  it("refuses a Nightly built for another machine and a document that is not a feed", () => {
+    expect(
+      resolveNightlyInstallRelease({
+        document: feed({ release: { ...nightly, arch: "x64" } }),
+        ...machine,
+        verifySignature: accept,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-platform" });
+    expect(
+      resolveNightlyInstallRelease({ document: { hello: 1 }, ...machine, verifySignature: accept }),
+    ).toEqual({ kind: "refuse", refusal: "malformed" });
   });
 });

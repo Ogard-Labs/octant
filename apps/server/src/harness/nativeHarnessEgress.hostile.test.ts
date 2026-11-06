@@ -4689,18 +4689,32 @@ describe("native harness tool egress grants and learn mode", () => {
       const host = await markedThreadWithHosts();
       const windowId = decodeWindowId("00000000-0000-4000-8000-000000000611");
       let settled: NativeHarnessApprovalStore | undefined;
+      let pending: NativeHarnessApproval | undefined;
+      let childRunId: string | undefined;
       const handler = createNativeHarnessSessionRouteHandler({
         windowAuthorityStore: new WindowAuthorityStore(),
         store: {
-          read: () => undefined,
+          read: () =>
+            pending === undefined
+              ? undefined
+              : { session: { status: "running" }, approvals: [pending], questions: [] },
           pause: () => false,
           resume: () => false,
           turnInFlight: () => false,
         } as never,
         followUps: {} as never,
-        authorizeThread: () => true,
-        decideApproval: ({ threadId, approvalId, decision, answer }) =>
-          settled?.decide(threadId, approvalId, decision, answer) ?? "approval-not-found",
+        authorizeThread: () => false,
+        mayAnswerChildFromDevice: (input) =>
+          input.runId === childRunId &&
+          input.parentThreadId === String(egressThread) &&
+          input.deviceId === String(device.deviceId),
+        decideApproval: ({ threadId, approvalId, decision, answer }) => {
+          const outcome =
+            settled?.decide(threadId, approvalId, decision, answer) ?? "approval-not-found";
+          if (outcome === "decided" && pending !== undefined)
+            pending = { ...pending, status: decision === "deny" ? "denied" : "approved" };
+          return outcome;
+        },
       });
       const statuses: unknown[] = [];
       const lead = await markedCommandLead(host, {
@@ -4714,6 +4728,7 @@ describe("native harness tool egress grants and learn mode", () => {
           ],
         ],
         decide: async (approval, answer) => {
+          pending = approval;
           const request = new Request(
             `http://127.0.0.1/api/native-harness/sessions/${String(egressThread)}/approvals`,
             {
@@ -4733,16 +4748,21 @@ describe("native harness tool egress grants and learn mode", () => {
           const response = await handler(request);
           const body = (await response?.json()) as { kind?: string; reason?: string };
           statuses.push(body.reason ?? response?.status);
-          // The store read here is a stub, so a decided approval reads as not found.
+          // A refused route must release the real waiter so a regression reports
+          // its refusal instead of hanging until the whole native test times out.
+          if (body.reason !== "host-not-offered" && body.kind !== "approval-decided")
+            settled?.decide(String(egressThread), String(approval.id), "deny");
           return body.reason === "host-not-offered" ? "host-not-offered" : "decided";
         },
       });
       settled = lead.approvals;
+      const child = lead.child();
+      childRunId = child.runId;
 
-      expect(await lead.bash("registry.example.com:443")).toEqual({
+      expect(await child.bash("registry.example.com:443")).toEqual({
         "registry.example.com:443": "connected",
       });
-      expect(statuses[0]).toBe("host-not-offered");
+      expect(statuses).toEqual(["host-not-offered", 200]);
       expect(callGrants(host)).toEqual([
         expect.objectContaining({
           host: "registry.example.com",

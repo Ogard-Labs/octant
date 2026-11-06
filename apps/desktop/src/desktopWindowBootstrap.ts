@@ -1,5 +1,6 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 import { DESKTOP_FLAVOR_IDENTITIES } from "@octant/host-runtime";
+import { NATIVE_MAIN_AUTHORITY_HEADER } from "@octant/contracts/nightly-browser";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WindowBounds } from "./nativeWindowState";
@@ -24,7 +25,8 @@ export function decorateTrustedRendererHeaders(input: {
   for (const name of Object.keys(requestHeaders)) {
     if (
       name.toLowerCase() === RENDERER_IDENTITY_HEADER ||
-      name.toLowerCase() === "x-octant-human-presentation"
+      name.toLowerCase() === "x-octant-human-presentation" ||
+      name.toLowerCase() === NATIVE_MAIN_AUTHORITY_HEADER
     )
       delete requestHeaders[name];
   }
@@ -84,7 +86,11 @@ export function createMainBrowserWindowOptions(options: {
   readonly initialThreadMode?: "code" | "work";
   readonly initialThreadId?: string;
   readonly localUpdatePreferences?: boolean;
+  /** An Octant Nightly client window, whose bridge omits Octant-only administration. */
+  readonly nightlyClient?: boolean;
   readonly applicationFlavor?: "stable" | "nightly";
+  /** Nightly's running Data role; present only where Nightly offers the choice. */
+  readonly applicationData?: "octant" | "test-data";
   readonly preloadPath: string;
   readonly browserWindow: WindowPresentation["browserWindow"];
 }): BrowserWindowConstructorOptions {
@@ -113,9 +119,13 @@ export function createMainBrowserWindowOptions(options: {
           ? [
               "--octant-application-flavor=nightly",
               `--octant-application-name=${DESKTOP_FLAVOR_IDENTITIES.nightly.productName}`,
+              ...(options.applicationData === undefined
+                ? []
+                : [`--octant-application-data=${options.applicationData}`]),
             ]
           : []),
         ...(options.localUpdatePreferences === true ? ["--octant-local-update-preferences"] : []),
+        ...(options.nightlyClient === true ? ["--octant-nightly-client"] : []),
         `--octant-project-capability=${options.capability}`,
         `--octant-window-id=${options.windowId}`,
         ...(options.initialProjectId === undefined

@@ -5,6 +5,9 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import {
   MAX_REPOSITORY_TEST_ARTIFACT_BYTES,
   MAX_REPOSITORY_TEST_OUTPUT_BYTES,
+  decodeProjectAction,
+  type ProjectAction,
+  type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import type { RepositoryTestProcessResult } from "./repositoryTestRunner";
 import {
@@ -26,6 +29,7 @@ import {
 } from "../process/seatbeltProfile";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import type { EgressProxyEndpoint, OsNetworkEgress } from "../process/threadEgressPolicy";
+import { defaultTerminalShell } from "./terminalShell";
 
 interface ProcessStream {
   on(event: "data", listener: (chunk: unknown) => void): unknown;
@@ -156,6 +160,9 @@ export interface HarnessShellScriptInput {
 }
 
 export interface RepositoryTestProcessInput {
+  readonly networkAccess?: "none";
+  readonly executionPolicy?: ProviderExecutionPolicy;
+  readonly checkoutRoot?: string;
   readonly beforeLaunch?: () => boolean;
   /** Rechecks named-command authority after launch preparation, immediately before spawn. */
   readonly admitStart?: () => boolean | Promise<boolean>;
@@ -345,6 +352,25 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
     return this.#launch(input, validated, signal);
+  }
+
+  /** Only the reviewed Project recipe path uses a shell. Structured repository
+   * tests keep their argv-only refusal; both share process ownership and cleanup. */
+  async executeReviewedAction(
+    input: Omit<RepositoryTestProcessInput, "argv"> & { readonly action: ProjectAction },
+    signal?: AbortSignal,
+  ): Promise<RepositoryTestProcessResult> {
+    if (!supportsOwnedProcessGroups(this.#platform)) return unavailable(false);
+    if (signal?.aborted) return cancelledBeforeSpawn();
+    try {
+      const action = decodeProjectAction(input.action);
+      const executable = defaultTerminalShell();
+      const launch = { ...input, argv: [executable, "-lc", action.command] };
+      validateLaunchInput(launch, this.#maxOutputBytes);
+      return this.#launch(launch, { executable, args: launch.argv.slice(1) }, signal);
+    } catch {
+      return unavailable(false);
+    }
   }
 
   /**
@@ -556,6 +582,13 @@ export class RepositoryTestProcessPort {
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
+      if (input.executionPolicy === "plan") return unavailable(false);
+      let checkoutRoot = input.cwd;
+      if (input.checkoutRoot !== undefined) {
+        checkoutRoot = await realpath(input.checkoutRoot);
+        const cwd = await realpath(input.cwd);
+        if (!contained(checkoutRoot, cwd)) return unavailable(false);
+      }
       const executable = isAbsolute(validated.executable)
         ? validated.executable
         : await resolveTestExecutable(validated.executable);
@@ -615,9 +648,10 @@ export class RepositoryTestProcessPort {
       launch = this.#confinement.prepare({
         executable,
         args: validated.args,
-        boundRoot: input.cwd,
+        boundRoot: checkoutRoot,
         temporaryDirectory: this.#temporaryDirectory,
-        networkEgress: proxied?.networkEgress ?? this.#networkEgress,
+        networkEgress:
+          input.networkAccess === "none" ? "none" : (proxied?.networkEgress ?? this.#networkEgress),
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [

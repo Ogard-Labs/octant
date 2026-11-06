@@ -11,9 +11,13 @@ export interface CredentialOperation {
   readonly actionLabel: string;
   readonly request: {
     readonly url: string;
-    readonly body: string;
     readonly authorization: "bearer" | "raw";
-  };
+  } & (
+    | { readonly method: "GET"; readonly body?: never }
+    | { readonly method?: "POST"; readonly body: string }
+  );
+  /** Status checks cancel the response body; otherwise bounded JSON reaches accepted. */
+  readonly response?: "status-only";
   /** Only a non-sensitive status is returned to the agent in this first slice. */
   readonly accepted: (body: unknown) => boolean;
 }

@@ -1,3 +1,4 @@
+import { decodeConversationInputManifest } from "@octant/contracts/conversation-inputs";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -611,6 +612,56 @@ describe("createAgentRunSessionRuntime", () => {
       await provider.emit({ kind: "completed", sessionId });
       await vi.advanceTimersByTimeAsync(0);
       expect(outcome?.kind).toBe("completed");
+      expect(outcome?.evidence?.workingTime).toMatchObject({
+        activeMs: 10 * 60_000,
+        totalActiveMs: 10 * 60_000,
+        attempts: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the person's selected bound for a fresh attempt without treating the default as a second cutoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, { workingTimeLimitMs: () => 90 * 60_000 }),
+      );
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      expect(outcome).toBeUndefined();
+      await provider.emit({ kind: "completed", sessionId });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome?.evidence?.workingTime).toMatchObject({
+        activeMs: 31 * 60_000,
+        limitMs: 90 * 60_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps provider startup bounded when the person allows a longer working window", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider({ wedge: "start" });
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, { workingTimeLimitMs: () => 90 * 60_000 }),
+      );
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(2 * 60_000 + 1);
+      expect(outcome).toMatchObject({
+        kind: "failed",
+        failure: { message: expect.stringContaining("did not start within 2 minutes") },
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -631,7 +682,7 @@ describe("createAgentRunSessionRuntime", () => {
       await vi.advanceTimersByTimeAsync(2_000);
       expect(outcome).toMatchObject({
         kind: "interrupted",
-        reason: "Managed AgentRun turn exceeded its runtime deadline.",
+        reason: expect.stringContaining("Working-time limit reached"),
       });
     } finally {
       vi.useRealTimers();
@@ -720,7 +771,7 @@ describe("createAgentRunSessionRuntime", () => {
       await vi.advanceTimersByTimeAsync(2_000);
       expect(outcome).toMatchObject({
         kind: "interrupted",
-        reason: "Managed AgentRun turn exceeded its runtime deadline.",
+        reason: expect.stringContaining("Working-time limit reached"),
       });
     } finally {
       vi.useRealTimers();
@@ -886,7 +937,7 @@ describe("createAgentRunSessionRuntime", () => {
     const handle = runtime.start(agentRun());
     const outcome = await settled(handle);
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       kind: "completed",
       responseText: "Report ready.",
       usage: { inputTokens: 20, outputTokens: 5 },
@@ -935,6 +986,69 @@ describe("createAgentRunSessionRuntime", () => {
     await settled(handle);
 
     expect(provider.turns[0]?.context).toEqual(admitted);
+  });
+
+  it("delivers admitted original inputs and refuses provider startup after their source is revoked", async () => {
+    const original = agentRun();
+    const run = {
+      ...original,
+      routingReceipt: {
+        ...original.routingReceipt,
+        admittedInputCount: 1,
+        contextInputPolicy: "preserve" as const,
+      },
+    };
+    const manifest = decodeConversationInputManifest({
+      version: 1,
+      purpose: "child-delegation",
+      items: [
+        {
+          status: "included",
+          input: {
+            source: {
+              mode: "chat",
+              threadId: "33333333-3333-4333-8333-333333333333",
+              attachmentId: "77777777-7777-4777-8777-777777777777",
+            },
+            displayName: "Original report.pdf",
+            mediaType: "application/pdf",
+            byteLength: 4,
+            digest: "a".repeat(64),
+          },
+        },
+      ],
+    });
+    const attachments = [
+      {
+        attachmentId: "source-report",
+        displayName: "Original report.pdf",
+        mediaType: "application/pdf",
+        bytes: new Uint8Array([1, 2, 3, 4]),
+      },
+    ];
+    let available = true;
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "text-delta", sessionId, text: "Read the original report." }).then(() =>
+          emit({ kind: "completed", sessionId }),
+        );
+      },
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        context: { resolve: () => context, inputs: () => (available ? manifest : undefined) },
+        inputsCurrent: () => available,
+        prepareInputs: async () => attachments,
+      }),
+    );
+    const firstOutcome = await settled(runtime.start(run));
+    expect(firstOutcome).toMatchObject({ kind: "completed" });
+    expect(provider.turns[0]?.attachments).toEqual(attachments);
+    available = false;
+    const refused = await settled(runtime.start(run));
+    expect(refused.kind).toBe("failed");
+    expect(provider.starts).toHaveLength(1);
+    expect(provider.turns).toHaveLength(1);
   });
 
   it("declines provider approvals instead of consenting on the user's behalf", async () => {
@@ -1046,7 +1160,7 @@ describe("createAgentRunSessionRuntime", () => {
     await vi.waitFor(() => expect(provider.turns.length).toBe(1));
     await runtime.stop(agentRun().id);
 
-    expect(await outcome).toEqual({ kind: "cancelled" });
+    expect(await outcome).toMatchObject({ kind: "cancelled" });
     expect(provider.interrupts).toEqual([sessionId]);
     expect(provider.stops).toEqual([sessionId]);
   });
@@ -1064,7 +1178,7 @@ describe("createAgentRunSessionRuntime", () => {
     // not shut the provider down or end the reservation a second time.
     await runtime.stop(agentRun().id);
 
-    expect(await outcome).toEqual({ kind: "cancelled" });
+    expect(await outcome).toMatchObject({ kind: "cancelled" });
     expect(provider.interrupts).toEqual([sessionId]);
     expect(provider.stops).toEqual([sessionId]);
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");
@@ -1128,7 +1242,7 @@ describe("createAgentRunSessionRuntime", () => {
     await supervisor.stop(run.id);
 
     expect(provider.stops).toEqual([sessionId, sessionId]);
-    expect(observed).toEqual([{ kind: "cancelled" }]);
+    expect(observed).toMatchObject([{ kind: "cancelled" }]);
     expect(supervisor.activeRunIds()).toEqual([]);
   });
 
@@ -1144,7 +1258,7 @@ describe("createAgentRunSessionRuntime", () => {
     await vi.waitFor(() => expect(provider.turns.length).toBe(1));
     await runtime.stop(agentRun().id);
 
-    expect(await outcome).toEqual({ kind: "cancelled" });
+    expect(await outcome).toMatchObject({ kind: "cancelled" });
     expect(provider.stops).toEqual([sessionId]);
   });
 
@@ -1179,7 +1293,7 @@ describe("createAgentRunSessionRuntime", () => {
     provider.confirmShutdown();
     await supervisor.stop(run.id);
 
-    expect(observed).toEqual([{ kind: "cancelled" }]);
+    expect(observed).toMatchObject([{ kind: "cancelled" }]);
     expect(supervisor.activeRunIds()).toEqual([]);
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");
   });
@@ -1242,7 +1356,7 @@ describe("createAgentRunSessionRuntime", () => {
 
     // A confirmed shutdown is the fact that ends the reservation, and it ends it
     // exactly once even though the deferred release ran on the retry path.
-    expect(observed).toEqual([{ kind: "cancelled" }]);
+    expect(observed).toMatchObject([{ kind: "cancelled" }]);
     expect(recordTerminal).toHaveBeenCalledTimes(1);
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");
     clockMs += 120_000;
@@ -1261,7 +1375,7 @@ describe("createAgentRunSessionRuntime", () => {
     await runtime.stop(agentRun().id);
     await runtime.stop(agentRun().id);
 
-    expect(await outcome).toEqual({ kind: "cancelled" });
+    expect(await outcome).toMatchObject({ kind: "cancelled" });
     expect(recordTerminal).toHaveBeenCalledTimes(1);
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");
   });
@@ -1293,9 +1407,9 @@ describe("createAgentRunSessionRuntime", () => {
 
     const outcome = await settled(runtime.start(agentRun()));
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       kind: "interrupted",
-      reason: "Managed AgentRun turn exceeded its runtime deadline.",
+      reason: expect.stringContaining("Working-time limit reached"),
     });
     // A provider that never came up must not hold its reservation until the
     // host restarts.
@@ -1311,9 +1425,9 @@ describe("createAgentRunSessionRuntime", () => {
 
     const outcome = await settled(runtime.start(agentRun()));
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       kind: "interrupted",
-      reason: "Managed AgentRun turn exceeded its runtime deadline.",
+      reason: expect.stringContaining("Working-time limit reached"),
     });
     // The connection was acquired before the deadline fired, so it is stopped
     // rather than leaked.
@@ -1330,9 +1444,9 @@ describe("createAgentRunSessionRuntime", () => {
 
     const outcome = await settled(runtime.start(agentRun()));
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       kind: "interrupted",
-      reason: "Managed AgentRun turn exceeded its runtime deadline.",
+      reason: expect.stringContaining("Working-time limit reached"),
     });
     expect(provider.stops).toEqual([sessionId]);
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");

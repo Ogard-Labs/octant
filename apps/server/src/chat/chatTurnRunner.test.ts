@@ -229,6 +229,105 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.outcome).toBe("completed");
   });
 
+  it("refuses original continuation inputs revoked during native startup", async () => {
+    const acquireInputs: ProviderAcquireInput[] = [];
+    let subscribedBeforeSend = false;
+    let current = true;
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.sync(() => {
+        subscribedBeforeSend = true;
+        return Stream.fromQueue(queue);
+      }),
+      start: () =>
+        Effect.sync(() => {
+          current = false;
+          return { sessionId };
+        }),
+      send: vi.fn((input: { readonly context?: ReadonlyArray<{ readonly kind: string }> }) =>
+        Effect.gen(function* () {
+          expect(subscribedBeforeSend).toBe(true);
+          expect(input.context).toEqual([{ kind: "instructions", text: "Stay concise." }]);
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Hello" } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      ),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const driver = {
+      acquire: (input: ProviderAcquireInput) => {
+        acquireInputs.push(input);
+        return Effect.succeed(connection);
+      },
+    } as unknown as ProviderDriver;
+    const scratchRoot = "/tmp/octant-scratch/thread";
+    const updates: ChatAttempt[] = [];
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          runner.run({
+            inputsCurrent: () => current,
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            context: [{ kind: "instructions", text: "Stay concise." }],
+            scratchRoot,
+            driver,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "a".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      ),
+    );
+
+    expect(acquireInputs[0]).toMatchObject({ mode: "chat", projectRoot: scratchRoot });
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: { message: expect.stringContaining("original continuation inputs") },
+    });
+    expect(connection.send).not.toHaveBeenCalled();
+  });
+
   it("releases reserved spend when provider acquisition fails", async () => {
     const settle = vi.fn();
     const driver: ProviderDriver = {

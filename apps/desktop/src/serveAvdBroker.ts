@@ -27,6 +27,7 @@ export interface ServeAvdBrokerOptions {
     args: ReadonlyArray<string>,
     options: {
       readonly env: NodeJS.ProcessEnv;
+      readonly cwd?: string;
       readonly stdio: ["ignore", "pipe", "pipe"];
     },
   ) => ChildProcess;
@@ -97,18 +98,15 @@ export async function startServeAvdBroker(
     onExit: () => void,
   ): Promise<AvdLaunch> {
     if (closed) return { kind: "unavailable", reason: "tool-missing" };
-    const spec = await tools.launchSpec("serve-avd", [
-      "--no-preview",
-      "-q",
-      "--codec",
-      "mjpeg",
-      "--host",
-      "127.0.0.1",
-      serial,
-    ]);
+    const spec = await tools.launchSpec(
+      "serve-avd",
+      ["--no-preview", "-q", "--codec", "mjpeg", "--host", "127.0.0.1", serial],
+      sdkRoot,
+    );
     if (spec === undefined || closed) return { kind: "unavailable", reason: "tool-missing" };
     const child = spawn(spec.command, spec.args, {
       env: serveAvdEnvironment(spec.env, sdkRoot),
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     // An unread stderr pipe fills and stalls serve-avd. An unhandled spawn

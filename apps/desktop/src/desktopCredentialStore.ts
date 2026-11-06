@@ -3,10 +3,12 @@ import {
   makeWindowsCredentialStore,
   type CredentialPurgeStore,
   type CredentialStore,
+  type SecretServiceNamespace,
 } from "@octant/host-runtime";
 import {
   makeKeychainCredentialPurgeStore,
   makeKeychainCredentialStore,
+  type KeychainServiceFamily,
 } from "./keychainCredentialStore";
 
 export type DesktopCredentialBackend =
@@ -87,67 +89,62 @@ export async function resolveDesktopCredentialBackend(options: {
   readonly platform: NodeJS.Platform;
   readonly keychainHelperPath: string;
   readonly storeScope: string;
+  readonly serviceFamily?: KeychainServiceFamily;
 }): Promise<DesktopCredentialBackend> {
   if (options.platform === "darwin") {
+    const keychain = {
+      storeScope: options.storeScope,
+      serviceFamily: options.serviceFamily ?? "octant",
+    } as const;
     return {
       kind: "keychain",
-      store: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
-      }),
-      purgeStore: makeKeychainCredentialPurgeStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
-      }),
+      store: makeKeychainCredentialStore(options.keychainHelperPath, keychain),
+      purgeStore: makeKeychainCredentialPurgeStore(options.keychainHelperPath, keychain),
       replicaDeviceKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "replica-device-key",
       }),
       replicaStoreCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "replica-store-credential",
       }),
       canvasPublicShareSecrets: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "canvas-public-share-secret",
       }),
       mcpServerCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "mcp-server-credential",
       }),
       desktopProviderCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "desktop-provider-credential",
       }),
       pushPlatformCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "push-platform-credential",
       }),
       sshKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
+        ...keychain,
         namespace: "ssh-key",
       }),
     };
   }
   if (options.platform === "linux") {
+    // Nightly's test host names its own `service` values; Octant's are unchanged.
+    const family = options.serviceFamily ?? "octant";
+    const store = (namespace: SecretServiceNamespace) =>
+      makeSecretServiceCredentialStore({ namespace, family });
     return {
       kind: "secret-service",
-      store: makeSecretServiceCredentialStore(),
-      replicaDeviceKeys: makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
-      replicaStoreCredentials: makeSecretServiceCredentialStore({
-        namespace: "replica-store-credential",
-      }),
-      canvasPublicShareSecrets: makeSecretServiceCredentialStore({
-        namespace: "canvas-public-share-secret",
-      }),
-      mcpServerCredentials: makeSecretServiceCredentialStore({
-        namespace: "mcp-server-credential",
-      }),
-      desktopProviderCredentials: makeSecretServiceCredentialStore({
-        namespace: "desktop-provider-credential",
-      }),
-      pushPlatformCredentials: makeSecretServiceCredentialStore({
-        namespace: "push-platform-credential",
-      }),
-      sshKeys: makeSecretServiceCredentialStore({ namespace: "ssh-key" }),
+      store: store("provider"),
+      replicaDeviceKeys: store("replica-device-key"),
+      replicaStoreCredentials: store("replica-store-credential"),
+      canvasPublicShareSecrets: store("canvas-public-share-secret"),
+      mcpServerCredentials: store("mcp-server-credential"),
+      desktopProviderCredentials: store("desktop-provider-credential"),
+      pushPlatformCredentials: store("push-platform-credential"),
+      sshKeys: store("ssh-key"),
     };
   }
   if (options.platform === "win32") {

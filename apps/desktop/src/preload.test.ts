@@ -1,12 +1,19 @@
+import { webUtils } from "electron";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { NEEDS_NEWER_OCTANT, nightlyClientChannelClass } from "./nightlyClientChannels";
 
-vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
+vi.mock("electron", () => ({
+  contextBridge: {},
+  ipcRenderer: {},
+  webUtils: { getPathForFile: vi.fn(() => "") },
+}));
 
 import {
   HOST_BRIDGE_KEY,
   IPC_CHANNELS,
+  OCTANT_ONLY_BRIDGE_MEMBERS,
   createHostBridge,
   decodeInitialProjectTarget,
   decodeProjectWindowCapability,
@@ -20,6 +27,115 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it("leaves Octant-only administration out of a Nightly client bridge so its screens hide", async () => {
+    const reached: string[] = [];
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async (channel: string) => {
+        reached.push(channel);
+        return undefined;
+      }),
+      on: vi.fn((channel: string) => {
+        reached.push(channel);
+      }),
+      removeListener: vi.fn(),
+    };
+    const octant = createHostBridge(ipc, projectWindowCapability, undefined, "darwin");
+    for (const member of OCTANT_ONLY_BRIDGE_MEMBERS) expect(member in octant).toBe(true);
+    expect(octant.managedInOctant).toBeUndefined();
+
+    const client = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly", data: "octant" },
+      true,
+    );
+    for (const member of OCTANT_ONLY_BRIDGE_MEMBERS) expect(member in client).toBe(false);
+    expect(client.managedInOctant).toBe(true);
+    expect(client.readNightlyData).toBeTypeOf("function");
+    for (const value of Object.values(client)) {
+      if (typeof value !== "function") continue;
+      try {
+        await (value as () => unknown)();
+      } catch {
+        // Argument validation refuses before any channel; only reached channels matter.
+      }
+    }
+    expect(reached.length).toBeGreaterThan(0);
+    expect(
+      reached.filter((channel) => nightlyClientChannelClass(channel) === "octant-only"),
+    ).toEqual([]);
+  });
+
+  it("builds the Nightly client bridge only from its fixed launch argument", () => {
+    const argv = process.argv;
+    try {
+      for (const [arguments_, expected] of [
+        [["--octant-nightly-client"], true],
+        [[], undefined],
+      ] as const) {
+        process.argv = ["fixture", ...arguments_];
+        const exposeInMainWorld = vi.fn();
+        installHostBridge(
+          { exposeInMainWorld },
+          { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() },
+          projectWindowCapability,
+        );
+        const bridge = exposeInMainWorld.mock.calls[0]?.[1];
+        expect(bridge?.managedInOctant).toBe(expected);
+        expect("hubAdministrationRequest" in bridge).toBe(expected !== true);
+      }
+    } finally {
+      process.argv = argv;
+    }
+  });
+
+  it("offers Nightly's Data requests only with a Data role and sends only the fixed choice", async () => {
+    const invoke = vi.fn(
+      async (channel: string): Promise<unknown> =>
+        channel === IPC_CHANNELS.nightlyDataRelaunch
+          ? { kind: "relaunching" }
+          : { running: "octant", chosen: "test-data", testDataPresent: false },
+    );
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly", data: "octant" },
+    );
+    await expect(bridge.chooseNightlyData?.("test-data")).resolves.toEqual({
+      running: "octant",
+      chosen: "test-data",
+      testDataPresent: false,
+    });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.nightlyDataChoose, "test-data");
+    await expect(bridge.relaunchNightly?.()).resolves.toEqual({ kind: "relaunching" });
+    expect(bridge.readNightlyInstall).toBeUndefined();
+    const withoutRole = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly" },
+    );
+    expect(withoutRole.readNightlyData).toBeUndefined();
+    invoke.mockResolvedValueOnce({
+      running: "octant",
+      chosen: "test-data",
+      testDataPresent: false,
+      folder: "/x",
+    });
+    await expect(bridge.readNightlyData?.()).rejects.toThrow();
+  });
+
   it.each([
     {
       arguments: [
@@ -27,6 +143,31 @@ describe("desktop preload bridge", () => {
         "--octant-application-name=Octant Nightly",
       ],
       expected: { flavor: "nightly", productName: "Octant Nightly" },
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-data=test-data",
+      ],
+      expected: { flavor: "nightly", productName: "Octant Nightly", data: "test-data" },
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-data=/Users/test/Library/Application Support/Octant",
+      ],
+      expected: undefined,
+    },
+    {
+      arguments: [
+        "--octant-application-flavor=nightly",
+        "--octant-application-name=Octant Nightly",
+        "--octant-application-data=octant",
+        "--octant-application-data=test-data",
+      ],
+      expected: undefined,
     },
     { arguments: [], expected: undefined },
     { arguments: ["--octant-application-flavor=nightly"], expected: undefined },
@@ -92,6 +233,71 @@ describe("desktop preload bridge", () => {
     },
   );
 
+  it("tells a Nightly window that its Octant is too old for a brokered flow, in every wrapper", async () => {
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async (channel: string) => {
+        throw new Error(`Error invoking remote method '${channel}': Error: ${NEEDS_NEWER_OCTANT}`);
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const bridge = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly", data: "octant" },
+      true,
+    );
+    const instance = "80000000-0000-4000-8000-000000000401";
+    const uuid = "10000000-0000-4000-8000-000000000001";
+    const calls: ReadonlyArray<() => Promise<unknown>> = [
+      () => bridge.selectProjectRoot("work"),
+      () => bridge.selectLocalPluginFolder(),
+      () => bridge.selectSkillFolder(),
+      () => bridge.selectRuntimeBinary(),
+      () => bridge.saveSupportBundle(),
+      () =>
+        bridge.openCodeExternalEditor({
+          threadId: uuid,
+          checkoutId: uuid,
+          fileId: uuid,
+          line: 1,
+          column: 1,
+        } as never),
+      () =>
+        bridge.openCodeCheckoutInApplication({ threadId: uuid, applicationId: "finder" } as never),
+      () =>
+        bridge.previewHandoff({
+          target: {
+            targetId: uuid,
+            projectId: uuid,
+            hostId: uuid,
+            kind: "file",
+            opaqueRef: "ref",
+            displayName: "a.png",
+          },
+          kind: "quick-look",
+        } as never),
+      () => bridge.requestCodeOperationApproval({} as never),
+      () => bridge.providerCredentialStatus(instance),
+      () => bridge.setProviderCredential(instance, "sk-test"),
+      () => bridge.clearProviderCredential(instance),
+      () => bridge.listProviderApiKeys(instance),
+      () => bridge.addProviderApiKey(instance, "sk-test"),
+      () => bridge.removeProviderApiKey(instance, "default"),
+    ];
+    for (const call of calls) {
+      const message = await call().then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      expect(message).toBe(NEEDS_NEWER_OCTANT);
+    }
+  });
+
   it("surfaces an allowlisted remote-device failure without the wrapper, and refuses anything else", async () => {
     const known = "Octant local device controls are unavailable.";
     const wrapped = new Error(
@@ -104,12 +310,13 @@ describe("desktop preload bridge", () => {
       on: vi.fn(),
       removeListener: vi.fn(),
     };
-    const surfaced = await createHostBridge(wrappedIpc, projectWindowCapability)
-      .getRemoteDeviceInventory()
-      .then(
-        () => "resolved",
-        (error: unknown) => (error instanceof Error ? error.message : String(error)),
-      );
+    const surfaced = await (
+      createHostBridge(wrappedIpc, projectWindowCapability).getRemoteDeviceInventory?.() ??
+      Promise.reject(new Error("absent"))
+    ).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
     expect(surfaced).toBe(known);
 
     const unknownIpc: IpcRendererPort = {
@@ -119,12 +326,13 @@ describe("desktop preload bridge", () => {
       on: vi.fn(),
       removeListener: vi.fn(),
     };
-    const refused = await createHostBridge(unknownIpc, projectWindowCapability)
-      .getRemoteDeviceInventory()
-      .then(
-        () => "resolved",
-        (error: unknown) => (error instanceof Error ? error.message : String(error)),
-      );
+    const refused = await (
+      createHostBridge(unknownIpc, projectWindowCapability).getRemoteDeviceInventory?.() ??
+      Promise.reject(new Error("absent"))
+    ).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
     expect(refused).toBe("Octant could not apply the local device controls.");
   });
 
@@ -164,13 +372,37 @@ describe("desktop preload bridge", () => {
     },
   );
 
+  it("gives Octant the Nightly row's requests with no arguments and gives Nightly none", async () => {
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn().mockResolvedValue({ status: "installed" }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const octant = createHostBridge(ipc, projectWindowCapability, undefined, "darwin");
+    expect(await octant.installNightly?.()).toEqual({ status: "installed" });
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.nightlyInstall);
+    vi.mocked(ipc.invoke).mockResolvedValueOnce({ status: "everywhere" });
+    await expect(octant.readNightlyInstall?.()).rejects.toThrow("Invalid Octant Nightly state.");
+
+    const nightly = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+    );
+    for (const method of ["readNightlyInstall", "installNightly", "openNightly", "removeNightly"])
+      expect(method in nightly).toBe(false);
+  });
+
   it("replays the current local update state when Settings subscribes without checking the feed", async () => {
     const state = {
       status: "idle",
       currentVersion: "0.1.0",
       automaticChecks: false,
       ring: "preview",
-      allowedRings: ["preview", "candidate"],
+      allowedRings: ["preview"],
     };
     const ipc: IpcRendererPort = {
       invoke: vi.fn().mockResolvedValue(state),
@@ -520,6 +752,7 @@ describe("desktop preload bridge", () => {
       "forgetPairedComputer",
       "forgetRemoteServerPages",
       "getComputerUseStatus",
+      "getDroppedFilePath",
       "getHostCapabilities",
       "getManagedToolsStatus",
       "getPrivateListenerStatus",
@@ -528,6 +761,7 @@ describe("desktop preload bridge", () => {
       "hubAdministrationRequest",
       "initialProjectTarget",
       "installAppUpdate",
+      "installNightly",
       "listCaptureWindows",
       "listOpenInApplications",
       "listPairedComputers",
@@ -545,6 +779,7 @@ describe("desktop preload bridge", () => {
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
       "openInNewWindow",
+      "openNightly",
       "openRemoteServerPage",
       "ownerUnlockForgetKey",
       "ownerUnlockMakeKey",
@@ -557,8 +792,10 @@ describe("desktop preload bridge", () => {
       "projectWindowCapability",
       "providerCredentialStatus",
       "readBundledWhatsNew",
+      "readNightlyInstall",
       "reconcileExpiredRemoteDevices",
       "recoverRemoteHostIdentity",
+      "removeNightly",
       "removeProviderApiKey",
       "renameProviderApiKey",
       "renameRemoteDevice",
@@ -1298,9 +1535,9 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
-    await expect(bridge.getPrivateListenerStatus()).resolves.toEqual(disabled);
+    await expect(bridge.getPrivateListenerStatus?.()).resolves.toEqual(disabled);
     await expect(
-      bridge.enablePrivateListener({
+      bridge.enablePrivateListener?.({
         hostname: "192.168.1.20",
         port: 9443,
         origin: "https://192.168.1.20:9443",
@@ -1309,7 +1546,7 @@ describe("desktop preload bridge", () => {
         localConfirmation: true,
       }),
     ).resolves.toEqual(ready);
-    await expect(bridge.disablePrivateListener()).resolves.toEqual(disabled);
+    await expect(bridge.disablePrivateListener?.()).resolves.toEqual(disabled);
 
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.privateListenerStatus],
@@ -1352,8 +1589,8 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
-    await expect(bridge.getPrivateListenerStatus()).resolves.toEqual(selfMade);
-    await expect(bridge.getPrivateListenerStatus()).rejects.toThrow();
+    await expect(bridge.getPrivateListenerStatus?.()).resolves.toEqual(selfMade);
+    await expect(bridge.getPrivateListenerStatus?.()).rejects.toThrow();
   });
 
   it("rejects invalid private listener enable requests before IPC and sanitizes failures", async () => {
@@ -1364,7 +1601,7 @@ describe("desktop preload bridge", () => {
     );
 
     await expect(
-      bridge.enablePrivateListener({
+      bridge.enablePrivateListener?.({
         hostname: "192.168.1.20",
         port: 9443,
         origin: "https://192.168.1.20:9443",
@@ -1376,7 +1613,7 @@ describe("desktop preload bridge", () => {
     expect(invoke).not.toHaveBeenCalled();
 
     const failure = await bridge
-      .enablePrivateListener({
+      .enablePrivateListener?.({
         hostname: "192.168.1.20",
         port: 9443,
         origin: "https://192.168.1.20:9443",
@@ -1429,23 +1666,25 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
-    await expect(bridge.mintRemotePairingTicket("lan-private")).resolves.toMatchObject({
+    await expect(bridge.mintRemotePairingTicket?.("lan-private")).resolves.toMatchObject({
       ticketId,
       sourceClass: "lan-private",
     });
-    await expect(bridge.listRemotePairingRequests()).resolves.toEqual([]);
-    await expect(bridge.approveRemotePairingRequest(ticketId)).resolves.toMatchObject({
+    await expect(bridge.listRemotePairingRequests?.()).resolves.toEqual([]);
+    await expect(bridge.approveRemotePairingRequest?.(ticketId)).resolves.toMatchObject({
       decision: "approved",
       device: { deviceId },
     });
-    await expect(bridge.denyRemotePairingRequest(ticketId, "user-denied")).resolves.toEqual({
+    await expect(bridge.denyRemotePairingRequest?.(ticketId, "user-denied")).resolves.toEqual({
       decision: "denied",
     });
-    await expect(bridge.getRemoteDeviceInventory()).resolves.toEqual([device]);
-    await expect(bridge.renameRemoteDevice(deviceId, "Living Room")).resolves.toEqual(device);
-    await expect(bridge.revokeRemoteDevice(deviceId)).resolves.toMatchObject({ result: "applied" });
-    await expect(bridge.revokeAllRemoteDevices()).resolves.toMatchObject({ result: "applied" });
-    await expect(bridge.reconcileExpiredRemoteDevices()).resolves.toMatchObject({
+    await expect(bridge.getRemoteDeviceInventory?.()).resolves.toEqual([device]);
+    await expect(bridge.renameRemoteDevice?.(deviceId, "Living Room")).resolves.toEqual(device);
+    await expect(bridge.revokeRemoteDevice?.(deviceId)).resolves.toMatchObject({
+      result: "applied",
+    });
+    await expect(bridge.revokeAllRemoteDevices?.()).resolves.toMatchObject({ result: "applied" });
+    await expect(bridge.reconcileExpiredRemoteDevices?.()).resolves.toMatchObject({
       result: "applied",
     });
     expect(invoke.mock.calls.slice(0, 9)).toEqual([
@@ -1479,12 +1718,12 @@ describe("desktop preload bridge", () => {
       { invoke, on: vi.fn(), removeListener: vi.fn() },
       projectWindowCapability,
     );
-    await expect(bridge.getRemoteHostIdentityRecovery()).resolves.toEqual(recovery);
-    await expect(bridge.rotateRemoteHostIdentity()).resolves.toEqual({
+    await expect(bridge.getRemoteHostIdentityRecovery?.()).resolves.toEqual(recovery);
+    await expect(bridge.rotateRemoteHostIdentity?.()).resolves.toEqual({
       status: "rotated",
       fingerprint: "b".repeat(64),
     });
-    await expect(bridge.recoverRemoteHostIdentity()).resolves.toEqual(recovery);
+    await expect(bridge.recoverRemoteHostIdentity?.()).resolves.toEqual(recovery);
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.remoteHostIdentityStatus],
       [IPC_CHANNELS.remoteHostIdentityRotate],
@@ -1517,4 +1756,18 @@ describe("native menu bridge", () => {
     expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
     expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
   });
+});
+
+it("extracts native dropped paths through Electron and refuses synthetic or unavailable files", () => {
+  const ipc: IpcRendererPort = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
+  const bridge = createHostBridge(ipc, projectWindowCapability);
+  const file = new File([], "folder");
+  vi.mocked(webUtils.getPathForFile).mockReturnValueOnce("/project/日本語 folder");
+  expect(bridge.getDroppedFilePath?.(file)).toBe("/project/日本語 folder");
+  expect(bridge.getDroppedFilePath?.(file)).toBeUndefined();
+  vi.mocked(webUtils.getPathForFile).mockImplementationOnce(() => {
+    throw new Error("not a native file");
+  });
+  expect(bridge.getDroppedFilePath?.(file)).toBeUndefined();
+  expect(ipc.invoke).not.toHaveBeenCalled();
 });

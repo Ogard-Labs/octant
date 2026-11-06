@@ -31,6 +31,69 @@ A supported installation must be checked with a real sandboxed launch before
 claiming packaged desktop acceptance. Octant does not install or relax host
 security policy automatically.
 
+### Launch flags
+
+The Linux AppImages accept only a short list of display flags, so a desktop
+entry or a launcher can pick Wayland or X11 and work around graphics trouble:
+
+- `--ozone-platform=` or `--ozone-platform-hint=`, with `wayland`, `x11` or
+  `auto`
+- `--enable-features=` or `--disable-features=`, naming only
+  `UseOzonePlatform`, `WaylandWindowDecorations`, `WaylandTextInputV3`,
+  `WaylandFractionalScaleV1` or `VaapiVideoDecoder` (comma-separated)
+- `--enable-wayland-ime` and `--wayland-text-input-version=1` or `=3`
+- `--disable-gpu` and `--disable-gpu-compositing`
+- `--force-device-scale-factor=` with a number above 0 and at most 4
+
+Each flag may appear once. Octant and Octant Nightly refuse to start with any
+other flag, including `--no-sandbox`, other sandbox switches, debugging and
+inspector options and `--js-flags`.
+
+### An AppArmor profile for Octant
+
+Ubuntu 23.10 and later stop unconfined programs from creating the user
+namespaces Chromium's sandbox needs, unless an AppArmor profile allows it for
+that program. Give the permission to one fixed copy of each app, not to every
+AppImage mount or every program in your home folder:
+
+1. Extract each AppImage to a folder only you can write, for example
+   `~/Applications/Octant`:
+
+   ```sh
+   mkdir -p ~/Applications && cd ~/Applications
+   ./Octant-<version>-linux-x64.AppImage --appimage-extract
+   mv squashfs-root Octant
+   chmod -R go-w Octant
+   ```
+
+   An extracted copy has no AppImage path to record, so open it yourself
+   before starting Nightly.
+
+2. As an administrator, create `/etc/apparmor.d/octant`, naming the exact
+   executable (your home path, not a wildcard):
+
+   ```text
+   abi <abi/4.0>,
+   include <tunables/global>
+
+   profile octant /home/alex/Applications/Octant/Octant flags=(unconfined) {
+     userns,
+   }
+   ```
+
+   Do the same for Nightly in `/etc/apparmor.d/octant-nightly`; its
+   executable has a space in its name, so quote the path:
+   `profile octant-nightly "/home/alex/Applications/Octant Nightly/Octant Nightly" flags=(unconfined) {`.
+
+3. Load the profiles: `sudo apparmor_parser -r /etc/apparmor.d/octant
+/etc/apparmor.d/octant-nightly`.
+
+Anything that can write that executable can use the permission, which is why
+the folder must stay writable by you alone. Do not turn off
+`kernel.apparmor_restrict_unprivileged_userns` for the whole machine to make
+Octant start; that removes the restriction for every program. Check the result
+with a real launch, as below.
+
 ### Isolated desktop installation
 
 A pre-existing rootless Cua Space is a tested option when direct launch on the

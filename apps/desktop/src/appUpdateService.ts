@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type {
   AppReleaseRing,
+  AppUpdateProduct,
   AppUpdateRelease,
   AppUpdateState,
   AppVersion,
@@ -17,6 +18,7 @@ import {
   fetchUpdateFeed,
   fetchVerifiedArtifact,
   type FeedVerifier,
+  isEmptyFeedMarker,
   updateFeedUrl,
 } from "./appUpdateFeed";
 import type { PortableImageApplyResult, PortableImagePort } from "./portableImageUpdate";
@@ -62,7 +64,13 @@ export interface AppUpdateServiceOptions {
    * known size; a body far past it is not one.
    */
   readonly maxArtifactBytes?: number;
-  readonly app: { readonly version: AppVersion; readonly platform: string; readonly arch: string };
+  readonly app: {
+    readonly version: AppVersion;
+    readonly platform: string;
+    readonly arch: string;
+    /** Which app this is; a signed release for the other app is refused. */
+    readonly product: AppUpdateProduct;
+  };
   readonly automaticChecks: boolean;
   /**
    * The ring to follow before the persisted preference arrives. Defaults to
@@ -296,7 +304,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
         return publishWithoutOffer({
           status: "refused",
           refusal: "wrong-ring",
-          message: refusalMessage("wrong-ring"),
+          message: refusalMessage("wrong-ring", options.app.product),
         });
       }
       if (next === ring) return state;
@@ -376,15 +384,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       const document = fetched.document;
       // The feed can report an unpublished channel, but that unsigned marker
       // proves nothing about the installed version and must never carry an offer.
-      if (
-        typeof document === "object" &&
-        document !== null &&
-        "schemaVersion" in document &&
-        document.schemaVersion === 1 &&
-        "status" in document &&
-        document.status === "empty" &&
-        Object.keys(document).length === 2
-      ) {
+      if (isEmptyFeedMarker(document)) {
         return publishWithoutOffer({
           status: "idle",
           checkedAt: clock() as AppUpdateState["checkedAt"],
@@ -401,7 +401,9 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
           status: offer.refusal === "not-newer" ? "up-to-date" : "refused",
           refusal: offer.refusal,
           checkedAt: clock() as AppUpdateState["checkedAt"],
-          ...(offer.refusal === "not-newer" ? {} : { message: refusalMessage(offer.refusal) }),
+          ...(offer.refusal === "not-newer"
+            ? {}
+            : { message: refusalMessage(offer.refusal, options.app.product) }),
         });
       }
       return publish({
@@ -545,8 +547,12 @@ const ROLLED_BACK_MESSAGE =
 const RESTORE_FAILED_MESSAGE =
   "Octant could not relaunch the update and could not restore the previous copy. Replace the image by hand.";
 
-function refusalMessage(refusal: string): string {
+function refusalMessage(refusal: string, product: AppUpdateProduct): string {
   switch (refusal) {
+    case "wrong-app":
+      return product === "octant"
+        ? "This update is for Octant Nightly, not Octant."
+        : "This update is for Octant, not Octant Nightly.";
     case "untrusted-signature":
       return "The update was not signed by Octant, so it was refused.";
     case "malformed":

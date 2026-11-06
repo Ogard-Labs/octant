@@ -1,3 +1,4 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -198,6 +199,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
   Pick<
     FoundationsWiring,
+    | "conversationInputTransfer"
     | "browserAuthority"
     | "providerRuntimeRegistry"
     | "workArtifactProjection"
@@ -207,6 +209,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
 
 export function wireWork(deps: WorkDependencies) {
   const {
+    conversationInputTransfer,
     agentRunPersistence,
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
@@ -381,6 +384,7 @@ export function wireWork(deps: WorkDependencies) {
       projectLabel: (projectId) => persistence.readProject(projectId as ProjectId)?.name,
     });
     const workTurnService = new WorkTurnService({
+      conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
@@ -602,7 +606,10 @@ export function wireWork(deps: WorkDependencies) {
       consumeIssueContextFramed: consumeCreateFromIssueFramed,
       projects: projectService,
       projection: workTurnProjection,
-      workingDirectories: { resolve: resolveThreadWorkingDirectory },
+      workingDirectories: {
+        resolve: resolveThreadWorkingDirectory,
+        current: threadWorkingDirectoryCurrent,
+      },
       resolveDriver: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined) return undefined;
@@ -663,6 +670,24 @@ export function wireWork(deps: WorkDependencies) {
     });
     const fileMentionService = new FileMentionService({
       authority: {
+        resolveDraftRoot: async (windowId, mode, projectId) => {
+          const bootstrap = await projectService.bootstrap(windowId);
+          const project = bootstrap.active.find((entry) => String(entry.id) === projectId);
+          if (
+            project === undefined ||
+            project.lifecycle !== "active" ||
+            project.type === "chat" ||
+            project.type !== (mode === "code-draft" ? "code" : "work")
+          )
+            return { kind: "unauthorized" };
+          const pinned = await pinFileMentionRoot(project.binding.canonicalRoot);
+          return pinned.kind === "ok"
+            ? {
+                ...pinned,
+                extraRoots: await pinFileMentionExtraRoots(projectExtraFolderRoots(project)),
+              }
+            : pinned;
+        },
         resolveCodeRoot: async (windowId, threadId, checkoutId) => {
           try {
             const view = await codeService.read(windowId, decodeCodeThreadId(threadId));
@@ -1291,6 +1316,7 @@ export function wireWork(deps: WorkDependencies) {
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => workAttachments.recover());
+    yield* Effect.promise(() => conversationInputTransfer.recover());
     const advanceMessageQueue = () => {
       void threadMessageQueue
         .tick()

@@ -1,3 +1,4 @@
+import { createConversationInputTransfer } from "./conversationInputs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -201,7 +202,13 @@ export function wireFoundations(deps: FoundationsDependencies) {
       ...selection,
     });
 
+  const conversationInputTransfer = createConversationInputTransfer(
+    persistence,
+    workThreadProjection,
+    providerRuntimeRegistry,
+  );
   return {
+    conversationInputTransfer,
     browserAuthority,
     codeBoardEventStore,
     codeEvidence,

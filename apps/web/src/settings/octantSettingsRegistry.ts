@@ -65,9 +65,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("app-update-ring"),
-          label: "Release ring",
+          label: "Update channel",
           scope: "app",
-          keywords: "release ring stable preview candidate nightly beta channel updates",
+          keywords:
+            "update channel release ring stable preview candidate nightly beta channel updates",
+        },
+        {
+          id: settingId("app-update-nightly"),
+          label: "Octant Nightly",
+          scope: "app",
+          keywords: "octant nightly install open remove second app builds preview updates",
+        },
+        {
+          id: settingId("app-nightly-data"),
+          label: "Data",
+          scope: "app",
+          keywords: "octant nightly test separate host development testing relaunch",
+        },
+        {
+          id: settingId("app-nightly-test-data"),
+          label: "Test data",
+          scope: "app",
+          keywords: "octant nightly test folder development testing",
         },
       ],
     },
@@ -749,6 +768,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Helper agents at once in one thread",
           scope: "app",
           keywords: "helper agents subagents concurrency at once limit parallel thread",
+        },
+        {
+          id: settingId("subagent-working-minutes"),
+          label: "Working minutes per helper attempt",
+          scope: "app",
+          keywords:
+            "helper agents subagents working time minutes limit budget retry resume approval question waits",
         },
         {
           id: settingId("default-model"),

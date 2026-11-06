@@ -970,6 +970,8 @@ export interface CodeOperationTurnPort {
      */
     readonly operationId: CodeOperationId;
     readonly sessionId: string;
+    readonly providerRoot?: string;
+    readonly folderCurrent?: () => boolean;
     readonly checkoutRoot: string;
     readonly rootIdentity?: { readonly device: string; readonly inode: string };
     readonly prompt: string;
@@ -1000,7 +1002,7 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: () => {
+    readonly takeProductFeedback?: (maxAttachments?: number) => {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };
@@ -1021,6 +1023,11 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
+  }) => Promise<CodeOperationTurnResult>;
+  readonly forceStop?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
@@ -1118,6 +1125,13 @@ export interface CodeOperationExecuteOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /** Host-owned input preparation, only for a fresh start after checkout authority resolves. */
+  readonly prepareTurnInput?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly checkoutRoot: string;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<(() => boolean) | undefined>;
   /**
    * Set by the routine dispatcher for the provider turn it starts for a run,
    * and only there: that turn may report the run's result. Host-only: the
@@ -1127,6 +1141,11 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  readonly prepareWorktree?: (
+    thread: CodeThread,
+    root: string,
+    current: () => boolean,
+  ) => Promise<string | undefined>;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -1266,6 +1285,7 @@ export interface CodeOperationServiceOptions {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
     readonly supportsImages: boolean;
+    readonly maxAttachments?: number;
   }) => {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
@@ -1679,10 +1699,13 @@ export class CodeOperationService {
             if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
             // A start stopped while it prepares is refused at its next
             // admission check, at the latest just before the runtime takes it on.
+            let inputCurrent: (() => boolean) | undefined;
+            const preparationCurrent = () =>
+              startingTurn?.cancelled !== true && options.admissionCurrent?.() !== false;
             const admissionCurrent =
               startingTurn === undefined
                 ? options.admissionCurrent
-                : () => !startingTurn.cancelled && options.admissionCurrent?.() !== false;
+                : () => preparationCurrent() && inputCurrent?.() !== false;
             try {
               // Held first, so no restore starts after this; one already
               // overwriting the files finishes before the checkpoint is taken.
@@ -1715,6 +1738,26 @@ export class CodeOperationService {
                 recordedStart === undefined &&
                 turnRefusal === undefined
               ) {
+                if (options.prepareTurnInput !== undefined) {
+                  try {
+                    inputCurrent = await options.prepareTurnInput({
+                      threadId: command.threadId,
+                      checkoutRoot: root.checkoutRoot,
+                      current: preparationCurrent,
+                      signal: AbortSignal.timeout(10_000),
+                    });
+                  } catch {
+                    inputCurrent = undefined;
+                  }
+                  if (inputCurrent === undefined || admissionCurrent?.() === false)
+                    turnRefusal = admissionRefusal();
+                }
+              }
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined
+              ) {
                 // A server folder is no folder of this host: Git here never
                 // captures a path that only names it there.
                 const checkpoint =
@@ -1740,6 +1783,9 @@ export class CodeOperationService {
                     expectedCursor: resultCursor,
                     event: {
                       kind: "conversation-turn-started",
+                      ...(command.toolCatalogHandoff === undefined
+                        ? {}
+                        : { toolCatalogHandoff: command.toolCatalogHandoff }),
                       providerInstanceId: scope.thread.providerInstanceId,
                       modelId: scope.thread.modelId,
                       sessionId: command.sessionId,
@@ -1934,6 +1980,8 @@ export class CodeOperationService {
         () => !held.cancelled && admissionCurrent?.() !== false,
         root.rootIdentity,
         routineRun,
+        thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+        thread.workingFolderId === undefined ? undefined : root.rootCurrent,
       );
       // Stopped before the runtime took it on: whatever the preparation then
       // answered (the admission refusal, or a failure of its own), the start
@@ -4022,6 +4070,8 @@ export class CodeOperationService {
           admissionCurrent,
           root.rootIdentity,
           routineRun,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+          thread.workingFolderId === undefined ? undefined : root.rootCurrent,
         );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
@@ -4034,6 +4084,23 @@ export class CodeOperationService {
             approvalId: command.approvalId,
             decision: command.decision,
           }),
+        );
+      case "force-stop-provider-turn":
+        return this.#providerResult(
+          command.operationId,
+          this.#options.turns.forceStop === undefined
+            ? {
+                state: "failed",
+                failure: {
+                  category: "failed",
+                  message: "This runtime does not support force-stopping an owned attempt.",
+                },
+              }
+            : await this.#options.turns.forceStop({
+                thread,
+                checkoutRoot: root.checkoutRoot,
+                turnOperationId: command.turnOperationId,
+              }),
         );
       case "cancel-provider-turn": {
         // A turn still preparing is not the runtime's yet, so the runtime
@@ -5473,6 +5540,8 @@ export class CodeOperationService {
     admissionCurrent?: () => boolean,
     rootIdentity?: { readonly device: string; readonly inode: string },
     routineRun?: AutomationRunReference,
+    providerRoot?: string,
+    folderCurrent?: () => boolean,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -5482,6 +5551,13 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
         "refused",
       );
+    const preparationRefusal = await this.#options.prepareWorktree?.(
+      thread,
+      checkoutRoot,
+      () => admissionCurrent?.() !== false,
+    );
+    if (preparationRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", preparationRefusal, "refused");
     const selections =
       command.extensionSelections?.filter(
         (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),
@@ -5659,6 +5735,8 @@ export class CodeOperationService {
       thread,
       operationId: command.operationId,
       sessionId: command.sessionId,
+      ...(providerRoot === undefined ? {} : { providerRoot }),
+      ...(folderCurrent === undefined ? {} : { folderCurrent }),
       checkoutRoot,
       ...(rootIdentity === undefined ? {} : { rootIdentity }),
       prompt,
@@ -5687,11 +5765,12 @@ export class CodeOperationService {
       ...(takeProductFeedback === undefined
         ? {}
         : {
-            takeProductFeedback: () =>
+            takeProductFeedback: (maxAttachments) =>
               takeProductFeedback({
                 threadId: command.threadId,
                 operationId: command.operationId,
                 supportsImages,
+                ...(maxAttachments === undefined ? {} : { maxAttachments }),
               }),
           }),
     });
@@ -6141,6 +6220,7 @@ function sameConversationStart(
     event.providerInstanceId === thread.providerInstanceId &&
     event.modelId === thread.modelId &&
     event.sessionId === command.sessionId &&
+    (event.toolCatalogHandoff === true) === (command.toolCatalogHandoff === true) &&
     (event.checkoutId === undefined || event.checkoutId === command.checkoutId) &&
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&
@@ -6260,6 +6340,7 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "answer-provider-input":
     case "answer-provider-approval":
     case "cancel-provider-turn":
+    case "force-stop-provider-turn":
     case "attach-terminal":
       return "read";
     case "start-terminal":

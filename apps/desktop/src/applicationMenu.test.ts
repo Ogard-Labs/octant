@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildApplicationMenuTemplate } from "./applicationMenu";
+import {
+  buildApplicationMenuTemplate,
+  buildStableMenuTemplate,
+  developerToolsAllowed,
+} from "./applicationMenu";
 
 describe("native application menu", () => {
   it("keeps Settings in the Octant menu and invokes the shared settings action", () => {
@@ -8,6 +12,7 @@ describe("native application menu", () => {
       appName: "Octant",
       onOpenSettings,
       onQuit: vi.fn(),
+      developerTools: true,
     });
     const appMenu = template[0];
 
@@ -32,6 +37,7 @@ describe("native application menu", () => {
       appName: "Octant",
       onOpenSettings: vi.fn(),
       onQuit,
+      developerTools: true,
     });
     const appMenu = template[0];
     const quit = Array.isArray(appMenu?.submenu)
@@ -49,6 +55,7 @@ describe("native application menu", () => {
       appName: "Octant",
       onOpenSettings: vi.fn(),
       onQuit: vi.fn(),
+      developerTools: true,
     });
     expect(template.slice(1).map((item) => item.role)).toEqual([
       "fileMenu",
@@ -56,5 +63,50 @@ describe("native application menu", () => {
       "viewMenu",
       "windowMenu",
     ]);
+  });
+
+  it("leaves Reload and developer tools out of View when they are not offered", () => {
+    const template = buildApplicationMenuTemplate({
+      appName: "Octant Nightly",
+      onOpenSettings: vi.fn(),
+      onQuit: vi.fn(),
+      developerTools: false,
+    });
+    expect(template[0]?.label).toBe("Octant Nightly");
+    const view = template.find((item) => item.label === "View");
+    expect(view?.role).toBeUndefined();
+    const roles = Array.isArray(view?.submenu) ? view.submenu.map((item) => item.role) : [];
+    expect(roles).toContain("togglefullscreen");
+    for (const role of ["toggleDevTools", "reload", "forceReload"])
+      expect(roles).not.toContain(role);
+    expect(template.map((item) => item.role)).not.toContain("viewMenu");
+  });
+});
+
+describe("developer tools by build", () => {
+  it("keeps developer tools in development, candidate and preview builds and hides them in a stable release", () => {
+    expect(developerToolsAllowed({ packaged: false, version: "0.2.0" })).toBe(true);
+    expect(developerToolsAllowed({ packaged: true, version: "0.2.0-candidate.3" })).toBe(true);
+    expect(developerToolsAllowed({ packaged: true, version: "0.2.0-preview.5" })).toBe(true);
+    expect(developerToolsAllowed({ packaged: true, version: "0.2.0" })).toBe(false);
+  });
+});
+
+describe("stable Windows and Linux menu", () => {
+  it("keeps zoom, fullscreen and the Edit menu and offers neither reload nor developer tools", () => {
+    const template = buildStableMenuTemplate();
+    const roles = JSON.stringify(template);
+    expect(template.map((item) => item.role ?? item.label)).toEqual([
+      "fileMenu",
+      "editMenu",
+      "View",
+      "windowMenu",
+    ]);
+    for (const role of ["zoomIn", "zoomOut", "resetZoom", "togglefullscreen"]) {
+      expect(roles).toContain(`"${role}"`);
+    }
+    for (const role of ["reload", "forceReload", "toggleDevTools", "viewMenu"]) {
+      expect(roles).not.toContain(`"${role}"`);
+    }
   });
 });
