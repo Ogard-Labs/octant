@@ -44,11 +44,17 @@ exercised. Nightly cannot yet run its own test-data host.
 Octant ships as two apps that install side by side and can be open at the same
 time (maintainer decision, 2026-11-05):
 
-- **Octant** is the app a person works in. It follows Stable (the `stable`
-  ring) or, when the person chooses it in Settings › Updates, Preview (the
-  `candidate` ring): pre-release builds of the next stable version, cut from
-  the ref a maintainer chooses. One binary serves both channels; the channel is
-  an in-app choice, not a second download.
+- **Octant** is the app a person works in. Settings › Updates has a three-option
+  channel switch, Stable | Preview | Nightly. Stable follows the `stable` ring.
+  Preview follows the `candidate` ring: pre-release builds of the next stable
+  version, cut from the ref a maintainer chooses. Nightly keeps Octant on the
+  `candidate` ring too and adds the Octant Nightly install row; Octant never
+  follows `preview`. Because Preview and Nightly share a ring, the choice is
+  stored as its own shared setting, `updateChannel`, beside `releaseRing`; where
+  it is absent it derives from the ring (`stable` is Stable, `candidate` is
+  Preview), and a stored channel that disagrees with the ring is ignored. One
+  binary serves every channel; the channel is an in-app choice, not a second
+  download.
 - **Octant Nightly** follows Nightly (the `preview` ring): scheduled builds of
   `main`. It shows what is next. It has no channel choice.
 
@@ -604,8 +610,10 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 
 ## Getting Octant Nightly
 
-- **From Octant on Preview.** Nightly is opt-in. When Octant follows Preview,
-  Settings › Updates shows an Octant Nightly row below the channel switch:
+- **From Octant on the Nightly channel.** Nightly is opt-in. When the channel
+  switch is on Nightly (Octant itself stays on `candidate`), Settings › Updates
+  shows an Octant Nightly row directly under the switch. Choosing Nightly
+  downloads nothing; only the explicit click does:
   "Install Octant Nightly" downloads the newest Nightly (`preview` ring) build
   and places it beside Octant after three checks:
   - The feed signature, against the preview ring's trust set (the preview key
@@ -657,8 +665,10 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     website.
 - **From the website.** octant.sh offers both downloads. The Nightly download
   says it works with Octant and needs it installed.
-- Switching Octant back to Stable leaves an installed Nightly in place; the
-  row stays while Nightly is installed so it can still be opened or removed.
+- Switching Octant to Stable or Preview leaves an installed Nightly in place;
+  the row stays while Nightly is installed so it can still be opened or
+  removed, and is hidden otherwise. Main still allows an install only while
+  Octant follows `candidate`.
 - Nightly then updates itself on its own ring. Octant's updater only ever
   checks `stable` or `candidate`.
 
@@ -676,7 +686,12 @@ directory. Its bundled preload marks these preferences as local: the renderer
 neither synchronizes shared host update settings into Nightly nor writes a
 Nightly choice back to those shared settings. Nightly follows only `preview`
 and shows no channel switch; Octant's running identity permits `stable` and
-`candidate`. Automatic checks
+`candidate`. Its Updates section otherwise matches Octant's: the same Version
+row (What's new, Check for updates, Relaunch to update), the same ready and
+refusal notices, the same Automatic checks row and "What a check sends"
+disclosure, and the same copy style. In place of the switch is one quiet line
+saying Nightly gets a new build of what is being built every night, and there
+is no install row. Automatic checks
 start off until Nightly's own stored choice is read. Invalid or redirected
 preference files leave them off. What's new and its acknowledgement also stay
 in Nightly's own bundled resources and window storage.

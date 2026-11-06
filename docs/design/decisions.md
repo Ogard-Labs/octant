@@ -332,7 +332,7 @@ An update installs only after its feed signature and artifact hash verify, and o
 
 - The release must be strictly newer and name this platform, architecture and ring.
 - Anything unverifiable is refused, never downgraded; macOS adds the platform code-signature check, and a Linux AppImage replaces only the image it was launched from.
-- Rings are stable, preview and candidate. Octant follows stable or, by the person's in-app choice, candidate (shown as Preview); Octant Nightly follows preview (shown as Nightly).
+- Rings are stable, preview and candidate. Octant follows stable or, by the person's in-app choice, candidate (shown as Preview or, with the Nightly install row, Nightly); the Octant Nightly app follows preview.
 - Install waits while agents are active; automatic checks are a setting, and a check carries only version, platform and architecture.
 
 Status: Built. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
@@ -2708,13 +2708,13 @@ Status: Partly built. Since: 2026-10-26. Detail: [Hosted relay: shape](hosted-re
 
 ### Octant Nightly
 
-Octant Nightly is a second desktop app that installs beside Octant, follows the preview ring (scheduled builds of `main`), and works on the same data. Octant's host alone owns the data folder. Octant itself is one binary whose in-app channel is Stable or Preview (maintainer decision, 2026-11-05).
+Octant Nightly is a second desktop app that installs beside Octant, follows the preview ring (scheduled builds of `main`), and works on the same data. Octant's host alone owns the data folder. Octant itself is one binary whose in-app channel switch is Stable | Preview | Nightly (maintainer decision, 2026-11-05): Nightly keeps Octant on the candidate ring and adds the install row, and Octant never follows preview.
 
 - By default Nightly connects to Octant's running host as a client and never runs a host on Octant's data; it needs Octant installed.
 - For development and testing, a person can opt Nightly into its own host on separate test data, with its own port and Keychain service names; it never touches Octant's data or host.
 - Nightly has its own bundle id, link scheme, command-line tool and window storage, and holds no thread or Project data.
 - Both macOS desktop mains use sealed fixed entry roles. The same-version worker runtime keeps host/tool/extension Node execution under a distinct identity that native peer admission must refuse. Detail: [fixed entry](nightly-app.md#fixed-packaged-entry).
-- Octant on Preview offers Nightly as an opt-in install, only on the person's action, after verifying the signed feed, the artifact hash and a Nightly-specific code-signature requirement.
+- Octant on the Nightly channel offers Nightly as an opt-in install, only on the person's action, after verifying the signed feed, the artifact hash and a Nightly-specific code-signature requirement.
 - A build's flavor follows its ring (stable and candidate package as Octant, preview as Nightly), one app's update can never install the other, and Nightly is published only after an Octant build exists.
 
 Status: Identity, packaging, the 2026-11-05 channel split, authenticated window-bootstrap and validated Stable host-only launch and current-client retention foundations built; the Preview install row is built for packaged macOS Octant without a signed install yet exercised; the test-data host, complete embedded Browser, complete native bridge, full lifecycle acceptance and installation pending. Since: 2026-11-05. Detail: [Octant Nightly: one host serves both](nightly-app.md#one-host-serves-both) and [getting Octant Nightly](nightly-app.md#getting-octant-nightly).

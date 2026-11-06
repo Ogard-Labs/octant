@@ -1,3 +1,4 @@
+import type { AppUpdateChannel } from "@octant/contracts/shell";
 import type {
   AppReleaseRing,
   AppUpdateState,
@@ -24,7 +25,13 @@ export interface AppUpdateSettingsProps {
   readonly hostBridge?: OctantHostBridge;
   readonly automaticChecks: boolean;
   readonly onAutomaticChecksChange: (enabled: boolean) => void;
-  readonly onReleaseRingChange: (ring: AppReleaseRing) => void;
+  /** The channel chosen in Settings, when one has been stored. */
+  readonly updateChannel?: AppUpdateChannel | undefined;
+  /**
+   * Stores the channel with the ring it follows. Preview and Nightly both
+   * follow `candidate`; Octant itself never follows `preview`.
+   */
+  readonly onUpdateChannelChange: (channel: AppUpdateChannel, ring: AppReleaseRing) => void;
   /** A deep link landed on the Updates group. */
   readonly focused?: boolean;
 }
@@ -48,6 +55,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const [failure, setFailure] = useState<string>();
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [whatsNew, setWhatsNew] = useState<BundledWhatsNew>();
+  const [chosenChannel, setChosenChannel] = useState<AppUpdateChannel>();
 
   useEffect(() => {
     if (bridge?.subscribeAppUpdateState === undefined) return;
@@ -106,6 +114,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
     state !== undefined &&
     !localPreferences &&
     (allowedRings === undefined || allowedRings.length > 1);
+  const channel = effectiveChannel(chosenChannel ?? props.updateChannel, state?.ring);
   const offeredNotes =
     status === "available" && state?.available?.notes !== undefined && state.available.notes !== ""
       ? state.available.notes
@@ -214,42 +223,48 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       {offersRingChoice ? (
         <SettingRow
           description={
-            allowedRings === undefined
-              ? "Stable is the released build; Preview is a pre-release of the next stable version; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
-              : "Stable is the released build; Preview is a pre-release of the next stable version. Switching takes effect at the next check, and going back to Stable waits for a stable release newer than this one."
+            allowedRings === undefined || allowedRings.includes("candidate")
+              ? "Stable is the released build. Preview tests the next release. Nightly adds Octant Nightly, a separate app with what is being built now. Switching takes effect at the next check, and going back to Stable waits for a stable release newer than this one."
+              : "Stable is the released build. Switching takes effect at the next check."
           }
-          label="Release ring"
+          label="Update channel"
           scope="app"
           settingId="app-update-ring"
         >
-          <OctantToggleGroup<AppReleaseRing>
-            aria-label="Release ring"
+          <OctantToggleGroup<AppUpdateChannel>
+            aria-label="Update channel"
             onValueChange={(value) => {
               const selected = value[0];
               if (selected === undefined) return;
-              if (!localPreferences) props.onReleaseRingChange(selected);
-              if (setRing !== undefined) void run(() => setRing(selected));
+              // Octant follows `candidate` for both Preview and Nightly; the
+              // preview ring is read only by the Octant Nightly installer.
+              const ring: AppReleaseRing = selected === "stable" ? "stable" : "candidate";
+              setChosenChannel(selected);
+              props.onUpdateChannelChange(selected, ring);
+              if (setRing !== undefined) void run(() => setRing(ring));
             }}
-            value={[state?.ring ?? "stable"]}
+            value={[channel]}
           >
             {allowedRings?.includes("stable") !== false ? (
               <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
             ) : null}
-            {/* The labels are not the ring ids: the scheduled `preview` ring reads
-                as Nightly and the hand-run `candidate` ring as Preview. The ids
-                stay, because they name the update feed paths and version tags
-                that installed builds already follow. */}
             {allowedRings?.includes("candidate") !== false ? (
-              <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="preview">Preview</OctantToggleGroupItem>
             ) : null}
-            {allowedRings?.includes("preview") !== false ? (
-              <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
+            {allowedRings?.includes("candidate") !== false ? (
+              <OctantToggleGroupItem value="nightly">Nightly</OctantToggleGroupItem>
             ) : null}
           </OctantToggleGroup>
         </SettingRow>
       ) : null}
 
-      {localPreferences ? null : <NightlyInstallRow bridge={bridge} ring={state?.ring} />}
+      {localPreferences ? (
+        <p className="app-update__offer-notes">
+          Octant Nightly gets a new build of what is being built every night.
+        </p>
+      ) : (
+        <NightlyInstallRow bridge={bridge} channel={channel} ring={state?.ring} />
+      )}
 
       <SettingRow
         description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}
@@ -305,6 +320,20 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   );
 }
 
+/**
+ * The channel the switch shows. A stored channel counts only while it agrees
+ * with the ring the host follows (a hub's offer can move the ring without
+ * naming a channel); otherwise it is derived from the ring.
+ */
+function effectiveChannel(
+  stored: AppUpdateChannel | undefined,
+  ring: AppReleaseRing | undefined,
+): AppUpdateChannel {
+  if (stored === "stable" && ring !== "candidate") return "stable";
+  if ((stored === "preview" || stored === "nightly") && ring === "candidate") return stored;
+  return ring === "candidate" ? "preview" : "stable";
+}
+
 function describeWaiting(work: Extract<AppUpdateInstallOutcome, { kind: "wait" }>): string {
   if (work.activeAgentCount > 0) {
     return `Octant will not relaunch while ${work.activeAgentCount} ${work.activeAgentCount === 1 ? "agent is" : "agents are"} still working. Let the work finish or checkpoint it, then relaunch.`;
@@ -318,13 +347,14 @@ const NIGHTLY_IN_FLIGHT_READS = 600;
 /**
  * The Octant Nightly row below the ring switch.
  *
- * The host decides whether it shows: Octant on Preview offers the install,
- * either ring keeps open and remove while Nightly is installed, and Nightly
- * itself has no such row. Read again whenever the ring changes, because the
+ * It shows on the Nightly channel, and on any channel while Octant Nightly is
+ * installed; the host still refuses an install unless Octant follows
+ * `candidate`. Octant Nightly itself has no such row. Read again whenever the ring changes, because the
  * answer depends on it.
  */
 function NightlyInstallRow(props: {
   readonly bridge: OctantHostBridge | undefined;
+  readonly channel: AppUpdateChannel;
   readonly ring: AppReleaseRing | undefined;
 }) {
   const read = props.bridge?.readNightlyInstall;
@@ -378,6 +408,9 @@ function NightlyInstallRow(props: {
   }, [nightly, inFlight, busy, read]);
 
   if (nightly === undefined || nightly.status === "unavailable") return null;
+  // Visible on the Nightly channel, or whenever Octant Nightly is on disk so
+  // it can still be opened or removed.
+  if (props.channel !== "nightly" && nightly.status === "not-installed") return null;
 
   async function act(action: (() => Promise<NightlyInstallState>) | undefined): Promise<void> {
     if (action === undefined) return;
