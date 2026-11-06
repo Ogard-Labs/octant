@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   DEFAULT_FOLDER_ENVIRONMENT,
   DESKTOP_DATA_CHOICE_FILE,
@@ -79,9 +79,9 @@ export type HostOwningStartup =
  * What the host-owning desktop may start. A Nightly process that reaches it
  * without a test-host role (its choice changed or became unreadable after the
  * entry read it) refuses: Nightly never falls back to Octant's data folder or
- * port. Linux refuses too, because its Secret Service items carry no store
- * scope and would be shared with Octant's. Only an explicit `OCTANT_DATA_DIR`,
- * a developer's own choice, bypasses the overlap refusal.
+ * port. Only an explicit `OCTANT_DATA_DIR`, a developer's own choice, bypasses
+ * the overlap refusal. On Linux its Secret Service items name their own
+ * `service` values, because those items carry no store scope.
  */
 export function resolveHostOwningStartup(options: {
   readonly identity: DesktopIdentity;
@@ -106,23 +106,33 @@ export function resolveHostOwningStartup(options: {
       message:
         "Octant Nightly refused to start a host: separate test data is no longer selected. Open Octant Nightly again.",
     };
-  if (options.platform !== "darwin")
+  if (options.platform !== "darwin" && options.platform !== "linux")
     return {
       kind: "refused",
       message:
-        "Octant Nightly refused to start its test host: separate test data is available on macOS only.",
+        "Octant Nightly refused to start its test host: separate test data is available on macOS and Linux only.",
     };
   const home = desktopHomeDirectory(options.appDataDirectory, options.platform);
   if (
     explicit === undefined &&
-    desktopDataDirectoriesOverlap(options.role.dataDirectory, octantDefaultDataDirectory(home))
+    desktopDataDirectoriesOverlap(
+      options.role.dataDirectory,
+      octantDefaultDataDirectory(home, options.platform, options.env),
+    )
   )
     return {
       kind: "refused",
       message:
         "Octant Nightly refused to start its test host: its test data folder overlaps Octant's data folder.",
     };
-  const logsDirectory = join(home, "Library", "Logs", options.identity.productName);
+  const logsDirectory =
+    options.platform === "darwin"
+      ? join(home, "Library", "Logs", options.identity.productName)
+      : join(
+          xdgDirectory(options.env.XDG_STATE_HOME, home, ".local/state"),
+          "octant-nightly",
+          "logs",
+        );
   return {
     kind: "start",
     configuredDataDirectory: explicit ?? options.role.dataDirectory,
@@ -140,11 +150,24 @@ export function resolveHostOwningStartup(options: {
 }
 
 /**
- * Octant's default macOS data folder, named without touching it: resolving it
+ * Octant's default data folder, named without touching it: resolving it
  * through the host-runtime resolver would create the folder.
  */
-function octantDefaultDataDirectory(home: string): string {
-  return join(home, "Library", "Application Support", "Octant");
+function octantDefaultDataDirectory(
+  home: string,
+  platform: NodeJS.Platform,
+  env: Readonly<Record<string, string | undefined>>,
+): string {
+  return platform === "darwin"
+    ? join(home, "Library", "Application Support", "Octant")
+    : join(xdgDirectory(env.XDG_DATA_HOME, home, ".local/share"), "octant");
+}
+
+/** The same XDG rule the host-runtime path resolver applies. */
+function xdgDirectory(value: string | undefined, home: string, fallback: string): string {
+  return value !== undefined && value !== "" && value.trim() === value && isAbsolute(value)
+    ? resolve(value)
+    : join(home, fallback);
 }
 
 /** Separate test data is offered only where its credentials stay apart. */
@@ -152,7 +175,7 @@ export function nightlyTestDataSupported(
   identity: DesktopIdentity,
   platform: NodeJS.Platform,
 ): boolean {
-  return identity.testHost !== null && platform === "darwin";
+  return identity.testHost !== null && (platform === "darwin" || platform === "linux");
 }
 
 export type TestDataRemoval =
@@ -176,6 +199,11 @@ export async function removeNightlyTestData(options: {
   readonly appDataDirectory: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly trashItem: (path: string) => Promise<void>;
+  /**
+   * Linux: removes the test host's Secret Service items, which live outside
+   * the folder. Required there; Removal fails closed without it.
+   */
+  readonly clearTestDataSecrets?: () => Promise<void>;
 }): Promise<TestDataRemoval> {
   if (options.role.kind === "test-host") return { kind: "refused", reason: "test-host-running" };
   if (
@@ -190,14 +218,25 @@ export async function removeNightlyTestData(options: {
   });
   if (target.kind !== "test-host") return { kind: "refused", reason: "not-nightly" };
   const home = desktopHomeDirectory(options.appDataDirectory, options.platform);
-  const octant = octantDefaultDataDirectory(home);
+  const octant = octantDefaultDataDirectory(home, options.platform, options.env);
   if (desktopDataDirectoriesOverlap(target.dataDirectory, octant))
     return { kind: "refused", reason: "unsafe-folder" };
+  const clearSecrets = async (): Promise<boolean> => {
+    if (options.platform !== "linux") return true;
+    if (options.clearTestDataSecrets === undefined) return false;
+    try {
+      await options.clearTestDataSecrets();
+      return true;
+    } catch {
+      return false;
+    }
+  };
   let metadata;
   try {
     metadata = await lstat(target.dataDirectory);
   } catch {
-    return { kind: "absent" };
+    // Test-data items can outlive their folder; they go as well.
+    return (await clearSecrets()) ? { kind: "absent" } : { kind: "failed" };
   }
   if (!metadata.isDirectory() || metadata.isSymbolicLink())
     return { kind: "refused", reason: "unsafe-folder" };
@@ -216,6 +255,8 @@ export async function removeNightlyTestData(options: {
   // A client and the test host exclude each other through the single-instance
   // lock; a live owner receipt still refuses, for a host started another way.
   if (await testHostOwnerAlive(real)) return { kind: "refused", reason: "test-host-running" };
+  // The items go first: a failure keeps the folder, so Remove can be retried.
+  if (!(await clearSecrets())) return { kind: "failed" };
   try {
     await options.trashItem(target.dataDirectory);
     return { kind: "removed" };
@@ -279,6 +320,7 @@ export function createNightlyDataControl(options: {
   readonly windowStorageDirectory: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly trashItem: (path: string) => Promise<void>;
+  readonly clearTestDataSecrets?: () => Promise<void>;
   /** Starts a quit that relaunches once it is certain. */
   readonly requestRelaunch: () => void;
 }) {

@@ -1,5 +1,6 @@
 import {
   type AppReleaseRing,
+  type AppUpdateProduct,
   AppUpdateFeed,
   type AppUpdateRefusal,
   type AppUpdateRelease,
@@ -16,6 +17,8 @@ export interface RunningApp {
   readonly version: AppVersion;
   readonly platform: string;
   readonly arch: string;
+  /** Which app this is; a release for the other app is refused. */
+  readonly product: AppUpdateProduct;
   /** The ring this app is following, and therefore the ring its feed must name. */
   readonly ring: AppReleaseRing;
 }
@@ -58,6 +61,23 @@ export type UpdateOffer =
  * either way it would be checking the transport rather than the release.
  */
 export function canonicalReleaseBytes(release: AppUpdateRelease): Uint8Array {
+  return canonicalBytes({ ...releaseFields(release), product: release.product });
+}
+
+/**
+ * The bytes installs built before the release named its app verify.
+ *
+ * Those installs decode a feed strictly, so a document carrying `product` is
+ * malformed to them. Only the signer uses this, for the documents it leaves
+ * at the feed names those installs read, and only for Octant's own rings.
+ */
+export function canonicalReleaseBytesWithoutProduct(
+  release: Omit<AppUpdateRelease, "product">,
+): Uint8Array {
+  return canonicalBytes(releaseFields(release));
+}
+
+function releaseFields(release: Omit<AppUpdateRelease, "product">): Record<string, string> {
   const ordered: Record<string, string> = {
     arch: release.arch,
     platform: release.platform,
@@ -68,6 +88,10 @@ export function canonicalReleaseBytes(release: AppUpdateRelease): Uint8Array {
     version: String(release.version),
   };
   if (release.notes !== undefined) ordered.notes = release.notes;
+  return ordered;
+}
+
+function canonicalBytes(ordered: Readonly<Record<string, string>>): Uint8Array {
   const canonical = Object.keys(ordered)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${JSON.stringify(ordered[key])}`)
@@ -120,6 +144,11 @@ export function resolveUpdateOffer(input: {
   }
   if (!verified) return { kind: "refuse", refusal: "untrusted-signature" };
 
+  if (feed.release.product !== input.app.product) {
+    // Both apps' releases verify against the same keys, and on Linux nothing
+    // after this checks which app a portable image is.
+    return { kind: "refuse", refusal: "wrong-app" };
+  }
   if (feed.release.platform !== input.app.platform || feed.release.arch !== input.app.arch) {
     return { kind: "refuse", refusal: "wrong-platform" };
   }
@@ -144,7 +173,7 @@ export type NightlyInstallRelease =
       readonly kind: "refuse";
       readonly refusal: Extract<
         AppUpdateRefusal,
-        "malformed" | "untrusted-signature" | "wrong-platform" | "wrong-ring"
+        "malformed" | "untrusted-signature" | "wrong-app" | "wrong-platform" | "wrong-ring"
       >;
     };
 
@@ -155,7 +184,8 @@ export type NightlyInstallRelease =
  * Octant's own updater never reads this ring; only the person-started Nightly
  * installer does. The signature is checked against the preview ring's trust
  * set whatever ring the document claims, and the signed ring and the version's
- * own tag must both say preview, so a genuine Stable or Preview release served
+ * own tag must both say preview, and the signed app must be Octant Nightly,
+ * so a genuine Stable or Preview release served
  * at the Nightly address is refused rather than installed as Nightly.
  *
  * There is no version comparison: Nightly is a second app, not a newer copy of
@@ -185,6 +215,7 @@ export function resolveNightlyInstallRelease(input: {
     verified = false;
   }
   if (!verified) return { kind: "refuse", refusal: "untrusted-signature" };
+  if (feed.release.product !== "octant-nightly") return { kind: "refuse", refusal: "wrong-app" };
   if (feed.release.platform !== input.platform || feed.release.arch !== input.arch) {
     return { kind: "refuse", refusal: "wrong-platform" };
   }

@@ -11,8 +11,10 @@ import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./deskto
 import {
   closeDesktopPeerStatus,
   ensureNightlyHostReady,
+  linuxRendererSandboxDisabled,
   loadDesktopPeerStatus,
 } from "./desktopPeerStatus";
+import { resolveDesktopHostRuntimePaths } from "./runtimePaths";
 import { resolveStartupHostRole } from "./nightlyTestData";
 import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
 
@@ -24,7 +26,10 @@ const identity = app.isPackaged
   : desktopIdentity("stable");
 const launchLinks = createNightlyLaunchLinks(identity.scheme);
 
-if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "darwin")) {
+if (
+  identity.flavor === "nightly" ||
+  (app.isPackaged && (process.platform === "darwin" || process.platform === "linux"))
+) {
   const role = resolvePackagedDesktopLaunch(
     identity,
     process.argv.slice(1),
@@ -126,18 +131,30 @@ async function launchDesktop(): Promise<void> {
       return;
     }
   }
+  // A Linux Nightly whose renderers would run unsandboxed never reaches the
+  // binding, so it neither starts Octant's host nor registers a window.
+  const unsandboxed =
+    identity.flavor === "nightly" &&
+    process.platform === "linux" &&
+    linuxRendererSandboxDisabled({
+      hasSwitch: (name) => app.commandLine.hasSwitch(name),
+      argv: process.argv,
+      env: process.env,
+    });
   const native =
-    identity.flavor === "nightly"
+    identity.flavor === "nightly" && !unsandboxed
       ? loadDesktopPeerStatus({
           packaged: app.isPackaged,
           platform: process.platform,
           resourcesPath: process.resourcesPath,
+          ...linuxPeerEndpoint(),
         })
       : undefined;
   const outcome = await launchDesktopApplication(
     identity,
     () => import(new URL("./main.mjs", import.meta.url).href),
     async () => {
+      if (unsandboxed) return { kind: "refused", reason: "unsandboxed-renderer" };
       if (native === undefined) return { kind: "refused", reason: "native-unavailable" };
       const status = await ensureNightlyHostReady(native);
       const closed = await closeDesktopPeerStatus(native);
@@ -155,5 +172,28 @@ async function launchDesktop(): Promise<void> {
       dialog.showErrorBox(identity.productName, outcome.message);
       app.quit();
     });
+  }
+}
+
+/** Octant's Linux window socket and launcher record, from Octant's own host paths. */
+function linuxPeerEndpoint() {
+  if (process.platform !== "linux" || !app.isPackaged) return {};
+  try {
+    const paths = resolveDesktopHostRuntimePaths(
+      process.env.OCTANT_DATA_DIR,
+      app.getPath("appData"),
+      process.platform,
+      process.env,
+    );
+    return {
+      linux: {
+        windowsSocketPath: paths.windowsSocketPath,
+        launcherRecordPath: paths.launcherRecordPath,
+        version: app.getVersion(),
+      },
+    };
+  } catch {
+    // Unresolvable host paths leave the binding unloaded: native-unavailable.
+    return {};
   }
 }

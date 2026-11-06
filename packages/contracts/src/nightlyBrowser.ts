@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AppVersion } from "./appUpdates";
 import { WindowId } from "./shell";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -38,6 +39,9 @@ export type NativeWindowSource = typeof NativeWindowSource.Type;
  */
 export const NATIVE_MAIN_AUTHORITY_HEADER = "x-octant-native-main-authority";
 
+/** The window bootstrap protocol a native Nightly client and the host speak. */
+export const NIGHTLY_NATIVE_CLIENT_PROTOCOL = 1;
+
 /** Brokered host features a native Nightly main may reach with its main-only token. */
 export const NIGHTLY_HOST_FEATURES = [
   "project-root-receipts",
@@ -62,10 +66,32 @@ const AdvertisedHostFeature = Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]
 export const AdvertisedHostFeatures = Schema.Array(AdvertisedHostFeature).pipe(Schema.maxItems(64));
 export const decodeAdvertisedHostFeatures = Schema.decodeUnknownSync(AdvertisedHostFeatures);
 
+/**
+ * `octant-host-features.json`, attached to each published Octant release: the
+ * native client protocol and brokered features that build's host offers a
+ * Nightly window, so a Nightly build can be checked against the Octant it
+ * will attach to before it is published. Advisory: the asset is unsigned, so
+ * it must be signed or hash-pinned before anything outside CI gates on it.
+ */
+export const OctantHostFeaturesDocument = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  octantVersion: AppVersion,
+  /**
+   * Any protocol, not only this build's: a newer Octant's document must still
+   * read so the reader can report the mismatch rather than call it unreadable.
+   */
+  nativeClientProtocol: Schema.Int.pipe(Schema.positive()),
+  hostFeatures: AdvertisedHostFeatures,
+}).annotations(strict);
+export type OctantHostFeaturesDocument = typeof OctantHostFeaturesDocument.Type;
+export const decodeOctantHostFeaturesDocument = Schema.decodeUnknownSync(
+  OctantHostFeaturesDocument,
+);
+
 /** Separate from status: only an authenticated window registration returns this. */
 export const NightlyWindowBootstrap = Schema.Struct({
   kind: Schema.Literal("registered"),
-  protocol: Schema.Literal(1),
+  protocol: Schema.Literal(NIGHTLY_NATIVE_CLIENT_PROTOCOL),
   windowId: WindowId,
   generation: Generation,
   hostOrigin: HostOrigin,

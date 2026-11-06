@@ -122,14 +122,14 @@ export function updateFeedUrl(
 
 /**
  * Where a ring's feed sits under the base: `<ring>/<platform>-<arch>.json` for
- * stable, `<ring>/<platform>-<arch>.preview-key.json` for preview and candidate.
+ * stable, `candidate/<platform>-<arch>.octant.json` and
+ * `preview/<platform>-<arch>.octant-nightly.json` for the other two.
  *
- * Preview and candidate moved to a new name when they got their own signing
- * key. Installs built before that know only the stable key and keep reading
- * the old name, so the old name holds a stable-signed bridge feed that the
- * preview workflow never overwrites. However long such an install stays
- * offline, it still finds a release it can verify, and that release reads the
- * new name from then on.
+ * The non-stable names carry the app because the release inside now names it,
+ * and every install built before that decodes a feed strictly and calls a
+ * document with the field malformed. Those installs keep reading the names in
+ * `legacyUpdateFeedRelativePath`, which never receive a product-bearing
+ * document. Stable has published nothing at its name, so it needs no new one.
  */
 export function updateFeedRelativePath(target: {
   readonly ring: string;
@@ -137,8 +137,33 @@ export function updateFeedRelativePath(target: {
   readonly arch: string;
 }): string {
   const machine = `${encodeURIComponent(target.platform)}-${encodeURIComponent(target.arch)}`;
-  const file = target.ring === "stable" ? `${machine}.json` : `${machine}.preview-key.json`;
+  const file =
+    target.ring === "stable"
+      ? `${machine}.json`
+      : target.ring === "preview"
+        ? `${machine}.octant-nightly.json`
+        : `${machine}.octant.json`;
   return `${encodeURIComponent(target.ring)}/${file}`;
+}
+
+/**
+ * The name candidate installs built before the release named its app read:
+ * `candidate/<platform>-<arch>.preview-key.json`.
+ *
+ * Each candidate publication also writes a document there in the old shape,
+ * so those installs move to a build that reads the new name. Only candidate
+ * has one: candidate is Octant's alone, while the old preview names were read
+ * by Octant builds that must never be offered Nightly, so those names stay as
+ * they were last published and nothing writes them again.
+ */
+export function legacyUpdateFeedRelativePath(target: {
+  readonly ring: string;
+  readonly platform: string;
+  readonly arch: string;
+}): string | undefined {
+  if (target.ring !== "candidate") return undefined;
+  const machine = `${encodeURIComponent(target.platform)}-${encodeURIComponent(target.arch)}`;
+  return `candidate/${machine}.preview-key.json`;
 }
 
 function isHttpsUrl(value: string): boolean {

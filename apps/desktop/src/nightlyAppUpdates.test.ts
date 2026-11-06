@@ -31,6 +31,7 @@ async function fixture() {
   const keys = generateKeyPairSync("ed25519");
   const publicKey = keys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
   const release = decodeAppUpdateRelease({
+    product: "octant-nightly",
     version: "0.1.0-preview.20261104.2",
     platform: "darwin",
     arch: "arm64",

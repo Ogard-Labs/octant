@@ -41,12 +41,14 @@ import {
   DESKTOP_NODE_RUNTIME_NAME,
   DESKTOP_NODE_RUNTIME_BUNDLE_ID,
   DESKTOP_PEER_STATUS_FILENAME,
+  DESKTOP_PEER_LINUX_FILENAME,
   BROWSER_TEXT_INPUT_FILENAME,
 } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
 import { buildBrowserTextInput } from "./build-browser-text-input";
 import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
+import { buildDesktopPeerLinux } from "./build-desktop-peer-linux";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import { prepareManagedTools } from "./prepare-managed-tools";
@@ -505,6 +507,7 @@ export const PACKAGED_ARM64_FILES = [
   DARWIN_LANGUAGE_SERVER_BINARY,
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
+  `native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   LINUX_LANGUAGE_SERVER_BINARY,
@@ -557,6 +560,8 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
 ]);
 
 const ALLOWED_LINUX_NATIVE_SUFFIXES = [
+  // The Linux client trust binding, outside the app payload like the macOS one.
+  `/resources/native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
 ] as const;
@@ -589,7 +594,8 @@ export function validateNativePayloadAllowlist(
 
 /**
  * Linux portable trees and AppDirs may only carry the rebuilt SQLite and PTY
- * natives under resources/app — never Darwin Keychain/code-file helpers.
+ * natives under resources/app and the client trust binding under
+ * resources/native — never Darwin Keychain/code-file helpers.
  */
 export function validateLinuxNativePayloadAllowlist(paths: ReadonlyArray<string>): void {
   for (const path of paths) {
@@ -938,13 +944,18 @@ async function rebuildNativeModules(
     await rebuild(options);
     return;
   }
+  await withLinuxNativeToolchain(() => rebuild(options));
+}
+
+/** Runs a node-gyp build with the C/C++ pair Electron's V8 headers accept. */
+async function withLinuxNativeToolchain(build: () => Promise<void>): Promise<void> {
   const toolchain = resolveLinuxNativeToolchain();
   const previousCC = process.env.CC;
   const previousCXX = process.env.CXX;
   process.env.CC = toolchain.CC;
   process.env.CXX = toolchain.CXX;
   try {
-    await rebuild(options);
+    await build();
   } finally {
     if (previousCC === undefined) {
       delete process.env.CC;
@@ -1430,6 +1441,9 @@ async function packageLinuxDesktop(
 
   const resourcesRoot = join(finalPackageDir, "resources");
   await prepareManagedTools(repositoryRoot, join(resourcesRoot, "managed-tools"), "linux");
+  await withLinuxNativeToolchain(() =>
+    buildDesktopPeerLinux(join(resourcesRoot, "native", DESKTOP_PEER_LINUX_FILENAME), target.arch),
+  );
   for (const relativePath of PACKAGED_LINUX_EXECUTABLE_FILES) {
     await access(join(resourcesRoot, relativePath), 1);
   }
