@@ -1,6 +1,6 @@
-import type { CodeClient } from "@octant/client-runtime/code-client";
+import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId, CodeThreadView } from "@octant/contracts/code";
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeThreadControllerSlots,
@@ -225,10 +225,87 @@ describe("CodeThreadControllerSlots", () => {
     expect(secondSetAccessNotice).toHaveBeenCalledOnce();
   });
 
+  it("shares the window bootstrap and reads follow-ups only for each tab's own thread", async () => {
+    const registry = createCodeThreadControllers();
+    const api = client();
+    render(
+      <CodeThreadControllerSlots
+        client={api}
+        navigationBootstrap={bootstrap()}
+        readCursorStore={createCodeReadCursorStore()}
+        registry={registry}
+        threadIds={[threadA, threadB]}
+      />,
+    );
+    await waitFor(() => {
+      expect(registry.get(threadA)?.conversationHistory).toBe("loaded");
+      expect(registry.get(threadB)?.conversationHistory).toBe("loaded");
+    });
+    expect(api.bootstrap).not.toHaveBeenCalled();
+    expect(api.readFollowUp).toHaveBeenCalledTimes(2);
+    expect(api.readFollowUp).toHaveBeenCalledWith(threadA);
+    expect(api.readFollowUp).toHaveBeenCalledWith(threadB);
+  });
+
+  it("waits for window metadata without starting another bootstrap", async () => {
+    const registry = createCodeThreadControllers();
+    const api = client();
+    const props = {
+      client: api,
+      readCursorStore: createCodeReadCursorStore(),
+      registry,
+      threadIds: [threadA],
+    };
+    const view = render(<CodeThreadControllerSlots {...props} navigationBootstrap={undefined} />);
+    await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+    expect(api.bootstrap).not.toHaveBeenCalled();
+    view.rerender(<CodeThreadControllerSlots {...props} navigationBootstrap={bootstrap()} />);
+    await waitFor(() => expect(registry.get(threadA)?.status).toBe("ready"));
+    expect(api.bootstrap).not.toHaveBeenCalled();
+    expect(api.readFollowUp).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["late", "updated"] as const)(
+    "keeps a failed thread load retryable when %s window metadata arrives",
+    async (timing) => {
+      const registry = createCodeThreadControllers();
+      const api = client();
+      vi.mocked(api.thread).mockRejectedValueOnce(
+        new CodeClientFailure({ category: "unavailable", message: "Thread load unavailable" }),
+      );
+      const props = {
+        client: api,
+        readCursorStore: createCodeReadCursorStore(),
+        registry,
+        threadIds: [threadA],
+      };
+      const view = render(
+        <CodeThreadControllerSlots
+          {...props}
+          navigationBootstrap={timing === "late" ? undefined : bootstrap()}
+        />,
+      );
+      await waitFor(() =>
+        expect(registry.get(threadA)?.errorMessage).toBe("Thread load unavailable"),
+      );
+      const failedStatus = registry.get(threadA)?.status;
+      view.rerender(<CodeThreadControllerSlots {...props} navigationBootstrap={bootstrap()} />);
+      expect(registry.get(threadA)?.errorMessage).toBe("Thread load unavailable");
+      expect(registry.get(threadA)?.status).toBe(failedStatus);
+      expect(api.thread).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await registry.get(threadA)?.retry();
+      });
+      await waitFor(() => expect(registry.get(threadA)?.activeView?.thread.id).toBe(threadA));
+      expect(registry.get(threadA)?.errorMessage).toBeUndefined();
+    },
+  );
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(
       <CodeThreadControllerSlots
+        navigationBootstrap={bootstrap()}
         client={client()}
         readCursorStore={createCodeReadCursorStore()}
         registry={registry}
@@ -247,9 +324,11 @@ describe("CodeThreadControllerSlots", () => {
   it("lets go of a thread that was closed while the others keep running", async () => {
     const registry = createCodeThreadControllers();
     const codeClient = client();
+    const navigationBootstrap = bootstrap();
     const readCursorStore = createCodeReadCursorStore();
     const { rerender } = render(
       <CodeThreadControllerSlots
+        navigationBootstrap={navigationBootstrap}
         client={codeClient}
         readCursorStore={readCursorStore}
         registry={registry}
@@ -261,6 +340,7 @@ describe("CodeThreadControllerSlots", () => {
 
     rerender(
       <CodeThreadControllerSlots
+        navigationBootstrap={navigationBootstrap}
         client={codeClient}
         readCursorStore={readCursorStore}
         registry={registry}
@@ -279,6 +359,7 @@ describe("CodeThreadControllerSlots", () => {
 
     render(
       <CodeThreadControllerSlots
+        navigationBootstrap={bootstrap()}
         client={client()}
         readCursorStore={createCodeReadCursorStore()}
         registry={registry}

@@ -14,7 +14,6 @@ import {
   type AgentRunAuthority,
   type AutomationDefinitionDraft,
   type PermissionPersistence,
-  type ProviderExecutionPolicy,
   type RoutineProposal,
 } from "@octant/contracts";
 import type { AgentProfile } from "@octant/contracts/agent-profile";
@@ -26,7 +25,6 @@ export interface RoutineSourceThread {
   readonly providerInstanceId: string;
   readonly modelId: string;
   /** Code only. */
-  readonly executionPolicy?: ProviderExecutionPolicy;
   readonly permissionPersistence?: PermissionPersistence;
   readonly profileId?: string;
   readonly checkout?: { readonly repositoryId: string; readonly checkoutId: string };
@@ -78,10 +76,9 @@ export function buildThreadRoutineDraft(
   ) {
     return refused("The Project is no longer active.");
   }
+  // A thread in Plan does not refuse: the routine is the person's, built at
+  // the approval-gated authority below, and takes none of the thread's posture.
   if (mode === "code") {
-    if (thread.executionPolicy === "plan") {
-      return refused("The thread is in Plan mode, which is read-only.");
-    }
     if (
       thread.checkout === undefined ||
       !deps.checkoutAvailable(thread.checkout.checkoutId, thread.checkout.repositoryId)

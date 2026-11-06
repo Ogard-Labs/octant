@@ -158,7 +158,7 @@ function failure(message: string, status: number, origin: string | null): Respon
  * Authority and lifecycle remain server-owned; the client reads summaries and
  * controls runs that already exist (acknowledge, cancel, steer, retry, resume)
  * with expected versions. Nothing here starts a subagent: only the thread's
- * own agent does, through the Octant Harness delegate tool, so the child's
+ * own agent does, through `octant_agents`, so the child's
  * result returns to the agent that asked for it.
  */
 export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependencies) {

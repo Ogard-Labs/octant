@@ -1,9 +1,6 @@
 import { Schema } from "effect";
 import { BrowserContextPolicy } from "./browserAutomation";
-import {
-  decodeCodeDefinitionToolArguments,
-  decodeCodeDiagnosticsToolArguments,
-} from "./codeLanguage";
+import { decodeCodeLanguageToolArguments } from "./codeLanguage";
 import { ComputerUsePolicy } from "./computerUse";
 import { ExtensionCapability } from "./extensions";
 import {
@@ -156,8 +153,9 @@ const decodeValidationToolArguments = Schema.decodeUnknownSync(ValidationToolArg
  * classes and stay irreversible under taint, so hostile content a tool pulled
  * in cannot quietly turn into a file write or a command.
  *
- * Only a tool that brings in outside content taints the thread: the web tools,
- * and a child's collected reply, which may relay what the child fetched.
+ * Only a tool that brings in outside content taints the thread: the web tools.
+ * A child's reply, which may relay what the child fetched, reaches a harness
+ * lead through `octant_agents`, which marks the thread itself.
  * Tainting every result made the first local `read` turn every later write
  * and command into a fresh prompt. `web-fetch` asks every time on a tainted
  * thread because a GET can carry data out in its URL. `web-search` does not
@@ -265,13 +263,6 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     irreversibleUnderTaint: false,
     resultTaintsThread: false,
   },
-  delegate: {
-    modes: ["chat", "work", "code"],
-    requiredCapabilityClass: "agents",
-    approvalClass: "child-agent-creation",
-    irreversibleUnderTaint: false,
-    resultTaintsThread: true,
-  },
   "ask-user": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
@@ -347,12 +338,12 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     decodeArguments: (value) => decodeValidationToolArguments(value ?? {}),
   }),
   // The language server's reads of the checkout (docs/design/language-services.md,
-  // decision D5). They read what the thread can already read, through a
-  // server that cannot write, run other programs, or reach the network, so
-  // they ask nothing and Plan keeps them. What they return is derived from the
-  // checkout, as a file read is, so it marks nothing.
+  // decision D5), one tool with an operation. They read what the thread can
+  // already read, through a server that cannot write, run other programs, or
+  // reach the network, so they ask nothing and Plan keeps them. What they
+  // return is derived from the checkout, as a file read is, so it marks nothing.
   entry({
-    capabilityId: "code-diagnostics",
+    capabilityId: "code-language",
     version: 1,
     owner: "core",
     modes: ["code"],
@@ -361,19 +352,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     irreversibleUnderTaint: false,
     resultTaintsThread: false,
     requiresAppManagedTools: true,
-    decodeArguments: (value) => decodeCodeDiagnosticsToolArguments(value),
-  }),
-  entry({
-    capabilityId: "code-definition",
-    version: 1,
-    owner: "core",
-    modes: ["code"],
-    requiredCapabilityClass: "filesystem",
-    approvalClass: "project-file-reads",
-    irreversibleUnderTaint: false,
-    resultTaintsThread: false,
-    requiresAppManagedTools: true,
-    decodeArguments: (value) => decodeCodeDefinitionToolArguments(value),
+    decodeArguments: (value) => decodeCodeLanguageToolArguments(value),
   }),
   entry({
     capabilityId: "mcp-tool",

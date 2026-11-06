@@ -57,6 +57,7 @@
     "./side-task-client": "./src/sideTaskClient.ts",
     "./mobile-native-harness-client": "./src/mobileNativeHarnessClient.ts",
     "./mobile-speech-client": "./src/mobileSpeechClient.ts",
+    "./reply-detail-client": "./src/replyDetailClient.ts",
     "./ship-client": "./src/shipClient.ts",
     "./plan-client": "./src/planClient.ts",
     "./product-feedback-client": "./src/productFeedbackClient.ts",

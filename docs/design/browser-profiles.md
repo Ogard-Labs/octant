@@ -271,8 +271,10 @@ thread made.
   [bounded page scripts](browser-agent-tool.md#bounded-page-scripts). Private
   storage does not prove a page is signed out, so unknown session eligibility
   refuses scripts below Full access.
-- **Plan mode** refuses every Browser operation on every profile, as it does
-  today, except stopping the thread's own Browser.
+- **Plan mode** admits on every profile only the reads of the page already
+  open and stopping the thread's own Browser, and refuses every other
+  operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));
+  a read of a profile page still needs its (origin, profile) approval.
 - **Paired devices.** A paired device may not open a profile page, switch a page
   to a profile, answer a profile site approval, act on a profile page, list or
   clear a profile, or see a profile page's picture, text, address, or title. It

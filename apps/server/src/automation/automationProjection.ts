@@ -15,6 +15,7 @@ import {
   AutomationRunCreated,
   AutomationRunStatusChanged,
   AutomationNotificationRefRecorded,
+  AutomationRunResultReported,
   MAX_AUTOMATION_HISTORY_ENTRIES,
   MAX_AUTOMATION_NOTIFICATION_REFERENCES,
   MAX_AUTOMATION_QUERY_LIMIT,
@@ -57,6 +58,7 @@ import {
   AUTOMATION_OCCURRENCE_CLAIMED,
   AUTOMATION_OCCURRENCE_SKIPPED,
   AUTOMATION_RUN_CREATED,
+  AUTOMATION_RUN_RESULT_REPORTED,
   AUTOMATION_RUN_STATUS_CHANGED,
 } from "./automationEventStore";
 
@@ -77,6 +79,7 @@ const decodeDispatchIntentRecorded = Schema.decodeUnknownSync(AutomationDispatch
 const decodeFirstTurnRuntimeClaimed = Schema.decodeUnknownSync(AutomationFirstTurnRuntimeClaimed);
 const decodeFirstTurnAccepted = Schema.decodeUnknownSync(AutomationFirstTurnAccepted);
 const decodeNotificationRefRecorded = Schema.decodeUnknownSync(AutomationNotificationRefRecorded);
+const decodeRunResultReported = Schema.decodeUnknownSync(AutomationRunResultReported);
 
 /**
  * Bound on retained consumed-occurrence keys per Automation. The due ledger
@@ -248,6 +251,9 @@ export class AutomationProjection implements Projection {
         return;
       case AUTOMATION_NOTIFICATION_REF_RECORDED:
         this.#applyNotificationRefRecorded(event);
+        return;
+      case AUTOMATION_RUN_RESULT_REPORTED:
+        this.#applyRunResultReported(event);
         return;
       default:
         // Unknown automation frames belong to newer sibling slices; this
@@ -652,6 +658,23 @@ export class AutomationProjection implements Projection {
       notificationRefs: nextRefs,
       version: payload.version,
       updatedAt: payload.recordedAt,
+    } as AutomationRun);
+  }
+
+  /**
+   * The first reported result stands. A second frame for the same run (the
+   * host refuses one, but a journal could still hold it) only advances the
+   * version, so replay rebuilds the result a person first saw.
+   */
+  #applyRunResultReported(event: EventEnvelope): void {
+    const payload = decodeRunResultReported(event.payload);
+    const existing = this.#runs.get(payload.runId);
+    if (existing === undefined || existing.version >= event.aggregateVersion) return;
+    this.#indexRun({
+      ...existing,
+      ...(existing.reportedResult === undefined ? { reportedResult: payload.result } : {}),
+      version: event.aggregateVersion,
+      updatedAt: event.occurredAt as UtcTimestamp,
     } as AutomationRun);
   }
 

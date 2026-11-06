@@ -328,7 +328,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       // federation concern and stays out of this seam.
       openModes: ["chat", "work", "code"],
     });
-    // The sibling-threads tool's host side. It appends only to the reader's
+    // The threads tool's host side for its reads. It appends only to the reader's
     // own records: its outside-content mark and its observation stream.
     const siblingThreadsService = new SiblingThreadsService({
       journal: persistence.journal,

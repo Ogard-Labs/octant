@@ -46,7 +46,7 @@ describe("planWorkTurnContext", () => {
     expect(planned.kind).toBe("ok");
     if (planned.kind !== "ok") return;
     expect(planned.context).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("this task's folder") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Here is the summary." },
     ]);
@@ -95,7 +95,7 @@ describe("planWorkTurnContext", () => {
     expect(planned.kind).toBe("ok");
     if (planned.kind !== "ok") return;
     expect(planned.context).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("this task's folder") },
       { kind: "conversation-summary", text: "The brief asks for a revised launch plan." },
     ]);
     expect(
@@ -214,7 +214,7 @@ describe("planWorkTurnContext", () => {
       uuid,
       safeInputBudget: 500,
       tools: [
-        { name: "required_tool", description: "t".repeat(800), inputSchema: { type: "object" } },
+        { name: "required_tool", description: "t".repeat(1200), inputSchema: { type: "object" } },
       ],
     });
     expect(final.kind).toBe("ok");
@@ -230,6 +230,54 @@ describe("planWorkTurnContext", () => {
         }),
       ]),
     );
+  });
+
+  it("orders Work's instructions as orientation, the folder rule, delivery, tool notes, then the rest", () => {
+    let n = 0;
+    const uuid = () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, "0")}`;
+    const instruction = (referenceId: string, text: string) =>
+      ({
+        text,
+        sourceKind: "instruction",
+        referenceId,
+        category: "octant-policy",
+        posture: "required",
+        block: { kind: "instructions", text },
+      }) as const;
+    const plan = planWorkTurnContext({
+      threadId,
+      providerInstanceId: provider,
+      modelId: model,
+      uuid,
+      createdAt: "2026-08-11T12:00:00.000Z",
+      leading: [instruction("native-harness:0", "You are running inside Octant.")],
+      contributions: [
+        instruction("project-brief:instruction", "Keep STATUS.md current."),
+        {
+          ...instruction("project-brief:take-stock", "Take stock first."),
+          block: { kind: "turn-instructions", text: "Take stock first." },
+        },
+      ],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work guide fits its budget");
+    const planned = includeWorkToolDefinitions({
+      plan,
+      uuid,
+      safeInputBudget: 4_000,
+      tools: [
+        { name: "octant_canvas", inputSchema: { type: "object" } },
+        { name: "octant_browser", inputSchema: { type: "object" } },
+      ],
+    });
+    if (planned.kind !== "ok") throw new Error("The instructions fit their budget");
+    expect(planned.context.map((block) => block.text)).toEqual([
+      "You are running inside Octant.",
+      expect.stringContaining("this task's folder"),
+      expect.stringContaining("as a Canvas with the octant_canvas"),
+      "Keep STATUS.md current.",
+      BROWSER_TOOL_HOST_LINE,
+      "Take stock first.",
+    ]);
   });
 
   it("tells the model to deliver kept work as a Canvas only when the Canvas tool is offered", () => {
@@ -252,8 +300,12 @@ describe("planWorkTurnContext", () => {
     });
     if (withCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withCanvas.context).toEqual([
-      { kind: "instructions", text: expect.stringContaining("as a Canvas with the octant_canvas") },
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("this task's folder") },
+      {
+        kind: "instructions",
+        text: expect.stringContaining("as a Canvas with the octant_canvas"),
+        tool: "octant_canvas",
+      },
     ]);
     expect(withCanvas.manifest.entries).toContainEqual(
       expect.objectContaining({
@@ -272,8 +324,8 @@ describe("planWorkTurnContext", () => {
     });
     if (withoutCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withoutCanvas.context).toEqual([
-      { kind: "instructions", text: BROWSER_TOOL_HOST_LINE },
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("this task's folder") },
+      { kind: "instructions", text: BROWSER_TOOL_HOST_LINE, tool: "octant_browser" },
     ]);
     expect(JSON.stringify(withoutCanvas.context)).not.toContain("octant_canvas");
   });
@@ -298,7 +350,7 @@ describe("planWorkTurnContext", () => {
       tools: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
     });
     if (withArtifacts.kind !== "ok") throw new Error("The instructions fit their budget");
-    const delivery = withArtifacts.context[0];
+    const delivery = withArtifacts.context[1];
     expect(delivery).toEqual({
       kind: "instructions",
       text: expect.stringContaining("publish that file with Artifact"),

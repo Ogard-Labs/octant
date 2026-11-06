@@ -29,7 +29,6 @@ import {
 } from "@octant/contracts";
 import { prependEarlierTurns } from "@octant/domain";
 import { waitForReconnect } from "../lib/waitForReconnect";
-import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -41,7 +40,6 @@ import {
   type CodeOperationFailure,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
-  type CodeForkMergeBack,
   type CodeForkMergeBackOutcome,
   type CodeThreadFollowUpView,
   type CodeAttachmentId,
@@ -75,6 +73,7 @@ import {
   createCodeReadCursorStore,
   isActive,
   projectConversationTurns,
+  codeReplyMetadataUpdate,
   providerAnswerOutcome,
   providerRequestFromEvent,
   readConversationEvidence,
@@ -306,6 +305,8 @@ function readsConversationWindow(
  */
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
+  /** Window-owned metadata; a thread slot waits for it instead of bootstrapping. */
+  readonly navigation?: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client?: CodeClient;
   readonly draftStore?: ComposerThreadDraftStore;
   readonly readCursorStore?: CodeReadCursorStore;
@@ -322,6 +323,7 @@ export interface CodeControllerOptions {
 }
 
 export function useCodeController(options: CodeControllerOptions) {
+  const ownsNavigation = options.navigation === undefined;
   const reconnectDelayMs = options.reconnectDelayMs ?? 250;
   const navigationRefreshMs = options.navigationRefreshMs ?? 2_000;
   const readCursorStore = useMemo(
@@ -364,16 +366,20 @@ export function useCodeController(options: CodeControllerOptions) {
   composerDraftRef.current = composerDraft;
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
-  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
-    if (knownDraftThreads.current === undefined) {
-      composerDraftRef.current.dropUnknown(threadIds);
-    } else {
-      for (const threadId of knownDraftThreads.current) {
-        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+  const reconcileDrafts = useCallback(
+    (threadIds: ReadonlyArray<string>) => {
+      if (!ownsNavigation) return;
+      if (knownDraftThreads.current === undefined) {
+        composerDraftRef.current.dropUnknown(threadIds);
+      } else {
+        for (const threadId of knownDraftThreads.current) {
+          if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+        }
       }
-    }
-    knownDraftThreads.current = new Set(threadIds);
-  }, []);
+      knownDraftThreads.current = new Set(threadIds);
+    },
+    [ownsNavigation],
+  );
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   // The transcript as last set, and whose it is, for the window reads that
   // join a page onto it. A render keeps it level with live updates.
@@ -1488,48 +1494,12 @@ export function useCodeController(options: CodeControllerOptions) {
                     noteProviderRequest(event);
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
-                    if (event.kind === "conversation-turn-review-preview") {
-                      const preview = event.preview;
-                      setConversation((current) =>
-                        current.map((message) => {
-                          if (message.id !== `${operationId}:assistant`) return message;
-                          const capture = preview.capture ?? message.reviewPreview?.capture;
-                          return {
-                            ...message,
-                            reviewPreview: {
-                              ...preview,
-                              ...(capture === undefined ? {} : { capture }),
-                            },
-                          };
-                        }),
-                      );
-                    }
-                    if (event.kind === "conversation-turn-changed-files") {
-                      const changedFiles = event.changedFiles;
+                    const updateReply = codeReplyMetadataUpdate(event);
+                    if (updateReply !== undefined) {
                       setConversation((current) =>
                         current.map((message) =>
                           message.id === `${operationId}:assistant`
-                            ? { ...message, changedFiles }
-                            : message,
-                        ),
-                      );
-                    }
-                    if (event.kind === "context-handoff-attached") {
-                      const handoff = handoffSummary(event);
-                      setConversation((current) =>
-                        current.map((message) =>
-                          message.id === `${operationId}:assistant`
-                            ? { ...message, handoff }
-                            : message,
-                        ),
-                      );
-                    }
-                    if (event.kind === "fork-context-delivered") {
-                      const mergeBack = forkMergeBackSummary(event);
-                      setConversation((current) =>
-                        current.map((message) =>
-                          message.id === `${operationId}:assistant`
-                            ? withForkMergeBack(message, mergeBack)
+                            ? updateReply(message)
                             : message,
                         ),
                       );
@@ -1878,11 +1848,14 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const followUpThreadKey = useMemo(
     () =>
-      (bootstrap?.threads ?? [])
-        .filter((thread) => thread.lifecycle !== "archived")
-        .map((thread) => String(thread.id))
-        .join(","),
-    [bootstrap],
+      options.activeThreadId !== undefined
+        ? ""
+        : (bootstrap?.threads ?? [])
+            .filter((thread) => thread.lifecycle !== "archived")
+            .map((thread) => String(thread.id))
+            .sort()
+            .join(","),
+    [bootstrap, options.activeThreadId],
   );
 
   useEffect(() => {
@@ -1914,9 +1887,18 @@ export function useCodeController(options: CodeControllerOptions) {
     };
   }, [client, followUpThreadKey]);
 
+  const windowBootstrap = options.navigation?.bootstrap;
+  useEffect(() => {
+    if (ownsNavigation || windowBootstrap === undefined) return;
+    bootstrapRef.current = windowBootstrap;
+    setBootstrap(windowBootstrap);
+    // Window metadata neither reconciles a tab's drafts nor recovers a failed
+    // thread read. Only installing a successfully read view clears that failure.
+  }, [ownsNavigation, windowBootstrap]);
+
   useEffect(() => {
     mounted.current = true;
-    void loadBootstrap("bootstrap");
+    if (ownsNavigation) void loadBootstrap("bootstrap");
     return () => {
       mounted.current = false;
       bootstrapGeneration.current += 1;
@@ -1925,7 +1907,7 @@ export function useCodeController(options: CodeControllerOptions) {
       streamAbort.current?.abort();
       turnAbort.current?.abort();
     };
-  }, [loadBootstrap]);
+  }, [loadBootstrap, ownsNavigation]);
 
   useEffect(() => {
     activeThreadId.current = options.activeThreadId;
@@ -2857,43 +2839,11 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               // The host journals the change list just before the turn settles,
               // so the reply gains its files here rather than on the next reopen.
-              if (event.kind === "conversation-turn-review-preview") {
-                const preview = event.preview;
-                setConversation((current) =>
-                  current.map((message) => {
-                    if (message.id !== `${operationId}:assistant`) return message;
-                    const capture = preview.capture ?? message.reviewPreview?.capture;
-                    return {
-                      ...message,
-                      reviewPreview: { ...preview, ...(capture === undefined ? {} : { capture }) },
-                    };
-                  }),
-                );
-              }
-              if (event.kind === "conversation-turn-changed-files") {
-                const changedFiles = event.changedFiles;
+              const updateReply = codeReplyMetadataUpdate(event);
+              if (updateReply !== undefined) {
                 setConversation((current) =>
                   current.map((message) =>
-                    message.id === assistantId ? { ...message, changedFiles } : message,
-                  ),
-                );
-              }
-              // Journaled before the provider is sent anything, so the reply
-              // says what was handed over while it is still being written.
-              if (event.kind === "context-handoff-attached") {
-                const handoff = handoffSummary(event);
-                setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId ? { ...message, handoff } : message,
-                  ),
-                );
-              }
-              // Journaled with the handoff, before the provider is sent anything.
-              if (event.kind === "fork-context-delivered") {
-                const mergeBack = forkMergeBackSummary(event);
-                setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId ? withForkMergeBack(message, mergeBack) : message,
+                    message.id === assistantId ? updateReply(message) : message,
                   ),
                 );
               }
@@ -3242,15 +3192,3 @@ function providerAnswerKey(answer: CodeProviderAnswer): string {
 }
 
 /** A reply gains each merge its turn carried once, however often the event replays. */
-function withForkMergeBack(
-  message: CodeConversationMessage,
-  mergeBack: CodeForkMergeBack,
-): CodeConversationMessage {
-  const existing = message.forkMergeBacks ?? [];
-  const known = existing.some(
-    (candidate) =>
-      String(candidate.forkThreadId) === String(mergeBack.forkThreadId) &&
-      String(candidate.throughOperationId) === String(mergeBack.throughOperationId),
-  );
-  return known ? message : { ...message, forkMergeBacks: [...existing, mergeBack] };
-}

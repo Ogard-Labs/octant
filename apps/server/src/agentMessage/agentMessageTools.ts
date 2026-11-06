@@ -1,18 +1,17 @@
 import {
   decodeAgentMessageEndpointId,
   decodeAgentMessageReceiptRequest,
-  MAX_AGENT_MESSAGE_RECEIPT_IDS,
   type AgentMessageEndpointId,
-  type ProviderExecutionPolicy,
-  type ProviderToolDefinition,
 } from "@octant/contracts";
-import { decideProfileToolConstraint } from "@octant/domain";
+import {
+  AGENT_MESSAGE_UNREACHABLE,
+  MAX_AGENT_MESSAGE_RECIPIENTS,
+  parseSiblingThreadReference,
+} from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AgentMessageRefusalBudget, AgentMessageService } from "./agentMessageService";
 
-export const AGENT_MESSAGE_TOOL_NAME = "octant_agent_message";
-
-const MAX_TOOL_MESSAGE_BYTES = 65_536;
+type ToolOutcome = Awaited<ReturnType<AppManagedToolSet["execute"]>>;
 
 /**
  * How many refusals one turn may journal. Every journaled refusal is read back
@@ -35,237 +34,164 @@ function createRefusalBudget(): AgentMessageRefusalBudget {
   };
 }
 
-const definition: ProviderToolDefinition = {
-  name: AGENT_MESSAGE_TOOL_NAME,
-  description:
-    "Send a bounded message to another thread of this Project, addressed by its id. The host admits and journals it, and the recipient reads it as untrusted data, with your thread's id as the source, at the start of its next turn. Use it to hand off findings or leave a sibling thread a question — it never grants you the recipient's authority, starts no turn there, and returns no reply. Default action send admits a new message on every call, including a retry. Use action status with your sent messageIds to read queued, provider-delivered, recipient-acknowledged or refused receipts. When a delivered envelope reaches this thread, action acknowledge with its messageIds explicitly reports receipt; it does not prove understanding or action. No message expiry is currently recorded.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        enum: ["send", "acknowledge", "status"],
-        description:
-          "Omit for legacy send. Acknowledge only reports receipt of messages delivered to this exact thread; status reads only this thread's sent IDs.",
-      },
-      messageIds: {
-        type: "array",
-        minItems: 1,
-        maxItems: MAX_AGENT_MESSAGE_RECEIPT_IDS,
-        items: { type: "string", format: "uuid" },
-      },
-      recipients: {
-        type: "array",
-        maxItems: 4,
-        items: {
-          type: "object",
-          properties: {
-            threadId: { type: "string", maxLength: 128 },
-          },
-          required: ["threadId"],
-          additionalProperties: false,
-        },
-        description: "Threads of this Project to send the message to, by their durable ids.",
-      },
-      message: {
-        type: "string",
-        maxLength: MAX_TOOL_MESSAGE_BYTES,
-        description: "The bounded message body the recipients will read as data.",
-      },
-    },
-    required: [],
-    additionalProperties: false,
-  },
-};
-
-export interface AgentMessageToolInput {
-  readonly recipients: ReadonlyArray<{ readonly threadId: string }>;
-  readonly message: string;
-}
-
-const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent message.";
+export type AgentMessageOperation = "send" | "acknowledge" | "receipts";
 
 /**
- * The message tool for one sender turn.
+ * The messaging operations of the threads tool (`send`, `acknowledge`, and
+ * `receipts`) for one sender turn. The threads tool decides whether the turn
+ * may message at all (its mode, profile, and Plan) and asks {@link refuse} to
+ * answer and journal a call it refuses; what is left here is what the host does
+ * with an admitted call.
  *
- * Sending stores a body, appends journal events, and later taints another
- * thread, so it passes the same checks as any other effect a turn asks for: a
- * profile whose allowlist leaves the tool out, and a turn in Plan, are not
- * offered it. Both are read again on every call, because a tool set outlives
- * the moment it was composed and a thread can drop to Plan while its turn
- * runs. A refused call never reaches the delivery service.
+ * A recipient is a `<thread id>@<project id>` reference, the form `list`
+ * returns. Its Project part must be the sender's current Project; any other
+ * reference is unreachable, in the same sentence the delivery service uses for
+ * a thread of another Project, so the same text can never be read as a thread
+ * somewhere else.
  */
-export function createAgentMessageTools(input: {
+export function createAgentMessageOperations(input: {
   readonly service: Pick<
     AgentMessageService,
     "send" | "recordRefusedSend" | "acknowledge" | "statusForSender"
   >;
   readonly senderThreadId: string;
-  readonly senderRunId?: string;
-  /** The sender thread's snapshotted profile allowlist; empty permits every tool. */
-  readonly toolConstraints: ReadonlyArray<string>;
-  readonly profileDisplayName: string;
-  /** The turn's access posture now, never wider than the one it started with. */
-  readonly readPosture: () => ProviderExecutionPolicy;
-}): AppManagedToolSet {
+  /** The sender's Project as the host holds it now. */
+  readonly senderProjectId: () => string | undefined;
+}) {
   const refusalBudget = createRefusalBudget();
   const senderThreadId = decodeAgentMessageEndpointId(input.senderThreadId);
-  const senderRunId =
-    input.senderRunId === undefined ? undefined : decodeAgentMessageEndpointId(input.senderRunId);
-  const refusal = (): string | undefined => {
-    if (senderRunId !== undefined) return "Managed children do not use sibling messaging.";
-    const profile = decideProfileToolConstraint({
-      toolId: AGENT_MESSAGE_TOOL_NAME,
-      toolConstraints: input.toolConstraints,
-      profileDisplayName: input.profileDisplayName,
+
+  /** The thread ids a call names, for the journal; a call naming nobody journals nothing. */
+  const namedRecipients = (raw: unknown): ReadonlyArray<{ threadId: AgentMessageEndpointId }> => {
+    const recipients = recipientList(raw);
+    return recipients.flatMap((candidate) => {
+      const named =
+        typeof candidate === "string" ? parseSiblingThreadReference(candidate) : undefined;
+      return named === undefined
+        ? []
+        : [{ threadId: decodeAgentMessageEndpointId(named.threadId) }];
     });
-    if (profile.status === "refused") return profile.reason;
-    return input.readPosture() === "plan" ? PLAN_REFUSAL : undefined;
   };
-  const journalRefusedCall = async (inputJson: string): Promise<void> => {
+
+  const journalRefusedCall = async (raw: unknown, reason: "policy" | "unauthorized") => {
     try {
-      const parsed = JSON.parse(inputJson) as {
-        recipients?: ReadonlyArray<{ threadId?: unknown }>;
-      };
-      const recipients = (parsed.recipients ?? []).flatMap((candidate) => {
-        try {
-          return [{ threadId: decodeAgentMessageEndpointId(String(candidate.threadId)) }];
-        } catch {
-          return [];
-        }
-      });
+      const recipients = namedRecipients(raw);
       if (recipients.length === 0) return;
-      await input.service.recordRefusedSend({
-        senderThreadId,
-        recipients,
-        reason: "policy",
-        refusalBudget,
-      });
+      await input.service.recordRefusedSend({ senderThreadId, recipients, reason, refusalBudget });
     } catch {
-      // A call too malformed to name a recipient, or a journal that is not
-      // available, leaves the sender's answer as it was.
+      // A journal that is not available leaves the sender's answer as it was.
     }
   };
+
   return {
-    // A tool this turn could only be refused is omitted, not advertised.
-    definitions: refusal() === undefined ? [definition] : [],
-    execute: async ({ inputJson, signal }) => {
-      if (signal?.aborted) {
-        return {
-          result: { status: "refused", reason: "policy", message: "The turn was cancelled." },
-          isError: true,
-        };
+    /**
+     * Answers a messaging call the threads tool refused, journaling it when it
+     * is a send that names a recipient: the refusal is the sender's to see
+     * here and the person's to see in the Agents center.
+     */
+    refuse: async (operation: AgentMessageOperation, raw: unknown, message: string) => {
+      if (operation === "send") await journalRefusedCall(raw, "policy");
+      return policyRefusal(message);
+    },
+
+    send: async (raw: Record<string, unknown>): Promise<ToolOutcome> => {
+      const recipients = recipientList(raw);
+      const message = raw.message;
+      const extra = Object.keys(raw).some(
+        (key) => key !== "operation" && key !== "recipients" && key !== "message",
+      );
+      if (
+        extra ||
+        recipients.length === 0 ||
+        typeof message !== "string" ||
+        recipients.some((recipient) => typeof recipient !== "string")
+      ) {
+        await journalRefusedCall(raw, "policy");
+        return policyRefusal("A recipient reference and a message are required.");
       }
-      const refused = refusal();
-      if (refused !== undefined) {
-        // The refusal is the sender's to see here and the person's to see in
-        // the Agents center, so it is journaled when the call names anyone.
-        await journalRefusedCall(inputJson);
-        return { result: { status: "refused", reason: "policy", message: refused }, isError: true };
+      // The raw list is judged as a whole before anything reaches the service:
+      // a send that fails any check is refused entirely, never narrowed to the
+      // recipients that passed. Filtering first let one wrong-Project reference
+      // padded with malformed strings slip under both the recipient bound and
+      // the Project check.
+      if (recipients.length > MAX_AGENT_MESSAGE_RECIPIENTS) {
+        await journalRefusedCall(raw, "policy");
+        return policyRefusal(
+          `An agent message may name at most ${String(MAX_AGENT_MESSAGE_RECIPIENTS)} recipients.`,
+        );
       }
-      try {
-        const raw: unknown = JSON.parse(inputJson);
-        if (typeof raw === "object" && raw !== null && "action" in raw && raw.action !== "send") {
-          const request = decodeAgentMessageReceiptRequest(raw);
-          if (request.action === "status") {
-            try {
-              const receipts = input.service.statusForSender({
-                senderThreadId: String(senderThreadId),
-                messageIds: request.messageIds,
-              });
-              return {
-                result: receipts,
-                ...(receipts.some((receipt) => receipt.status !== "ok") ? { isError: true } : {}),
-              };
-            } catch {
-              return {
-                result: [
-                  { status: "unavailable", message: "The host could not read message receipts." },
-                ],
-                isError: true,
-              };
-            }
-          }
-          const receipts = [];
-          for (const messageId of request.messageIds) {
-            if (signal?.aborted || refusal() !== undefined)
-              receipts.push({
-                status: "refused" as const,
-                reason: "policy" as const,
-                message: "The turn can no longer acknowledge messages.",
-              });
-            else {
-              try {
-                receipts.push(
-                  await input.service.acknowledge({
-                    messageId: String(messageId),
-                    recipientThreadId: String(senderThreadId),
-                  }),
-                );
-              } catch {
-                receipts.push({
-                  status: "unavailable" as const,
-                  message: "The acknowledgement could not be confirmed.",
-                });
-              }
-            }
-          }
-          return {
-            result: receipts,
-            ...(receipts.some((receipt) => receipt.status !== "ok") ? { isError: true } : {}),
-          };
+      const projectId = input.senderProjectId();
+      const resolved: Array<{
+        readonly reference: string;
+        readonly threadId: AgentMessageEndpointId;
+        readonly inProject: boolean;
+      }> = [];
+      for (const reference of recipients) {
+        const named = parseSiblingThreadReference(String(reference));
+        if (named === undefined) {
+          await journalRefusedCall(raw, "policy");
+          return policyRefusal(
+            "Every recipient must be a `<thread id>@<project id>` reference from list.",
+          );
         }
-      } catch {
-        return {
-          result: {
-            status: "refused",
-            reason: "policy",
-            message: "The receipt request is invalid.",
-          },
-          isError: true,
-        };
+        resolved.push({
+          reference: String(reference),
+          threadId: decodeAgentMessageEndpointId(named.threadId),
+          inProject: projectId !== undefined && named.projectId === projectId,
+        });
       }
-      let recipients: ReadonlyArray<{ threadId: string }>;
-      let message: string;
-      try {
-        const parsed = JSON.parse(inputJson) as {
-          recipients?: ReadonlyArray<{ threadId?: unknown }>;
-          message?: unknown;
-        };
-        const decodedRecipients = (parsed.recipients ?? []).map((candidate) => ({
-          threadId: decodeAgentMessageEndpointId(String(candidate.threadId)),
-        }));
-        if (decodedRecipients.length === 0 || typeof parsed.message !== "string") {
-          await journalRefusedCall(inputJson);
-          return {
-            result: {
-              status: "refused",
-              reason: "policy",
-              message: "A recipient and a message are required.",
-            },
-            isError: true,
-          };
+      const outsideProject = resolved.filter((recipient) => !recipient.inProject);
+      if (outsideProject.length > 0) {
+        try {
+          await input.service.recordRefusedSend({
+            senderThreadId,
+            recipients: outsideProject.map((recipient) => ({ threadId: recipient.threadId })),
+            reason: "unauthorized",
+            refusalBudget,
+          });
+        } catch {
+          // As above: the sender's answer does not depend on the journal.
         }
-        recipients = decodedRecipients;
-        message = parsed.message;
-      } catch {
-        await journalRefusedCall(inputJson);
+        // Only a reference of another Project is answered as unreachable; the
+        // others learn just that this send was refused, which says nothing
+        // about whether their threads exist.
         return {
-          result: { status: "refused", reason: "policy", message: "The tool input is invalid." },
+          result: resolved.map((recipient) =>
+            recipient.inProject
+              ? {
+                  status: "refused",
+                  recipient: recipient.reference,
+                  reason: "policy",
+                  message: "Nothing was sent: another recipient of this send was refused.",
+                }
+              : {
+                  status: "refused",
+                  recipient: recipient.reference,
+                  reason: "unauthorized",
+                  message: AGENT_MESSAGE_UNREACHABLE,
+                },
+          ),
           isError: true,
         };
       }
+      const referenceOf = new Map(
+        resolved.map((recipient) => [String(recipient.threadId), recipient.reference]),
+      );
+      const outcomes: Array<Record<string, unknown>> = [];
       try {
-        const outcomes = await input.service.send({
+        const sent = await input.service.send({
           senderThreadId,
-          ...(senderRunId === undefined ? {} : { senderRunId }),
-          recipients: recipients.map((recipient): { threadId: AgentMessageEndpointId } => ({
-            threadId: decodeAgentMessageEndpointId(recipient.threadId),
-          })),
+          recipients: resolved.map((recipient) => ({ threadId: recipient.threadId })),
           body: message,
           refusalBudget,
         });
-        return { result: outcomes };
+        for (const outcome of sent) {
+          const { recipientThreadId, ...rest } = outcome;
+          outcomes.push({
+            ...rest,
+            recipient: referenceOf.get(String(recipientThreadId)) ?? String(recipientThreadId),
+          });
+        }
       } catch (error) {
         return {
           result: {
@@ -278,6 +204,89 @@ export function createAgentMessageTools(input: {
           isError: true,
         };
       }
+      // Each recipient's outcome is the answer, sent or refused, as the
+      // service gives it; the call itself did not fail.
+      return { result: outcomes };
+    },
+
+    receipts: (raw: Record<string, unknown>): ToolOutcome => {
+      const messageIds = receiptIds(raw, "status");
+      if (messageIds === undefined) return policyRefusal("The receipt request is invalid.");
+      try {
+        const receipts = input.service.statusForSender({
+          senderThreadId: String(senderThreadId),
+          messageIds,
+        });
+        return {
+          result: receipts,
+          ...(receipts.some((receipt) => receipt.status !== "ok") ? { isError: true } : {}),
+        };
+      } catch {
+        return {
+          result: [{ status: "unavailable", message: "The host could not read message receipts." }],
+          isError: true,
+        };
+      }
+    },
+
+    /**
+     * Reports receipt of messages delivered to this thread, one at a time.
+     * `stillAdmitted` is asked before each one, because a turn can drop to
+     * Plan or be cancelled while an earlier acknowledgement is journaled.
+     */
+    acknowledge: async (
+      raw: Record<string, unknown>,
+      stillAdmitted: () => boolean,
+    ): Promise<ToolOutcome> => {
+      const messageIds = receiptIds(raw, "acknowledge");
+      if (messageIds === undefined) return policyRefusal("The receipt request is invalid.");
+      const receipts = [];
+      for (const messageId of messageIds) {
+        if (!stillAdmitted()) {
+          receipts.push({
+            status: "refused" as const,
+            reason: "policy" as const,
+            message: "The turn can no longer acknowledge messages.",
+          });
+          continue;
+        }
+        try {
+          receipts.push(
+            await input.service.acknowledge({
+              messageId: String(messageId),
+              recipientThreadId: String(senderThreadId),
+            }),
+          );
+        } catch {
+          receipts.push({
+            status: "unavailable" as const,
+            message: "The acknowledgement could not be confirmed.",
+          });
+        }
+      }
+      return {
+        result: receipts,
+        ...(receipts.some((receipt) => receipt.status !== "ok") ? { isError: true } : {}),
+      };
     },
   };
+}
+
+function recipientList(raw: unknown): ReadonlyArray<unknown> {
+  if (typeof raw !== "object" || raw === null || !("recipients" in raw)) return [];
+  return Array.isArray(raw.recipients) ? raw.recipients : [];
+}
+
+/** The ids of a receipt request, decoded with the contract's own bounds. */
+function receiptIds(raw: Record<string, unknown>, action: "acknowledge" | "status") {
+  if (Object.keys(raw).some((key) => key !== "operation" && key !== "messageIds")) return undefined;
+  try {
+    return decodeAgentMessageReceiptRequest({ action, messageIds: raw.messageIds }).messageIds;
+  } catch {
+    return undefined;
+  }
+}
+
+function policyRefusal(message: string): ToolOutcome {
+  return { result: { status: "refused", reason: "policy", message }, isError: true };
 }

@@ -109,7 +109,7 @@ export function createStoredExtensionMaterialLoader(
         if (record?.instructions === undefined || record.effectiveState.kind !== "effective") {
           throw new Error("Standalone skill instructions are unavailable.");
         }
-        return { context: { kind: "instructions", text: record.instructions }, tools: [] };
+        return { context: { kind: "skill-instructions", text: record.instructions }, tools: [] };
       }
       if (source.kind !== "plugin-package") {
         throw new Error("Extension material source is unavailable.");
@@ -148,7 +148,7 @@ export function createStoredExtensionMaterialLoader(
         },
         source.componentId,
       );
-      return { context: { kind: "instructions", text }, tools: [] };
+      return { context: { kind: "skill-instructions", text }, tools: [] };
     },
   };
 }

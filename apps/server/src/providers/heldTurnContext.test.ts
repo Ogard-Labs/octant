@@ -125,6 +125,20 @@ describe("HeldTurnContext", () => {
       ledger.forTurn({ sessionId, resumed: true, context: [instructions, skill] }).context,
     ).toEqual([instructions, skill]);
   });
+
+  it("resends a restored status file after a turn that sent a newer version was interrupted", () => {
+    const ledger = new HeldTurnContext();
+    const statusA = { kind: "work-item", key: "STATUS.md", text: "Status A." } as const;
+    const statusB = { kind: "work-item", key: "STATUS.md", text: "Status B." } as const;
+    completeTurn(ledger, false, [instructions, statusA]);
+    expect(
+      ledger.forTurn({ sessionId, resumed: true, context: [instructions, statusB] }).context,
+    ).toEqual([statusB]);
+    ledger.observe(keptUsage);
+    ledger.observe({ ...fields, kind: "interrupted", message: "Stopped by the person." });
+    expect(completeTurn(ledger, true, [instructions, statusA]).context).toEqual([statusA]);
+    expect(completeTurn(ledger, true, [instructions, statusA]).context).toEqual([]);
+  });
 });
 
 describe("HeldTurnContext kept on disk", () => {
@@ -153,6 +167,24 @@ describe("HeldTurnContext kept on disk", () => {
     const file = readFileSync(path, "utf8");
     expect(file).not.toContain(instructions.text);
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it("sends only the newer status file after a restart, keeping its key and never its text on disk", () => {
+    const path = storePath();
+    const status = { kind: "project-memory", key: "work-status", text: "Draft sent." } as const;
+    const revised = { ...status, text: "Draft signed." } as const;
+    completeTurn(restarted(path), false, [instructions, status]);
+
+    const after = restarted(path);
+    expect(completeTurn(after, true, [instructions, revised, mention])).toEqual({
+      kind: "appended",
+      context: [revised, mention],
+      held: [instructions],
+    });
+    expect(completeTurn(after, true, [instructions, revised]).context).toEqual([]);
+    const file = readFileSync(path, "utf8");
+    expect(file).not.toContain(status.text);
+    expect(file).not.toContain(status.key);
   });
 
   it("sends standing context again after a restart that followed a compaction", () => {

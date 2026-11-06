@@ -34,6 +34,7 @@ export * from "./serverProjectsClient";
 export * from "./safeNetworksClient";
 export * from "./mobileNativeHarnessClient";
 export * from "./mobileSpeechClient";
+export * from "./replyDetailClient";
 export * from "./shipClient";
 export * from "./planClient";
 export * from "./productFeedbackClient";

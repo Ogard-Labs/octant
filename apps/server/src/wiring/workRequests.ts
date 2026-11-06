@@ -1,3 +1,4 @@
+import { pendingQuestionDeferrals } from "../pendingQuestionDeferrals";
 import { randomUUID } from "node:crypto";
 import {
   decodeAgentRunParentThreadId,
@@ -253,6 +254,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     )),
   ];
   const pendingRequestService = new PendingRequestService({
+    deferrals: pendingQuestionDeferrals(persistence.journal, persistence.connection),
     readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
     work: async (windowId) => [
       ...(await workRequestApplication.listPendingForWindow(windowId)),

@@ -13,6 +13,7 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import { reduceContextToBudget } from "@octant/domain/context-policy";
+import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
 import {
   documentDeliveryInstructions,
   offersCanvasTool,
@@ -26,8 +27,15 @@ import { appToolHostLines } from "../providers/appToolHostLines";
  */
 export const WORK_TURN_SAFE_INPUT_TOKENS = 24_000;
 
+/**
+ * Where a Work turn's files go. Whether a document becomes a file at all is
+ * the delivery rule's call (Canvas, the person's artifact tool, or none), so
+ * this names no delivery choice: an earlier text restated the Canvas rule here
+ * and left the model to reconcile two blocks that said the same thing.
+ */
+const WORK_ARTIFACT_REFERENCE = "octant-work-artifacts";
 const WORK_ARTIFACT_INSTRUCTIONS =
-  "You are working in an Octant Work task. When a document belongs in the task folder (the user asked for a file, or no Canvas tool is offered), use your available file tools to create it inside the bound task folder and report its real relative paths. Octant's Files tool lets the user open those files; observed Markdown and plain-text documents can also appear in Document beside the conversation. Creating a file does not prove a preview opened. Use appropriate format-specific tooling for binary documents. Never invent download URLs or host artifact ids. Use only tools actually offered to this task; these instructions grant no additional access.";
+  "Files you write for the person go inside this task's folder; report their real relative paths. Use format-specific tooling for binary documents. Do not claim a file opened in a preview, and never invent download URLs or artifact ids.";
 
 export type WorkTurnContextPlan =
   | {
@@ -68,6 +76,11 @@ export function planWorkTurnContext(input: {
   readonly modelId: ProviderModelId | string;
   readonly uuid: () => string;
   readonly createdAt: string;
+  /**
+   * Instructions that come before Work's own, such as Octant's orientation and
+   * reply formats, so every mode opens its instructions the same way.
+   */
+  readonly leading?: ReadonlyArray<WorkTurnContextContribution>;
   readonly contributions: ReadonlyArray<WorkTurnContextContribution>;
   readonly safeInputBudget?: number;
 }): WorkTurnContextPlan {
@@ -76,10 +89,11 @@ export function planWorkTurnContext(input: {
   const budget = input.safeInputBudget ?? WORK_TURN_SAFE_INPUT_TOKENS;
   const blocksByEntryId = new Map<string, ProviderContextBlock>();
   const contributions = [
+    ...(input.leading ?? []),
     {
       text: WORK_ARTIFACT_INSTRUCTIONS,
       sourceKind: "instruction",
-      referenceId: "octant-work-artifacts",
+      referenceId: WORK_ARTIFACT_REFERENCE,
       category: "octant-policy",
       posture: "required",
       block: { kind: "instructions", text: WORK_ARTIFACT_INSTRUCTIONS },
@@ -179,8 +193,9 @@ export function includeWorkToolDefinitions(input: {
     });
   });
   // The Canvas tool is known only here, so its delivery rule joins the plan
-  // with the tools and leads the context like the other Work instructions.
-  // The person's artifact switch puts the artifact rule in its place.
+  // with the tools, right after Work's folder rule: orientation and reply
+  // formats first, then this mode's rules, then the tool notes. The person's
+  // artifact switch puts the artifact rule in its place.
   const deliveryText = documentDeliveryInstructions({
     artifactToolName: input.artifactToolName,
     canvasOffered: offersCanvasTool(input.tools),
@@ -197,14 +212,17 @@ export function includeWorkToolDefinitions(input: {
               input.artifactToolName === undefined
                 ? "octant-canvas-delivery"
                 : "octant-artifact-delivery",
+            ...(input.artifactToolName === undefined ? { tool: CANVAS_TOOL_NAME } : {}),
           },
         ]),
-    ...appToolHostLines(input.tools).map((text, index) => ({
-      text,
+    ...appToolHostLines(input.tools).map((line, index) => ({
+      text: line.text,
+      tool: line.tool,
       referenceId: `octant-tool-host-line:${index}`,
     })),
   ];
-  const deliveryEntries: Array<ContextManifest["entries"][number]> = [];
+  const ruleEntries: Array<ContextManifest["entries"][number]> = [];
+  const noteEntries: Array<ContextManifest["entries"][number]> = [];
   for (const policy of policyTexts) {
     const deliveryTokens = Math.max(16, Math.ceil(policy.text.length / 4));
     const entry = decodeContextEntry({
@@ -231,13 +249,22 @@ export function includeWorkToolDefinitions(input: {
       reuseCount: 0,
       preview: { redacted: true, label: "octant-policy hidden" },
     });
-    deliveryEntries.push(entry);
-    blocks.set(String(entry.id), { kind: "instructions", text: policy.text });
+    (policy.referenceId.startsWith("octant-tool-host-line:") ? noteEntries : ruleEntries).push(
+      entry,
+    );
+    blocks.set(String(entry.id), {
+      kind: "instructions",
+      text: policy.text,
+      ...(policy.tool === undefined ? {} : { tool: policy.tool }),
+    });
   }
   return reduceWorkContext(
     decodeContextManifest({
       ...input.plan.manifest,
-      entries: [...deliveryEntries, ...input.plan.manifest.entries, ...toolEntries],
+      entries: [
+        ...placeWorkInstructions(input.plan.manifest.entries, ruleEntries, noteEntries, blocks),
+        ...toolEntries,
+      ],
     }),
     blocks,
     input.safeInputBudget,
@@ -256,6 +283,31 @@ export function sendsWorkBlock(entry: ContextManifest["entries"][number]): boole
     entry.state !== "summarized" &&
     entry.category !== "current-request"
   );
+}
+
+/**
+ * The delivery rule right after Work's folder rule, and the tool notes after
+ * the last standing instruction, so the notes follow every rule of the mode and
+ * only the current turn's instructions come after them.
+ */
+function placeWorkInstructions(
+  entries: ReadonlyArray<ContextManifest["entries"][number]>,
+  rules: ReadonlyArray<ContextManifest["entries"][number]>,
+  notes: ReadonlyArray<ContextManifest["entries"][number]>,
+  blocks: ReadonlyMap<string, ProviderContextBlock>,
+): ReadonlyArray<ContextManifest["entries"][number]> {
+  const folderRule = entries.findIndex(
+    (entry) => entry.source.referenceId === WORK_ARTIFACT_REFERENCE,
+  );
+  const withRules =
+    folderRule === -1
+      ? [...rules, ...entries]
+      : [...entries.slice(0, folderRule + 1), ...rules, ...entries.slice(folderRule + 1)];
+  let lastRule = -1;
+  withRules.forEach((entry, index) => {
+    if (blocks.get(String(entry.id))?.kind === "instructions") lastRule = index;
+  });
+  return [...withRules.slice(0, lastRule + 1), ...notes, ...withRules.slice(lastRule + 1)];
 }
 
 function reduceWorkContext(

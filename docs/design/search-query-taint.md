@@ -9,6 +9,13 @@ follows the [guardrail level](../architecture.md#security-and-authority): it
 refuses at Guarded and Reviewed, and at Full access only records the mark,
 never prompting or blocking.
 
+The rule applies to every `web-search` call the harness's tool-call policy
+decides: a harness thread's in Work and Code, and a harness Chat thread's
+while its research is on, whose only search is the harness's own. A Chat
+thread on another provider is offered the same `web-search` definition, run
+through its research route rather than the harness, and this refusal does not
+apply there ([Architecture: Web search](../architecture.md#web-search)).
+
 ## Refused patterns
 
 A query is refused when it is longer than 200 characters; contains a URL (a

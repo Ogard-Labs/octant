@@ -124,8 +124,7 @@ describe("decideExternalContentIngestion", () => {
 
 describe("nativeHarnessResultTaintsThread", () => {
   it("taints only for a harness tool that brings in outside content", () => {
-    const taints = (toolName: string, args: unknown = {}, result: unknown = {}) =>
-      nativeHarnessResultTaintsThread({ toolName, arguments: args, result });
+    const taints = (toolName: string) => nativeHarnessResultTaintsThread({ toolName });
     for (const local of [
       "read",
       "grep",
@@ -139,25 +138,11 @@ describe("nativeHarnessResultTaintsThread", () => {
       expect(taints(local)).toBe(false);
     expect(taints("web-fetch")).toBe(true);
     expect(taints("web-search")).toBe(true);
-    // A child's collected reply may relay what the child fetched; its status,
-    // or a collect that finds it still running, does not.
-    expect(
-      taints(
-        "delegate",
-        { operation: "collect", runId: "run-1" },
-        { status: "completed", text: "done", truncated: false },
-      ),
-    ).toBe(true);
-    expect(
-      taints(
-        "delegate",
-        { operation: "collect", runId: "run-1" },
-        { status: "not-ready", lifecycleStatus: "running" },
-      ),
-    ).toBe(false);
-    expect(taints("delegate", { operation: "status" })).toBe(false);
     // A tool the catalog does not know fails closed.
     expect(taints("harness-teleport")).toBe(true);
+    // So does `delegate`, which the harness no longer offers: a child's reply
+    // reaches a lead through `octant_agents`, which marks the thread itself.
+    expect(taints("delegate")).toBe(true);
   });
 });
 
