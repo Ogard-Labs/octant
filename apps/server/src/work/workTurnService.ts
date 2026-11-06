@@ -1193,90 +1193,92 @@ export class WorkTurnService {
         thread !== undefined
           ? this.#selectConversationHandoff(thread, previous, sessionDecision.reason)
           : undefined;
-    const inputHandoff =
-      handoff ??
-      (sessionDecision.kind === "host-rebuild" &&
-      this.#projection
-        .listForThread(command.threadId)
-        .some((turn) => (turn.attachments?.length ?? 0) > 0) &&
-      previous !== undefined &&
-      thread !== undefined &&
-      (previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
-        previous.authority.modelId !== command.authority.modelId ||
-        previous.carriedFrom !== undefined ||
-        this.#projection.rewoundSinceLatest(command.threadId))
-        ? this.#selectConversationHandoff(
-            thread,
-            previous,
-            previous.carriedFrom !== undefined
-              ? "branch"
-              : this.#projection.rewoundSinceLatest(command.threadId)
-                ? "rewind"
-                : "provider-switch",
-          )
-        : undefined);
-    let inputReceipt: ConversationInputReceipt | undefined;
-    let inputsCurrent: (() => boolean) | undefined;
-    const inputOnlyBlocks: ProviderContextBlock[] = [];
-    if (inputHandoff !== undefined) {
-      const transfer = this.#conversationInputTransfer;
-      const previousReceipt =
-        previous?.carriedFrom === undefined &&
-        previous?.status !== "completed" &&
-        previous?.inputReceipt?.purpose === inputHandoff.record.reason
-          ? previous.inputReceipt
-          : undefined;
-      if (
-        transfer === undefined &&
-        ((inputHandoff.selection.inputs?.length ?? 0) > 0 ||
-          inputHandoff.selection.inputUnavailable === true ||
-          previousReceipt !== undefined)
-      )
-        throw this.#failure(
-          "unavailable",
-          "Original source inputs cannot be transferred on this host. Nothing was sent.",
-        );
-      const prepared = await transfer?.prepare({
-        owner: {
-          mode: "work",
-          threadId: String(command.threadId),
-          projectId: String(command.authority.projectId),
-        },
-        purpose: inputHandoff.record.reason,
-        selection: inputHandoff.selection,
-        ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
-        ...(command.contextInputPolicy === undefined ? {} : { policy: command.contextInputPolicy }),
-        target: {
-          providerInstanceId: String(command.authority.providerInstanceId),
-          modelId: String(command.authority.modelId),
-        },
-        current: () => options?.admissionCurrent?.() !== false,
-      });
-      if (prepared?.status === "refused") throw this.#failure("unavailable", prepared.message);
-      if (prepared?.status === "ready" && prepared.receipt !== undefined) {
-        inputsCurrent = prepared.inputsCurrent;
-        attachmentInputs = [...attachmentInputs, ...prepared.attachments];
-        inputReceipt = prepared.receipt;
-        if (handoff === undefined)
-          inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
-        else
-          handoff = {
-            ...handoff,
-            blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
-            record: {
-              ...handoff.record,
-              inputReceipt: prepared.receipt,
-              omissions: {
-                ...handoff.record.omissions,
-                attachments: Math.max(
-                  0,
-                  handoff.record.omissions.attachments - prepared.receipt.included,
-                ),
+      const inputHandoff =
+        handoff ??
+        (sessionDecision.kind === "host-rebuild" &&
+        this.#projection
+          .listForThread(command.threadId)
+          .some((turn) => (turn.attachments?.length ?? 0) > 0) &&
+        previous !== undefined &&
+        thread !== undefined &&
+        (previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
+          previous.authority.modelId !== command.authority.modelId ||
+          previous.carriedFrom !== undefined ||
+          this.#projection.rewoundSinceLatest(command.threadId))
+          ? this.#selectConversationHandoff(
+              thread,
+              previous,
+              previous.carriedFrom !== undefined
+                ? "branch"
+                : this.#projection.rewoundSinceLatest(command.threadId)
+                  ? "rewind"
+                  : "provider-switch",
+            )
+          : undefined);
+      let inputReceipt: ConversationInputReceipt | undefined;
+      let inputsCurrent: (() => boolean) | undefined;
+      const inputOnlyBlocks: ProviderContextBlock[] = [];
+      if (inputHandoff !== undefined) {
+        const transfer = this.#conversationInputTransfer;
+        const previousReceipt =
+          previous?.carriedFrom === undefined &&
+          previous?.status !== "completed" &&
+          previous?.inputReceipt?.purpose === inputHandoff.record.reason
+            ? previous.inputReceipt
+            : undefined;
+        if (
+          transfer === undefined &&
+          ((inputHandoff.selection.inputs?.length ?? 0) > 0 ||
+            inputHandoff.selection.inputUnavailable === true ||
+            previousReceipt !== undefined)
+        )
+          throw this.#failure(
+            "unavailable",
+            "Original source inputs cannot be transferred on this host. Nothing was sent.",
+          );
+        const prepared = await transfer?.prepare({
+          owner: {
+            mode: "work",
+            threadId: String(command.threadId),
+            projectId: String(command.authority.projectId),
+          },
+          purpose: inputHandoff.record.reason,
+          selection: inputHandoff.selection,
+          ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
+          ...(command.contextInputPolicy === undefined
+            ? {}
+            : { policy: command.contextInputPolicy }),
+          target: {
+            providerInstanceId: String(command.authority.providerInstanceId),
+            modelId: String(command.authority.modelId),
+          },
+          current: () => options?.admissionCurrent?.() !== false,
+        });
+        if (prepared?.status === "refused") throw this.#failure("unavailable", prepared.message);
+        if (prepared?.status === "ready" && prepared.receipt !== undefined) {
+          inputsCurrent = prepared.inputsCurrent;
+          attachmentInputs = [...attachmentInputs, ...prepared.attachments];
+          inputReceipt = prepared.receipt;
+          if (handoff === undefined)
+            inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
+          else
+            handoff = {
+              ...handoff,
+              blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
+              record: {
+                ...handoff.record,
+                inputReceipt: prepared.receipt,
+                omissions: {
+                  ...handoff.record.omissions,
+                  attachments: Math.max(
+                    0,
+                    handoff.record.omissions.attachments - prepared.receipt.included,
+                  ),
+                },
               },
-            },
-          };
+            };
+        }
       }
-    }
 
       const harnessContext =
         thread === undefined
@@ -1349,16 +1351,16 @@ export class WorkTurnService {
                   block,
                 }),
               )),
-        ...inputOnlyBlocks.map(
-          (block, index): WorkTurnContextContribution => ({
-            text: block.text,
-            sourceKind: "message",
-            referenceId: `conversation-inputs:${command.threadId}:${index}`,
-            category: "conversation",
-            posture: "required",
-            block,
-          }),
-        ),
+          ...inputOnlyBlocks.map(
+            (block, index): WorkTurnContextContribution => ({
+              text: block.text,
+              sourceKind: "message",
+              referenceId: `conversation-inputs:${command.threadId}:${index}`,
+              category: "conversation",
+              posture: "required",
+              block,
+            }),
+          ),
 
           ...(await this.#sideChatReturnContributions(
             command.threadId,
@@ -1478,7 +1480,7 @@ export class WorkTurnService {
             providerSessionId,
             ...(resumeCursor === undefined ? {} : { resumeCursor }),
             ...(handoff === undefined ? {} : { handoff: handoff.record }),
-          ...(inputReceipt === undefined ? {} : { inputReceipt }),
+            ...(inputReceipt === undefined ? {} : { inputReceipt }),
             ...(externalInput === undefined ? {} : { externalInput }),
             prompt: command.prompt,
             ...(command.sideChatReturns === undefined
@@ -1566,7 +1568,8 @@ export class WorkTurnService {
         attachments: attachmentInputs,
         contextPlan: planned,
         sessionHolds,
-        admissionCurrent: () => folderCurrent() && options?.admissionCurrent?.() !== false && inputsCurrent?.() !== false,
+        admissionCurrent: () =>
+          folderCurrent() && options?.admissionCurrent?.() !== false && inputsCurrent?.() !== false,
         ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
         signal: controller.signal,
       }).finally(() => {

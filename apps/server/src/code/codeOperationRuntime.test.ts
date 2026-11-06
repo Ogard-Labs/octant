@@ -7593,53 +7593,101 @@ describe("provider switch handoff", () => {
       });
     });
 
-    it("carries the original screenshot through a Code fork text handoff without sharing its native writer", async () => {
-      const drivers = twoHarnesses();
-      const bytes = new Uint8Array([137, 80, 78]);
-      const reference = {
-        source: {
-          mode: "code" as const,
-          threadId: String(threadId),
-          attachmentId: "30000000-0000-4000-8000-000000000001",
-        },
-        displayName: "Original.png",
-        mediaType: "image/png",
-        byteLength: bytes.length,
-        digest: createHash("sha256").update(bytes).digest("hex"),
-      };
-      const fixture = runtimeFixture({
-        resolveProviderDriver: drivers.resolveProviderDriver,
-        inputTransfer: (directory) =>
-          new ConversationInputTransfer({
-            dataDirectory: directory,
-            ownerCurrent: () => true,
-            sourceCurrent: () => true,
-            read: async () => bytes,
-            supports: () => true,
+    it.each(["current", "folder-revoked", "source-revoked"] as const)(
+      "keeps a fork’s selected provider folder and original screenshot together (%s)",
+      async (admission) => {
+        const drivers = twoHarnesses();
+        let folderCurrent = true;
+        let sourceCurrent = true;
+        const acquired: Array<{
+          readonly projectRoot: string;
+          readonly extraFolders?: ReadonlyArray<string>;
+        }> = [];
+        const bytes = new Uint8Array([137, 80, 78]);
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(threadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Original.png",
+          mediaType: "image/png",
+          byteLength: bytes.length,
+          digest: createHash("sha256").update(bytes).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: async (current) => {
+            const driver = await drivers.resolveProviderDriver(current);
+            return {
+              ...driver,
+              acquire: (input) => {
+                acquired.push(input);
+                return driver.acquire(input);
+              },
+            };
+          },
+          resolveCheckoutRoot: async () => ({
+            checkoutRoot: "/private/exact",
+            workingDirectory: "/approved/notes",
+            rootCurrent: () => folderCurrent,
+            shell: "/bin/zsh",
+            credentialReferences: [],
+            environment: {},
           }),
-        forkContext: (input) => {
-          const selected = fixture.selectForkConversation(input);
-          return selected.status === "available" ? { ...selected, inputs: [reference] } : selected;
-        },
-      });
-      try {
-        await finishFirstTurn(fixture, drivers, providerInstance);
-        fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
-        await sendOnFork(fixture);
-        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
-        expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
-          expect.objectContaining({ displayName: "Original.png", bytes }),
-        ]);
-        expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toMatchObject({
-          reason: "fork",
-          inputReceipt: { purpose: "fork", included: 1 },
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => sourceCurrent,
+              read: async () => {
+                await Promise.resolve();
+                if (admission === "folder-revoked") folderCurrent = false;
+                if (admission === "source-revoked") sourceCurrent = false;
+                return bytes;
+              },
+              supports: () => true,
+            }),
+          forkContext: (input) => {
+            const selected = fixture.selectForkConversation(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
         });
-        expect(drivers.harness.resume).not.toHaveBeenCalled();
-      } finally {
-        await fixture.runtime.close();
-        fixture.close();
-      }
-    });
+        try {
+          await finishFirstTurn(fixture, drivers, providerInstance);
+          fixture.setOtherThread(
+            decodeCodeThread({
+              ...forkOn(harnessInstance, "harness-model"),
+              workingFolderId: `folder_${"a".repeat(64)}`,
+            }),
+          );
+          const result = await sendOnFork(fixture);
+          if (admission !== "current") {
+            expect(result).toMatchObject({ state: "failed" });
+            expect(acquired).toHaveLength(1);
+            expect(drivers.harness.send).not.toHaveBeenCalled();
+            return;
+          }
+          expect(acquired.at(-1)).toMatchObject({
+            projectRoot: "/approved/notes",
+            extraFolders: expect.arrayContaining(["/private/exact"]),
+          });
+          await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+          expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+            expect.objectContaining({ displayName: "Original.png", bytes }),
+          ]);
+          expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toMatchObject({
+            reason: "fork",
+            inputReceipt: { purpose: "fork", included: 1 },
+          });
+          expect(drivers.harness.resume).not.toHaveBeenCalled();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
 
     describe("merging a fork's conversation back into its source", () => {
       const sourceSession = sessionId;

@@ -3261,7 +3261,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
     }
     // Driver, credentials, and fork preparation may outlive the host's admission.
-    if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false || inputGuards.some((current) => !current())) {
+    if (
+      input.folderCurrent?.() === false ||
+      input.admissionCurrent?.() === false ||
+      inputGuards.some((current) => !current())
+    ) {
       await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }

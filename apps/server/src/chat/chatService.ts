@@ -4222,106 +4222,106 @@ export class ChatService {
               )?.id,
             })
           : undefined;
-    const branchNeedsInputs =
-      thread.branchedFrom !== undefined &&
-      previousTurn !== undefined &&
-      previousTurn.sequence <= thread.branchedFrom.carriedTurnCount;
-    const hostInputReason =
-      sessionDecision.kind !== "host-rebuild" ||
-      !keptTurns.some(
-        (turn) => turn.attachmentIds.length > 0 || (turn.originalInputs?.length ?? 0) > 0,
-      )
-        ? undefined
-        : rewoundTail
-          ? "rewind"
-          : branchNeedsInputs
-            ? "branch"
-            : previous !== undefined &&
-                (String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
-                  String(previous.modelId) !== String(thread.modelId))
-              ? "provider-switch"
+      const branchNeedsInputs =
+        thread.branchedFrom !== undefined &&
+        previousTurn !== undefined &&
+        previousTurn.sequence <= thread.branchedFrom.carriedTurnCount;
+      const hostInputReason =
+        sessionDecision.kind !== "host-rebuild" ||
+        !keptTurns.some(
+          (turn) => turn.attachmentIds.length > 0 || (turn.originalInputs?.length ?? 0) > 0,
+        )
+          ? undefined
+          : rewoundTail
+            ? "rewind"
+            : branchNeedsInputs
+              ? "branch"
+              : previous !== undefined &&
+                  (String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
+                    String(previous.modelId) !== String(thread.modelId))
+                ? "provider-switch"
+                : undefined;
+      const inputHandoff =
+        handoff ??
+        (hostInputReason === undefined
+          ? undefined
+          : this.#selectConversationHandoff(thread, threadView, hostInputReason, {
+              from:
+                previous === undefined
+                  ? undefined
+                  : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
+              excludeTurnId: threadView?.turns.find(
+                (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
+              )?.id,
+            }));
+      let inputReceipt: ConversationInputReceipt | undefined;
+      let inputsCurrent: (() => boolean) | undefined;
+      const inputOnlyBlocks: ProviderContextBlock[] = [];
+      const inputPurpose =
+        inputHandoff?.record.reason ??
+        (sessionDecision.kind === "host-rebuild" ? admittedInputReceipt?.purpose : undefined);
+      if (inputPurpose !== undefined) {
+        const transfer = this.#conversationInputTransfer;
+        const previousReceipt =
+          admittedInputReceipt?.purpose === inputPurpose
+            ? admittedInputReceipt
+            : previous?.outcome !== "completed" && previous?.inputReceipt?.purpose === inputPurpose
+              ? previous.inputReceipt
               : undefined;
-    const inputHandoff =
-      handoff ??
-      (hostInputReason === undefined
-        ? undefined
-        : this.#selectConversationHandoff(thread, threadView, hostInputReason, {
-            from:
-              previous === undefined
-                ? undefined
-                : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
-            excludeTurnId: threadView?.turns.find(
-              (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
-            )?.id,
-          }));
-    let inputReceipt: ConversationInputReceipt | undefined;
-    let inputsCurrent: (() => boolean) | undefined;
-    const inputOnlyBlocks: ProviderContextBlock[] = [];
-    const inputPurpose =
-      inputHandoff?.record.reason ??
-      (sessionDecision.kind === "host-rebuild" ? admittedInputReceipt?.purpose : undefined);
-    if (inputPurpose !== undefined) {
-      const transfer = this.#conversationInputTransfer;
-      const previousReceipt =
-        admittedInputReceipt?.purpose === inputPurpose
-          ? admittedInputReceipt
-          : previous?.outcome !== "completed" && previous?.inputReceipt?.purpose === inputPurpose
-            ? previous.inputReceipt
-            : undefined;
-      if (
-        transfer === undefined &&
-        ((inputHandoff?.selection.inputs?.length ?? 0) > 0 ||
-          inputHandoff?.selection.inputUnavailable === true ||
-          previousReceipt !== undefined)
-      )
-        throw new ChatServiceError({
-          category: "unavailable",
-          message: "Original source inputs cannot be transferred on this host. Nothing was sent.",
+        if (
+          transfer === undefined &&
+          ((inputHandoff?.selection.inputs?.length ?? 0) > 0 ||
+            inputHandoff?.selection.inputUnavailable === true ||
+            previousReceipt !== undefined)
+        )
+          throw new ChatServiceError({
+            category: "unavailable",
+            message: "Original source inputs cannot be transferred on this host. Nothing was sent.",
+          });
+        const prepared = await transfer?.prepare({
+          owner: {
+            mode: "chat",
+            threadId: String(thread.id),
+            projectId: thread.projectId === undefined ? null : String(thread.projectId),
+          },
+          purpose: inputPurpose,
+          ...(inputHandoff === undefined ? {} : { selection: inputHandoff.selection }),
+          ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
+          ...(contextInputPolicy === undefined ? {} : { policy: contextInputPolicy }),
+          target: {
+            providerInstanceId: String(thread.providerInstanceId),
+            modelId: String(thread.modelId),
+          },
+          current: () =>
+            executionContext?.admissionCurrent?.() !== false &&
+            this.#persistence.readChatThread(thread.id)?.lifecycle === "active",
         });
-      const prepared = await transfer?.prepare({
-        owner: {
-          mode: "chat",
-          threadId: String(thread.id),
-          projectId: thread.projectId === undefined ? null : String(thread.projectId),
-        },
-        purpose: inputPurpose,
-        ...(inputHandoff === undefined ? {} : { selection: inputHandoff.selection }),
-        ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
-        ...(contextInputPolicy === undefined ? {} : { policy: contextInputPolicy }),
-        target: {
-          providerInstanceId: String(thread.providerInstanceId),
-          modelId: String(thread.modelId),
-        },
-        current: () =>
-          executionContext?.admissionCurrent?.() !== false &&
-          this.#persistence.readChatThread(thread.id)?.lifecycle === "active",
-      });
-      if (prepared?.status === "refused")
-        throw new ChatServiceError({ category: "unavailable", message: prepared.message });
-      if (prepared?.status === "ready" && prepared.receipt !== undefined) {
-        inputsCurrent = prepared.inputsCurrent;
-        attachments = [...attachments, ...prepared.attachments];
-        inputReceipt = prepared.receipt;
-        if (handoff === undefined)
-          inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
-        else
-          handoff = {
-            ...handoff,
-            blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
-            record: {
-              ...handoff.record,
-              inputReceipt: prepared.receipt,
-              omissions: {
-                ...handoff.record.omissions,
-                attachments: Math.max(
-                  0,
-                  handoff.record.omissions.attachments - prepared.receipt.included,
-                ),
+        if (prepared?.status === "refused")
+          throw new ChatServiceError({ category: "unavailable", message: prepared.message });
+        if (prepared?.status === "ready" && prepared.receipt !== undefined) {
+          inputsCurrent = prepared.inputsCurrent;
+          attachments = [...attachments, ...prepared.attachments];
+          inputReceipt = prepared.receipt;
+          if (handoff === undefined)
+            inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
+          else
+            handoff = {
+              ...handoff,
+              blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
+              record: {
+                ...handoff.record,
+                inputReceipt: prepared.receipt,
+                omissions: {
+                  ...handoff.record.omissions,
+                  attachments: Math.max(
+                    0,
+                    handoff.record.omissions.attachments - prepared.receipt.included,
+                  ),
+                },
               },
-            },
-          };
+            };
+        }
       }
-    }
 
       this.#preflightChatTurn(probe, thread, attachments, tools);
       const providerFacts = await this.#resolveProviderContextFacts(
@@ -4411,7 +4411,11 @@ export class ChatService {
             .filter((text) => text !== undefined && text.length > 0)
             .join("\n\n") || undefined,
           threadMentionContexts,
-          handoff === undefined ? (inputOnlyBlocks.length === 0 ? undefined : inputOnlyBlocks) : handoff.blocks,
+          handoff === undefined
+            ? inputOnlyBlocks.length === 0
+              ? undefined
+              : inputOnlyBlocks
+            : handoff.blocks,
           offersCanvasTool(tools?.definitions),
           appToolHostLines(tools?.definitions),
           personMemoryText,
