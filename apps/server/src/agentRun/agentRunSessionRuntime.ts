@@ -1,3 +1,6 @@
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
+import type { ConversationInputManifest } from "@octant/contracts/conversation-inputs";
+import type { ProviderAttachmentInput } from "@octant/contracts";
 import { isAbsolute, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -105,6 +108,10 @@ const AVERAGE_CHARACTERS_PER_TOKEN = 4;
  * change what the user consented to.
  */
 export interface AgentRunContextSnapshotPort {
+  readonly inputs?: (input: {
+    readonly runId: AgentRunId;
+    readonly contextSnapshotId: AgentRunContextSnapshotId;
+  }) => ConversationInputManifest | undefined;
   readonly resolve: (input: {
     readonly runId: AgentRunId;
     readonly contextSnapshotId: AgentRunContextSnapshotId;
@@ -132,6 +139,10 @@ export interface AgentRunContextSnapshotPort {
  */
 export function createRecordedAgentRunContextSnapshotPort(options: {
   readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+  readonly readAdmittedInputs?: (input: {
+    readonly runId: AgentRunId;
+    readonly contextSnapshotId: AgentRunContextSnapshotId;
+  }) => ConversationInputManifest | undefined;
   readonly readAdmittedContext: (input: {
     readonly runId: AgentRunId;
     readonly contextSnapshotId: AgentRunContextSnapshotId;
@@ -139,7 +150,34 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
   /** The reply a completed run left; absent when it was never recorded or was purged. */
   readonly readResultText?: (runId: AgentRunId) => string | undefined;
 }): AgentRunContextSnapshotPort {
+  const inputs: NonNullable<AgentRunContextSnapshotPort["inputs"]> = ({
+    runId,
+    contextSnapshotId,
+  }) => {
+    const run = options.getById(runId);
+    if (
+      run === undefined ||
+      String(run.routingReceipt.contextSnapshotId) !== String(contextSnapshotId) ||
+      run.routingReceipt.admittedInputCount === undefined
+    )
+      return undefined;
+    const manifest = options.readAdmittedInputs?.({ runId, contextSnapshotId });
+    if (
+      manifest?.purpose !== "child-delegation" ||
+      manifest.items.length !== run.routingReceipt.admittedInputCount ||
+      manifest.items.some(
+        (item) =>
+          item.status !==
+          ((run.routingReceipt.contextInputPolicy ?? "preserve") === "text-only"
+            ? "omitted"
+            : "included"),
+      )
+    )
+      return undefined;
+    return manifest;
+  };
   return {
+    inputs,
     resolve: ({ runId, contextSnapshotId }) => {
       const run = options.getById(runId);
       if (run === undefined) return undefined;
@@ -150,7 +188,12 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
         run.routingReceipt.admittedContextBlocks === undefined
           ? []
           : options.readAdmittedContext({ runId: run.id, contextSnapshotId });
-      if (admitted === undefined) return undefined;
+      if (
+        admitted === undefined ||
+        (run.routingReceipt.admittedInputCount !== undefined &&
+          inputs({ runId, contextSnapshotId }) === undefined)
+      )
+        return undefined;
       const dependencies = dependencyResultBlocks(run, options);
       return dependencies === undefined ? undefined : [...admitted, ...dependencies];
     },
@@ -254,6 +297,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly usage?: TurnUsage;
   }) => void;
   readonly context: AgentRunContextSnapshotPort;
+  readonly inputsCurrent?: (manifest: ConversationInputManifest) => boolean;
+  readonly prepareInputs?: (input: {
+    readonly run: AgentRun;
+    readonly manifest: ConversationInputManifest;
+    readonly signal: AbortSignal;
+  }) => Promise<ReadonlyArray<ProviderAttachmentInput> | undefined>;
   readonly uuid: () => string;
   /** Filesystem root for Chat children, which own no workspace of their own. */
   readonly scratchRoot?: (run: AgentRun) => string | undefined;
@@ -924,6 +973,41 @@ export function createAgentRunSessionRuntime(
           authority,
           projectRoot,
           context: continuation === undefined ? context : [],
+          ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
+            ? {}
+            : {
+                inputManifest: options.context.inputs?.({
+                  runId: run.id,
+                  contextSnapshotId: run.routingReceipt.contextSnapshotId,
+                }),
+              }),
+          inputsCurrent: () => {
+            if (run.routingReceipt.admittedInputCount === undefined) return true;
+            const manifest = options.context.inputs?.({
+              runId: run.id,
+              contextSnapshotId: run.routingReceipt.contextSnapshotId,
+            });
+            return manifest !== undefined && options.inputsCurrent?.(manifest) === true;
+          },
+          prepareInputs: async (signal) => {
+            if (run.routingReceipt.admittedInputCount === undefined) return [];
+            const snapshot = {
+              runId: run.id,
+              contextSnapshotId: run.routingReceipt.contextSnapshotId,
+            };
+            const manifest = options.context.inputs?.(snapshot);
+            if (manifest === undefined) return undefined;
+            const attachments = await options.prepareInputs?.({ run, manifest, signal });
+            if (signal.aborted || options.context.inputs?.(snapshot) === undefined)
+              return undefined;
+            // A native continuation already owns its original inputs; revalidate
+            // source revocation without appending duplicates to the provider.
+            return continuation === undefined
+              ? attachments
+              : attachments === undefined
+                ? undefined
+                : [];
+          },
           reservationId,
           ...(spendReservationId === undefined ? {} : { spendReservationId }),
           ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
@@ -1304,6 +1388,11 @@ interface ManagedSessionInput {
   readonly authority: AgentRunAuthority;
   readonly projectRoot: string;
   readonly context: ReadonlyArray<ProviderContextBlock>;
+  readonly inputManifest?: ConversationInputManifest | undefined;
+  readonly inputsCurrent: () => boolean;
+  readonly prepareInputs: (
+    signal: AbortSignal,
+  ) => Promise<ReadonlyArray<ProviderAttachmentInput> | undefined>;
   readonly reservationId: CapacityReservationId;
   readonly spendReservationId?: ReturnType<typeof decodeSpendCeilingReservationId>;
   readonly spendCeiling?: AgentRunSessionRuntimeOptions["spendCeiling"];
@@ -1624,6 +1713,13 @@ function runSessionTurn(
         message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
       } satisfies ProviderFailure);
     }
+    const attachments = yield* Effect.promise(input.prepareInputs);
+    if (attachments === undefined)
+      return yield* Effect.fail({
+        category: "provider-failed",
+        message:
+          "The admitted source inputs are unavailable or unsupported. Restore them or explicitly delegate with text-only context.",
+      } satisfies ProviderFailure);
     input.onSessionReady();
     const connection = yield* input.driver
       .acquire({
@@ -1711,6 +1807,11 @@ function runSessionTurn(
       connection,
       consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
       send: Effect.suspend(() => {
+        if (!input.inputsCurrent())
+          return Effect.fail({
+            category: "provider-failed",
+            message: "The source inputs were revoked before delivery.",
+          } satisfies ProviderFailure);
         if (!input.recordContinuation("delivery-unknown"))
           return Effect.fail({
             category: "stale-resume",
@@ -1720,8 +1821,13 @@ function runSessionTurn(
         return connection.send({
           sessionId: input.sessionId,
           prompt: input.prompt,
-          context: [...input.context],
-          attachments: [],
+          context: [
+            ...input.context,
+            ...(input.inputManifest === undefined
+              ? []
+              : [conversationInputReceiptBlock(input.inputManifest)]),
+          ],
+          attachments: [...attachments],
           tools: [...(input.appManagedTools?.definitions ?? [])],
         });
       }),

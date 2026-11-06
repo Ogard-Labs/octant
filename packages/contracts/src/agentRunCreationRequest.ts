@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ConversationInputPolicy } from "./conversationInputs";
 import {
   AgentRunDependencies,
   AgentRunAuthority,
@@ -139,6 +140,7 @@ export const AgentRunCreationRequest = Schema.Struct({
    * refuses the creation instead of admitting an empty one.
    */
   includeParentContext: Schema.optional(Schema.Boolean),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
 })
   .annotations(strict)
   .pipe(
@@ -167,6 +169,7 @@ export const AgentRunControlRequest = Schema.Struct({
   role: AgentRunRole,
   task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
   includeParentContext: Schema.optional(Schema.Boolean),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   /** Sibling runs this one waits for; see `AgentRun.dependsOn`. */
   dependsOn: Schema.optional(AgentRunDependencies),
   /**

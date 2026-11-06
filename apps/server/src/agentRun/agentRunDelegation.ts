@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   LOCAL_HOST_ID,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
@@ -62,6 +63,7 @@ export interface AgentRunDelegationInput {
   readonly modelId?: string;
   readonly reasoning?: string;
   readonly includeParentContext?: boolean;
+  readonly contextInputPolicy?: ConversationInputPolicy;
   readonly after?: ReadonlyArray<string>;
   /** A roster member that runs the child on its own host instead of this one. */
   readonly targetMemberId?: string;
@@ -213,7 +215,8 @@ export async function startAgentRunDelegation(
       input.modelId !== undefined ||
       input.reasoning !== undefined ||
       input.after !== undefined ||
-      input.includeParentContext === true
+      input.includeParentContext === true ||
+      input.contextInputPolicy !== undefined
     )
       return {
         status: "refused",
@@ -253,6 +256,9 @@ export async function startAgentRunDelegation(
       role,
       task: input.task,
       ...(input.includeParentContext ? { includeParentContext: true } : {}),
+      ...(input.contextInputPolicy === undefined
+        ? {}
+        : { contextInputPolicy: input.contextInputPolicy }),
       ...(input.after === undefined ? {} : { dependsOn: input.after }),
     });
   } catch {

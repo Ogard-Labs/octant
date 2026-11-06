@@ -2216,6 +2216,23 @@ workspace is allocated, so a refusal names the reason (for example, no readable
 messages yet or a conversation that changed during the read) and leaves no
 worktree behind.
 
+When parent context includes original user attachments, admission captures at
+most eight immutable input references (32 MiB in all), including source mode,
+thread and attachment identity, media type, name, length and digest. These
+references share the purgeable context snapshot; the journal records only the
+input count and preserve/text-only policy. The destination's observed native
+attachment capability and model modality must support every selected input.
+Missing source metadata or unsupported input refuses creation; the caller can
+choose another model or explicitly request text-only context. A waiting pool
+route checks the eventual target before provider startup. Execution re-reads
+exact bytes, verifies their digest and source lifecycle, and refuses the whole
+send if any required input changed, disappeared or was revoked. Restart uses
+the same recorded selection. A native follow-up verifies the selection without
+appending duplicate original inputs to the retained session. A separate input
+receipt distinguishes original user inputs from the coordinator's brief and
+report, both in provider context and the child's conversation view. Deleting
+the parent destroys its manifest together with its derived conversation.
+
 Finished siblings currently owing a result to the same parent can be delivered
 in one ordinary parent turn, capped at 16 members and 32,768 prompt characters.
 Delivery does not wait for every sibling to finish. Each member's identity and

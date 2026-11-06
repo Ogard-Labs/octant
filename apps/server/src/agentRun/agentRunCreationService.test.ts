@@ -1,3 +1,4 @@
+import { decodeConversationInputReference } from "@octant/contracts/conversation-inputs";
 import { describe, expect, it } from "vitest";
 import { decodeAgentRunCreationRequest, type AgentRunCreationRequest } from "@octant/contracts";
 import type {
@@ -97,6 +98,43 @@ describe("buildAgentRunRequestCommand", () => {
     expect(command.routingReceipt.admittedContextBlocks).toBe(2);
     // The selection and the id it is recorded under always travel together.
     expect(command.routingReceipt.contextSnapshotId).toBeDefined();
+  });
+
+  it("admits original input provenance only for a capable target or an explicit text-only choice", () => {
+    const reference = decodeConversationInputReference({
+      source: { mode: "chat", threadId: ids.thread, attachmentId: ids.request },
+      displayName: "Screenshot.png",
+      mediaType: "image/png",
+      byteLength: 12,
+      digest: "a".repeat(64),
+    });
+    const options = {
+      request: baseRequest({ includeParentContext: true }),
+      creationPosture: "automatic" as const,
+      providerReadiness: readyPort,
+      uuid,
+      parentContext: {
+        resolve: () => ({
+          blocks: [{ kind: "user-message" as const, text: "Read the screenshot." }],
+          inputs: [reference],
+        }),
+      },
+    };
+    expect(() => buildAgentRunRequestCommand(options)).toThrow(/cannot receive a source input/);
+    const preserved = buildAgentRunRequestCommand({
+      ...options,
+      providerReadiness: { ...readyPort, supportsInput: () => true },
+    });
+    expect(preserved.admittedInputs?.items).toEqual([{ status: "included", input: reference }]);
+    expect(preserved.routingReceipt.admittedInputCount).toBe(1);
+    expect(JSON.stringify(preserved.routingReceipt)).not.toContain("Screenshot.png");
+    const reduced = buildAgentRunRequestCommand({
+      ...options,
+      request: baseRequest({ includeParentContext: true, contextInputPolicy: "text-only" }),
+    });
+    expect(reduced.admittedInputs?.items).toEqual([
+      { status: "omitted", input: reference, reason: "person-excluded" },
+    ]);
   });
 
   it("records nothing when the parent selected no context", () => {

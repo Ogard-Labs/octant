@@ -890,6 +890,26 @@ describe("AgentRunHierarchy", () => {
         status: "unavailable" as const,
         entries: [],
         truncated: false,
+        inputManifest: {
+          version: 1 as const,
+          purpose: "child-delegation" as const,
+          items: [
+            {
+              status: "included" as const,
+              input: {
+                source: {
+                  mode: "chat" as const,
+                  threadId: String(parentThreadId),
+                  attachmentId: "77777777-7777-4777-8777-777777777777",
+                },
+                displayName: "Original report.pdf",
+                mediaType: "application/pdf",
+                byteLength: 4,
+                digest: "a".repeat(64),
+              },
+            },
+          ],
+        },
       })),
     });
     render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
@@ -900,6 +920,9 @@ describe("AgentRunHierarchy", () => {
     await waitFor(() => expect(within(conversation).getByText("ships")).toBeVisible());
     expect(within(conversation).getByText("ships").tagName).toBe("STRONG");
     expect(conversation).toHaveTextContent("The reply was truncated.");
+    expect(within(conversation).getByLabelText("Original inputs")).toHaveTextContent(
+      "Original report.pdf · application/pdf · 4 bytes · Included",
+    );
   });
 
   it("reads a streamed reply as one message, not one paragraph per piece", async () => {

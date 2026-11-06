@@ -1,3 +1,9 @@
+import {
+  MAX_CONVERSATION_INPUTS,
+  MAX_CONVERSATION_INPUT_BYTES,
+  type ConversationInputManifest,
+  type ConversationInputReference,
+} from "@octant/contracts/conversation-inputs";
 import { createHash } from "node:crypto";
 import {
   LOCAL_HOST_ID,
@@ -67,6 +73,11 @@ export class AgentRunCreationRejected extends Error {
 }
 
 export interface ProviderReadinessPort {
+  readonly supportsInput?: (input: {
+    readonly providerInstanceId: string;
+    readonly modelId: string;
+    readonly mediaType: string;
+  }) => boolean;
   readonly isReady: (input: {
     readonly providerInstanceId: string;
     readonly modelId: string;
@@ -108,8 +119,50 @@ export interface AgentRunParentContextPort {
     readonly mode: OctantMode;
   }) =>
     | ReadonlyArray<ProviderContextBlock>
+    | AdmittedParentSelection
     | { readonly unavailable: AgentRunParentContextUnavailableReason }
     | undefined;
+}
+
+export interface AdmittedParentSelection {
+  readonly blocks: ReadonlyArray<ProviderContextBlock>;
+  readonly inputs?: ReadonlyArray<ConversationInputReference>;
+  readonly inputUnavailable?: boolean;
+}
+
+export function assertParentInputAdmission(input: {
+  readonly selection: AdmittedParentSelection | undefined;
+  readonly policy: "preserve" | "text-only";
+  readonly readiness: ProviderReadinessPort;
+  readonly target?: { readonly providerInstanceId: string; readonly modelId: string };
+}): void {
+  const references = input.selection?.inputs ?? [];
+  if (input.selection?.inputUnavailable === true && input.policy === "preserve")
+    throw new AgentRunCreationRejected(
+      "parent-context-unavailable",
+      "A selected source input is unavailable. Restore it or explicitly choose text-only parent context.",
+    );
+  if (
+    references.length > MAX_CONVERSATION_INPUTS ||
+    (input.policy === "preserve" &&
+      references.reduce((sum, item) => sum + item.byteLength, 0) > MAX_CONVERSATION_INPUT_BYTES)
+  )
+    throw new AgentRunCreationRejected(
+      "parent-context-unavailable",
+      "The selected parent inputs exceed the transfer limit. Choose a smaller source selection or delegate without parent context.",
+    );
+  const target = input.target;
+  if (
+    target !== undefined &&
+    input.policy === "preserve" &&
+    references.some(
+      (item) => input.readiness.supportsInput?.({ ...target, mediaType: item.mediaType }) !== true,
+    )
+  )
+    throw new AgentRunCreationRejected(
+      "parent-context-unavailable",
+      "The selected provider/model cannot receive a source input. Choose a capable target or explicitly choose text-only parent context.",
+    );
 }
 
 const PARENT_CONTEXT_REFUSALS: Record<AgentRunParentContextUnavailableReason, string> = {
@@ -249,7 +302,28 @@ export function buildAgentRunRequestCommand(
   };
 
   const effectiveAuthorityDigest = agentRunRequestAuthorityDigest(request.requestedAuthority);
-  const admittedContext = resolveAdmittedContext(input);
+  const admittedSelection = resolveAdmittedContext(input);
+  const admittedContext = admittedSelection?.blocks;
+  const references = admittedSelection?.inputs ?? [];
+  const inputPolicy = request.contextInputPolicy ?? "preserve";
+  assertParentInputAdmission({
+    selection: admittedSelection,
+    policy: inputPolicy,
+    readiness: input.providerReadiness,
+    ...(executionCandidate === undefined ? {} : { target: executionCandidate }),
+  });
+  const admittedInputs: ConversationInputManifest | undefined =
+    references.length === 0
+      ? undefined
+      : {
+          version: 1,
+          purpose: "child-delegation",
+          items: references.map((reference) =>
+            inputPolicy === "text-only"
+              ? { status: "omitted", input: reference, reason: "person-excluded" }
+              : { status: "included", input: reference },
+          ),
+        };
   const executionSelection =
     input.executionSelection ??
     selectAgentRunExecutionKind(
@@ -301,7 +375,10 @@ export function buildAgentRunRequestCommand(
         ? [...executionSelection.capabilityDegradations]
         : [...executionSelection.capabilityDegradations, executionSelection.nativeFallbackReason],
     contextSnapshotId: decodeAgentRunContextSnapshotId(input.uuid()),
-    ...(admittedContext === undefined ? {} : { admittedContextBlocks: admittedContext.length }),
+    ...(admittedContext === undefined
+      ? {}
+      : { admittedContextBlocks: admittedContext.length, contextInputPolicy: inputPolicy }),
+    ...(admittedInputs === undefined ? {} : { admittedInputCount: admittedInputs.items.length }),
     effectiveAuthorityDigest,
     usageQuality: "unavailable",
     hostId: LOCAL_HOST_ID,
@@ -325,6 +402,7 @@ export function buildAgentRunRequestCommand(
     // stores it under the receipt's snapshot id, where deleting the parent
     // thread can destroy the conversation it came from.
     ...(admittedContext === undefined ? {} : { admittedContext }),
+    ...(admittedInputs === undefined ? {} : { admittedInputs }),
   };
 }
 
@@ -339,7 +417,7 @@ export function buildAgentRunRequestCommand(
  */
 function resolveAdmittedContext(
   input: BuildAgentRunRequestCommandInput,
-): ReadonlyArray<ProviderContextBlock> | undefined {
+): AdmittedParentSelection | undefined {
   if (input.request.includeParentContext !== true) return undefined;
   return resolveParentContextSelection(input.parentContext, {
     parentThreadId: input.request.parentThreadId,
@@ -358,7 +436,7 @@ function resolveAdmittedContext(
 export function resolveParentContextSelection(
   port: AgentRunParentContextPort | undefined,
   input: { readonly parentThreadId: AgentRunParentThreadId; readonly mode: OctantMode },
-): ReadonlyArray<ProviderContextBlock> {
+): AdmittedParentSelection {
   const resolved = port?.resolve(input);
   if (resolved !== undefined && "unavailable" in resolved) {
     throw new AgentRunCreationRejected(
@@ -366,13 +444,15 @@ export function resolveParentContextSelection(
       PARENT_CONTEXT_REFUSALS[resolved.unavailable],
     );
   }
-  if (resolved === undefined || resolved.length === 0) {
+  const selection =
+    resolved === undefined ? undefined : "blocks" in resolved ? resolved : { blocks: resolved };
+  if (selection === undefined || selection.blocks.length === 0) {
     throw new AgentRunCreationRejected(
       "parent-context-unavailable",
       "The parent thread's context could not be resolved for this child.",
     );
   }
-  return resolved.slice(0, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
+  return { ...selection, blocks: selection.blocks.slice(0, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS) };
 }
 
 function resolveWorkspaceReceipt(
