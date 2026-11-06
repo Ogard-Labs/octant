@@ -135,6 +135,17 @@ bool same_object(int directory, const char *name, const char *own) {
          peer.st_dev == self.st_dev && peer.st_ino == self.st_ino;
 }
 
+std::optional<std::string> own_boot_id() {
+  const int directory =
+      open("/proc/sys/kernel/random", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (directory < 0)
+    return std::nullopt;
+  std::string text;
+  const bool read = read_small(directory, "boot_id", text, 64);
+  close(directory);
+  return read ? policy::boot_id_text(text) : std::nullopt;
+}
+
 struct Peer {
   int pidfd = -1;
   int64_t pid = 0;
@@ -226,8 +237,11 @@ bool validate_peer(int socket, Peer &peer, std::string &reason) {
   }
   if (!start)
     return false;
+  const auto boot = own_boot_id();
+  if (!boot)
+    return false;
   candidate.pid = *pid;
-  candidate.key = policy::peer_key(*pid, *start);
+  candidate.key = policy::peer_key(*boot, *pid, *start);
   peer = std::move(candidate);
   return true;
 }

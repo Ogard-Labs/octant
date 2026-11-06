@@ -1274,7 +1274,9 @@ the same as on macOS; only the transport and the peer check differ.
   carry the kernel's credential naming the validated pid. A descriptor handed
   to another process therefore cannot speak for its creator, and a message
   that itself carries a descriptor (`SCM_RIGHTS`) closes the connection.
-- **Leases.** A peer is keyed by pid and kernel start time. The pidfd
+- **Leases.** A peer is keyed by a SHA-256 of the boot id, its pid and its
+  kernel start time: 64 lowercase hex characters, the same shape as the macOS
+  audit-token key that the lease owner and host require. The pidfd
   becoming readable (the process exited) or EOF on the connection that carried
   its window requests revokes that peer's leases, as process exit does on
   macOS. Nightly keeps that one connection open for its window operations.
