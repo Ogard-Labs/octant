@@ -207,10 +207,27 @@ function recentMessages(
       };
       const selected: ProviderContextBlock[] = [];
       const inputs: ConversationInputReference[] = [];
+      const inputsBySource = new Map<string, ConversationInputReference>();
       let inputUnavailable = false;
       let inheritedMessages = 0;
       for (const message of messages) {
-        inputs.push(...(message.inputs ?? []));
+        for (const reference of message.inputs ?? []) {
+          const key = `${reference.source.mode}:${reference.source.threadId}:${reference.source.attachmentId}`;
+          const existing = inputsBySource.get(key);
+          if (existing !== undefined) {
+            if (
+              existing.source.projectId !== reference.source.projectId ||
+              existing.displayName !== reference.displayName ||
+              existing.mediaType !== reference.mediaType ||
+              existing.byteLength !== reference.byteLength ||
+              existing.digest !== reference.digest
+            )
+              return { status: "unavailable", reason: "source-changed" };
+            continue;
+          }
+          inputsBySource.set(key, reference);
+          inputs.push(reference);
+        }
         inputUnavailable ||= message.inputUnavailable === true;
         if (
           message.byteLength !== undefined &&

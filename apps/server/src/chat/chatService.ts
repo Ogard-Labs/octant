@@ -3406,6 +3406,7 @@ export class ChatService {
         turn.sideChatReturns,
         false,
         command.contextInputPolicy,
+        attempt.inputReceipt,
       );
       const nextAttempt = retryChatTurn(thread, attempt, {
         turnId: command.turnId,
@@ -4047,6 +4048,7 @@ export class ChatService {
     sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>,
     toolCatalogHandoff = false,
     contextInputPolicy?: ConversationInputPolicy,
+    admittedInputReceipt?: ConversationInputReceipt,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
     const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
@@ -4255,17 +4257,21 @@ export class ChatService {
     let inputReceipt: ConversationInputReceipt | undefined;
     let inputsCurrent: (() => boolean) | undefined;
     const inputOnlyBlocks: ProviderContextBlock[] = [];
-    if (inputHandoff !== undefined) {
+    const inputPurpose =
+      inputHandoff?.record.reason ??
+      (sessionDecision.kind === "host-rebuild" ? admittedInputReceipt?.purpose : undefined);
+    if (inputPurpose !== undefined) {
       const transfer = this.#conversationInputTransfer;
       const previousReceipt =
-        previous?.outcome !== "completed" &&
-        previous?.inputReceipt?.purpose === inputHandoff.record.reason
-          ? previous.inputReceipt
-          : undefined;
+        admittedInputReceipt?.purpose === inputPurpose
+          ? admittedInputReceipt
+          : previous?.outcome !== "completed" && previous?.inputReceipt?.purpose === inputPurpose
+            ? previous.inputReceipt
+            : undefined;
       if (
         transfer === undefined &&
-        ((inputHandoff.selection.inputs?.length ?? 0) > 0 ||
-          inputHandoff.selection.inputUnavailable === true ||
+        ((inputHandoff?.selection.inputs?.length ?? 0) > 0 ||
+          inputHandoff?.selection.inputUnavailable === true ||
           previousReceipt !== undefined)
       )
         throw new ChatServiceError({
@@ -4278,8 +4284,8 @@ export class ChatService {
           threadId: String(thread.id),
           projectId: thread.projectId === undefined ? null : String(thread.projectId),
         },
-        purpose: inputHandoff.record.reason,
-        selection: inputHandoff.selection,
+        purpose: inputPurpose,
+        ...(inputHandoff === undefined ? {} : { selection: inputHandoff.selection }),
         ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
         ...(contextInputPolicy === undefined ? {} : { policy: contextInputPolicy }),
         target: {

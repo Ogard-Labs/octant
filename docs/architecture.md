@@ -6578,7 +6578,9 @@ rewind, Work and Code forks, Chat branches and Code fork merge-back preserve
 original user inputs separately from the selected conversation text. Only the
 modes that support each action may supply inputs. A source reference names the
 original thread, Project where known, attachment identity, display name, media
-type, length and digest; a nested fork or branch retains that identity instead
+type, length and digest. Repeated matching references select one original before
+input bounds; conflicting metadata for the same identity refuses the selection.
+A nested fork or branch retains that identity instead
 of pretending the receiving thread owns the original bytes. Each destination
 reopens the existing attachment store, checks current source and destination
 scope, verifies exact bytes and observes the target model's attachment support.

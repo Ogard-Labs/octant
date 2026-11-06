@@ -268,6 +268,8 @@ function createFixture(behaviors?: {
   readonly providerA?: Array<DriverBehavior>;
   readonly providerB?: Array<DriverBehavior>;
   readonly providerBReadiness?: ProviderProbeResult["readiness"];
+  readonly providerBAttachments?: boolean;
+  readonly originalInputsCurrent?: () => boolean;
   readonly providerBProbeSequence?: Array<ProviderProbeResult["readiness"]>;
 }): LifecycleFixture {
   const dataDirectory = mkdtempSync(join(tmpdir(), "octant-chat-lifecycle-"));
@@ -287,7 +289,7 @@ function createFixture(behaviors?: {
     readiness: behaviors?.providerBReadiness ?? "ready",
     capabilities: {
       ...probe(ids.providerB, "model-b").capabilities,
-      nativeAttachments: "unsupported",
+      nativeAttachments: behaviors?.providerBAttachments === true ? "supported" : "unsupported",
     },
   });
   const providerB = makeDriver({
@@ -320,9 +322,11 @@ function createFixture(behaviors?: {
           ownerCurrent: (owner) =>
             persistence.readChatThread(decodeChatThreadId(owner.threadId))?.lifecycle === "active",
           sourceCurrent: (reference) =>
+            behaviors?.originalInputsCurrent?.() !== false &&
             persistence.readChatThread(decodeChatThreadId(reference.source.threadId))?.lifecycle ===
-            "active",
-          supports: (target) => target.providerInstanceId === ids.providerA,
+              "active",
+          supports: (target) =>
+            target.providerInstanceId === ids.providerA || behaviors?.providerBAttachments === true,
           read: (reference) =>
             new ChatAttachmentStore(dataDirectory).read({
               chatThreadId: decodeChatThreadId(reference.source.threadId),
@@ -455,6 +459,91 @@ describe("Chat lifecycle integration", () => {
     );
     fixture.close();
   });
+
+  it.each([
+    { policy: "preserve", revoke: false },
+    { policy: "text-only", revoke: false },
+    { policy: "preserve", revoke: true },
+  ] as const)(
+    "revalidates the admitted $policy originals on a host-rebuilt retry (revoked: $revoke)",
+    async ({ policy, revoke }) => {
+      let originalsCurrent = true;
+      const fixture = createFixture({
+        providerA: ["complete"],
+        providerB: ["checkpoint-disconnect", "complete"],
+        providerBAttachments: true,
+        originalInputsCurrent: () => originalsCurrent,
+      });
+      const created = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Retry admitted originals",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+      const attachment = await fixture.service.uploadAttachment({
+        threadId: created.thread.id,
+        attachmentId: decodeChatAttachmentId(ids.attachment),
+        displayName: "original.txt",
+        mediaType: "text/plain",
+        bytes: new TextEncoder().encode("original bytes"),
+      });
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: fixture.service.read(created.thread.id).thread.version,
+        prompt: "Read the original.",
+        attachmentIds: [attachment.id],
+      });
+      await fixture.service.execute({
+        kind: "change-chat-provider",
+        threadId: created.thread.id,
+        expectedVersion: fixture.service.read(created.thread.id).thread.version,
+        providerInstanceId: ids.providerB,
+        modelId: "model-b",
+      });
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: fixture.service.read(created.thread.id).thread.version,
+        prompt: "Continue with those originals.",
+        contextInputPolicy: policy,
+      });
+      const failed = fixture.service.read(created.thread.id).turns.at(-1);
+      const attempt = failed?.attempts.at(-1);
+      if (failed === undefined || attempt === undefined)
+        throw new Error("Expected a failed handoff.");
+      expect(attempt.outcome).toBe("interrupted");
+      expect(attempt.inputReceipt).toMatchObject({
+        purpose: "provider-switch",
+        policy,
+        included: policy === "preserve" ? 1 : 0,
+        omitted: policy === "text-only" ? 1 : 0,
+      });
+      const admittedAttachments = fixture.sentTurns.at(-1)?.attachmentIds;
+      await fixture.restart();
+      originalsCurrent = !revoke;
+      const retry = fixture.service.execute({
+        kind: "retry-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: fixture.service.read(created.thread.id).thread.version,
+        turnId: failed.id,
+        attemptId: attempt.id,
+      });
+      if (revoke) {
+        await expect(retry).rejects.toMatchObject({ failure: { category: "unavailable" } });
+        expect(fixture.sentTurns).toHaveLength(2);
+        expect(fixture.service.read(created.thread.id).turns.at(-1)?.attempts).toHaveLength(1);
+        fixture.close();
+        return;
+      }
+      await retry;
+      const retried = fixture.service.read(created.thread.id).turns.at(-1)?.attempts.at(-1);
+      expect(retried?.outcome).toBe("completed");
+      expect(retried?.inputReceipt).toEqual(attempt.inputReceipt);
+      expect(fixture.sentTurns.at(-1)?.attachmentIds).toEqual(admittedAttachments);
+      fixture.close();
+    },
+  );
 
   it("validates interrupt ownership before aborting another thread's attempt", async () => {
     const fixture = createFixture({ providerA: ["pending"] });
