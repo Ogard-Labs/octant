@@ -1256,6 +1256,15 @@ function ActiveSectionContent({
         />
       ) : null;
     case "remote-access": {
+      if (props.hostBridge?.managedInOctant === true)
+        return (
+          <section aria-label="Remote access" id="settings-remote-access">
+            <p className="settings-managed-in-octant">
+              Managed in Octant. Remote access, paired computers and hubs are set up in the Octant
+              app.
+            </p>
+          </section>
+        );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
       return administration !== undefined ? (
         <RemoteAccessSettingsSection
@@ -1978,7 +1987,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             onAutomaticChecksChange={(enabled) =>
               props.onSettingsChange({ automaticUpdateChecks: enabled })
             }
-            onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
+            updateChannel={props.settings.updateChannel}
+            onUpdateChannelChange={(updateChannel, releaseRing) =>
+              props.onSettingsChange({ updateChannel, releaseRing })
+            }
           />
         </div>
       </SettingsSection>

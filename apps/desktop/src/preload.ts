@@ -393,20 +393,26 @@ export interface OctantHostBridge {
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
+   * Set only in an Octant Nightly client window, whose bridge omits the
+   * Octant-only administration below (remote access, pairing, hubs, owner
+   * unlock, host identity), so Settings says it is managed in Octant.
+   */
+  readonly managedInOctant?: true;
+  /**
    * Pairs with another computer from its pasted app pairing code. Main reads
    * the code, checks the computer's key against its pin, records the pin, and
    * hands back the ticket for this window to claim with its own device key.
    */
-  readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
-  readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
-  readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  readonly pairWithPairingCode?: (code: string) => Promise<PairedComputerOutcome>;
+  readonly listPairedComputers?: () => Promise<ReadonlyArray<PairedComputer>>;
+  readonly forgetPairedComputer?: (origin: string) => Promise<ForgetPairedComputerOutcome>;
   /**
    * Ends the pairing main has open for an origin: `approved` once the other
    * computer approved this window's device, which records the pin; `abandoned`
    * when the person leaves first, which drops only what that pairing staged and
    * never a computer already paired.
    */
-  readonly settlePairedComputer: (
+  readonly settlePairedComputer?: (
     origin: string,
     outcome: "approved" | "abandoned",
   ) => Promise<SettlePairedComputerOutcome>;
@@ -416,14 +422,16 @@ export interface OctantHostBridge {
    * refuses an unlisted origin, a method or path off the short list, and any
    * header a signed request does not carry, and strips cookies from the reply.
    */
-  readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
+  readonly requestPairedComputer?: (
+    request: PairedComputerRequest,
+  ) => Promise<PairedComputerAnswer>;
   /**
    * Shows a server of another paired computer, which that computer granted,
    * in Octant's browser or the default browser. The main process checks the
    * request; the answer is opened, or refused with words for the row.
    */
-  readonly openRemoteServerPage: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
-  readonly forgetRemoteServerPages: (
+  readonly openRemoteServerPage?: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
+  readonly forgetRemoteServerPages?: (
     hostId: string,
   ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
   /**
@@ -431,37 +439,37 @@ export interface OctantHostBridge {
    * it to sign each of their requests, and it answers with Octant's headers
    * or a refusal.
    */
-  readonly subscribeRemoteServerPageSigning: (
+  readonly subscribeRemoteServerPageSigning?: (
     signer: (request: unknown) => Promise<unknown>,
   ) => () => void;
-  readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
-  readonly enablePrivateListener: (
+  readonly getPrivateListenerStatus?: () => Promise<PrivateListenerPublicStatus>;
+  readonly enablePrivateListener?: (
     request: PrivateListenerEnableRequest,
   ) => Promise<PrivateListenerPublicStatus>;
-  readonly restartPrivateListener: (
+  readonly restartPrivateListener?: (
     request: PrivateListenerEnableRequest,
   ) => Promise<PrivateListenerPublicStatus>;
-  readonly disablePrivateListener: () => Promise<PrivateListenerPublicStatus>;
-  readonly mintRemotePairingTicket: (
+  readonly disablePrivateListener?: () => Promise<PrivateListenerPublicStatus>;
+  readonly mintRemotePairingTicket?: (
     sourceClass: RemotePairingTicketSourceClass,
   ) => Promise<RemoteMintedPairingTicket>;
-  readonly listRemotePairingRequests: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
-  readonly approveRemotePairingRequest: (ticketId: string) => Promise<RemotePairingApprovalResult>;
-  readonly denyRemotePairingRequest: (
+  readonly listRemotePairingRequests?: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
+  readonly approveRemotePairingRequest?: (ticketId: string) => Promise<RemotePairingApprovalResult>;
+  readonly denyRemotePairingRequest?: (
     ticketId: string,
     reasonCode: string,
   ) => Promise<RemotePairingDenialResult>;
-  readonly getRemoteDeviceInventory: () => Promise<ReadonlyArray<RemoteDeviceInventoryEntry>>;
-  readonly renameRemoteDevice: (
+  readonly getRemoteDeviceInventory?: () => Promise<ReadonlyArray<RemoteDeviceInventoryEntry>>;
+  readonly renameRemoteDevice?: (
     deviceId: string,
     deviceLabel: string,
   ) => Promise<RemoteDeviceInventoryEntry>;
-  readonly revokeRemoteDevice: (deviceId: string) => Promise<RemoteCredentialOperationReceipt>;
-  readonly revokeAllRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
-  readonly reconcileExpiredRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
-  readonly getRemoteHostIdentityRecovery: () => Promise<RemoteHostIdentityRecoveryState>;
-  readonly rotateRemoteHostIdentity: () => Promise<RemoteHostIdentityRotationResult>;
-  readonly recoverRemoteHostIdentity: () => Promise<RemoteHostIdentityRecoveryState>;
+  readonly revokeRemoteDevice?: (deviceId: string) => Promise<RemoteCredentialOperationReceipt>;
+  readonly revokeAllRemoteDevices?: () => Promise<RemoteCredentialOperationReceipt>;
+  readonly reconcileExpiredRemoteDevices?: () => Promise<RemoteCredentialOperationReceipt>;
+  readonly getRemoteHostIdentityRecovery?: () => Promise<RemoteHostIdentityRecoveryState>;
+  readonly rotateRemoteHostIdentity?: () => Promise<RemoteHostIdentityRotationResult>;
+  readonly recoverRemoteHostIdentity?: () => Promise<RemoteHostIdentityRecoveryState>;
 }
 
 export function createHostBridge(
@@ -472,6 +480,7 @@ export function createHostBridge(
   windowId?: string,
   localUpdatePreferences = false,
   applicationIdentity?: OctantHostBridge["applicationIdentity"],
+  nightlyClient = false,
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
@@ -806,7 +815,7 @@ export function createHostBridge(
     ...(localUpdatePreferences ? { appUpdatePreferenceScope: "local" as const } : {}),
     // Nightly never offers to install, open or remove itself, so its bridge
     // carries none of the row's requests.
-    ...(localUpdatePreferences || applicationIdentity !== undefined
+    ...(localUpdatePreferences || nightlyClient || applicationIdentity !== undefined
       ? {}
       : {
           readNightlyInstall: async () =>
@@ -1069,205 +1078,275 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.startNewAgent, receive);
       return () => ipc.removeListener(IPC_CHANNELS.startNewAgent, receive);
     },
-    openRemoteServerPage: async (request: unknown): Promise<RemoteServerPageBridgeOutcome> => {
-      try {
-        return decodeRemoteServerPageOutcome(
-          await ipc.invoke(IPC_CHANNELS.remoteServerPageOpen, request),
-        );
-      } catch {
-        return { kind: "refused", message: "Octant could not open this server." };
-      }
-    },
-    forgetRemoteServerPages: async (hostId: string) => {
-      const outcome = (await ipc
-        .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
-        .catch(() => null)) as {
-        readonly status?: unknown;
-        readonly message?: unknown;
-      } | null;
-      return outcome?.status === "forgotten"
-        ? { status: "forgotten" as const }
-        : {
-            status: "incomplete" as const,
-            ...(typeof outcome?.message === "string" ? { message: outcome.message } : {}),
-          };
-    },
-    subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
-      const receive: DeepLinkListener = (_event, message) => {
-        if (typeof message !== "object" || message === null) return;
-        const { requestId, request } = message as {
-          readonly requestId?: unknown;
-          readonly request?: unknown;
-        };
-        if (typeof requestId !== "string") return;
-        void signer(request)
-          .catch(() => ({ status: "refused" }))
-          .then((signing) =>
-            ipc.invoke(IPC_CHANNELS.remoteServerPageSigned, { requestId, signing }),
-          )
-          .catch(() => undefined);
-      };
-      ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
-      return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
-    },
-    hubAdministrationRequest: async (operation: string, body?: unknown) => {
-      // Main refuses an unknown operation; the preload stays free of the
-      // operation table because its body decoders pull in npm modules a
-      // sandboxed preload cannot require.
-      if (typeof operation !== "string") {
-        throw new TypeError("Invalid hub request.");
-      }
-      const answer = (await ipc.invoke(IPC_CHANNELS.hubAdministrationRequest, operation, body)) as {
-        readonly status?: unknown;
-        readonly body?: unknown;
-      } | null;
-      if (typeof answer?.status !== "number") {
-        throw new Error("Octant hub controls are unavailable.");
-      }
-      return { status: answer.status, body: answer.body };
-    },
-    // A Mac owner device's unlock key. The bridge can make the key (its public
-    // half comes back), sign one owner unlock challenge, and forget the key.
-    // It cannot return the private key or sign any other text.
-    ownerUnlockMakeKey: async () =>
-      decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockMake)),
-    ownerUnlockSign: async (challenge: OwnerUnlockChallenge) =>
-      decodeOwnerUnlockOutcome(
-        await ipc.invoke(IPC_CHANNELS.ownerUnlockSign, {
-          challengeId: challenge.challengeId,
-          nonce: challenge.nonce,
-          hostMemberId: challenge.hostMemberId,
-          ownerMemberId: challenge.ownerMemberId,
-          method: challenge.method,
-          path: challenge.path,
-          bodyHash: challenge.bodyHash,
-          expiresAt: challenge.expiresAt,
+    // A Nightly client never carries Octant-only administration: the members
+    // are absent rather than refusing, so the screens that need them hide.
+    ...(nightlyClient
+      ? { managedInOctant: true as const }
+      : {
+          openRemoteServerPage: async (
+            request: unknown,
+          ): Promise<RemoteServerPageBridgeOutcome> => {
+            try {
+              return decodeRemoteServerPageOutcome(
+                await ipc.invoke(IPC_CHANNELS.remoteServerPageOpen, request),
+              );
+            } catch {
+              return { kind: "refused", message: "Octant could not open this server." };
+            }
+          },
+          forgetRemoteServerPages: async (hostId: string) => {
+            const outcome = (await ipc
+              .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
+              .catch(() => null)) as {
+              readonly status?: unknown;
+              readonly message?: unknown;
+            } | null;
+            return outcome?.status === "forgotten"
+              ? { status: "forgotten" as const }
+              : {
+                  status: "incomplete" as const,
+                  ...(typeof outcome?.message === "string" ? { message: outcome.message } : {}),
+                };
+          },
+          subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
+            const receive: DeepLinkListener = (_event, message) => {
+              if (typeof message !== "object" || message === null) return;
+              const { requestId, request } = message as {
+                readonly requestId?: unknown;
+                readonly request?: unknown;
+              };
+              if (typeof requestId !== "string") return;
+              void signer(request)
+                .catch(() => ({ status: "refused" }))
+                .then((signing) =>
+                  ipc.invoke(IPC_CHANNELS.remoteServerPageSigned, { requestId, signing }),
+                )
+                .catch(() => undefined);
+            };
+            ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
+            return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
+          },
+          hubAdministrationRequest: async (operation: string, body?: unknown) => {
+            // Main refuses an unknown operation; the preload stays free of the
+            // operation table because its body decoders pull in npm modules a
+            // sandboxed preload cannot require.
+            if (typeof operation !== "string") {
+              throw new TypeError("Invalid hub request.");
+            }
+            const answer = (await ipc.invoke(
+              IPC_CHANNELS.hubAdministrationRequest,
+              operation,
+              body,
+            )) as {
+              readonly status?: unknown;
+              readonly body?: unknown;
+            } | null;
+            if (typeof answer?.status !== "number") {
+              throw new Error("Octant hub controls are unavailable.");
+            }
+            return { status: answer.status, body: answer.body };
+          },
+          // A Mac owner device's unlock key. The bridge can make the key (its public
+          // half comes back), sign one owner unlock challenge, and forget the key.
+          // It cannot return the private key or sign any other text.
+          ownerUnlockMakeKey: async () =>
+            decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockMake)),
+          ownerUnlockSign: async (challenge: OwnerUnlockChallenge) =>
+            decodeOwnerUnlockOutcome(
+              await ipc.invoke(IPC_CHANNELS.ownerUnlockSign, {
+                challengeId: challenge.challengeId,
+                nonce: challenge.nonce,
+                hostMemberId: challenge.hostMemberId,
+                ownerMemberId: challenge.ownerMemberId,
+                method: challenge.method,
+                path: challenge.path,
+                bodyHash: challenge.bodyHash,
+                expiresAt: challenge.expiresAt,
+              }),
+            ),
+          ownerUnlockForgetKey: async () =>
+            decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockForget)),
+          getPrivateListenerStatus: async () =>
+            decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
+          enablePrivateListener: async (request: PrivateListenerEnableRequest) => {
+            validatePrivateListenerEnableRequest(request);
+            try {
+              return decodePrivateListenerStatus(
+                await ipc.invoke(IPC_CHANNELS.privateListenerEnable, {
+                  hostname: request.hostname,
+                  port: request.port,
+                  origin: request.origin,
+                  certificatePem: request.certificatePem,
+                  privateKeyPem: request.privateKeyPem,
+                  localConfirmation: true,
+                }),
+              );
+            } catch {
+              throw new Error("Octant could not enable the private listener.");
+            }
+          },
+          restartPrivateListener: async (request: PrivateListenerEnableRequest) => {
+            validatePrivateListenerEnableRequest(request);
+            try {
+              return decodePrivateListenerStatus(
+                await ipc.invoke(IPC_CHANNELS.privateListenerRestart, {
+                  hostname: request.hostname,
+                  port: request.port,
+                  origin: request.origin,
+                  certificatePem: request.certificatePem,
+                  privateKeyPem: request.privateKeyPem,
+                  localConfirmation: true,
+                }),
+              );
+            } catch {
+              throw new Error("Octant could not restart the private listener.");
+            }
+          },
+          disablePrivateListener: async () => {
+            try {
+              return decodePrivateListenerStatus(
+                await ipc.invoke(IPC_CHANNELS.privateListenerDisable),
+              );
+            } catch {
+              throw new Error("Octant could not disable the private listener.");
+            }
+          },
+          mintRemotePairingTicket: async (sourceClass: RemotePairingTicketSourceClass) => {
+            if (
+              sourceClass !== "loopback" &&
+              sourceClass !== "lan-private" &&
+              sourceClass !== "tailscale"
+            ) {
+              throw new TypeError("Invalid pairing source class.");
+            }
+            return decodeRemoteMintedTicket(
+              await invokeRemote(IPC_CHANNELS.remotePairingTicket, sourceClass),
+            );
+          },
+          listRemotePairingRequests: async () =>
+            decodeRemotePendingList(await invokeRemote(IPC_CHANNELS.remotePairingRequests)),
+          approveRemotePairingRequest: async (ticketId: string) => {
+            validateRemoteUuid(ticketId);
+            return decodeRemotePairingApproval(
+              await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId),
+            );
+          },
+          denyRemotePairingRequest: async (ticketId: string, reasonCode: string) => {
+            validateRemoteUuid(ticketId);
+            validateRemoteReason(reasonCode);
+            return decodeRemotePairingDenial(
+              await invokeRemote(IPC_CHANNELS.remotePairingDeny, ticketId, reasonCode),
+            );
+          },
+          getRemoteDeviceInventory: async () =>
+            decodeRemoteDeviceList(await invokeRemote(IPC_CHANNELS.remoteDeviceInventory)),
+          renameRemoteDevice: async (deviceId: string, deviceLabel: string) => {
+            validateRemoteUuid(deviceId);
+            validateRemoteDeviceLabel(deviceLabel);
+            return decodeRemoteDevice(
+              await invokeRemote(IPC_CHANNELS.remoteDeviceRename, deviceId, deviceLabel.trim()),
+            );
+          },
+          revokeRemoteDevice: async (deviceId: string) => {
+            validateRemoteUuid(deviceId);
+            return decodeRemoteReceipt(
+              await invokeRemote(IPC_CHANNELS.remoteDeviceRevoke, deviceId),
+            );
+          },
+          revokeAllRemoteDevices: async () =>
+            decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceRevokeAll)),
+          reconcileExpiredRemoteDevices: async () =>
+            decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceReconcileExpired)),
+          getRemoteHostIdentityRecovery: async () =>
+            decodeRemoteHostIdentityRecovery(
+              await invokeRemote(IPC_CHANNELS.remoteHostIdentityStatus),
+            ),
+          rotateRemoteHostIdentity: async () =>
+            decodeRemoteHostIdentityRotation(
+              await invokeRemote(IPC_CHANNELS.remoteHostIdentityRotate),
+            ),
+          recoverRemoteHostIdentity: async () =>
+            decodeRemoteHostIdentityRecovery(
+              await invokeRemote(IPC_CHANNELS.remoteHostIdentityRecover),
+            ),
+          pairWithPairingCode: async (code: string): Promise<PairedComputerOutcome> => {
+            if (typeof code !== "string" || code.length > 4_096) {
+              return {
+                status: "refused",
+                message: "Paste the whole pairing code from that computer.",
+              };
+            }
+            return decodePairedComputerOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerPair, code),
+            );
+          },
+          listPairedComputers: async () =>
+            decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
+          forgetPairedComputer: async (origin: string) =>
+            decodeForgetPairedComputerOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
+            ),
+          settlePairedComputer: async (
+            origin: string,
+            outcome: "approved" | "abandoned",
+          ): Promise<SettlePairedComputerOutcome> => {
+            if (typeof origin !== "string" || (outcome !== "approved" && outcome !== "abandoned")) {
+              return { status: "refused", message: "Octant refused that pairing answer." };
+            }
+            return decodeSettlePairedComputerOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerSettle, origin, outcome),
+            );
+          },
+          requestPairedComputer: async (request: PairedComputerRequest) =>
+            decodePairedComputerAnswer(
+              await ipc.invoke(
+                IPC_CHANNELS.pairedComputerRequest,
+                pairedComputerRequestOf(request),
+              ),
+            ),
         }),
-      ),
-    ownerUnlockForgetKey: async () =>
-      decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockForget)),
-    getPrivateListenerStatus: async () =>
-      decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
-    enablePrivateListener: async (request: PrivateListenerEnableRequest) => {
-      validatePrivateListenerEnableRequest(request);
-      try {
-        return decodePrivateListenerStatus(
-          await ipc.invoke(IPC_CHANNELS.privateListenerEnable, {
-            hostname: request.hostname,
-            port: request.port,
-            origin: request.origin,
-            certificatePem: request.certificatePem,
-            privateKeyPem: request.privateKeyPem,
-            localConfirmation: true,
-          }),
-        );
-      } catch {
-        throw new Error("Octant could not enable the private listener.");
-      }
-    },
-    restartPrivateListener: async (request: PrivateListenerEnableRequest) => {
-      validatePrivateListenerEnableRequest(request);
-      try {
-        return decodePrivateListenerStatus(
-          await ipc.invoke(IPC_CHANNELS.privateListenerRestart, {
-            hostname: request.hostname,
-            port: request.port,
-            origin: request.origin,
-            certificatePem: request.certificatePem,
-            privateKeyPem: request.privateKeyPem,
-            localConfirmation: true,
-          }),
-        );
-      } catch {
-        throw new Error("Octant could not restart the private listener.");
-      }
-    },
-    disablePrivateListener: async () => {
-      try {
-        return decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerDisable));
-      } catch {
-        throw new Error("Octant could not disable the private listener.");
-      }
-    },
-    mintRemotePairingTicket: async (sourceClass: RemotePairingTicketSourceClass) => {
-      if (
-        sourceClass !== "loopback" &&
-        sourceClass !== "lan-private" &&
-        sourceClass !== "tailscale"
-      ) {
-        throw new TypeError("Invalid pairing source class.");
-      }
-      return decodeRemoteMintedTicket(
-        await invokeRemote(IPC_CHANNELS.remotePairingTicket, sourceClass),
-      );
-    },
-    listRemotePairingRequests: async () =>
-      decodeRemotePendingList(await invokeRemote(IPC_CHANNELS.remotePairingRequests)),
-    approveRemotePairingRequest: async (ticketId: string) => {
-      validateRemoteUuid(ticketId);
-      return decodeRemotePairingApproval(
-        await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId),
-      );
-    },
-    denyRemotePairingRequest: async (ticketId: string, reasonCode: string) => {
-      validateRemoteUuid(ticketId);
-      validateRemoteReason(reasonCode);
-      return decodeRemotePairingDenial(
-        await invokeRemote(IPC_CHANNELS.remotePairingDeny, ticketId, reasonCode),
-      );
-    },
-    getRemoteDeviceInventory: async () =>
-      decodeRemoteDeviceList(await invokeRemote(IPC_CHANNELS.remoteDeviceInventory)),
-    renameRemoteDevice: async (deviceId: string, deviceLabel: string) => {
-      validateRemoteUuid(deviceId);
-      validateRemoteDeviceLabel(deviceLabel);
-      return decodeRemoteDevice(
-        await invokeRemote(IPC_CHANNELS.remoteDeviceRename, deviceId, deviceLabel.trim()),
-      );
-    },
-    revokeRemoteDevice: async (deviceId: string) => {
-      validateRemoteUuid(deviceId);
-      return decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceRevoke, deviceId));
-    },
-    revokeAllRemoteDevices: async () =>
-      decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceRevokeAll)),
-    reconcileExpiredRemoteDevices: async () =>
-      decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceReconcileExpired)),
-    getRemoteHostIdentityRecovery: async () =>
-      decodeRemoteHostIdentityRecovery(await invokeRemote(IPC_CHANNELS.remoteHostIdentityStatus)),
-    rotateRemoteHostIdentity: async () =>
-      decodeRemoteHostIdentityRotation(await invokeRemote(IPC_CHANNELS.remoteHostIdentityRotate)),
-    recoverRemoteHostIdentity: async () =>
-      decodeRemoteHostIdentityRecovery(await invokeRemote(IPC_CHANNELS.remoteHostIdentityRecover)),
-    pairWithPairingCode: async (code: string): Promise<PairedComputerOutcome> => {
-      if (typeof code !== "string" || code.length > 4_096) {
-        return { status: "refused", message: "Paste the whole pairing code from that computer." };
-      }
-      return decodePairedComputerOutcome(await ipc.invoke(IPC_CHANNELS.pairedComputerPair, code));
-    },
-    listPairedComputers: async () =>
-      decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
-    forgetPairedComputer: async (origin: string) =>
-      decodeForgetPairedComputerOutcome(
-        await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
-      ),
-    settlePairedComputer: async (
-      origin: string,
-      outcome: "approved" | "abandoned",
-    ): Promise<SettlePairedComputerOutcome> => {
-      if (typeof origin !== "string" || (outcome !== "approved" && outcome !== "abandoned")) {
-        return { status: "refused", message: "Octant refused that pairing answer." };
-      }
-      return decodeSettlePairedComputerOutcome(
-        await ipc.invoke(IPC_CHANNELS.pairedComputerSettle, origin, outcome),
-      );
-    },
-    requestPairedComputer: async (request: PairedComputerRequest) =>
-      decodePairedComputerAnswer(
-        await ipc.invoke(IPC_CHANNELS.pairedComputerRequest, pairedComputerRequestOf(request)),
-      ),
   });
 }
+
+/**
+ * The bridge members that reach an Octant-only channel, all absent from a
+ * Nightly client bridge. The preload test checks that the remaining members
+ * reach no Octant-only channel.
+ */
+export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
+  "readNightlyInstall",
+  "installNightly",
+  "openNightly",
+  "removeNightly",
+  "pairWithPairingCode",
+  "listPairedComputers",
+  "forgetPairedComputer",
+  "settlePairedComputer",
+  "requestPairedComputer",
+  "openRemoteServerPage",
+  "forgetRemoteServerPages",
+  "subscribeRemoteServerPageSigning",
+  "hubAdministrationRequest",
+  "ownerUnlockMakeKey",
+  "ownerUnlockSign",
+  "ownerUnlockForgetKey",
+  "getPrivateListenerStatus",
+  "enablePrivateListener",
+  "restartPrivateListener",
+  "disablePrivateListener",
+  "mintRemotePairingTicket",
+  "listRemotePairingRequests",
+  "approveRemotePairingRequest",
+  "denyRemotePairingRequest",
+  "getRemoteDeviceInventory",
+  "renameRemoteDevice",
+  "revokeRemoteDevice",
+  "revokeAllRemoteDevices",
+  "reconcileExpiredRemoteDevices",
+  "getRemoteHostIdentityRecovery",
+  "rotateRemoteHostIdentity",
+  "recoverRemoteHostIdentity",
+]);
 
 function decodePairedComputer(value: unknown): PairedComputer {
   if (typeof value !== "object" || value === null) {
@@ -2681,6 +2760,7 @@ export function installHostBridge(
   windowId?: string,
   localUpdatePreferences = process.argv.includes("--octant-local-update-preferences"),
   applicationIdentity = applicationIdentityArgument(process.argv),
+  nightlyClient = process.argv.includes("--octant-nightly-client"),
 ): void {
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
@@ -2692,6 +2772,7 @@ export function installHostBridge(
       windowId,
       localUpdatePreferences,
       applicationIdentity,
+      nightlyClient,
     ),
   );
 }

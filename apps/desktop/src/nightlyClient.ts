@@ -18,6 +18,7 @@ import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import { nightlyClientChannelClass, nightlyClientRefusal } from "./nightlyClientChannels";
 import {
   createMainBrowserWindowOptions,
   createTrustedRendererRequestRegistry,
@@ -225,15 +226,20 @@ export async function runNightlyClient(
       return data.choose(value);
     });
   }
-  // The shared renderer's other native contributions are still awaiting their
-  // typed owning broker. Refusal is explicit; no arbitrary channel is proxied.
+  // Every other channel refuses by its class in the closed table: Octant-only
+  // administration says where it lives, and a feature awaiting its broker says
+  // it is not here yet. No arbitrary channel is proxied.
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {
-    if (supported.has(channel)) continue;
+    const channelClass = nightlyClientChannelClass(channel);
+    if (supported.has(channel)) {
+      if (channelClass !== "local")
+        throw new Error("Octant Nightly answers a channel its table does not mark local.");
+      continue;
+    }
+    const message = nightlyClientRefusal(channelClass);
     ipcMain.handle(channel, (event) => {
       owns(event);
-      throw new Error(
-        "Needs a newer Octant. This Nightly native feature is not available in this build.",
-      );
+      throw new Error(message);
     });
   }
   let acceptedQuit = false;
@@ -305,6 +311,7 @@ export async function runNightlyClient(
               createMainBrowserWindowOptions({
                 bounds,
                 localUpdatePreferences: true,
+                nightlyClient: true,
                 applicationFlavor: identity.flavor,
                 ...(offersTestData ? { applicationData: "octant" as const } : {}),
                 productName: identity.productName,
