@@ -222,3 +222,90 @@ describe("the agent's question card in a Work thread", () => {
     expect(screen.queryByRole("region", { name: "Provider question" })).toBeNull();
   });
 });
+
+it.each(["work", "code"] as const)(
+  "keeps a submitted questionnaire readable in a reopened %s thread",
+  async (mode) => {
+    const user = userEvent.setup();
+    const questionnaire = {
+      questions: [
+        {
+          id: "formats",
+          prompt: "Which formats?",
+          selection: "multiple",
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "md", label: "Markdown" },
+          ],
+        },
+      ],
+    };
+    const client = clientFor(async () =>
+      view({
+        mode,
+        questions: [
+          {
+            ...question,
+            status: "answered",
+            questionnaire,
+            answer: JSON.stringify({
+              version: 1,
+              answers: [{ questionId: "formats", selectedOptionIds: ["pdf", "md"] }],
+              comment: "Keep originals",
+            }),
+            settledAt: "2026-11-06T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
+    await user.click(await screen.findByText(`Answers sent · ${question.prompt}`));
+    expect(screen.getByText("PDF, Markdown")).toBeVisible();
+    expect(screen.getByText("Keep originals")).toBeVisible();
+    expect(client.answerQuestion).not.toHaveBeenCalled();
+  },
+);
+
+it("withdraws a Code questionnaire when another window submits it", async () => {
+  const user = userEvent.setup();
+  const questionnaire = {
+    questions: [
+      {
+        id: "formats",
+        prompt: "Which formats?",
+        selection: "multiple",
+        options: [{ id: "pdf", label: "PDF" }],
+      },
+    ],
+  };
+  let answered = false;
+  const client = clientFor(async () =>
+    view({
+      mode: "code",
+      questions: [
+        {
+          ...question,
+          questionnaire,
+          ...(answered
+            ? {
+                status: "answered",
+                answer: JSON.stringify({
+                  version: 1,
+                  answers: [{ questionId: "formats", selectedOptionIds: ["pdf"] }],
+                }),
+                settledAt: "2026-11-06T10:00:00.000Z",
+              }
+            : {}),
+        },
+      ],
+    }),
+  );
+  render(
+    <ThreadHarnessCards client={client as never} threadId={threadId} refreshIntervalMs={20} />,
+  );
+  await screen.findByRole("form", { name: "Questionnaire" });
+  answered = true;
+  await user.click(await screen.findByText(`Answers sent · ${question.prompt}`));
+  expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument();
+  expect(client.answerQuestion).not.toHaveBeenCalled();
+});

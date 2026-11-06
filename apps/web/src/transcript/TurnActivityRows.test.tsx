@@ -8,6 +8,9 @@ import {
 } from "./TurnActivityRows";
 import type { TurnActivity } from "./turnActivity";
 import { MarkdownLinkActionsContext } from "../markdown/Markdown";
+import type { ReplyDetailLevel } from "@octant/contracts/shell";
+import type { ReactNode } from "react";
+import { ReplyDetailContext } from "./replyDetail";
 
 const mixed: TurnActivity = {
   reasoning: "Check the failing suite first.",
@@ -581,5 +584,122 @@ describe("a tool row that read outside content", () => {
     ).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "true");
     expect(tag).toHaveAttribute("data-found", "false");
+  });
+});
+
+describe("the Reply detail level", () => {
+  const settledTurn: TurnActivity = {
+    reasoning: "**Check** the failing suite first.\nThen read the log.",
+    rows: [
+      { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "exit 0" },
+      {
+        kind: "tool",
+        id: "call-2",
+        toolName: "Write",
+        state: "completed",
+        summary: "Updated pane",
+      },
+    ],
+  };
+  const fold = "2 tool calls · 1 file edited";
+
+  function atLevel(level: ReplyDetailLevel, node: ReactNode) {
+    return <ReplyDetailContext.Provider value={level}>{node}</ReplyDetailContext.Provider>;
+  }
+
+  it("at medium, keeps thinking folded with its first line showing and a settled turn's tool calls listed", () => {
+    render(atLevel("medium", <TurnActivityRows activity={settledTurn} running={false} settled />));
+
+    const thinking = screen.getByRole("button", { name: "Thinking" });
+    expect(disclosure("Thinking").open).toBe(false);
+    expect(thinking).toHaveAttribute("aria-expanded", "false");
+    // The first line, without its emphasis marks, beside the name; hidden from
+    // assistive technology so it is not read again when the body opens.
+    const preview = within(thinking).getByText("Check the failing suite first.");
+    expect(preview).toBeVisible();
+    expect(preview).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText("Then read the log.", { exact: false })).not.toBeVisible();
+
+    expect(disclosure(fold).open).toBe(true);
+    expect(screen.getByRole("button", { name: fold })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
+    expect(disclosure("Bash, done").open).toBe(false);
+    expect(screen.getByText("exit 0")).not.toBeVisible();
+  });
+
+  it("at high, opens thinking, the settled tool calls, and each call's recorded result", () => {
+    render(atLevel("high", <TurnActivityRows activity={settledTurn} running={false} settled />));
+
+    expect(disclosure("Thinking").open).toBe(true);
+    expect(screen.getByRole("button", { name: "Thinking" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("Then read the log.", { exact: false })).toBeVisible();
+    expect(disclosure(fold).open).toBe(true);
+    expect(disclosure("Bash, done").open).toBe(true);
+    expect(screen.getByRole("button", { name: "Bash, done" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("exit 0")).toBeVisible();
+    expect(screen.getByText("Updated pane")).toBeVisible();
+  });
+
+  it("at low, folds a settled turn and keeps thinking shut with no preview", () => {
+    render(atLevel("low", <TurnActivityRows activity={settledTurn} running={false} settled />));
+
+    expect(disclosure("Thinking").open).toBe(false);
+    expect(
+      within(screen.getByRole("button", { name: "Thinking" })).queryByText(
+        "Check the failing suite first.",
+      ),
+    ).toBeNull();
+    expect(disclosure(fold).open).toBe(false);
+    expect(screen.getByText("exit 0")).not.toBeVisible();
+  });
+
+  it("keeps a row the person closed by hand until the level changes", async () => {
+    const user = userEvent.setup();
+    const turn = (summary: string): TurnActivity => ({
+      reasoning: "",
+      rows: [{ kind: "tool", id: "call-1", toolName: "Bash", state: "running", summary }],
+    });
+    const view = render(atLevel("high", <TurnActivityRows activity={turn("bun test")} running />));
+    expect(disclosure("Bash, running").open).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Bash, running" }));
+    expect(disclosure("Bash, running").open).toBe(false);
+
+    view.rerender(
+      atLevel("high", <TurnActivityRows activity={turn("bun test --watch")} running />),
+    );
+    expect(disclosure("Bash, running").open).toBe(false);
+    expect(screen.getByRole("button", { name: "Bash, running" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    view.rerender(
+      atLevel("medium", <TurnActivityRows activity={turn("bun test --watch")} running />),
+    );
+    view.rerender(
+      atLevel("high", <TurnActivityRows activity={turn("bun test --watch")} running />),
+    );
+    expect(disclosure("Bash, running").open).toBe(true);
+  });
+
+  it("keeps a settled fold the person closed by hand at medium", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      atLevel("medium", <TurnActivityRows activity={settledTurn} running={false} settled />),
+    );
+
+    await user.click(screen.getByRole("button", { name: fold }));
+    expect(disclosure(fold).open).toBe(false);
+    view.rerender(
+      atLevel("medium", <TurnActivityRows activity={settledTurn} running={false} settled />),
+    );
+    expect(disclosure(fold).open).toBe(false);
   });
 });

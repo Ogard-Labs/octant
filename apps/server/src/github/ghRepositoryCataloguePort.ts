@@ -75,6 +75,19 @@ export interface GhIssueDetailObservation {
   readonly body: string;
   readonly bodyTruncated: boolean;
   readonly comments: readonly GhIssueCommentObservation[];
+  /** Older comments beyond the newest {@link MAX_ISSUE_COMMENTS}. */
+  readonly commentsOmitted: number;
+  readonly pullRequest?: true;
+}
+
+export interface GhSearchObservationRow {
+  readonly kind: "issue" | "pull-request";
+  readonly number: number;
+  readonly title: string;
+  readonly state: "open" | "draft" | "merged" | "closed";
+  readonly author: string;
+  readonly updatedAt: string;
+  readonly url: string;
 }
 
 export interface GhPullRequestObservationRow {
@@ -232,6 +245,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
         state: request.state,
         search,
         unassigned: request.assignee === "none",
+        scope: "issue-titles",
       });
       if (query === undefined) return ok([], false);
       return this.#paginateRest({
@@ -269,11 +283,54 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     });
   }
 
+  /**
+   * Search one repository's issues and pull requests, titles and bodies,
+   * newest activity first. The repository and the search syntax are the
+   * server's: only `author:` and `#number` survive from the caller's terms.
+   */
+  async searchIssuesAndPullRequests(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly query: string;
+      readonly pageSize: number;
+      readonly cursor?: string | undefined;
+      readonly state: "open" | "closed" | "all";
+    },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhSearchObservationRow>>> {
+    const repository = validatedRepositoryPath(request.owner, request.name);
+    if (repository === undefined) return { kind: "unavailable" };
+    const query = composeIssueSearchQuery({
+      owner: request.owner,
+      name: request.name,
+      state: request.state,
+      search: request.query,
+      unassigned: false,
+      scope: "issues-and-pull-requests",
+    });
+    if (query === undefined) return ok([], false);
+    return this.#paginateRest({
+      kind: "search",
+      discriminator: `${repository}|${request.state}|${request.query.trim()}`,
+      pageSize: request.pageSize,
+      cursor: request.cursor,
+      pathFor: (page) =>
+        `search/issues?q=${encodeURIComponent(query)}` +
+        `&sort=updated&order=desc&per_page=${UPSTREAM_PAGE_SIZE}&page=${page}`,
+      decodeItem: decodeSearchItem,
+      matches: () => true,
+      extractItems: extractSearchIssueItems,
+      signal,
+    });
+  }
+
   async readIssue(
     request: {
       readonly owner: string;
       readonly name: string;
       readonly number: number;
+      readonly includePullRequest?: boolean | undefined;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhIssueDetailObservation>> {
@@ -287,11 +344,23 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       signal,
     );
     if (issueResult.kind !== "ok") return issueResult;
-    const issue = decodeIssueDetail(issueResult.stdout);
+    const issue = decodeIssueDetail(issueResult.stdout, request.includePullRequest === true);
     if (issue === undefined) return { kind: "unavailable" };
+    const { commentCount, ...detail } = issue;
     const comments = await this.#readIssueComments(repository, request.number, signal);
     if (comments.kind !== "ok") return comments;
-    return { kind: "ok", value: { ...issue, comments: comments.value } };
+    const kept = comments.value.slice(-MAX_ISSUE_COMMENTS);
+    return {
+      kind: "ok",
+      value: {
+        ...detail,
+        comments: kept,
+        // GitHub's own count, when it gave one, also covers comments past the
+        // pages read here.
+        commentsOmitted:
+          Math.max(commentCount ?? comments.value.length, comments.value.length) - kept.length,
+      },
+    };
   }
 
   async listPullRequests(
@@ -475,7 +544,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       }
       if (items.length < UPSTREAM_PAGE_SIZE) break;
     }
-    return { kind: "ok", value: comments.slice(-MAX_ISSUE_COMMENTS) };
+    return { kind: "ok", value: comments };
   }
 
   async #paginateRest<Row>(options: {
@@ -729,9 +798,20 @@ function decodeIssueItem(item: unknown): GhIssueObservationRow | "skip" | undefi
   return { ...shared, state: item.state };
 }
 
-function decodeIssueDetail(stdout: string): Omit<GhIssueDetailObservation, "comments"> | undefined {
+function decodeIssueDetail(
+  stdout: string,
+  includePullRequest: boolean,
+):
+  | (Omit<GhIssueDetailObservation, "comments" | "commentsOmitted"> & {
+      readonly commentCount: number | undefined;
+    })
+  | undefined {
   const item = tryParseJson(stdout);
-  if (!isRecord(item) || item.pull_request !== undefined) return undefined;
+  if (!isRecord(item)) return undefined;
+  // The Issues endpoint answers for pull requests too; a caller reads one only
+  // when it asked to, so an issue reference never resolves to a pull request.
+  const pullRequest = item.pull_request !== undefined;
+  if (pullRequest && !includePullRequest) return undefined;
   const shared = decodeSharedItemFacts(item);
   if (shared === undefined) return undefined;
   if (item.state !== "open" && item.state !== "closed") return undefined;
@@ -744,7 +824,33 @@ function decodeIssueDetail(stdout: string): Omit<GhIssueDetailObservation, "comm
     labels: decodeLabels(item.labels),
     body: body.text,
     bodyTruncated: body.truncated,
+    commentCount:
+      typeof item.comments === "number" && Number.isSafeInteger(item.comments) && item.comments >= 0
+        ? item.comments
+        : undefined,
+    ...(pullRequest ? { pullRequest: true as const } : {}),
   };
+}
+
+function decodeSearchItem(item: unknown): GhSearchObservationRow | "skip" | undefined {
+  if (!isRecord(item)) return undefined;
+  const shared = decodeSharedItemFacts(item);
+  if (shared === undefined) return undefined;
+  if (item.state !== "open" && item.state !== "closed") return undefined;
+  if (!isRecord(item.pull_request)) {
+    return { kind: "issue", ...shared, state: item.state };
+  }
+  // A search hit carries the pull request's merge time under `pull_request`,
+  // not at the top level as the pulls endpoint does.
+  const state =
+    typeof item.pull_request.merged_at === "string"
+      ? ("merged" as const)
+      : item.state === "closed"
+        ? ("closed" as const)
+        : item.draft === true
+          ? ("draft" as const)
+          : ("open" as const);
+  return { kind: "pull-request", ...shared, state };
 }
 
 function decodeIssueComment(item: unknown): GhIssueCommentObservation | undefined {
@@ -799,6 +905,11 @@ function composeIssueSearchQuery(input: {
   readonly state: "open" | "closed" | "all";
   readonly search: string;
   readonly unassigned: boolean;
+  /**
+   * The issue catalogue matches issue titles; the agent's repository search
+   * matches titles and bodies of issues and pull requests alike.
+   */
+  readonly scope: "issue-titles" | "issues-and-pull-requests";
 }): string | undefined {
   const authors: string[] = [];
   const numbers: string[] = [];
@@ -822,7 +933,8 @@ function composeIssueSearchQuery(input: {
   if (authors.length === 0 && numbers.length === 0 && titleParts.length === 0) {
     return undefined;
   }
-  const prefix = [`repo:${input.owner}/${input.name}`, "type:issue"];
+  const prefix = [`repo:${input.owner}/${input.name}`];
+  if (input.scope === "issue-titles") prefix.push("type:issue");
   if (input.state === "open") prefix.push("is:open");
   if (input.state === "closed") prefix.push("is:closed");
   // Search has its own vocabulary for the REST `assignee=none` filter, so a
@@ -832,7 +944,10 @@ function composeIssueSearchQuery(input: {
   for (const author of authors) userTerms.push(`author:${author}`);
   for (const number of numbers) userTerms.push(number);
   if (titleParts.length > 0) {
-    userTerms.push(`"${titleParts.join(" ")}"`, "in:title");
+    userTerms.push(
+      `"${titleParts.join(" ")}"`,
+      input.scope === "issue-titles" ? "in:title" : "in:title,body",
+    );
   }
   const parts = [...prefix];
   let addedUserTerm = false;

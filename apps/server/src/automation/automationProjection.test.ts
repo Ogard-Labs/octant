@@ -30,6 +30,7 @@ import {
   AUTOMATION_OCCURRENCE_CLAIMED,
   AUTOMATION_OCCURRENCE_SKIPPED,
   AUTOMATION_RUN_AGGREGATE_TYPE,
+  AUTOMATION_RUN_RESULT_REPORTED,
   AutomationEventStore,
   registerAutomationEvents,
 } from "./automationEventStore";
@@ -781,5 +782,45 @@ describe("automation projection occurrence ledger", () => {
     expect(rebuilt.getDefinition(definition.id)).toEqual(
       harness.projection.getDefinition(definition.id),
     );
+  });
+
+  it("shows the first result a run reported without changing its lifecycle, through replay", () => {
+    const harness = createHarness();
+    const definition = automationDefinitionFixture({ id: automationId("1107") as never });
+    harness.store.appendDefinitionCreated({ automation: definition });
+    const run = automationRunForDefinition(definition, { id: runId("2107") });
+    harness.store.appendRunCreated({ run });
+    const first = {
+      outcome: "needs-attention",
+      summary: "Two invoices lack a total.",
+      reportedAt: later,
+    } as const;
+    harness.store.appendRunResultReported({
+      automationId: definition.id,
+      runId: run.id,
+      result: first,
+      expectedVersion: 1,
+    });
+    // The host refuses a second report; a journal that holds one anyway
+    // still rebuilds the result the person first saw.
+    appendRunEvent(harness, run.id, 2, AUTOMATION_RUN_RESULT_REPORTED, {
+      automationId: definition.id,
+      runId: run.id,
+      result: { outcome: "succeeded", summary: "All good.", reportedAt: later },
+    });
+
+    const projected = harness.projection.getRun(run.id);
+    expect(projected?.reportedResult).toEqual(first);
+    expect(projected?.lifecycle).toBe("queued");
+    expect(projected?.version).toBe(3);
+    expect(() => decodeAutomationRun(projected)).not.toThrow();
+
+    const replay = harness.store.replayAll();
+    expect(replay.status).toBe("ok");
+    if (replay.status !== "ok") return;
+    const rebuilt = new AutomationProjection();
+    for (const envelope of replay.events) rebuilt.applyEnvelope(envelope);
+    for (const envelope of replay.events) rebuilt.applyEnvelope(envelope);
+    expect(rebuilt.getRun(run.id)).toEqual(projected);
   });
 });

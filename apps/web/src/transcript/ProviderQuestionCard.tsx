@@ -1,3 +1,5 @@
+import type { Questionnaire } from "@octant/contracts";
+import { QuestionnaireCard } from "./QuestionnaireCard";
 import { useState } from "react";
 
 import { OctantButton } from "../ui/base/OctantButton";
@@ -5,6 +7,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 export interface ProviderQuestionCardProps {
+  readonly questionnaire?: Questionnaire | undefined;
   readonly prompt: string;
   readonly options: ReadonlyArray<{
     readonly label: string;
@@ -13,7 +16,7 @@ export interface ProviderQuestionCardProps {
   /** Where this question sits in a set the provider asked at once. */
   readonly questionIndex?: number | undefined;
   readonly questionCount?: number | undefined;
-  readonly onAnswer: (response: string) => void;
+  readonly onAnswer: (response: string) => void | boolean | Promise<void | boolean>;
   /** Ends the turn without answering; offered only when the host exposes one. */
   readonly onDismiss?: (() => void) | undefined;
   /** Extra class for the surface's own layout, e.g. a thread-column wrapper. */
@@ -32,6 +35,12 @@ const CUSTOM = "octant-question-custom";
  * answers until the last one.
  */
 export function ProviderQuestionCard(props: ProviderQuestionCardProps) {
+  if (props.questionnaire !== undefined)
+    return <QuestionnaireCard {...props} questionnaire={props.questionnaire} />;
+  return <SingleQuestionCard {...props} />;
+}
+
+function SingleQuestionCard(props: ProviderQuestionCardProps) {
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [customAnswer, setCustomAnswer] = useState("");
   const custom = selected === CUSTOM;

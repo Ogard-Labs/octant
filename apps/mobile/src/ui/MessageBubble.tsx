@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import type { ChatMessagePart } from "@octant/contracts";
+import type { ChatMessagePart, ReplyDetailLevel } from "@octant/contracts";
 import { GlassSurface, radii, space, useTheme } from "../../design-system";
 import { MessageActions, type MessageActionItem } from "./MessageActions";
 import { MessageBlocks } from "./MessageBlocks";
 import { resolveChatMessageParts } from "./messageDocument";
 import { ReasoningPart } from "./ReasoningPart";
 import { ToolPartCard } from "./ToolPartCard";
+import { mobileReplyDetailPresentation } from "./replyDetailPresentation";
 
 export interface MessageBubbleProps {
   readonly role: string;
@@ -21,6 +22,8 @@ export interface MessageBubbleProps {
   readonly extraActions?: ReadonlyArray<MessageActionItem>;
   /** Fork from here and Rewind to here; shown under either role's message. */
   readonly turnActions?: ReadonlyArray<MessageActionItem>;
+  /** The thread's Reply detail level; absent draws Low. */
+  readonly replyDetail?: ReplyDetailLevel;
 }
 
 function isUserRole(role: string): boolean {
@@ -102,13 +105,25 @@ export function MessageBubble(props: MessageBubbleProps) {
     <View style={[styles.row, styles.rowAssistant]} testID={props.testID}>
       <View style={styles.assistantStack}>
         {parts.map((part, index) => {
-          const key = `${part.kind}:${index}`;
+          // The level is in the key so a change of level remounts each panel
+          // at the new level, dropping a choice made by hand at the old one.
+          const level = props.replyDetail ?? "low";
+          const key = `${part.kind}:${index}:${level}`;
           if (part.kind === "reasoning") {
-            return <ReasoningPart key={key} text={part.text} />;
+            const presentation = mobileReplyDetailPresentation(level, part.text);
+            return (
+              <ReasoningPart
+                defaultExpanded={presentation.reasoningExpanded}
+                key={key}
+                preview={presentation.reasoningPreview}
+                text={part.text}
+              />
+            );
           }
           if (part.kind === "tool") {
             return (
               <ToolPartCard
+                defaultOpen={mobileReplyDetailPresentation(level, "").toolDetailOpen}
                 key={key}
                 name={part.name}
                 status={part.status}

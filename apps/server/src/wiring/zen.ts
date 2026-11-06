@@ -14,6 +14,7 @@ import { defaultShellSettings } from "@octant/domain";
 import { ZenThreadCatalog } from "../zen/zenThreadCatalog";
 import { localHostDisplayName } from "../localHostDisplayName";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
+import { zenLayoutOf } from "../zen/zenLayoutReadPort";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -185,7 +186,10 @@ export function wireZen(deps: ZenDependencies) {
       };
     },
   });
-  const zenAssistantTools = new ZenAssistantTools({ zenService });
+  const zenAssistantTools = new ZenAssistantTools({
+    zenService,
+    zenLayout: { layout: (windowId) => zenLayoutOf(zenService.bootstrap(windowId).space) },
+  });
   contributeChatTools((windowId, thread) => zenAssistantTools.forThread(windowId, thread));
   const zenRoutes = createZenRouteHandler({ zenService, windowAuthorityStore });
   // Navigator is the production consumer of the `navigatorAssistant`

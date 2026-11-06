@@ -794,7 +794,7 @@ describe("Chat lifecycle integration", () => {
     expect(searxngTurn).toMatchObject({
       providerInstanceId: ids.providerB,
       attachmentIds: [],
-      toolNames: ["octant_web_research"],
+      toolNames: ["web-search"],
     });
     expect(fixture.sentTurns[0]?.attachmentIds).toEqual([attachment.id]);
     expect(fixture.service.read(created.thread.id).attachments).toEqual(

@@ -12,6 +12,7 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
+  type AutomationRunReference,
   type CodeReviewTarget,
   type CodeReviewRevision,
   type CodeReviewFindingAssessment,
@@ -989,6 +990,8 @@ export interface CodeOperationTurnPort {
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
     readonly admissionCurrent?: () => boolean;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
     /**
      * Told once a provider has accepted this turn's prompt and context. A
      * start that returns `running` has only taken the turn on: the context is
@@ -1115,6 +1118,12 @@ export interface CodeOperationExecuteOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /**
+   * Set by the routine dispatcher for the provider turn it starts for a run,
+   * and only there: that turn may report the run's result. Host-only: the
+   * wire command cannot carry it.
+   */
+  readonly routineRun?: AutomationRunReference;
 }
 
 export interface CodeOperationServiceOptions {
@@ -1497,6 +1506,7 @@ export class CodeOperationService {
             existing.event.result,
             deliveredResult(this.#providerResult(command.operationId, { state: "interrupted" })),
             options.admissionCurrent,
+            options.routineRun,
           ),
         );
       }
@@ -1766,6 +1776,7 @@ export class CodeOperationService {
                         starting.attachments,
                         admissionCurrent,
                         initiator,
+                        options.routineRun,
                       );
               } catch (error) {
                 const category =
@@ -1862,6 +1873,7 @@ export class CodeOperationService {
     cached: CodeOperationResult,
     stopped: CodeOperationResult,
     admissionCurrent?: () => boolean,
+    routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
     // A stale turn can be resumed long after the Project's provider policy
     // changed, and this path starts a real provider session. The policy admits
@@ -1921,6 +1933,7 @@ export class CodeOperationService {
         recordedTurnAttachments(frames),
         () => !held.cancelled && admissionCurrent?.() !== false,
         root.rootIdentity,
+        routineRun,
       );
       // Stopped before the runtime took it on: whatever the preparation then
       // answered (the admission refusal, or a failure of its own), the start
@@ -3324,6 +3337,7 @@ export class CodeOperationService {
     attachments: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
     initiator: CodeOperationInitiator = "agent",
+    routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     // A server thread's Git runs on its server; it never reaches this host's.
@@ -4007,6 +4021,7 @@ export class CodeOperationService {
           attachments,
           admissionCurrent,
           root.rootIdentity,
+          routineRun,
         );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
@@ -5457,6 +5472,7 @@ export class CodeOperationService {
     references: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
     rootIdentity?: { readonly device: string; readonly inode: string },
+    routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -5653,6 +5669,7 @@ export class CodeOperationService {
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+      ...(routineRun === undefined ? {} : { routineRun }),
       // A message is delivered when a provider has it, not when the turn was
       // taken on: the runtime launches after this call returns, and a host
       // that stopped in between would have journaled a delivery, dropped the

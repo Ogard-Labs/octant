@@ -583,8 +583,8 @@ describe("Code language reads", () => {
   const diagnostics = (overrides: Partial<ToolCallPolicyInput> = {}) =>
     resolveToolCall(
       baseInput({
-        capability: decodeToolActionCapability({ id: "code-diagnostics", version: 1 }),
-        arguments: { path: "src/a.ts" },
+        capability: decodeToolActionCapability({ id: "code-language", version: 1 }),
+        arguments: { operation: "diagnostics", path: "src/a.ts" },
         ...overrides,
       }),
     );
@@ -609,15 +609,17 @@ describe("Code language reads", () => {
     expect(
       diagnostics({ thread: thread({ executionPolicy: "plan", externalContentIngested: true }) }),
     ).toMatchObject({ kind: "allow" });
-    expect(
-      resolveToolCall(
-        baseInput({
-          capability: decodeToolActionCapability({ id: "code-definition", version: 1 }),
-          arguments: { path: "src/a.ts", line: 3, column: 7 },
-          thread: thread({ executionPolicy: "plan" }),
-        }),
-      ),
-    ).toMatchObject({ kind: "allow" });
+    for (const operation of ["definition", "references"]) {
+      expect(
+        resolveToolCall(
+          baseInput({
+            capability: decodeToolActionCapability({ id: "code-language", version: 1 }),
+            arguments: { operation, path: "src/a.ts", line: 3, column: 7 },
+            thread: thread({ executionPolicy: "plan" }),
+          }),
+        ),
+      ).toMatchObject({ kind: "allow" });
+    }
   });
 
   it("refuses Chat and Work, and a provider without app-managed tools", () => {
@@ -630,11 +632,12 @@ describe("Code language reads", () => {
   });
 
   it("follows a profile allowlist by the tool names the agent sees", () => {
+    expect(diagnostics({ thread: thread({ toolConstraints: ["octant_code"] }) })).toMatchObject({
+      kind: "allow",
+    });
+    // The retired per-read names allow nothing now: a profile names the one tool.
     expect(
       diagnostics({ thread: thread({ toolConstraints: ["octant_code_diagnostics"] }) }),
-    ).toMatchObject({ kind: "allow" });
-    expect(
-      diagnostics({ thread: thread({ toolConstraints: ["octant_code_definition"] }) }),
     ).toMatchObject({ kind: "deny", step: "profile-constraints" });
   });
 });

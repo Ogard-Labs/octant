@@ -290,6 +290,32 @@ describe("Apple runtime contracts", () => {
     expect(request.kind).toBe("logs");
   });
 
+  it("decodes a log read's window only up to ten minutes back", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const logs = {
+      actionId: "10000000-0000-4000-8000-000000000001",
+      correlationId: "10000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "10000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "10000000-0000-4000-8000-000000000004",
+        providerInstanceId: "10000000-0000-4000-8000-000000000007",
+        extension: { kind: "core" },
+      },
+      threadId: "10000000-0000-4000-8000-000000000008",
+      checkoutId: "10000000-0000-4000-8000-000000000009",
+      kind: "logs",
+      simulatorId: "10000000-0000-4000-8000-000000000010",
+      bundleIdentifier: "app.octant.fixture",
+      sinceSeconds: 120,
+      includeCrashes: true,
+      timeoutMs: 30000,
+      approval: { kind: "not-required" },
+    };
+    expect(decode(logs)).toMatchObject({ sinceSeconds: 120, includeCrashes: true });
+    expect(() => decode({ ...logs, sinceSeconds: 601 })).toThrow();
+  });
+
   it("requires a bundle identity for app log and terminate operations", () => {
     const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => unknown;
     expect(() =>

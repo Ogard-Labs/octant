@@ -1,3 +1,4 @@
+import { MAX_BROWSER_CAPTURES_PER_THREAD, MAX_BROWSER_RECORDING_BYTES } from "@octant/contracts";
 import { constants } from "node:fs";
 import { access, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -14,9 +15,13 @@ export class BrowserProofSaverError extends Error {
 }
 
 /** The most pictures a thread keeps, and the most one save may write. */
-const MAX_FILES = 32;
-/** A kept capture is the small picture the model received; this is far above it. */
-const MAX_BASE64_CHARACTERS = 256 * 1024;
+const MAX_FILES = MAX_BROWSER_CAPTURES_PER_THREAD;
+/**
+ * The largest capture is a recording, an animated PNG of at most
+ * `MAX_BROWSER_RECORDING_BYTES`; a screenshot is far below it. An animated PNG
+ * keeps `.png`, so it is named like any other picture.
+ */
+const MAX_BASE64_CHARACTERS = Math.ceil(MAX_BROWSER_RECORDING_BYTES / 3) * 4;
 const DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/;
 const EXTENSIONS = { png: "png", jpeg: "jpg", webp: "webp", gif: "gif" } as const;
 

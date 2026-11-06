@@ -159,7 +159,7 @@ export function createSelectedExtensionResolver(options: {
       });
       if (composed.status === "blocked")
         return unavailable(`Selected extension is unavailable (${composed.reasons.join(", ")}).`);
-      if (composed.providerContext.some((block) => block.kind !== "instructions")) {
+      if (composed.providerContext.some((block) => block.kind !== "skill-instructions")) {
         return unavailable("Selected skill instructions are unavailable.");
       }
       if (composed.tools.length === 0) {

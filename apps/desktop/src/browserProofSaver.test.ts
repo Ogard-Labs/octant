@@ -1,3 +1,4 @@
+import { MAX_BROWSER_RECORDING_BYTES } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserProofSaverError, createBrowserProofSaver } from "./browserProofSaver";
 
@@ -39,6 +40,17 @@ describe("createBrowserProofSaver", () => {
     ]);
     expect(result).toEqual({ kind: "saved", count: 2, folderName: "pr-12" });
     expect(JSON.stringify(result)).not.toContain("/Users/demo");
+  });
+
+  it("saves a recording as large as a recording may be, as a .png, and refuses one larger", async () => {
+    const { save, write } = saver();
+    const fits = `data:image/png;base64,${"A".repeat(Math.ceil(MAX_BROWSER_RECORDING_BYTES / 3) * 4)}`;
+    await save({ sender: {} }, [{ fileNumber: 1, dataUrl: fits }]);
+    expect(write.mock.calls[0]?.[0]).toBe("/Users/demo/Pictures/pr-12/browser-check-01.png");
+    const larger = `data:image/png;base64,${"A".repeat(Math.ceil(MAX_BROWSER_RECORDING_BYTES / 3) * 4 + 4)}`;
+    await expect(save({ sender: {} }, [{ fileNumber: 1, dataUrl: larger }])).rejects.toBeInstanceOf(
+      BrowserProofSaverError,
+    );
   });
 
   it("writes nothing when the person cancels the picker", async () => {

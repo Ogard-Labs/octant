@@ -17,7 +17,7 @@ import {
 export const TURN_DECISION_INSTRUCTIONS: ProviderContextBlock = {
   kind: "instructions",
   text: [
-    "When you finish a turn and the work cannot continue until the user chooses between a few concrete next steps, end the reply with exactly this block as its last thing (before any follow-up block):",
+    "When you finish a turn and the work cannot continue until the user chooses between a few concrete next steps, end the reply with exactly this block, followed only by any follow-up block:",
     `\`\`\`${TURN_DECISION_BLOCK_LANGUAGE}`,
     '{"ask":"...","options":[{"label":"...","recommended":true},{"label":"..."}]}',
     "```",

@@ -34,6 +34,7 @@ import {
   type PrincipalKind,
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
+import { foldersHoldCoveredFile } from "./codeLanguageCoverage";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
 import { pathInResolvedRoot, type CodeFolderRootResolution } from "./codeProjectFolderRoot";
@@ -213,6 +214,14 @@ export type CodeLanguageAgentRead =
       readonly checkoutId: CodeCheckoutId;
       readonly path: CodeRelativePath;
       readonly position: CodeLanguagePosition;
+    }
+  | {
+      readonly kind: "references";
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly path: CodeRelativePath;
+      readonly position: CodeLanguagePosition;
+      readonly includeDeclaration: boolean;
     };
 
 /**
@@ -751,6 +760,30 @@ export class CodeLanguageService {
   }
 
   /**
+   * Whether an agent's language read could be answered for any file of these
+   * folders, judged when a Code turn's tools are composed: some server
+   * effective now that an agent may start (`static`) covers a file a bounded
+   * scan finds there. The Settings switch is read through the effective set,
+   * so a bundled server turned off covers nothing, and a `repo-tooling`
+   * server never counts because an agent's read never starts or reads
+   * through one. It decides only whether the tool is offered; every read is
+   * still checked as it runs.
+   */
+  servesAgentsIn(folders: ReadonlyArray<string>): boolean {
+    if (this.#platform !== "macos" && this.#platform !== "linux") return false;
+    const languages = new Set(
+      this.#components()
+        .filter((component) => component.launchClass === "static")
+        .flatMap((component) => component.languages),
+    );
+    if (languages.size === 0) return false;
+    return foldersHoldCoveredFile(folders, (fileName) => {
+      const languageId = languageOf(fileName);
+      return languageId !== undefined && languages.has(languageId);
+    });
+  }
+
+  /**
    * A read for an agent's tool call, answered for the file as saved, so its
    * lines match what the agent's own file reads show. Every authority check
    * an editor's read passes runs first, and in the same order.
@@ -853,7 +886,12 @@ export class CodeLanguageService {
     document: OpenDocument,
     request:
       | { readonly kind: "diagnostics" }
-      | { readonly kind: "definition"; readonly position: CodeLanguagePosition },
+      | { readonly kind: "definition"; readonly position: CodeLanguagePosition }
+      | {
+          readonly kind: "references";
+          readonly position: CodeLanguagePosition;
+          readonly includeDeclaration: boolean;
+        },
     scope: {
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
@@ -890,6 +928,9 @@ export class CodeLanguageService {
       return { status: "diagnostics", ...scope, ...mapped };
     }
 
+    if (request.kind === "references")
+      return this.#answerReferences(record, document, request, scope);
+
     const response = await connection.request("textDocument/definition", {
       textDocument: { uri: document.uri },
       position: request.position,
@@ -911,6 +952,64 @@ export class CodeLanguageService {
         )
       : targets;
     return { status: "definition", ...scope, targets: named };
+  }
+
+  /**
+   * Where the name at a position of a document the server holds is used, for
+   * an agent's read of the saved file. The editor's references read is staged
+   * against a document revision it acknowledged; an agent holds no revision,
+   * so its read is answered here for the text it just brought up to the saved
+   * file, under the same bounds, and refused as unsupported by a server that
+   * does not report references.
+   */
+  async #answerReferences(
+    record: ServerRecord,
+    document: OpenDocument,
+    request: { readonly position: CodeLanguagePosition; readonly includeDeclaration: boolean },
+    scope: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly fileId: CodeFileId;
+    },
+  ): Promise<CodeLanguageReadResult> {
+    const connection = record.connection;
+    if (connection === undefined) return { status: "unavailable", reason: "starting" };
+    const support = this.#referencesSupport(record, document);
+    if (support !== "supported") {
+      return { status: "unsupported", capability: "references", support };
+    }
+    const version = document.version;
+    const current = () => record.connection === connection && document.version === version;
+    const response = await connection.request("textDocument/references", {
+      textDocument: { uri: document.uri },
+      position: request.position,
+      context: { includeDeclaration: request.includeDeclaration },
+    });
+    if (response.status !== "answered") return unavailable(response);
+    const mapped = await toReferenceTargets({
+      result: response.result,
+      roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
+      realpath: (path) => realpath(path),
+      current,
+    });
+    // Mapping stops early once the text or the server changed, and what it
+    // kept places names in text the agent no longer reads.
+    if (!current()) return { status: "stale" };
+    const targets = record.extraFolder
+      ? mapped.targets.map((target) =>
+          target.kind === "checkout-location"
+            ? { ...target, path: decodeCodeProjectFilePath(`${record.rootPath}/${target.path}`) }
+            : target,
+        )
+      : mapped.targets;
+    return {
+      status: "references",
+      ...scope,
+      documentVersion: document.version,
+      documentRevision: document.revision,
+      targets,
+      truncated: mapped.truncated,
+    };
   }
 
   /**

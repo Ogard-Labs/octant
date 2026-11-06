@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Check, Eye, EyeOff, LockKeyhole } from "lucide-react";
 import type {
   CredentialRequestAnswer,
+  CredentialRequestFailure,
   CredentialRequestCard as Card,
 } from "@octant/contracts/credential-request";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -18,11 +19,24 @@ const statusText = {
   failed: "Request could not be completed",
 } as const;
 
+const failureText: Readonly<Record<CredentialRequestFailure, string>> = {
+  locked: "Unlock 1Password yourself, then request a new card.",
+  missing: "The selected field was not found. Check its reference, then request a new card.",
+  "not-linked": "Link 1Password in Settings > Secret stores, then request a new card.",
+  changed: "The linked store changed during lookup. Review it, then request a new card.",
+  unavailable:
+    "1Password could not be reached. Check its CLI and connection, then request a new card.",
+  "invalid-reference":
+    "Use a valid 1Password field reference containing a token, then request a new card.",
+};
+
 export function CredentialRequestCard(props: {
   readonly card: Card;
   readonly answer: (answer: CredentialRequestAnswer) => Promise<boolean>;
 }) {
   const id = useId();
+  const [linked, setLinked] = useState(false);
+  const [reference, setReference] = useState("");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -32,6 +46,7 @@ export function CredentialRequestCard(props: {
   useEffect(() => {
     if (props.card.state !== "pending") {
       setSecret("");
+      setReference("");
       setRevealed(false);
     }
   }, [props.card.state]);
@@ -41,9 +56,14 @@ export function CredentialRequestCard(props: {
     setBusy(true);
     setError(undefined);
     const answer: CredentialRequestAnswer =
-      action === "decline" ? { id: props.card.id, action } : { id: props.card.id, action, secret };
+      action === "decline"
+        ? { id: props.card.id, action }
+        : linked
+          ? { id: props.card.id, action: "allow-linked", store: "onepassword", reference }
+          : { id: props.card.id, action, secret };
     // Do not retain the entry after submission, even if the network fails.
     setSecret("");
+    setReference("");
     setRevealed(false);
     try {
       if (await props.answer(answer)) setAccepted(true);
@@ -66,7 +86,10 @@ export function CredentialRequestCard(props: {
           <LockKeyhole size={16} aria-hidden="true" />
         )}
         <span>
-          {props.card.label} · {statusText[props.card.state]}
+          {props.card.label} ·{" "}
+          {props.card.failure === undefined
+            ? statusText[props.card.state]
+            : failureText[props.card.failure]}
         </span>
       </div>
     );
@@ -78,7 +101,7 @@ export function CredentialRequestCard(props: {
       autoComplete="off"
       onSubmit={(event) => {
         event.preventDefault();
-        if (secret.trim()) void send("allow");
+        if ((linked ? reference : secret).trim()) void send("allow");
       }}
     >
       <div className="credential-request-card__heading">
@@ -95,18 +118,39 @@ export function CredentialRequestCard(props: {
         </div>
       </div>
       <p className="credential-request-card__reason">{props.card.reason}</p>
+      <OctantButton
+        type="button"
+        variant="ghost"
+        disabled={busy || accepted}
+        onClick={() => {
+          setLinked(!linked);
+          setSecret("");
+          setReference("");
+          setRevealed(false);
+          setError(undefined);
+        }}
+      >
+        {linked ? "Enter token manually" : "Use 1Password reference"}
+      </OctantButton>
+      {linked ? (
+        <p className="credential-request-card__reason">
+          Use a field reference from an already linked store. Octant will not link or unlock it.
+        </p>
+      ) : null}
       <div className="credential-request-card__field">
         <OctantInput
           id={id}
-          type={revealed ? "text" : "password"}
+          type={linked || revealed ? "text" : "password"}
+          aria-label={linked ? "1Password field reference" : undefined}
           autoComplete="off"
           spellCheck={false}
           autoCapitalize="off"
-          value={secret}
-          maxLength={4096}
+          value={linked ? reference : secret}
+          maxLength={linked ? 512 : 4096}
           disabled={busy || accepted}
           onChange={(event) => {
-            setSecret(event.target.value);
+            if (linked) setReference(event.target.value);
+            else setSecret(event.target.value);
             setError(undefined);
           }}
           onKeyDown={(event) => {
@@ -114,18 +158,20 @@ export function CredentialRequestCard(props: {
           }}
           aria-describedby={`${id}-privacy${error === undefined ? "" : ` ${id}-error`}`}
           aria-invalid={error !== undefined}
-          placeholder="Paste token"
+          placeholder={linked ? "op://vault/item/field" : "Paste token"}
         />
-        <OctantIconButton
-          className="credential-request-card__reveal"
-          type="button"
-          label={revealed ? "Hide token" : "Show token"}
-          aria-pressed={revealed}
-          disabled={busy || accepted || !secret}
-          onClick={() => setRevealed(!revealed)}
-        >
-          {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
-        </OctantIconButton>
+        {linked ? null : (
+          <OctantIconButton
+            className="credential-request-card__reveal"
+            type="button"
+            label={revealed ? "Hide token" : "Show token"}
+            aria-pressed={revealed}
+            disabled={busy || accepted || !secret}
+            onClick={() => setRevealed(!revealed)}
+          >
+            {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+          </OctantIconButton>
+        )}
       </div>
       <div className="credential-request-card__footer">
         <details className="credential-request-card__details">
@@ -146,7 +192,7 @@ export function CredentialRequestCard(props: {
           </OctantButton>
           <OctantButton
             type="submit"
-            disabled={busy || accepted || !secret.trim()}
+            disabled={busy || accepted || !(linked ? reference : secret).trim()}
             aria-busy={busy}
           >
             {props.card.actionLabel}

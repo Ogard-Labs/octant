@@ -54,6 +54,7 @@ export type RoutesDependencies = {
     | "goalRoutes"
     | "planRoutes"
     | "projectBindingRoutes"
+    | "replyDetailRoutes"
     | "shellRoutes"
     | "shipRoutes"
     | "themeRoutes"
@@ -211,6 +212,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     remoteServerGrantLocalRoutes,
     replicaSyncStatusRoutes,
     scaffoldRoutes,
+    replyDetailRoutes,
     shellRoutes,
     shipRoutes,
     sidebarBackgroundRoutes,
@@ -308,6 +310,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await canvasRoutes(request)) ??
     (await imageRoutes(request)) ??
     (await speechRoutes(request)) ??
+    (await replyDetailRoutes(request)) ??
     (await artifactLibraryRoutes(request)) ??
     (await artifactMirrorRoutes(request)) ??
     (await syncedArtifactRoutes(request)) ??
