@@ -254,8 +254,9 @@ entries are excluded.
 ## Process topology
 
 On macOS, both trusted desktop executables use sealed ASAR entries and fixed
-launch roles. Stable's separately identified, same-version bundled runtime runs
-its host, managed tools, scoped terminal CLI and executable extensions as Node. The worker runtime is
+launch roles. Each app's separately identified, same-version bundled runtime runs
+its host, managed tools and executable extensions as Node (Stable's also runs its
+scoped terminal CLI; Nightly's host is only its test-data host). The worker runtime is
 not a trusted desktop peer, and Node consumers keep physical server files and
 stdin supervision. The runtime has independent Framework/fuse bytes; no arbitrary
 script runs under the trusted desktop executable's identity. See the owning
@@ -13351,10 +13352,10 @@ macOS-only.
   Preview-only Nightly install row (packaged macOS Octant, person-started,
   feed signature, artifact hash and a Nightly-specific code requirement) are
   built; a signed install from a published Nightly build has not been
-  exercised. The test-data host's startup (its own folder, port and Keychain
-  service names, decided once from Nightly's stored choice) is built; its
-  Settings choice and packaged host payload are not, so a person cannot yet
-  choose it. Identity and packaging foundations
+  exercised. Nightly's own host on separate test data (macOS only: its own
+  folder, port, logs and Keychain service names, chosen in Settings and decided
+  once at launch) is built; a signed Nightly running it has not been
+  exercised. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
   Nightly's own renderer with a short server-enforced lease. It never loads

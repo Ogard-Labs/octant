@@ -744,12 +744,10 @@ export function createPackagerOptions(
     appVersion: version,
     arch: target.arch,
     asar:
-      target.platform === "darwin"
-        ? { unpack: `**/{${desktopUnpackedFiles(identity).join(",")}}` }
-        : false,
-    ...(target.platform === "darwin" && identity.flavor === "stable"
-      ? { ignore: /^\/apps\/server(?:\/|$)/ }
-      : {}),
+      target.platform === "darwin" ? { unpack: `**/{${desktopUnpackedFiles().join(",")}}` } : false,
+    // Both apps keep the worker host tree out of the trusted archive: Nightly
+    // runs this same host for its own test data.
+    ...(target.platform === "darwin" ? { ignore: /^\/apps\/server(?:\/|$)/ } : {}),
     dir,
     electronVersion: ELECTRON_VERSION,
     // macOS terminates a process that opens the microphone without this
@@ -1191,19 +1189,19 @@ async function packageDarwinDesktop(
   const packagedApp = join(packagedDirectories[0]!, `${identity.productName}.app`);
   await rename(packagedApp, finalApp);
   await rm(packagerRoot, { recursive: true, force: true });
-  if (identity.flavor === "stable") {
-    await packageDesktopNodeRuntime({
-      primaryApp: finalApp,
-      temporaryRoot: join(outRoot, ".node-runtime"),
-      version,
-      electronVersion: ELECTRON_VERSION,
-    });
-    await stageStableHostPayload(stageRoot, finalApp);
-    await validateBundleIdentity(join(finalApp, DESKTOP_NODE_RUNTIME_APP), {
-      bundleId: DESKTOP_NODE_RUNTIME_BUNDLE_ID,
-      productName: DESKTOP_NODE_RUNTIME_NAME,
-    });
-  }
+  // Nightly carries the host payload and its worker runtime as Octant does;
+  // its host role starts only from its stored Data choice.
+  await packageDesktopNodeRuntime({
+    primaryApp: finalApp,
+    temporaryRoot: join(outRoot, ".node-runtime"),
+    version,
+    electronVersion: ELECTRON_VERSION,
+  });
+  await stageHostPayload(stageRoot, finalApp);
+  await validateBundleIdentity(join(finalApp, DESKTOP_NODE_RUNTIME_APP), {
+    bundleId: DESKTOP_NODE_RUNTIME_BUNDLE_ID,
+    productName: DESKTOP_NODE_RUNTIME_NAME,
+  });
 
   const nativeResources = join(finalApp, "Contents/Resources/native");
   await mkdir(nativeResources, { recursive: true });
@@ -1235,21 +1233,16 @@ async function packageDarwinDesktop(
     join(nativeResources, "octant-device-helper"),
   );
   for (const relativePath of PACKAGED_EXECUTABLE_FILES) {
-    await access(
-      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`, identity)),
-      1,
-    );
+    await access(join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`)), 1);
   }
   for (const relativePath of PACKAGED_ARM64_FILES) {
     await validatePackagedArm64(
-      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`, identity)),
+      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`)),
     );
   }
 
   const packagedPayload = join(finalApp, "Contents/Resources/app");
   const archive = join(finalApp, "Contents/Resources/app.asar");
-  if (identity.flavor === "nightly" && existsSync(packagedPayload))
-    throw new Error("Nightly contains an unsealed application directory.");
   if (existsSync(join(packagedPayload, "apps/desktop")))
     throw new Error("Physical host payload contains a loose desktop entry.");
   const archiveEntries = readDesktopArchive(
@@ -1268,17 +1261,13 @@ async function packageDarwinDesktop(
         { encoding: "utf8" },
       ),
     ),
-    identity,
   );
-  const payloadEntries =
-    identity.flavor === "stable"
-      ? [
-          ...archiveEntries,
-          ...(await collectPayloadEntries(packagedPayload)).filter((entry) =>
-            entry.path.startsWith("apps/server/"),
-          ),
-        ]
-      : archiveEntries;
+  const payloadEntries = [
+    ...archiveEntries,
+    ...(await collectPayloadEntries(packagedPayload)).filter((entry) =>
+      entry.path.startsWith("apps/server/"),
+    ),
+  ];
   validatePackagedPayload(payloadEntries, target, identity);
   const bundleEntries = await collectPayloadEntries(outRoot);
   const bundlePaths = new Set([
@@ -1286,7 +1275,7 @@ async function packageDarwinDesktop(
       const prefix = `${identity.productName}.app/Contents/Resources/app.asar.unpacked/`;
       if (entry.path.startsWith(prefix)) {
         const payload = entry.path.slice(prefix.length);
-        if (!new Set(desktopUnpackedFiles(identity)).has(payload))
+        if (!new Set(desktopUnpackedFiles()).has(payload))
           throw new Error(`Unexpected loose desktop native payload: ${payload}.`);
         return entry.path.replace("/app.asar.unpacked/", "/app/");
       }
@@ -1310,13 +1299,10 @@ async function packageDarwinDesktop(
   validatePackagedRendererPolicy(
     archiveEntries.find((entry) => entry.path === "apps/web/dist/index.html")?.content ?? "",
   );
-  if (identity.flavor === "stable")
-    await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+  await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
   await prepareDesktopRuntimeFuses(finalApp);
-  if (identity.flavor === "stable") {
-    await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
-    await validateNodeRuntimeFuses(join(finalApp, DESKTOP_NODE_RUNTIME_APP));
-  }
+  await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+  await validateNodeRuntimeFuses(join(finalApp, DESKTOP_NODE_RUNTIME_APP));
   await validateBundleIdentity(finalApp, identity);
   return finalApp;
 }
@@ -2072,7 +2058,7 @@ async function runCommandForOutput(argv: ReadonlyArray<string>): Promise<{
 }
 
 /** Keep Node consumers on physical files; no loose desktop module may be staged here. */
-export async function stageStableHostPayload(stageRoot: string, appPath: string): Promise<void> {
+export async function stageHostPayload(stageRoot: string, appPath: string): Promise<void> {
   const root = join(appPath, "Contents/Resources/app");
   await mkdir(join(root, "apps"), { recursive: true });
   for (const app of ["server", "web"])

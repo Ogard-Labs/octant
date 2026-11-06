@@ -37,12 +37,11 @@ release workflow stamp the flavor from the ring, and the scheduled Nightly run
 alone is held by the functional-client preflight. The Octant Nightly row in
 Octant's Settings › Updates is built for packaged macOS Octant, including its
 three checks; a signed install from a published Nightly build has not yet been
-exercised. The test-data host's startup is built: Nightly reads its stored
-Data choice once at launch and, with separate test data, runs Octant's
-host-owning desktop on its own folder, port and Keychain service names, refusing
-a folder that overlaps Octant's. Nightly's Settings choice, relaunch offer,
-removal control and Test data label, and the host payload in packaged Nightly,
-are not built, so a person cannot yet choose test data.
+exercised. Nightly's own host on separate test data is built for macOS: the
+Data choice in Settings › Updates with its relaunch offer and removal, the
+Test data label, startup on its own folder, port, logs and Keychain service
+names, and the host payload and worker runtime in packaged Nightly. A signed
+Nightly running its test host has not yet been exercised.
 
 ## Two apps, one set of data
 
@@ -453,10 +452,11 @@ the sealed GUI role aborts during LaunchServices/WindowServer registration; the
 Node command preserves confinement without granting GUI services. Its script is
 an ordinary signed bundle resource, never trusted desktop code for peer admission.
 
-Stable retains a separate, same-version `Octant Runtime.app` inside its Frameworks
-folder for its host, managed tools and approved executable extensions. Its bundle
-id is `app.octant.desktop.runtime`, distinct from both desktop mains and their
-helpers, and it must never be admitted as a desktop peer. This runtime keeps
+Each app retains a separate, same-version `Octant Runtime.app` inside its
+Frameworks folder for its host, managed tools and approved executable extensions;
+Nightly's runs only its test host. Its bundle id is `app.octant.desktop.runtime`
+in both apps, distinct from both desktop mains and their helpers, and it must
+never be admitted as a desktop peer. This runtime keeps
 standalone Node behavior and current stdin supervision and confinement contracts.
 Node consumers use the physical server/web payload under `Resources/app`, which
 contains no loose desktop module; trusted desktop code stays in ASAR. Development

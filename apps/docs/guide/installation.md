@@ -102,8 +102,8 @@ the same login session. Development/ad-hoc builds refuse this connection; a
 missing response can mean Octant is closed or too old. If it is closed, Nightly
 can start the installed compatible signed Octant without opening an Octant
 window, then authenticate it again. An older installation that lacks this launch
-capability refuses. Nightly reports a missing installation and never starts its
-own host. A successful status check
+capability refuses. Nightly reports a missing installation and, on Octant's
+data, never starts its own host. A successful status check
 is followed by separate authenticated window registration. A compatible host
 issues only that window's short-lived capability; Nightly loads its own screens
 without owning host data or credentials. If renewal fails, its old renderer
@@ -127,6 +127,25 @@ reconversion are not supported by that path. Page accessibility, remaining nativ
 other native brokers and full lifecycle acceptance remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.
+
+### Separate test data in Nightly
+
+For development and testing on macOS, Nightly can run a host of its own on data
+that is never Octant's. In Nightly, open **Settings › Updates** and set **Data**
+to **Separate test data**, then choose **Relaunch Octant Nightly**. The choice
+takes effect on that relaunch.
+
+- Nightly's test data lives in
+  `~/Library/Application Support/Octant Nightly/Test Data`, its host listens on
+  port `13774`, and its log is in `~/Library/Logs/Octant Nightly`. It never
+  reads or changes Octant's data, never connects to Octant's host, and Octant
+  and Nightly can both run.
+- Sign-ins are kept apart: you sign in to providers again for test data, and
+  those items are stored under Nightly's own Keychain names.
+- The window shows a **Test data** label beside the Nightly label.
+- To go back, set **Data** to **Octant's data** and relaunch. While Nightly uses
+  Octant's data, **Remove test data** moves the test data folder to the Trash.
+- Separate test data is not offered on Linux yet.
 
 An in-app Quit command in Octant closes its workspace windows while a current
 Nightly window still uses its host. The host remains in the background, and
