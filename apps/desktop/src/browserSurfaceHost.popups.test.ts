@@ -148,7 +148,7 @@ async function presentedSurface(options: { readonly agentAttached?: boolean } = 
       heldSelect = value;
     },
     emit: (method: string, params: unknown) => {
-      for (const listener of [...protocol]) listener({}, method, params);
+      for (const listener of protocol) listener({}, method, params);
     },
     emitPage,
     press: (button: "left" | "right" = "left") =>

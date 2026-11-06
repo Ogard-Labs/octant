@@ -45,7 +45,7 @@ export class BrowserPagePopups {
     this.close();
     const id = decodeBrowserPagePopupId(randomUUID());
     this.#owned = { popup: { ...draft, id } as HumanBrowserPagePopup, source };
-    for (const wake of [...this.#waiters]) wake();
+    for (const wake of this.#waiters) wake();
     return id;
   }
 

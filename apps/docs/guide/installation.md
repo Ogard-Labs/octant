@@ -123,7 +123,11 @@ Keyboard invocation preserves the current field and selection, and menu
 retirement releases held page keys. Live clipboard acceptance remains pending. Standard text
 inputs and textareas support native composition with a caret anchored to the
 Stable-owned field. Password, custom editors, embedded frames and full IME
-reconversion are not supported by that path. Page accessibility, remaining native popup types,
+reconversion are not supported by that path. A page's select lists, link and
+image menus open as native menus in the Nightly window, its alerts, confirmations
+and leave-page questions as sheets, and its file fields as Nightly's own open
+panel; links that would open a new window are refused, as in Octant. Selects and
+dialogs inside embedded frames, page accessibility,
 other native brokers and full lifecycle acceptance remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.
