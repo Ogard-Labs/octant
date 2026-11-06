@@ -1978,7 +1978,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             onAutomaticChecksChange={(enabled) =>
               props.onSettingsChange({ automaticUpdateChecks: enabled })
             }
-            onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
+            updateChannel={props.settings.updateChannel}
+            onUpdateChannelChange={(updateChannel, releaseRing) =>
+              props.onSettingsChange({ updateChannel, releaseRing })
+            }
           />
         </div>
       </SettingsSection>
