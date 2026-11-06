@@ -40,6 +40,8 @@ import {
   decodeReplicaArtifactQueued,
   decodeReplicaArtifactReconciled,
   decodeReplicaBackfillStarted,
+  decodeReplicaBackfillRestoring,
+  type ReplicaBackfillRestoring,
   decodeReplicaBackfillMarked,
   decodeReplicaBackfillQueued,
   decodeReplicaCommentQueued,
@@ -102,7 +104,10 @@ export interface ReplicaRestoreState extends ReplicaRestoreProgress {
 
 export interface ReplicaArtifactState {
   readonly backfills: ReadonlyArray<
-    ReplicaBackfillStarted & { readonly state: "running" | "stopped" }
+    ReplicaBackfillStarted & {
+      readonly state: "running" | "stopped";
+      readonly restoring?: ReplicaBackfillRestoring;
+    }
   >;
   /** Every entry waiting to publish, versions and comment changes, oldest first. */
   readonly queue: ReadonlyArray<ReplicaQueuedEntry>;
@@ -154,7 +159,10 @@ export class ReplicaArtifactProjection implements Projection {
   readonly #restores = new Map<string, ReplicaRestoreState & { readonly instanceId: string }>();
   readonly #backfills = new Map<
     string,
-    ReplicaBackfillStarted & { readonly state: "running" | "stopped" }
+    ReplicaBackfillStarted & {
+      readonly state: "running" | "stopped";
+      readonly restoring?: ReplicaBackfillRestoring;
+    }
   >();
   #state: ReplicaArtifactState | undefined;
 
@@ -185,6 +193,12 @@ export class ReplicaArtifactProjection implements Projection {
         const started = decodeReplicaBackfillStarted(event.payload);
         if (!this.#backfills.has(started.backfillId))
           this.#backfills.set(started.backfillId, { ...started, state: "running" });
+        break;
+      }
+      case names.backfillRestoring: {
+        const restoring = decodeReplicaBackfillRestoring(event.payload);
+        const batch = this.#backfills.get(restoring.backfillId);
+        if (batch !== undefined) this.#backfills.set(restoring.backfillId, { ...batch, restoring });
         break;
       }
       case names.backfillStopped:

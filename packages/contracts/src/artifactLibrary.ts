@@ -342,6 +342,7 @@ export const ArtifactPublicationPreview = Schema.Struct({
       state: Schema.Literal("running", "stopped", "finished"),
       done: Schema.Int.pipe(Schema.nonNegative()),
       total: Schema.Int.pipe(Schema.nonNegative()),
+      restoreAvailable: Schema.optional(Schema.Boolean),
       message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
     }),
   ),

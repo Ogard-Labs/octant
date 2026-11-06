@@ -128,7 +128,11 @@ In **Versions…**, use the separate **Delete from synced library** action and
 confirmation. This sends a deletion for currently known versions to your other
 computers. It preserves local history and does not erase provider copies. A
 concurrent revision stays visible until you resolve it. Deletion stops a pending
-historical publication; restore the artifact before resuming it. Local erasure
+historical publication, including a deletion learned from another computer.
+Choose **Restore artifact** in the stopped publication when you want to keep
+its local revision. Wait for that explicit restore to publish before resuming;
+a restore still queued offline does not lift the stop. The review survives a
+restart, but a later deletion needs a fresh restore. Local erasure
 never sends a synchronized deletion.
 
 ## Set up a store

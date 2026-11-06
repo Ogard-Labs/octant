@@ -509,10 +509,24 @@ export class ReplicaArtifactSyncService {
               state: done === backfill.versionIds.length ? "finished" : backfill.state,
               done,
               total: backfill.versionIds.length,
-              ...(deletionPending || heads.some((head) => head.kind === "tombstone")
+              restoreAvailable:
+                available &&
+                this.#backfillDeletionBlocked(backfill.backfillId) &&
+                (artifact?.tombstones.length ?? 0) > 0 &&
+                !state.outbox.some(
+                  (entry) =>
+                    entry.kind === "artifact-version" &&
+                    same(entry.bundle.octant.versionId, backfill.restoring?.versionId),
+                ),
+              ...(this.#backfillDeletionBlocked(backfill.backfillId)
                 ? {
-                    message:
-                      "Publication stopped for a synchronized deletion. Restore the artifact before resuming older publication.",
+                    message: state.outbox.some(
+                      (entry) =>
+                        entry.kind === "artifact-version" &&
+                        same(entry.bundle.octant.versionId, backfill.restoring?.versionId),
+                    )
+                      ? "Restore is queued here. Resume the historical publication after that restore has published."
+                      : "Publication stopped for a synchronized deletion. Restore the artifact before resuming older publication.",
                   }
                 : !available
                   ? { message: "Publishing waits for sync and the task's current write authority." }
@@ -611,25 +625,7 @@ export class ReplicaArtifactSyncService {
           same(held.instanceId, local?.instanceId),
       );
     if (backfill === undefined) return false;
-    if (running) {
-      if (
-        this.#ports
-          .artifactState()
-          .outbox.some(
-            (entry) =>
-              same(entry.artifact.canvasId, canvasId) && entry.kind === "artifact-tombstone",
-          )
-      )
-        return false;
-      const known = replicaArtifactsWithQueued(this.#ports.artifactState(), local).find((held) =>
-        same(held.canvasId, canvasId),
-      );
-      if (
-        known !== undefined &&
-        replicaArtifactHeads(known).some((head) => head.kind === "tombstone")
-      )
-        return false;
-    }
+    if (running && this.#backfillDeletionBlocked(backfillId)) return false;
     this.#ports.journal.append({
       eventName: running
         ? REPLICA_ARTIFACT_EVENT_NAMES.backfillResumed
@@ -674,9 +670,15 @@ export class ReplicaArtifactSyncService {
         reason: "stale-preview",
         message: "This artifact is no longer available.",
       };
-    const parents = replicaArtifactHeads(artifact).flatMap((head) =>
-      head.kind === "version" ? [String(head.versionId)] : [],
-    );
+    const published = this.#ports.artifactState().artifact(canvasId);
+    const parents = [
+      ...new Set(
+        [
+          ...replicaArtifactHeads(artifact),
+          ...(published === undefined ? [] : replicaArtifactHeads(published)),
+        ].flatMap((head) => (head.kind === "version" ? [String(head.versionId)] : [])),
+      ),
+    ];
     const bundle = this.#ports.artifactState().artifact(canvasId)?.versions.at(-1)?.bundle;
     if (bundle === undefined)
       return {
@@ -699,6 +701,62 @@ export class ReplicaArtifactSyncService {
     return { status: "accepted" };
   }
 
+  restorePublication(canvasId: CanvasId, versionId: CanvasVersionId): void {
+    const state = this.#ports.artifactState();
+    const deletions =
+      state
+        .artifact(canvasId)
+        ?.tombstones.map((held) => ({
+          instanceId: held.originInstanceId,
+          sequence: held.originSequence,
+        })) ?? [];
+    if (deletions.length === 0) return;
+    const deletionDigest = this.#deletionDigest(canvasId);
+    for (const batch of state.backfills) {
+      if (
+        same(batch.canvasId, canvasId) &&
+        same(batch.instanceId, this.#ports.membershipState().local?.instanceId)
+      ) {
+        this.#ports.journal.append({
+          eventName: REPLICA_ARTIFACT_EVENT_NAMES.backfillRestoring,
+          payload: { backfillId: batch.backfillId, versionId, deletionDigest },
+        });
+      }
+    }
+  }
+
+  #deletionDigest(canvasId: CanvasId): string {
+    return sha256Hex(
+      JSON.stringify(
+        (this.#ports.artifactState().artifact(canvasId)?.tombstones ?? [])
+          .map((deletion) => [String(deletion.originInstanceId), deletion.originSequence])
+          .sort(),
+      ),
+    );
+  }
+
+  #backfillDeletionBlocked(backfillId: string): boolean {
+    const state = this.#ports.artifactState();
+    const batch = state.backfills.find((held) => held.backfillId === backfillId);
+    if (batch === undefined) return true;
+    if (
+      state.outbox.some(
+        (entry) =>
+          same(entry.artifact.canvasId, batch.canvasId) && entry.kind === "artifact-tombstone",
+      )
+    )
+      return true;
+    const artifact = state.artifact(batch.canvasId);
+    const deletions = artifact?.tombstones ?? [];
+    if (deletions.length === 0) return false;
+    const restoring = batch.restoring;
+    return (
+      restoring === undefined ||
+      !artifact?.versions.some((held) => same(held.versionId, restoring.versionId)) ||
+      restoring.deletionDigest !== this.#deletionDigest(batch.canvasId)
+    );
+  }
+
   #publicationAllowed(version: CanvasVersion): boolean {
     return !this.#ports.planMode(version) && (this.#ports.publicationAllowed?.(version) ?? true);
   }
@@ -711,6 +769,10 @@ export class ReplicaArtifactSyncService {
         !same(backfill.instanceId, this.#ports.membershipState().local?.instanceId)
       )
         continue;
+      if (this.#backfillDeletionBlocked(backfill.backfillId)) {
+        this.controlBackfill(backfill.canvasId, backfill.backfillId, false);
+        continue;
+      }
       for (let index = 0; index < backfill.versionIds.length; index += 1) {
         const id = backfill.versionIds[index];
         const state = this.#ports.artifactState();
@@ -732,7 +794,22 @@ export class ReplicaArtifactSyncService {
           this.controlBackfill(backfill.canvasId, backfill.backfillId, false);
           break;
         }
-        const previous = backfill.versionIds[index - 1];
+        const previous = this.#ports
+          .canvas(backfill.canvasId)
+          ?.versions.filter(
+            (candidate) =>
+              candidate.sequence < version.sequence &&
+              (state
+                .artifact(backfill.canvasId)
+                ?.versions.some((held) => same(held.versionId, candidate.versionId)) ||
+                state.outbox.some(
+                  (held) =>
+                    held.kind === "artifact-version" &&
+                    same(held.artifact.canvasId, backfill.canvasId) &&
+                    same(held.bundle.octant.versionId, candidate.versionId),
+                )),
+          )
+          .toSorted((left, right) => right.sequence - left.sequence)[0]?.versionId;
         const queued = this.#queue({
           kind: "artifact-version",
           canvasId: backfill.canvasId,
@@ -1173,7 +1250,11 @@ export class ReplicaArtifactSyncService {
       if (next === undefined) return;
       if (next.kind !== "canvas-comment" && next.backfillId !== undefined) {
         const current = this.#ports.canvas(next.artifact.canvasId)?.currentVersion;
-        if (current === undefined || !this.#publicationAllowed(current)) {
+        if (
+          current === undefined ||
+          !this.#publicationAllowed(current) ||
+          this.#backfillDeletionBlocked(next.backfillId)
+        ) {
           this.controlBackfill(next.artifact.canvasId, next.backfillId, false);
           continue;
         }

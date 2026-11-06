@@ -174,6 +174,38 @@ describe("when no thread here can take a Work artifact", () => {
 });
 
 describe("publishing existing versions", () => {
+  it("offers explicit restore when a pulled deletion stops a local historical selection", async () => {
+    const onRestore = vi.fn();
+    dialog(
+      {
+        ...twoVersions,
+        status: "current",
+        publication: {
+          destination: "Reviewed replica store",
+          instanceId: "60000000-0000-4000-8000-000000000001",
+          previewToken: "a".repeat(64),
+          available: true,
+          versions: [],
+          truncated: false,
+          deletionAvailable: false,
+          deletionPending: false,
+          deletionConflict: true,
+          backfill: {
+            id: "70000000-0000-4000-8000-000000000001",
+            state: "stopped",
+            done: 0,
+            total: 1,
+            restoreAvailable: true,
+            message: "A synchronized deletion stopped this publication.",
+          },
+        },
+      },
+      { onRestore },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Restore artifact" }));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+  });
+
   it("requires version selection and explicit destination consent before publication and deletion", async () => {
     const onBackfill = vi.fn();
     const onDeleteSynced = vi.fn();

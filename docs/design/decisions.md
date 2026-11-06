@@ -2376,7 +2376,7 @@ Status: Built. Since: 2026-10-14. Detail: [Artifact replica sync: Membership, as
 Every committed Canvas version is queued for publish through the share filter, and nothing is called while sync is off.
 
 - Nothing is queued without sync or a replica identity, nor for a Code thread under Plan mode. An imported entry is never republished.
-- Historical local versions require a reviewed destination and eligibility preview, explicit selection and consent; durable publication progress can stop and resume after restart without duplicating entries. Nothing backfills automatically.
+- Historical local versions require a reviewed destination and eligibility preview, explicit selection and consent; durable publication progress can stop and resume after restart without duplicating entries. Separate batches preserve known ancestry; a newly pulled deletion stops uploads, and only a published explicit Restore of the reviewed deletion slots permits resuming them. Nothing backfills automatically.
 - Synchronized deletion is a separate confirmed tombstone action over known versions, preserving local history. A local erase never publishes it and removes queued historical bundles locally. A deletion beside a concurrent revision stays visible until explicitly resolved.
 
 Status: Built. Since: —. Detail: [Artifact replica sync: Artifact sync: publish and pull](artifact-replica-sync.md#artifact-sync-publish-and-pull).

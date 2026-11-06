@@ -759,7 +759,7 @@ function eraseReplicaArtifactCopies(
         `SELECT global_sequence FROM event_journal
          WHERE aggregate_type = ? AND (
            (event_name IN (?, ?, ?) AND json_extract(payload_json, '$.artifact.canvasId') = ?)
-           OR (event_name IN (?, ?, ?) AND json_extract(payload_json, '$.backfillId') IN (
+           OR (event_name IN (?, ?, ?, ?) AND json_extract(payload_json, '$.backfillId') IN (
              SELECT json_extract(payload_json, '$.backfillId') FROM event_journal
              WHERE event_name = ? AND json_extract(payload_json, '$.canvasId') = ?
            ))
@@ -774,6 +774,7 @@ function eraseReplicaArtifactCopies(
         REPLICA_ARTIFACT_EVENT_NAMES.backfillStarted,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillStopped,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillResumed,
+        REPLICA_ARTIFACT_EVENT_NAMES.backfillRestoring,
         REPLICA_ARTIFACT_EVENT_NAMES.backfillStarted,
         canvasId,
       ) as ReadonlyArray<{ readonly global_sequence: number }>;

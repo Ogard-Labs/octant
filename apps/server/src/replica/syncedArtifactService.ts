@@ -85,6 +85,7 @@ export interface SyncedArtifactPorts {
     | "startBackfill"
     | "controlBackfill"
     | "deleteSynced"
+    | "restorePublication"
   >;
   readonly localCanvas: (canvasId: CanvasId) => SyncedArtifactLocalCanvas | undefined;
   /** Every thread on this host, active or not; the policy decides which may take it. */
@@ -596,10 +597,13 @@ export class SyncedArtifactService {
     if (state === undefined) {
       return refused("not-found", "Nothing synced is known for this artifact here.");
     }
-    if (state.standing.status !== "deleted") {
+    if (
+      state.standing.status !== "deleted" &&
+      this.#ports.sync.publicationPreview(canvasId)?.backfill?.restoreAvailable !== true
+    ) {
       return refused("not-deleted", "It has not been deleted.");
     }
-    const parents = state.standing.deletions.flatMap((deletion) =>
+    const parents = state.artifact.tombstones.flatMap((deletion) =>
       deletion.parentVersionIds.map(String),
     );
     const current = state.local?.currentVersion;
@@ -613,6 +617,7 @@ export class SyncedArtifactService {
           thisComputer: true,
         },
         [...parents, String(current.versionId)],
+        true,
       );
     }
     const deletion = replicaDeletionShown(state.artifact, state.standing.deletions);
@@ -628,6 +633,7 @@ export class SyncedArtifactService {
         thisComputer: false,
       },
       parents,
+      true,
     );
   }
 
@@ -640,6 +646,7 @@ export class SyncedArtifactService {
     state: Standing,
     chosen: Candidate,
     parents: ReadonlyArray<string>,
+    restoring = false,
   ): Promise<ArtifactSyncedResult> {
     const canvasId = state.artifact.canvasId;
     const versionId = this.#ports.uuid() as CanvasVersionId;
@@ -658,6 +665,7 @@ export class SyncedArtifactService {
       if (!this.#ingested(state.artifact, threadId, chosen)) {
         return refused("refused", "This computer could not record where the version came from.");
       }
+      if (restoring) this.#ports.sync.restorePublication(canvasId, versionId);
       const release = this.#ports.sync.resolveNext(canvasId, parents);
       let committed: SyncedArtifactCommit;
       try {
@@ -692,6 +700,7 @@ export class SyncedArtifactService {
       octant: { ...header, versionId, sequence: sequence + 1, createdAt: now },
       definition: chosen.definition,
     };
+    if (restoring) this.#ports.sync.restorePublication(canvasId, versionId);
     const outcome = await this.#ports.sync.publishVersion({ canvasId, bundle, parents });
     if (outcome.status === "refused") {
       return outcome.reason === "sync-off"

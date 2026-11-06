@@ -93,6 +93,7 @@ export function SyncedArtifactDialog(props: SyncedArtifactDialogProps) {
               key={detail.publication.previewToken}
               preview={detail.publication}
               versions={detail.versions}
+              onRestore={props.onRestore}
               busy={props.busy}
               {...(props.onBackfill === undefined ? {} : { onBackfill: props.onBackfill })}
               {...(props.onBackfillControl === undefined
@@ -317,6 +318,7 @@ function ThreadChoice(props: {
 function PublicationChoices(props: {
   readonly preview: ArtifactPublicationPreview;
   readonly versions: ReadonlyArray<ArtifactSyncedVersion>;
+  readonly onRestore: () => void;
   readonly busy: boolean;
   readonly onBackfill?: SyncedArtifactDialogProps["onBackfill"];
   readonly onControl?: SyncedArtifactDialogProps["onBackfillControl"];
@@ -440,6 +442,17 @@ function PublicationChoices(props: {
             {batch.done} of {batch.total} versions published · {batch.state}
           </p>
           {batch.message === undefined ? null : <p className="oct-row-detail">{batch.message}</p>}
+          {batch.restoreAvailable === true ? (
+            <OctantButton
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={props.busy}
+              onClick={props.onRestore}
+            >
+              Restore artifact
+            </OctantButton>
+          ) : null}
           {batch.state === "finished" ? null : (
             <div className="synced-artifact__row">
               <OctantButton

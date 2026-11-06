@@ -527,7 +527,10 @@ them in.
   readable text, previews, Project name and computer identity sent there. A
   digest binds consent to the identity, destination, local history and known
   replica heads; a changed preview refuses and must be reviewed again. No
-  unselected ancestor is implicitly published. The journal records selection,
+  unselected ancestor is implicitly published. Each selected version names the
+  nearest earlier local version already published or explicitly queued, even
+  across separate publication requests; consecutive batches do not invent
+  independent roots. The journal records selection,
   queue entries and stop/resume; retry and restart reuse the same entries. Progress
   counts actual published versions, names pending membership or store failures,
   and Stop takes effect after the current atomic upload. A stopped publication
@@ -538,8 +541,14 @@ them in.
   the provider's stored copies. It uses an already published bundle, so deletion
   does not disclose unpublished local text. A changed preview refuses; a
   concurrent revision remains a visible conflict until a person chooses again.
-  Pending historical publication stops, and cannot resume over a deletion until
-  the artifact is restored. Local erase/purge stays local and publishes nothing;
+  Pending historical publication stops when a deletion is queued locally or
+  learned on pull, before any subsequent upload. Restore remains available when
+  an unpublished local revision stands beside that deletion. A durable intent
+  binds the person’s explicit Restore to its new version and a digest of the
+  known deletion slots before committing it. Historical publication can resume
+  only once that restored version is published; queued/offline restoration does
+  not suffice. A subsequently learned deletion requires a fresh Restore. The
+  same rule survives restart, and local purge removes the intent with its batch. Local erase/purge stays local and publishes nothing;
   it also erases queued historical bundles from both journal and live projection.
 - **Remaining limits.** Binding selects an existing compatible thread; it does
   not create one. Keep and Merge resolve version heads only: a tombstone beside

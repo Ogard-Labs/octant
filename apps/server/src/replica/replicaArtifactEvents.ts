@@ -47,6 +47,7 @@ export const REPLICA_ARTIFACT_EVENT_NAMES = {
   backfillStopped: "replica.backfill-stopped@1",
   backfillResumed: "replica.backfill-resumed@1",
   backfillQueued: "replica.backfill-version-queued@1",
+  backfillRestoring: "replica.backfill-restore-requested@1",
 } as const;
 
 export const ReplicaArtifactKind = Schema.Literal("artifact-version", "artifact-tombstone");
@@ -74,6 +75,12 @@ export const ReplicaBackfillStarted = Schema.Struct({
   versionIds: Schema.Array(CanvasVersionId).pipe(Schema.minItems(1), Schema.maxItems(24)),
 }).annotations(strict);
 export type ReplicaBackfillStarted = typeof ReplicaBackfillStarted.Type;
+export const ReplicaBackfillRestoring = Schema.Struct({
+  backfillId: Schema.UUID,
+  versionId: CanvasVersionId,
+  deletionDigest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+}).annotations(strict);
+export type ReplicaBackfillRestoring = typeof ReplicaBackfillRestoring.Type;
 export const ReplicaBackfillMarked = Schema.Struct({ backfillId: Schema.UUID }).annotations(strict);
 export const ReplicaBackfillQueued = Schema.Struct({
   ...ReplicaArtifactQueued.fields,
@@ -218,6 +225,7 @@ export function registerReplicaArtifactEvents(registry: EventRegistry): EventReg
     .register(names.backfillStopped, 1, ReplicaBackfillMarked)
     .register(names.backfillResumed, 1, ReplicaBackfillMarked)
     .register(names.backfillQueued, 1, ReplicaBackfillQueued)
+    .register(names.backfillRestoring, 1, ReplicaBackfillRestoring)
     .register(names.queued, 1, ReplicaArtifactQueued)
     .register(names.publishRefused, 1, ReplicaArtifactPublishRefused)
     .register(names.published, 1, ReplicaArtifactPublished)
@@ -233,6 +241,7 @@ export function registerReplicaArtifactEvents(registry: EventRegistry): EventReg
 }
 
 export const decodeReplicaArtifactQueued = Schema.decodeUnknownSync(ReplicaArtifactQueued);
+export const decodeReplicaBackfillRestoring = Schema.decodeUnknownSync(ReplicaBackfillRestoring);
 export const decodeReplicaBackfillStarted = Schema.decodeUnknownSync(ReplicaBackfillStarted);
 export const decodeReplicaBackfillMarked = Schema.decodeUnknownSync(ReplicaBackfillMarked);
 export const decodeReplicaBackfillQueued = Schema.decodeUnknownSync(ReplicaBackfillQueued);
