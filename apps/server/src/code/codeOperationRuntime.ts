@@ -1788,7 +1788,10 @@ export function createCodeOperationRuntime(
           acquire: {
             instanceId: thread.providerInstanceId,
             mode: "code",
-            projectRoot: root.checkoutRoot,
+            projectRoot:
+              stored.workingFolderId === undefined
+                ? root.checkoutRoot
+                : (root.workingDirectory ?? root.checkoutRoot),
             permissionPersistence: thread.permissionPersistence,
           },
           resume: {
@@ -2426,6 +2429,7 @@ interface ActiveTurn {
   readonly sessionId: string;
   readonly requestedSessionId: string;
   readonly providerRoot: string;
+  readonly folderCurrent?: () => boolean;
   readonly checkoutRoot: string;
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
@@ -2912,7 +2916,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (forkOrigin !== undefined && switchHandoff?.journaled !== "text") {
       // Seeding durably copies the source's session, so a turn whose admission
       // lapsed during driver and credential preparation copies nothing.
-      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
+      if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
+        return refuseRevokedAdmission();
       const seeded = await this.#options
         .forkProviderSession?.({
           fork: input.thread,
@@ -2940,7 +2945,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       switchHandoff?.status === "ready" &&
       switchHandoff.journaled !== "text"
     ) {
-      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
+      if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
+        return refuseRevokedAdmission();
       const seeded = await this.#options
         .forkProviderSession?.({
           fork: input.thread,
@@ -3062,7 +3068,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
     }
     // Driver, credentials, and fork preparation may outlive the host's admission.
-    if (input.admissionCurrent?.() === false) {
+    if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false) {
       await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }
@@ -3109,6 +3115,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : input.sessionId,
       requestedSessionId: input.sessionId,
       providerRoot: input.providerRoot ?? input.checkoutRoot,
+      ...(input.folderCurrent === undefined ? {} : { folderCurrent: input.folderCurrent }),
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
@@ -4678,6 +4685,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         attachments,
       }),
     };
+    const folderWatch =
+      active.folderCurrent === undefined
+        ? undefined
+        : setInterval(() => {
+            if (active.folderCurrent?.() === false) {
+              active.interruptMessage =
+                "The working folder became unavailable. Nothing was redirected.";
+              active.abort.abort();
+            }
+          }, 250);
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
@@ -4968,6 +4985,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }
       })
       .finally(() => {
+        clearInterval(folderWatch);
         active.reviewCapture?.close();
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)

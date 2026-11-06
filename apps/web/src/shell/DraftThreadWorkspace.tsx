@@ -333,6 +333,7 @@ const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
 ];
 
 export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
+  const [workingFolderValid, setWorkingFolderValid] = useState(true);
   const [folderChoice, setFolderChoice] = useState<{
     readonly projectId: string;
     readonly choice: ThreadWorkingFolderChoice;
@@ -514,8 +515,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     createFromSelection?.kind === "terminal" ? createFromSelection.request : undefined;
   // Every create path below names its arguments up to the ones it uses; a
   // terminal session rides after all of them, so it is added here once.
-  const createThread: DraftThreadWorkspaceProps["onCreateThread"] = (...args) =>
-    props.onCreateThread(
+  const createThread: DraftThreadWorkspaceProps["onCreateThread"] = (...args) => {
+    if (!workingFolderValid) return false;
+    if (workingFolder === undefined && terminalSession === undefined)
+      return props.onCreateThread(...args);
+    return props.onCreateThread(
       args[0],
       args[1],
       args[2],
@@ -529,8 +533,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       args[10],
       args[11],
       terminalSession ?? args[12],
-      workingFolder,
+      ...(workingFolder === undefined ? ([] as const) : ([workingFolder] as const)),
     );
+  };
   const [selectedProjectLabel, setSelectedProjectLabel] = useState(
     props.projectId === undefined ? undefined : props.projectName,
   );
@@ -744,6 +749,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         />
         {workingFolder === undefined ? null : (
           <ApprovedWorkingFolderControl
+            key={String(selectedProjectId)}
+            onValidityChange={setWorkingFolderValid}
             folders={workingFolders}
             value={workingFolder}
             onChange={(choice) => setFolderChoice({ projectId: String(selectedProjectId), choice })}

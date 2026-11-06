@@ -1,3 +1,4 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
@@ -689,6 +690,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             selectedRoot,
             thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           );
+          const directoryCurrent = threadWorkingDirectoryCurrent(selectedRoot, workingDirectory);
           return {
             checkoutRoot: root.rootPath,
             rootIdentity: root.rootIdentity,

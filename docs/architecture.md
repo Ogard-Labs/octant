@@ -3711,8 +3711,7 @@ steers, completes, archives, or stops a thread.
 A Work or Code Project has one **main folder** (its bound root) and any
 number of **extra folders** the person adds, up to 16 (maintainer decision,
 2026-10-31). An extra folder gets the same access as the main folder at each
-thread's [guardrail level](#security-and-authority); commands, checkouts and
-Git start in the main folder. Built.
+thread's [guardrail level](#security-and-authority). New tasks may choose an approved working folder; Code checkouts and Git remain bound to their own checkout. Built.
 
 - **Adding and removing.** Only a person adds or removes one, from the
   Project page's folders card. Add folder… opens the native folder picker on
@@ -3724,6 +3723,22 @@ Git start in the main folder. Built.
   when) and `project.extra-folder-removed@1` (the folder, who removed it,
   and when), each with the whole Project after the change, so replay rebuilds
   the list. A Project journaled before the field existed replays with none.
+- **Task working folder.** At creation, the person chooses a server-issued
+  folder identity from the current Project and an optional relative subdirectory.
+  The identity binds the Project's main binding revision and the extra folder's
+  journaled addition revision; remove/re-add produces a new identity even if the
+  path and timestamp match. A request supplies no arbitrary absolute root.
+  The provider, terminal default, saved actions and new Work artifacts use this
+  choice. The composer and Environment show it. The choice is immutable for that
+  task, including its subdirectory; a different choice starts a new task. Existing
+  threads without an identity retain their main-folder/checkout interpretation and
+  their existing relative-directory control. This avoids resuming a retained native
+  session against a different root. Missing, removed, relinked or replaced working
+  folders refuse rather than redirect output. A running turn checks its selected
+  identity and physical directory until settlement and cancels on revocation.
+  An extra working folder is shared, including for a child worktree. Code Git,
+  PRs, changed-file receipts and Review still describe that thread's primary
+  checkout only; the UI states that limit.
 - **What can be a folder.** The domain policy refuses the home folder and
   any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
   `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
@@ -3795,8 +3810,9 @@ Git start in the main folder. Built.
   journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
   folder unless the person picks an extra folder. A saved action previews its
-  host-resolved active checkout by default in a Code thread; Project-level
-  actions use the main folder. The action's directory is relative to that
+  host-resolved task working folder when selected, otherwise the active checkout
+  in a Code thread. Work task actions and new terminals use their task folder;
+  Project-level actions without a task use the main folder. The action's directory is relative to that
   folder. Explicit picks accept only the main folder or an extra folder the
   Project record lists, compared as the exact path. See the Project actions
   rule under [Security and authority](#security-and-authority). Every Project terminal
@@ -3809,12 +3825,11 @@ Git start in the main folder. Built.
   lists; the host refuses any other, and a folder missing on disk is left out
   of the binding. The Terminal tab's menu offers **Restart in** each extra
   folder (a Project with none shows no pick, and Plan shows none). The pick
-  stops a running shell and starts a fresh one in that folder, because a
-  running shell cannot change where it started; the first terminal a tab opens
-  still starts in the thread's working directory.
-  _Rationale:_ restarting on the pick, rather than a separate start control,
-  keeps one terminal per tab and reuses the stop-then-start path the Browser
-  grant already takes.
+  opens a confirmation naming the destination and explaining that restart stops
+  the shell and every command running in it. Only an explicit confirmation stops
+  it; Cancel preserves it, and New terminal offers a separate shell when available.
+  This terminal-only choice does not change the task's recorded working folder.
+  The first terminal a task opens starts in its recorded working directory.
 - **Work files.** A path relative to the main folder is always the main
   folder's; a file in an extra folder is named by its absolute path, and the
   host honours an absolute path only inside one of the Project's current
@@ -3828,15 +3843,13 @@ Git start in the main folder. Built.
   every folder the same way, so a file written in an extra folder lists as
   Work's own. An artifact the host creates for a Work thread takes a name with
   no path and is placed in the folder that thread works in: its working
-  directory, which is always inside the main folder, read from the thread by
-  the host and never from the request, and refused for a thread of another
-  Project. Without a thread it goes to the main folder. The artifact's record
-  keeps that folder, so revising, renaming, converting and exporting it act on
-  the same folder.
-  _Rationale:_ a thread's working directory is a path relative to the main
-  folder by contract, so no thread works in an extra folder, and an artifact
-  never lands in one. Letting a request name an extra folder would widen what
-  a create request may reach beyond what it reaches today.
+  directory relative to its selected approved root, read from the thread by
+  the host and never from the create request. Without a thread it goes to the
+  main folder. The artifact's record retains its folder identity and relative
+  destination, so revise, rename, conversion, export and preview continue there
+  after replay; a later thread change cannot retarget it. Removing/re-adding or
+  relinking that root refuses these operations without a fallback. Legacy records
+  without an identity retain their main-folder interpretation.
 - **`@file` picker and Code search.** A mention is the main folder's relative
   path or the absolute path of a file inside one of the Project's current
   extra folders; the host reads an absolute path only there and reports any
@@ -11409,8 +11422,9 @@ access` agree); a thread's own change is journaled as
   existing versioned Project events; paired devices cannot save or launch them.
   Suggestions from package scripts and Makefile targets remain read-only until
   confirmed. Running first previews the host-resolved folder and branch.
-  A Code thread defaults to its authorized active checkout; the Project folder
-  and approved extra folders remain explicit choices. A selected extra folder
+  A task with a recorded working-folder choice defaults to that approved folder
+  and relative subdirectory; a legacy Code thread defaults to its active checkout.
+  The Project folder and approved extra folders remain explicit choices. A selected extra folder
   is shared, not a child worktree. A Project-level run uses the Project folder.
   Changed checkout identities, revisions, bindings, task authority or saved
   commands refuse stale launch. Plan never starts an action. A task-bound run

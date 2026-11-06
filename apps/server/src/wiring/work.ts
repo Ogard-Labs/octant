@@ -1,3 +1,4 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -602,7 +603,10 @@ export function wireWork(deps: WorkDependencies) {
       consumeIssueContextFramed: consumeCreateFromIssueFramed,
       projects: projectService,
       projection: workTurnProjection,
-      workingDirectories: { resolve: resolveThreadWorkingDirectory },
+      workingDirectories: {
+        resolve: resolveThreadWorkingDirectory,
+        current: threadWorkingDirectoryCurrent,
+      },
       resolveDriver: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined) return undefined;

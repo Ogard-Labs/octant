@@ -1,5 +1,6 @@
 import { ChildWorktreeSnapshotId, ChildWorktreeSourceReview } from "./childWorktreeSources";
 import { Schema } from "effect";
+import { WorkThreadId } from "./workThreads";
 import { CodeTerminalId, CodeThreadId, CodeCheckoutId, WorktreeReceiptId } from "./code";
 import { CodeOperationId, MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
 import { UtcTimestamp, AggregateVersion } from "./events";
@@ -76,6 +77,7 @@ const ActionRun = Schema.Struct({
   folder: Schema.String.pipe(Schema.maxLength(4608)),
   branch: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
   thread: Schema.optional(ActionThread),
+  workThreadId: Schema.optional(WorkThreadId),
 }).annotations(strict);
 
 export const WorktreePreparation = Schema.Struct({
@@ -136,6 +138,7 @@ export const ProjectTerminalCommand = Schema.Union(
     actionId: ProjectActionId,
     ...Folder,
     thread: Schema.optional(ActionThread),
+    workThreadId: Schema.optional(WorkThreadId),
   }).annotations(strict),
 
   Schema.Struct({
@@ -145,11 +148,13 @@ export const ProjectTerminalCommand = Schema.Union(
     ...Folder,
     actionId: ProjectActionId,
     thread: Schema.optional(ActionThread),
+    workThreadId: Schema.optional(WorkThreadId),
     projectVersion: Schema.optional(AggregateVersion),
   }).annotations(strict),
 
   Schema.Struct({
     kind: Schema.Literal("start"),
+    workThreadId: Schema.optional(WorkThreadId),
     ...Target,
     ...TerminalGeometry,
     ...Folder,

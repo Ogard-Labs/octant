@@ -519,6 +519,53 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("keeps the Git checkout separate from the provider folder and stops on folder revocation", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const acquire = vi.fn(() => Effect.succeed(connection));
+    let current = true;
+    const fixture = runtimeFixture({
+      provider: { ...providerDriver(connection), acquire },
+      approvalValidator: false,
+      resolveCheckoutRoot: async () => ({
+        checkoutRoot: "/private/exact",
+        workingDirectory: "/approved/notes",
+        rootCurrent: () => current,
+        shell: "/bin/zsh",
+        credentialReferences: [],
+        environment: {},
+      }),
+    });
+    try {
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), workingFolderId: `folder_${"a".repeat(64)}` }),
+      );
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(acquire).toHaveBeenCalled());
+      expect(acquire).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectRoot: "/approved/notes",
+          extraFolders: expect.arrayContaining(["/private/exact"]),
+        }),
+      );
+      current = false;
+      await vi.waitFor(() => expect(fixture.conversation().turns[0]?.status).toBe("interrupted"), {
+        timeout: 2000,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
   it("releases the spend reservation when a Code turn is cancelled", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

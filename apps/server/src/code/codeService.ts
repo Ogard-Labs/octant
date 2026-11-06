@@ -1609,6 +1609,20 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
+          if (
+            thread.workingFolderId !== undefined &&
+            (await this.#workingDirectories.resolve(
+              authenticatedWindowId,
+              thread,
+              checkout,
+              thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            )) === undefined
+          )
+            throw this.#failure(
+              "invalid",
+              "The selected working folder changed while the task was being created.",
+            );
+
           this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
             this.#append(
               "code-thread",
@@ -2069,6 +2083,14 @@ export class CodeService {
         };
       }
       if (command.kind === "change-code-thread-working-directory") {
+        if (
+          current.workingFolderId !== undefined &&
+          String(command.workingDirectory) !== String(current.workingDirectory ?? ".")
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose another working subfolder in a new task; this conversation keeps its original provider session.",
+          );
         if (
           command.workingFolderId !== undefined &&
           command.workingFolderId !== current.workingFolderId
@@ -3484,6 +3506,14 @@ export class CodeService {
     if (source?.type !== "code" || destination === undefined) {
       throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
     }
+    if (
+      current.workingFolderId !== undefined &&
+      String(destination.id) !== String(current.projectId)
+    )
+      throw this.#failure(
+        "invalid",
+        "This task's working folder is bound to its current Project. Start a new task in the destination Project.",
+      );
     const signals = boardRuntimeActivityFromWorks(
       this.#persistence.readCodeRuntimeWorks(current.id),
     );

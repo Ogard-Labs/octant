@@ -3,7 +3,7 @@ import {
   type ApprovedWorkingFolder,
   type ThreadWorkingFolderChoice,
 } from "@octant/contracts";
-import { useId } from "react";
+import { useId, useState, useEffect } from "react";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
 export function ApprovedWorkingFolderControl(props: {
@@ -11,8 +11,17 @@ export function ApprovedWorkingFolderControl(props: {
   readonly value: ThreadWorkingFolderChoice;
   readonly onChange: (choice: ThreadWorkingFolderChoice) => void;
   readonly code: boolean;
+  readonly onValidityChange?: (valid: boolean) => void;
 }) {
   const id = useId();
+  const [valid, setValid] = useState(true);
+  useEffect(() => {
+    props.onValidityChange?.(valid);
+  }, [valid, props.onValidityChange]);
+  const updateValidity = (next: boolean) => {
+    setValid(next);
+    props.onValidityChange?.(next);
+  };
   const selected = props.folders.find((folder) => folder.id === props.value.workingFolderId);
   return (
     <div className="working-directory-control">
@@ -22,11 +31,12 @@ export function ApprovedWorkingFolderControl(props: {
         options={props.folders.map((folder) => ({ id: folder.id, label: folder.label }))}
         onValueChange={(value) => {
           const folder = props.folders.find((candidate) => candidate.id === value);
-          if (folder !== undefined)
-            props.onChange({
-              workingFolderId: folder.id,
-              workingDirectory: decodeThreadWorkingDirectory("."),
-            });
+          if (folder === undefined) return;
+          updateValidity(true);
+          props.onChange({
+            workingFolderId: folder.id,
+            workingDirectory: decodeThreadWorkingDirectory("."),
+          });
         }}
       />
       <label htmlFor={id}>Subfolder within working folder</label>
@@ -38,12 +48,19 @@ export function ApprovedWorkingFolderControl(props: {
           try {
             const directory = decodeThreadWorkingDirectory(event.currentTarget.value);
             props.onChange({ ...props.value, workingDirectory: directory });
+            updateValidity(true);
             event.currentTarget.setCustomValidity("");
           } catch {
+            updateValidity(false);
             event.currentTarget.setCustomValidity("Use . or a relative subfolder without ..");
           }
         }}
       />
+      {!valid ? (
+        <small role="alert">
+          Use . or a relative subfolder without .. before starting this task.
+        </small>
+      ) : null}
       <small>
         {selected === undefined
           ? "Working folder unavailable. Choose a current Project folder."

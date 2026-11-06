@@ -191,6 +191,9 @@ function harness(
     readonly access?: (window: string, project: string) => boolean;
     readonly root?: string | undefined;
     readonly resolveRoot?: () => Promise<string | undefined>;
+    readonly resolveActionWorkThread?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["resolveActionWorkThread"];
     readonly resolveActionCheckout?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["resolveActionCheckout"];
@@ -223,6 +226,9 @@ function harness(
     ...(options.resolveActionCheckout === undefined
       ? {}
       : { resolveActionCheckout: options.resolveActionCheckout }),
+    ...(options.resolveActionWorkThread === undefined
+      ? {}
+      : { resolveActionWorkThread: options.resolveActionWorkThread }),
     suggestActions: async () => [
       { name: "Dev", command: "bun run dev", directory: ".", source: "package.json" as const },
     ],
@@ -383,69 +389,79 @@ it("allows a Plan checkout preview but refuses to start its saved command", asyn
   }
 });
 
-it("keeps a child action inside its checkout and stops it when authority is revoked", async () => {
-  const actionId = "93000000-0000-4000-8000-000000000001";
-  let current = true;
-  const f = harness({
-    projects: new Map([
-      [
-        ids.project,
-        project({
-          actions: [{ id: actionId, name: "Test", command: "printf ready", directory: "." }],
-        }),
-      ],
-    ]),
-    resolveActionCheckout: async () => ({
-      root: "/worktrees/child",
-      branch: "feature/child",
-      executionPolicy: "approval-gated",
-      current: () => current,
-      active: () => current,
-    }),
-  });
-  const thread = {
-    threadId: "94000000-0000-4000-8000-000000000001",
-    checkoutId: "94000000-0000-4000-8000-000000000002",
-  } as const;
-  try {
-    expect(
-      await f.service.execute(windowId, "local-window", {
-        kind: "preview-action",
-        projectId,
-        actionId: actionId as never,
-        thread: thread as never,
+it.each([undefined, "/approved/shared/subfolder"])(
+  "keeps a child action in its selected folder %s and stops it when authority is revoked",
+  async (workingRoot) => {
+    const actionId = "93000000-0000-4000-8000-000000000001";
+    let current = true;
+    const f = harness({
+      projects: new Map([
+        [
+          ids.project,
+          project({
+            actions: [{ id: actionId, name: "Test", command: "printf ready", directory: "." }],
+          }),
+        ],
+      ]),
+      resolveActionCheckout: async () => ({
+        root: "/worktrees/child",
+        ...(workingRoot === undefined ? {} : { workingRoot }),
+        branch: "feature/child",
+        executionPolicy: "approval-gated",
+        current: () => current,
+        active: () => current,
       }),
-    ).toMatchObject({
-      kind: "project-action-preview",
-      action: { folder: "/worktrees/child", branch: "feature/child" },
     });
-    await f.service.execute(windowId, "local-window", {
-      ...start(),
-      kind: "start-action",
-      actionId: actionId as never,
-      thread: thread as never,
-    });
-    const launch = f.terminals.launches[0];
-    expect(launch).toMatchObject({ cwd: "/worktrees/child", executionPolicy: "approval-gated" });
-    expect(launch?.extraFolders).not.toContain(root);
-    expect(launch?.admit?.()).toBe(true);
-    current = false;
-    expect(launch?.admit?.()).toBe(false);
-    await f.service.settleActionAuthorities();
-    expect(f.terminals.terminated).toEqual([ids.terminal]);
-    expect(
+    const thread = {
+      threadId: "94000000-0000-4000-8000-000000000001",
+      checkoutId: "94000000-0000-4000-8000-000000000002",
+    } as const;
+    try {
+      expect(
+        await f.service.execute(windowId, "local-window", {
+          kind: "preview-action",
+          projectId,
+          actionId: actionId as never,
+          thread: thread as never,
+        }),
+      ).toMatchObject({
+        kind: "project-action-preview",
+        action: {
+          folder: workingRoot ?? "/worktrees/child",
+          ...(workingRoot === undefined ? { branch: "feature/child" } : {}),
+        },
+      });
       await f.service.execute(windowId, "local-window", {
-        ...start({ terminalId: ids.secondTerminal }),
+        ...start(),
         kind: "start-action",
         actionId: actionId as never,
         thread: thread as never,
-      }),
-    ).toMatchObject({ kind: "project-terminal-refused", reason: "authority-revoked" });
-    expect(f.terminals.launches).toHaveLength(1);
-  } finally {
-    f.connection.close();
-  }
-});
+      });
+      const launch = f.terminals.launches[0];
+      expect(launch).toMatchObject({
+        cwd: workingRoot ?? "/worktrees/child",
+        executionPolicy: "approval-gated",
+      });
+      expect(launch?.extraFolders).not.toContain(root);
+      expect(launch?.admit?.()).toBe(true);
+      current = false;
+      expect(launch?.admit?.()).toBe(false);
+      await f.service.settleActionAuthorities();
+      expect(f.terminals.terminated).toEqual([ids.terminal]);
+      expect(
+        await f.service.execute(windowId, "local-window", {
+          ...start({ terminalId: ids.secondTerminal }),
+          kind: "start-action",
+          actionId: actionId as never,
+          thread: thread as never,
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused", reason: "authority-revoked" });
+      expect(f.terminals.launches).toHaveLength(1);
+    } finally {
+      f.connection.close();
+    }
+  },
+);
 
 it("runs a saved action in a fresh process and never writes into a busy terminal", async () => {
   const f = harness({
@@ -1227,4 +1243,47 @@ it("runs a preparation recipe through its once-only setup lifecycle in a managed
   });
   expect(f.terminals.launches).toHaveLength(0);
   f.connection.close();
+});
+
+it("starts a Work terminal in its task folder and refuses a withdrawn task without fallback", async () => {
+  let current = true;
+  const f = harness({
+    projects: new Map([[ids.project, project({ type: "work" })]]),
+    resolveActionWorkThread: async () =>
+      current
+        ? {
+            root: "/approved/notes/subfolder",
+            executionPolicy: "approval-gated",
+            current: () => current,
+            active: () => current,
+          }
+        : undefined,
+  });
+  try {
+    const command = decodeProjectTerminalCommand({
+      ...start(),
+      workThreadId: "94000000-0000-4000-8000-000000000001",
+    });
+    expect(await f.service.execute(windowId, "local-window", command)).toMatchObject({
+      kind: "project-terminal",
+    });
+    expect(f.terminals.launches[0]).toMatchObject({ cwd: "/approved/notes/subfolder" });
+    current = false;
+    expect(f.terminals.launches[0]?.admit?.()).toBe(false);
+    await f.service.settleActionAuthorities();
+    expect(f.terminals.terminated).toContain(ids.terminal);
+    expect(
+      await f.service.execute(
+        windowId,
+        "local-window",
+        decodeProjectTerminalCommand({
+          ...start({ terminalId: ids.secondTerminal }),
+          workThreadId: "94000000-0000-4000-8000-000000000001",
+        }),
+      ),
+    ).toMatchObject({ kind: "project-terminal-refused" });
+    expect(f.terminals.launches).toHaveLength(1);
+  } finally {
+    f.connection.close();
+  }
 });

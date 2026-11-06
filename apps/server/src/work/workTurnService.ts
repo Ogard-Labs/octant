@@ -313,6 +313,7 @@ export interface WorkTurnServiceDependencies {
   };
   readonly projection: WorkTurnProjection;
   readonly workingDirectories: {
+    readonly current?: (root: string, directory: string) => () => boolean;
     readonly resolve: (
       authoritativeRoot: string,
       workingDirectory: ThreadWorkingDirectory,
@@ -1360,6 +1361,31 @@ export class WorkTurnService {
 
     const controller = new AbortController();
     this.#controllers.set(String(command.requestId), controller);
+    const selectedRoot =
+      project === undefined
+        ? undefined
+        : approvedWorkingFolderRoot(project, command.authority.workingFolderId);
+    const physicalCurrent =
+      selectedRoot === undefined
+        ? undefined
+        : this.#workingDirectories.current?.(selectedRoot, projectRoot);
+    const folderCurrent = () => {
+      if (command.authority.workingFolderId === undefined || project === undefined) return true;
+      const latest = this.#persistence.readProject(project.id);
+      return (
+        latest?.type === "work" &&
+        latest.lifecycle === "active" &&
+        approvedWorkingFolderRoot(latest, command.authority.workingFolderId) === selectedRoot &&
+        physicalCurrent?.() !== false
+      );
+    };
+    const folderWatch =
+      command.authority.workingFolderId === undefined
+        ? undefined
+        : setInterval(() => {
+            if (!folderCurrent())
+              controller.abort("Working folder is unavailable; nothing is redirected.");
+          }, 250);
     const launch = this.#runTurn({
       command,
       ...(thread === undefined ? {} : { thread }),
@@ -1375,8 +1401,7 @@ export class WorkTurnService {
           : [
               ...new Set([
                 ...(command.authority.workingFolderId !== undefined &&
-                approvedWorkingFolderRoot(project, command.authority.workingFolderId) !==
-                  project.binding.canonicalRoot
+                projectRoot !== project.binding.canonicalRoot
                   ? [project.binding.canonicalRoot]
                   : []),
                 ...projectExtraFolderRoots(project),
@@ -1387,13 +1412,12 @@ export class WorkTurnService {
       attachments: attachmentInputs,
       contextPlan: planned,
       sessionHolds,
-      ...(options?.admissionCurrent === undefined
-        ? {}
-        : { admissionCurrent: options.admissionCurrent }),
+      admissionCurrent: () => folderCurrent() && options?.admissionCurrent?.() !== false,
       ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       signal: controller.signal,
     }).finally(() => {
+      clearInterval(folderWatch);
       if (
         this.#runningAccess.get(String(command.threadId))?.requestId === String(command.requestId)
       ) {

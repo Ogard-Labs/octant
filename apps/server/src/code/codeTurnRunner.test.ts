@@ -246,54 +246,60 @@ describe("CodeTurnRunner", () => {
     },
   );
 
-  it("subscribes before send and acquires Code in the exact checkout with thread authority", async () => {
-    let subscribed = false;
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = fakeConnection({
-      subscribe: Effect.sync(() => {
-        subscribed = true;
-        return Stream.fromQueue(queue);
-      }),
-      send: vi.fn(() =>
-        Effect.gen(function* () {
-          expect(subscribed).toBe(true);
-          yield* Queue.offer(queue, event({ kind: "text-delta", text: "hello" }));
-          yield* Queue.offer(queue, event({ kind: "completed" }));
+  it.each([undefined, "/private/approved/task"])(
+    "subscribes before send and launches in the chosen folder %s with thread authority",
+    async (providerRoot) => {
+      let subscribed = false;
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = fakeConnection({
+        subscribe: Effect.sync(() => {
+          subscribed = true;
+          return Stream.fromQueue(queue);
         }),
-      ),
-    });
-    const acquire = vi.fn(() => Effect.succeed(connection));
-    const events: CodeTurnEvent[] = [];
-    const outcomes: CodeTurnOutcome[] = [];
-    const runner = new CodeTurnRunner();
-
-    await Effect.runPromise(
-      Effect.scoped(
-        runner.run(
-          input({
-            provider: { acquire },
-            persistEvent: (next) => Effect.sync(() => events.push(next)),
-            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+        send: vi.fn(() =>
+          Effect.gen(function* () {
+            expect(subscribed).toBe(true);
+            yield* Queue.offer(queue, event({ kind: "text-delta", text: "hello" }));
+            yield* Queue.offer(queue, event({ kind: "completed" }));
           }),
         ),
-      ),
-    );
+      });
+      const acquire = vi.fn(() => Effect.succeed(connection));
+      const events: CodeTurnEvent[] = [];
+      const outcomes: CodeTurnOutcome[] = [];
+      const runner = new CodeTurnRunner();
 
-    expect(acquire).toHaveBeenCalledWith({
-      instanceId: providerInstanceId,
-      mode: "code",
-      projectRoot: "/private/worktrees/exact",
-      permissionPersistence: "current-session",
-    });
-    expect(connection.start).toHaveBeenCalledWith({
-      sessionId,
-      modelId: decodeProviderModelId("model-a"),
-      executionPolicy: "approval-gated",
-      tools: [],
-    });
-    expect(events).toContainEqual(expect.objectContaining({ category: "message", text: "hello" }));
-    expect(outcomes.at(-1)).toBe("completed");
-  });
+      await Effect.runPromise(
+        Effect.scoped(
+          runner.run(
+            input({
+              ...(providerRoot === undefined ? {} : { providerRoot }),
+              provider: { acquire },
+              persistEvent: (next) => Effect.sync(() => events.push(next)),
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+            }),
+          ),
+        ),
+      );
+
+      expect(acquire).toHaveBeenCalledWith({
+        instanceId: providerInstanceId,
+        mode: "code",
+        projectRoot: providerRoot ?? "/private/worktrees/exact",
+        permissionPersistence: "current-session",
+      });
+      expect(connection.start).toHaveBeenCalledWith({
+        sessionId,
+        modelId: decodeProviderModelId("model-a"),
+        executionPolicy: "approval-gated",
+        tools: [],
+      });
+      expect(events).toContainEqual(
+        expect.objectContaining({ category: "message", text: "hello" }),
+      );
+      expect(outcomes.at(-1)).toBe("completed");
+    },
+  );
 
   it("reconciles provider file, diff, and successful tool claims as observations, never proof", async () => {
     const providerEvents = [

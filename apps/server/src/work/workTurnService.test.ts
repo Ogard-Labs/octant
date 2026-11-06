@@ -158,6 +158,47 @@ describe("WorkTurnService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     expect(fixture.acquireInputs).toHaveLength(1);
   });
+  it("interrupts a running provider when its selected folder is withdrawn", async () => {
+    const base = workProject();
+    const project = workProject({
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/notes",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+      ],
+    });
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw Error("Missing folder");
+    let runningSignal: AbortSignal | undefined;
+    const fixture = serviceFixture({
+      project,
+      turnRuntime: {
+        run: async (input) => {
+          runningSignal = input.signal;
+          await new Promise<void>((resolve) => {
+            if (input.signal.aborted) resolve();
+            else input.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { kind: "cancelled" };
+        },
+      },
+    });
+    const thread = { ...(await fixture.threads.read()), workingFolderId: choice.id };
+    fixture.threads.read.mockResolvedValue(thread);
+    fixture.threads.bootstrap.mockResolvedValue({ threads: [thread] });
+    const command = startCommand();
+    await fixture.service.startFirstTurn(ids.window, {
+      ...command,
+      authority: { ...command.authority, workingFolderId: choice.id },
+    });
+    await vi.waitFor(() => expect(runningSignal).toBeDefined());
+    fixture.persistence.readProject.mockReturnValue(base);
+    await vi.waitFor(() => expect(runningSignal?.aborted).toBe(true), { timeout: 2000 });
+    await fixture.waitForIdle();
+    expect(fixture.projection.lookup(ids.request)?.status).toBe("cancelled");
+  });
   it("journals the exact accepted framed input and keeps it through projection replay and an identical retry", async () => {
     const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
     const fixture = serviceFixture({ turnRuntime: { run } });

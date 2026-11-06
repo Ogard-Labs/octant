@@ -193,6 +193,16 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
       threadId: thread.id,
       checkoutId: checkout.id,
       workingDirectory: thread.workingDirectory ?? ".",
+      ...(thread.workingFolderId === undefined
+        ? {}
+        : {
+            workingFolder: project.workingFolders?.find(
+              (folder) => folder.id === thread.workingFolderId,
+            ),
+            workingFolderUnavailable: !project.workingFolders?.some(
+              (folder) => folder.id === thread.workingFolderId,
+            ),
+          }),
       threadVersion: thread.version,
       observedAt: this.options.clock(),
     };

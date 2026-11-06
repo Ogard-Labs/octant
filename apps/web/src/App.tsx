@@ -6777,6 +6777,14 @@ function LaunchedShell(
         terminalId,
         columns: 100,
         rows: 30,
+        ...(activeMode === "work" &&
+        activeWorkThreadId !== undefined &&
+        workNavigation.bootstrap?.threads.some(
+          (thread) =>
+            String(thread.id) === String(activeWorkThreadId) && thread.projectId === projectId,
+        )
+          ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
+          : {}),
         ...(folder === undefined ? {} : { folder }),
       });
     } catch {
@@ -6825,6 +6833,13 @@ function LaunchedShell(
       target: {
         projectId,
         actionId: action.id,
+        ...(activeMode === "work" &&
+        activeWorkThreadId !== undefined &&
+        workNavigation.bootstrap?.threads.some(
+          (thread) => thread.id === activeWorkThreadId && thread.projectId === projectId,
+        )
+          ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
+          : {}),
         ...(folder === undefined ? {} : { folder }),
         ...(activeMode !== "code" ||
         view === undefined ||

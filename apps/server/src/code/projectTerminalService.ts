@@ -56,6 +56,7 @@ export const PROJECT_TERMINAL_AGGREGATE = "project-terminal";
 export type ProjectTerminalCaller = "local-window" | "remote-device";
 
 interface ActionCheckout {
+  readonly workingRoot?: string;
   readonly preparationAccess?: { readonly commands: boolean; readonly network: boolean };
   readonly receiptId?: string;
   readonly preparationThread?: { readonly threadId: string; readonly checkoutId: string };
@@ -73,6 +74,11 @@ type ActionReceipt = NonNullable<
 export interface ProjectTerminalServiceOptions {
   readonly worktreePreparation?: WorktreePreparationService;
   readonly childWorktreeSources?: ChildWorktreeSourceService;
+  readonly resolveActionWorkThread?: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    threadId: import("@octant/contracts").WorkThreadId,
+  ) => Promise<ActionCheckout | undefined>;
   readonly resolveActionCheckout?: (
     windowId: WindowId,
     projectId: ProjectId,
@@ -463,15 +469,21 @@ export class ProjectTerminalService {
       (candidate) => String(candidate.id) === String(command.actionId),
     );
     if (action === undefined) return refused("unavailable", "This Project has no such action.");
+    if (command.thread !== undefined && command.workThreadId !== undefined)
+      return refused("unauthorized", "Choose one task for this action.");
     const checkout =
-      command.thread === undefined
-        ? undefined
-        : await (
-            this.#options.resolveActionCheckout?.(windowId, command.projectId, command.thread) ??
-            Promise.resolve(undefined)
-          ).catch(() => undefined);
+      command.workThreadId !== undefined
+        ? await this.#options
+            .resolveActionWorkThread?.(windowId, command.projectId, command.workThreadId)
+            .catch(() => undefined)
+        : command.thread === undefined
+          ? undefined
+          : await (
+              this.#options.resolveActionCheckout?.(windowId, command.projectId, command.thread) ??
+              Promise.resolve(undefined)
+            ).catch(() => undefined);
     if (
-      command.thread !== undefined &&
+      (command.thread !== undefined || command.workThreadId !== undefined) &&
       (checkout === undefined ||
         !checkout.current() ||
         (command.kind === "start-action" && checkout.executionPolicy === "plan"))
@@ -485,7 +497,7 @@ export class ProjectTerminalService {
       return refused("unavailable", "This Project's folder is unavailable.");
     const folder =
       command.folder === undefined
-        ? (checkout?.root ?? projectRoot)
+        ? (checkout?.workingRoot ?? checkout?.root ?? projectRoot)
         : this.#folderRoot(authority.project, projectRoot, command.folder);
     const settled = this.#authority(windowId, command.projectId);
     if (folder === undefined)
@@ -498,10 +510,10 @@ export class ProjectTerminalService {
       return refused("authority-revoked", "This Project changed. Review its action again.");
     const receipt: ActionReceipt = {
       actionId: action.id,
+      ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
       name: action.name,
       folder: action.directory === "." ? folder : `${folder}/${action.directory}`,
-      ...(checkout?.branch === undefined ||
-      (command.folder !== undefined && command.folder !== checkout.root)
+      ...(checkout?.branch === undefined || folder !== checkout.root
         ? {}
         : { branch: checkout.branch }),
       ...(command.thread === undefined
@@ -577,15 +589,31 @@ export class ProjectTerminalService {
     ) {
       return refused("authority-revoked", "This Project changed while its terminal was starting.");
     }
-    const folder = placed?.folder ?? this.#folderRoot(authority.project, root, command.folder);
+    const workThread =
+      placed?.checkout ??
+      (command.workThreadId === undefined
+        ? undefined
+        : await this.#options
+            .resolveActionWorkThread?.(windowId, command.projectId, command.workThreadId)
+            .catch(() => undefined));
+    if (command.workThreadId !== undefined && (workThread === undefined || !workThread.current()))
+      return refused(
+        "unavailable",
+        "This task's working folder is unavailable. Nothing was redirected.",
+      );
+    const folder =
+      placed?.folder ??
+      (command.folder === undefined && workThread !== undefined
+        ? (workThread.workingRoot ?? workThread.root)
+        : this.#folderRoot(authority.project, root, command.folder));
     if (folder === undefined) {
       return refused("unavailable", "That folder is not one of this Project's folders.");
     }
     // A Work Project's terminal is confined as a Code Project's is when the
     // Project remembers no Full access; Work Projects remember none.
     const posture: ProjectTerminalPosture =
-      placed?.checkout !== undefined
-        ? placed.checkout.executionPolicy === "full-access"
+      workThread !== undefined
+        ? workThread.executionPolicy === "full-access"
           ? "full-access"
           : "approval-gated"
         : authority.project.type === "code" &&
@@ -615,7 +643,9 @@ export class ProjectTerminalService {
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
         ...(action === undefined
-          ? {}
+          ? workThread === undefined
+            ? {}
+            : { admit: () => workThread.current() }
           : {
               command: actionShellCommand(folder, action),
               admit: () => {
@@ -639,7 +669,9 @@ export class ProjectTerminalService {
         // shell can move between them; the pick only chooses where it starts.
         // One missing on disk is left out, as from a runtime's profile.
         extraFolders: [
-          placed?.checkout?.root ?? root,
+          ...(command.workThreadId !== undefined
+            ? [root, ...(workThread === undefined ? [] : [workThread.root])]
+            : [workThread?.root ?? root]),
           ...projectExtraFolderRoots(authority.project).filter(isDirectory),
         ].filter((candidate) => candidate !== folder),
         // Its own shell history and state, apart from every thread's shells in
@@ -648,7 +680,7 @@ export class ProjectTerminalService {
         columns: command.columns,
         rows: command.rows,
         credentialReferences: [],
-        executionPolicy: placed?.checkout?.executionPolicy ?? posture,
+        executionPolicy: workThread?.executionPolicy ?? posture,
       });
     } catch (error) {
       if (action !== undefined)
@@ -672,7 +704,7 @@ export class ProjectTerminalService {
       posture,
       placed?.receipt,
       action !== undefined,
-      placed?.checkout?.active,
+      workThread?.active,
     );
   }
 

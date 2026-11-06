@@ -1,4 +1,5 @@
 import {
+  decodeProjectWorkingFolderId,
   decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderModelId,
@@ -1102,6 +1103,43 @@ describe("DraftThreadWorkspace", () => {
     );
   });
 
+  it("shows the approved working choice and submits its identity with the unchanged Work draft", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const main = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const extra = decodeProjectWorkingFolderId(`folder_${"b".repeat(64)}`);
+    const withFolders = projects.map((project) =>
+      project.type === "work"
+        ? {
+            ...project,
+            workingFolders: [
+              { id: main, label: "Main folder", kind: "main" as const },
+              { id: extra, label: "Shared notes 日本語", kind: "extra" as const },
+            ],
+          }
+        : project,
+    );
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="work"
+        projectId={workProjectId}
+        projects={withFolders}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Draft brief");
+    await user.click(screen.getByRole("combobox", { name: "Task working folder" }));
+    await user.click(await screen.findByRole("option", { name: "Shared notes 日本語" }));
+    await user.clear(screen.getByLabelText("Subfolder within working folder"));
+    await user.type(screen.getByLabelText("Subfolder within working folder"), "資料 folder");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread.mock.calls[0]?.[0]).toBe("Draft brief");
+    expect(onCreateThread.mock.calls[0]?.[13]).toEqual({
+      workingFolderId: extra,
+      workingDirectory: "資料 folder",
+    });
+  });
   it("submits the saved Project selected inline without opening a picker", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();

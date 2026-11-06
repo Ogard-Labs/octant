@@ -808,6 +808,7 @@ describe("Project extra folders", () => {
     const { project, folder } = add(work(), "/Users/example/Notes");
     expect(folder).toEqual({
       canonicalRoot: "/Users/example/Notes",
+      addedRevision: 2,
       addedBy: actor,
       addedAt: updatedAt,
     });

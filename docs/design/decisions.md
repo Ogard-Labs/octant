@@ -686,7 +686,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 ### Projects with several folders
 
-A Work or Code Project has one main folder plus extra folders the person adds; each extra folder gets the main folder's access at the thread's level, and commands, checkouts and Git start in the main folder.
+A Work or Code Project has one main folder plus extra folders the person adds; each gets the same access at the task's level. New tasks choose a server-issued working-folder identity and relative subdirectory at creation. Code Git and checkouts retain their own root.
 
 - Only a person adds or removes an extra folder, through a folder-picker receipt; each change is journaled with who and when and replays, and a Project made before the field existed has none.
 - An extra folder is never the home folder or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
@@ -697,7 +697,9 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 - A path relative to the main folder is always the main folder's; a file in an extra folder is named by its absolute path, which the host honours only inside one of the Project's current extra folders. The Work Files listing and a turn's record of changed files cover every folder, and the Work overview lists each extra folder's top level by its last component, with no host path.
 - The `@file` picker (Work and Code) lists and reads a file in an extra folder by its absolute path, only inside one of the Project's current extra folders; Code search covers the extra folders and marks each match with its folder; the harness shell and the ACP client file and terminal tools reach every Project folder.
 - The Code editor and the Files explorer open, read and save a file in an extra folder, named by its absolute path and placed by the same root authority; each extra folder is its own tree beneath the checkout's, and a search match there opens.
-- A Work artifact the host creates for a thread is placed in that thread's working directory, read from the thread and never from the request, and stays in the main folder without a thread; no thread works in an extra folder, so an artifact never lands in one.
+- A new task's approved folder identity binds the current Project binding and folder-add revision; it cannot be changed in place. Provider, terminal defaults, saved actions and new Work artifacts use it. Revocation or loss cancels running work and refuses new effects without redirecting output. Existing threads retain their earlier interpretation.
+- Work artifact records keep that identity and their relative destination through revise, rename, conversion, export and preview, including replay and removed/re-added root negatives. Unscoped and legacy artifacts stay in the main folder. An extra working folder is shared; Code Git, PR, changed files and Review remain checkout-only and say so.
+- A terminal folder change names the destination and explains process termination before an explicit restart; Cancel preserves the running shell and New terminal remains a deliberate alternative.
 - The explorer watches the checkout and all sixteen extra roots over one authenticated stream shared by duplicate views; the host shares physical watchers. Notices identify the root, reconnect/truncation reconciles every visible tree, and removed/relinked folders terminate the stream. Extra-root language services watch changes and reconcile open documents after a dropped watch. Only exact current roots can be watched. The Terminal tab can start in a listed extra folder.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).

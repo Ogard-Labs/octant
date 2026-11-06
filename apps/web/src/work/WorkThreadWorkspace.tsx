@@ -1983,16 +1983,26 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
   );
   const projectLabel = project?.name ?? serverWorkProject?.name;
+  const chosenFolder =
+    project?.type === "work"
+      ? project.workingFolders?.find((folder) => folder.id === thread?.workingFolderId)
+      : undefined;
+  const folderUnavailable = thread?.workingFolderId !== undefined && chosenFolder === undefined;
   const folder = thread?.workingDirectory;
   // A server thread's folder is named where it is: `alias:folder` on its server.
   const root =
     serverWorkProject !== undefined
       ? serverWorkProject.location
       : project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
-        ? project.binding.canonicalRoot
+        ? chosenFolder?.kind === "extra"
+          ? chosenFolder.label
+          : folderUnavailable
+            ? undefined
+            : project.binding.canonicalRoot
         : undefined;
-  const path =
-    root === undefined
+  const path = folderUnavailable
+    ? "Working folder unavailable"
+    : root === undefined
       ? folder
       : folder === undefined || folder === "."
         ? root
@@ -2493,9 +2503,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               )}
               {path === undefined ? null : (
                 <span className="work-folder-bar__folder" title={path}>
-                  {folder === undefined || folder === "."
-                    ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
-                    : folder}
+                  {folderUnavailable
+                    ? "Working folder unavailable"
+                    : folder === undefined || folder === "."
+                      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+                      : folder}
                 </span>
               )}
             </div>

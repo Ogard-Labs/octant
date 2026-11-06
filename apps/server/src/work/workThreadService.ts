@@ -911,6 +911,14 @@ export class WorkThreadService {
         );
       } else if (command.kind === "change-work-thread-working-directory") {
         if (
+          current.workingFolderId !== undefined &&
+          String(command.workingDirectory) !== String(current.workingDirectory ?? ".")
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose another working subfolder in a new task; this conversation keeps its original provider session.",
+          );
+        if (
           command.workingFolderId !== undefined &&
           command.workingFolderId !== current.workingFolderId
         )
@@ -1111,6 +1119,14 @@ export class WorkThreadService {
     if (destination === undefined) {
       throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
     }
+    if (
+      current.workingFolderId !== undefined &&
+      String(destination.id) !== String(current.projectId)
+    )
+      throw this.#failure(
+        "invalid",
+        "This task's working folder is bound to its current Project. Start a new task in the destination Project.",
+      );
     const destinationFolder = destination.type === "chat" ? "" : destination.binding.canonicalRoot;
     const signals = await this.#restSignals(current.id);
     const decision = decideThreadMove({
