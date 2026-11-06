@@ -34,6 +34,41 @@ describe("layoutCanvasDiagram", () => {
     expect(server?.y).toBeLessThan(store?.y ?? 0);
   });
 
+  it.each(["down", "right"] as const)(
+    "routes a self-loop outside its node with a visible return arrow when flowing %s",
+    (flow) => {
+      const block = decodeCanvasBlock({
+        schemaVersion: 21,
+        blockId: "retry",
+        kind: "diagram",
+        flow,
+        nodes: [
+          { nodeId: "check", label: "Check address", detail: "Make sure it reaches your friend" },
+        ],
+        edges: [
+          {
+            edgeId: "retry",
+            source: "check",
+            target: "check",
+            label: "Try again",
+            style: "dashed",
+          },
+        ],
+      });
+      if (block.kind !== "diagram") throw new Error("Expected diagram");
+      const layout = layoutCanvasDiagram(block);
+      const node = layout.nodes[0];
+      const edge = layout.edges[0];
+      if (node === undefined || edge === undefined) throw new Error("Missing diagram parts");
+      expect(edge.points.length).toBeGreaterThan(2);
+      expect({ x: edge.x1, y: edge.y1 }).not.toEqual({ x: edge.x2, y: edge.y2 });
+      expect(edge.labelX > node.x + node.width || edge.labelY > node.y + node.height).toBe(true);
+      expect(layout.width).toBeGreaterThan(edge.labelX);
+      expect(layout.height).toBeGreaterThan(edge.labelY);
+      expect(edge.style).toBe("dashed");
+    },
+  );
+
   it("reads across the page when the author says the diagram flows that way", () => {
     const layout = layoutCanvasDiagram(diagram({ flow: "right" }));
 

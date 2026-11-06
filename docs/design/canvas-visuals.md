@@ -468,3 +468,17 @@ motion of its own.
   `packages/domain/src/canvasFlowLayout.test.ts`.
 - Render changed blocks in light, dark, forced colours, and at phone width. A
   documentation-only move is not evidence of fresh rendered QA.
+
+## Inline diagram proportions and retry loops
+
+In a thread, a diagram board follows its drawing's natural aspect ratio. A
+tall flow stays tall, with labels, icons, subtitles, branches, and arrowheads
+readable in the conversation column. The surrounding inline Canvas keeps its
+existing teaser and expansion controls; zoom and pan remain available without
+layout-editing authority. The document workspace keeps its fixed board frame.
+
+A self-loop uses two distinct ports on the same node and a return lane outside
+that node, to the right for a downward flow or below for a rightward flow.
+Its label sits on the outside lane. Solid and dashed arrows retain their
+meaning, and the shared layout gives previews and exports the same visible
+loop. Centre-to-centre routing would collapse a retry into an invisible line.

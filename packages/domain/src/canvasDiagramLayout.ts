@@ -514,6 +514,45 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
       style: edge.style ?? "line",
       ...(edge.tone === undefined ? {} : { tone: edge.tone }),
     } as const;
+    // A retry returns to the same box. Centre-to-centre routing would draw
+    // no line, so give it two distinct ports and a lane outside the node.
+    if (source === target) {
+      const points =
+        flow === "down"
+          ? [
+              { x: source.x + source.width, y: source.y + source.height / 4 },
+              { x: source.x + source.width + DETOUR_GAP * 2, y: source.y + source.height / 4 },
+              {
+                x: source.x + source.width + DETOUR_GAP * 2,
+                y: source.y + (source.height * 3) / 4,
+              },
+              { x: source.x + source.width, y: source.y + (source.height * 3) / 4 },
+            ]
+          : [
+              { x: source.x + source.width / 4, y: source.y + source.height },
+              { x: source.x + source.width / 4, y: source.y + source.height + DETOUR_GAP * 2 },
+              {
+                x: source.x + (source.width * 3) / 4,
+                y: source.y + source.height + DETOUR_GAP * 2,
+              },
+              { x: source.x + (source.width * 3) / 4, y: source.y + source.height },
+            ];
+      const first = points[0];
+      const last = points.at(-1);
+      if (first === undefined || last === undefined) return [];
+      return [
+        {
+          ...common,
+          points,
+          x1: first.x,
+          y1: first.y,
+          x2: last.x,
+          y2: last.y,
+          labelX: flow === "down" ? source.x + source.width + DETOUR_GAP * 2 : from.x,
+          labelY: flow === "down" ? from.y : source.y + source.height + DETOUR_GAP * 2,
+        },
+      ];
+    }
     const blockers = boxes.filter(
       (box) => box !== source && box !== target && crosses(box, from, to),
     );
