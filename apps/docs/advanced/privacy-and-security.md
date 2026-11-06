@@ -515,9 +515,11 @@ remote listener, approved export, or other integration you turned on.
 A signed desktop build may ask a static HTTPS feed whether a newer build
 exists. The request is a GET with the running version, platform, and
 architecture, a User-Agent of `Octant` with no version, and no cookies.
-Automatic checks wait ten minutes after launch, then repeat once a day, and
-start only after the saved preference is loaded. Turn them off in
-**Settings → General → Updates**; off means no request is made. Manual
+Automatic checks are off by default — a store that never recorded the
+preference decodes to off — and when on, wait ten minutes after launch, then
+repeat once a day, starting only after the saved preference is loaded. Turn
+them on or off in **Settings → General → Updates**; off means no request is
+made. Manual
 **Check for updates** still contacts the feed when you ask. Details, including
 what a server can infer, live under [Installation](/guide/installation#updates)
 and are **provisional** until signed self-updating releases are final.

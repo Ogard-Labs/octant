@@ -145,10 +145,11 @@ roughly how often it is open. The ring is part of the address rather than a
 parameter, so the path itself says whether you follow stable or preview. That
 is more than an IP alone.
 
-Automatic checking is a switch in **Settings → General → Updates**. Off
-means no request is made at all. The desktop process starts with checking
-off until the saved preference loads; a store that never recorded the
-setting decodes to on. When it is on, the first check waits ten minutes
+Automatic checking is a switch in **Settings → General → Updates**, off by
+default. Off means no request is made at all. The desktop process starts
+with checking off until the saved preference loads, and a store that never
+recorded the setting decodes to off as well — an unrecorded preference never
+turns into a request. When you turn it on, the first check waits ten minutes
 after launch, then repeats once a day. You can still check by hand when
 automatic checking is off.
 

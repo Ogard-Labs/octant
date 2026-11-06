@@ -13891,8 +13891,10 @@ macOS-only.
   bar for provider readiness. This conservative reading currently counts open
   provider sessions, including idle sessions kept for another turn, so the quit
   warning describes sessions rather than claiming that each is running work.
-  Automatic checks are a setting; the host starts with them
-  off until the persisted choice arrives, then checks daily. A check is a
+  Automatic checks are a setting that defaults to off — a store
+  that never recorded the choice decodes to off, and the host starts with
+  them off until the persisted choice arrives — then checks daily once the
+  person turns the switch on. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
 

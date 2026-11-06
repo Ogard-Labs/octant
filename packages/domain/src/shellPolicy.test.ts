@@ -203,7 +203,9 @@ describe("shell settings policy", () => {
       sidebarCollapsedPresentation: "always",
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       firstRunOnboarding: "pending",
-      automaticUpdateChecks: true,
+      // Automatic update checks start off: an unrecorded preference decodes
+      // to no update traffic, so the switch is a real opt-in.
+      automaticUpdateChecks: false,
       marketplaceFetchesEnabled: true,
       // A completed thread rests a week before the host archives it.
       completedThreadArchiveAfterDays: 7,

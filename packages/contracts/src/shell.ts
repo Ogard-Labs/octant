@@ -641,11 +641,12 @@ export const ShellSettings = Schema.Struct({
   /**
    * Whether Octant may check for updates on its own. Off means no request is
    * made at all rather than a check whose answer is withheld — what leaves the
-   * machine is the point of the switch. A store
-   * persisted before updates shipped decodes to on, which is the behaviour the
-   * release notes describe.
+   * machine is the point of the switch. Off by default, including for a store
+   * persisted before updates shipped: an unrecorded preference must not turn
+   * into network traffic the person never asked for (data protection by
+   * default). Turning the switch on records the choice explicitly.
    */
-  automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
     default: () => ({ enabled: true, automaticUpdates: false }),
   }),
