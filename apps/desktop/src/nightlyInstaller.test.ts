@@ -125,7 +125,9 @@ function installer(
     feedBaseUrl: "https://updates.example.test",
     app: { version: "0.2.0-candidate.20261101.1" as AppVersion, platform: "darwin", arch: "arm64" },
     temporaryDirectory: join(root, "tmp"),
-    downloadDeadlineMs: 50,
+    // Only the stalled-download test needs a short deadline; a slow CI runner
+    // took longer than 50 ms to serve and hash an ordinary fake download.
+    downloadDeadlineMs: options.stallDownloads === true ? 50 : 10_000,
     native: () => native,
     trash,
     verifier: createFeedVerifier(trust),
