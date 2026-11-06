@@ -1,3 +1,4 @@
+import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -239,6 +240,15 @@ function AttemptFailureNotice(props: { readonly attempt: ChatAttempt }) {
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
+  useRetainQuestionnaireDrafts(
+    `chat:${String(props.view.thread.id)}`,
+    activeChatTurns(props.view.turns).flatMap((turn) =>
+      turn.attempts.flatMap((attempt) =>
+        attempt.pendingQuestion === undefined ? [] : [chatQuestionDraftRequestId(attempt)],
+      ),
+    ),
+  );
+
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly turnId: string; readonly kind: "mark" | "restore" } | undefined
   >(undefined);
@@ -587,6 +597,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 <AttemptBlock
                   serverUrl={props.serverUrl}
                   windowCapability={props.windowCapability}
+                  questionDraftScope={`chat:${String(props.view.thread.id)}`}
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
@@ -786,11 +797,20 @@ function RouteReceipt(props: { readonly decision: ChatTurnRouteDecision }) {
   );
 }
 
+function chatQuestionDraftRequestId(attempt: ChatAttempt): string {
+  return JSON.stringify([
+    String(attempt.turnId),
+    String(attempt.id),
+    attempt.pendingQuestion?.requestId,
+  ]);
+}
+
 // One shared empty list, so a reply without citations does not hand the
 // memoized block a fresh array on every render of the transcript.
 const NO_CITATIONS: ChatThreadView["citations"] = [];
 
 const AttemptBlock = memo(function AttemptBlock(props: {
+  readonly questionDraftScope: string;
   readonly attempt: ChatAttempt;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
@@ -982,6 +1002,10 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         props.onAnswerQuestion === undefined ? null : (
           <ProviderQuestionCard
             key={props.attempt.pendingQuestion.requestId}
+            draftIdentity={{
+              scope: props.questionDraftScope,
+              requestId: chatQuestionDraftRequestId(props.attempt),
+            }}
             questionnaire={props.attempt.pendingQuestion.questionnaire}
             onAnswer={(answer) =>
               props.onAnswerQuestion?.({

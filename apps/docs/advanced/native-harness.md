@@ -583,6 +583,11 @@ multiple-choice question. A recommended option starts unselected. When
 available, **Write another answer** lets you supply an alternative.
 Use **Anything to add?** to qualify your choices with an optional comment.
 
+Your unsent choices and comment stay on this screen when you navigate away
+and reopen the same question, including after deferring it. Another window
+starts with its own empty draft. Closing or reloading the screen discards these
+unsent answers.
+
 Nothing is sent while you make your choices. **Send answers** sends the
 complete set and lets the agent continue. If delivery fails, your draft stays
 available. Submitted questionnaires become an expandable **Answers sent**

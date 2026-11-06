@@ -1252,6 +1252,14 @@ only when the question explicitly permits zero choices. A submitted answer
 from another window settles the same request; a stale or duplicate answer
 cannot replace it. Validation and delivery failures keep the draft available.
 
+Unsent questionnaire choices, written alternatives and comments stay in memory
+on their source screen while navigating through Home, Inbox or another thread,
+and while deferring and bringing back the same request. Another window does
+not receive or overwrite them. They are bound to the exact request and question
+definition; settlement, cancellation, replacement or recovery invalidates them.
+Closing or reloading the app screen drops these drafts. They are never journaled,
+exported in diagnostics or submitted by restoration.
+
 Submitted questionnaires collapse into an expandable, readable summary of
 the questions, selected labels, written answers, and comment. The journal
 keeps the definition and response so the summary survives reopening. Expired,

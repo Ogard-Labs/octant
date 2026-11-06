@@ -1,7 +1,15 @@
+import type { ReactNode } from "react";
+import { QuestionnaireDraftsProvider } from "./questionnaireDrafts";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { QuestionnaireCard, QuestionnaireSummary } from "./QuestionnaireCard";
+const draftIdentity = { scope: "chat:thread", requestId: "request" };
+const wrap = (content: ReactNode, windowId = "window") => (
+  <QuestionnaireDraftsProvider serverUrl="local" windowId={windowId}>
+    {content}
+  </QuestionnaireDraftsProvider>
+);
 const questionnaire = {
   questions: [
     {
@@ -32,11 +40,14 @@ describe("inline questionnaires", () => {
     const user = userEvent.setup();
     const submit = vi.fn(async () => true);
     render(
-      <QuestionnaireCard
-        prompt="Before I implement"
-        questionnaire={questionnaire}
-        onAnswer={submit}
-      />,
+      wrap(
+        <QuestionnaireCard
+          draftIdentity={draftIdentity}
+          prompt="Before I implement"
+          questionnaire={questionnaire}
+          onAnswer={submit}
+        />,
+      ),
     );
     expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
@@ -60,6 +71,129 @@ describe("inline questionnaires", () => {
     await user.click(screen.getByText("Answers sent · Before I implement"));
     expect(screen.getByText("PDF, Markdown")).toBeVisible();
     expect(screen.getByText("After the build")).toBeVisible();
+  });
+  it("keeps unsent choices, written answers and comments when the same request is reopened", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(async () => true);
+    const card = (
+      <QuestionnaireCard
+        draftIdentity={draftIdentity}
+        prompt="Choices"
+        questionnaire={questionnaire}
+        onAnswer={submit}
+      />
+    );
+    const { rerender } = render(wrap(card));
+    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    const group = screen.getByRole("group", { name: "After exporting?" });
+    await user.click(within(group).getByRole("radio", { name: "Write another answer" }));
+    await user.type(screen.getByRole("textbox", { name: "Your answer" }), "Ask after saving");
+    await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Keep originals");
+    rerender(wrap(<p>Inbox</p>));
+    rerender(wrap(card));
+    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Ask after saving");
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("Keep originals");
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it("keeps each window's answers private without letting another window erase the source draft", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+    const card = (
+      <QuestionnaireCard
+        draftIdentity={draftIdentity}
+        prompt="Choices"
+        questionnaire={questionnaire}
+        onAnswer={submit}
+      />
+    );
+    const source = render(wrap(card, "source"));
+    await user.click(within(source.container).getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.type(
+      within(source.container).getByRole("textbox", { name: /Anything to add/ }),
+      "Source note",
+    );
+    source.rerender(wrap(<p>Inbox</p>, "source"));
+    const other = render(wrap(card, "other"));
+    expect(
+      within(other.container).getByRole("checkbox", { name: "PDF (Recommended)" }),
+    ).not.toBeChecked();
+    expect(within(other.container).getByRole("textbox", { name: /Anything to add/ })).toHaveValue(
+      "",
+    );
+    await user.click(within(other.container).getByRole("checkbox", { name: "Markdown" }));
+    other.unmount();
+    source.rerender(wrap(card, "source"));
+    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Markdown" })).not.toBeChecked();
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("Source note");
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it("discards answers when the request or questionnaire definition changes", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+    const card = (
+      <QuestionnaireCard
+        draftIdentity={draftIdentity}
+        prompt="Choices"
+        questionnaire={questionnaire}
+        onAnswer={submit}
+      />
+    );
+    const { rerender } = render(wrap(card));
+    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Old note");
+    rerender(
+      wrap(
+        <QuestionnaireCard
+          draftIdentity={draftIdentity}
+          prompt="Changed choices"
+          questionnaire={questionnaire}
+          onAnswer={submit}
+        />,
+      ),
+    );
+    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
+    rerender(wrap(card));
+    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    rerender(
+      wrap(
+        <QuestionnaireCard
+          draftIdentity={{ ...draftIdentity, requestId: "replacement" }}
+          prompt="Choices"
+          questionnaire={questionnaire}
+          onAnswer={submit}
+        />,
+      ),
+    );
+    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it("clears an accepted draft while keeping its submitted summary readable", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(async () => true);
+    const card = (
+      <QuestionnaireCard
+        draftIdentity={draftIdentity}
+        prompt="Choices"
+        questionnaire={questionnaire}
+        onAnswer={submit}
+      />
+    );
+    const { rerender } = render(wrap(card));
+    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.click(screen.getByRole("radio", { name: "Save only" }));
+    await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Submitted note");
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    await user.click(await screen.findByText("Answers sent · Choices"));
+    expect(screen.getByText("Submitted note")).toBeVisible();
+    rerender(wrap(<p>Inbox</p>));
+    rerender(wrap(card));
+    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
+    expect(submit).toHaveBeenCalledTimes(1);
   });
   it("keeps the draft after a refused answer and supports a written alternative", async () => {
     const user = userEvent.setup();

@@ -1,3 +1,4 @@
+import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
 import {
   WorktreePreparationDialog,
   type PreparationTarget,
@@ -7780,7 +7781,12 @@ function LaunchedShell(
                                                 origin={new URL(props.launch.serverUrl).origin}
                                                 windowId={String(props.launch.windowId)}
                                               >
-                                                {shell}
+                                                <QuestionnaireDraftsProvider
+                                                  serverUrl={props.launch.serverUrl}
+                                                  windowId={props.launch.windowId}
+                                                >
+                                                  {shell}
+                                                </QuestionnaireDraftsProvider>
                                               </CodeDebugWindowProvider>
                                             </ServerCodeProjectsContext.Provider>
                                           </HostPlatformContext.Provider>

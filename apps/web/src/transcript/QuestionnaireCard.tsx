@@ -1,3 +1,4 @@
+import { useQuestionnaireDraft, type QuestionnaireDraftIdentity } from "./questionnaireDrafts";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useId, useRef, useState } from "react";
 import type { Questionnaire, QuestionnaireResponse } from "@octant/contracts";
@@ -8,6 +9,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 export interface QuestionnaireCardProps {
+  readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
   readonly prompt: string;
   readonly questionnaire: Questionnaire;
   readonly onAnswer: (answer: string) => void | boolean | Promise<void | boolean>;
@@ -18,18 +20,27 @@ export interface QuestionnaireCardProps {
 type DraftAnswer = QuestionnaireResponse["answers"][number];
 
 export function QuestionnaireCard(props: QuestionnaireCardProps) {
-  const id = useId();
-  const [answers, setAnswers] = useState<ReadonlyArray<DraftAnswer>>(() =>
-    props.questionnaire.questions.map((question) => ({
-      questionId: question.id,
-      selectedOptionIds: [],
-    })),
+  return (
+    <QuestionnaireEditor
+      key={JSON.stringify([props.draftIdentity, props.prompt, props.questionnaire])}
+      {...props}
+    />
   );
-  const [customIds, setCustomIds] = useState<ReadonlyArray<string>>([]);
-  const [comment, setComment] = useState("");
+}
+
+function QuestionnaireEditor(props: QuestionnaireCardProps) {
+  const id = useId();
+  const draft = useQuestionnaireDraft(props.draftIdentity, props.prompt, props.questionnaire);
+  const { answers, customIds, comment } = draft;
+  const setAnswers = (
+    update: (current: ReadonlyArray<DraftAnswer>) => ReadonlyArray<DraftAnswer>,
+  ) => draft.setDraft((current) => ({ ...current, answers: update(current.answers) }));
+  const setCustomIds = (update: (current: ReadonlyArray<string>) => ReadonlyArray<string>) =>
+    draft.setDraft((current) => ({ ...current, customIds: update(current.customIds) }));
+  const setComment = (comment: string) => draft.setDraft((current) => ({ ...current, comment }));
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<string>();
   const submitting = useRef(false);
   const response = {
     version: 1 as const,
@@ -54,7 +65,7 @@ export function QuestionnaireCard(props: QuestionnaireCardProps) {
     );
 
   const send = async () => {
-    if (!valid || submitting.current || sent) return;
+    if (!valid || submitting.current || sent !== undefined) return;
     submitting.current = true;
     setBusy(true);
     setNotice(undefined);
@@ -62,7 +73,10 @@ export function QuestionnaireCard(props: QuestionnaireCardProps) {
       const result = await props.onAnswer(encoded);
       if (result === false)
         setNotice("The answers were not accepted. Review the thread status and try again.");
-      else setSent(true);
+      else {
+        draft.clear();
+        setSent(encoded);
+      }
     } catch {
       setNotice(
         "The answers could not be confirmed. Your draft is kept. Check the connection before trying again.",
@@ -73,12 +87,12 @@ export function QuestionnaireCard(props: QuestionnaireCardProps) {
     }
   };
 
-  if (sent)
+  if (sent !== undefined)
     return (
       <QuestionnaireSummary
         prompt={props.prompt}
         questionnaire={props.questionnaire}
-        answer={encoded}
+        answer={sent}
       />
     );
   return (
