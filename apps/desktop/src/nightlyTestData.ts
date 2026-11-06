@@ -1,4 +1,3 @@
-import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
@@ -7,9 +6,9 @@ import {
   DESKTOP_DATA_CHOICE_FILE,
   decodeOwnerReceipt,
   KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
-  decodeDesktopDataChoice,
   desktopDataDirectoriesOverlap,
   encodeDesktopDataChoice,
+  readStoredDesktopDataChoice,
   resolveDesktopHostRole,
   type DesktopDataChoice,
   type DesktopHostRole,
@@ -18,35 +17,7 @@ import {
 import type { NightlyDataState } from "@octant/contracts/app-updates";
 import type { KeychainServiceFamily } from "./keychainCredentialStore";
 
-const MAX_CHOICE_BYTES = 1_024;
-
-/**
- * Reads the Data choice from Nightly's window storage at startup. A missing,
- * oversized, linked, non-regular or unreadable file is Octant's data, the safe
- * default. It opens without blocking, so a FIFO put there cannot hang launch.
- */
-export function readStoredDesktopDataChoice(windowStorageDirectory: string): DesktopDataChoice {
-  let descriptor: number;
-  try {
-    descriptor = openSync(
-      join(windowStorageDirectory, DESKTOP_DATA_CHOICE_FILE),
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
-  } catch {
-    return "octant";
-  }
-  try {
-    if (!fstatSync(descriptor).isFile()) return "octant";
-    const bytes = Buffer.alloc(MAX_CHOICE_BYTES + 1);
-    const read = readSync(descriptor, bytes, 0, bytes.length, 0);
-    if (read > MAX_CHOICE_BYTES) return "octant";
-    return decodeDesktopDataChoice(bytes.subarray(0, read).toString("utf8"));
-  } catch {
-    return "octant";
-  } finally {
-    closeSync(descriptor);
-  }
-}
+export { readStoredDesktopDataChoice };
 
 /** Stores the choice for the next launch; the running process keeps its role. */
 export async function storeDesktopDataChoice(

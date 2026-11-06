@@ -1,6 +1,16 @@
 import { packagedNativePath } from "./desktop-client-runtime";
 import { execFileSync } from "node:child_process";
-import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
+import {
+  readFile,
+  mkdtemp,
+  mkdir,
+  writeFile,
+  access,
+  rm,
+  readdir,
+  stat,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
@@ -45,7 +55,9 @@ import {
   createQuitAppleScript,
   createServerRuntimeManifest,
   createDesktopRuntimeManifest,
+  installNightlyCommand,
   installTerminalLauncher,
+  nightlyCommandLauncherScript,
   linuxPackageDirectoryName,
   packagedBundlePath,
   packagedLinuxBundlePath,
@@ -1467,6 +1479,72 @@ describe("the terminal launcher the desktop app ships", () => {
       }
     },
   );
+});
+
+describe("the octant-nightly command Octant Nightly ships", () => {
+  it("runs the bundled full command with the worker runtime through a link on PATH", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-nightly-command-"));
+    try {
+      const repository = resolve(root, "repository");
+      await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
+      await writeFile(resolve(repository, "packages/cli/dist/octant-nightly.mjs"), "// full CLI\n");
+      // An app moved to a path with a space, linked from a folder on PATH.
+      const contents = resolve(root, "Moved Apps/Octant Nightly.app/Contents");
+      const commandDirectory = resolve(contents, "Resources/command-line");
+      await installNightlyCommand(
+        repository,
+        commandDirectory,
+        desktopIdentity("nightly"),
+        "0.12.0-preview.20261106.1",
+      );
+      const runtime = resolve(
+        contents,
+        "Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime",
+      );
+      await mkdir(dirname(runtime), { recursive: true });
+      // Stands in for the worker runtime: reports how it was started.
+      await writeFile(
+        runtime,
+        '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "version=$OCTANT_CLI_VERSION" "$@"\n',
+        { mode: 0o755 },
+      );
+      const bin = resolve(root, "bin");
+      await mkdir(bin);
+      await symlink(resolve(commandDirectory, "octant-nightly"), resolve(bin, "octant-nightly"));
+
+      expect((await readdir(commandDirectory)).sort()).toEqual([
+        "octant-nightly",
+        "octant-nightly.mjs",
+      ]);
+      expect((await stat(resolve(commandDirectory, "octant-nightly"))).mode & 0o777).toBe(0o755);
+      const output = execFileSync("/bin/sh", ["-c", "octant-nightly project add --inspect ."], {
+        env: { PATH: `${bin}:/usr/bin:/bin` },
+        encoding: "utf8",
+      });
+      // Every argument reaches the bundled command, after its fixed script path.
+      expect(output.split("\n")).toEqual([
+        "node-mode=1",
+        "version=0.12.0-preview.20261106.1",
+        resolve(commandDirectory, "octant-nightly.mjs"),
+        "project",
+        "add",
+        "--inspect",
+        ".",
+        "",
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is Nightly's alone and refuses a version that could leave its quotes", () => {
+    expect(() => nightlyCommandLauncherScript(desktopIdentity("stable"), "1.0.0")).toThrow(
+      "Only Octant Nightly ships octant-nightly.",
+    );
+    expect(() =>
+      nightlyCommandLauncherScript(desktopIdentity("nightly"), "1.0.0'; rm -rf /"),
+    ).toThrow("Invalid release version.");
+  });
 });
 
 it("keeps the worker server physical without copying a loose desktop entry", async () => {

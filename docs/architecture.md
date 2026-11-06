@@ -13371,7 +13371,10 @@ macOS-only.
   shares Octant's data through Octant's running host and never runs a host on
   that folder, so the journal keeps one writer and no nightly migrates data
   Octant must still open. For development and testing it can instead run its
-  own host on separate test data. A person's first install is therefore Octant
+  own host on separate test data. Its command-line tool, `octant-nightly`,
+  follows the same rule: it attaches to Octant's host (or, with test data,
+  Nightly's test host) and never starts or migrates one
+  ([the `octant-nightly` command](design/nightly-app.md#the-octant-nightly-command)). A person's first install is therefore Octant
   ([Octant Nightly](design/nightly-app.md)). The channel split and the
   Preview-only Nightly install row (packaged macOS Octant, person-started,
   feed signature, artifact hash and a Nightly-specific code requirement) are

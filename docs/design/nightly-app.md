@@ -19,8 +19,9 @@ and other native broker parity remain unfinished; this is not yet a usable
 second app.
 
 The remaining delivery includes complete embedded browsing parity,
-full lifecycle acceptance, shared sign-in operations, the complete
-`octant-nightly` command and the functional release preflight. Coexistence and rollback
+full lifecycle acceptance, shared sign-in operations and the functional
+release preflight. The full `octant-nightly` command is built
+([below](#the-octant-nightly-command)). Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
 preview workflow selects each run's flavor, artifact and payload-smoke paths
@@ -864,7 +865,8 @@ evidence; the preflight that replaces the early gate checks them:
       [accessibility](#accessibility)).
 - [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
       an unsigned packaged Nightly smoke.
-- [ ] The full `octant-nightly` command.
+- [x] The full `octant-nightly` command (see
+      [the `octant-nightly` command](#the-octant-nightly-command)).
 - [ ] Roll-forward rollback, a published host feature list and the app named
       in the signed feed (decision 4).
 - [ ] Linux client trust, designed and built (decision 3).
@@ -896,9 +898,11 @@ Chromium remote-debugging options before importing host or client-registration
 code. Refusal in JavaScript alone does not establish that Chromium exposed no
 debugging endpoint during startup; native startup checks cover that separately.
 
-Nightly's bundled `octant mcp` and help entry remains a fixed role, without
+Nightly's bundled terminal `octant mcp` and help entry remains a fixed role, without
 loading the host-owning GUI module or accepting a caller-selected script. It is
-not the full planned `octant-nightly` command or evidence of Code-terminal parity.
+not evidence of Code-terminal parity. Nightly's full `octant-nightly` command is a
+separate resource run by its worker runtime
+([below](#the-octant-nightly-command)), never by this role.
 Stable's public terminal command instead runs the existing standalone scoped CLI
 bundle through its separate Node runtime. A real Code-profile check showed that
 the sealed GUI role aborts during LaunchServices/WindowServer registration; the
@@ -1132,7 +1136,8 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
   lock or one window layout file; it holds no thread or Project data.
 - `octant-nightly` is the Nightly build of the command-line tool. It attaches to
   the same host as `octant`, so a person can try a newer tool against their
-  real data without replacing `octant`.
+  real data without replacing `octant`
+  ([below](#the-octant-nightly-command)).
 - The identity is one record per flavor in `@octant/host-runtime`, consumed by
   `DESKTOP_PACKAGE_IDENTITY` and desktop packaging. The packaged manifest stamps
   the flavor, and the desktop reads that manifest rather than a launch
@@ -1142,6 +1147,57 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 - `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` still override either app, as for a
   development build. A development build (`bun run dev`) is neither app and is
   unchanged.
+
+## The `octant-nightly` command
+
+`octant` and `octant-nightly` are one command-line source. The entry passes its
+flavor's identity record, and the tool's name, help text and product name come
+from that record; `--version` prints the name and the release version packaging
+stamps beside the bundle (`development` from source). The tool prints no link,
+so the link scheme does not appear in it.
+
+- **Which host.** By default `octant-nightly` attaches to Octant's host: the
+  same data folder, host receipt, bridge-secret discovery and window authority
+  as `octant`. When Nightly's stored Data choice is Separate test data, it
+  attaches to Nightly's test host on its folder and port `13774` instead. It
+  reads `data-choice.json` with the desktop's own rule (the same host-runtime
+  reader): only an exact `{"data":"test-data"}` regular file selects test
+  data, and a missing, oversized, linked, malformed or unreadable choice means
+  Octant's data. A stored test-data choice on Linux refuses with a message, as
+  the desktop does. `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` override either,
+  as for `octant`; an explicit `OCTANT_DATA_DIR` skips the stored choice.
+- **Never a host.** `octant-nightly` never starts, stops, installs, upgrades or
+  runs a host, and never writes a login or boot service, so it can never own or
+  migrate Octant's data. `server start|stop|restart|enable|disable|run|install|upgrade|uninstall`,
+  `web --dev`, `hub enable --install-service` and `hub disable --remove-service`
+  refuse before anything runs, and help lists only what it offers. When no
+  host is running, a command that `octant` would answer by starting one says
+  which host is missing and how to start it: Octant (the app or
+  `octant server start`) or, with test data, Octant Nightly.
+- **Not the test host either.** `octant` starts its own host in the analogous
+  case, but that start runs Octant's login service without Nightly's test-host
+  environment (its Keychain service family, default folder and log folder),
+  so a host started that way would keep test-data credentials under Octant's
+  Keychain names. The test host therefore starts only with Octant Nightly.
+- **Needs a newer Octant.** A host answers a route it does not have with its
+  catch-all plain `Not Found`, and a missing resource on a route it has with a
+  JSON refusal. When a command's request meets the catch-all, or the host does
+  not accept command-line sessions at all, the tool reports "Needs a newer
+  Octant", naming the request and the host's advertised `/health` version, and
+  the command fails. A command's existing fallback for an older host keeps
+  working, since the status is unchanged.
+- **Packaging.** Packaged macOS Nightly carries
+  `Contents/Resources/command-line/octant-nightly` and its one-file bundle
+  `octant-nightly.mjs` beside it. The shell launcher follows the link a person
+  put on `PATH` back to the app, then runs only that bundle with
+  `Octant Runtime.app` in Node mode, passing every argument to the command and
+  none to the runtime. The sealed GUI main never runs it. The bundle carries
+  every dependency except the full-screen terminal library, whose native core
+  is not shipped, so `octant-nightly agent` uses its line mode. Both files are
+  sealed by the app signature. Octant ships no such folder. Stable installs no
+  `octant` on `PATH` and has no Settings action for it, so Nightly has none
+  either: a person links the command (user guide). Linux Nightly ships no
+  command yet.
 
 ## Getting Octant Nightly
 
@@ -1308,7 +1364,9 @@ remain separate packaged acceptance.
 - Quitting either app leaves the other's windows working.
 - An `octant://` link opens Octant, and an `octant-nightly://` link opens
   Nightly.
-- `octant` and `octant-nightly` both reach the one running host.
+- `octant` and `octant-nightly` both reach the one running host. With test data,
+  `octant-nightly` reaches Nightly's test host, and with no host running it
+  starts none.
 - Install from Settings is offered only while Octant follows Preview, and
   refuses a build whose signature, hash, or code signature does not verify.
   Remove leaves the data untouched.
