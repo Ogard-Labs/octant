@@ -25,6 +25,8 @@ bool required(const char *name) {
   return value && std::string(value) == "1";
 }
 std::string self_path;
+constexpr std::string_view LINUX_PEER_KEY_FIXTURE =
+    "4be26660a400e0f5562c36dbe1d8253f815932426a83dde813a3cd721315422b";
 void launcher_tests(const std::string &folder);
 
 void policy_tests() {
@@ -62,7 +64,20 @@ void policy_tests() {
   check(fdinfo_pid("pos:\t0\nflags:\t02000002\nPid:\t4242\n") == 4242, "reads a pidfd pid");
   check(fdinfo_pid("Pid:\t-1\n") == -1, "reads an exited pidfd pid");
   check(!fdinfo_pid("flags:\t0\n"), "refuses fdinfo without a pid");
-  check(peer_key(7, 9) == "7:9", "keys a peer by pid and start time");
+  // The same fixture key the desktop lease-owner test feeds to the real
+  // JavaScript decoder; both sides must agree on it byte for byte.
+  check(peer_key("00000000-0000-4000-8000-000000000001", 4242, 98765) ==
+            LINUX_PEER_KEY_FIXTURE,
+        "keys a peer by boot, pid and start time as SHA-256 hex");
+  check(peer_key("00000000-0000-4000-8000-000000000001", 4242, 98766) !=
+            LINUX_PEER_KEY_FIXTURE,
+        "a new incarnation of the same pid gets a new key");
+  check(sha256("abc")[0] == 0xba && sha256("abc")[31] == 0xad,
+        "SHA-256 matches the FIPS 180-4 example");
+  check(boot_id_text("0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0\n") ==
+            "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        "reads the boot id");
+  check(!boot_id_text("short\n"), "refuses a malformed boot id");
 
   const auto parsed = parse_launcher_record(
       "{\"schemaVersion\":1,\"appImage\":\"/home/a/Octant \\\"x\\\".AppImage\","
@@ -311,7 +326,16 @@ void socket_tests() {
         sleep(10);
         _exit(0);
       }
-      const std::string line = payload + "\n" + std::to_string(holder) + "\n";
+      std::string self_stat;
+      const int self_directory = open("/proc/self", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      read_small(self_directory, "stat", self_stat, 4096);
+      close(self_directory);
+      const auto self_boot = own_boot_id();
+      const auto self_start = policy::process_start_time(self_stat);
+      const std::string own_key =
+          self_boot && self_start ? policy::peer_key(*self_boot, getpid(), *self_start) : "";
+      const std::string line =
+          payload + "\n" + std::to_string(holder) + "\n" + own_key + "\n";
       if (write(report[1], line.data(), line.size()) < 0)
         _exit(3);
       _exit(0);
@@ -331,11 +355,12 @@ void socket_tests() {
     std::getline(lines, holder_text);
     check(payload.find("\"kind\":\"registered\"") != std::string::npos,
           "a same-user client registers a window" + mode + ": " + payload);
-    check(payload.find(":") != std::string::npos &&
-              payload.find("\"peer\":\"" + std::to_string(child) + ":") != std::string::npos,
-          "the lease is keyed by the client's pid and start time" + mode);
-    check(server.wait_exited(1) &&
-              server.exited.front().starts_with(std::to_string(child) + ":"),
+    std::string expected_key;
+    std::getline(lines, expected_key);
+    check(expected_key.size() == 64 &&
+              payload.find("\"peer\":\"" + expected_key + "\"") != std::string::npos,
+          "the lease is keyed by the client's own boot, pid and start time" + mode);
+    check(server.wait_exited(1) && server.exited.front() == expected_key,
           "the client's pidfd exit revokes its leases while its socket stays open" + mode);
     const pid_t holder = static_cast<pid_t>(std::stol(holder_text));
     kill(holder, SIGKILL);

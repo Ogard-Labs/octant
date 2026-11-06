@@ -1,6 +1,7 @@
 #pragma once
 // Pure Linux client trust rules: no syscalls, so the policy test runs them
 // without sockets, processes or a real runtime folder.
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -203,10 +204,113 @@ inline std::optional<int64_t> fdinfo_pid(std::string_view fdinfo) {
   return std::nullopt;
 }
 
+// SHA-256 (FIPS 180-4), small and self-contained so the policy needs no
+// crypto library. It only shapes a key; it carries no secret.
+inline std::array<uint8_t, 32> sha256(std::string_view input) {
+  static constexpr uint32_t k[64] = {
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+      0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+      0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+      0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+      0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+      0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+      0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+      0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+  uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  std::string message(input);
+  const uint64_t bits = static_cast<uint64_t>(input.size()) * 8;
+  message.push_back(static_cast<char>(0x80));
+  while (message.size() % 64 != 56)
+    message.push_back(0);
+  for (int shift = 56; shift >= 0; shift -= 8)
+    message.push_back(static_cast<char>((bits >> shift) & 0xff));
+  const auto rotate = [](uint32_t value, int count) {
+    return (value >> count) | (value << (32 - count));
+  };
+  for (size_t block = 0; block < message.size(); block += 64) {
+    uint32_t w[64];
+    for (int index = 0; index < 16; ++index)
+      w[index] =
+          (uint32_t(uint8_t(message[block + index * 4])) << 24) |
+          (uint32_t(uint8_t(message[block + index * 4 + 1])) << 16) |
+          (uint32_t(uint8_t(message[block + index * 4 + 2])) << 8) |
+          uint32_t(uint8_t(message[block + index * 4 + 3]));
+    for (int index = 16; index < 64; ++index) {
+      const uint32_t s0 = rotate(w[index - 15], 7) ^ rotate(w[index - 15], 18) ^
+                          (w[index - 15] >> 3);
+      const uint32_t s1 = rotate(w[index - 2], 17) ^ rotate(w[index - 2], 19) ^
+                          (w[index - 2] >> 10);
+      w[index] = w[index - 16] + s0 + w[index - 7] + s1;
+    }
+    uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5],
+             g = h[6], j = h[7];
+    for (int index = 0; index < 64; ++index) {
+      const uint32_t t1 = j + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25)) +
+                          ((e & f) ^ (~e & g)) + k[index] + w[index];
+      const uint32_t t2 = (rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22)) +
+                          ((a & b) ^ (a & c) ^ (b & c));
+      j = g;
+      g = f;
+      f = e;
+      e = d + t1;
+      d = c;
+      c = b;
+      b = a;
+      a = t1 + t2;
+    }
+    h[0] += a;
+    h[1] += b;
+    h[2] += c;
+    h[3] += d;
+    h[4] += e;
+    h[5] += f;
+    h[6] += g;
+    h[7] += j;
+  }
+  std::array<uint8_t, 32> digest{};
+  for (int index = 0; index < 8; ++index)
+    for (int byte = 0; byte < 4; ++byte)
+      digest[index * 4 + byte] =
+          static_cast<uint8_t>((h[index] >> (24 - byte * 8)) & 0xff);
+  return digest;
+}
+
 // The peer key binds a lease to one process incarnation: its pid and its
-// kernel start time, never an executable path, a hash or $APPIMAGE.
-inline std::string peer_key(int64_t pid, uint64_t start_time) {
-  return std::to_string(pid) + ":" + std::to_string(start_time);
+// kernel start time on this boot, never an executable path or $APPIMAGE.
+// The window lease owner and the host take a key of 64 lowercase hex
+// characters (the macOS key is a SHA-256 of the audit token), so the Linux
+// key is a SHA-256 of a fixed encoding. The boot id keeps a pid and start
+// time from an earlier boot from naming the same key.
+inline std::string peer_key(std::string_view boot_id, int64_t pid,
+                            uint64_t start_time) {
+  std::string encoding = "octant.linux-peer.v1";
+  encoding.push_back('\0');
+  encoding.append(boot_id);
+  encoding.push_back('\0');
+  encoding += std::to_string(pid);
+  encoding.push_back('\0');
+  encoding += std::to_string(start_time);
+  static constexpr char hex[] = "0123456789abcdef";
+  std::string key;
+  for (auto byte : sha256(encoding)) {
+    key += hex[byte >> 4];
+    key += hex[byte & 15];
+  }
+  return key;
+}
+
+// /proc/sys/kernel/random/boot_id: one lowercase UUID and a newline.
+inline std::optional<std::string> boot_id_text(std::string_view text) {
+  if (ends_with(text, "\n"))
+    text.remove_suffix(1);
+  if (text.size() != 36 ||
+      text.find_first_not_of("0123456789abcdef-") != std::string_view::npos)
+    return std::nullopt;
+  return std::string(text);
 }
 
 struct LauncherRecord {
