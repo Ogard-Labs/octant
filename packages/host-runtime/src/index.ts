@@ -116,8 +116,13 @@ export {
   type CredentialStoreFailureCategory,
 } from "./credentialStore";
 export {
+  clearSecretServiceTestData,
   makeSecretServiceCredentialStore,
   probeSecretService,
+  secretServiceAttribute,
+  SECRET_SERVICE_NAMESPACES,
+  SECRET_SERVICE_TEST_DATA_PREFIX,
+  type SecretServiceNamespace,
   SECRET_SERVICE_ATTRIBUTE,
   SECRET_SERVICE_BUSCTL_PATH,
   SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE,

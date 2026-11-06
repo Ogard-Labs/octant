@@ -50,7 +50,10 @@ async function readPreferences(path: string): Promise<Preferences> {
 /** Nightly preferences and apply never acquire ownership of Stable's host. */
 export async function createNightlyAppUpdates(options: {
   readonly userDataDirectory: string;
-  readonly service: Omit<AppUpdateServiceOptions, "ring" | "allowedRings" | "automaticChecks">;
+  readonly service: Omit<
+    AppUpdateServiceOptions,
+    "ring" | "allowedRings" | "automaticChecks" | "app"
+  > & { readonly app: Omit<AppUpdateServiceOptions["app"], "product"> };
   readonly prepare: () => Promise<{ readonly kind: "closed" | "failed" }>;
   readonly canApply: () => boolean;
   readonly recover: (message: string) => Promise<void>;
@@ -60,6 +63,8 @@ export async function createNightlyAppUpdates(options: {
   let preferences = await readPreferences(path);
   const updates = createAppUpdateService({
     ...options.service,
+    // Nightly installs only Nightly builds, whatever a feed at its address says.
+    app: { ...options.service.app, product: "octant-nightly" },
     ring: preferences.ring,
     allowedRings: NIGHTLY_RINGS,
     automaticChecks: false,

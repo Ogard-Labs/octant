@@ -123,7 +123,7 @@ describe("selected skill context", () => {
       const test = fixture(mode);
       await expect(test.resolver({ mode, thread, selections: [test.selection] })).resolves.toEqual({
         kind: "resolved",
-        context: [{ kind: "instructions", text: "Use the synthetic checklist." }],
+        context: [{ kind: "skill-instructions", text: "Use the synthetic checklist." }],
       });
     },
   );
@@ -143,7 +143,7 @@ describe("selected skill context", () => {
       }),
     ).resolves.toMatchObject({
       kind: "resolved",
-      context: [{ kind: "instructions", text: "Use the synthetic checklist." }],
+      context: [{ kind: "skill-instructions", text: "Use the synthetic checklist." }],
     });
   });
 
@@ -230,7 +230,7 @@ describe("selected skill context", () => {
       test.resolver({ mode: "code", thread, selections: [test.selection] }),
     ).resolves.toEqual({
       kind: "resolved",
-      context: [{ kind: "instructions", text: "Use the synthetic checklist." }],
+      context: [{ kind: "skill-instructions", text: "Use the synthetic checklist." }],
     });
   });
 });

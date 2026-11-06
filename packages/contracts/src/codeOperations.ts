@@ -1,3 +1,4 @@
+import { Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import {
   CodeGitHunk,
@@ -1795,6 +1796,7 @@ const ApprovalReviewedEvent = Schema.Struct({
 }).annotations(strict);
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
+  questionnaire: Schema.optional(Questionnaire),
   requestId: ProviderRequestId,
   prompt: CodeQuestionPromptText,
   options: Schema.Array(CodeQuestionOptionText).pipe(

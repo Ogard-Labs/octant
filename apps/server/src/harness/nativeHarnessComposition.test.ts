@@ -21,7 +21,7 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
-import { childAgentTools } from "../chat/sideChatDelegation";
+import { withheldFromSideChat } from "../chat/sideChatToolScope";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
@@ -50,13 +50,34 @@ const thread = {
 } as unknown as CodeThread;
 
 describe("native harness composition", () => {
-  it.each([true, false])(
-    "offers child questions through either harness and refuses tools after authority is revoked (%s)",
-    async (isHarness) => {
+  it.each([
+    { isHarness: true, grouped: false },
+    { isHarness: false, grouped: false },
+    { isHarness: true, grouped: true },
+    { isHarness: false, grouped: true },
+  ])(
+    "offers questions through either harness and refuses tools after authority is revoked ($isHarness, $grouped)",
+    async ({ isHarness, grouped }) => {
+      const questionnaire = {
+        questions: [
+          {
+            id: "design",
+            prompt: "Which parts?",
+            selection: "multiple",
+            options: [{ id: "existing", label: "Existing design" }],
+          },
+        ],
+      };
+      const response = {
+        version: 1,
+        answers: [{ questionId: "design", selectedOptionIds: ["existing"] }],
+        comment: "Keep the spacing",
+      };
+      const answer = grouped ? JSON.stringify(response) : "Use the existing design";
       let authorized = true;
       const ask = vi.fn(async () => ({
         status: "answered" as const,
-        answer: "Use the existing design",
+        answer,
       }));
       const composition = createNativeHarnessComposition({
         isChildAuthorityCurrent: () => authorized,
@@ -104,11 +125,16 @@ describe("native harness composition", () => {
       expect(
         await tools?.execute({
           name: "ask-user",
-          inputJson: JSON.stringify({ prompt: "Which design?", options: [] }),
+          inputJson: JSON.stringify({
+            prompt: "Which design?",
+            options: [],
+            ...(grouped ? { questionnaire } : {}),
+          }),
           signal: new AbortController().signal,
         }),
-      ).toMatchObject({ result: { answer: "Use the existing design" } });
+      ).toMatchObject({ result: { answer: grouped ? response : answer } });
       expect(ask).toHaveBeenCalledOnce();
+      if (grouped) expect(ask).toHaveBeenCalledWith(expect.objectContaining({ questionnaire }));
       authorized = false;
       expect(
         await tools?.execute({
@@ -500,7 +526,6 @@ describe("native harness composition", () => {
     const productionPorts = {
       goals: { read: async () => undefined, execute: async () => undefined } as never,
       questions: { ask: async () => undefined } as never,
-      delegate: () => ({}) as never,
       webFetch: (async () => undefined) as never,
       resolveWebSearch: () => (async () => undefined) as never,
     };
@@ -538,7 +563,6 @@ describe("native harness composition", () => {
         "context-remaining",
         "journal-lookup",
         "second-opinion",
-        "delegate",
         "ask-user",
         "goal",
       ];
@@ -571,14 +595,7 @@ describe("native harness composition", () => {
         );
         const readOnly = ["read", "grep", "glob"];
         const web = ["web-fetch", "web-search"];
-        const lead = [
-          "todo-write",
-          "context-remaining",
-          "second-opinion",
-          "delegate",
-          "ask-user",
-          "goal",
-        ];
+        const lead = ["todo-write", "context-remaining", "second-opinion", "ask-user", "goal"];
         expect(code).toEqual(
           writes
             ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check"]
@@ -664,21 +681,93 @@ describe("native harness composition", () => {
       ]);
     });
 
-    it("gives a Side Chat no delegation in the tool set it finally receives", () => {
+    it("gives every Harness thread exactly one child-run tool, octant_agents, and a Side Chat none", () => {
       const { composition } = harness(false, productionPorts);
       const agents = (): AppManagedToolSet => ({
         definitions: [{ name: "octant_agents" } as never],
         execute: async () => ({ result: {} }),
       });
+      const chatSet = (sideChat: boolean) =>
+        combineAppManagedToolSets(
+          composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
+          withheldFromSideChat({ sideChat, tools: agents }),
+        );
+      const childRunTools = (set: AppManagedToolSet | undefined) =>
+        names(set!).filter((name) => name === "octant_agents" || name === "delegate");
+      expect(childRunTools(chatSet(false))).toEqual(["octant_agents"]);
+      expect(childRunTools(chatSet(true))).toEqual([]);
+      // Work and Code add `octant_agents` beside the harness set the same way,
+      // so the harness set itself must carry no child-run tool of its own.
+      for (const set of [
+        composition.forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" }),
+        composition.forCode({ thread: codeThread, checkoutRoot: "/nonexistent", windowId: "w" }),
+      ]) {
+        expect(childRunTools(combineAppManagedToolSets(set, agents()))).toEqual(["octant_agents"]);
+      }
+    });
+
+    it("gives a Side Chat only the advice tools and its file reads in the tool set it finally receives", () => {
+      const { composition } = harness(false, { ...productionPorts, journal: noJournal });
+      const offered = (...toolNames: ReadonlyArray<string>): AppManagedToolSet => ({
+        definitions: toolNames.map((name) => ({ name }) as never),
+        execute: async () => ({ result: {} }),
+      });
+      // The same sources a Chat turn is composed from, in the order it uses.
       const finalSet = (sideChat: boolean) =>
         combineAppManagedToolSets(
           composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
-          childAgentTools({ sideChat, tools: agents }),
+          sideChat
+            ? offered("octant_side_chat_list_files", "octant_side_chat_read_file")
+            : undefined,
+          withheldFromSideChat({
+            sideChat,
+            tools: () =>
+              offered(
+                "octant_ask_thread",
+                "octant_create_image",
+                "octant_offer_side_task",
+                "octant_canvas",
+                "octant_past_threads",
+                "octant_agents",
+                "octant_computer",
+              ),
+          }),
         );
-      expect(names(finalSet(true))).not.toContain("delegate");
-      expect(names(finalSet(true))).not.toContain("octant_agents");
-      // An ordinary Chat thread keeps both.
-      expect(names(finalSet(false))).toEqual(expect.arrayContaining(["delegate", "octant_agents"]));
+      expect(names(finalSet(true))).toEqual([
+        "context-remaining",
+        "second-opinion",
+        "octant_side_chat_list_files",
+        "octant_side_chat_read_file",
+      ]);
+      // An ordinary Chat thread keeps every one of them.
+      expect(names(finalSet(false))).toEqual(
+        expect.arrayContaining([
+          "octant_ask_thread",
+          "octant_create_image",
+          "octant_offer_side_task",
+          "octant_canvas",
+          "octant_past_threads",
+          "octant_agents",
+          "octant_computer",
+        ]),
+      );
+    });
+
+    it("leaves a provider runtime's Chat thread with octant_agents and no harness tools", () => {
+      const { composition } = harness(false, {
+        ...productionPorts,
+        isHarnessProvider: () => false,
+      });
+      const agents = (): AppManagedToolSet => ({
+        definitions: [{ name: "octant_agents" } as never],
+        execute: async () => ({ result: {} }),
+      });
+      expect(composition.forChat({ thread: chatThread, windowId: "window-1" })).toBeUndefined();
+      const finalSet = combineAppManagedToolSets(
+        composition.forChat({ thread: chatThread, windowId: "window-1" }),
+        withheldFromSideChat({ sideChat: false, tools: agents }),
+      );
+      expect(names(finalSet!)).toEqual(["octant_agents"]);
     });
 
     it("keeps the composition call site supplying every port the offered set depends on", () => {
@@ -700,7 +789,6 @@ describe("native harness composition", () => {
         "goals:",
         "questions:",
         "secondOpinion:",
-        "delegate:",
         "shell:",
         "resolveWebSearch:",
         "webFetch:",

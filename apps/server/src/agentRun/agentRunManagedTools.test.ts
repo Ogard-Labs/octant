@@ -95,14 +95,17 @@ function tool(
     summary?: ReadonlyArray<AgentRunParentSummaryEntry>;
     authorizeCancel?: (run: AgentRun) => boolean;
     remote?: RemoteDelegationPort;
+    ingestion?: "recorded" | "refused";
   } = {},
 ) {
   const calls: string[] = [];
+  const ingested: string[] = [];
   const settlements: AgentRunCommand[] = [];
   const runs = [...(options.runs ?? [])];
   return {
     calls,
     settlements,
+    ingested,
     currentRuns: () => runs,
     set: createAgentsManagedTools({
       admission: {
@@ -192,6 +195,11 @@ function tool(
             },
           }),
       authorizeCancel: options.authorizeCancel ?? (() => true),
+      recordResultIngestion: (run) => {
+        if (options.ingestion === "refused") return false;
+        ingested.push(String(run.id));
+        return true;
+      },
       uuid: () => "00000000-0000-4000-8000-0000000000ee",
       sleep: () => Promise.resolve(),
     }),
@@ -595,6 +603,34 @@ describe("agents managed tools", () => {
       runId: ids.run,
       text: "child reply",
     });
+  });
+
+  it("marks the parent as having read outside content before it hands back a child's reply", async () => {
+    // The child may relay what it fetched, so its reply counts as outside
+    // content however it reaches the parent: as a delivered turn or here.
+    const { set, ingested, settlements } = tool({
+      runs: [queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never })],
+    });
+    await call(set, { operation: "status" });
+    expect(ingested).toEqual([]);
+    const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 10 });
+    expect(outcome.result).toMatchObject({ status: "completed", text: "child reply" });
+    expect(ingested).toEqual([ids.run]);
+    expect(settlements).toHaveLength(1);
+  });
+
+  it("keeps a child's reply owed when the mark on its parent cannot be recorded", async () => {
+    const { set, settlements } = tool({
+      ingestion: "refused",
+      runs: [queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never })],
+    });
+    const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 10 });
+    expect(outcome).toMatchObject({
+      isError: true,
+      result: { error: "result-delivery-unavailable" },
+    });
+    expect(JSON.stringify(outcome.result)).not.toContain("child reply");
+    expect(settlements).toEqual([]);
   });
 
   it("answers at once for a child waiting for a provider slot, so the parent can end its turn and free the slot the child needs", async () => {

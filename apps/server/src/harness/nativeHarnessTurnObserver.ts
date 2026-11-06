@@ -110,14 +110,23 @@ export class NativeHarnessTurnObserver {
       // changing statuses never move the cached prefix.
       ...(goal === undefined ? [] : [{ kind: "work-item" as const, text: goal }]),
       ...(servers === undefined ? [] : [{ kind: "project-memory" as const, text: servers }]),
+      // One-turn instructions, so the system prompt Octant Harness builds
+      // from standing instructions stays byte-stable: a redirect sent as a
+      // standing instruction changed that prompt, and the date would every day.
       ...(redirect === undefined
         ? []
         : [
             {
-              kind: "instructions" as const,
+              kind: "turn-instructions" as const,
               text: `The advisor reviewed your last turn and redirects you: ${redirect}`,
             },
           ]),
+      // Codex and Claude Code tell the model the date themselves; nothing else
+      // did here, and a Work status file asks for today's date.
+      {
+        kind: "turn-instructions" as const,
+        text: `Today is ${this.#options.clock().slice(0, 10)} (UTC).`,
+      },
     ];
   }
 

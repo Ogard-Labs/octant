@@ -305,6 +305,54 @@ export function redactedAppleInputDiagnostic(
 }
 
 /**
+ * How much of a device log an agent's `logs` read hands back. A log is read
+ * from its newest end, so a read that runs out of room keeps the latest lines;
+ * with crashes asked for, the log keeps half the room and the crashes the rest.
+ * A line longer than the cut is shortened rather than dropped, so a stack frame
+ * or an exception message still shows how it starts.
+ */
+export interface DeviceLogBudget {
+  readonly lines: number;
+  readonly bytes: number;
+}
+
+export const DEVICE_LOG_BUDGET: DeviceLogBudget = { lines: 500, bytes: 32 * 1024 };
+export const DEVICE_LOG_BUDGET_BESIDE_CRASHES: DeviceLogBudget = { lines: 250, bytes: 16 * 1024 };
+export const DEVICE_LOG_LINE_CHARACTERS = 2_048;
+
+/** The newest lines of `text` that fit `budget`, and whether anything was left out or cut. */
+export function boundedDeviceLogTail(
+  text: string,
+  budget: DeviceLogBudget,
+): { readonly text: string; readonly lines: number; readonly truncated: boolean } {
+  const all = text.split(/\r?\n/);
+  if (all.at(-1) === "") all.pop();
+  const encoder = new TextEncoder();
+  const kept: string[] = [];
+  let bytes = 0;
+  let truncated = false;
+  for (let index = all.length - 1; index >= 0; index -= 1) {
+    const whole = all[index] ?? "";
+    // A limit that falls between a surrogate pair would leave half a
+    // character, which is written out as a replacement mark.
+    const cut = /[\uD800-\uDBFF]/.test(whole.charAt(DEVICE_LOG_LINE_CHARACTERS - 1))
+      ? DEVICE_LOG_LINE_CHARACTERS - 1
+      : DEVICE_LOG_LINE_CHARACTERS;
+    const line = whole.length > DEVICE_LOG_LINE_CHARACTERS ? whole.slice(0, cut) : whole;
+    const size = encoder.encode(line).byteLength + 1;
+    if (kept.length >= budget.lines || bytes + size > budget.bytes) {
+      truncated = true;
+      break;
+    }
+    if (line !== whole) truncated = true;
+    kept.push(line);
+    bytes += size;
+  }
+  kept.reverse();
+  return { text: kept.join("\n"), lines: kept.length, truncated };
+}
+
+/**
  * Evidence for Open URL keeps the address's origin only. Its path and query
  * can carry tokens or personal data, so, like typed text, they are shown in
  * the confirmation and never recorded.

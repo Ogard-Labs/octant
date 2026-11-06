@@ -245,6 +245,13 @@ export interface RepositoryTestProcessInput {
    * bounded capture, for a caller that reads output while the command runs.
    */
   readonly onOutput?: (chunk: Uint8Array) => void;
+  /**
+   * Which end of an output over the port's bound the result keeps: the first
+   * bytes (the default), or the newest. A log read is the caller for
+   * `newest`: the line an agent is looking for is the last one the app
+   * wrote, and a prefix cannot give it back.
+   */
+  readonly outputRetention?: "first" | "newest";
 }
 
 export interface RepositoryTestArtifactReadInput {
@@ -673,7 +680,7 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
 
-    const output = new CombinedOutputCapture(this.#maxOutputBytes);
+    const output = new CombinedOutputCapture(this.#maxOutputBytes, input.outputRetention);
     const forward = (chunk: unknown) => {
       if (input.onOutput === undefined) return;
       input.onOutput(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(String(chunk)));
@@ -939,30 +946,81 @@ export class RepositoryTestProcessPort {
 
 class CombinedOutputCapture {
   readonly #maximum: number;
-  readonly #stdout: Buffer[] = [];
-  readonly #stderr: Buffer[] = [];
+  readonly #retention: "first" | "newest";
+  readonly #chunks: Array<{ readonly target: "stdout" | "stderr"; bytes: Buffer }> = [];
   #retained = 0;
 
-  constructor(maximum: number) {
+  constructor(maximum: number, retention: "first" | "newest" = "first") {
     this.#maximum = maximum + 1;
+    this.#retention = retention;
   }
 
   append(target: "stdout" | "stderr", chunk: unknown): void {
-    if (this.#retained >= this.#maximum) return;
+    if (this.#retention === "first" && this.#retained >= this.#maximum) return;
     const bytes = Buffer.isBuffer(chunk)
       ? chunk
       : chunk instanceof Uint8Array
         ? Buffer.from(chunk)
         : Buffer.from(String(chunk), "utf8");
-    const retained = bytes.subarray(0, this.#maximum - this.#retained);
+    const retained =
+      this.#retention === "first" ? bytes.subarray(0, this.#maximum - this.#retained) : bytes;
     if (retained.byteLength === 0) return;
-    (target === "stdout" ? this.#stdout : this.#stderr).push(Buffer.from(retained));
+    this.#chunks.push({ target, bytes: Buffer.from(retained) });
     this.#retained += retained.byteLength;
+    if (this.#retention === "newest") this.#dropOldest();
+  }
+
+  /**
+   * Drops the oldest bytes over the bound, then the continuation bytes of a
+   * character the cut split, so a valid UTF-8 tail does not read as a parser
+   * failure.
+   */
+  #dropOldest(): void {
+    if (this.#retained <= this.#maximum) return;
+    const cut = new Set<"stdout" | "stderr">();
+    let oldest = this.#chunks[0];
+    while (oldest !== undefined && this.#retained > this.#maximum) {
+      const excess = this.#retained - this.#maximum;
+      cut.add(oldest.target);
+      if (oldest.bytes.byteLength <= excess) {
+        this.#chunks.shift();
+        this.#retained -= oldest.bytes.byteLength;
+        oldest = this.#chunks[0];
+        continue;
+      }
+      oldest.bytes = oldest.bytes.subarray(excess);
+      this.#retained -= excess;
+    }
+    // A dropped whole chunk can end inside a character as well as a partial
+    // cut can, and stdout and stderr interleave, so each stream that lost
+    // bytes has its first retained bytes checked, oldest chunk overall or not.
+    for (const target of cut) {
+      for (let index = 0; index < this.#chunks.length;) {
+        const chunk = this.#chunks[index];
+        if (chunk === undefined) break;
+        if (chunk.target !== target) {
+          index += 1;
+          continue;
+        }
+        let start = 0;
+        while (start < chunk.bytes.byteLength && ((chunk.bytes[start] ?? 0) & 0xc0) === 0x80) {
+          start += 1;
+        }
+        chunk.bytes = chunk.bytes.subarray(start);
+        this.#retained -= start;
+        if (chunk.bytes.byteLength > 0) break;
+        this.#chunks.splice(index, 1);
+      }
+    }
   }
 
   result(): Pick<RepositoryTestProcessResult, "stdout" | "stderr" | "parserFailed"> {
-    const stdout = Buffer.concat(this.#stdout);
-    const stderr = Buffer.concat(this.#stderr);
+    const stream = (target: "stdout" | "stderr") =>
+      Buffer.concat(
+        this.#chunks.filter((chunk) => chunk.target === target).map((chunk) => chunk.bytes),
+      );
+    const stdout = stream("stdout");
+    const stderr = stream("stderr");
     return {
       stdout: new Uint8Array(stdout),
       stderr: new Uint8Array(stderr),

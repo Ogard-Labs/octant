@@ -183,3 +183,91 @@ it("names the newer-host prerequisite when the installed Stable lacks host-only 
   });
   expect(host).not.toHaveBeenCalled();
 });
+
+it("asks a Linux person to open Octant when no launch recorded it, and names the sandbox refusal", async () => {
+  const host = vi.fn(async () => undefined);
+  expect(
+    await launchDesktopApplication(desktopIdentity("nightly"), host, async () => ({
+      kind: "refused",
+      reason: "no-launcher-record",
+    })),
+  ).toEqual({ kind: "client-bridge-required", message: "Open Octant, then try again." });
+  expect(
+    await launchDesktopApplication(desktopIdentity("nightly"), host, async () => ({
+      kind: "refused",
+      reason: "unsandboxed-renderer",
+    })),
+  ).toMatchObject({
+    kind: "client-bridge-required",
+    message: expect.stringContaining("Chromium's sandbox"),
+  });
+  expect(host).not.toHaveBeenCalled();
+});
+
+describe("Linux display flags", () => {
+  const octant = desktopIdentity("stable");
+  const nightly = desktopIdentity("nightly");
+  const link = "octant://code/project/123e4567-e89b-42d3-a456-426614174000";
+  const allowed = [
+    ["--ozone-platform=wayland"],
+    ["--ozone-platform-hint=auto"],
+    ["--ozone-platform=x11", "--enable-features=UseOzonePlatform,WaylandWindowDecorations"],
+    ["--disable-features=VaapiVideoDecoder"],
+    ["--enable-wayland-ime", "--wayland-text-input-version=3"],
+    ["--disable-gpu", "--disable-gpu-compositing"],
+    ["--force-device-scale-factor=1.5"],
+  ];
+
+  it("accepts the closed display list beside each role on Linux, for both apps", () => {
+    for (const flags of allowed) {
+      expect(resolvePackagedDesktopLaunch(octant, flags, undefined, "linux").kind).toBe("desktop");
+      expect(resolvePackagedDesktopLaunch(nightly, flags, undefined, "linux").kind).toBe("desktop");
+      expect(
+        resolvePackagedDesktopLaunch(
+          octant,
+          [...flags, DESKTOP_HOST_ONLY_SWITCH],
+          undefined,
+          "linux",
+        ).kind,
+      ).toBe("host-only");
+      expect(resolvePackagedDesktopLaunch(octant, [...flags, link], undefined, "linux").kind).toBe(
+        "desktop",
+      );
+    }
+  });
+
+  it("refuses sandbox, debugging, loader and unknown flags, bad values and repeats", () => {
+    for (const flags of [
+      ["--no-sandbox"],
+      ["--disable-seccomp-filter-sandbox"],
+      ["--disable-setuid-sandbox"],
+      ["--inspect"],
+      ["--remote-debugging-port=9222"],
+      ["--js-flags=--expose-gc"],
+      ["--require=/tmp/x.js"],
+      ["/tmp/script.js"],
+      ["--use-gl=egl"],
+      ["--ozone-platform=headless"],
+      ["--ozone-platform"],
+      ["--enable-features=RunAllFlashInAllowMode"],
+      ["--enable-features=UseOzonePlatform,UseOzonePlatform"],
+      ["--enable-features="],
+      ["--wayland-text-input-version=2"],
+      ["--force-device-scale-factor=0"],
+      ["--force-device-scale-factor=9"],
+      ["--force-device-scale-factor=1e1"],
+      ["--disable-gpu=1"],
+      ["--disable-gpu", "--disable-gpu"],
+      ["--ozone-platform=wayland", "--no-sandbox"],
+    ]) {
+      expect(resolvePackagedDesktopLaunch(octant, flags, undefined, "linux").kind).toBe("refused");
+      expect(resolvePackagedDesktopLaunch(nightly, flags, undefined, "linux").kind).toBe("refused");
+    }
+  });
+
+  it("keeps display flags refused on macOS", () => {
+    expect(
+      resolvePackagedDesktopLaunch(octant, ["--ozone-platform=wayland"], undefined, "darwin").kind,
+    ).toBe("refused");
+  });
+});

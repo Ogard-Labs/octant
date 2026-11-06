@@ -62,8 +62,11 @@ it exactly that one tool family, as that thread, and nothing wider.
   chose to always allow is not asked again. A context a managed turn approved is
   asked about again, because the grant keeps its own approval bindings. A page
   read marks the thread `thread.external-content-ingested@1`, because the Browser
-  service records that on every observation whoever asked. An approval answered
-  after the thread moved into Plan is treated as cancelled.
+  service records that on every observation whoever asked. In Plan a call may
+  read the page already open and nothing else
+  ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). An
+  approval answered after the thread moved into Plan is treated as cancelled;
+  one asked in Plan, which can only be for a read, is the person's answer.
 - **No captures.** A screenshot through the endpoint is not kept as a thread
   Browser capture: no journal actor describes a hand-typed CLI, so `capturedBy`
   is never named and the service keeps nothing ([Browser captures](browser-captures.md)).

@@ -92,7 +92,7 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly questionId: string;
     readonly answer: string;
-  }) => "answered" | "question-not-found" | "already-settled";
+  }) => "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   readonly now?: () => number;
 }
 
@@ -355,11 +355,18 @@ export function createNativeHarnessSessionRouteHandler(
           : {
               kind: "question-refused",
               questionId: answer.questionId,
-              reason: outcome === "already-settled" ? "already-settled" : "question-not-found",
+              reason:
+                outcome === "invalid-answer"
+                  ? "invalid-answer"
+                  : outcome === "already-settled"
+                    ? "already-settled"
+                    : "question-not-found",
               message:
-                outcome === "already-settled"
-                  ? "That question was already answered."
-                  : "No pending question has that id on this thread.",
+                outcome === "invalid-answer"
+                  ? "The questionnaire answer is incomplete or contains invalid choices."
+                  : outcome === "already-settled"
+                    ? "That question was already answered."
+                    : "No pending question has that id on this thread.",
             };
       return json(result, result.kind === "question-answered" ? 200 : 409, origin);
     }

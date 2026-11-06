@@ -71,6 +71,7 @@ import {
   validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
+  NIGHTLY_CLIENT_HARNESS_MARKER,
   resolveReleaseVersion,
   validateBundledInternalRuntime,
   validateSandboxedPreloads,
@@ -477,6 +478,7 @@ describe("desktop packaging boundary", () => {
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
+      "native/octant-desktop-peer-linux.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
@@ -519,8 +521,15 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant-linux-x64/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      "Octant-linux-x64/resources/native/octant-desktop-peer-linux.node",
     ];
     expect(() => validateLinuxNativePayloadAllowlist(allowed)).not.toThrow();
+    expect(() =>
+      validateLinuxNativePayloadAllowlist([
+        ...allowed,
+        "Octant-linux-x64/resources/app/apps/desktop/dist/native/octant-desktop-peer-linux.node",
+      ]),
+    ).toThrow(/unexpected native payload/);
     expect(() =>
       validateLinuxNativePayloadAllowlist([
         ...allowed,
@@ -1256,9 +1265,31 @@ describe("desktop packaging boundary", () => {
     expect(() =>
       validatePackagedPayload([
         ...required,
+        { path: "apps/desktop/dist/nightly-client-harness-nightly.mjs", content: "" },
+      ]),
+    ).toThrow("Nightly client smoke harness");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
+        {
+          path: "apps/desktop/dist/main.mjs",
+          content: `const m = "${NIGHTLY_CLIENT_HARNESS_MARKER}";`,
+        },
+      ]),
+    ).toThrow("Nightly client smoke harness in apps/desktop/dist/main.mjs");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
         { path: "apps/web/dist/app.js", content: "OpenOr" + "bit" },
       ]),
     ).toThrow("forbidden product identity");
+  });
+
+  it("finds its marker in every Nightly client smoke harness entry, so packaging refuses them", async () => {
+    for (const entry of ["nightly-client-harness-nightly.ts", "nightly-client-harness-stable.ts"]) {
+      const source = await readFile(resolve(import.meta.dirname, entry), "utf8");
+      expect(source).toContain(`"${NIGHTLY_CLIENT_HARNESS_MARKER}"`);
+    }
   });
 
   it("keeps output ignored and packages without third-party release tooling", async () => {

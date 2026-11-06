@@ -7,6 +7,7 @@ import { createUsageResumePorts } from "../usage/usageResumePorts";
 import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencyScheduler";
 import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
+import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
 import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
@@ -146,21 +147,12 @@ export function wireContinuation(deps: ContinuationDependencies) {
       journal: persistence.journal,
       agentRuns: agentRunPersistence,
       clock: () => new Date(),
-      recordResultIngestion: (run) => {
-        try {
-          return (
-            externalContentIngestionStore.record({
-              threadId: String(run.parentThreadId),
-              provenance: { origin: "tool-result", sourceLabel: "subagent-result" },
-              contentReference: `agent-run-result-${String(run.id)}-${run.generation ?? 1}`,
-              correlationId: randomUUID(),
-              authorized: true,
-            }).kind !== "refused"
-          );
-        } catch {
-          return false;
-        }
-      },
+      recordResultIngestion: (run) =>
+        recordAgentRunResultIngestion(
+          (input) => externalContentIngestionStore.record(input),
+          run,
+          randomUUID,
+        ),
       ports: {
         chat: createChatAgentResultDeliveryPort({
           readThread: (threadId) => persistence.readChatThread(threadId),

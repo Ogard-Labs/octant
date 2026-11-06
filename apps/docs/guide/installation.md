@@ -70,7 +70,7 @@ Produces:
 - `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
 - `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
 
-The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed `<ring>/linux-x64.json` feed, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed feed for its ring, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
 
 It will not update a package or an unpacked archive, and it will not update an image it cannot write. The reason appears in **Settings → General → Updates**. It also will not relaunch while an agent is still working or while Octant cannot confirm what is running — the same rule as on macOS. A provider that is not installed or not signed in, or one you switched off, does not hold the update back, because stopping Octant interrupts nothing for it. A launch that is not the portable image does not contact the update service.
 
@@ -193,8 +193,8 @@ octant-nightly --help
 
 ### Separate test data in Nightly
 
-For development and testing on macOS, Nightly can run a host of its own on data
-that is never Octant's. In Nightly, open **Settings › Updates** and set **Data**
+For development and testing on macOS and Linux, Nightly can run a host of its
+own on data that is never Octant's. In Nightly, open **Settings › Updates** and set **Data**
 to **Separate test data**, then choose **Relaunch Octant Nightly**. The choice
 takes effect on that relaunch.
 
@@ -211,7 +211,35 @@ takes effect on that relaunch.
 - The window shows a **Test data** label beside the Nightly label.
 - To go back, set **Data** to **Octant's data** and relaunch. While Nightly uses
   Octant's data, **Remove test data** moves the test data folder to the Trash.
-- Separate test data is not offered on Linux yet.
+- On Linux the test data lives in `~/.local/share/octant-nightly/test-data`
+  (under `$XDG_DATA_HOME` when you set it) and its log under
+  `~/.local/state/octant-nightly/logs`. Keys go into your keyring as separate
+  items whose `service` starts with `octant-nightly-test-data.`, so they never
+  replace or read Octant's. **Remove test data** also removes those keyring
+  items; if the keyring is locked, nothing is removed and Settings says so.
+
+### Octant Nightly on Linux
+
+Nightly connects to Octant on Linux the same way it does on macOS, with these
+prerequisites:
+
+- Both apps are the packaged AppImages, run by you, directly on your desktop:
+  not inside a container, Flatpak, snap or other sandbox, and not as another
+  user. Nightly checks that Octant runs as the same user in the same session
+  namespaces, and Octant checks Nightly the same way.
+- Linux 5.3 or later.
+- Chromium's sandbox works for both apps. Never start either with
+  `--no-sandbox`: Nightly refuses to connect while its windows run without the
+  sandbox. On Ubuntu 23.10 and later, see
+  [an AppArmor profile for Octant](./linux-host#an-apparmor-profile-for-octant).
+- Open Octant once from its AppImage. Each launch records which image it came
+  from, so Nightly can later start Octant's host in the background. If Octant
+  has never been opened, was moved, or its image was replaced or made writable
+  by others, Nightly says **Open Octant, then try again.**
+
+The check admits any program you run yourself outside a sandbox, which can
+already read Octant's own files. It keeps out programs in a sandbox and other
+users.
 
 An in-app Quit command in Octant closes its workspace windows while a current
 Nightly window still uses its host. The host remains in the background, and
@@ -245,10 +273,17 @@ It cannot start or migrate that host data.
 
 Packaged Octant follows the stable ring or, when you choose Preview or Nightly, the
 candidate ring, and refuses a feed signed for preview. The Nightly identity
-follows only preview and refuses stable and candidate feeds. Development runs
-keep their existing behavior. The stable-host connection, full Nightly command
-and coexistence remain required before Nightly can be offered as a usable
-download.
+follows only preview and refuses stable and candidate feeds. Each signed update
+also names the app it is for, so Octant refuses an Octant Nightly build ("This
+update is for Octant Nightly, not Octant.") and Nightly refuses an Octant
+build, on Linux as on macOS.
+
+If you installed an Octant build from the preview stream before Octant Nightly
+took it over (up to `0.1.0-preview.20261104.71`), that copy is never offered
+Nightly and sees no further update there. Choose Preview in Settings › Updates
+to keep getting new Octant builds. Development runs keep their existing
+behavior. The stable-host connection, full Nightly command, Nightly labels and
+coexistence remain required before Nightly can be offered as a usable download.
 
 Settings › Updates has an update channel switch with Stable, Preview and
 Nightly. Stable is the released build, Preview tests the next release, and
@@ -268,8 +303,9 @@ remove it; the row asks you to if it is still open. After you switch to Stable o
 stays while Nightly is installed. Octant on Linux does not install Nightly;
 download it from octant.sh instead. The release workflow's scheduled Nightly run
 has an explicit preflight stop until that functional client is implemented and
-verified. Its dispatched run builds Octant on the candidate ring and is not
-held by that stop; stable releases and local packaging have no such stop
+verified, and so does a dispatched rollback, which rebuilds a known-good
+Nightly under a newer version because updates only move forward. Its other
+dispatched run builds Octant on the candidate ring and is not held by that stop; stable releases and local packaging have no such stop
 either.
 
 Nightly identifies its local window with a neutral "Nightly" label beside

@@ -1,5 +1,8 @@
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveHostRuntimePaths, type HostRuntimePaths } from "@octant/host-runtime";
 
 export const BROWSER_EDITABLE_PRELOAD_FILENAME = "browserEditablePreload.cjs" as const;
 export const DESKTOP_PRELOAD_FILENAME = "preload.cjs" as const;
@@ -92,4 +95,50 @@ export function resolveDesktopHostRoot(options: {
 }
 
 export const DESKTOP_PEER_STATUS_FILENAME = "octant-desktop-peer-status.node";
+/** The Linux binding: same exports, a path socket and kernel peer checks. */
+export const DESKTOP_PEER_LINUX_FILENAME = "octant-desktop-peer-linux.node";
 export const BROWSER_TEXT_INPUT_FILENAME = "octant-browser-text-input.node";
+
+/**
+ * The host paths Octant's desktop resolves for its data folder. Nightly's
+ * client computes the same paths to reach the Linux window socket and
+ * launcher record that Octant writes beside its control socket.
+ */
+export function resolveDesktopHostRuntimePaths(
+  configuredDirectory: string | undefined,
+  appDataDirectory: string,
+  platform: NodeJS.Platform = process.platform,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): HostRuntimePaths {
+  if (platform !== "darwin" && platform !== "linux") {
+    throw new Error(`Octant desktop does not support host paths on ${platform}.`);
+  }
+  // Electron appData is ~/Library/Application Support on macOS and ~/.config on
+  // Linux; walk up to the home directory from that path so tests can inject a
+  // synthetic appData without depending on the process home.
+  const home =
+    platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(appDataDirectory, "..");
+  return resolveHostRuntimePaths({
+    env: {
+      OCTANT_DATA_DIR: configuredDirectory,
+      // Linux XDG overrides must reach the host-runtime resolver; otherwise a
+      // user with XDG_DATA_HOME set still lands under the default home path.
+      XDG_DATA_HOME: env.XDG_DATA_HOME,
+      XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
+      XDG_STATE_HOME: env.XDG_STATE_HOME,
+      OCTANT_LOGS_DIR: env.OCTANT_LOGS_DIR,
+    },
+    platform,
+    home,
+    temporaryDirectory: canonicalTemporaryDirectory(),
+    uid: process.getuid?.() ?? 0,
+  });
+}
+
+function canonicalTemporaryDirectory(): string {
+  try {
+    return realpathSync(tmpdir());
+  } catch {
+    return resolve(tmpdir());
+  }
+}
