@@ -204,7 +204,8 @@ export function linuxRendererSandboxDisabled(input: {
     input.hasSwitch("no-sandbox") ||
     input.hasSwitch("disable-setuid-sandbox") ||
     input.argv.some((argument) => argument === "--no-sandbox") ||
-    (input.env.ELECTRON_DISABLE_SANDBOX !== undefined && input.env.ELECTRON_DISABLE_SANDBOX !== "")
+    // Presence alone counts, empty included: refusing is the safe reading.
+    input.env.ELECTRON_DISABLE_SANDBOX !== undefined
   );
 }
 

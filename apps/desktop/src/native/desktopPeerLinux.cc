@@ -536,7 +536,15 @@ void serve(std::shared_ptr<Server> owned, int listener) {
       if (request.operation != policy::operation_status &&
           !peers.contains(connection.peer.key)) {
         if (peers.size() >= policy::max_peers) {
-          drop(index);
+          // Refused as macOS refuses a 33rd peer, with a reply.
+          Wire reply;
+          reply.operation = request.operation;
+          reply.generation = request.generation;
+          std::memcpy(reply.window, request.window, sizeof(reply.window));
+          const auto payload = refusal_payload("invalid-request");
+          std::memcpy(reply.payload, payload.data(), payload.size());
+          send_wire(connection.fd, reply);
+          ++index;
           continue;
         }
         peers.emplace(connection.peer.key, true);
@@ -700,8 +708,19 @@ Result connect_server(Client &client, Deadline deadline) {
   return {"ready", {}, {}};
 }
 
+// A reply that arrived after an earlier call's deadline is discarded, here
+// before sending and below while waiting, so a slow answer refuses only its
+// own call and never another one.
 Result exchange(Client &client, const Wire &request, Wire &reply,
                 Deadline deadline) {
+  for (;;) {
+    ucred stale{};
+    const auto drained = receive_wire(client.fd, reply, stale);
+    if (drained == Received::again)
+      break;
+    if (drained != Received::message || !from_peer(stale, client.peer))
+      return {"refused", "invalid-peer", {}};
+  }
   if (!send_wire(client.fd, request))
     return {"refused", "not-running", {}};
   for (;;) {
@@ -717,9 +736,10 @@ Result exchange(Client &client, const Wire &request, Wire &reply,
       continue;
     if (received == Received::closed)
       return {"refused", "invalid-peer", {}};
-    if (received != Received::message || !from_peer(credentials, client.peer) ||
-        !policy::valid_reply(reply, request))
+    if (received != Received::message || !from_peer(credentials, client.peer))
       return {"refused", "invalid-peer", {}};
+    if (!policy::valid_reply(reply, request))
+      continue;
     return {"ready", {}, {}};
   }
 }
@@ -768,6 +788,10 @@ std::string call_window(uint32_t operation, const std::string &window,
     const Result exchanged = exchange(*window_client, request, reply, deadline);
     if (exchanged.kind == "ready")
       return reply.payload;
+    // A timeout keeps the connection: closing it would end every lease this
+    // Nightly holds, where macOS refuses only the late call.
+    if (exchanged.reason == "deadline-exceeded")
+      return refusal_payload("deadline-exceeded");
     window_client.reset();
     if (exchanged.reason != "not-running")
       return refusal_payload(exchanged.reason.c_str());
@@ -825,6 +849,9 @@ Result launch_stable_host(Deadline deadline) {
     return {};
   }
   // Prepared before fork: the children only make system calls.
+  const long open_max = sysconf(_SC_OPEN_MAX);
+  const int descriptor_limit =
+      open_max <= 0 ? 1024 : static_cast<int>(std::min<long>(open_max, 65536));
   const pid_t child = fork();
   if (child < 0) {
     close(image);
@@ -844,7 +871,10 @@ Result launch_stable_host(Deadline deadline) {
       dup2(null, 2);
     }
     // Nothing of Nightly's but the image itself reaches Octant.
-    syscall(SYS_close_range, 3U, ~0U, CLOSE_RANGE_CLOEXEC);
+    if (syscall(SYS_close_range, 3U, ~0U, CLOSE_RANGE_CLOEXEC) != 0)
+      // Before Linux 5.11: mark each descriptor below the limit instead.
+      for (int fd = 3; fd < descriptor_limit; ++fd)
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
     sigset_t none;
     sigemptyset(&none);
     sigprocmask(SIG_SETMASK, &none, nullptr);
