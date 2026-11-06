@@ -92,14 +92,16 @@ makes on its own, or because you asked, are different relationships:
   endpoints you pointed Octant at. That includes a Canvas export to a GitHub
   Gist: once you approve it, GitHub receives the exported Markdown as the
   account you approved. See [Privacy notice](/advanced/privacy-notice#destinations-you-choose).
-- **Public Canvas share service** is operated by Octant at
+- **Public Canvas share service** is operated by Ogard Labs at
   `canvas.octant.sh`, or by you if you enter your own URL. Once you turn on
   Public links and approve a publish, it receives the Canvas and can read it.
-  See [Privacy notice](/advanced/privacy-notice#destinations-you-choose).
-
-  ::: warning Draft
-  Hosting provider: to be named before the service launches.
-  :::
+  See [Privacy notice](/advanced/privacy-notice#destinations-you-choose). Its
+  hosting sub-processors are **Gigahost AS** (servers in Norway, EEA) and
+  **Hetzner Online GmbH** (encrypted offsite backups in Finland, EU) — the same
+  infrastructure Ogard Labs runs its other services on. Both are in the EEA, so
+  no transfer tool is needed while the service stays hosted there; moving it
+  outside the EEA/UK would require the SCC module named in the
+  [SCC position](/advanced/scc-position).
 
 Whether any of those parties is a processor, a sub-processor, or neither
 is a legal question this draft does not close. The product fact is that
