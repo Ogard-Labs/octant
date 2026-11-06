@@ -4306,6 +4306,12 @@ or .zip>` write the same files, built by one host command
   overflow, or host restart. The client transport bounds and prioritizes reads,
   coalesces identical work, cancels obsolete thread switches, renews local
   client context without replaying mutations, and windows long transcripts.
+- **Code reply metadata.** Newly sent and resumed Code replies apply the same
+  review-preview, changed-file, handoff and fork-return metadata rules. Live
+  metadata targets the assistant row created by that stream, including the
+  optimistic row of a newly sent turn. Send, resume and reconnect keep their
+  own lifecycles and draft recovery.
+
 - **Data lifecycle.** Reset, remove-all, delete-remote-host, and thread
   retention/purge operations are explicit, reported per scope, and never run
   implicitly. Removing a paired host or Project deletes what it owns and
