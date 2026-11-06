@@ -4297,14 +4297,46 @@ describe("WorkTurnService", () => {
   });
 
   it("refuses a changed tool catalogue before acceptance and preserves the conversation on explicit continuation", async () => {
+    const base = workProject();
+    const project = workProject({
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/notes",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/assets",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+      ],
+    });
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw new Error("Missing approved folder");
+    let physicalCurrent = true;
+    let keepRunning = false;
+    let continuationSignal: AbortSignal | undefined;
     const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
       input.onSessionReady?.({
         sessionId: input.providerSessionId,
         resumeCursor: { driverKind: "codex", value: "saved-session" },
       });
+      if (keepRunning) {
+        continuationSignal = input.signal;
+        expect(input.admissionCurrent?.()).toBe(true);
+        await new Promise<void>((resolve) =>
+          input.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        return { kind: "cancelled" as const };
+      }
       return { kind: "completed" as const, response: "A saved answer" };
     });
+    const resolveAppManagedTools = vi.fn(() => undefined);
     const fixture = serviceFixture({
+      project,
+      resolveAppManagedTools,
+      workingDirectoriesCurrent: () => () => physicalCurrent,
       turnRuntime: { run },
       resolveDriver: (_id, fallback) => ({
         ...fallback,
@@ -4312,10 +4344,16 @@ describe("WorkTurnService", () => {
         toolCatalogContinuation: () => "handoff-required",
       }),
     });
-    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const thread = { ...(await fixture.threads.read()), workingFolderId: choice.id };
+    fixture.threads.read.mockResolvedValue(thread);
+    const command = {
+      ...startCommand(),
+      authority: { ...startCommand().authority, workingFolderId: choice.id },
+    };
+    await fixture.service.startFirstTurn(ids.window, command);
     await fixture.waitForIdle();
     const next = {
-      ...startCommand(),
+      ...command,
       requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
       turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
       prompt: "Use the updated tools",
@@ -4325,7 +4363,19 @@ describe("WorkTurnService", () => {
     );
     expect(run).toHaveBeenCalledTimes(1);
     expect((await fixture.service.transcript(ids.window, ids.thread)).turns).toHaveLength(1);
+    keepRunning = true;
     await fixture.service.startFirstTurn(ids.window, { ...next, toolCatalogHandoff: true });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    physicalCurrent = false;
+    expect(resolveAppManagedTools).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        projectRoot: "/approved/notes",
+        extraFolders: [project.binding.canonicalRoot, "/approved/assets"],
+      }),
+    );
+    expect(run.mock.calls[1]?.[0].projectRoot).toBe("/approved/notes");
+    expect(run.mock.calls[1]?.[0].extraFolders).toContain(project.binding.canonicalRoot);
+    await vi.waitFor(() => expect(continuationSignal?.aborted).toBe(true));
     await fixture.waitForIdle(next.requestId);
     expect(run).toHaveBeenCalledTimes(2);
     await expect(fixture.service.startFirstTurn(ids.window, next)).rejects.toThrow(
@@ -4345,6 +4395,16 @@ describe("WorkTurnService", () => {
     expect(
       (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
     ).toMatchObject({ reason: "provider-switch", messages: 2 });
+    fixture.persistence.readProject.mockReturnValue(base);
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...next,
+        requestId: randomUUID(),
+        turnId: randomUUID(),
+        toolCatalogHandoff: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(run).toHaveBeenCalledTimes(2);
   });
 
   describe("moving a Work conversation to another provider", () => {
@@ -4979,6 +5039,9 @@ async function attachmentStore(): Promise<WorkAttachmentStore> {
 function serviceFixture(
   options: {
     readonly project?: Project;
+    readonly workingDirectoriesCurrent?: NonNullable<
+      WorkTurnServiceDependencies["workingDirectories"]["current"]
+    >;
     readonly nativeConversation?: boolean;
     readonly resolveDriver?: (
       id: Parameters<WorkTurnServiceDependencies["resolveDriver"]>[0],
@@ -5141,7 +5204,12 @@ function serviceFixture(
       active: [{ id: ids.project, type: "work", lifecycle: "active" }],
     })),
   };
-  const workingDirectories = { resolve: vi.fn(async (root: string) => root) };
+  const workingDirectories = {
+    resolve: vi.fn(async (root: string) => root),
+    ...(options.workingDirectoriesCurrent === undefined
+      ? {}
+      : { current: options.workingDirectoriesCurrent }),
+  };
   const service = new WorkTurnService({
     ...(options.resolveSideChatReturns === undefined
       ? {}

@@ -2544,6 +2544,11 @@ describe("WorkThreadWorkspace", () => {
     const action = await screen.findByRole("button", { name: "Continue with updated tools" });
     expect(composer).toHaveValue("Use the updated tools");
     expect(startFirstTurn).toHaveBeenCalledTimes(1);
+    fireEvent.drop(composer, { dataTransfer: nativeFolderTransfer() });
+    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(composer).toHaveValue("Use the updated tools");
+    expect(action).toBeVisible();
+    expect(startFirstTurn).toHaveBeenCalledTimes(1);
     await user.click(action);
     await waitFor(() => expect(startFirstTurn).toHaveBeenCalledTimes(2));
     expect(startFirstTurn).toHaveBeenLastCalledWith(

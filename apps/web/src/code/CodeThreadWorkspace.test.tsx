@@ -121,6 +121,13 @@ describe("updated native session tools", () => {
     const action = await screen.findByRole("button", { name: "Continue with updated tools" });
     expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
     expect(code.sendFollowUp).not.toHaveBeenCalled();
+    fireEvent.drop(screen.getByLabelText("Follow-up message"), {
+      dataTransfer: nativeFolderTransfer(),
+    });
+    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
+    expect(action).toBeVisible();
+    expect(code.sendFollowUp).not.toHaveBeenCalled();
     await userEvent.click(action);
     await waitFor(() => expect(code.sendFollowUp).toHaveBeenCalledOnce());
     expect(vi.mocked(code.sendFollowUp).mock.calls[0]?.[11]).toBe(true);

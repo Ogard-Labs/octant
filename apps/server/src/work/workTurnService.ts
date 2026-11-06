@@ -961,6 +961,19 @@ export class WorkTurnService {
       }
     }
 
+    const extraFolders =
+      project === undefined
+        ? []
+        : [
+            ...new Set([
+              ...(command.authority.workingFolderId !== undefined &&
+              projectRoot !== project.binding.canonicalRoot
+                ? [project.binding.canonicalRoot]
+                : []),
+              ...projectExtraFolderRoots(project),
+            ]),
+          ].filter((folder) => folder !== projectRoot);
+
     const provider = this.#persistence.readProviderInstance(command.authority.providerInstanceId);
     if (provider === undefined || !provider.enabled) {
       throw this.#failure("unavailable", "Selected Work provider is unavailable.");
@@ -1044,9 +1057,7 @@ export class WorkTurnService {
           : this.#resolveAppManagedTools?.({
               thread,
               projectRoot,
-              ...(project === undefined || projectExtraFolderRoots(project).length === 0
-                ? {}
-                : { extraFolders: projectExtraFolderRoots(project) }),
+              ...(extraFolders.length === 0 ? {} : { extraFolders }),
               windowId: authenticatedWindowId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
@@ -1442,18 +1453,7 @@ export class WorkTurnService {
         ...(resumeCursor === undefined ? {} : { resumeCursor }),
         projectRoot,
         projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
-        extraFolders:
-          project === undefined
-            ? []
-            : [
-                ...new Set([
-                  ...(command.authority.workingFolderId !== undefined &&
-                  projectRoot !== project.binding.canonicalRoot
-                    ? [project.binding.canonicalRoot]
-                    : []),
-                  ...projectExtraFolderRoots(project),
-                ]),
-              ].filter((folder) => folder !== projectRoot),
+        extraFolders,
         ...(server === undefined ? {} : { serverTools: server.tools }),
         driver,
         ...(preparedTools === undefined ? {} : { preparedTools }),
