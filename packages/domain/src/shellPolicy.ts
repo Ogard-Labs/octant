@@ -166,7 +166,8 @@ export function defaultShellSettings(): ShellSettings {
     sidebarCollapsedPresentation: "always",
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
-    automaticUpdateChecks: true,
+    // Off by default: an unrecorded preference decodes to no update traffic.
+    automaticUpdateChecks: false,
     computerUse: { enabled: true, automaticUpdates: false },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,

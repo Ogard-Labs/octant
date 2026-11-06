@@ -505,11 +505,12 @@ still has to carry a signature Octant's built-in key accepts.
 
 ### How often a check happens
 
-Automatic checking is on by default once the saved preference is loaded,
-including hosts that stored settings before updates shipped. The desktop
-process itself starts with checking **off** and stays off until that
-preference arrives, so turning the switch off is never raced by a
-launch-time request.
+Automatic checking is **off by default**, including on hosts that stored
+settings before updates shipped: a store that never recorded the preference
+decodes to off, so an unrecorded choice never becomes a request. The desktop
+process also starts with checking off and stays off until the saved
+preference arrives, so turning the switch on is never raced by a
+launch-time request either.
 
 When automatic checking is on, the first check waits ten minutes after
 launch, then repeats once every twenty-four hours. That is often enough to

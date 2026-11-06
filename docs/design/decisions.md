@@ -333,7 +333,7 @@ An update installs only after its feed signature and artifact hash verify, and o
 - The release must be strictly newer and name this app (Octant or Octant Nightly), platform, architecture and ring; a release for the other app is refused as the wrong app.
 - Anything unverifiable is refused, never downgraded; macOS adds the platform code-signature check, and a Linux AppImage replaces only the image it was launched from.
 - Rings are stable, preview and candidate. Octant follows stable or, by the person's in-app choice, candidate (shown as Preview or, with the Nightly install row, Nightly); the Octant Nightly app follows preview.
-- Install waits while agents are active; automatic checks are a setting, and a check carries only version, platform and architecture.
+- Install waits while agents are active; automatic checks default to off until the person opts in, including stores that never recorded a choice. A check carries only version, platform and architecture.
 
 Status: Built. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 

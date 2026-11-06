@@ -238,6 +238,14 @@ describe("shell bootstrap contracts", () => {
     expect(decodeShellSettings(predatesTheCards).homeCards).toEqual({ order: [], visibility: [] });
   });
 
+  it("decodes a store that never recorded the update-check preference to checks off", () => {
+    const { automaticUpdateChecks: _omitted, ...withoutUpdateChecks } = settings;
+    expect(decodeShellSettings(withoutUpdateChecks).automaticUpdateChecks).toBe(false);
+    expect(
+      decodeShellSettings({ ...settings, automaticUpdateChecks: true }).automaticUpdateChecks,
+    ).toBe(true);
+  });
+
   it("keeps a start-screen card order and choice, and refuses a card named twice", () => {
     const homeCards = {
       order: ["pull-requests", "working-now"],
