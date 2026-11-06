@@ -188,6 +188,7 @@ export function startOctantServer(
     const startedAt = Date.now();
 
     const {
+      conversationInputTransfer,
       browserAuthority,
       codeBoardEventStore,
       codeEvidence,
@@ -713,6 +714,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       worktreePreparation,
+      conversationInputTransfer,
       browserModelBindings,
       personMemoryAccess,
       serverConnection,
@@ -869,6 +871,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      conversationInputTransfer,
       personMemoryAccess,
       workRequestRuntime,
       threadAwaitsHarnessApproval,
@@ -933,6 +936,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      conversationInputTransfer,
       personMemoryAccess,
       runtimeForgeChanges,
       nativeHarnessSessions,

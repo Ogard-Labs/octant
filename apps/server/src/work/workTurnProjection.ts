@@ -87,6 +87,7 @@ export class WorkTurnProjection {
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}
           : { attachments: accepted.attachments }),
+        ...(accepted.inputReceipt === undefined ? {} : { inputReceipt: accepted.inputReceipt }),
         ...(accepted.extensionSelections === undefined || accepted.extensionSelections.length === 0
           ? {}
           : { extensionSelections: accepted.extensionSelections }),

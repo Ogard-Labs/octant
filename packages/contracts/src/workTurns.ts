@@ -1,3 +1,8 @@
+import {
+  ConversationInputReceipt,
+  ConversationInputPolicy,
+  ConversationInputReference,
+} from "./conversationInputs";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
@@ -86,6 +91,7 @@ export const WorkAttachmentReference = Schema.Struct({
   mediaType: WorkAttachmentMediaType,
   byteLength: Schema.Int.pipe(Schema.between(1, MAX_WORK_ATTACHMENT_BYTES)),
   digest: WorkAttachmentDigest,
+  source: Schema.optional(ConversationInputReference.fields.source),
 }).annotations(strict);
 export type WorkAttachmentReference = typeof WorkAttachmentReference.Type;
 
@@ -219,6 +225,7 @@ export const WorkForkConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type WorkForkConversationHandoff = typeof WorkForkConversationHandoff.Type;
 
@@ -250,6 +257,7 @@ export type WorkExternalInputReceipt = typeof WorkExternalInputReceipt.Type;
 export const WorkTurnState = Schema.Struct({
   toolCatalogHandoff: Schema.optional(Schema.Boolean),
   externalInput: Schema.optional(WorkExternalInputReceipt),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -316,6 +324,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * never accepted, and the journal records the attachment by name and digest
    * rather than by content.
    */
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   attachmentIds: Schema.optional(
     Schema.Array(WorkAttachmentId).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
@@ -497,6 +506,7 @@ export type WorkTurnStreamFrame = typeof WorkTurnStreamFrame.Type;
 
 export const WorkTurnAccepted = Schema.Struct({
   externalInput: Schema.optional(WorkExternalInputReceipt),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   kind: Schema.Literal("turn-accepted"),
   toolCatalogHandoff: Schema.optional(Schema.Boolean),
   requestId: WorkTurnRequestId,

@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -2360,11 +2361,15 @@ export function useCodeController(options: CodeControllerOptions) {
     async (input: {
       readonly threadId: CodeThreadId;
       readonly throughOperationId: string;
+      readonly contextInputPolicy?: ConversationInputPolicy;
     }): Promise<CodeForkMergeBackOutcome | undefined> => {
       const result = await execute({
         kind: "merge-code-fork-context",
         threadId: input.threadId,
         throughOperationId: input.throughOperationId,
+        ...(input.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: input.contextInputPolicy }),
       });
       return result?.kind === "fork-context-merge" ? result.outcome : undefined;
     },

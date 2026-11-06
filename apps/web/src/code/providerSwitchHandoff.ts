@@ -178,6 +178,7 @@ const MERGE_BACK_REFUSALS: Record<
 
 /** What the person sees on the fork after asking to merge it back. */
 export function forkMergeBackOutcomeMessage(outcome: CodeForkMergeBackOutcome): string {
+  if (outcome.status === "refused" && outcome.message !== undefined) return outcome.message;
   if (outcome.status === "refused") return MERGE_BACK_REFUSALS[outcome.reason];
   return `Merged ${count(outcome.messages, "message", "messages")} back into the thread this was forked from. Its next message carries them; nothing runs until then.`;
 }

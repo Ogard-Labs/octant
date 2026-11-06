@@ -1200,7 +1200,8 @@ Status: Built. Since: —. Detail: [Architecture: Held standing context](../arch
 When a conversation moves to a new session, the new provider gets a bounded, disclosed text handoff. It never resumes the old session.
 
 - The handoff is journaled before the prompt is sent, with counts, taint and omissions. Hidden reasoning, tool activity and the previous native session never transfer.
-- A Chat or Work turn needs a handoff only when the destination provider keeps its own session, and Chat gains no filesystem or shell authority from it.
+- A Chat or Work turn needs a text handoff only when the destination provider keeps its own session. Original user inputs are preserved separately on provider changes, rewind, supported forks or branches and Code fork merge-back, including host-rebuilt conversation. Exact source bytes, current scope and target modality are checked; an explicit text-only choice records omissions. Chat gains no filesystem or shell authority.
+- Purgeable destination-owned manifests freeze the admitted input identity across retries and restart. A missing, changed, unsupported or revoked original refuses the send; native fork/rewind state is not duplicated as attachment inputs.
 - A switch that cannot hand over refuses before the provider starts, with a named reason.
 - Merging a fork's conversation back is explicit and approval-free and adds context only. File changes reach the source only through Git review, and outside content the fork took in taints the source.
 

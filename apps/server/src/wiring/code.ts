@@ -920,10 +920,15 @@ export function wireCode(deps: CodeDependencies) {
           // The runtime owns the journal a merge is recorded in and the turns
           // that carry it.
           forkMergeBack: {
-            merge: async (windowId, forkThreadId, throughOperationId) =>
+            merge: async (windowId, forkThreadId, throughOperationId, contextInputPolicy) =>
               codeOperationRuntime?.mergeForkContext === undefined
                 ? { status: "refused", reason: "unsupported" }
-                : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
+                : codeOperationRuntime.mergeForkContext(
+                    windowId,
+                    forkThreadId,
+                    throughOperationId,
+                    contextInputPolicy,
+                  ),
           },
           managedThreadCreation: withServerWorktreeCreation(
             { store: serverProjectStore, connection: serverConnection },

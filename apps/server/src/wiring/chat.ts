@@ -158,10 +158,11 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     readonly workThreadService: () => WorkThreadService;
     /** Wired by wireWork; read only after startup. */
     readonly workTurnService: () => WorkTurnService;
-  } & Pick<FoundationsWiring, "providerRuntimeRegistry">;
+  } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
 
 export function wireChat(deps: ChatDependencies) {
   const {
+    conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageProjection,
     agentMessageService,
@@ -382,6 +383,7 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
+      conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({

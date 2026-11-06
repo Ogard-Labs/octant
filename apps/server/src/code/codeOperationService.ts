@@ -1002,7 +1002,7 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: () => {
+    readonly takeProductFeedback?: (maxAttachments?: number) => {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };
@@ -1285,6 +1285,7 @@ export interface CodeOperationServiceOptions {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
     readonly supportsImages: boolean;
+    readonly maxAttachments?: number;
   }) => {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
@@ -5764,11 +5765,12 @@ export class CodeOperationService {
       ...(takeProductFeedback === undefined
         ? {}
         : {
-            takeProductFeedback: () =>
+            takeProductFeedback: (maxAttachments) =>
               takeProductFeedback({
                 threadId: command.threadId,
                 operationId: command.operationId,
                 supportsImages,
+                ...(maxAttachments === undefined ? {} : { maxAttachments }),
               }),
           }),
     });

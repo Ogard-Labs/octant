@@ -39,6 +39,37 @@ const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000
 const sessionId = decodeProviderSessionId("87000000-0000-4000-8000-000000000002");
 
 describe("CodeTurnRunner", () => {
+  it("refuses to send original continuation inputs revoked while the native session starts", async () => {
+    let current = true;
+    const connection = fakeConnection({
+      start: vi.fn(() =>
+        Effect.sync(() => {
+          current = false;
+          return { sessionId };
+        }),
+      ),
+      subscribe: Effect.succeed(Stream.never),
+    });
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              inputsCurrent: () => current,
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: { message: expect.stringContaining("original continuation inputs") },
+    });
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+  });
+
   it("resumes the same native session for a follow-up without creating another", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),

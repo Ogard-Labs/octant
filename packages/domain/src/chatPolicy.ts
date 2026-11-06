@@ -243,6 +243,7 @@ export interface BeginChatTurnInput {
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
   /** Set when this turn's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
+  readonly inputReceipt?: ChatAttempt["inputReceipt"];
   readonly contextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly sideChatReturns?: ChatTurn["sideChatReturns"];
@@ -277,6 +278,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     providerSessionId: input.providerSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
+    ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
     ...(input.sideChatSourceReceipt === undefined
@@ -424,6 +426,7 @@ export interface RetryChatTurnInput {
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
   /** Set when the retried attempt's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
+  readonly inputReceipt?: ChatAttempt["inputReceipt"];
   readonly newContextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
@@ -475,6 +478,7 @@ export function retryChatTurn(
     providerSessionId: input.newProviderSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
+    ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
     ...(input.sideChatSourceReceipt === undefined
@@ -535,6 +539,7 @@ export function resumeChatTurn(
     providerInstanceId: attempt.providerInstanceId,
     providerSessionId: attempt.providerSessionId,
     modelId: attempt.modelId,
+    ...(attempt.inputReceipt === undefined ? {} : { inputReceipt: attempt.inputReceipt }),
     contextManifestId: input.newContextManifestId,
     ...(input.sideChatSourceReceipt === undefined
       ? {}

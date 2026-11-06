@@ -360,9 +360,12 @@ export function admittedParentWorkContext(
               inputs: turn.attachments.map((attachment) =>
                 decodeConversationInputReference({
                   source: {
-                    mode: "work",
-                    threadId: String(turn.threadId),
-                    attachmentId: String(attachment.attachmentId),
+                    ...(attachment.source ?? {
+                      mode: "work",
+                      threadId: String(turn.threadId),
+                      attachmentId: String(attachment.attachmentId),
+                      projectId: String(turn.projectId),
+                    }),
                   },
                   displayName: attachment.displayName,
                   mediaType: attachment.mediaType,
@@ -498,29 +501,33 @@ export function admittedChatConversationContext(
               }),
         },
         byteLength: reference.byteLength,
-        inputs: turn.attachmentIds.flatMap((id) => {
-          const attachment = view.attachments?.find(
-            (item) =>
-              String(item.id) === String(id) &&
-              String(item.threadId) === String(input.threadId) &&
-              item.status === "finalized",
-          );
-          return attachment === undefined
-            ? []
-            : [
-                decodeConversationInputReference({
-                  source: {
-                    mode: "chat",
-                    threadId: String(input.threadId),
-                    attachmentId: String(attachment.id),
-                  },
-                  displayName: attachment.displayName,
-                  mediaType: attachment.mediaType,
-                  byteLength: attachment.byteLength,
-                  digest: attachment.digest,
-                }),
-              ];
-        }),
+        inputs: [
+          ...(turn.originalInputs ?? []),
+          ...turn.attachmentIds.flatMap((id) => {
+            const attachment = view.attachments?.find(
+              (item) =>
+                String(item.id) === String(id) &&
+                String(item.threadId) === String(input.threadId) &&
+                item.status === "finalized",
+            );
+            return attachment === undefined
+              ? []
+              : [
+                  decodeConversationInputReference({
+                    source: {
+                      mode: "chat",
+                      threadId: String(input.threadId),
+                      attachmentId: String(attachment.id),
+                      projectId: thread.projectId === undefined ? null : String(thread.projectId),
+                    },
+                    displayName: attachment.displayName,
+                    mediaType: attachment.mediaType,
+                    byteLength: attachment.byteLength,
+                    digest: attachment.digest,
+                  }),
+                ];
+          }),
+        ],
         inputUnavailable: turn.attachmentIds.some(
           (id) =>
             !view.attachments?.some(
@@ -732,6 +739,7 @@ function scanCodeConversation(
                       mode: "code",
                       threadId: String(read.threadId),
                       attachmentId: String(attachment.attachmentId),
+                      projectId: String(thread.projectId),
                     },
                     displayName: attachment.displayName,
                     mediaType: attachment.mediaType,

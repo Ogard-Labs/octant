@@ -1,4 +1,5 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
 import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
 import {
@@ -744,6 +745,7 @@ export interface CodeServiceOptions {
       authenticatedWindowId: WindowId,
       forkThreadId: CodeThreadId,
       throughOperationId: string,
+      contextInputPolicy?: ConversationInputPolicy,
     ) => Promise<CodeForkMergeBackOutcome>;
   };
   readonly probeProvider?: (
@@ -1375,6 +1377,7 @@ export class CodeService {
                 authenticatedWindowId,
                 fork.id,
                 command.throughOperationId,
+                command.contextInputPolicy,
               );
         return { kind: "fork-context-merge", threadId: fork.id, outcome };
       }

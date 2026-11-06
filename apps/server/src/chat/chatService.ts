@@ -1,3 +1,10 @@
+import {
+  decodeConversationInputReference,
+  type ConversationInputPolicy,
+  type ConversationInputReceipt,
+} from "@octant/contracts/conversation-inputs";
+import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
@@ -564,8 +571,10 @@ interface ChatTurnContextPlan {
 }
 
 interface PreparedChatTurn {
+  readonly inputsCurrent?: () => boolean;
   readonly sideChatSourceReceipt?: SideChatSourceReceipt;
   readonly nativeSession?: ChatAttempt;
+  readonly inputReceipt?: ConversationInputReceipt;
   /**
    * Set when the turn starts a new provider session with the thread's earlier
    * conversation handed over as text. The record is journaled with the turn's
@@ -639,6 +648,7 @@ export interface ChatServiceOptions {
    * the thread needs the person.
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -996,6 +1006,7 @@ export class ChatService {
   readonly #gatherMultiModelRuntimeFacts: NonNullable<
     ChatServiceOptions["gatherMultiModelRuntimeFacts"]
   >;
+  readonly #conversationInputTransfer: ChatServiceOptions["conversationInputTransfer"];
   readonly #attachmentStore: ChatAttachmentStore;
   readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
@@ -1060,6 +1071,7 @@ export class ChatService {
       ((input) => this.#probeMultiModelRuntimeFacts(input.pool));
     this.#attachmentStore =
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
+    this.#conversationInputTransfer = options.conversationInputTransfer;
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
@@ -2581,6 +2593,9 @@ export class ChatService {
             content === undefined ||
             content.body !== command.prompt ||
             (existing.toolCatalogHandoff === true) !== (command.toolCatalogHandoff === true) ||
+            (existing.attempts[0]?.inputReceipt !== undefined &&
+              existing.attempts[0].inputReceipt.policy !==
+                (command.contextInputPolicy ?? "preserve")) ||
             JSON.stringify(existing.sideChatReturns ?? []) !==
               JSON.stringify(command.sideChatReturns ?? [])
           ) {
@@ -2647,6 +2662,7 @@ export class ChatService {
         resolvedExtensions,
         command.sideChatReturns,
         command.toolCatalogHandoff === true,
+        command.contextInputPolicy,
       );
       const attachmentIds = command.attachmentIds;
       const turn = beginChatTurn(prepared.executionThread, {
@@ -2662,6 +2678,7 @@ export class ChatService {
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -2863,6 +2880,7 @@ export class ChatService {
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -3009,10 +3027,10 @@ export class ChatService {
    * the source thread — the command cannot choose them — so a branch can never
    * widen authority or escape the source thread's Project.
    *
-   * A branch carries message text only. Attachments stay bound to the source
-   * thread and are counted in `branchedFrom.omittedAttachmentCount` rather than
-   * silently dropped, and only completed attempts with readable response
-   * content are carried, so the branch never shows an exchange that did not
+   * A branch carries message text and immutable original-input references.
+   * Attachment bytes stay bound to their source and are reopened under current
+   * scope when the branch starts its own turn. Only completed attempts with
+   * readable response content are carried, so the branch never shows an exchange that did not
    * happen. A source whose provider keeps its conversation in a session of its
    * own cannot lend that session to the branch, which would share the source's
    * later turns: the branch's first turn starts a new session with the carried
@@ -3043,7 +3061,7 @@ export class ChatService {
     const timestamp = decodeTimestamp(this.#clock());
     const copiedContent: PreparedChatContent[] = [];
     const branchTurns: ChatTurn[] = [];
-    let omittedAttachmentCount = 0;
+    const omittedAttachmentCount = 0;
     for (const sourceTurn of carried) {
       const userContent = contentById.get(String(sourceTurn.userMessageRef.contentId));
       if (userContent === undefined) {
@@ -3052,7 +3070,35 @@ export class ChatService {
           message: "Chat turn content is unavailable.",
         });
       }
-      omittedAttachmentCount += sourceTurn.attachmentIds.length;
+      const originalInputs = [
+        ...(sourceTurn.originalInputs ?? []),
+        ...sourceTurn.attachmentIds.map((id) => {
+          const attachment = view.attachments.find(
+            (item) =>
+              String(item.id) === String(id) &&
+              String(item.threadId) === String(source.id) &&
+              item.status === "finalized",
+          );
+          if (attachment === undefined)
+            throw new ChatServiceError({
+              category: "unavailable",
+              message:
+                "An original branch input is unavailable. Restore it before branching; the source conversation is unchanged.",
+            });
+          return decodeConversationInputReference({
+            source: {
+              mode: "chat",
+              threadId: String(source.id),
+              attachmentId: String(id),
+              projectId: source.projectId === undefined ? null : String(source.projectId),
+            },
+            displayName: attachment.displayName,
+            mediaType: attachment.mediaType,
+            byteLength: attachment.byteLength,
+            digest: attachment.digest,
+          });
+        }),
+      ];
       const turnId = this.#uuid() as ChatTurn["id"];
       const userMessage = this.#prepareContent(branchThreadId, "user", userContent.body);
       copiedContent.push(userMessage);
@@ -3097,6 +3143,7 @@ export class ChatService {
           sequence: branchTurns.length + 1,
           userMessageRef: userMessage.reference,
           attachmentIds: [],
+          ...(originalInputs.length === 0 ? {} : { originalInputs }),
           attempts,
           createdAt: sourceTurn.createdAt,
         }),
@@ -3218,6 +3265,7 @@ export class ChatService {
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
     readonly record: ChatAttemptHandoff;
+    readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }>;
   } {
     const subject = { thread: "Chat", cause: reason === "branch" ? "branch" : "switch" } as const;
     const refuse = (why: ConversationHandoffRefusal): never => {
@@ -3255,6 +3303,7 @@ export class ChatService {
     if (owned !== "ok") return refuse(owned);
     return {
       blocks: selection.blocks,
+      selection,
       record:
         reason === "rewind"
           ? restartHandoffRecord(selection, "rewind")
@@ -3355,6 +3404,8 @@ export class ChatService {
         executionContext,
         undefined,
         turn.sideChatReturns,
+        false,
+        command.contextInputPolicy,
       );
       const nextAttempt = retryChatTurn(thread, attempt, {
         turnId: command.turnId,
@@ -3366,6 +3417,7 @@ export class ChatService {
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -3705,6 +3757,8 @@ export class ChatService {
         executionContext,
         undefined,
         turn.sideChatReturns,
+        false,
+        command.contextInputPolicy,
       );
       const nextAttempt = resumeChatTurn(thread, attempt, {
         turnId: command.turnId,
@@ -3992,6 +4046,7 @@ export class ChatService {
     },
     sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>,
     toolCatalogHandoff = false,
+    contextInputPolicy?: ConversationInputPolicy,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
     const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
@@ -4035,7 +4090,7 @@ export class ChatService {
     const previousTurn =
       sinceRewind?.turn ?? (rewoundTail && keptTurns.length === 0 ? undefined : tailTurn);
     const previous = sinceRewind?.attempt ?? previousTurn?.attempts.at(-1);
-    const attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
+    let attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
     const carriesAppTools =
@@ -4143,7 +4198,7 @@ export class ChatService {
         });
       }
       let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
-      const handoff =
+      let handoff =
         sessionDecision.kind === "new-session-with-handoff"
           ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
               // A handoff that never completed is made again from the provider
@@ -4165,6 +4220,103 @@ export class ChatService {
               )?.id,
             })
           : undefined;
+    const branchNeedsInputs =
+      thread.branchedFrom !== undefined &&
+      previousTurn !== undefined &&
+      previousTurn.sequence <= thread.branchedFrom.carriedTurnCount;
+    const hostInputReason =
+      sessionDecision.kind !== "host-rebuild" ||
+      !keptTurns.some(
+        (turn) => turn.attachmentIds.length > 0 || (turn.originalInputs?.length ?? 0) > 0,
+      )
+        ? undefined
+        : rewoundTail
+          ? "rewind"
+          : branchNeedsInputs
+            ? "branch"
+            : previous !== undefined &&
+                (String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
+                  String(previous.modelId) !== String(thread.modelId))
+              ? "provider-switch"
+              : undefined;
+    const inputHandoff =
+      handoff ??
+      (hostInputReason === undefined
+        ? undefined
+        : this.#selectConversationHandoff(thread, threadView, hostInputReason, {
+            from:
+              previous === undefined
+                ? undefined
+                : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
+            excludeTurnId: threadView?.turns.find(
+              (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
+            )?.id,
+          }));
+    let inputReceipt: ConversationInputReceipt | undefined;
+    let inputsCurrent: (() => boolean) | undefined;
+    const inputOnlyBlocks: ProviderContextBlock[] = [];
+    if (inputHandoff !== undefined) {
+      const transfer = this.#conversationInputTransfer;
+      const previousReceipt =
+        previous?.outcome !== "completed" &&
+        previous?.inputReceipt?.purpose === inputHandoff.record.reason
+          ? previous.inputReceipt
+          : undefined;
+      if (
+        transfer === undefined &&
+        ((inputHandoff.selection.inputs?.length ?? 0) > 0 ||
+          inputHandoff.selection.inputUnavailable === true ||
+          previousReceipt !== undefined)
+      )
+        throw new ChatServiceError({
+          category: "unavailable",
+          message: "Original source inputs cannot be transferred on this host. Nothing was sent.",
+        });
+      const prepared = await transfer?.prepare({
+        owner: {
+          mode: "chat",
+          threadId: String(thread.id),
+          projectId: thread.projectId === undefined ? null : String(thread.projectId),
+        },
+        purpose: inputHandoff.record.reason,
+        selection: inputHandoff.selection,
+        ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
+        ...(contextInputPolicy === undefined ? {} : { policy: contextInputPolicy }),
+        target: {
+          providerInstanceId: String(thread.providerInstanceId),
+          modelId: String(thread.modelId),
+        },
+        current: () =>
+          executionContext?.admissionCurrent?.() !== false &&
+          this.#persistence.readChatThread(thread.id)?.lifecycle === "active",
+      });
+      if (prepared?.status === "refused")
+        throw new ChatServiceError({ category: "unavailable", message: prepared.message });
+      if (prepared?.status === "ready" && prepared.receipt !== undefined) {
+        inputsCurrent = prepared.inputsCurrent;
+        attachments = [...attachments, ...prepared.attachments];
+        inputReceipt = prepared.receipt;
+        if (handoff === undefined)
+          inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
+        else
+          handoff = {
+            ...handoff,
+            blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
+            record: {
+              ...handoff.record,
+              inputReceipt: prepared.receipt,
+              omissions: {
+                ...handoff.record.omissions,
+                attachments: Math.max(
+                  0,
+                  handoff.record.omissions.attachments - prepared.receipt.included,
+                ),
+              },
+            },
+          };
+      }
+    }
+
       this.#preflightChatTurn(probe, thread, attachments, tools);
       const providerFacts = await this.#resolveProviderContextFacts(
         driver,
@@ -4253,7 +4405,7 @@ export class ChatService {
             .filter((text) => text !== undefined && text.length > 0)
             .join("\n\n") || undefined,
           threadMentionContexts,
-          handoff?.blocks,
+          handoff === undefined ? (inputOnlyBlocks.length === 0 ? undefined : inputOnlyBlocks) : handoff.blocks,
           offersCanvasTool(tools?.definitions),
           appToolHostLines(tools?.definitions),
           personMemoryText,
@@ -4278,6 +4430,8 @@ export class ChatService {
       toolsPrepared = true;
       return {
         executionThread: thread,
+        ...(inputsCurrent === undefined ? {} : { inputsCurrent }),
+        ...(inputReceipt === undefined ? {} : { inputReceipt }),
         ...(nativeSession === undefined ? {} : { nativeSession }),
         ...(handoff === undefined ? {} : { handoff: handoff.record }),
         context:
@@ -6009,6 +6163,9 @@ export class ChatService {
               reservationId,
               estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
               attachments: input.prepared.attachments,
+              ...(input.prepared.inputsCurrent === undefined
+                ? {}
+                : { inputsCurrent: input.prepared.inputsCurrent }),
               ...nativeSetupOption(
                 sessionNativeSetup(this.#persistence, {
                   providerInstanceId,

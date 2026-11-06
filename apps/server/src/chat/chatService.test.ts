@@ -1,3 +1,5 @@
+import { decodeChatThreadId } from "@octant/contracts";
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { SideChatSidecarStore } from "./sideChatSidecarStore";
 import { createHash } from "node:crypto";
 import {
@@ -233,6 +235,7 @@ function withProbe(
 
 function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
+  readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
   readonly toolCatalogContinuation?: ProviderDriver["toolCatalogContinuation"];
@@ -704,6 +707,9 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.inputTransfer === undefined
+      ? {}
+      : { conversationInputTransfer: options.inputTransfer(dataDirectory) }),
     recordExternalContentIngestion:
       options?.recordExternalContentIngestion ?? ((input) => ingestions.record(input)),
     ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
@@ -11117,7 +11123,7 @@ describe("handing a Chat conversation to a new provider session", () => {
   /** A thread with one answered turn on the first provider, ready to move. */
   async function answeredThread(
     fixture: ReturnType<typeof openFixture>,
-    options?: { readonly projectId?: string },
+    options?: { readonly projectId?: string; readonly originalDocument?: Uint8Array },
   ) {
     const created = await fixture.service.execute({
       kind: "create-chat-thread",
@@ -11126,11 +11132,22 @@ describe("handing a Chat conversation to a new provider session", () => {
       ...(options?.projectId === undefined ? {} : { projectId: options.projectId }),
     } as never);
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload =
+      options?.originalDocument === undefined
+        ? undefined
+        : await fixture.service.uploadAttachment({
+            threadId: created.thread.id,
+            attachmentId: decodeChatAttachmentId(ids.attachment),
+            displayName: "Original.txt",
+            mediaType: "text/plain",
+            bytes: options.originalDocument,
+          });
     const sent = await fixture.service.execute({
       kind: "send-chat-turn",
       threadId: created.thread.id,
-      expectedVersion: created.thread.version,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
       prompt: "Remember the walrus",
+      ...(upload === undefined ? {} : { attachmentIds: [upload.id] }),
     });
     if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
     return created.thread.id;
@@ -11207,6 +11224,98 @@ describe("handing a Chat conversation to a new provider session", () => {
       }),
     ).rejects.toThrow("submission identity");
     expect(fixture.fakeDriver.startedSessionIds).toHaveLength(2);
+  });
+
+  it.each([otherNative, hosted])(
+    "preserves the original document on provider switch to %s or refuses before acquisition",
+    async (target) => {
+      let supports = false;
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        inputTransfer: (directory) => {
+          const store = new ChatAttachmentStore(directory);
+          return new ConversationInputTransfer({
+            ownerCurrent: () => true,
+            dataDirectory: directory,
+            sourceCurrent: () => true,
+            supports: () => supports,
+            read: (reference) =>
+              store.read({
+                chatThreadId: decodeChatThreadId(reference.source.threadId),
+                chatAttachmentId: decodeChatAttachmentId(reference.source.attachmentId),
+                displayName: reference.displayName,
+                size: reference.byteLength,
+                hash: reference.digest,
+                finalizedAt: now,
+              }),
+          });
+        },
+      });
+      const bytes = new TextEncoder().encode("Original document content");
+      const threadId = await answeredThread(fixture, { originalDocument: bytes });
+      await moveTo(fixture, threadId, target);
+      await expect(sendFollowUp(fixture, threadId)).rejects.toMatchObject({
+        failure: { message: expect.stringContaining("Original.txt (unsupported)") },
+      });
+      expect(fixture.fakeDriver.acquireInputs).toHaveLength(1);
+      supports = true;
+      await sendFollowUp(fixture, threadId);
+      expect(fixture.fakeDriver.sentTurns[1]?.attachments).toEqual([
+        expect.objectContaining({ displayName: "Original.txt", bytes }),
+      ]);
+      expect(lastAttempt(fixture, threadId)?.inputReceipt).toMatchObject({
+        purpose: "provider-switch",
+        included: 1,
+        omitted: 0,
+      });
+    },
+  );
+
+  it("keeps a branched document bound to its original source instead of dropping it or sharing its native writer", async () => {
+    const fixture = openMoving({
+      nativeConversationFor: ownsConversation,
+      inputTransfer: (directory) => {
+        const store = new ChatAttachmentStore(directory);
+        return new ConversationInputTransfer({
+          ownerCurrent: () => true,
+          dataDirectory: directory,
+          sourceCurrent: () => true,
+          supports: () => true,
+          read: (reference) =>
+            store.read({
+              chatThreadId: decodeChatThreadId(reference.source.threadId),
+              chatAttachmentId: decodeChatAttachmentId(reference.source.attachmentId),
+              displayName: reference.displayName,
+              size: reference.byteLength,
+              hash: reference.digest,
+              finalizedAt: now,
+            }),
+        });
+      },
+    });
+    const bytes = new TextEncoder().encode("Original branch document");
+    const sourceId = await answeredThread(fixture, { originalDocument: bytes });
+    const source = fixture.service.read(sourceId);
+    const result = await fixture.service.execute({
+      kind: "branch-chat-thread",
+      threadId: sourceId,
+      turnId: source.turns[0]?.id,
+      expectedVersion: source.thread.version,
+      title: "Branched document",
+    });
+    if (result.kind !== "thread-created") throw new Error("Branch was not created");
+    expect(
+      fixture.service.read(result.thread.id).turns[0]?.originalInputs?.[0]?.source.threadId,
+    ).toBe(String(sourceId));
+    await sendFollowUp(fixture, result.thread.id);
+    expect(fixture.fakeDriver.sentTurns[1]?.attachments).toEqual([
+      expect.objectContaining({ displayName: "Original.txt", bytes }),
+    ]);
+    expect(fixture.fakeDriver.resumeInputs).toHaveLength(0);
+    expect(lastAttempt(fixture, result.thread.id)?.inputReceipt).toMatchObject({
+      purpose: "branch",
+      included: 1,
+    });
   });
 
   it("starts a new session with the earlier conversation when a provider that keeps its own session takes over", async () => {

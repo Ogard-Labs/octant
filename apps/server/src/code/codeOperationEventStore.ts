@@ -1670,6 +1670,7 @@ function conversationHandoff(
         previousModelId: event.previousModelId,
         messages: event.messages,
         omissions: event.omissions,
+        ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
         externalContentIngested: event.externalContentIngested,
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
       };
@@ -1679,6 +1680,7 @@ function conversationHandoff(
         forkedFrom: event.forkedFrom,
         messages: event.messages,
         omissions: event.omissions,
+        ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
         externalContentIngested: event.externalContentIngested,
       };
     case "fork-native-session":

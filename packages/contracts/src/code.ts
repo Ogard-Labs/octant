@@ -1,3 +1,4 @@
+import { ConversationInputPolicy } from "./conversationInputs";
 import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -657,6 +658,7 @@ export type ForkCodeThreadCommand = typeof ForkCodeThreadCommand.Type;
  */
 export const MergeCodeForkContextCommand = Schema.Struct({
   kind: Schema.Literal("merge-code-fork-context"),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   /** The fork. */
   threadId: CodeThreadId,
   throughOperationId: Schema.UUID,
@@ -1198,6 +1200,7 @@ export const CodeForkMergeBackOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeForkMergeBackRefusal,
+    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   }).annotations(strict),
 );
 export type CodeForkMergeBackOutcome = typeof CodeForkMergeBackOutcome.Type;

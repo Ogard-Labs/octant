@@ -1,3 +1,6 @@
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
+import { decodeProviderInstanceId } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   decodeChatThreadId,
@@ -39,8 +42,11 @@ export function conversationInputSource(
   const chat = new ChatAttachmentStore(persistence.dataDirectory);
   const work = new WorkAttachmentStore(persistence.dataDirectory);
   const code = new CodeAttachmentStore(persistence.dataDirectory);
-  const current = (reference: ConversationInputReference): boolean => {
-    const source = reference.source;
+  const ownerCurrent = (source: {
+    readonly mode: "chat" | "work" | "code";
+    readonly threadId: string;
+    readonly projectId?: string | null | undefined;
+  }): boolean => {
     const thread =
       source.mode === "chat"
         ? persistence.readChatThread(decodeChatThreadId(source.threadId))
@@ -48,11 +54,19 @@ export function conversationInputSource(
           ? workThreads.read(decodeWorkThreadId(source.threadId))
           : persistence.readCodeThread(decodeCodeThreadId(source.threadId));
     return (
-      thread !== undefined && thread.lifecycle !== "deleting" && thread.lifecycle !== "deleted"
+      thread !== undefined &&
+      thread.lifecycle !== "deleting" &&
+      thread.lifecycle !== "deleted" &&
+      (source.projectId === undefined ||
+        (source.projectId === null
+          ? thread.projectId === undefined
+          : String(thread.projectId) === source.projectId))
     );
   };
+  const current = (reference: ConversationInputReference) => ownerCurrent(reference.source);
   return {
     current,
+    ownerCurrent,
     read: async (reference: ConversationInputReference): Promise<Uint8Array | undefined> => {
       if (!current(reference)) return undefined;
       const source = reference.source;
@@ -89,4 +103,24 @@ export function conversationInputSource(
           });
     },
   };
+}
+
+export function createConversationInputTransfer(
+  persistence: PersistenceService,
+  workThreads: WorkThreadProjection,
+  providers: ProviderRuntimeRegistry,
+) {
+  const source = conversationInputSource(persistence, workThreads);
+  return new ConversationInputTransfer({
+    dataDirectory: persistence.dataDirectory,
+    ownerCurrent: source.ownerCurrent,
+    sourceCurrent: source.current,
+    read: source.read,
+    supports: (target, mediaType) =>
+      supportsConversationInput(
+        providers.observedState(decodeProviderInstanceId(target.providerInstanceId)),
+        target.modelId,
+        mediaType,
+      ),
+  });
 }

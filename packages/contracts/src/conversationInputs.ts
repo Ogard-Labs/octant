@@ -20,6 +20,7 @@ export const ConversationInputReference = Schema.Struct({
     mode: Schema.Literal("chat", "work", "code"),
     threadId: Schema.UUID,
     attachmentId: Schema.UUID,
+    projectId: Schema.optional(Schema.NullOr(Schema.UUID)),
   }).annotations(strict),
   displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
@@ -59,3 +60,24 @@ export const decodeConversationInputReference = Schema.decodeUnknownSync(
   ConversationInputReference,
 );
 export const decodeConversationInputManifest = Schema.decodeUnknownSync(ConversationInputManifest);
+
+/** Journal-safe reference; the manifest itself stays in the destination's purgeable scope. */
+export const ConversationInputReceipt = Schema.Struct({
+  snapshotId: Schema.UUID,
+  purpose: ConversationInputPurpose,
+  policy: ConversationInputPolicy,
+  byteLength: Schema.Int.pipe(Schema.between(1, 131072)),
+  digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  included: Schema.Int.pipe(Schema.between(0, MAX_CONVERSATION_INPUTS)),
+  omitted: Schema.Int.pipe(Schema.between(0, MAX_CONVERSATION_INPUTS)),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (receipt) =>
+        receipt.included + receipt.omitted > 0 &&
+        receipt.included + receipt.omitted <= MAX_CONVERSATION_INPUTS,
+    ),
+  );
+export type ConversationInputReceipt = typeof ConversationInputReceipt.Type;
+export const decodeConversationInputReceipt = Schema.decodeUnknownSync(ConversationInputReceipt);

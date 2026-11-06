@@ -414,3 +414,10 @@ Nothing is sent until you send it.
 - [Promotions](/guide/promotions) for escalating Work work to a Code thread
 - [Projects](/guide/projects) for managing Work Projects
 - [Code](/guide/code) for repository engineering
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.

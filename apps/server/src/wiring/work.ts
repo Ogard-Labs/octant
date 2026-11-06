@@ -199,6 +199,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
   Pick<
     FoundationsWiring,
+    | "conversationInputTransfer"
     | "browserAuthority"
     | "providerRuntimeRegistry"
     | "workArtifactProjection"
@@ -208,6 +209,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
 
 export function wireWork(deps: WorkDependencies) {
   const {
+    conversationInputTransfer,
     agentRunPersistence,
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
@@ -382,6 +384,7 @@ export function wireWork(deps: WorkDependencies) {
       projectLabel: (projectId) => persistence.readProject(projectId as ProjectId)?.name,
     });
     const workTurnService = new WorkTurnService({
+      conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
@@ -1313,6 +1316,7 @@ export function wireWork(deps: WorkDependencies) {
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => workAttachments.recover());
+    yield* Effect.promise(() => conversationInputTransfer.recover());
     const advanceMessageQueue = () => {
       void threadMessageQueue
         .tick()
