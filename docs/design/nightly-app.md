@@ -675,9 +675,11 @@ window is not a fallback.
   a password field, and also withholds a value Chromium shows as mask
   characters. Link
   addresses and other page addresses never travel. Ignored and unnamed generic
-  nodes give their children to their parent, except an unnamed live region, a control named by its own
-  content (button, link, heading, field, option and the like) travels without
-  its descendants, and line boxes are dropped.
+  nodes give their children to their parent, except an unnamed live region, a form control (field, check box, option and the like) travels without its
+  descendants, a container named by its content (button, link, heading, menu
+  item, tab) keeps only descendants that are interactive, focusable, live or
+  named beyond its own name, such as a link inside a heading, and
+  line boxes are dropped.
 - **Bounds.** At most 1,500 nodes, 64 levels and 512 children per node; past
   any bound the tree is cut in page order and marked truncated. The contract
   refuses a tree whose identities repeat, whose children are missing or have
@@ -710,9 +712,14 @@ window is not a fallback.
   holds macOS secure input while it has focus, and a dead key's character is
   sent on as typed. Focus follows the page's focused node while the person is
   in the Browser, and moving VoiceOver's focus to a node focuses it in the page.
+  While the person composes in a mirrored field, the field keeps the candidate
+  and ignores the page's snapshot value; the committed text is sent as a new
+  value and shown until the page's value matches it, for at most 2 seconds.
   Live regions are announced through Nightly's own polite and assertive live
-  regions when their text changes after the first read; the mirrored live
-  nodes themselves stay quiet so nothing is said twice.
+  regions when their text changes after the first read, each announcement as a
+  fresh element, and an emptied region clears its announcement so the same
+  words are said again; the mirrored live nodes themselves stay quiet so
+  nothing is said twice.
 - **Actions.** A mirrored node can be pressed, focused, scrolled into view,
   stepped up or down (sliders and spin buttons) and, for a native `input` or
   `textarea` text field whose whole value travelled and that is not a password

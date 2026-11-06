@@ -149,17 +149,11 @@ const CHROMIUM_ROLES: Readonly<Record<string, BrowserAccessibilityRole>> = {
 };
 /** Roles that never travel: line boxes and breaks are layout, not content. */
 const DROPPED = new Set(["InlineTextBox", "LineBreak"]);
-/** Roles named by their own content, whose descendants add nothing a reader needs. */
+/** Controls named by their own content, whose descendants add nothing a reader needs. */
 const LEAVES = new Set<BrowserAccessibilityRole>([
-  "button",
   "checkbox",
   "combobox",
-  "heading",
   "img",
-  "link",
-  "menuitem",
-  "menuitemcheckbox",
-  "menuitemradio",
   "option",
   "progressbar",
   "radio",
@@ -168,9 +162,40 @@ const LEAVES = new Set<BrowserAccessibilityRole>([
   "slider",
   "spinbutton",
   "switch",
-  "tab",
   "text",
   "textbox",
+]);
+/**
+ * Roles named by their content that may still hold something to reach, such as
+ * a link inside a heading: only descendants that are interactive, focusable or
+ * named beyond the container's own name stay.
+ */
+const NAMED_CONTAINERS = new Set<BrowserAccessibilityRole>([
+  "button",
+  "heading",
+  "link",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "tab",
+]);
+const INTERACTIVE = new Set<BrowserAccessibilityRole>([
+  "button",
+  "checkbox",
+  "combobox",
+  "link",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "radio",
+  "searchbox",
+  "slider",
+  "spinbutton",
+  "switch",
+  "tab",
+  "textbox",
+  "treeitem",
 ]);
 const VALUED = new Set<BrowserAccessibilityRole>([
   "combobox",
@@ -255,6 +280,26 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
   const addresses = new Map<string, AccessibilityAddress>();
   let truncated = false;
   let focusedId: string | undefined;
+  const made = new Map<string, BrowserAccessibilityNode>();
+  /** Descendants of a named container that added nothing; they never travel. */
+  const pruned = new Set<string>();
+  const prune = (id: string) => {
+    pruned.add(id);
+    for (const child of made.get(id)?.children ?? []) prune(child);
+  };
+  const meaningful = (id: string, containerName: string | undefined): boolean => {
+    const node = made.get(id);
+    if (node === undefined) return false;
+    return (
+      INTERACTIVE.has(node.role) ||
+      node.focusable === true ||
+      node.live !== undefined ||
+      (node.name !== undefined &&
+        node.role !== "text" &&
+        !(containerName ?? "").includes(node.name)) ||
+      node.children.some((child) => meaningful(child, containerName))
+    );
+  };
 
   const visit = (
     frame: AccessibilityFrameTree,
@@ -368,6 +413,7 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
     if (bounds !== undefined) node.bounds = bounds;
     if (property(raw, "focused") === true) focusedId = id;
     nodes.push(node);
+    made.set(id, node);
     addresses.set(id, {
       ordinal: frame.ordinal,
       backendNodeId: backend,
@@ -381,7 +427,14 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
     let children: string[];
     if (nested !== undefined)
       children = frameDepth < 8 ? graft(nested, depth + 1, frameDepth + 1) : [];
-    else children = LEAVES.has(role) ? [] : childrenOf(depth + 1);
+    else if (LEAVES.has(role)) children = [];
+    else if (NAMED_CONTAINERS.has(role))
+      children = childrenOf(depth + 1).filter((child) => {
+        if (meaningful(child, node.name)) return true;
+        prune(child);
+        return false;
+      });
+    else children = childrenOf(depth + 1);
     if (children.length > MAX_BROWSER_ACCESSIBILITY_CHILDREN) {
       truncated = true;
       children = children.slice(0, MAX_BROWSER_ACCESSIBILITY_CHILDREN);
@@ -433,7 +486,7 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
     const node = byId.get(id);
     if (node !== undefined) order.push(...[...node.children].reverse());
   }
-  if (kept.size !== nodes.length) truncated = true;
+  if (kept.size !== nodes.filter((node) => !pruned.has(node.id)).length) truncated = true;
   const sound = nodes.flatMap((node) => {
     const travels = kept.has(node.id) ? byId.get(node.id) : undefined;
     return travels === undefined ? [] : [travels];

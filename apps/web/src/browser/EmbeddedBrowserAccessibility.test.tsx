@@ -89,6 +89,35 @@ function mirrored(updates: ReadonlyArray<HumanBrowserResult>) {
   return { view, execute, asked, release: () => release() };
 }
 
+/** A mirror whose asks wait until the test delivers Stable's next answer. */
+function controlled() {
+  const queue: HumanBrowserResult[] = [];
+  const waiting: Array<() => void> = [];
+  const asked: Array<Readonly<Record<string, unknown>>> = [];
+  const execute = vi.fn(
+    async (request: Readonly<Record<string, unknown>>): Promise<HumanBrowserResult> => {
+      asked.push(request);
+      if (request.kind === "accessibility-action") return { status: "accepted" };
+      while (queue.length === 0) await new Promise<void>((done) => waiting.push(done));
+      return queue.shift() ?? { status: "idle" };
+    },
+  );
+  const deliver = (result: HumanBrowserResult) => {
+    queue.push(result);
+    for (const wake of waiting.splice(0)) wake();
+  };
+  const view = render(
+    <EmbeddedBrowserAccessibility
+      presentationId={presentationId}
+      execute={execute}
+      scaleX={1}
+      scaleY={1}
+      secureText={() => undefined}
+    />,
+  );
+  return { view, asked, deliver };
+}
+
 describe("Nightly's Browser accessibility mirror", () => {
   it("mirrors roles, names, values and states as a screen reader reads them", async () => {
     const { view } = mirrored([{ status: "accessibility", update: full }]);
@@ -175,10 +204,87 @@ describe("Nightly's Browser accessibility mirror", () => {
         },
       },
     ]);
-    const polite = await screen.findByText("Saved", { selector: "[aria-live=polite]" });
-    expect(polite.getAttribute("role")).toBe("status");
+    const polite = await screen.findByText("Saved", { selector: "[aria-live=polite] span" });
+    expect(polite.parentElement?.getAttribute("role")).toBe("status");
     // The mirrored status itself stays quiet, so nothing is said twice.
     expect(document.querySelector('[data-mirror-id="0-7"]')?.getAttribute("aria-live")).toBe("off");
+    view.unmount();
+  });
+
+  it("says the same words again when a live region empties and fills again", async () => {
+    const patch = (revision: number, update: Record<string, unknown>) => ({
+      status: "accessibility" as const,
+      update: {
+        kind: "patch" as const,
+        base: revision - 1,
+        revision,
+        rootId: "0-1",
+        truncated: false,
+        nodes: [],
+        removed: [],
+        ...update,
+      } as BrowserAccessibilityUpdate,
+    });
+    const status = { id: "0-7", role: "status" as const, live: "polite" as const };
+    const { view, deliver } = controlled();
+    deliver({ status: "accessibility", update: full });
+    await screen.findByRole("button", { name: "Save" });
+    const region = () => document.querySelector('[aria-live="polite"][role="status"]');
+    deliver(patch(2, { nodes: [{ id: "0-8", role: "text", name: "Saved", children: [] }] }));
+    await waitFor(() => expect(region()?.textContent).toBe("Saved"));
+    const first = region()?.firstChild;
+    deliver(patch(3, { nodes: [{ ...status, children: [] }], removed: ["0-8"] }));
+    await waitFor(() => expect(region()?.textContent).toBe(""));
+    deliver(
+      patch(4, {
+        nodes: [
+          { ...status, children: ["0-8"] },
+          { id: "0-8", role: "text", name: "Saved", children: [] },
+        ],
+      }),
+    );
+    await waitFor(() => expect(region()?.textContent).toBe("Saved"));
+    // A fresh element, so the screen reader hears the repeat.
+    expect(region()?.firstChild).not.toBe(first);
+    view.unmount();
+  });
+
+  it("keeps a composition candidate in a mirrored field and sends the committed value", async () => {
+    const { view, asked, deliver } = controlled();
+    deliver({ status: "accessibility", update: full });
+    const email = (await screen.findByRole("textbox", { name: "Email" })) as HTMLInputElement;
+    fireEvent.compositionStart(email);
+    fireEvent.change(email, { target: { value: "ada@example.com\u304b" } });
+    // A snapshot arrives mid-composition with the page's unchanged value.
+    deliver({
+      status: "accessibility",
+      update: {
+        kind: "patch",
+        base: 1,
+        revision: 2,
+        rootId: "0-1",
+        truncated: false,
+        nodes: [{ id: "0-2", role: "heading", name: "Welcome back", level: 1, children: [] }],
+        removed: [],
+      },
+    });
+    await screen.findByRole("heading", { name: "Welcome back" });
+    expect(email.value).toBe("ada@example.com\u304b");
+    expect(asked.some((request) => request.kind === "accessibility-action")).toBe(false);
+    fireEvent.change(email, { target: { value: "ada@example.com\u304b\u306a" } });
+    fireEvent.compositionEnd(email);
+    await waitFor(() =>
+      expect(asked.filter((request) => request.kind === "accessibility-action")).toEqual([
+        {
+          kind: "accessibility-action",
+          presentationId,
+          revision: 2,
+          nodeId: "0-4",
+          action: { action: "set-value", value: "ada@example.com\u304b\u306a" },
+        },
+      ]),
+    );
+    expect(email.value).toBe("ada@example.com\u304b\u306a");
     view.unmount();
   });
 

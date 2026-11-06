@@ -94,8 +94,16 @@ export function EmbeddedBrowserAccessibility(props: {
   readonly secureText: (text: string) => void;
 }) {
   const [mirror, setMirror] = useState<Mirror | undefined>(undefined);
-  const [polite, setPolite] = useState("");
-  const [assertive, setAssertive] = useState("");
+  // Each announcement is a fresh element, so a repeat of the same words is said again.
+  const [polite, setPolite] = useState({ text: "", sequence: 0 });
+  const [assertive, setAssertive] = useState({ text: "", sequence: 0 });
+  /**
+   * What the person is composing or has just committed in a mirrored field.
+   * The field shows it instead of the page's value until the page catches up,
+   * so a snapshot never overwrites a composition candidate.
+   */
+  const drafts = useRef(new Map<string, { value: string; composing: boolean; until: number }>());
+  const [, redraw] = useState(0);
   const container = useRef<HTMLDivElement>(null);
   const latest = useRef({ mirror, props });
   latest.current = { mirror, props };
@@ -135,8 +143,12 @@ export function EmbeddedBrowserAccessibility(props: {
             const said = spoken(next.nodes, node.id);
             const before = spokenText.current.get(node.id);
             spokenText.current.set(node.id, said);
+            const announce = node.live === "assertive" ? setAssertive : setPolite;
             if (announcing && said !== "" && said !== before)
-              (node.live === "assertive" ? setAssertive : setPolite)(said);
+              announce((last) => ({ text: said, sequence: last.sequence + 1 }));
+            // An emptied region clears its announcement, so the same words can come again.
+            else if (announcing && said === "" && before !== undefined && before !== "")
+              announce((last) => ({ text: "", sequence: last.sequence + 1 }));
           }
           setMirror(next);
         } else if (result.status === "idle") continue;
@@ -188,6 +200,22 @@ export function EmbeddedBrowserAccessibility(props: {
         action,
       })
       .catch(() => undefined);
+  };
+
+  /** Send a field's new value and show it until the page's own value matches. */
+  const commit = (nodeId: string, value: string) => {
+    drafts.current.set(nodeId, { value, composing: false, until: Date.now() + 2_000 });
+    redraw((count) => count + 1);
+    act(nodeId, { action: "set-value", value });
+  };
+  const shownValue = (nodeId: string, page: string): string => {
+    const draft = drafts.current.get(nodeId);
+    if (draft === undefined) return page;
+    if (!draft.composing && (draft.value === page || Date.now() > draft.until)) {
+      drafts.current.delete(nodeId);
+      return page;
+    }
+    return draft.value;
   };
 
   if (mirror === undefined) return null;
@@ -293,21 +321,40 @@ export function EmbeddedBrowserAccessibility(props: {
         ...common,
         "aria-label": node.name,
         ...(node.role === "searchbox" ? { role: "searchbox" } : {}),
-        value: node.value ?? "",
+        value: shownValue(node.id, node.value ?? ""),
         readOnly: node.readonly === true,
         disabled: node.disabled === true,
         ...states,
         // Typing reaches the page as keys; only a value set some other way,
         // such as by an assistive technology or a finished composition, travels.
-        onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-          if (!(event.nativeEvent as InputEvent).isComposing)
-            act(node.id, { action: "set-value", value: event.currentTarget.value.slice(0, 1_024) });
+        onCompositionStart: (
+          event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>,
+        ) => {
+          drafts.current.set(node.id, {
+            value: event.currentTarget.value,
+            composing: true,
+            until: Number.POSITIVE_INFINITY,
+          });
         },
-        // A finished composition's last input may still say it is composing.
+        onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+          const value = event.currentTarget.value.slice(0, 1_024);
+          const draft = drafts.current.get(node.id);
+          if (draft?.composing === true || (event.nativeEvent as InputEvent).isComposing) {
+            // The candidate stays local until the composition commits.
+            drafts.current.set(node.id, {
+              value,
+              composing: true,
+              until: Number.POSITIVE_INFINITY,
+            });
+            redraw((count) => count + 1);
+            return;
+          }
+          commit(node.id, value);
+        },
         onCompositionEnd: (
           event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>,
         ) => {
-          act(node.id, { action: "set-value", value: event.currentTarget.value.slice(0, 1_024) });
+          commit(node.id, event.currentTarget.value.slice(0, 1_024));
         },
       };
       // Mirrored page fields must be native controls so assistive technology
@@ -354,7 +401,7 @@ export function EmbeddedBrowserAccessibility(props: {
           color: "transparent",
         }}
       >
-        {polite}
+        <span key={polite.sequence}>{polite.text}</span>
       </div>
       {/* ui-boundary-exception: screen-reader-announcement */}
       <div
@@ -368,7 +415,7 @@ export function EmbeddedBrowserAccessibility(props: {
           color: "transparent",
         }}
       >
-        {assertive}
+        <span key={assertive.sequence}>{assertive.text}</span>
       </div>
     </div>
   );

@@ -208,6 +208,36 @@ describe("the Browser accessibility mirror's tree", () => {
     expect(asResult(reduced)).toMatchObject({ status: "accessibility" });
   });
 
+  it("keeps a link inside a heading and drops only the text a named container already says", () => {
+    const nodes = root(
+      tree("RootWebArea", {
+        kids: [
+          tree("heading", {
+            name: "Details",
+            properties: { level: 2 },
+            kids: [
+              tree("link", { name: "Details", kids: [ax("StaticText", { name: "Details" })] }),
+            ],
+          }),
+          tree("heading", { name: "Plain", kids: [ax("StaticText", { name: "Plain" })] }),
+        ],
+      }),
+    );
+    const reduced = reduceBrowserAccessibility(frame(nodes));
+    const heading = reduced.nodes.find(
+      (node) => node.role === "heading" && node.name === "Details",
+    );
+    const link = reduced.nodes.find((node) => node.role === "link");
+    expect(link?.name).toBe("Details");
+    expect(heading?.children).toEqual([link?.id]);
+    expect(link?.children).toEqual([]);
+    expect(reduced.addresses.has(link?.id ?? "")).toBe(true);
+    expect(reduced.nodes.find((node) => node.name === "Plain")?.children).toEqual([]);
+    expect(reduced.nodes.some((node) => node.role === "text")).toBe(false);
+    expect(reduced.truncated).toBe(false);
+    expect(asResult(reduced)).toMatchObject({ status: "accessibility" });
+  });
+
   it("cuts the tree at the node, depth and text bounds and marks it truncated", () => {
     const many = root(
       tree("RootWebArea", {
