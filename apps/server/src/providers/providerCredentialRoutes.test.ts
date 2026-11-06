@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decodeProviderInstance, decodeWindowId, type ProviderInstance } from "@octant/contracts";
 import { addApiKey } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import type { ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyJournal } from "./providerKeyJournal";
 import { createProviderCredentialRouteHandler } from "./providerCredentialRoutes";
 
@@ -57,10 +58,11 @@ function setup(
     readonly onRefuse?: (instances: ProviderInstance[]) => void;
     readonly providerRefusal?: string;
     readonly onRemoveProvider?: (instance: ProviderInstance) => void;
-    readonly keyReference?: "linked" | "none" | "unavailable";
+    readonly keyReference?: ProviderKeyReference | { readonly rejects: unknown };
   } = {},
 ) {
   const records: Array<Record<string, unknown>> = [];
+  const reads: string[] = [];
   const journal: ProviderKeyJournal = {
     request: (request) => {
       if (input.journalFails === true) throw new Error("journal unavailable");
@@ -93,7 +95,13 @@ function setup(
     journal,
     ...(input.keyReference === undefined
       ? {}
-      : { readKeyReference: async () => input.keyReference ?? "none" }),
+      : {
+          readKeyReference: async () => {
+            const reference = input.keyReference ?? { status: "none" };
+            if ("rejects" in reference) throw reference.rejects;
+            return reference;
+          },
+        }),
     reprobe: async (_window, instance) => input.onReprobe?.(instance),
     removeProvider: async (_window, instance) => {
       if (input.providerRefusal !== undefined) {
@@ -123,10 +131,13 @@ function setup(
                       stored.delete(id);
                     },
                   },
-            readStored: async (id) => stored.get(id) ?? "",
+            readStored: async (id) => {
+              reads.push(id);
+              return stored.get(id) ?? "";
+            },
           },
   });
-  return { handle, stored, instances, records };
+  return { handle, stored, instances, records, reads };
 }
 
 function hostLocal(
@@ -619,7 +630,7 @@ describe("host-local provider key pool routes", () => {
   });
 
   it("never replaces or clears a key that points into a linked secret store", async () => {
-    const { handle, stored, records } = setup({ keyReference: "linked" });
+    const { handle, stored, records, reads } = setup({ keyReference: { status: "linked" } });
     stored.set(GATEWAY_ID, "linked-pointer");
     for (const request of [
       keys("add", { instance: GATEWAY_ID, credential: KEY }),
@@ -640,6 +651,8 @@ describe("host-local provider key pool routes", () => {
     });
     expect(stored.get(GATEWAY_ID)).toBe("linked-pointer");
     expect(records).toEqual([]);
+    // The linked item itself is never read, so no unlock prompt is raised.
+    expect(reads).toEqual([]);
   });
 
   it("changes nothing when the change cannot be journaled, and passes on the keyring's reason", async () => {
@@ -655,6 +668,46 @@ describe("host-local provider key pool routes", () => {
       category: "credential-store-unavailable",
       cause: "locked",
     });
+  });
+
+  it("passes on the keyring's reason when the key's link cannot be read", async () => {
+    for (const keyReference of [
+      { status: "unavailable", cause: "locked" } as const,
+      { rejects: { category: "unavailable", cause: "locked" } },
+    ]) {
+      const { handle, records } = setup({ keyReference });
+      for (const request of [
+        keys("list", { instance: GATEWAY_ID }),
+        keys("add", { instance: GATEWAY_ID, credential: KEY }),
+        hostLocal("/api/desktop/provider-credentials/set", {
+          instance: GATEWAY_ID,
+          credential: KEY,
+          replace: true,
+        }),
+      ]) {
+        const response = await handle(request);
+        expect(response?.status).toBe(503);
+        expect(await response?.json()).toMatchObject({
+          category: "credential-store-unavailable",
+          cause: "locked",
+        });
+      }
+      expect(records).toEqual([]);
+    }
+  });
+
+  it("refuses a key over the broker's bound as too large, as set does", async () => {
+    const { handle, stored } = setup();
+    const large = "k".repeat(12 * 1_024 + 1);
+    for (const request of [
+      keys("add", { instance: GATEWAY_ID, credential: large }),
+      keys("replace", { instance: GATEWAY_ID, keyId: "default", credential: large }),
+    ]) {
+      const response = await handle(request);
+      expect(response?.status).toBe(413);
+      expect(await response?.json()).toMatchObject({ category: "too-large" });
+    }
+    expect(stored.size).toBe(0);
   });
 
   it("refuses a malformed request, an unknown provider and one without a stored key", async () => {

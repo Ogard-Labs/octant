@@ -40,7 +40,7 @@ import {
 import { admitDesktopBroker, admitsWindow } from "../desktopBrokerAdmission";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import type { ProviderCredentialStore } from "./credentialBrokerClient";
+import type { ProviderCredentialStore, ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyChangeRecorder, ProviderKeyJournal } from "./providerKeyJournal";
 
 const ROUTES = {
@@ -132,9 +132,7 @@ export interface ProviderCredentialRouteOptions {
    * A pointer changes only through the journaled secret-store routes, so these
    * routes never overwrite or clear one. Without it, nothing is linked.
    */
-  readonly readKeyReference?: (
-    providerInstanceId: string,
-  ) => Promise<"linked" | "none" | "unavailable">;
+  readonly readKeyReference?: (providerInstanceId: string) => Promise<ProviderKeyReference>;
   /**
    * Checks the provider again after its key changed. The observed state is
    * cached from the last check, so without this a key stored from the command
@@ -206,6 +204,7 @@ export function createProviderCredentialRouteHandler(
     if (PROVIDER_API_KEY_ROUTES.includes(route)) {
       const keyRequest = decodeKeyRequest(route, body.value);
       if (keyRequest === undefined) return refuse("invalid");
+      if (keyRequest === "too-large") return refuse("too-large");
       if (credentialsForPool === undefined) return refuse("credential-store-unavailable");
       return serialized(() => changeApiKeys(keyRequest, windowId, credentialsForPool, options));
     }
@@ -236,9 +235,9 @@ export function createProviderCredentialRouteHandler(
       const { id } = target;
       if (route === ROUTES.set || (route === ROUTES.remove && target.kind === "existing")) {
         const reference = await readKeyReference(options, id);
-        if (reference !== "none") {
-          return refuse(reference === "linked" ? "linked-secret" : "credential-store-unavailable");
-        }
+        if (reference.status === "linked") return refuse("linked-secret");
+        if (reference.status === "unavailable")
+          return refuse("credential-store-unavailable", reference.cause);
       }
       const begin = (
         action: "set" | "remove" | "remove-with-provider",
@@ -485,12 +484,13 @@ function refuse(
 async function readKeyReference(
   options: Pick<ProviderCredentialRouteOptions, "readKeyReference">,
   id: string,
-): Promise<"linked" | "none" | "unavailable"> {
-  if (options.readKeyReference === undefined) return "none";
+): Promise<ProviderKeyReference> {
+  if (options.readKeyReference === undefined) return { status: "none" };
   try {
     return await options.readKeyReference(id);
-  } catch {
-    return "unavailable";
+  } catch (error) {
+    const cause = storeCauseOf(error);
+    return cause === undefined ? { status: "unavailable" } : { status: "unavailable", cause };
   }
 }
 
@@ -524,7 +524,7 @@ type KeyRequest =
 
 const KEY_ID = /^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
-function decodeKeyRequest(route: Route, value: unknown): KeyRequest | undefined {
+function decodeKeyRequest(route: Route, value: unknown): KeyRequest | "too-large" | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort().join(",");
@@ -535,6 +535,13 @@ function decodeKeyRequest(route: Route, value: unknown): KeyRequest | undefined 
     instance.length > MAX_INSTANCE_REFERENCE_LENGTH
   )
     return undefined;
+  // As for `set`, a key over the broker's bound is refused as too large.
+  if (
+    (route === ROUTES.keysAdd || route === ROUTES.keysReplace) &&
+    typeof credential === "string" &&
+    Buffer.byteLength(credential, "utf8") > MAX_PROVIDER_KEY_BYTES
+  )
+    return "too-large";
   const validKeyId = typeof keyId === "string" && KEY_ID.test(keyId) ? keyId : undefined;
   const validCredential =
     typeof credential === "string" &&
@@ -603,14 +610,17 @@ async function changeApiKeys(
   if (!usesStoredKey(target.instance)) return refuse("no-stored-key-authentication");
   const { id } = target;
   try {
+    // Decided before the stored value is read: reading a linked key follows
+    // the pointer into the linked store, which may ask the person to unlock it.
     const reference = await readKeyReference(options, id);
-    if (reference === "unavailable") return refuse("credential-store-unavailable");
-    const linked = reference === "linked";
+    if (reference.status === "unavailable")
+      return refuse("credential-store-unavailable", reference.cause);
+    if (reference.status === "linked")
+      return request.kind === "list" ? Response.json({ keys: [] }) : refuse("linked-secret");
     const stored = (await credentials.store.has(id)) ? await credentials.readStored(id) : undefined;
     if (request.kind === "list") {
-      return Response.json({ keys: stored === undefined || linked ? [] : listApiKeys(stored) });
+      return Response.json({ keys: stored === undefined ? [] : listApiKeys(stored) });
     }
-    if (linked) return refuse("linked-secret");
     let next: string | undefined;
     let added: ReturnType<typeof addApiKey>["key"] | undefined;
     if (request.kind === "add") {

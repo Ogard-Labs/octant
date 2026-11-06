@@ -27,7 +27,10 @@ import { createSignInHostPorts } from "../hub/signInHostPorts";
 import { SignInService } from "../hub/signInService";
 import { SpokeSignInService } from "../hub/spokeSignInService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
-import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
+import {
+  makeProviderKeyReferenceReader,
+  makePushPlatformCredentialBrokerClient,
+} from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
@@ -1001,18 +1004,10 @@ export function wireRemote(deps: RemoteDependencies) {
     ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
       ? {}
       : {
-          readKeyReference: (() => {
-            const references = makeSecretStoreBrokerClient({
-              url: options.credentialBrokerUrl,
-              token: options.credentialBrokerToken,
-            });
-            return async (id: string) => {
-              const answer = await references.reference({ namespace: "provider", id });
-              return answer.status === "linked" || answer.status === "none"
-                ? answer.status
-                : "unavailable";
-            };
-          })(),
+          readKeyReference: makeProviderKeyReferenceReader({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
         }),
     reprobe: async (windowId, instance) => {
       await providerService.probe(windowId, instance.id, { fresh: true });
