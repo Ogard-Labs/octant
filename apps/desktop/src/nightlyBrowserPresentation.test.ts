@@ -861,3 +861,99 @@ describe("page popups in Nightly's embedded Browser", () => {
     await main.close();
   });
 });
+
+describe("the accessibility mirror in Nightly's embedded Browser", () => {
+  const read = { ...owner, presentationId: id, kind: "accessibility", revision: 0 } as const;
+  const press = {
+    ...owner,
+    presentationId: id,
+    kind: "accessibility-action",
+    revision: 1,
+    nodeId: "0-2",
+    action: { action: "press" },
+  } as const;
+  const mirrored: HumanBrowserResult = {
+    status: "accessibility",
+    update: {
+      kind: "full",
+      revision: 1,
+      rootId: "0-1",
+      truncated: false,
+      nodes: [
+        { id: "0-1", role: "document", children: ["0-2"] },
+        { id: "0-2", role: "button", name: "Save", children: [] },
+      ],
+    },
+  };
+  async function presented(
+    options: {
+      readonly assistive?: () => boolean;
+      readonly focused?: () => boolean;
+      readonly visibleLayout?: boolean;
+      readonly hold?: Promise<void>;
+    } = {},
+  ) {
+    const calls: HumanBrowserRequest[] = [];
+    const main = new NightlyBrowserPresentation({
+      current: () => true,
+      visible: () => true,
+      focused: options.focused ?? (() => true),
+      assistiveTechnology: options.assistive ?? (() => true),
+      execute: async (request) => {
+        calls.push(request);
+        if (request.kind === "attach") return { status: "attached", presentationId: id };
+        if (request.kind === "accessibility") {
+          await options.hold;
+          return mirrored;
+        }
+        return { status: "accepted" };
+      },
+    });
+    await main.invoke({ ...owner, kind: "attach" });
+    await main.invoke({
+      ...owner,
+      presentationId: id,
+      kind: "layout",
+      layout: { width: 800, height: 600, visible: options.visibleLayout ?? true },
+    });
+    return { main, calls };
+  }
+
+  it("asks Stable for the mirror and acts through it only while an assistive technology is on", async () => {
+    let on = false;
+    const { main, calls } = await presented({ assistive: () => on });
+    expect(await main.invoke(read)).toEqual({ status: "refused" });
+    expect(await main.invoke(press)).toEqual({ status: "refused" });
+    expect(calls.some((request) => request.kind.startsWith("accessibility"))).toBe(false);
+    on = true;
+    expect(await main.invoke(read)).toEqual(mirrored);
+    expect(await main.invoke(press)).toEqual({ status: "accepted" });
+    await main.close();
+  });
+
+  it("asks for nothing while the Browser view is hidden and acts only while focused", async () => {
+    const hidden = await presented({ visibleLayout: false });
+    expect(await hidden.main.invoke(read)).toEqual({ status: "refused" });
+    expect(hidden.calls.some((request) => request.kind === "accessibility")).toBe(false);
+    await hidden.main.close();
+    const unfocused = await presented({ focused: () => false });
+    expect(await unfocused.main.invoke(press)).toEqual({ status: "refused" });
+    expect(unfocused.calls.some((request) => request.kind === "accessibility-action")).toBe(false);
+    await unfocused.main.close();
+  });
+
+  it("holds one mirror ask open without delaying the person's typing", async () => {
+    let release = () => {};
+    const hold = new Promise<void>((done) => {
+      release = done;
+    });
+    const { main } = await presented({ hold });
+    const pending = main.invoke(read);
+    // A second ask for the same presentation while one is held is refused.
+    expect(await main.invoke(read)).toEqual({ status: "refused" });
+    expect(await main.invoke(input("keyDown"))).toEqual({ status: "accepted" });
+    release();
+    expect(await pending).toEqual(mirrored);
+    await main.close();
+  });
+});

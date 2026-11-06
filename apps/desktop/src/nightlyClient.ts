@@ -413,6 +413,9 @@ export async function runNightlyClient(
               current: () => windows.get(id) === window && !window.isDestroyed(),
               visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
               focused: () => !window.isDestroyed() && window.isFocused(),
+              // Chromium turns this on when VoiceOver or another assistive
+              // technology starts reading the app.
+              assistiveTechnology: () => app.accessibilitySupportEnabled,
               popupMenu: (request, signal) => {
                 if (window.isDestroyed()) return Promise.resolve({ kind: "refused" });
                 const point = screen.getCursorScreenPoint();

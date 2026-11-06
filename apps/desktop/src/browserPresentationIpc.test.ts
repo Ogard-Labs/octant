@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  BROWSER_ACCESSIBILITY_ROLES,
   decodeHumanBrowserRequest,
   decodeHumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
 import {
+  BROWSER_ACCESSIBILITY_IPC_ROLES,
   decodeHumanBrowserIpcRequest,
   decodeHumanBrowserIpcResult,
 } from "./browserPresentationIpc";
@@ -209,5 +211,88 @@ describe("sandboxed human Browser protocol", () => {
       expect(() => decodeHumanBrowserIpcResult(result)).toThrow();
       expect(() => decodeHumanBrowserResult(result)).toThrow();
     }
+  });
+});
+
+describe("the accessibility mirror over the preload", () => {
+  const mirror = (nodes: ReadonlyArray<Record<string, unknown>>, extra = {}) => ({
+    status: "accessibility",
+    update: { kind: "full", revision: 2, rootId: "0-1", truncated: false, nodes, ...extra },
+  });
+  const document = { id: "0-1", role: "document", children: ["0-2"] };
+
+  it("keeps the preload's role list equal to the contract's", () => {
+    expect([...BROWSER_ACCESSIBILITY_IPC_ROLES]).toEqual([...BROWSER_ACCESSIBILITY_ROLES]);
+  });
+
+  it("carries the mirror and its actions as the contract does", () => {
+    const accepted = [
+      mirror(
+        [document, { id: "0-2", role: "textbox", name: "Password", secure: true, children: [] }],
+        {
+          focusedId: "0-2",
+        },
+      ),
+      {
+        status: "accessibility",
+        update: {
+          kind: "patch",
+          base: 1,
+          revision: 2,
+          rootId: "0-1",
+          truncated: true,
+          nodes: [
+            {
+              id: "0-2",
+              role: "button",
+              name: "Save",
+              bounds: { x: 1, y: 2, width: 3, height: 4 },
+              children: [],
+            },
+          ],
+          removed: ["0-3"],
+        },
+      },
+    ];
+    for (const result of accepted) {
+      expect(decodeHumanBrowserIpcResult(result)).toEqual(decodeHumanBrowserResult(result));
+    }
+    for (const request of [
+      { ...owner, presentationId, kind: "accessibility", revision: 0 },
+      {
+        ...owner,
+        presentationId,
+        kind: "accessibility-action",
+        revision: 2,
+        nodeId: "1-44",
+        action: { action: "set-value", value: "Ada" },
+      },
+    ])
+      expect(decodeHumanBrowserIpcRequest(request)).toEqual(decodeHumanBrowserRequest(request));
+  });
+
+  it("refuses a password value, a broken tree, an unknown role and a script action", () => {
+    for (const result of [
+      mirror([
+        document,
+        { id: "0-2", role: "textbox", secure: true, value: "hunter2", children: [] },
+      ]),
+      mirror([document, { id: "0-2", role: "textbox", children: ["0-2"] }]),
+      mirror([document, { id: "0-2", role: "RootWebArea", children: [] }]),
+      mirror([document, { id: "0-2", role: "link", url: "https://example.test/", children: [] }]),
+    ]) {
+      expect(() => decodeHumanBrowserIpcResult(result)).toThrow();
+      expect(() => decodeHumanBrowserResult(result)).toThrow();
+    }
+    const action = {
+      ...owner,
+      presentationId,
+      kind: "accessibility-action",
+      revision: 2,
+      nodeId: "0-2",
+      action: { action: "evaluate", value: "alert(1)" },
+    };
+    expect(() => decodeHumanBrowserIpcRequest(action)).toThrow();
+    expect(() => decodeHumanBrowserRequest(action)).toThrow();
   });
 });
