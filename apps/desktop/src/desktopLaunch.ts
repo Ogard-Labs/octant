@@ -56,7 +56,15 @@ export async function launchDesktopApplication(
             "Open a signed Octant that supports Nightly. Octant may be closed or too old to answer this status check.";
           break;
         case "invalid-scope":
-          message = "Octant and Octant Nightly must run in the same macOS login session.";
+          message =
+            "Octant and Octant Nightly must run as the same person in the same login session, outside any container or app sandbox.";
+          break;
+        case "no-launcher-record":
+          message = "Open Octant, then try again.";
+          break;
+        case "unsandboxed-renderer":
+          message =
+            "Octant Nightly connects to Octant only while Chromium's sandbox protects its windows. Start it without --no-sandbox or ELECTRON_DISABLE_SANDBOX.";
           break;
         case "deadline-exceeded":
           message =

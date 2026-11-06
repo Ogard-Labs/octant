@@ -147,8 +147,8 @@ is not available in Nightly yet.
 
 ### Separate test data in Nightly
 
-For development and testing on macOS, Nightly can run a host of its own on data
-that is never Octant's. In Nightly, open **Settings › Updates** and set **Data**
+For development and testing on macOS and Linux, Nightly can run a host of its
+own on data that is never Octant's. In Nightly, open **Settings › Updates** and set **Data**
 to **Separate test data**, then choose **Relaunch Octant Nightly**. The choice
 takes effect on that relaunch.
 
@@ -165,7 +165,35 @@ takes effect on that relaunch.
 - The window shows a **Test data** label beside the Nightly label.
 - To go back, set **Data** to **Octant's data** and relaunch. While Nightly uses
   Octant's data, **Remove test data** moves the test data folder to the Trash.
-- Separate test data is not offered on Linux yet.
+- On Linux the test data lives in `~/.local/share/octant-nightly/test-data`
+  (under `$XDG_DATA_HOME` when you set it) and its log under
+  `~/.local/state/octant-nightly/logs`. Keys go into your keyring as separate
+  items whose `service` starts with `octant-nightly-test-data.`, so they never
+  replace or read Octant's. **Remove test data** also removes those keyring
+  items; if the keyring is locked, nothing is removed and Settings says so.
+
+### Octant Nightly on Linux
+
+Nightly connects to Octant on Linux the same way it does on macOS, with these
+prerequisites:
+
+- Both apps are the packaged AppImages, run by you, directly on your desktop:
+  not inside a container, Flatpak, snap or other sandbox, and not as another
+  user. Nightly checks that Octant runs as the same user in the same session
+  namespaces, and Octant checks Nightly the same way.
+- Linux 5.3 or later.
+- Chromium's sandbox works for both apps. Never start either with
+  `--no-sandbox`: Nightly refuses to connect while its windows run without the
+  sandbox. On Ubuntu 23.10 and later, see
+  [an AppArmor profile for Octant](./linux-host#an-apparmor-profile-for-octant).
+- Open Octant once from its AppImage. Each launch records which image it came
+  from, so Nightly can later start Octant's host in the background. If Octant
+  has never been opened, was moved, or its image was replaced or made writable
+  by others, Nightly says **Open Octant, then try again.**
+
+The check admits any program you run yourself outside a sandbox, which can
+already read Octant's own files. It keeps out programs in a sandbox and other
+users.
 
 An in-app Quit command in Octant closes its workspace windows while a current
 Nightly window still uses its host. The host remains in the background, and

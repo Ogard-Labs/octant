@@ -68,7 +68,9 @@ Nightly publication still needs.
    the embedded page) included. A companion window stays rejected. Planned.
 3. **Linux Nightly stays in scope.** It needs its own Linux client trust design,
    because Linux has no code-signature check or audit-token peer identity to
-   admit a Nightly main by. Designed, not built; the design comes first.
+   admit a Nightly main by. Designed and built; see
+   [Linux client trust](#linux-client-trust). A packaged pair on a real Linux
+   desktop has not been exercised.
 4. **The signed feed names its app.** The signed update feed names the app it
    is for (Octant or Octant Nightly), and each app refuses a feed for the
    other with a clear message, beside the existing ring check. Built; see
@@ -169,17 +171,25 @@ never Octant's:
   `{"data":"test-data"}` selects test data; a missing, oversized, linked or
   malformed file means Octant's data. The main process reads it once at launch
   and no renderer request changes the running role.
-- Separate test data is macOS only for now. Linux Secret Service items carry no
-  store scope, so a Linux test host would share Octant's credentials; Nightly
-  does not offer the choice there, and a stored choice refuses with a message
-  instead of starting a host.
+- On Linux, Secret Service items carry no store scope, so the test host names
+  its own `service` values instead: `octant-nightly-test-data.<namespace>`
+  (`provider`, `replica-device-key`, `ssh-key` and the rest) in place of
+  Octant's. Every lookup, store and clear names `service`, so an item of one
+  family never matches the other's. The Linux test folder is
+  `$XDG_DATA_HOME/octant-nightly/test-data` (by default
+  `~/.local/share/octant-nightly/test-data`), its service log
+  `$XDG_STATE_HOME/octant-nightly/logs/service.log`, and its port `13774`.
+  Remove test data also clears every test-data Secret Service item; when the
+  keyring refuses, the folder stays and Remove reports the failure, so it can
+  be retried.
 - Nightly refuses to start its test host when its folder is, or lies inside,
   Octant's data folder, or contains it, unless `OCTANT_DATA_DIR` set the folder
   explicitly. A Nightly process that reaches the host-owning desktop without a
   test-host role (its choice changed or became unreadable during launch)
   refuses and quits; it never falls back to Octant's folder or port `13773`.
-- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`,
-  passed to its host as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
+- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`
+  (on Linux, under `$XDG_STATE_HOME/octant-nightly/logs`), passed to its host
+  as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
 - Its default folder is `~/Octant Nightly` rather than `~/Octant`, passed as
   `OCTANT_DEFAULT_FOLDER`, so Work and Code without a Project, the artifact
   mirror and managed repository clones never touch Octant's files. Its Keychain
@@ -572,7 +582,7 @@ evidence; the preflight that replaces the early gate checks them:
 - [ ] The full `octant-nightly` command.
 - [x] Roll-forward rollback, a published host feature list and the app named
       in the signed feed (decision 4).
-- [ ] Linux client trust, designed and built (decision 3).
+- [x] Linux client trust, designed and built (decision 3).
 - [ ] The usable-client preflight in place of the early gate, with no secrets,
       checking compatibility against the published Octant features.
 - [ ] Maintainer checks: a signed pair, a signed install from Settings,
@@ -814,6 +824,91 @@ Developer ID same-Team admission. Actual signed-pair registration, active-owner
 process exit and full-payload renderer/native acceptance still need their
 evidence. The retained-client policy has separate focused and synthetic evidence;
 full signed lifecycle acceptance remains unrun. The functional publication gate stays in force.
+
+## Linux client trust
+
+Linux has no code signature or kernel audit token to admit a Nightly main by.
+Packaged Linux Octant and Nightly instead admit each other by what the kernel
+attests about the process on the other end of a path socket in the person's
+private runtime folder. The status and window protocols, their sizes and
+deadlines, the 15-second lease, the native-main token and its admission are
+the same as on macOS; only the transport and the peer check differ.
+
+- **The endpoint.** Packaged Octant listens on a `SOCK_SEQPACKET` path socket,
+  `<identity>.windows.v1.sock`, mode `0600`, beside its control socket in the
+  per-user runtime folder (`/tmp/octant-<uid>`, which the host runtime keeps
+  `0700` and owned by the person). It is never an abstract socket and never
+  TCP. One socket carries both status and window requests as fixed-size
+  messages. Octant takes a lock beside the socket before it listens and
+  unlinks a socket left by an exited Octant only while holding that lock; a
+  file that is not a socket refuses.
+- **The peer check, both directions.** On the first message of a connection
+  each side reads `SO_PEERCRED` and requires the person's own user id. It
+  holds a pidfd for that process: `SO_PEERPIDFD` where the kernel has it
+  (Linux 6.5), otherwise `pidfd_open` for the credential's pid (Linux 5.3 or
+  later), and checks through `/proc/self/fdinfo` that the pidfd names that
+  pid. Through `/proc/<pid>` it requires the same mount, user and PID
+  namespaces and the same root as its own, and reads the process start time.
+  Those reads count only while the pidfd shows the process alive, so a reused
+  pid cannot answer for an exited one. A peer in a container, Flatpak, snap
+  or Bubblewrap sandbox, or under `chroot`, is refused.
+- **Every message.** Both sockets set `SO_PASSCRED`, and every message must
+  carry the kernel's credential naming the validated pid. A descriptor handed
+  to another process therefore cannot speak for its creator, and a message
+  that itself carries a descriptor (`SCM_RIGHTS`) closes the connection.
+- **Leases.** A peer is keyed by pid and kernel start time. The pidfd
+  becoming readable (the process exited) or EOF on the connection that carried
+  its window requests revokes that peer's leases, as process exit does on
+  macOS. Nightly keeps that one connection open for its window operations.
+- **What grants nothing.** The executable path, a hash of it, `$APPIMAGE` and
+  the command line are never trust inputs. The binding is packaged-only: a
+  development build never loads it and reports the window protocol
+  unavailable (`native-unavailable`).
+- **Launch arguments.** Packaged Linux Octant applies the same fixed
+  launch-argument check as packaged macOS (ordinary startup, one Code link,
+  the fixed terminal, Canvas and host-only roles) before it imports any host
+  code, so it accepts `--octant-host-only` and refuses anything else,
+  `--no-sandbox` included. Chromium can rewrite a Linux process's command
+  line, so the native binding does not re-read it; the JavaScript entry check
+  is the gate.
+- **The renderer sandbox.** Nightly registers no window, and never starts
+  Octant's host, while its renderers would run without Chromium's sandbox:
+  `--no-sandbox`, `--disable-setuid-sandbox` or `ELECTRON_DISABLE_SANDBOX`
+  refuse with a message naming them.
+
+### Starting a closed Octant on Linux
+
+Each packaged Octant launch from an AppImage writes `<identity>.launcher.json`,
+mode `0600`, in the same runtime folder: the AppImage path (`$APPIMAGE`), its
+device and its inode. When status says Octant is not running, Nightly reads
+that record, refuses unless it is a regular private file the person owns, and
+opens the named image without following a link. The image must still be a
+regular file the person owns, not writable by group or others, with the
+recorded device and inode: a moved, replaced, loosened or linked image
+refuses. Nightly then starts it by descriptor (`execveat`) with only
+`--octant-host-only` and a minimal environment: the session's home, user,
+locale, display, D-Bus and XDG variables, `OCTANT_DATA_DIR` and
+`APPIMAGE_EXTRACT_AND_RUN`; never loader, Electron, Node or AppImage
+variables. With no record Nightly says "Open Octant, then try again." As on
+macOS, a launch receipt grants nothing: fresh authenticated status still
+precedes window registration.
+
+### The accepted limit
+
+Any code running unconfined as the same person, in the same namespaces, can
+pass this check, just as it can already read Octant's administrative bridge
+secret from the data folder. Linux client trust therefore keeps confined and
+other-user code out; it does not tell an Octant main from other same-user
+code. Maintainers accepted this limit on 2026-11-06. Not done now: a Linux
+security-module label check, and moving the bridge secret into the runtime
+folder (a separate change).
+
+Evidence: the policy, real-socket and launcher tests run on Ubuntu 24.04 in
+CI (same user admitted under both pidfd paths; a Bubblewrap
+`--unshare-all` peer, another user and a handed-over descriptor refused;
+pidfd exit and EOF revoke; stale-socket and launcher-record tampering), and
+a real keyring test shows test-data and Octant items never cross. A packaged
+AppImage pair on a real Linux desktop has not been exercised.
 
 ## Identity
 
