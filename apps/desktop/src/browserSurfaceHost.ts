@@ -1367,10 +1367,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           readonly handle: (accept: boolean) => Promise<boolean>;
         }
       | undefined;
-    let dialogLoad: { generation: number | undefined; times: number[]; noticed: boolean } = {
+    // `answering` latches for the rest of the document load: a page that waits
+    // out the window must not earn its sheets back.
+    let dialogLoad: { generation: number | undefined; times: number[]; answering: boolean } = {
       generation: undefined,
       times: [],
-      noticed: false,
+      answering: false,
     };
     humanDialogHandoffs.set(client, (reports) => {
       const held = heldDialog;
@@ -1413,16 +1415,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // and the person is told once, without a modal.
         const generation = scriptGenerations.get(view);
         if (dialogLoad.generation !== generation)
-          dialogLoad = { generation, times: [], noticed: false };
+          dialogLoad = { generation, times: [], answering: false };
         const now = Date.now();
         dialogLoad.times = [
           ...dialogLoad.times.filter((at) => now - at < HUMAN_DIALOG_BURST_MS),
           now,
         ];
-        if (dialogLoad.times.length > HUMAN_DIALOG_BURST) {
+        if (dialogLoad.answering || dialogLoad.times.length > HUMAN_DIALOG_BURST) {
           void handle(BROWSER_DIALOG_POLICY[type] === "accepted");
-          if (!dialogLoad.noticed) {
-            dialogLoad.noticed = true;
+          if (!dialogLoad.answering) {
+            dialogLoad.answering = true;
             popups.offer(
               { kind: "notice", notice: "dialogs-answered" },
               {

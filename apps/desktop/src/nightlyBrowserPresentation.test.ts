@@ -674,6 +674,8 @@ describe("page popups in Nightly's embedded Browser", () => {
       readonly focused?: () => boolean;
       readonly watch?: () => Promise<HumanBrowserResult>;
       readonly offerAgain?: boolean;
+      /** Held before Stable answers a popup poll, as its bounded wait is. */
+      readonly beforePopup?: () => Promise<void>;
     } = {},
   ) {
     const calls: HumanBrowserRequest[] = [];
@@ -688,6 +690,7 @@ describe("page popups in Nightly's embedded Browser", () => {
         if (request.kind === "attach") return { status: "attached", presentationId: id };
         if (request.kind === "popup-watch" && stable.watch !== undefined) return stable.watch();
         if (request.kind === "popup") {
+          await stable.beforePopup?.();
           if (offered && stable.offerAgain !== true) {
             await new Promise((done) => setTimeout(done, 20));
             return { status: "idle" };
@@ -831,6 +834,30 @@ describe("page popups in Nightly's embedded Browser", () => {
     await new Promise((done) => setTimeout(done, 300));
     expect(calls.some((request) => request.kind === "popup")).toBe(false);
     expect(shown).not.toHaveBeenCalled();
+    await main.close();
+  });
+
+  it("leaves a popup pending when the window lost focus while the poll waited", async () => {
+    let focused = true;
+    let answerPoll: () => void = () => {};
+    const held = new Promise<void>((done) => {
+      answerPoll = done;
+    });
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, {
+      focused: () => focused,
+      offerAgain: true,
+      beforePopup: () => held,
+    });
+    await vi.waitFor(() => expect(calls.some((request) => request.kind === "popup")).toBe(true));
+    // The held poll resolves after focus moved away.
+    focused = false;
+    answerPoll();
+    await new Promise((done) => setTimeout(done, 100));
+    expect(shown).not.toHaveBeenCalled();
+    expect(calls.some((request) => request.kind === "popup-dismiss")).toBe(false);
+    focused = true;
+    await vi.waitFor(() => expect(shown).toHaveBeenCalledTimes(1));
     await main.close();
   });
 });

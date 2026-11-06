@@ -452,12 +452,30 @@ describe("page popups in Stable's hidden Browser window", () => {
     });
     surface.emit("Page.javascriptDialogOpening", { type: "alert", message: "more" });
     expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    // Waiting out the burst window does not earn the page its sheets back.
+    const now = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + 11_000);
+    try {
+      surface.emit("Page.javascriptDialogOpening", { type: "alert", message: "after a pause" });
+      expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    } finally {
+      clock.mockRestore();
+    }
+    // A new document load starts with sheets again.
+    surface.emitPage("did-start-navigation");
+    surface.emit("Page.javascriptDialogOpening", { type: "alert", message: "new page" });
+    expect(popupOf(await surface.send({ kind: "popup" }))).toMatchObject({
+      kind: "dialog",
+      message: "new page",
+    });
     const answers = surface.commands.filter(
       ({ method }) => method === "Page.handleJavaScriptDialog",
     );
-    // Three answered by the person, then confirm dismissed and alert accepted by policy.
-    expect(answers.slice(3).map(({ params }) => params)).toEqual([
+    // Three answered by the person, then by policy: confirm dismissed, the
+    // alerts before and after the pause accepted.
+    expect(answers.slice(3, 6).map(({ params }) => params)).toEqual([
       { accept: false },
+      { accept: true },
       { accept: true },
     ]);
     surface.host.closeContext(contextId);

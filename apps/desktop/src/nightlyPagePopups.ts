@@ -13,6 +13,34 @@ import type { NightlyPagePopupPlacement } from "./nightlyBrowserPresentation";
 export const NIGHTLY_DIALOGS_ANSWERED_NOTICE =
   "A page kept opening dialogs, so Octant answered the rest for this page.";
 
+/**
+ * Open panels still on screen, per window. Electron's `showOpenDialog` takes no
+ * abort signal and has no call that closes the panel, so a panel whose popup
+ * Stable retired stays until the person closes it. Its result is then ignored,
+ * and every later popup for that window waits for it instead of stacking a
+ * second modal over it.
+ */
+const openPanels = new WeakMap<BrowserWindow, Promise<unknown>>();
+
+/** Resolve undefined on abort; the awaited work may still settle later and is ignored. */
+function unlessAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
+  if (signal.aborted) return Promise.resolve(undefined);
+  return new Promise<T | undefined>((done) => {
+    const aborted = () => done(undefined);
+    signal.addEventListener("abort", aborted, { once: true });
+    void work.then(
+      (value) => {
+        signal.removeEventListener("abort", aborted);
+        done(signal.aborted ? undefined : value);
+      },
+      () => {
+        signal.removeEventListener("abort", aborted);
+        done(undefined);
+      },
+    );
+  });
+}
+
 /** The presentation route body bound; a longer file answer is refused before it is sent. */
 const MAX_ANSWER_BYTES = 15_360;
 
@@ -138,6 +166,11 @@ export async function presentNightlyPagePopup(
   signal: AbortSignal,
 ): Promise<HumanBrowserPopupAnswer | undefined> {
   if (window.isDestroyed() || signal.aborted) return undefined;
+  const panel = openPanels.get(window);
+  if (panel !== undefined) {
+    await unlessAborted(panel, signal);
+    if (window.isDestroyed() || signal.aborted) return undefined;
+  }
   if (popup.kind === "select" || popup.kind === "context") {
     const menu = nightlyPageMenu(popup);
     const zoom = window.webContents.getZoomFactor();
@@ -186,9 +219,19 @@ export async function presentNightlyPagePopup(
       new Notification({ title: "Octant Nightly", body: NIGHTLY_DIALOGS_ANSWERED_NOTICE }).show();
     return undefined;
   }
-  const chosen = await dialog.showOpenDialog(window, {
+  const opened = dialog.showOpenDialog(window, {
     properties: popup.multiple ? ["openFile", "multiSelections"] : ["openFile"],
   });
-  if (chosen.canceled || signal.aborted) return undefined;
+  const settled = opened.then(
+    () => undefined,
+    () => undefined,
+  );
+  openPanels.set(window, settled);
+  void settled.then(() => {
+    if (openPanels.get(window) === settled) openPanels.delete(window);
+  });
+  // A retired chooser stops waiting at once; the panel's later choice reaches nothing.
+  const chosen = await unlessAborted(opened, signal);
+  if (chosen === undefined || chosen.canceled || signal.aborted) return undefined;
   return nightlyChosenFiles(chosen.filePaths, popup.multiple);
 }
