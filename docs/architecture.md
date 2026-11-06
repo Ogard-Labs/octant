@@ -10444,7 +10444,7 @@ access` agree); a thread's own change is journaled as
   | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
   | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
   | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                        | No turn runs                                                                                                                                                                                                                               |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
 
   Wherever a row names the root or the checkout, a Project's extra folders
   get the same rule ([Projects with several folders](#projects-with-several-folders)).
@@ -10811,10 +10811,24 @@ access` agree); a thread's own change is journaled as
   Its environment is an allowlist (path, locale, user, terminal, time zone,
   its scratch directory, and the family's guards), so provider credentials
   and config-home variables are dropped; its process group is killed when the
-  read settles. Credential-reading readiness probes are not version reads and
-  still run unconfined: Claude's `auth status --json` and discovery's
-  `authProbeArgs` read the person's own sign-in state, a standing gap like
-  Oh My Pi's probe.
+  read settles. Credential-reading readiness probes have their own narrow
+  boundary through the same builder. Discovery's Codex `login status` may
+  read the selected account's `auth.json` and `config.toml`; Claude's
+  standalone `auth status --json` reads its `.credentials.json`,
+  `settings.json` and global `.claude.json`. On macOS the status probe may
+  also read the one login Keychain file and reach the two security services,
+  preserving native Keychain interaction without a whole-home grant. These
+  probes may exec and fork for installed launchers and `security`, but their
+  descendants inherit the same file boundary and no network. Oh My Pi's
+  declaration probe reads only its isolated account directory, with its
+  existing no-tools, no-extensions, no-skills and no-session switches. Only
+  the private scratch directory is writable. Scratch outlives the owned
+  process and is released on completion or cancellation. A missing sandbox
+  refuses the probe rather than running it unconfined; a discovery timeout,
+  locked store or failed process reports unknown instead of guessing signed
+  out. A Claude check immediately before a confined turn still attests that
+  turn's own profile, so a successful standalone status does not promise
+  that a particular turn can reach its sign-in.
   OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
   Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
   the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a

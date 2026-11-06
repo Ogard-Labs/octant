@@ -411,12 +411,38 @@ app never asks for the camera. Electron main owns the
 per-tool instances; packaged macOS tools launch under the separately identified
 bundled `Octant Runtime.app` in Node mode, never a system Node or trusted desktop
 main. Its version matches the desktop's Electron version. See the
-[fixed-entry boundary](nightly-app.md#fixed-packaged-entry). Tools run unconfined
-under that signed runtime identity: no sandbox profile limits them,
-and macOS may attribute their access to Octant's privacy (TCC) grants. They
-need `simctl`, the Simulator's frameworks, and the shared `adb` server, and
-Octant has no confinement profile for them yet. Octant narrows what they
-inherit instead: each
+[fixed-entry boundary](nightly-app.md#fixed-packaged-entry). The desktop wraps
+the pinned tool and its staged smoke in a device-scoped native sandbox:
+Seatbelt on macOS and rootless Bubblewrap on Linux. No supported sandbox means
+no npm-tool launch; the pane retains its existing native capture/input fallback.
+The tool reads its runtime and package tree, system binaries/frameworks and the
+selected SDK. It may read and write its own device service state
+(`~/Library/Developer/CoreSimulator` for Simulator, the Android user directory
+for adb authentication) and a private transient state directory. The Android
+profile also reads the exact `~/.emulator_console_auth_token` file, which
+`adb emu` needs to identify a running emulator; the emulator keeps ownership of
+writing it. It receives no
+Project, provider-account, login-Keychain or whole-home grant. SDK/runtime paths
+that resolve to the home or its ancestors are refused. The service passes the
+selected Android SDK before preparing the profile, and sets the process's cwd
+and temporary directory to its private state; helper commands reuse that same
+state for the lifetime of the desktop service. Cleanup removes it after the
+tracked tools exit. A live stream retains its state until its owner stops it.
+
+On macOS the profile admits CoreSimulator's named services and runtime mount;
+the OS still applies the runtime's privacy (TCC) identity. Networking permits
+only loopback listeners and connections, for the stream, input and shared adb
+server. On Linux the capsule has its own user, PID, IPC and UTS namespaces,
+drops all capabilities, mounts the named system/SDK/package roots read-only and
+only device/private state writable. It shares the host network so the existing
+adb server and browser can reach it; Bubblewrap does not enforce macOS's
+loopback-only egress. A confined tool still controls the permitted device
+services: confinement does not make the guest's content trusted or approve
+device input. Native device launch, display, input, capture and authentication
+remain platform-specific acceptance checks; synthetic OS refusal checks alone
+do not establish their compatibility.
+
+Each
 launch receives only an allowlisted environment (`PATH`, `HOME`, user and
 locale variables, `TMPDIR`, `DEVELOPER_DIR`, and the Android SDK and `adb`
 variables), never provider keys, tokens, broker credentials, or other `OCTANT_*`

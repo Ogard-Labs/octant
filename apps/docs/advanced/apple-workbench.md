@@ -143,6 +143,12 @@ a booted Simulator and falls back to the desktop device helper when that
 stream is missing. The pane opens once per request; a tab you
 closed stays closed until the agent asks again.
 
+The managed stream runs in a native sandbox that grants its Simulator state,
+runtime and local services, without access to your Projects or provider
+sign-ins. A host that cannot start this sandbox keeps the native device helper.
+Device-tool versions and manual checks are available in **Settings › Device tools**;
+automatic updates remain off until you enable them.
+
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
