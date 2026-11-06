@@ -15,6 +15,8 @@ export interface NativeWindowRequest {
   readonly windowId: string;
   readonly generation: number;
   readonly operation: "register" | "renew" | "revoke";
+  /** The client accepts the native-main bootstrap fields; an older client does not. */
+  readonly nativeMain: boolean;
 }
 
 export type NativeWindowEvent =
@@ -262,10 +264,12 @@ export function ownNightlyWindowLeases(options: {
         owned.acquisition = request(host, "POST", owned);
         await owned.acquisition;
         // The host, not this main, names what it brokers for a native main.
-        const bootstrap: NightlyWindowBootstrap = {
-          ...registered,
-          hostFeatures: owned.hostFeatures,
-        };
+        // An older client decodes the bootstrap strictly, so it gets the
+        // original fields only and keeps working without brokered features.
+        const { nativeMainToken: _withheld, ...original } = registered;
+        const bootstrap: NightlyWindowBootstrap = input.nativeMain
+          ? { ...registered, hostFeatures: owned.hostFeatures }
+          : original;
         owned.active = true;
         armExpiry(key, owned);
         if (
@@ -427,6 +431,7 @@ function decodeEvent(value: unknown): NativeWindowEvent | undefined {
       windowId: request.windowId,
       generation: request.generation,
       operation: request.operation,
+      nativeMain: "nativeMain" in request && request.nativeMain === true,
     },
   };
 }

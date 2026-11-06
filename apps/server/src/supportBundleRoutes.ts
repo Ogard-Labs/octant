@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { renameSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, lstatSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import { decodeSupportBundleExportRequest, type SupportBundleSaveOutcome } from "@octant/contracts";
 import { authorizeDiagnosticsExportActor, buildSupportBundleZip } from "@octant/domain";
@@ -62,8 +62,16 @@ function json(body: unknown, status: number, origin: string | null): Response {
   });
 }
 
-/** Writes the zip beside its destination first and moves it into place on commit. */
-function stageZipAt(path: string, modifiedAt: Date): StageSupportBundleDelivery {
+/**
+ * Writes the zip beside its destination first and moves it into place on
+ * commit. A new-file-only delivery links instead of renaming, so it fails
+ * rather than replacing a file that appeared at that path in the meantime.
+ */
+function stageZipAt(
+  path: string,
+  modifiedAt: Date,
+  delivery: "replace" | "new-file-only",
+): StageSupportBundleDelivery {
   return (files) => {
     const staged = `${path}.octant-${randomBytes(6).toString("hex")}.tmp`;
     try {
@@ -73,10 +81,26 @@ function stageZipAt(path: string, modifiedAt: Date): StageSupportBundleDelivery 
       throw error;
     }
     return {
-      commit: () => renameSync(staged, path),
+      commit: () => {
+        if (delivery === "replace") {
+          renameSync(staged, path);
+          return;
+        }
+        linkSync(staged, path);
+        rmSync(staged, { force: true });
+      },
       abort: () => rmSync(staged, { force: true }),
     };
   };
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function createSupportBundleRouteHandler(dependencies: SupportBundleRouteDependencies) {
@@ -89,18 +113,18 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
     if (!isLoopbackHostname(url.hostname)) {
       return json({ error: "Support bundle requests must use loopback." }, 400, null);
     }
-    if (
-      request.method !== "POST" ||
-      secret === undefined ||
-      admitDesktopBroker({
-        request,
-        desktopBridgeSecret: secret,
-        windowAuthorityStore: dependencies.windowAuthorityStore,
-        now: now(),
-      }).status !== "admitted"
-    ) {
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: secret,
+      windowAuthorityStore: dependencies.windowAuthorityStore,
+      now: now(),
+    });
+    if (request.method !== "POST" || secret === undefined || admission.status !== "admitted") {
       return json({ error: "Support bundle save is unauthorized." }, 401, null);
     }
+    // Stable's save dialog confirms a replacement itself. A native main's path
+    // names no window and no dialog the host can see, so it only creates.
+    const delivery = admission.kind === "native-main" ? "new-file-only" : "replace";
     let absolutePath: string;
     try {
       const text = await request.text();
@@ -122,11 +146,14 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
     } catch {
       return json({ error: "Support bundle save request is invalid." }, 400, null);
     }
+    if (delivery === "new-file-only" && pathExists(absolutePath)) {
+      return json({ error: "A file already exists there. Nothing was saved." }, 409, null);
+    }
     try {
       const outcome = await exportSupportBundle(
         { destinationCategory: "chosen-by-person" },
         dependencies.sources(),
-        stageZipAt(absolutePath, new Date(now())),
+        stageZipAt(absolutePath, new Date(now()), delivery),
       );
       const answer: SupportBundleSaveOutcome =
         outcome.kind === "exported"

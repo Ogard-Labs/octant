@@ -9,7 +9,7 @@ const clientHandle = "00000000-0000-4000-8000-000000000593";
 const peer = "a".repeat(64);
 const hostFeatures = ["project-root-receipts", "a-feature-from-a-newer-host"];
 
-function fixture(onCount?: (count: number) => void) {
+function fixture(onCount?: (count: number) => void, nativeMain = true) {
   let receive: (event: unknown) => void = () => {};
   let elapsed = 0;
   let expire = () => {};
@@ -60,7 +60,7 @@ function fixture(onCount?: (count: number) => void) {
       responses.set(requestId, resolve);
       receive({
         kind: "request",
-        request: { requestId, peer, windowId: clientHandle, generation: 1, operation },
+        request: { requestId, peer, windowId: clientHandle, generation: 1, operation, nativeMain },
       } satisfies NativeWindowEvent);
     });
   return {
@@ -101,6 +101,32 @@ describe("Nightly native window lease ownership", () => {
       expect(reply.hostFeatures).toEqual(hostFeatures);
       f.replaceHost();
       expect(f.owner.hasWindow(reply.windowId)).toBe(false);
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("gives a client that does not accept native-main fields only its original bootstrap", async () => {
+    const f = fixture(undefined, false);
+    try {
+      const reply = await f.send(1, "register");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      // An older client decodes these exact keys strictly and refuses any other.
+      expect(Object.keys(reply).sort()).toEqual(
+        [
+          "capability",
+          "generation",
+          "hostInstance",
+          "hostOrigin",
+          "kind",
+          "leaseMs",
+          "protocol",
+          "rendererIdentity",
+          "windowId",
+        ].sort(),
+      );
+      expect(JSON.stringify(reply)).not.toContain(String(f.requests[0]?.body.nativeMainToken));
+      expect(f.owner.hasWindow(reply.windowId)).toBe(true);
     } finally {
       await f.owner.close();
     }
