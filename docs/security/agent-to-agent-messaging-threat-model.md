@@ -8,7 +8,7 @@
 
 **Scope:** Structured messages between AgentRuns and real threads on one Octant
 host, beyond bounded `#thread` mention excerpts and beyond Chat-only
-`octant_thread_message`
+`octant_ask_thread`
 
 **Effective rule:** [`../architecture.md`](../architecture.md) (the paragraph on
 agent-to-agent messaging under Modes) states what the host enforces. It is
@@ -58,7 +58,7 @@ power in another.
 - Hierarchy, depth, and concurrency ceilings remain in force.
 - Chat coordination stays a separate, mention-gated path. Broader
   messaging (this design) may target Chat, Work, Code, and AgentRuns under
-  Open-scope intersection; it does not widen `octant_thread_message` beyond
+  Open-scope intersection; it does not widen `octant_ask_thread` beyond
   Chat.
 - Full compromise of the host user is outside containment; messaging must not
   amplify that compromise across Projects or hosts.
@@ -95,8 +95,9 @@ absolute paths, raw body text, credentials, or provider payloads.
 
 ## Sibling-thread reads
 
-The `octant_threads` tool is messaging's read-only companion: a Code turn may
-list, read, and wait on the other open Code threads of its own Project. The
+The read operations of `octant_threads`, the tool whose `send` carries
+messaging, are its read-only companion: a Work or Code turn may list, read,
+and wait on the other open threads of its own Project, which share its mode. The
 effective rule is the paragraph on seeing sibling threads in
 [`../architecture.md`](../architecture.md); this section records how its read
 path meets the threats above.

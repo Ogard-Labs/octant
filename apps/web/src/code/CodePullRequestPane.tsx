@@ -23,6 +23,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import {
+  browserProofSaveLabel,
   browserProofSaveMessage,
   canSaveBrowserProofScreenshots,
   saveBrowserProofScreenshots,
@@ -475,7 +476,7 @@ function CreatePullRequest(
         captures: proof.captures,
         bridge: proofBridge,
       });
-      setProofSaved(browserProofSaveMessage(result));
+      setProofSaved(browserProofSaveMessage(result, proof.captures));
       setSavedCaptureIds(
         result.kind === "saved"
           ? browserProofCaptureOrder(proof.captures).map((capture) => String(capture.captureId))
@@ -655,7 +656,7 @@ function CreatePullRequest(
                   type="button"
                   variant="ghost"
                 >
-                  Save screenshots…
+                  {browserProofSaveLabel(proof.captures)}
                 </OctantButton>
               ) : null}
               {proofSaved === undefined ? null : <p role="status">{proofSaved}</p>}

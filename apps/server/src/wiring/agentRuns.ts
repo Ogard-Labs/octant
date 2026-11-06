@@ -49,6 +49,7 @@ import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import {
   agentRunEligibleTargets as eligibleAgentRunTargets,
+  recordAgentRunResultIngestion,
   type RemoteDelegationPort,
 } from "../agentRun/agentRunDelegation";
 import {
@@ -891,7 +892,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         }),
     },
     parentSessions: {
-      // The same rule `delegate` refuses by: a paused session, or one a
+      // The same rule `octant_agents` refuses by: a paused session, or one a
       // restart left needing a check, starts no child until it is resumed.
       isHeld: (parentThreadId) => {
         const status = nativeHarnessSessions.read(String(parentThreadId))?.session.status;
@@ -903,8 +904,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       },
     },
   });
-  // Admits the subagents a thread's agent delegates through the Octant
-  // Harness `delegate` tool. No HTTP route starts a subagent: a child a
+  // Admits the subagents a thread's agent delegates through
+  // `octant_agents`. No HTTP route starts a subagent: a child a
   // person started by hand had no agent to hand its result back to.
   const agentRunAdmission: AgentRunControlAdmissionDependencies = {
     onExecutionAccepted: onAgentRunExecutionAccepted,
@@ -1119,6 +1120,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           run,
           windowId: input.windowId,
         }),
+      recordResultIngestion: (run) =>
+        recordAgentRunResultIngestion(
+          (record) => externalContentIngestionStore.record(record),
+          run,
+          randomUUID,
+        ),
       uuid: randomUUID,
     });
   // The routes are built where they are dispatched, with the Canvas snapshot
@@ -1271,7 +1278,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   return {
     agentRunAdmission,
     agentRunChildWorktree,
-    agentRunEligibleTargets,
     agentRunLiveConversations,
     agentRunOrchestration,
     agentRunProcessSupervisor,
@@ -1285,7 +1291,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     managedWorktreeReceipts,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
-    remoteDelegation,
     remoteDelegationHolder,
     runtimeOutsideContentMarks,
     sideTasks,

@@ -120,11 +120,13 @@ export function decideStackMerge(
 
 /**
  * Pull-request changes that need the person's approval for this one act at
- * every guardrail level, Full access included: merging, and a comment, which
- * posts under the person's name.
+ * every guardrail level, Full access included: merging; a comment, which
+ * posts under the person's name; and a watch, which lets the host start turns
+ * in the thread later, when nobody may be there to stop them. Ending a watch
+ * only takes reach away, so it never asks.
  */
 export function pullRequestChangeNeedsPerActApproval(
-  kind: "merge" | "comment" | "close" | "reopen" | "labels",
+  kind: "merge" | "comment" | "close" | "reopen" | "labels" | "watch" | "unwatch",
 ): boolean {
-  return kind === "merge" || kind === "comment";
+  return kind === "merge" || kind === "comment" || kind === "watch";
 }

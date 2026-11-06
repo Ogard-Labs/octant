@@ -100,6 +100,41 @@ describe("AndroidEmulatorRequest", () => {
     ).toThrow();
   });
 
+  it("decodes a tap at a point or on a named element, never both or neither", () => {
+    expect(
+      decodeAndroidEmulatorRequest({ ...base, kind: "tap", target: "com.example:id/sign_in" })
+        .target,
+    ).toBe("com.example:id/sign_in");
+    expect(() =>
+      decodeAndroidEmulatorRequest({
+        ...base,
+        kind: "tap",
+        target: "Sign in",
+        point: { x: 12, y: 40 },
+      }),
+    ).toThrow();
+    expect(() => decodeAndroidEmulatorRequest({ ...base, kind: "tap", target: " " })).toThrow();
+  });
+
+  it("decodes describe-ui as a read and logs only with a package and a bounded window", () => {
+    const read = { ...base, requestedBy: undefined, approval: { kind: "not-required" } };
+    expect(decodeAndroidEmulatorRequest({ ...read, kind: "describe-ui" }).kind).toBe("describe-ui");
+    const logs = {
+      ...read,
+      kind: "logs",
+      packageName: "com.example.app",
+      sinceSeconds: 600,
+      includeCrashes: true,
+    };
+    expect(decodeAndroidEmulatorRequest(logs)).toMatchObject({
+      sinceSeconds: 600,
+      includeCrashes: true,
+    });
+    expect(() => decodeAndroidEmulatorRequest({ ...logs, packageName: undefined })).toThrow();
+    expect(() => decodeAndroidEmulatorRequest({ ...logs, sinceSeconds: 601 })).toThrow();
+    expect(() => decodeAndroidEmulatorRequest({ ...logs, sinceSeconds: 0 })).toThrow();
+  });
+
   it("decodes screen recording only with the person who asked", () => {
     for (const kind of ["start-recording", "stop-recording"]) {
       expect(decodeAndroidEmulatorRequest({ ...base, kind }).kind).toBe(kind);

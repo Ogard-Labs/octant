@@ -75,6 +75,17 @@ export interface ThreadRetentionServiceOptions {
     readonly mode: OctantMode;
     readonly threadId: ThreadRetentionThreadId;
   }) => Promise<void> | void;
+  /**
+   * Drops presentation choices kept for erased threads outside their own
+   * records, such as a thread's own Reply detail level in shell settings, so
+   * nothing about a thread that no longer exists stays behind.
+   */
+  readonly forgetThreadPresentation?: (
+    threads: ReadonlyArray<{
+      readonly mode: OctantMode;
+      readonly threadId: ThreadRetentionThreadId;
+    }>,
+  ) => void;
 }
 
 export class ThreadRetentionService {
@@ -88,6 +99,7 @@ export class ThreadRetentionService {
   readonly #purgeCanvasFiles: ThreadRetentionServiceOptions["purgeCanvasFiles"];
   readonly #purgeThreadArtifacts: ThreadRetentionServiceOptions["purgeThreadArtifacts"];
   readonly #forgetProjectData: ThreadRetentionServiceOptions["forgetProjectData"];
+  readonly #forgetThreadPresentation: ThreadRetentionServiceOptions["forgetThreadPresentation"];
 
   constructor(options: ThreadRetentionServiceOptions) {
     this.#connection = options.connection;
@@ -100,6 +112,7 @@ export class ThreadRetentionService {
     this.#purgeCanvasFiles = options.purgeCanvasFiles;
     this.#purgeThreadArtifacts = options.purgeThreadArtifacts;
     this.#forgetProjectData = options.forgetProjectData;
+    this.#forgetThreadPresentation = options.forgetThreadPresentation;
   }
 
   readState(): ThreadRetentionState {
@@ -198,6 +211,11 @@ export class ThreadRetentionService {
       });
       if (canvasIds.length > 0) this.#forgetCanvases?.(canvasIds);
       if (subject.mode === "work") this.#forgetWorkThread?.(String(subject.threadId));
+    }
+    if (selected.length > 0) {
+      this.#forgetThreadPresentation?.(
+        selected.map((subject) => ({ mode: subject.mode, threadId: subject.threadId })),
+      );
     }
     const projectScopeDeleted =
       request.scope.kind === "project"

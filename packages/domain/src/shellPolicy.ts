@@ -174,6 +174,8 @@ export function defaultShellSettings(): ShellSettings {
     transcriptTextSize: "small",
     transcriptWidth: "narrow",
     usageBars: "smooth",
+    replyDetail: "low",
+    threadReplyDetail: [],
     showThreadProviderIcons: true,
     showThreadStats: true,
     homeCards: { order: [], visibility: [] },

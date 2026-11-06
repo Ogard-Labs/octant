@@ -5,8 +5,8 @@ import {
   MAX_SIBLING_THREAD_READS_PER_TURN,
   MAX_SIBLING_THREAD_WAITS_PER_TURN,
   MAX_SIBLING_THREAD_WAIT_MS,
-  decodeCodeThreadId,
   decodeProjectId,
+  decodeSiblingThreadId,
 } from "@octant/contracts";
 import {
   SIBLING_THREAD_UNREACHABLE,
@@ -17,6 +17,7 @@ import {
   siblingThreadActionIngestsContent,
   siblingThreadReference,
   siblingThreadWaitMs,
+  threadsToolOperations,
   type SiblingThreadCaller,
   type SiblingThreadFacts,
 } from "./siblingThreadPolicy";
@@ -24,7 +25,7 @@ import {
 const projectA = decodeProjectId("a0000000-0000-4000-8000-000000000001");
 const projectB = decodeProjectId("b0000000-0000-4000-8000-000000000001");
 const threadId = (n: number) =>
-  decodeCodeThreadId(`c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
+  decodeSiblingThreadId(`c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
 
 const caller: SiblingThreadCaller = { threadId: threadId(1), projectId: projectA, mode: "code" };
 
@@ -62,11 +63,30 @@ describe("sibling thread policy", () => {
     expect(listed.truncated).toBe(false);
   });
 
-  it("lists nothing for a caller outside a Project or outside Code", () => {
+  it("lists nothing for a caller outside a Project, in Chat, or of another mode than its siblings", () => {
     const candidates = [sibling(2), sibling(3)];
 
     expect(listSiblingThreads({ ...caller, projectId: undefined }, candidates).threads).toEqual([]);
     expect(listSiblingThreads({ ...caller, mode: "work" }, candidates).threads).toEqual([]);
+    expect(
+      listSiblingThreads({ ...caller, mode: "chat" }, [
+        sibling(2, { mode: "chat" }),
+        sibling(3, { mode: "chat" }),
+      ]).threads,
+    ).toEqual([]);
+  });
+
+  it("lists the other open Work threads of a Work caller's Project", () => {
+    const workCaller: SiblingThreadCaller = { ...caller, mode: "work" };
+    const listed = listSiblingThreads(workCaller, [
+      sibling(1, { mode: "work" }),
+      sibling(2, { mode: "work" }),
+      sibling(3, { mode: "work", closed: true }),
+      sibling(4, { mode: "work", projectId: projectB }),
+      sibling(5),
+    ]);
+
+    expect(listed.threads.map((thread) => thread.threadId)).toEqual([threadId(2)]);
   });
 
   it("caps the list and says when readable threads were left out", () => {
@@ -201,5 +221,65 @@ describe("sibling thread policy", () => {
     expect(siblingThreadActionIngestsContent("list")).toBe(true);
     expect(siblingThreadActionIngestsContent("read")).toBe(true);
     expect(siblingThreadActionIngestsContent("wait")).toBe(false);
+  });
+
+  describe("the operations a turn is offered", () => {
+    const code = {
+      mode: "code" as const,
+      posture: "approval-gated",
+      profileAllowsRead: true,
+      profileAllowsSend: true,
+      profileAllowsBoard: true,
+      messagingCarried: true,
+      plannerThread: false,
+    };
+
+    it("offers a Code turn reading and messaging, and its planner the board too", () => {
+      expect(threadsToolOperations(code)).toEqual([
+        "help",
+        "list",
+        "read",
+        "wait",
+        "send",
+        "acknowledge",
+        "receipts",
+      ]);
+      expect(threadsToolOperations({ ...code, plannerThread: true })).toContain("board");
+    });
+
+    it("keeps messaging out of Plan and out of a profile that names only the read operations", () => {
+      expect(threadsToolOperations({ ...code, posture: "plan" })).toEqual([
+        "help",
+        "list",
+        "read",
+        "wait",
+      ]);
+      expect(threadsToolOperations({ ...code, profileAllowsSend: false })).not.toContain("send");
+    });
+
+    it("offers a Work turn only the read operations, whatever the host could carry", () => {
+      expect(
+        threadsToolOperations({ ...code, mode: "work", posture: undefined, plannerThread: true }),
+      ).toEqual(["help", "list", "read", "wait"]);
+    });
+
+    it("offers board only to the designated planner whose profile names it", () => {
+      expect(threadsToolOperations(code)).not.toContain("board");
+      expect(
+        threadsToolOperations({ ...code, plannerThread: true, profileAllowsBoard: false }),
+      ).not.toContain("board");
+    });
+
+    it("offers no operation, not even help, to Chat or to a profile that names none", () => {
+      expect(threadsToolOperations({ ...code, mode: "chat" })).toEqual([]);
+      expect(
+        threadsToolOperations({
+          ...code,
+          profileAllowsRead: false,
+          profileAllowsSend: false,
+          profileAllowsBoard: false,
+        }),
+      ).toEqual([]);
+    });
   });
 });

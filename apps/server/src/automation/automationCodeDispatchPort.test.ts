@@ -154,6 +154,37 @@ describe("Code routine threads", () => {
     expect(await start("full-access")).toBe("full-access");
   });
 
+  it("hands the run's identity to the turn it starts beside the command, never inside it", async () => {
+    const operations = {
+      execute: vi.fn(async () => ({ kind: "provider-turn-state", state: "running" })),
+    };
+    const dispatch = createAutomationCodeDispatchPort({
+      codeService: {
+        execute: vi.fn() as never,
+        bootstrap: async () => ({ threads: [{ id: threadId, checkoutId: "checkout-1" }] }),
+      },
+      operations: operations as never,
+      evidence: { put: () => ({ contentId: "c", digest: "d", byteLength: 1 }) as never },
+      clock: () => "2026-08-10T12:00:00.000Z" as UtcTimestamp,
+      uuid: () => "aa000000-0000-4000-8000-0000000000fb",
+    });
+    const run = codeRun();
+    await dispatch.startOrRecoverFirstTurn({
+      run,
+      threadId,
+      firstTurnRequestId: run.firstTurnRequestId,
+      promptDigest: "unused" as never,
+      scopeId,
+    });
+    const [, command, options] = operations.execute.mock.calls[0] as unknown as [
+      unknown,
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(options).toEqual({ routineRun: { automationId: run.automationId, runId: run.id } });
+    expect(command).not.toHaveProperty("routineRun");
+  });
+
   it("creates a run at the level picked on the routine, never above the Project's", async () => {
     const created = async (
       projectLevel: PermissionMode,

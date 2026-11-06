@@ -3,6 +3,14 @@ import { MentionableThreadId } from "./threadMentionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
+/**
+ * Chat's blocking ask: one instruction to a Chat thread the turn explicitly
+ * mentions, answered with that thread's completed reply. Offered only when the
+ * turn mentions a Chat thread; Work and Code threads are reached through their
+ * own modes' threads tool, never through this one.
+ */
+export const THREAD_DIALOGUE_TOOL_NAME = "octant_ask_thread";
+
 /** The bounded message a Chat provider may deliver to an explicitly mentioned Chat thread. */
 export const ThreadDialogueMessageInput = Schema.Struct({
   targetThreadId: MentionableThreadId,

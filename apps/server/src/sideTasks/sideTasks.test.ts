@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { EventActor, MAX_OPEN_SIDE_TASKS } from "@octant/contracts";
+import {
+  EventActor,
+  MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH,
+  MAX_OPEN_SIDE_TASKS,
+  type WindowId,
+} from "@octant/contracts";
+import type { CodePlannerToolPort } from "../code/codePlannerTools";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -263,5 +269,162 @@ describe("side tasks", () => {
     expect(dismissal).toMatchObject({ kind: "side-task-refused", reason: "already-settled" });
     expect(result).toMatchObject({ kind: "side-task-started", sent: true });
     expect(store.read(threadId).tasks[0]?.status).toBe("started");
+  });
+
+  describe("the planner's offer to the Project board", () => {
+    function plannerTools(
+      options: {
+        readonly designated?: boolean;
+        readonly toolConstraints?: ReadonlyArray<string>;
+        readonly propose?: CodePlannerToolPort["propose"];
+      } = {},
+    ) {
+      const store = storeOn(openConnection());
+      let designated = options.designated ?? true;
+      const propose = vi.fn<CodePlannerToolPort["propose"]>(
+        options.propose ??
+          (async (_windowId, _threadId, draft) => ({
+            status: "proposed",
+            proposal: {
+              id: "a0000000-0000-4000-8000-000000000001",
+              title: draft.title,
+              status: "pending",
+            } as never,
+          })),
+      );
+      const tools = createSideTaskTools({
+        store,
+        threadId,
+        mode: "code",
+        projectId,
+        suggestedBy: claude,
+        uuid: uuidFactory(),
+        clock: () => now,
+        planner: {
+          port: {
+            isPlannerThread: () => designated,
+            board: async () => {
+              throw new Error("A board offer never reads the board.");
+            },
+            propose,
+          },
+          windowId: windowId as WindowId,
+        },
+        toolConstraints: options.toolConstraints ?? [],
+        profileDisplayName: "Planner",
+      });
+      const schema = tools.definitions[0]?.inputSchema as {
+        readonly properties: Record<
+          string,
+          { readonly enum?: ReadonlyArray<string>; readonly maxLength?: number }
+        >;
+      };
+      return {
+        store,
+        tools,
+        schema,
+        propose,
+        undesignate: () => {
+          designated = false;
+        },
+      };
+    }
+    const boardOffer = { ...offer, target: "board" };
+
+    it("records a pending proposal the person confirms, not a side-task card", async () => {
+      const { store, tools, schema, propose } = plannerTools();
+
+      expect(schema.properties.target?.enum).toEqual(["new-worktree", "new-thread", "board"]);
+      const answer = await tools.execute({
+        name: "octant_offer_side_task",
+        inputJson: JSON.stringify(boardOffer),
+      });
+
+      expect(answer).toMatchObject({
+        result: {
+          status: "pending-user-confirmation",
+          proposalId: "a0000000-0000-4000-8000-000000000001",
+        },
+      });
+      expect(propose).toHaveBeenCalledExactlyOnceWith(windowId, threadId, {
+        title: offer.title,
+        intent: offer.prompt,
+        rationale: offer.reason,
+      });
+      expect(store.read(threadId).tasks).toEqual([]);
+    });
+
+    it("states the planner's tighter bounds in the schema and refuses an intent past them", async () => {
+      const { tools, schema, propose } = plannerTools();
+
+      expect(schema.properties.prompt?.maxLength).toBe(MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH);
+      const tooLong = await tools.execute({
+        name: "octant_offer_side_task",
+        inputJson: JSON.stringify({
+          ...boardOffer,
+          prompt: "x".repeat(MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH + 1),
+        }),
+      });
+
+      expect(tooLong).toMatchObject({ isError: true, result: { status: "refused" } });
+      expect(propose).not.toHaveBeenCalled();
+    });
+
+    it("passes on the planner's own refusal, such as its cap on waiting proposals", async () => {
+      const { tools } = plannerTools({
+        propose: async () => ({
+          status: "refused",
+          reason: "too-many-pending-proposals",
+          message: "This Project already has 10 proposals waiting for a person.",
+        }),
+      });
+
+      expect(
+        await tools.execute({
+          name: "octant_offer_side_task",
+          inputJson: JSON.stringify(boardOffer),
+        }),
+      ).toMatchObject({
+        isError: true,
+        result: { status: "refused", message: expect.stringContaining("10 proposals") },
+      });
+    });
+
+    it("offers board only to the designated planner whose profile names it, and refuses once undesignated", async () => {
+      expect(plannerTools({ designated: false }).schema.properties.target?.enum).toEqual([
+        "new-worktree",
+        "new-thread",
+      ]);
+      expect(
+        plannerTools({ toolConstraints: ["octant_offer_side_task"] }).schema.properties.target
+          ?.enum,
+      ).not.toContain("board");
+      const named = plannerTools({ toolConstraints: ["octant_offer_side_task.board"] });
+      expect(named.schema.properties.target?.enum).toContain("board");
+
+      named.undesignate();
+      expect(
+        await named.tools.execute({
+          name: "octant_offer_side_task",
+          inputJson: JSON.stringify(boardOffer),
+        }),
+      ).toMatchObject({ isError: true, result: { status: "refused" } });
+      expect(named.propose).not.toHaveBeenCalled();
+    });
+
+    it("never offers board outside a Code planner", async () => {
+      const tools = toolsFor(storeOn(openConnection()), "code");
+
+      expect(
+        (tools.definitions[0]?.inputSchema as { properties: { target: { enum: string[] } } })
+          .properties.target.enum,
+      ).toEqual(["new-worktree", "new-thread"]);
+      expect(
+        await tools.execute({
+          name: "octant_offer_side_task",
+          inputJson: JSON.stringify(boardOffer),
+        }),
+      ).toMatchObject({ isError: true, result: { status: "refused" } });
+    });
   });
 });

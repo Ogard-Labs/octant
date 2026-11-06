@@ -9,7 +9,7 @@ import { FOLLOW_UP_BLOCK_LANGUAGE, type ProviderContextBlock } from "@octant/con
 export const FOLLOW_UP_SUGGESTION_INSTRUCTIONS: ProviderContextBlock = {
   kind: "instructions",
   text: [
-    "At the end of a turn you may suggest up to three follow-ups the user could start next. Suggest them only when there is clear, separable next work; most replies need none. Emit them only as the last thing in your reply, in exactly this form:",
+    "At the end of a turn you may suggest up to three follow-ups the user could start next. Suggest them only when there is clear, separable next work; most replies need none. Emit them only at the very end of your reply, after any decision block, in exactly this form:",
     `\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}`,
     '{"suggestions":[{"title":"...","prompt":"...","target":"new-thread"}]}',
     "```",

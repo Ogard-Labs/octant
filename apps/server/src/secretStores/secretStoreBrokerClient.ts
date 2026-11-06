@@ -1,3 +1,8 @@
+import { Schema } from "effect";
+import {
+  CredentialRequestResolution,
+  type CredentialRequestReference,
+} from "@octant/contracts/credential-request";
 import {
   decodeCommandCredentialHostRequest,
   decodeCommandCredentialHostResult,
@@ -8,7 +13,7 @@ import {
  * The server's handle on the host credential broker's linked-secret-store
  * routes. Every call answers with a value: a broker that is down, refuses, or
  * answers in an unexpected shape is `broker-unavailable`, never an exception
- * and never a guess. No answer carries what an item resolves to.
+ * and never a guess. Only the private request-card lookup and scoped cloud sessions carry transient credential material; they are never renderer responses.
  */
 
 import type {
@@ -119,6 +124,11 @@ export type GoogleCliSessionAnswer =
     }
   | { readonly status: "none" | "refused" | Exclude<StoreCheckStatus, "found"> };
 export interface SecretStoreBrokerClient {
+  /** Transient lookup for an already claimed local credential card; never expose to a client. */
+  readonly requestCardRead?: (
+    reference: CredentialRequestReference,
+    signal: AbortSignal,
+  ) => Promise<CredentialRequestResolution>;
   readonly googleCliReference?: (
     signal?: AbortSignal,
   ) => Promise<GoogleCliReferenceAnswer | SecretStoreBrokerDown>;
@@ -325,6 +335,15 @@ export function makeSecretStoreBrokerClient(
     return DOWN;
   };
   return {
+    requestCardRead: async (reference, signal) => {
+      try {
+        return Schema.decodeUnknownSync(CredentialRequestResolution)(
+          await post("request-card-read", reference, signal, 32_768),
+        );
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
     googleCliReference: async (signal) => {
       const answer = await post(`${GOOGLE}reference`, {}, signal);
       if (answer?.status === "none") return { status: "none" };

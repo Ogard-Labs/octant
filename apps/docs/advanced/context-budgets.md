@@ -182,8 +182,11 @@ What the breakdown can say depends on the runtime:
   - **Octant tools**: the definitions of tools Octant registered with the
     session.
   - **Octant instructions**, **Skills** and **Attachments**: what Octant sends
-    with every turn, inside the prompt. These runtimes keep every turn's prompt,
-    so the window holds one copy per turn, and Octant adds them up. Once the
+    with the prompt. Instructions and skills go once per session and again
+    only when they change. In Codex and Claude Code they travel beside your
+    message, so those programs' own history and thread titles show what you
+    typed. These runtimes keep every copy they were sent, and Octant adds them
+    up. Once the
     runtime compacts the session it keeps a share of earlier turns Octant cannot
     measure, so from then on these stay in Other (provider) and the breakdown
     says so. The same happens if Octant could not count an earlier turn of the

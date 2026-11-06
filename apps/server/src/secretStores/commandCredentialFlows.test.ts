@@ -7,12 +7,38 @@ import { decodeCommandCredentialDefinition } from "@octant/contracts/command-cre
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { commandCredentialRoutes } from "./commandCredentialRoutes";
-import { commandCredentialTools } from "./commandCredentialTools";
+import { createCredentialTool, type CredentialToolSource } from "../credentials/credentialTool";
+import { savedCredentialCommands } from "./commandCredentialTools";
 import { CommandCredentialBindings } from "./commandCredentialBindings";
 const services: CommandCredentialBindings[] = [];
 afterEach(() => {
   for (const service of services.splice(0)) service.close();
 });
+/** A host with no registered credential operation. */
+const nothingRegistered: CredentialToolSource<never> = {
+  offered: false,
+  list: () => [],
+  use: async () => ({ result: { status: "unexpected" }, isError: true }),
+  close: async () => undefined,
+};
+function credentialTool(input: {
+  readonly service: CommandCredentialBindings;
+  readonly window: string;
+  readonly thread: string;
+  readonly project: string;
+  readonly current?: () => boolean;
+}) {
+  return createCredentialTool({
+    registered: nothingRegistered,
+    saved: savedCredentialCommands({
+      service: input.service,
+      windowId: input.window,
+      threadId: input.thread,
+      projectId: input.project,
+      current: input.current ?? (() => true),
+    }),
+  });
+}
 async function fixture() {
   const store = new WindowAuthorityStore();
   const window = decodeWindowId(randomUUID());
@@ -164,18 +190,85 @@ describe("person and provider command authorization", () => {
     expect(review).toMatchObject({ reason: "unauthorized" });
     expect(f.execute).not.toHaveBeenCalled();
   });
+  it("is offered for a saved command alone and lists it without its account or vault references", async () => {
+    const f = await fixture();
+    const tool = credentialTool(f);
+    expect(tool.definitions.map((d) => d.name)).toEqual(["octant_credential"]);
+    expect(tool.definitions[0]?.inputSchema).toMatchObject({
+      properties: { operation: { enum: ["help", "list", "run-saved"] } },
+    });
+    const listed = await tool.execute({
+      name: "octant_credential",
+      inputJson: '{"operation":"list"}',
+    });
+    expect(listed).toEqual({
+      isError: false,
+      result: {
+        operations: [],
+        savedCommands: [
+          {
+            id: f.binding.bindingId,
+            label: "Fixture command",
+            executable: "/usr/bin/client",
+            args: ["status"],
+            directory: "",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(listed)).not.toContain("v".repeat(26));
+    expect(
+      await tool.execute({
+        name: "octant_command",
+        inputJson: JSON.stringify({ operation: "run", bindingId: f.binding.bindingId }),
+      }),
+    ).toMatchObject({ isError: true });
+    expect(
+      await tool.execute({
+        name: "octant_credential",
+        inputJson: '{"operation":"request","id":"linear-account-check"}',
+      }),
+    ).toMatchObject({ result: { status: "refused" }, isError: true });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("is not offered when nothing is registered and no command is saved for this Project", async () => {
+    const f = await fixture();
+    const tool = credentialTool({ ...f, project: randomUUID() });
+    expect(tool.definitions).toEqual([]);
+    expect(
+      await tool.execute({
+        name: "octant_credential",
+        inputJson: JSON.stringify({ operation: "run-saved", id: f.binding.bindingId }),
+      }),
+    ).toMatchObject({ result: { status: "refused" }, isError: true });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("is not offered in Plan and refuses run-saved without opening a review once Plan begins", async () => {
+    const f = await fixture();
+    expect(credentialTool({ ...f, current: () => false }).definitions).toEqual([]);
+    let current = true;
+    const tool = credentialTool({ ...f, current: () => current });
+    expect(tool.definitions.map((d) => d.name)).toEqual(["octant_credential"]);
+    current = false;
+    for (const inputJson of [
+      JSON.stringify({ operation: "run-saved", id: f.binding.bindingId }),
+      '{"operation":"list"}',
+    ]) {
+      expect(await tool.execute({ name: "octant_credential", inputJson })).toMatchObject({
+        result: { status: "refused" },
+        isError: true,
+      });
+    }
+    const view = f.service.view(f.window);
+    expect(view.kind === "command-credential-view" ? view.requests : undefined).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+  });
   it("uses the same human review for a provider-selected binding and refuses Plan for the person too", async () => {
     const f = await fixture();
-    const tool = commandCredentialTools({
-      service: f.service,
-      windowId: f.window,
-      threadId: f.thread,
-      projectId: f.project,
-      current: () => true,
-    });
+    const tool = credentialTool(f);
     const running = tool.execute({
-      name: "octant_command",
-      inputJson: JSON.stringify({ operation: "run", bindingId: f.binding.bindingId }),
+      name: "octant_credential",
+      inputJson: JSON.stringify({ operation: "run-saved", id: f.binding.bindingId }),
     });
     await vi.waitFor(() => {
       const view = f.service.view(f.window);
@@ -202,16 +295,10 @@ describe("person and provider command authorization", () => {
   });
   it("cancels a pending provider request when its tool lifetime ends", async () => {
     const f = await fixture();
-    const tool = commandCredentialTools({
-      service: f.service,
-      windowId: f.window,
-      threadId: f.thread,
-      projectId: f.project,
-      current: () => true,
-    });
+    const tool = credentialTool(f);
     const pending = tool.execute({
-      name: "octant_command",
-      inputJson: JSON.stringify({ operation: "run", bindingId: f.binding.bindingId }),
+      name: "octant_credential",
+      inputJson: JSON.stringify({ operation: "run-saved", id: f.binding.bindingId }),
     });
     await vi.waitFor(() => {
       const view = f.service.view(f.window);

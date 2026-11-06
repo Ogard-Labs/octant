@@ -38,7 +38,15 @@ afterEach(() => {
   }
 });
 
-function openHarness() {
+function openHarness(
+  options: {
+    readonly workThreads?: ReadonlyArray<{
+      readonly id: string;
+      readonly projectId: string;
+      readonly updatedAt: string;
+    }>;
+  } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-thread-retention-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -52,12 +60,22 @@ function openHarness() {
   });
   const erasedCanvasFiles: Array<ReadonlyArray<string>> = [];
   const forgottenProjects: string[] = [];
+  const forgottenPresentation: Array<string> = [];
   const service = new ThreadRetentionService({
     connection,
     journal,
     clock: () => now,
     uuid: randomUUID,
-    listWorkThreads: () => [],
+    listWorkThreads: () =>
+      (options.workThreads ?? []).map((thread) => ({
+        ...thread,
+        projectId: decodeProjectId(thread.projectId),
+      })),
+    forgetThreadPresentation: (threads) => {
+      forgottenPresentation.push(
+        ...threads.map((thread) => `${thread.mode}:${String(thread.threadId)}`),
+      );
+    },
     forgetCanvases: (canvasIds) => runtime.canvasProjection.evict(canvasIds),
     purgeCanvasFiles: (canvasIds) => {
       erasedCanvasFiles.push(canvasIds);
@@ -66,7 +84,15 @@ function openHarness() {
       forgottenProjects.push(projectId);
     },
   });
-  return { connection, journal, service, runtime, erasedCanvasFiles, forgottenProjects };
+  return {
+    connection,
+    journal,
+    service,
+    runtime,
+    erasedCanvasFiles,
+    forgottenProjects,
+    forgottenPresentation,
+  };
 }
 
 function pending(eventName: string, payload: unknown) {
@@ -424,6 +450,53 @@ function appendRaw(
     )
     .run(aggregateType, aggregateId, Number(inserted.lastInsertRowid));
 }
+
+describe("a purged thread's presentation choices", () => {
+  const purge = (service: ThreadRetentionService, mode: "chat" | "work" | "code") =>
+    service.purge(
+      { scope: { kind: "thread", mode, threadId: ids.thread }, confirm: true },
+      "local-window",
+    );
+
+  it("leave with a purged Chat thread", async () => {
+    const { connection, journal, service, forgottenPresentation } = openHarness();
+    seedChatThread(journal, connection, ids.thread, "Gone", "body");
+    seedChatThread(journal, connection, ids.other, "Kept", "body");
+    await purge(service, "chat");
+    expect(forgottenPresentation).toEqual([`chat:${ids.thread}`]);
+  });
+
+  it("leave with a purged Work thread", async () => {
+    const projectId = "c1000000-0000-4000-8000-0000000000c1";
+    const { service, forgottenPresentation } = openHarness({
+      workThreads: [{ id: ids.thread, projectId, updatedAt: now }],
+    });
+    await purge(service, "work");
+    expect(forgottenPresentation).toEqual([`work:${ids.thread}`]);
+  });
+
+  it("leave with a purged Code thread", async () => {
+    const projectId = "c1000000-0000-4000-8000-0000000000c2";
+    const { connection, service, forgottenPresentation } = openHarness();
+    seedProject(connection, projectId);
+    connection
+      .prepare(
+        `INSERT INTO code_thread_projection (
+          thread_id, project_id, checkout_id, lifecycle, schema_version, thread_json,
+          aggregate_version, updated_at, last_sequence
+        ) VALUES (?, ?, 'checkout-a', 'active', 1, '{}', 1, ?, 1)`,
+      )
+      .run(ids.thread, projectId, now);
+    await purge(service, "code");
+    expect(forgottenPresentation).toEqual([`code:${ids.thread}`]);
+  });
+
+  it("are not touched when a purge erases no thread", async () => {
+    const { service, forgottenPresentation } = openHarness();
+    await purge(service, "chat");
+    expect(forgottenPresentation).toEqual([]);
+  });
+});
 
 function count(connection: SqliteConnection, sql: string): number {
   return (connection.prepare(sql).get() as { readonly count: number }).count;

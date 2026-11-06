@@ -22,6 +22,7 @@ import type {
   GhProjectObservationRow,
   GhPullRequestObservationRow,
   GhRepositoryObservationRow,
+  GhSearchObservationRow,
 } from "./ghRepositoryCataloguePort";
 
 const DEFAULT_CACHE_TTL_MS = 30_000;
@@ -56,9 +57,21 @@ interface CataloguePort {
       readonly owner: string;
       readonly name: string;
       readonly number: number;
+      readonly includePullRequest?: boolean;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhIssueDetailObservation>>;
+  searchIssuesAndPullRequests(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly query: string;
+      readonly pageSize: number;
+      readonly cursor?: string;
+      readonly state: "open" | "closed" | "all";
+    },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhSearchObservationRow>>>;
   listPullRequests(
     request: {
       readonly owner: string;
@@ -285,7 +298,12 @@ export class GithubCatalogueService {
     }
     if (request.kind === "issue") {
       const result = await this.#port.readIssue(
-        { owner: request.owner, name: request.name, number: request.number },
+        {
+          owner: request.owner,
+          name: request.name,
+          number: request.number,
+          ...(request.includePullRequest === true ? { includePullRequest: true } : {}),
+        },
         signal,
       );
       if (result.kind !== "ok") return result;
@@ -334,6 +352,33 @@ export class GithubCatalogueService {
         kind: "ok",
         value: {
           kind: "issues",
+          page: {
+            rows: result.value.rows,
+            sort: "updated-desc",
+            hasNextPage: result.value.hasNextPage,
+            ...(result.value.endCursor === undefined ? {} : { endCursor: result.value.endCursor }),
+            freshness: { status: "fresh" },
+          },
+        },
+      };
+    }
+    if (request.kind === "search") {
+      const result = await this.#port.searchIssuesAndPullRequests(
+        {
+          owner: request.owner,
+          name: request.name,
+          query: request.query,
+          pageSize: request.pageSize,
+          ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+          state: request.state ?? DEFAULT_ISSUE_STATE,
+        },
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      return {
+        kind: "ok",
+        value: {
+          kind: "search",
           page: {
             rows: result.value.rows,
             sort: "updated-desc",
@@ -471,9 +516,11 @@ function capabilityFor(
       return "repository-catalogue";
     case "issues":
     case "issue":
-    // Assigned work reads through the one search surface issues share; a
-    // token that can search issues can search pull requests, so gating the
-    // whole read on issues-read stays honest without inventing a capability.
+    // Repository search and assigned work read through the one search surface
+    // issues share; a token that can search issues can search pull requests,
+    // so gating the whole read on issues-read stays honest without inventing
+    // a capability.
+    case "search":
     case "assigned-work":
       return "issues-read";
     case "pull-requests":
@@ -500,6 +547,8 @@ function markStale(
       return { kind: "issues", page: { ...response.page, freshness } };
     case "pull-requests":
       return { kind: "pull-requests", page: { ...response.page, freshness } };
+    case "search":
+      return { kind: "search", page: { ...response.page, freshness } };
     case "projects":
       return { kind: "projects", page: { ...response.page, freshness } };
     case "assigned-work":
