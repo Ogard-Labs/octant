@@ -9,8 +9,7 @@ import type {
   ToolNetworkEgressPolicy,
 } from "@octant/contracts";
 import {
-  CODE_DEFINITION_TOOL_NAME,
-  CODE_DIAGNOSTICS_TOOL_NAME,
+  CODE_LANGUAGE_TOOL_NAME,
   lookupClosedToolCatalogEntry,
   nativeHarnessToolCapabilityId,
   nativeHarnessToolNameForCapability,
@@ -305,8 +304,7 @@ export function resolveNetworkEgressPolicy(input: {
 function profileToolIdForCapability(capabilityId: string): string {
   if (capabilityId === "browser-automation") return "octant_browser";
   if (capabilityId === "computer-use") return "octant_computer";
-  if (capabilityId === "code-diagnostics") return CODE_DIAGNOSTICS_TOOL_NAME;
-  if (capabilityId === "code-definition") return CODE_DEFINITION_TOOL_NAME;
+  if (capabilityId === "code-language") return CODE_LANGUAGE_TOOL_NAME;
   return nativeHarnessToolNameForCapability(capabilityId) ?? capabilityId;
 }
 

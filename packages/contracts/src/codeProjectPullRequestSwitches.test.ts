@@ -4,6 +4,7 @@ import {
   decodeCodeProjectPullRequestAutoFixRecorded,
   decodeCodeProjectPullRequestMergeWhenReadyCommand,
   decodeCodeProjectPullRequestSwitchOutcome,
+  decodeCodeProjectPullRequestWatchRecorded,
 } from "./codeProjectPullRequestSwitches";
 
 const target = {
@@ -86,6 +87,54 @@ describe("pull-request switch contracts", () => {
       decodeCodeProjectPullRequestAutoFixRecorded({
         ...wake,
         change: { ...wake.change, log: "error text" },
+      }),
+    ).toThrow();
+  });
+
+  it("journals a watch wake by signal identity within the wake limit, and never forge text", () => {
+    const wake = {
+      target,
+      threadId,
+      change: {
+        kind: "woke",
+        headSha: "a1",
+        signals: [
+          { kind: "checks-failed", key: "a1" },
+          { kind: "comment", key: "IC_1" },
+        ],
+        wake: 10,
+        result: "started",
+      },
+    };
+    expect(decodeCodeProjectPullRequestWatchRecorded(wake)).toEqual(wake);
+    expect(() =>
+      decodeCodeProjectPullRequestWatchRecorded({ ...wake, change: { ...wake.change, wake: 11 } }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeProjectPullRequestWatchRecorded({
+        ...wake,
+        change: { ...wake.change, signals: [] },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeProjectPullRequestWatchRecorded({
+        ...wake,
+        change: { ...wake.change, body: "comment text" },
+      }),
+    ).toThrow();
+  });
+
+  it("records the baseline a watch began from, which may be empty", () => {
+    const enabled = { target, threadId, change: { kind: "enabled", baseline: [] } };
+    expect(decodeCodeProjectPullRequestWatchRecorded(enabled)).toEqual(enabled);
+    expect(() =>
+      decodeCodeProjectPullRequestWatchRecorded({ target, threadId, change: { kind: "enabled" } }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeProjectPullRequestWatchRecorded({
+        target,
+        threadId,
+        change: { kind: "stopped", reason: "bored" },
       }),
     ).toThrow();
   });

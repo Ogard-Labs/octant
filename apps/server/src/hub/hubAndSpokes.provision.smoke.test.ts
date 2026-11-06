@@ -154,6 +154,7 @@ const changes = (host: HubTestHost, change: string) =>
 function feedSigner() {
   const keys = generateKeyPairSync("ed25519");
   const release = {
+    product: "octant-nightly",
     version: "1.4.0",
     platform: "darwin",
     arch: "arm64",

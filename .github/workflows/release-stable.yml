@@ -166,6 +166,20 @@ jobs:
           echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
+      # What this Octant's host offers an Octant Nightly window, so a Nightly
+      # build can be checked against the published Octant before it ships.
+      # One row attaches it; the document does not depend on the platform.
+      - name: Attach the host feature list
+        if: matrix.target == 'linux-x64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/host-features/octant-host-features.json"
+          bun scripts/write-host-features.ts --version "$VERSION" --out "$out"
+          gh release upload "${GITHUB_REF_NAME}" "$out" --clobber
+
       - name: Sign the feed (or dry-run when unsigned)
         id: feed
         env:
@@ -183,6 +197,7 @@ jobs:
           args=(
             --version "$VERSION"
             --ring stable
+            --flavor stable
             --platform "$PLATFORM"
             --arch "$ARCH"
             --url "$ARTIFACT_URL"

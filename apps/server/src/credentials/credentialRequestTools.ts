@@ -1,18 +1,30 @@
 import type { CodeThread } from "@octant/contracts";
-import { REQUEST_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { CredentialOperation } from "@octant/plugin-api/credential-request";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { CredentialToolSource } from "./credentialTool";
 import type { CredentialRequests } from "./credentialRequests";
 
-export function createCredentialRequestTools(options: {
+/** What `list` shows of a registered operation: never its destination request. */
+export interface RegisteredCredentialOperationEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly reason: string;
+}
+
+/**
+ * The `request` side of the credential tool: a one-use card for an operation
+ * an admitted integration registered. It is usable only from the turn's own
+ * local window, on an active thread outside Plan whose binding has not moved.
+ */
+export function registeredCredentialOperations(options: {
   readonly service: CredentialRequests;
   readonly windowId: string;
   readonly thread: CodeThread;
   readonly readThread: () => CodeThread | undefined;
   readonly operations: () => ReadonlyArray<CredentialOperation>;
   readonly windowCurrent: () => boolean;
-}): AppManagedToolSet {
+}): CredentialToolSource<RegisteredCredentialOperationEntry> {
   const lifetime = new AbortController();
   const current = () => {
     try {
@@ -28,53 +40,24 @@ export function createCredentialRequestTools(options: {
         thread.modelId === options.thread.modelId &&
         String(thread.checkoutId) === String(options.thread.checkoutId) &&
         String(thread.bindingRevisionId) === String(options.thread.bindingRevisionId) &&
-        isToolAllowedByAllowlist(thread.toolConstraints ?? [], REQUEST_CREDENTIAL_TOOL.name)
+        isToolAllowedByAllowlist(thread.toolConstraints ?? [], OCTANT_CREDENTIAL_TOOL.name)
       );
     } catch {
       return false;
     }
   };
   return {
-    definitions:
-      current() && options.operations().length > 0
-        ? [
-            {
-              ...REQUEST_CREDENTIAL_TOOL,
-              inputSchema: {
-                ...REQUEST_CREDENTIAL_TOOL.inputSchema,
-                properties: {
-                  operation: {
-                    type: "string",
-                    enum: options.operations().map((operation) => operation.id),
-                  },
-                },
-              },
-            },
-          ]
-        : [],
+    offered: current() && options.operations().length > 0,
+    list: () =>
+      current()
+        ? options.operations().map(({ id, label, reason }) => ({ id, label, reason }))
+        : undefined,
     close: async () => {
       lifetime.abort();
     },
-    execute: async ({ name, inputJson, signal }) => {
-      if (name !== REQUEST_CREDENTIAL_TOOL.name || !current())
-        return { result: { status: "refused" }, isError: true };
-      if (inputJson.length > 1024) return { result: { status: "invalid" }, isError: true };
-      let input: unknown;
-      try {
-        input = JSON.parse(inputJson);
-      } catch {
-        return { result: { status: "invalid" }, isError: true };
-      }
-      if (
-        typeof input !== "object" ||
-        input === null ||
-        Object.keys(input).length !== 1 ||
-        !("operation" in input) ||
-        typeof input.operation !== "string"
-      ) {
-        return { result: { status: "unsupported-operation" }, isError: true };
-      }
-      const operation = options.operations().find((candidate) => candidate.id === input.operation);
+    use: async (id, signal) => {
+      if (!current()) return { result: { status: "refused" }, isError: true };
+      const operation = options.operations().find((candidate) => candidate.id === id);
       if (operation === undefined)
         return { result: { status: "unsupported-operation" }, isError: true };
       const result = await options.service.request({

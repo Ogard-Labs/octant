@@ -5,8 +5,9 @@ import { useState, type ReactNode } from "react";
 import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { BrowserCaptureImage } from "./BrowserCaptureImage";
+import { BrowserCaptureImage, BrowserRecordingBadge } from "./BrowserCaptureImage";
 import {
+  browserProofSaveLabel,
   browserProofSaveMessage,
   canSaveBrowserProofScreenshots,
   saveBrowserProofScreenshots,
@@ -35,6 +36,7 @@ export function BrowserProofPanel(props: BrowserProofPanelProps) {
   const bridge = props.hostBridge ?? getInjectedHostBridge();
   const canSave = props.captures.length > 0 && canSaveBrowserProofScreenshots(bridge);
   const entries = browserProofTimeline(props.steps, props.captures);
+  const saveLabel = browserProofSaveLabel(props.captures);
 
   const save = async () => {
     setSaving(true);
@@ -47,7 +49,7 @@ export function BrowserProofPanel(props: BrowserProofPanelProps) {
         captures: props.captures,
         bridge,
       });
-      setSaved(browserProofSaveMessage(result));
+      setSaved(browserProofSaveMessage(result, props.captures));
     } catch (error) {
       setFailure(
         error instanceof Error && error.message.length > 0
@@ -88,7 +90,7 @@ export function BrowserProofPanel(props: BrowserProofPanelProps) {
             type="button"
             variant="ghost"
           >
-            {saving ? "Saving…" : "Save screenshots…"}
+            {saving ? "Saving…" : saveLabel}
           </OctantButton>
         ) : null}
       </div>
@@ -101,12 +103,15 @@ export function BrowserProofPanel(props: BrowserProofPanelProps) {
       {open ? (
         <ProofList
           captureImage={(capture) => (
-            <BrowserCaptureImage
-              capture={capture}
-              className="browser-proof__shot"
-              client={props.client}
-              threadId={props.threadId}
-            />
+            <span className="browser-capture__media browser-proof__media">
+              <BrowserCaptureImage
+                capture={capture}
+                className="browser-proof__shot"
+                client={props.client}
+                threadId={props.threadId}
+              />
+              <BrowserRecordingBadge capture={capture} />
+            </span>
           )}
           entries={entries}
         />

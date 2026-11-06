@@ -47,6 +47,14 @@ export interface HostRuntimePaths {
   readonly socketPath: string;
   readonly ownerReceiptPath: string;
   readonly controlSecretPath: string;
+  /**
+   * Linux only: the path socket where packaged Octant answers the Nightly
+   * status and window protocol. It shares the private per-user runtime
+   * folder, never an abstract name or TCP.
+   */
+  readonly windowsSocketPath: string;
+  /** Linux only: the AppImage Octant last launched from, for a host-only start. */
+  readonly launcherRecordPath: string;
   readonly bridgeSecretPath: string;
   readonly hostInfoPath: string;
   readonly servicePolicyPath: string;
@@ -128,7 +136,11 @@ export function resolveHostRuntimePaths(input: HostRuntimePathInput): HostRuntim
     .digest("hex")
     .slice(0, 20);
   const socketPath = join(runtimeDirectory, `${identity}.sock`);
-  if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH_BYTES) {
+  const windowsSocketPath = join(runtimeDirectory, `${identity}.windows.v1.sock`);
+  if (
+    Buffer.byteLength(socketPath) > MAX_SOCKET_PATH_BYTES ||
+    Buffer.byteLength(windowsSocketPath) > MAX_SOCKET_PATH_BYTES
+  ) {
     throw new HostRuntimePathError(
       "socket-path-too-long",
       "Octant control socket path exceeds the safe platform limit.",
@@ -149,6 +161,8 @@ export function resolveHostRuntimePaths(input: HostRuntimePathInput): HostRuntim
     socketPath,
     ownerReceiptPath: join(dataDirectory, "run", "owner.json"),
     controlSecretPath: join(runtimeDirectory, `${identity}.secret`),
+    windowsSocketPath,
+    launcherRecordPath: join(runtimeDirectory, `${identity}.launcher.json`),
     bridgeSecretPath: join(dataDirectory, "octant-bridge-secret"),
     hostInfoPath: join(dataDirectory, "octant-host.json"),
     servicePolicyPath: join(configDirectory, "service-policy.json"),

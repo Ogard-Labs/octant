@@ -19,6 +19,8 @@ vi.mock("electron", () => ({
     requestSingleInstanceLock: () => true,
     exit: vi.fn(),
     quit: vi.fn(),
+    getVersion: () => "0.1.0-preview.20261104.1",
+    commandLine: { hasSwitch: () => false },
   },
   dialog: { showErrorBox: vi.fn() },
 }));
@@ -35,6 +37,7 @@ vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: () => ({}),
   ensureNightlyHostReady: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),
   closeDesktopPeerStatus: async () => ({ kind: "closed" }),
+  linuxRendererSandboxDisabled: () => false,
 }));
 vi.mock("./desktopLaunch", async (original) => ({
   ...(await original<typeof import("./desktopLaunch")>()),

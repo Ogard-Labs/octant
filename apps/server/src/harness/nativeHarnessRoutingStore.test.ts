@@ -335,51 +335,80 @@ describe("native harness session store", () => {
     expect(open().read(threadId)?.session.status).toBe("idle");
   });
 
-  it("keeps a lead's question pending until any surface answers it, then rebuilds it after a restart", async () => {
-    const threadId = "00000000-0000-4000-8000-000000000021";
-    const connection = openConnection();
-    const uuid = uuidFactory();
-    const sessions = new NativeHarnessSessionStore({
-      journal: journalFor(connection),
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    const shown: string[] = [];
-    const questions = new NativeHarnessQuestionStore({
-      sessions,
-      uuid,
-      clock: () => now,
-      onAsked: ({ question }) => shown.push(question.prompt),
-    });
-    const asked = questions.ask({
-      threadId,
-      mode: "chat",
-      lead: candidate("big") as never,
-      prompt: "Which database?",
-      options: ["sqlite", "postgres"],
-    });
-    const pending = sessions.read(threadId)?.questions[0];
-    expect(pending?.status).toBe("pending");
-    expect(shown).toEqual(["Which database?"]);
-    expect(questions.answer("other-thread", String(pending!.id), "sqlite")).toBe(
-      "question-not-found",
-    );
-    expect(questions.answer(threadId, String(pending!.id), "sqlite")).toBe("answered");
-    await expect(asked).resolves.toMatchObject({ status: "answered", answer: "sqlite" });
-    expect(questions.answer(threadId, String(pending!.id), "postgres")).toBe("already-settled");
+  it.each([false, true])(
+    "keeps plain or grouped questions until one valid answer and rebuilds the exchange (%s)",
+    async (grouped) => {
+      const questionnaire = {
+        questions: [
+          {
+            id: "database",
+            prompt: "Which databases?",
+            selection: "multiple" as const,
+            options: [
+              { id: "sqlite", label: "SQLite" },
+              { id: "postgres", label: "Postgres" },
+            ],
+          },
+        ],
+      };
+      const answer = grouped
+        ? JSON.stringify({
+            version: 1,
+            answers: [{ questionId: "database", selectedOptionIds: ["sqlite", "postgres"] }],
+            comment: "Use both",
+          })
+        : "sqlite";
+      const threadId = "00000000-0000-4000-8000-000000000021";
+      const connection = openConnection();
+      const uuid = uuidFactory();
+      const sessions = new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+      const shown: string[] = [];
+      const questions = new NativeHarnessQuestionStore({
+        sessions,
+        uuid,
+        clock: () => now,
+        onAsked: ({ question }) => shown.push(question.prompt),
+      });
+      const asked = questions.ask({
+        threadId,
+        mode: "chat",
+        lead: candidate("big") as never,
+        prompt: "Which database?",
+        ...(grouped ? { questionnaire } : {}),
+        options: ["sqlite", "postgres"],
+      });
+      const pending = sessions.read(threadId)?.questions[0];
+      expect(pending?.status).toBe("pending");
+      expect(shown).toEqual(["Which database?"]);
+      expect(questions.answer("other-thread", String(pending!.id), "sqlite")).toBe(
+        "question-not-found",
+      );
+      if (grouped) {
+        expect(questions.answer(threadId, String(pending!.id), "sqlite")).toBe("invalid-answer");
+        expect(sessions.read(threadId)?.questions[0]?.status).toBe("pending");
+      }
+      expect(questions.answer(threadId, String(pending!.id), answer)).toBe("answered");
+      await expect(asked).resolves.toMatchObject({ status: "answered", answer });
+      expect(questions.answer(threadId, String(pending!.id), "postgres")).toBe("already-settled");
 
-    const restarted = new NativeHarnessSessionStore({
-      journal: journalFor(connection),
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    expect(restarted.read(threadId)?.questions[0]).toMatchObject({
-      status: "answered",
-      answer: "sqlite",
-    });
-  });
+      const restarted = new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+      expect(restarted.read(threadId)?.questions[0]).toMatchObject({
+        status: "answered",
+        ...(grouped ? { questionnaire } : {}),
+        answer,
+      });
+    },
+  );
 
   it("settles a question as cancelled when the turn asking it is aborted", async () => {
     const threadId = "00000000-0000-4000-8000-000000000022";

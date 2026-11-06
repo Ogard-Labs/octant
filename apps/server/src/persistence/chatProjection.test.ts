@@ -129,6 +129,85 @@ function digest(body: string): string {
 }
 
 describe("ChatProjection", () => {
+  it("reads active navigation without scanning archived activity", () => {
+    const connection = openConnection();
+    const store = journal(connection);
+    for (const created of [thread(), thread({ id: ids.threadB, lifecycle: "archived" })]) {
+      store.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: created.id },
+        expectedVersion: 0,
+        events: [pending("chat.thread-created@1", { kind: "thread-created", thread: created })],
+      });
+    }
+    connection
+      .prepare(`
+      INSERT INTO chat_turn_projection
+        (turn_id, thread_id, sequence, schema_version, turn_json, aggregate_version, created_at, last_sequence)
+      VALUES (?, ?, 1, 1, '{}', 1, ?, 3)
+    `)
+      .run(ids.turn, ids.threadB, now);
+    connection.exec(`
+      WITH RECURSIVE rows(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM rows WHERE n < 20000)
+      INSERT INTO chat_attempt_projection
+        (attempt_id, turn_id, thread_id, schema_version, attempt_json, aggregate_version, last_sequence)
+      SELECT 'archived-' || n, '${ids.turn}', '${ids.threadB}', 1,
+        '{"outcome":"completed"}', 1, n + 3 FROM rows
+    `);
+    const navigationSql: string[] = [];
+    const observed: SqliteConnection = {
+      ...connection,
+      prepare(sql) {
+        navigationSql.push(sql);
+        return connection.prepare(sql);
+      },
+    };
+    const expected = [{ id: ids.thread, lastSequence: 1, executing: false, followUpOpen: false }];
+    expect(readChatNavigation(observed)).toEqual([expect.objectContaining(expected[0])]);
+    const query = navigationSql[0];
+    if (query === undefined) throw new Error("navigation must query its projection");
+    const plan = connection.prepare(`EXPLAIN QUERY PLAN ${query}`).all();
+    // A metadata read must not visit the archived rows, irrespective of their count.
+    // Check access paths rather than a machine-dependent wall-clock threshold.
+    const historicalTables = [
+      "chat_turn_projection",
+      "chat_attempt_projection",
+      "chat_attachment_projection",
+      "chat_citation_projection",
+      "thread_work_item_projection",
+      "thread_follow_up_projection",
+      "chat_purge_projection",
+      "chat_turn_route_projection",
+    ];
+    for (const table of historicalTables) {
+      expect(JSON.stringify(plan)).not.toMatch(new RegExp(`SCAN ${table}\\b`));
+      expect(JSON.stringify(plan)).toContain(`SEARCH ${table}`);
+    }
+    connection
+      .prepare(`
+      INSERT INTO chat_turn_projection
+        (turn_id, thread_id, sequence, schema_version, turn_json, aggregate_version, created_at, last_sequence)
+      VALUES ('active-turn', ?, 1, 1, '{}', 1, ?, 30000)
+    `)
+      .run(ids.thread, now);
+    connection
+      .prepare(`
+      INSERT INTO chat_attempt_projection
+        (attempt_id, turn_id, thread_id, schema_version, attempt_json, aggregate_version, last_sequence)
+      VALUES ('active-attempt', 'active-turn', ?, 1, '{"outcome":"streaming"}', 1, 30001)
+    `)
+      .run(ids.thread);
+    expect(readChatNavigation(connection)).toEqual([
+      expect.objectContaining({ id: ids.thread, lastSequence: 30001, executing: true }),
+    ]);
+    connection.exec(`UPDATE chat_attempt_projection
+      SET attempt_json = '{"outcome":"waiting"}', last_sequence = 30002
+      WHERE attempt_id = 'active-attempt'`);
+    expect(readChatNavigation(connection)).toEqual([
+      expect.objectContaining({ id: ids.thread, lastSequence: 30002, executing: false }),
+    ]);
+    connection.close();
+  });
+
   it("projects settings, threads, turns, and content reads", () => {
     const connection = openConnection();
     const store = journal(connection);

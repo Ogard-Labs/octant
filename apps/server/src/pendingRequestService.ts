@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import {
   decodePendingRequestList,
   MAX_PENDING_REQUESTS,
@@ -9,6 +11,11 @@ import {
 import { enabledModes } from "@octant/domain";
 
 export interface PendingRequestSources {
+  readonly deferrals?: {
+    readonly read: (key: string) => string | undefined;
+    readonly record: (change: PendingQuestionDeferral) => void;
+  };
+  readonly now?: () => number;
   readonly readSettings: () => ProductSurfaceSettings;
   /** Work requests this window could answer, under the Work request service's own access check. */
   readonly work: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
@@ -39,6 +46,33 @@ export class PendingRequestService {
     this.#sources = sources;
   }
 
+  async defer(
+    windowId: WindowId,
+    change: PendingQuestionDeferral,
+    current: () => boolean,
+  ): Promise<boolean> {
+    if (this.#sources.deferrals === undefined) return false;
+    if (
+      change.until !== null &&
+      (!Number.isFinite(Date.parse(change.until)) ||
+        Date.parse(change.until) <= (this.#sources.now?.() ?? Date.now()))
+    )
+      return false;
+    const list = await this.list(windowId);
+    if (
+      !current() ||
+      !list.requests.some(
+        (request) =>
+          request.kind === "question" &&
+          request.deferralKey === change.key &&
+          enabledModes(this.#sources.readSettings()).includes(request.mode),
+      )
+    )
+      return false;
+    this.#sources.deferrals.record(change);
+    return true;
+  }
+
   async list(windowId: WindowId): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
     const [work, code, children] = await Promise.all([
@@ -58,7 +92,18 @@ export class PendingRequestService {
         requestKey(left).localeCompare(requestKey(right)),
     );
     return decodePendingRequestList({
-      requests: oldestFirst.slice(0, MAX_PENDING_REQUESTS),
+      requests: oldestFirst.slice(0, MAX_PENDING_REQUESTS).map((request) => {
+        if (request.kind !== "question" || this.#sources.deferrals === undefined) return request;
+        const deferralKey = questionKey(request);
+        const until = this.#sources.deferrals.read(deferralKey);
+        return {
+          ...request,
+          deferralKey,
+          ...(until !== undefined && Date.parse(until) > (this.#sources.now?.() ?? Date.now())
+            ? { deferredUntil: until }
+            : {}),
+        };
+      }),
       truncated: oldestFirst.length > MAX_PENDING_REQUESTS,
     });
   }
@@ -73,4 +118,10 @@ function requestKey(request: PendingRequest): string {
         ? `${request.kind}:${request.text}`
         : JSON.stringify(request.answer);
   return `${request.mode}:${String(request.threadId)}:${handle}`;
+}
+
+function questionKey(request: PendingRequest): string {
+  // Identity, choices, version and authority context participate. A changed
+  // request cannot inherit a former question's attention preference.
+  return createHash("sha256").update(JSON.stringify(request)).digest("hex");
 }

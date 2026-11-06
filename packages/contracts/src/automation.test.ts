@@ -8,7 +8,10 @@ import {
   decodeAutomationEvent,
   decodeAutomationQuery,
   decodeAutomationRun,
+  decodeAutomationRunReportedResult,
   decodeAutomationTrigger,
+  decodeRoutineChangeRequest,
+  decodeRoutineProposalList,
 } from "./automation";
 
 const ids = {
@@ -1317,5 +1320,56 @@ describe("automation contracts", () => {
         origin: { kind: "interactive" },
       }),
     ).toThrow();
+  });
+});
+
+describe("what a thread's agent asks about routines and reports from a run", () => {
+  const result = {
+    outcome: "needs-attention",
+    summary: "Two invoices lack a total.",
+    reportedAt: at,
+  };
+
+  it("journals a run's reported result with a known outcome and a summary of at most 1 KB", () => {
+    expect(
+      decodeAutomationEvent({
+        eventName: "automation-run-result-reported@1",
+        payload: { automationId: ids.automation, runId: ids.run, result },
+      }).payload,
+    ).toMatchObject({ result });
+    expect(
+      decodeAutomationRunReportedResult({ ...result, summary: "a".repeat(1_024) }),
+    ).toBeDefined();
+    for (const invalid of [
+      { ...result, summary: "a".repeat(1_025) },
+      // Characters under the bound can still be over it in bytes.
+      { ...result, summary: "é".repeat(513) },
+      { ...result, summary: "   " },
+      { ...result, outcome: "completed" },
+      { ...result, extra: true },
+    ]) {
+      expect(() => decodeAutomationRunReportedResult(invalid)).toThrow();
+    }
+  });
+
+  it("lists a change request beside proposals and keeps it strict", () => {
+    const request = {
+      kind: "routine-change-request",
+      proposalId: ids.request,
+      threadId: ids.actor,
+      mode: "work",
+      projectId: ids.project,
+      automationId: ids.automation,
+      change: "archive",
+      displayName: "Weekly research",
+      expectedVersion: 4,
+      requestedAt: at,
+    };
+    expect(
+      decodeRoutineProposalList({ kind: "routine-proposal-list", proposals: [request] }).proposals,
+    ).toEqual([request]);
+    expect(() => decodeRoutineChangeRequest({ ...request, change: "resume" })).toThrow();
+    expect(() => decodeRoutineChangeRequest({ ...request, mode: "chat" })).toThrow();
+    expect(() => decodeRoutineChangeRequest({ ...request, principal: {} })).toThrow();
   });
 });
