@@ -1,4 +1,5 @@
 import {
+  DEFAULT_WEB_SEARCH_RESULTS,
   decodeUtcTimestamp,
   MAX_NATIVE_HARNESS_TOOL_DETAIL,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
@@ -456,7 +457,7 @@ async function execute(
       const input = args as NativeHarnessWebSearchArguments;
       const results = await ports.webSearch!({
         query: input.query,
-        limit: input.limit ?? 5,
+        limit: input.limit ?? DEFAULT_WEB_SEARCH_RESULTS,
         ...(signal === undefined ? {} : { signal }),
       });
       return ok({ query: input.query, results });

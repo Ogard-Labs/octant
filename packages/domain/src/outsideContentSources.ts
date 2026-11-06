@@ -24,6 +24,8 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "github-issues": "GitHub issues",
   "github-pull-requests": "GitHub pull requests",
   "github-projects": "GitHub projects",
+  "github-pull-request": "A GitHub pull request",
+  "github-search": "GitHub search results",
   "linear-issue": "A Linear issue",
   "mcp-tool": "Results from connected tools",
   "planner-proposal": "The planner thread that proposed this one",
@@ -44,7 +46,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   octant_canvas: "A Canvas document",
   octant_computer: "Apps on your desktop",
   octant_create_image: "A generated image",
-  octant_github: "GitHub issues, pull requests and projects",
+  octant_github: "GitHub issues, pull requests, projects and searches",
   octant_offer_side_task: "A side task offer",
   octant_propose_routine: "A proposed routine",
   octant_pull_request: "This thread's pull request",
@@ -54,7 +56,10 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   octant_side_chat_search_files: "A file search for a side chat",
   octant_terminal: "Terminal output",
   octant_threads: "The Project's work board",
+  // Chat search's name before it became `web-search`, kept so a label
+  // journaled under it still reads.
   octant_web_research: "Web research",
+  octant_zen: "Results from the Zen assistant",
   // Tools since folded into `octant_threads`, `octant_offer_side_task`, and
   // `octant_ask_thread`. No turn is offered them any more, but marks recorded
   // under their names stay in the journal and still show in words.
@@ -83,7 +88,8 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "goal-check": "A goal check",
 };
 
-// The Zen assistant's tools share one prefix and one meaning.
+// Earlier versions recorded each of the Zen assistant's seven tools under
+// its own name; one prefix keeps those journaled labels readable.
 const ZEN_PREFIX = "octant_zen_";
 // A synced artifact's label names the computer it came from, in words.
 const SYNCED_PREFIX = "Synced from ";

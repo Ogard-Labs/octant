@@ -55,7 +55,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_create_image: "generate an image; it costs money, so only when asked",
   octant_credential:
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
-  octant_github: "read the repository's issues, pull requests, and projects",
+  octant_github:
+    "read the repository's issues, pull requests, and projects, one issue in full, or search them",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
@@ -69,14 +70,7 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_terminal: "run long-lived processes such as dev servers and read their output",
   octant_threads:
     "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
-  octant_web_research: "search the web when an answer needs current or outside information",
-  octant_zen_create_widget: "add a Notes, Checklist, or Timer widget to this Zen space",
-  octant_zen_list_widgets: "list the widget kinds this Zen space offers",
-  octant_zen_pin_thread: "pin a thread into this Zen space as a card",
-  octant_zen_place_element: "move, resize, focus, minimize, restore, or remove a Zen element",
-  octant_zen_preview_recipe: "propose a custom widget; it exists only once the user confirms it",
-  octant_zen_search_threads: "find threads to pin into this Zen space",
-  octant_zen_update_appearance: "change this Zen space's dimming and element opacity",
+  octant_zen: "read and arrange this Zen space: pin threads, add widgets, move elements",
 };
 
 /**
