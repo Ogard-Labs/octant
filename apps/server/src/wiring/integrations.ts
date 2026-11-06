@@ -23,6 +23,7 @@ import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
   isGithubIntegrationEffective,
   isLinearIntegrationEffective,
+  isFirstPartyIntegrationEffective,
 } from "../github/githubIntegrationEffective";
 import { createGithubRouteHandler } from "../githubRoutes";
 import {
@@ -30,6 +31,9 @@ import {
   createUnavailableSecretVault,
 } from "../integration/integrationCredentialVault";
 import { createFileConnectionStore } from "../integration/integrationConnectionStore";
+import { createAzureIntegration } from "../plugins/azure/azureIntegration";
+import { IntegrationCredentialOperations } from "../integration/integrationCredentialOperations";
+import { createIntegrationHostPort } from "../integration/integrationHostPort";
 import { createLinearIntegrationService } from "../integration/integrationService";
 import { createIntegrationRouteHandler } from "../integrationRoutes";
 import { makeCredentialBrokerClient } from "../providers/credentialBrokerClient";
@@ -373,6 +377,13 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               token: options.credentialBrokerToken,
             }),
           ));
+    const azureOperations = new IntegrationCredentialOperations();
+    const azureRuntime = createAzureIntegration(
+      createIntegrationHostPort({
+        registerCredentialOperation: (operation) => azureOperations.register(operation),
+      }),
+    );
+    yield* Effect.addFinalizer(() => Effect.promise(() => azureRuntime.close()));
     const linearRedirectUri =
       options.linearOAuthRedirectUri ?? "http://127.0.0.1:52693/oauth/linear/callback";
     const integrationService = createLinearIntegrationService({
@@ -455,7 +466,16 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       githubReadToolService,
       githubRoutes,
       integrationRoutes,
-      credentialOperations: () => integrationService.credentialOperations?.() ?? [],
+      credentialOperations: () => [
+        ...(integrationService.credentialOperations?.() ?? []),
+        ...(isFirstPartyIntegrationEffective(
+          githubExtensionSnapshot.read(),
+          "azure-arm-integration",
+          { missingRow: "effective" },
+        )
+          ? azureOperations.list()
+          : []),
+      ],
       linearIssueContextService,
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,

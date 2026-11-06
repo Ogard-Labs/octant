@@ -4089,6 +4089,13 @@ flowchart LR
     thread marks the thread reading it (see the Code fork rule under Modes).
     A Canvas written while its writer was marked keeps that mark after the
     writer is cleared, and marks the next thread that reads it.
+  - Measured deterministic Auto/Shield scenario (2026-11-06): research ingestion,
+    an in-root edit, then the declared local `bun run test` command produces zero
+    outside-content prompts with or without a person clearing after review. A
+    subsequent GET to a configured safe network produces one such prompt without
+    clear and zero after clear. This is a policy/journal fixture measurement,
+    not a live provider turn count; provider-owned review can differ. It gives
+    no basis for weakening taint policy or recommending Full access.
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
@@ -9131,7 +9138,10 @@ address and how it is reached: sign-in through the MCP authorization flow,
 a key the vendor issues sent in one header, or nothing. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
-installed package under the one activation ladder. Connect makes an
+installed package under the one activation ladder. A remote browser's disabled
+Connect action names the local-host requirement in its own row, describes the
+service's sign-in/app-registration/key requirement, and links to the concrete
+host-window setup steps. It never implies that a browser can complete that flow. Connect makes an
 ordinary user-added server for the entry's address and then starts the
 sign-in, or takes the key (kept in the broker like any user-added secret),
 or just connects. The add request carries the entry's id; the host accepts it
@@ -12139,6 +12149,15 @@ access` agree); a thread's own change is journaled as
   `viewer { id }` request to `https://api.linear.app/graphql`. It is available
   in Code when the provider carries app-managed tools, the profile allows the
   tool, the thread is active and outside Plan, and the integration is effective.
+  A bundled Azure integration also registers `azure-subscriptions-check`: one
+  fixed HTTPS GET to `https://management.azure.com/subscriptions?api-version=2022-12-01`,
+  using the person's unexpired short-lived Resource Manager bearer. The card
+  displays the entire approved URL and returns only status; subscription data
+  and token material never reach the agent. The token's actual account and RBAC
+  can be broader than this request; Octant neither guesses nor narrows those
+  claims. The descriptor admits GET without a body or the existing fixed POST
+  with a body; redirects and pagination links are never followed. Azure CLI
+  credentials, token-file leases and ambient Azure stores remain unavailable.
   The host supplies the label, purpose, destination and action text from the
   registered consumer; agents cannot supply a URL, query, credential reference,
   file destination or command. Consumer descriptors use the public
@@ -12938,9 +12957,10 @@ in this document describe the build as it ships.
 Below Full access, secret files stay out of every agent's reach by an OS rule;
 at Full access they are guarded softly (maintainer decision, 2026-10-31:
 "softer guard — full access is full access"). Full access stays "no sandbox,
-no prompts": a shell command there can read a protected file. Built, except
-the Azure command line's general short-lived credential channel. The Google
-Cloud channel is the bounded `gcloud` service-account adapter below.
+no prompts": a shell command there can read a protected file. The Google
+Cloud channel is the bounded `gcloud` service-account adapter below. Azure uses
+only the fixed one-use Resource Manager HTTP read described under credential
+cards; general Azure CLI credentials remain unavailable by design.
 
 - **One list, every runtime.** The list is
   `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
@@ -13014,7 +13034,10 @@ Cloud channel is the bounded `gcloud` service-account adapter below.
   The Google Cloud `gcloud` command line in Octant's own shell receives a
   command-owned access-token file and private configuration from the broker
   after exact account/scopes consent ([linked secret stores](#linked-secret-stores)).
-  Allowed; not built yet: the Azure command line's general credential channel.
+  Azure offers only the fixed broker-owned Resource Manager GET through a
+  private one-use credential card; it exports no token to a CLI or file.
+  General Azure CLI credentials remain unavailable. A confined command must not
+  bypass a protected Azure store through another tool.
   - _Rationale._ AWS first because a session needs nothing on disk: the
     session's three values go in the command's environment, which the AWS
     command line and every AWS SDK read before any file. The Google Cloud
@@ -13022,6 +13045,10 @@ Cloud channel is the bounded `gcloud` service-account adapter below.
     directory to bound each command's resources; it does not assume that
     Google supports only file input. Azure needs its own consumer-specific
     contract rather than an invented generic access-token environment variable.
+    The tested `az rest` interface follows same-origin redirects with the bearer;
+    a fixed initial URL therefore does not bound the final authenticated path.
+    The approved Azure HTTP alternative enforces the fixed URL itself and refuses
+    every redirect instead of giving a command a credential lease.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,
