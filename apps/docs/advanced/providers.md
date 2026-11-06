@@ -558,6 +558,16 @@ session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
 
+Eligible official OpenAI bearer API-key endpoints also offer an independent
+**Allow cloud sessions** switch on their detail page. It is off by default and
+does not start a task. The separately reviewed
+[Code cloud-session workflow](/guide/code#provider-cloud-sessions) sends only
+the task text to the provider's sandbox and has its own cost/execution consent.
+Subscription sign-ins and compatible gateways are unavailable for this first
+protocol. An outside driver may implement the same published closed codec,
+subject to normal activation and observed capability checks. No generic HTTP
+or credential authority follows from enabling it.
+
 Direct API endpoints are added in **Settings → Octant Harness → Model
 endpoints → Add endpoint**. After the one-click sign-ins and the presets, the
 dialog walks through five steps:

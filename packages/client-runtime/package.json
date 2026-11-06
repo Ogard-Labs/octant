@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./provider-cloud-session-client": "./src/providerCloudSessionClient.ts",
     "./git-history-client": "./src/gitHistoryClient.ts",
     ".": "./src/index.ts",
     "./agent-run-client": "./src/agentRunClient.ts",

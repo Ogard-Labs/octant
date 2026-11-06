@@ -188,6 +188,7 @@ try {
       platform: process.platform,
       uid: paths.uid,
     });
+    // Persistence must outlive the server's scoped cancellation and finalizers.
     const program = Effect.scoped(
       Effect.gen(function* () {
         const server = yield* startOctantServer({
@@ -240,8 +241,8 @@ try {
         );
         console.info(`Octant server listening on ${server.url}`);
         return yield* Effect.never;
-      }).pipe(Effect.provide(PersistenceLive)),
-    );
+      }),
+    ).pipe(Effect.provide(PersistenceLive));
     const exit = await Effect.runPromiseExit(program, { signal: abortController.signal });
     if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
       // A defect (a failed listen, an fs error) has no typed failure; squash

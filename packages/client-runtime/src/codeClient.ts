@@ -1,4 +1,8 @@
 import {
+  createProviderCloudSessionClient,
+  type ProviderCloudSessionClient,
+} from "./providerCloudSessionClient";
+import {
   decodeCodeCheckoutId,
   decodeCodeBoardQuery,
   decodeCodeProjectPullRequestQuery,
@@ -165,6 +169,7 @@ export interface CodeFileSave {
 }
 
 export interface CodeClient {
+  readonly providerCloudSessions?: ProviderCloudSessionClient;
   bootstrap(): Promise<CodeBootstrap>;
   navigation(): Promise<CodeNavigation>;
   thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
@@ -414,6 +419,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         ),
     });
   return {
+    providerCloudSessions: createProviderCloudSessionClient(options),
     bootstrap() {
       return request(
         fetch,

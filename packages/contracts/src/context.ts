@@ -514,6 +514,7 @@ export const SHIELD_REVIEW_USAGE_AGGREGATE_TYPE = "shield-review-usage";
  * has no context plan, so it reconciles against nothing.
  */
 export const PERSON_MEMORY_REQUEST_SHAPE = "person-memory";
+export const PROVIDER_CLOUD_TURN_REQUEST_SHAPE = "provider-cloud-turn";
 
 /**
  * The per-thread aggregate a thread's distillation is journaled on. The usage
@@ -560,6 +561,7 @@ export const UsageReconciliation = Schema.Struct({
       if (
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
+        reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;

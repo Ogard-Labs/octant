@@ -35,6 +35,42 @@ system:
 Only a Mac runs outside drivers. Linux and Windows hosts cannot confine one,
 so they never start it.
 
+## Optional provider cloud jobs
+
+The public SDK exposes `CloudSessionDriver` separately from local session
+acquisition. Its first supported protocol is `openai-agents-v1`; another
+protocol is unsupported in this release. Use
+`@octant/provider-sdk/openai-cloud-session-protocol` to encode the same closed
+create/read/cancel operations as the bundled adapter. A third-party driver has
+no broader HTTP plan or private first-party shortcut.
+
+For an outside driver, expose `cloudSessions.protocol = "openai-agents-v1"`
+and `create`, `read`, `cancel` methods through `serveOutsideDriver`, and return
+`claims.cloudSessions: "supported"` from probe. Each method receives its own
+scoped host HTTP port. Create receives the reviewed job ID, model and text;
+read receives the owned remote ID; cancel receives the remote and local job
+IDs. Return the normalized observation or cancellation result defined by
+`@octant/contracts/provider-cloud-sessions`. Do not interpret cancel requested
+as a completed turn.
+
+The host requires the exact official API endpoint and bearer-key profile,
+enabled/trusted activation, observed capability, independent endpoint opt-in,
+current Code authority and exact per-job consent. The scoped port seals the
+method/path/body, reviewed text/model, disabled network and empty tools/files/
+environment. It refuses another job ID, changed input, broader configuration
+or duplicate create. The host adds the credential and records the actual
+created ID before forwarding the bounded response. An ambiguous create must
+not be retried. The ordinary outside-driver HTTP port cannot create/read/cancel
+Agents API jobs without this owned operation.
+
+Run `runCloudSessionConformance` from
+`@octant/provider-sdk/cloud-session-conformance` against your adapter with
+synthetic HTTP. Also exercise the ordinary outside-driver conformance kit.
+These checks establish local protocol behavior, not real account eligibility,
+provider confinement or billing. The
+[Code workflow](/guide/code#provider-cloud-sessions) describes the current
+text-only input, cancellation, cost and retention limits.
+
 ## Start from the example
 
 The Octant repository holds an example driver package at

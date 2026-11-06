@@ -68,6 +68,7 @@ import {
   type ModelEndpointInstance,
 } from "./endpointStatus";
 import { EndpointMark, EndpointState } from "./ModelEndpointRow";
+import { ProviderCloudOptIn } from "./ProviderCloudOptIn";
 
 /** Where the detail page puts focus when a row's fix opened it. */
 export type EndpointDetailFocus = "key" | "address" | "model-ids" | "verify-tools";
@@ -75,6 +76,7 @@ export type EndpointDetailFocus = "key" | "address" | "model-ids" | "verify-tool
 export type ModelEndpointDetailProps = Pick<
   ProviderSettingsViewProps,
   | "credentialManagementAvailable"
+  | "providerCloudSessionClient"
   | "onRename"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
@@ -297,6 +299,9 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
       <ModelsSection {...props} disabled={disabled} />
       <VoiceSection {...props} disabled={disabled} />
       <DataSection {...props} disabled={disabled} />
+      {props.providerCloudSessionClient === undefined ? null : (
+        <ProviderCloudOptIn client={props.providerCloudSessionClient} instanceId={instance.id} />
+      )}
       <NameAndAddressSection {...props} credential={credential} disabled={disabled} />
       <DiagnosticsSection {...props} failing={failing} />
       <RemoveSection {...props} disabled={disabled} />

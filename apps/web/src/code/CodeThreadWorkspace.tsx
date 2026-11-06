@@ -1,3 +1,4 @@
+import { ProviderCloudSessions } from "./ProviderCloudSessions";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
@@ -2102,6 +2103,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
+        {!displayReady ||
+        props.pairedDevice === true ||
+        codeClient?.providerCloudSessions === undefined ? null : (
+          <div className="thread-column">
+            <ProviderCloudSessions client={codeClient.providerCloudSessions} threadId={thread.id} />
+          </div>
+        )}
 
         {!displayReady ||
         props.imageGenerationClient === undefined ||

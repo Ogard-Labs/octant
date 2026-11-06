@@ -36,6 +36,45 @@ The server validates that the folder exists and the renderer receives an opaque 
 
 A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
 
+## Provider cloud sessions
+
+You can send a separate text task to a provider's remote sandbox without moving
+your local thread or checkout. This is optional and may incur model and sandbox
+charges. It does not run your local tools or receive local command approvals.
+
+1. In **Settings → Octant Harness → Model endpoints**, open an eligible official
+   OpenAI API-key endpoint and turn on **Allow cloud sessions**. This setting is
+   separate for each endpoint and starts nothing by itself. A Codex subscription
+   sign-in or compatible gateway does not provide this API capability.
+2. Open an existing local Code thread and expand **Provider cloud sessions**.
+   Choose the endpoint and a configured model, then enter the text to send.
+3. Choose **Review cloud task**. Only that text is attached: no files, history,
+   host tools or credentials. Check anything you paste for private information.
+4. Read the remote execution and cost disclosure, approve the exact text, then
+   choose **Run in provider cloud**. Plan refuses submission; you can still
+   inspect or request cancellation of an existing job. A task with a
+   thread or Project spend ceiling also refuses, because this API cannot enforce
+   the required hard cloud charge limit.
+
+The remote environment requests disabled network and has no host callbacks.
+The panel shows last-observed status, time and untrusted text output, with
+truncation marked. It never applies returned code to your checkout. **Refresh
+saved sessions** reads the local receipts; **Check remote status** asks the
+provider about that session. A normal window close after accepted handoff does
+not stop the remote job. A ten-minute host watchdog, turning opt-in off, or host
+shutdown requests cancellation, but **Request cancellation** is not proof the
+provider stopped execution or billing.
+
+If create cannot be confirmed, the panel keeps **Submission uncertain** and
+does not retry automatically. To submit a distinct task, review it again and
+acknowledge the exact earlier unknown work; it may still be running and billing.
+The earlier receipt and unknown usage stay intact. This acknowledgement is not
+a cancellation. Jobs with a known provider session can be checked after restart.
+Purging the local thread removes its local cloud input, output and identity; it
+does not delete provider-held data. Provider API access, model eligibility and
+actual charges depend on your own account and have not been established by a
+local fixture or an enabled toggle.
+
 ## Actions
 
 A Code Project can keep named commands such as Run, Test, or Dev. Open the

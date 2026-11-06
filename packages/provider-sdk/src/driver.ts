@@ -22,6 +22,7 @@ import type {
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
+import type { CloudSessionDriver } from "./cloudSessions";
 
 export type {
   ProviderAttachmentInput,
@@ -201,6 +202,7 @@ export interface ProviderUserInputAnswer {
 }
 
 export interface ProviderDriver {
+  readonly cloudSessions?: CloudSessionDriver;
   /**
    * Provider-owned conversations must resume; host-owned APIs receive planned
    * history. `host-resumable` is host-owned, but the runtime keeps each

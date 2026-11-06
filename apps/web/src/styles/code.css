@@ -1,3 +1,43 @@
+.provider-cloud-sessions {
+  min-width: 0;
+  margin-block: var(--oct-space-3);
+  padding-block: var(--oct-space-3);
+  border-top: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
+}
+
+.provider-cloud-sessions summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.provider-cloud-sessions > p,
+.provider-cloud-sessions > label,
+.provider-cloud-sessions > button {
+  margin-block: var(--oct-space-2);
+}
+
+.provider-cloud-sessions label {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.provider-cloud-sessions pre {
+  max-height: 18rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+}
+
+.provider-cloud-sessions article {
+  margin-top: var(--oct-space-3);
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border);
+}
+
 .code-file-explorer,
 .code-editor-pane,
 .code-diff-pane,

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./provider-cloud-sessions": "./src/providerCloudSessions.ts",
     "./git-history": "./src/gitHistory.ts",
     ".": "./src/index.ts",
     "./agent-profile": "./src/agentProfile.ts",

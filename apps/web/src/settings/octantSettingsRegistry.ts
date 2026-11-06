@@ -745,6 +745,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "model endpoints add endpoint api openai-compatible anthropic-compatible ollama azure ai foundry amazon bedrock base url address api key replace key sign in with chatgpt plan openrouter subscription sign out check now try again can't connect not working key refused no models diagnostics remove endpoint where your data goes eu zero data retention models shown hidden reads images chat only verify tools",
         },
         {
+          id: settingId("provider-cloud-sessions"),
+          label: "Allow provider cloud sessions",
+          scope: "host",
+          keywords:
+            "provider cloud sessions remote sandbox execution opt in endpoint consent model charges",
+        },
+        {
           id: settingId("model-roles"),
           label: "Model roles",
           scope: "host",

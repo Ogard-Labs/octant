@@ -262,6 +262,7 @@ describe("octantSettingsRegistry", () => {
     const harness = octantSettingsRegistry.sections.find((s) => s.id === "harness");
     expect(harness?.settings.map((setting) => setting.id)).toEqual([
       "model-endpoints",
+      "provider-cloud-sessions",
       "model-roles",
       "subagent-creation-posture",
       "subagent-concurrency-on-host",

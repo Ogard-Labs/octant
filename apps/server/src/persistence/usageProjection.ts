@@ -5,6 +5,7 @@ import {
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_REQUEST_SHAPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
+  PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
   decodeCodeOperationEventFrame,
   decodeContextUsageReconciled,
   decodeUsageRecord,
@@ -56,6 +57,7 @@ export class UsageProjection implements Projection {
     if (
       event.aggregateType !== "context-ledger" &&
       event.aggregateType !== "image-job" &&
+      event.aggregateType !== PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== AGENT_RUN_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE
@@ -85,13 +87,15 @@ export class UsageProjection implements Projection {
     // person-memory distillation is the distilled thread's.
     const subject = manifest?.subject ?? {
       aggregateType:
-        event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
-          ? "agent-run"
-          : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
-            ? shieldReviewedThreadType(connection, event.aggregateId)
-            : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE
-              ? distilledThreadType(connection, event.aggregateId)
-              : event.aggregateType,
+        event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE
+          ? "code-thread"
+          : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
+            ? "agent-run"
+            : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
+              ? shieldReviewedThreadType(connection, event.aggregateId)
+              : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE
+                ? distilledThreadType(connection, event.aggregateId)
+                : event.aggregateType,
       aggregateId: event.aggregateId,
     };
     // A reconciled request whose subject thread (or child run) was purged keeps

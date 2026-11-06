@@ -2,6 +2,7 @@ import {
   AGENT_RUN_USAGE_AGGREGATE_TYPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
+  PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
   CONTEXT_COMPACTION_EVENT_NAMES,
   CONTEXT_COMPACTION_REQUEST_SHAPE,
   decodeContextCompactionCompleted,
@@ -86,6 +87,7 @@ export class ContextProjection implements Projection {
     if (
       event.eventName === "context.usage-reconciled@1" &&
       (event.aggregateType === "image-job" ||
+        event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE)

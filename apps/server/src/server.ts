@@ -97,6 +97,7 @@ import { wireContinuation } from "./wiring/continuation";
 import { wireZen } from "./wiring/zen";
 import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
+import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
 import { integrationEventSources } from "./integration/integrationEventSources";
@@ -1444,8 +1445,22 @@ export function startOctantServer(
           : manifest;
       },
     });
+    const cloudSessions = wireProviderCloudSessions({
+      persistence,
+      credentialResolver,
+      codeProjectAccess,
+      codeSessionAuthority,
+      windowAuthorityStore,
+      spendCeilingService,
+      configuredDriverOptions,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
+    yield* Effect.addFinalizer(() => Effect.promise(() => cloudSessions.service.close()));
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
       conversationInputRoutes,
+      providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
@@ -1791,7 +1806,7 @@ export function startOctantServer(
             category: "server-unavailable",
             message: "Octant could not bind the local server.",
           }),
-      }),
+      }).pipe(Effect.onError(() => Effect.promise(() => cloudSessions.service.close()))),
       (server) =>
         Effect.promise(async () => {
           let shutdownFailure: unknown;
@@ -1870,6 +1885,13 @@ export function startOctantServer(
             httpStop = server.stop(true);
           } catch (error) {
             shutdownFailure = error;
+          }
+          try {
+            // Stop admission first, then request owned cloud cancellation while
+            // both the journal and provider transport are still available.
+            await cloudSessions.service.close();
+          } catch (error) {
+            shutdownFailure ??= error;
           }
           try {
             unsubscribeMachineChanges();

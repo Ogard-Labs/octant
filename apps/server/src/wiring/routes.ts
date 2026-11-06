@@ -31,6 +31,7 @@ import type { WorkRequestsWiring } from "./workRequests";
 export type RoutesDependencies = {
   readonly conversationInputRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
+  readonly providerCloudSessionRoutes: (request: Request) => Promise<Response | undefined>;
 } & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
   Pick<
@@ -149,6 +150,7 @@ export function wireRoutes(deps: RoutesDependencies) {
   const {
     conversationInputRoutes,
     credentialRequestRoutes,
+    providerCloudSessionRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
     agentRunRouteDependencies,
@@ -312,6 +314,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await previewRoutes(request)) ??
     (await canvasRoutes(request)) ??
     (await imageRoutes(request)) ??
+    (await providerCloudSessionRoutes(request)) ??
     (await speechRoutes(request)) ??
     (await replyDetailRoutes(request)) ??
     (await artifactLibraryRoutes(request)) ??

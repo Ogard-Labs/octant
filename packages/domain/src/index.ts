@@ -227,6 +227,7 @@ export * from "./hubPushPolicy";
 export * from "./hubWakePolicy";
 export * from "./hubGuestPolicy";
 
+export * from "./providerCloudPolicy";
 export * from "./paperLocalSetup";
 export * from "./unifiedDiff";
 export * from "./browserCredentialUsePolicy";

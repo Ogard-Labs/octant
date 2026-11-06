@@ -16,3 +16,8 @@ export * from "./cloudIamConformance";
 export * from "./childObservations";
 export * from "./imageGeneration";
 export * from "./imageGenerationConformance";
+
+export * from "./cloudSessions";
+
+export * from "./cloudSessionConformance";
+export * from "./openAiCloudSessionProtocol";

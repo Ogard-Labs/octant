@@ -47,6 +47,9 @@ export const OUTSIDE_DRIVER_METHODS = {
   sessionCancel: "session/cancel",
   sessionRelease: "session/release",
   sessionEvent: "session/event",
+  cloudCreate: "cloud/create",
+  cloudRead: "cloud/read",
+  cloudCancel: "cloud/cancel",
   httpRequest: "http/request",
   httpChunk: "http/chunk",
   httpEnd: "http/end",
@@ -166,6 +169,7 @@ export type OutsideDriverHttpResponse = typeof OutsideDriverHttpResponse.Type;
 
 export const OutsideDriverInitializeResult = Schema.Struct({
   protocolVersion: OutsideProviderDriverProtocolVersion,
+  cloudSessions: Schema.optional(Schema.Literal("openai-agents-v1")),
 }).annotations(strict);
 export type OutsideDriverInitializeResult = typeof OutsideDriverInitializeResult.Type;
 

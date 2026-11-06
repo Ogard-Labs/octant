@@ -199,6 +199,7 @@ export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";
 
+export * from "./providerCloudSessions";
 export * from "./sideChatReturn";
 export * from "./gitHunks";
 export * from "./browserCredentialUse";
