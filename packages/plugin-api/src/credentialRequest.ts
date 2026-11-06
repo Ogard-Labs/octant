@@ -11,9 +11,11 @@ export interface CredentialOperation {
   readonly actionLabel: string;
   readonly request: {
     readonly url: string;
-    readonly body: string;
     readonly authorization: "bearer" | "raw";
-  };
+  } & (
+    | { readonly method: "GET"; readonly body?: never }
+    | { readonly method?: "POST"; readonly body: string }
+  );
   /** Only a non-sensitive status is returned to the agent in this first slice. */
   readonly accepted: (body: unknown) => boolean;
 }

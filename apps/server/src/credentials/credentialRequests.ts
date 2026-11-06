@@ -80,7 +80,7 @@ export class CredentialRequests {
           label: input.operation.label,
           reason: input.operation.reason,
           consumer: input.operation.consumer,
-          destination: url.origin,
+          destination: input.operation.request.method === "GET" ? url.href : url.origin,
           actionLabel: input.operation.actionLabel,
           state: "pending",
         },
@@ -131,7 +131,7 @@ export class CredentialRequests {
       const spec = entry.operation.request;
       const response = await this.#fetch(
         new Request(spec.url, {
-          method: "POST",
+          method: spec.method ?? "POST",
           redirect: "error",
           credentials: "omit",
           cache: "no-store",
@@ -140,7 +140,7 @@ export class CredentialRequests {
             authorization:
               spec.authorization === "bearer" ? `Bearer ${answer.secret}` : answer.secret,
           },
-          body: spec.body,
+          ...(spec.method === "GET" ? {} : { body: spec.body }),
           signal: entry.controller.signal,
         }),
       );

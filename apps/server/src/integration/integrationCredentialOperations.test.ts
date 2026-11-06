@@ -53,6 +53,15 @@ describe("integration credential contributions", () => {
     await runtime.close();
     expect(operations.list()).toEqual([]);
   });
+  it("refuses unsupported methods and GET bodies from a runtime plugin", () => {
+    const operations = new IntegrationCredentialOperations();
+    for (const method of ["DELETE", "PATCH", "GET"]) {
+      const candidate = { ...operation, request: { ...operation.request } };
+      Reflect.set(candidate.request, "method", method);
+      expect(operations.register(candidate)).toEqual({ kind: "refused" });
+    }
+    expect(operations.list()).toEqual([]);
+  });
   it("refuses an unsafe destination and snapshots a registered request", () => {
     const operations = new IntegrationCredentialOperations();
     expect(

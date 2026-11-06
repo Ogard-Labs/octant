@@ -18,7 +18,11 @@ export class IntegrationCredentialOperations {
         url.password ||
         url.hash ||
         operation.request.url.length > 2048 ||
-        operation.request.body.length > 16_384 ||
+        (operation.request.method === "GET"
+          ? operation.request.body !== undefined
+          : (operation.request.method !== undefined && operation.request.method !== "POST") ||
+            typeof operation.request.body !== "string" ||
+            operation.request.body.length > 16_384) ||
         !["bearer", "raw"].includes(operation.request.authorization) ||
         [operation.label, operation.reason, operation.consumer, operation.actionLabel].some(
           (value) => typeof value !== "string" || value.length === 0 || value.length > 512,

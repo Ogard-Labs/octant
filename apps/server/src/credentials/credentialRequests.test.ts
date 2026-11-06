@@ -103,3 +103,48 @@ describe("private credential requests", () => {
     expect(h.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("fixed credential reads", () => {
+  it("sends one GET to the registered complete URL without a body or redirect following", async () => {
+    const fetch = vi.fn(async (_request: Request) => new Response('{"value":[]}'));
+    const service = new CredentialRequests({ fetch });
+    const pending = service.request({
+      windowId: "window",
+      threadId: "thread",
+      operation: {
+        ...operation,
+        request: {
+          url: "https://management.azure.com/subscriptions?api-version=2022-12-01",
+          method: "GET",
+          authorization: "bearer",
+        },
+        accepted: () => true,
+      },
+      current: () => true,
+      signal: new AbortController().signal,
+    });
+    try {
+      const card = service.view("window", "thread").requests[0];
+      if (card === undefined) throw new Error("No private credential card");
+      expect(card.destination).toBe(
+        "https://management.azure.com/subscriptions?api-version=2022-12-01",
+      );
+      await service.answer("window", {
+        id: card.id,
+        action: "allow",
+        secret: "short-lived-fixture-token",
+      });
+      expect(await pending).toEqual({ status: "used" });
+      const request = fetch.mock.calls[0]?.[0];
+      expect(request?.method).toBe("GET");
+      expect(request?.redirect).toBe("error");
+      expect(request?.headers.get("authorization")).toBe("Bearer short-lived-fixture-token");
+      expect(request?.body).toBeNull();
+      expect(JSON.stringify(service.view("window", "thread"))).not.toContain(
+        "short-lived-fixture-token",
+      );
+    } finally {
+      service.close();
+    }
+  });
+});
