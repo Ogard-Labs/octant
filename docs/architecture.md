@@ -4269,7 +4269,9 @@ or .zip>` write the same files, built by one host command
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
-  timers. An image job queued or finished journals on its own `image-jobs`
+  timers. Chat navigation selects active threads before reading their activity
+  through thread indexes, so archived history is not scanned during sidebar
+  refreshes. Hidden-thread filtering still precedes the service's result limit. An image job queued or finished journals on its own `image-jobs`
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
   approvals, follow-up offers and message queues use their own metadata-only
