@@ -71,7 +71,11 @@ import {
 } from "@octant/domain/replica-entry-policy";
 import { replicaInGoodStanding } from "@octant/domain/replica-membership-policy";
 import { artifactKindForBlocks } from "@octant/domain";
-import type { ArtifactLibrarySyncedEntry } from "@octant/contracts/artifact-library";
+import {
+  MAX_ARTIFACT_BACKFILL_VERSIONS,
+  type ArtifactPublicationPreview,
+  type ArtifactLibrarySyncedEntry,
+} from "@octant/contracts/artifact-library";
 import {
   REPLICA_ARTIFACT_EVENT_NAMES,
   type ReplicaArtifactQueued,
@@ -365,6 +369,10 @@ export interface ReplicaArtifactSyncPorts {
   readonly projectName: (projectId: string) => string | undefined;
   /** Whether the thread that owns this version is read-only. */
   readonly planMode: (version: CanvasVersion) => boolean;
+  /** Display-only store location; reads no store and exposes no credential reference. */
+  readonly destination?: () => string;
+  /** Current local thread and Project authority for deliberate publication. */
+  readonly publicationAllowed?: (version: CanvasVersion) => boolean;
   /**
    * Told after every pull this service makes, so an artifact open in a
    * thread here takes a later version another computer wrote on top of it.
@@ -386,6 +394,358 @@ export class ReplicaArtifactSyncService {
 
   constructor(ports: ReplicaArtifactSyncPorts) {
     this.#ports = ports;
+  }
+
+  publicationPreview(canvasId: CanvasId): ArtifactPublicationPreview | undefined {
+    const canvas = this.#ports.canvas(canvasId);
+    const state = this.#ports.artifactState();
+    const artifact = state.artifact(canvasId);
+    if (canvas === undefined && artifact === undefined) return undefined;
+    const local = this.#ports.membershipState().local;
+    const deletionPending = state.outbox.some(
+      (entry) => same(entry.artifact.canvasId, canvasId) && entry.kind === "artifact-tombstone",
+    );
+    const available =
+      !deletionPending &&
+      this.#queues() &&
+      (canvas === undefined || this.#publicationAllowed(canvas.currentVersion));
+    const versions = [...(canvas?.versions ?? [])]
+      .sort((a, b) => a.sequence - b.sequence)
+      .slice(-200)
+      .map((version): ArtifactPublicationPreview["versions"][number] => {
+        const project = version.definition.provenance.projectId;
+        const safe = replicaArtifactTextLeavesSafely(version.definition);
+        const bytes =
+          project === null
+            ? 0
+            : Buffer.byteLength(
+                encodeArtifactBundle(
+                  bundleFor(version, String(local?.instanceId ?? "local") as HostId),
+                ),
+                "utf8",
+              );
+        const reason = !this.#publicationAllowed(version)
+          ? "This artifact belongs to a read-only task."
+          : project === null
+            ? "Only artifacts filed under a Project can sync."
+            : !safe
+              ? "The share filter excludes this content."
+              : bytes > MAX_ARTIFACT_BUNDLE_BYTES
+                ? "This version exceeds the artifact sync size limit."
+                : undefined;
+        const status = artifact?.versions.some((held) => same(held.versionId, version.versionId))
+          ? "published"
+          : state.outbox.some(
+                (held) =>
+                  held.kind === "artifact-version" &&
+                  same(held.bundle.octant.versionId, version.versionId),
+              )
+            ? "queued"
+            : reason === undefined
+              ? "eligible"
+              : "excluded";
+        return {
+          versionId: version.versionId,
+          sequence: version.sequence,
+          byteLength: bytes,
+          status,
+          ...(reason === undefined ? {} : { reason }),
+        };
+      });
+    const known = replicaArtifactsWithQueued(state, local).find((held) =>
+      same(held.canvasId, canvasId),
+    );
+    const heads = known === undefined ? [] : replicaArtifactHeads(known);
+    const destination = this.#ports.destination?.() ?? "The configured replica store";
+    const previewToken = sha256Hex(
+      JSON.stringify([
+        String(local?.instanceId ?? ""),
+        destination,
+        String(canvas?.currentVersion.versionId ?? ""),
+        versions.map((v) => [String(v.versionId), v.sequence]),
+        deletionPending,
+        heads
+          .map((head) =>
+            head.kind === "version"
+              ? ["version", String(head.versionId)]
+              : ["tombstone", String(head.originInstanceId), head.originSequence],
+          )
+          .sort(),
+      ]),
+    );
+    const backfill = state.backfills.findLast(
+      (held) => same(held.canvasId, canvasId) && same(held.instanceId, local?.instanceId),
+    );
+    const done =
+      backfill?.versionIds.filter((id) =>
+        artifact?.versions.some((held) => same(held.versionId, id)),
+      ).length ?? 0;
+    const failure = state.outbox.find(
+      (held) => held.backfillId === backfill?.backfillId && held.lastFailure !== undefined,
+    )?.lastFailure;
+    const pendingMembership =
+      local !== undefined &&
+      !replicaInGoodStanding(this.#ports.membershipState().membership, local.instanceId);
+    return {
+      destination,
+      deletionPending,
+      instanceId: local === undefined ? null : String(local.instanceId),
+      previewToken,
+      available,
+      versions,
+      truncated: (canvas?.versions.length ?? 0) > 200,
+      deletionAvailable:
+        available &&
+        (artifact?.versions.length ?? 0) > 0 &&
+        heads.some((head) => head.kind === "version"),
+      deletionConflict:
+        heads.some((head) => head.kind === "version") &&
+        heads.some((head) => head.kind === "tombstone"),
+      ...(backfill === undefined
+        ? {}
+        : {
+            backfill: {
+              id: backfill.backfillId,
+              state: done === backfill.versionIds.length ? "finished" : backfill.state,
+              done,
+              total: backfill.versionIds.length,
+              ...(deletionPending || heads.some((head) => head.kind === "tombstone")
+                ? {
+                    message:
+                      "Publication stopped for a synchronized deletion. Restore the artifact before resuming older publication.",
+                  }
+                : !available
+                  ? { message: "Publishing waits for sync and the task's current write authority." }
+                  : pendingMembership
+                    ? {
+                        message:
+                          "Queued here; this computer is waiting for replica membership approval.",
+                      }
+                    : failure === undefined
+                      ? {}
+                      : {
+                          message: `Queued here; the last store attempt was ${failure}. Resume or check the connection to retry.`,
+                        }),
+            },
+          }),
+    };
+  }
+
+  startBackfill(input: {
+    readonly canvasId: CanvasId;
+    readonly backfillId: string;
+    readonly previewToken: string;
+    readonly versionIds: ReadonlyArray<CanvasVersionId>;
+  }):
+    | { readonly status: "accepted" }
+    | {
+        readonly status: "refused";
+        readonly reason: "sync-off" | "stale-preview";
+        readonly message: string;
+      } {
+    const preview = this.publicationPreview(input.canvasId);
+    if (preview === undefined || !preview.available || preview.instanceId === null)
+      return {
+        status: "refused",
+        reason: "sync-off",
+        message: "Turn sync on and check this task's write authority before publishing.",
+      };
+    const existing = this.#ports
+      .artifactState()
+      .backfills.find((held) => held.backfillId === input.backfillId);
+    if (existing !== undefined)
+      return same(existing.canvasId, input.canvasId) &&
+        JSON.stringify(existing.versionIds.map(String)) ===
+          JSON.stringify(input.versionIds.map(String))
+        ? { status: "accepted" }
+        : {
+            status: "refused",
+            reason: "stale-preview",
+            message: "That publication request already names another selection.",
+          };
+    const selected = [...new Set(input.versionIds.map(String))];
+    const previous = preview.backfill;
+    if (
+      preview.previewToken !== input.previewToken ||
+      selected.length === 0 ||
+      selected.length > MAX_ARTIFACT_BACKFILL_VERSIONS ||
+      (previous !== undefined && previous.state !== "finished") ||
+      selected.some(
+        (id) =>
+          !preview.versions.some(
+            (version) => same(version.versionId, id) && version.status === "eligible",
+          ),
+      )
+    )
+      return {
+        status: "refused",
+        reason: "stale-preview",
+        message:
+          "The artifact, selected versions or replica changed. Review the current preview before publishing.",
+      };
+    const versionIds = preview.versions
+      .filter((version) => selected.includes(String(version.versionId)))
+      .map((version) => version.versionId);
+    this.#ports.journal.append({
+      eventName: REPLICA_ARTIFACT_EVENT_NAMES.backfillStarted,
+      payload: {
+        backfillId: input.backfillId,
+        canvasId: input.canvasId,
+        instanceId: preview.instanceId,
+        versionIds,
+      },
+    });
+    this.#queueBackfills();
+    void this.drain().catch(() => undefined);
+    return { status: "accepted" };
+  }
+
+  controlBackfill(canvasId: CanvasId, backfillId: string, running: boolean): boolean {
+    const local = this.#ports.membershipState().local;
+    const backfill = this.#ports
+      .artifactState()
+      .backfills.find(
+        (held) =>
+          held.backfillId === backfillId &&
+          same(held.canvasId, canvasId) &&
+          same(held.instanceId, local?.instanceId),
+      );
+    if (backfill === undefined) return false;
+    if (running) {
+      if (
+        this.#ports
+          .artifactState()
+          .outbox.some(
+            (entry) =>
+              same(entry.artifact.canvasId, canvasId) && entry.kind === "artifact-tombstone",
+          )
+      )
+        return false;
+      const known = replicaArtifactsWithQueued(this.#ports.artifactState(), local).find((held) =>
+        same(held.canvasId, canvasId),
+      );
+      if (
+        known !== undefined &&
+        replicaArtifactHeads(known).some((head) => head.kind === "tombstone")
+      )
+        return false;
+    }
+    this.#ports.journal.append({
+      eventName: running
+        ? REPLICA_ARTIFACT_EVENT_NAMES.backfillResumed
+        : REPLICA_ARTIFACT_EVENT_NAMES.backfillStopped,
+      payload: { backfillId },
+    });
+    if (running) void this.drain().catch(() => undefined);
+    return true;
+  }
+
+  deleteSynced(
+    canvasId: CanvasId,
+    previewToken: string,
+  ):
+    | { readonly status: "accepted" }
+    | {
+        readonly status: "refused";
+        readonly reason: "stale-preview" | "sync-off";
+        readonly message: string;
+      } {
+    const preview = this.publicationPreview(canvasId);
+    if (preview === undefined || !preview.deletionAvailable)
+      return {
+        status: "refused",
+        reason: "sync-off",
+        message:
+          "Synchronized deletion needs sync on, a published artifact and current write authority.",
+      };
+    if (preview.previewToken !== previewToken)
+      return {
+        status: "refused",
+        reason: "stale-preview",
+        message: "This artifact's known versions changed. Review deletion again.",
+      };
+    const artifact = replicaArtifactsWithQueued(
+      this.#ports.artifactState(),
+      this.#ports.membershipState().local,
+    ).find((held) => same(held.canvasId, canvasId));
+    if (artifact === undefined)
+      return {
+        status: "refused",
+        reason: "stale-preview",
+        message: "This artifact is no longer available.",
+      };
+    const parents = replicaArtifactHeads(artifact).flatMap((head) =>
+      head.kind === "version" ? [String(head.versionId)] : [],
+    );
+    const bundle = this.#ports.artifactState().artifact(canvasId)?.versions.at(-1)?.bundle;
+    if (bundle === undefined)
+      return {
+        status: "refused",
+        reason: "stale-preview",
+        message: "This artifact is no longer available.",
+      };
+    for (const batch of this.#ports.artifactState().backfills) {
+      if (same(batch.canvasId, canvasId) && batch.state === "running")
+        this.controlBackfill(canvasId, batch.backfillId, false);
+    }
+    const result = this.#queue({ kind: "artifact-tombstone", canvasId, version: bundle, parents });
+    if (result.status === "refused")
+      return {
+        status: "refused",
+        reason: "sync-off",
+        message: "The artifact cannot be queued for synchronized deletion.",
+      };
+    void this.drain().catch(() => undefined);
+    return { status: "accepted" };
+  }
+
+  #publicationAllowed(version: CanvasVersion): boolean {
+    return !this.#ports.planMode(version) && (this.#ports.publicationAllowed?.(version) ?? true);
+  }
+
+  #queueBackfills(): void {
+    if (!this.#queues()) return;
+    for (const backfill of this.#ports.artifactState().backfills) {
+      if (
+        backfill.state !== "running" ||
+        !same(backfill.instanceId, this.#ports.membershipState().local?.instanceId)
+      )
+        continue;
+      for (let index = 0; index < backfill.versionIds.length; index += 1) {
+        const id = backfill.versionIds[index];
+        const state = this.#ports.artifactState();
+        if (
+          state.artifact(backfill.canvasId)?.versions.some((held) => same(held.versionId, id)) ||
+          state.outbox.some(
+            (held) => held.kind === "artifact-version" && same(held.bundle.octant.versionId, id),
+          )
+        )
+          continue;
+        const version = this.#ports
+          .canvas(backfill.canvasId)
+          ?.versions.find((held) => same(held.versionId, id));
+        if (
+          version === undefined ||
+          !this.#publicationAllowed(version) ||
+          version.definition.provenance.projectId === null
+        ) {
+          this.controlBackfill(backfill.canvasId, backfill.backfillId, false);
+          break;
+        }
+        const previous = backfill.versionIds[index - 1];
+        const queued = this.#queue({
+          kind: "artifact-version",
+          canvasId: backfill.canvasId,
+          version,
+          parents: previous === undefined ? [] : [String(previous)],
+          backfillId: backfill.backfillId,
+        });
+        if (queued.status === "refused") {
+          this.controlBackfill(backfill.canvasId, backfill.backfillId, false);
+          break;
+        }
+      }
+    }
   }
 
   /**
@@ -798,10 +1158,26 @@ export class ReplicaArtifactSyncService {
   }
 
   async #drainOnce(): Promise<void> {
+    this.#queueBackfills();
     const pending = this.#ports.artifactState().queue.length;
     for (let index = 0; index < pending; index += 1) {
-      const next = this.#ports.artifactState().queue[0];
+      const state = this.#ports.artifactState();
+      const next = state.queue.find(
+        (entry) =>
+          entry.kind === "canvas-comment" ||
+          entry.backfillId === undefined ||
+          state.backfills.some(
+            (batch) => batch.backfillId === entry.backfillId && batch.state === "running",
+          ),
+      );
       if (next === undefined) return;
+      if (next.kind !== "canvas-comment" && next.backfillId !== undefined) {
+        const current = this.#ports.canvas(next.artifact.canvasId)?.currentVersion;
+        if (current === undefined || !this.#publicationAllowed(current)) {
+          this.controlBackfill(next.artifact.canvasId, next.backfillId, false);
+          continue;
+        }
+      }
       if (!this.#publishes()) return;
       const outcome = await this.#ports.membership.publishArtifact({
         queueId: next.queueId,
@@ -838,6 +1214,7 @@ export class ReplicaArtifactSyncService {
   }
 
   #queue(input: {
+    readonly backfillId?: string;
     readonly kind: ReplicaArtifactQueued["kind"];
     readonly canvasId: CanvasId;
     readonly version: CanvasVersion | ArtifactBundle;
@@ -865,8 +1242,12 @@ export class ReplicaArtifactSyncService {
     }
     const queueId = this.#ports.uuid();
     this.#ports.journal.append({
-      eventName: REPLICA_ARTIFACT_EVENT_NAMES.queued,
+      eventName:
+        input.backfillId === undefined
+          ? REPLICA_ARTIFACT_EVENT_NAMES.queued
+          : REPLICA_ARTIFACT_EVENT_NAMES.backfillQueued,
       payload: {
+        ...(input.backfillId === undefined ? {} : { backfillId: input.backfillId }),
         queueId,
         kind: input.kind,
         artifact: {

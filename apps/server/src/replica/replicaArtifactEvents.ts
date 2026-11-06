@@ -43,6 +43,10 @@ export const REPLICA_ARTIFACT_EVENT_NAMES = {
   restoreStopped: "replica.restore-stopped@2",
   restoreResumed: "replica.restore-resumed@2",
   restoreFinished: "replica.restore-finished@2",
+  backfillStarted: "replica.backfill-started@1",
+  backfillStopped: "replica.backfill-stopped@1",
+  backfillResumed: "replica.backfill-resumed@1",
+  backfillQueued: "replica.backfill-version-queued@1",
 } as const;
 
 export const ReplicaArtifactKind = Schema.Literal("artifact-version", "artifact-tombstone");
@@ -62,6 +66,19 @@ export const ReplicaArtifactQueued = Schema.Struct({
   bundle: ArtifactBundle,
 }).annotations(strict);
 export type ReplicaArtifactQueued = typeof ReplicaArtifactQueued.Type;
+
+export const ReplicaBackfillStarted = Schema.Struct({
+  backfillId: Schema.UUID,
+  instanceId: ReplicaInstanceId,
+  canvasId: CanvasId,
+  versionIds: Schema.Array(CanvasVersionId).pipe(Schema.minItems(1), Schema.maxItems(24)),
+}).annotations(strict);
+export type ReplicaBackfillStarted = typeof ReplicaBackfillStarted.Type;
+export const ReplicaBackfillMarked = Schema.Struct({ backfillId: Schema.UUID }).annotations(strict);
+export const ReplicaBackfillQueued = Schema.Struct({
+  ...ReplicaArtifactQueued.fields,
+  backfillId: Schema.UUID,
+}).annotations(strict);
 
 /**
  * A change to a Canvas's comments this host will publish, in the same queue
@@ -197,6 +214,10 @@ export const REPLICA_FINAL_ARTIFACT_REFUSALS: ReadonlySet<ReplicaReadRefusalReas
 export function registerReplicaArtifactEvents(registry: EventRegistry): EventRegistry {
   const names = REPLICA_ARTIFACT_EVENT_NAMES;
   return registry
+    .register(names.backfillStarted, 1, ReplicaBackfillStarted)
+    .register(names.backfillStopped, 1, ReplicaBackfillMarked)
+    .register(names.backfillResumed, 1, ReplicaBackfillMarked)
+    .register(names.backfillQueued, 1, ReplicaBackfillQueued)
     .register(names.queued, 1, ReplicaArtifactQueued)
     .register(names.publishRefused, 1, ReplicaArtifactPublishRefused)
     .register(names.published, 1, ReplicaArtifactPublished)
@@ -212,6 +233,9 @@ export function registerReplicaArtifactEvents(registry: EventRegistry): EventReg
 }
 
 export const decodeReplicaArtifactQueued = Schema.decodeUnknownSync(ReplicaArtifactQueued);
+export const decodeReplicaBackfillStarted = Schema.decodeUnknownSync(ReplicaBackfillStarted);
+export const decodeReplicaBackfillMarked = Schema.decodeUnknownSync(ReplicaBackfillMarked);
+export const decodeReplicaBackfillQueued = Schema.decodeUnknownSync(ReplicaBackfillQueued);
 export const decodeReplicaArtifactPublished = Schema.decodeUnknownSync(ReplicaArtifactPublished);
 export const decodeReplicaArtifactPublishFailed = Schema.decodeUnknownSync(
   ReplicaArtifactPublishFailed,

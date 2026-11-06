@@ -39,12 +39,16 @@ import {
   decodeReplicaArtifactPublishFailed,
   decodeReplicaArtifactQueued,
   decodeReplicaArtifactReconciled,
+  decodeReplicaBackfillStarted,
+  decodeReplicaBackfillMarked,
+  decodeReplicaBackfillQueued,
   decodeReplicaCommentQueued,
   decodeReplicaRestoreMarked,
   decodeReplicaRestoreProgressed,
   decodeReplicaRestoreStarted,
   type ReplicaArtifactPublishFailure,
   type ReplicaArtifactQueued,
+  type ReplicaBackfillStarted,
   type ReplicaCommentQueued,
 } from "./replicaArtifactEvents";
 import {
@@ -79,6 +83,7 @@ export interface ReplicaSyncedArtifact extends ReplicaArtifactRecord {
 }
 
 export interface ReplicaQueuedArtifact extends ReplicaArtifactQueued {
+  readonly backfillId?: string;
   /** Why the last publish attempt did not land, if one did not. */
   readonly lastFailure: ReplicaArtifactPublishFailure | undefined;
 }
@@ -96,6 +101,9 @@ export interface ReplicaRestoreState extends ReplicaRestoreProgress {
 }
 
 export interface ReplicaArtifactState {
+  readonly backfills: ReadonlyArray<
+    ReplicaBackfillStarted & { readonly state: "running" | "stopped" }
+  >;
   /** Every entry waiting to publish, versions and comment changes, oldest first. */
   readonly queue: ReadonlyArray<ReplicaQueuedEntry>;
   /** Artifact versions and tombstones waiting to publish, oldest first. */
@@ -144,6 +152,10 @@ export class ReplicaArtifactProjection implements Projection {
   readonly #comments = new Map<string, Map<string, ReplicaSlotRef>>();
   /** By identity; a restore id names which one a later event continues. */
   readonly #restores = new Map<string, ReplicaRestoreState & { readonly instanceId: string }>();
+  readonly #backfills = new Map<
+    string,
+    ReplicaBackfillStarted & { readonly state: "running" | "stopped" }
+  >();
   #state: ReplicaArtifactState | undefined;
 
   reset(_connection: SqliteConnection): void {
@@ -153,6 +165,7 @@ export class ReplicaArtifactProjection implements Projection {
     this.#refusals.clear();
     this.#comments.clear();
     this.#restores.clear();
+    this.#backfills.clear();
     this.#state = undefined;
   }
 
@@ -166,9 +179,31 @@ export class ReplicaArtifactProjection implements Projection {
         // What was queued would publish under the identity that left, or
         // under the next one into another store. The versions stay here.
         this.#queued.clear();
+        this.#backfills.clear();
         break;
-      case names.queued: {
-        const queued = decodeReplicaArtifactQueued(event.payload);
+      case names.backfillStarted: {
+        const started = decodeReplicaBackfillStarted(event.payload);
+        if (!this.#backfills.has(started.backfillId))
+          this.#backfills.set(started.backfillId, { ...started, state: "running" });
+        break;
+      }
+      case names.backfillStopped:
+      case names.backfillResumed: {
+        const { backfillId } = decodeReplicaBackfillMarked(event.payload);
+        const held = this.#backfills.get(backfillId);
+        if (held !== undefined)
+          this.#backfills.set(backfillId, {
+            ...held,
+            state: event.eventName === names.backfillStopped ? "stopped" : "running",
+          });
+        break;
+      }
+      case names.queued:
+      case names.backfillQueued: {
+        const queued =
+          event.eventName === names.queued
+            ? decodeReplicaArtifactQueued(event.payload)
+            : decodeReplicaBackfillQueued(event.payload);
         if (!this.#queued.has(queued.queueId)) {
           this.#queued.set(queued.queueId, { ...queued, lastFailure: undefined });
         }
@@ -306,6 +341,9 @@ export class ReplicaArtifactProjection implements Projection {
     for (const [queueId, queued] of this.#queued) {
       if (evicted.has(String(queued.artifact.canvasId))) this.#queued.delete(queueId);
     }
+    for (const [id, batch] of this.#backfills) {
+      if (evicted.has(String(batch.canvasId))) this.#backfills.delete(id);
+    }
     this.#state = undefined;
   }
 
@@ -418,6 +456,7 @@ export class ReplicaArtifactProjection implements Projection {
       ]),
     );
     return {
+      backfills: [...this.#backfills.values()],
       queue,
       outbox: queue.filter(
         (entry): entry is ReplicaQueuedArtifact => entry.kind !== "canvas-comment",

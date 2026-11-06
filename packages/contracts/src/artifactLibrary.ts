@@ -317,6 +317,37 @@ export const MAX_ARTIFACT_SYNCED_VERSIONS = 200;
 export const MAX_ARTIFACT_SYNCED_THREADS = 50;
 
 /** Everything the library's sync view shows for one artifact. */
+export const MAX_ARTIFACT_BACKFILL_VERSIONS = 24;
+export const ArtifactPublicationPreview = Schema.Struct({
+  destination: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  instanceId: Schema.NullOr(Schema.UUID),
+  previewToken: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  available: Schema.Boolean,
+  versions: Schema.Array(
+    Schema.Struct({
+      versionId: CanvasVersionId,
+      sequence: Schema.Int.pipe(Schema.positive()),
+      byteLength: Schema.Int.pipe(Schema.nonNegative()),
+      status: Schema.Literal("eligible", "excluded", "queued", "published"),
+      reason: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+    }),
+  ).pipe(Schema.maxItems(200)),
+  truncated: Schema.Boolean,
+  deletionPending: Schema.Boolean,
+  deletionAvailable: Schema.Boolean,
+  deletionConflict: Schema.Boolean,
+  backfill: Schema.optional(
+    Schema.Struct({
+      id: Schema.UUID,
+      state: Schema.Literal("running", "stopped", "finished"),
+      done: Schema.Int.pipe(Schema.nonNegative()),
+      total: Schema.Int.pipe(Schema.nonNegative()),
+      message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+    }),
+  ),
+}).annotations(strict);
+export type ArtifactPublicationPreview = typeof ArtifactPublicationPreview.Type;
+
 export const ArtifactSyncedDetail = Schema.Struct({
   kind: Schema.Literal("artifact-synced-detail"),
   canvasId: CanvasId,
@@ -328,6 +359,7 @@ export const ArtifactSyncedDetail = Schema.Struct({
   deletedOn: Schema.optional(ComputerName),
   /** Whether it is open in a thread on this computer. */
   openHere: Schema.Boolean,
+  publication: Schema.optional(ArtifactPublicationPreview),
   /** Newest first. */
   versions: Schema.Array(ArtifactSyncedVersion).pipe(Schema.maxItems(MAX_ARTIFACT_SYNCED_VERSIONS)),
   /**
@@ -346,6 +378,28 @@ export type ArtifactSyncedDetail = typeof ArtifactSyncedDetail.Type;
  * version that supersedes a deletion.
  */
 export const ArtifactSyncedCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("backfill"),
+    canvasId: CanvasId,
+    backfillId: Schema.UUID,
+    previewToken: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+    versionIds: Schema.Array(CanvasVersionId).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_ARTIFACT_BACKFILL_VERSIONS),
+    ),
+    confirmed: Schema.Literal(true),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pause-backfill", "resume-backfill"),
+    canvasId: CanvasId,
+    backfillId: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("delete-synced"),
+    canvasId: CanvasId,
+    previewToken: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+    confirmed: Schema.Literal(true),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("detail"), canvasId: CanvasId }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("open"),
@@ -367,6 +421,7 @@ export const ArtifactSyncedCommand = Schema.Union(
 export type ArtifactSyncedCommand = typeof ArtifactSyncedCommand.Type;
 
 export const ArtifactSyncedRefusalReason = Schema.Literal(
+  "stale-preview",
   /** Nothing synced is known for this artifact here. */
   "not-found",
   /** No thread on this computer can take it without widening its authority. */

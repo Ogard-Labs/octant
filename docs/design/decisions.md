@@ -57,7 +57,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
-| [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
+| [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
@@ -2376,9 +2376,10 @@ Status: Built. Since: 2026-10-14. Detail: [Artifact replica sync: Membership, as
 Every committed Canvas version is queued for publish through the share filter, and nothing is called while sync is off.
 
 - Nothing is queued without sync or a replica identity, nor for a Code thread under Plan mode. An imported entry is never republished.
-- Gaps remain: there is no artifact deletion surface, and versions committed before the replica identity are not published (not built yet).
+- Historical local versions require a reviewed destination and eligibility preview, explicit selection and consent; durable publication progress can stop and resume after restart without duplicating entries. Nothing backfills automatically.
+- Synchronized deletion is a separate confirmed tombstone action over known versions, preserving local history. A local erase never publishes it and removes queued historical bundles locally. A deletion beside a concurrent revision stays visible until explicitly resolved.
 
-Status: Partly built. Since: —. Detail: [Artifact replica sync: Artifact sync: publish and pull](artifact-replica-sync.md#artifact-sync-publish-and-pull).
+Status: Built. Since: —. Detail: [Artifact replica sync: Artifact sync: publish and pull](artifact-replica-sync.md#artifact-sync-publish-and-pull).
 
 ### Store selection
 
