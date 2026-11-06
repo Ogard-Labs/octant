@@ -282,10 +282,9 @@ build, on Linux as on macOS.
 If you installed an Octant build from the preview stream before Octant Nightly
 took it over (up to `0.1.0-preview.20261104.71`), that copy is never offered
 Nightly and sees no further update there. Choose Preview in Settings › Updates
-to keep getting new Octant builds. Development runs
-keep their existing behavior. The stable-host connection, full Nightly command
-and coexistence remain required before Nightly can be offered as a usable
-download.
+to keep getting new Octant builds. Development runs keep their existing
+behavior. The stable-host connection, full Nightly command, Nightly labels and
+coexistence remain required before Nightly can be offered as a usable download.
 
 Settings › Updates has an update channel switch with Stable, Preview and
 Nightly. Stable is the released build, Preview tests the next release, and

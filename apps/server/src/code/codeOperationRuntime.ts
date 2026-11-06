@@ -1,3 +1,4 @@
+import { type Questionnaire } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler";
 import { boundReviewText } from "./codeReviewComparison";
@@ -56,7 +57,9 @@ import {
   type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeMergeStandingSource,
+  type CodeProjectPullRequestSwitchTarget,
   type CodeThreadId,
+  type AutomationRunReference,
   type EventActor,
   type PendingRequest,
   type ProviderCapabilities,
@@ -65,6 +68,8 @@ import {
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -145,6 +150,7 @@ import {
   type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
+import type { PullRequestWatchPort } from "./pullRequestWatchPort";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
   NativeHarnessTurnAdmission,
@@ -212,12 +218,14 @@ import {
   type CodeDeviceApprovalEffect,
   type PullRequestToolCommand,
 } from "./codeAppManagedTools";
+import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
   PROVIDER_CONTEXT_RESTATED,
   type ProviderTurnContextDelta,
 } from "@octant/provider-sdk/chat-conformance";
+import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
 import {
   documentDeliveryInstructions,
   offersCanvasTool,
@@ -352,6 +360,8 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
+  readonly pullRequestWatch?: PullRequestWatchPort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
@@ -501,8 +511,10 @@ export interface CodeOperationRuntimeOptions {
   /**
    * The planner capability: a Project-board read and an advisory work
    * proposal, both answered only for the Project's designated planner thread.
+   * The runtime hands it to the threads tool (`board`) and the side-task tool
+   * (target `board`) of each turn.
    */
-  readonly planner?: CodeAppManagedToolsOptions["planner"];
+  readonly planner?: CodePlannerToolPort;
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
     readonly windowId: WindowId;
@@ -510,37 +522,41 @@ export interface CodeOperationRuntimeOptions {
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
   /**
-   * The agent-message tool set for this thread, when the host admits agent
-   * messaging. The service is server-owned; the tool only
-   * petitions it. `readPosture` is the turn's access posture at the moment it
-   * is asked, so a turn in Plan is neither offered the tool nor able to send.
+   * The threads tool for one turn: a view of the other Code threads of this
+   * thread's Project, messaging them where the host admits it, and the
+   * planner's board. Asked once per turn, so its read and wait bounds are the
+   * turn's. `readPosture` is the turn's access posture at the moment it is
+   * asked, so a turn in Plan is neither offered messaging nor able to send.
    */
-  readonly agentMessages?: (input: {
-    readonly thread: CodeThread;
-    readonly readPosture: () => CodeThread["executionPolicy"];
-  }) => AppManagedToolSet | undefined;
-  /**
-   * The sibling-threads tool set for one turn: a read-only view of the other
-   * Code threads of this thread's Project, answered by the server for the
-   * turn's window. Asked once per turn, so its read and wait bounds are the
-   * turn's. Offered in Plan too, since no action changes anything outside the
-   * caller's own record.
-   */
-  readonly siblingThreads?: (input: {
+  readonly threads?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    readonly readPosture: () => CodeThread["executionPolicy"];
+    readonly planner?: CodePlannerToolPort;
   }) => AppManagedToolSet | undefined;
-  /** Lets the model offer out-of-scope work as a side task the person may start. */
-  readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /**
+   * Lets the model offer out-of-scope work as a side task the person may
+   * start, and the designated planner offer one to the Project board.
+   */
+  readonly sideTasks?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly planner?: CodePlannerToolPort;
+  }) => AppManagedToolSet | undefined;
   /**
    * Tool sets that areas built after this runtime add to each turn, such as
    * the language server's reads. `readThread` is the thread as the turn's
    * window sees it when a call runs, the running turn's posture included.
+   * `folders` are the turn's checkout root and extra folders, for a set that
+   * is offered only where it can answer for their files.
    */
   readonly contributedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
+    readonly folders: ReadonlyArray<string>;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
@@ -627,7 +643,11 @@ export interface CodeOperationRuntimeOptions {
     readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
     readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
     /** Settles a harness question the person answered through the Code question surface. */
-    readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
+    readonly answerQuestion?: (
+      threadId: string,
+      questionId: string,
+      answer: string,
+    ) => void | "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Marks a thread whose runtime read outside content with its own tools. */
@@ -825,6 +845,7 @@ export interface CodeOperationRuntime {
   raiseHarnessQuestion?(input: {
     readonly threadId: string;
     readonly questionId: string;
+    readonly questionnaire?: Questionnaire;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean;
@@ -2397,6 +2418,8 @@ interface ActiveTurn {
   >;
   readonly windowId: WindowId;
   readonly thread: CodeThread;
+  /** The routine run this turn was started for, from the dispatcher only. */
+  readonly routineRun?: AutomationRunReference;
   readonly operationId: CodeOperationId;
   readonly sessionId: string;
   readonly requestedSessionId: string;
@@ -3075,6 +3098,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : { extensionSelections: command.extensionSelections }),
       windowId: input.windowId,
       thread: input.thread,
+      ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
       operationId: command.operationId,
       sessionId:
         previous?.kind === "provider-session-ready" && providerSwitch === undefined
@@ -3415,7 +3439,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
   }
 
-  async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
+  async answerInput(
+    input: Parameters<CodeOperationTurnPort["answerInput"]>[0],
+  ): Promise<Awaited<ReturnType<CodeOperationTurnPort["answerInput"]>>> {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined || !active.questions.has(input.requestId)) {
       return this.#settleDeadTurnRequest(input.thread, "input", String(input.requestId));
@@ -3423,13 +3449,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (active.harnessQuestions.has(input.requestId)) {
       // A harness question is the host's own; the provider never saw it and
       // is waiting on the tool call that asked.
-      active.questions.delete(input.requestId);
-      active.harnessQuestions.delete(input.requestId);
-      this.#options.nativeHarness?.answerQuestion?.(
+      const outcome = this.#options.nativeHarness?.answerQuestion?.(
         String(active.thread.id),
         input.requestId,
         input.response,
       );
+      if (outcome === "invalid-answer")
+        return {
+          state: active.state,
+          failure: {
+            category: "invalid",
+            message: "The questionnaire answer is incomplete or contains invalid choices.",
+          },
+        };
+      if (outcome === "already-settled" || outcome === "question-not-found")
+        return {
+          state: active.state,
+          failure: { category: "stale", message: "That question is no longer pending." },
+        };
+      active.questions.delete(input.requestId);
+      active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
     if (active.connection === undefined) return turnState("failed");
@@ -3453,6 +3492,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   raiseHarnessQuestion(input: {
     readonly threadId: string;
     readonly questionId: string;
+    readonly questionnaire?: Questionnaire;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean {
@@ -3466,6 +3506,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       expectedCursor: active.cursor,
       event: {
         kind: "input-requested",
+        ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
         requestId: input.questionId,
         prompt: input.prompt,
         options: input.options,
@@ -3897,6 +3938,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
+   * One watch the thread's agent asked for, asked of the person in the thread
+   * with the pull request and the watch's bounds named. Nothing is minted: the
+   * watch turns on inside this same tool call, right after the answer, and the
+   * switch service checks the window and the thread again before it does.
+   */
+  #askPullRequestWatchApproval(
+    active: ActiveTurn,
+    target: CodeProjectPullRequestSwitchTarget,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const summary = boundProviderSummary(
+      `Let this thread's agent watch pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName}? Octant will start a new turn here when its checks finish, a review or comment arrives, or a merge conflict appears: at most ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES} times, for up to ${CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS / 86_400_000} days, ending when it merges or closes. Each turn runs at this thread's access level.`,
+    );
+    return summary === undefined
+      ? Promise.resolve("unavailable")
+      : this.#askToolApproval(active, summary, undefined, signal);
+  }
+
+  /**
    * The wording and binding context of one device approval. A Simulator,
    * emulator, or device effect is asked only while the turn's posture decides
    * effects by approval; a device lease is asked under every posture, Full
@@ -4236,6 +4296,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const service = this.#service;
     if (supportsAppManagedTools && service !== undefined) {
       const browserProfiles = this.#options.browserProfiles;
+      const pullRequestWatch = this.#options.pullRequestWatch;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -4271,6 +4332,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               ? undefined
               : this.#options.standingMergeAllowance?.(current)[0];
           },
+          ...(pullRequestWatch === undefined
+            ? {}
+            : {
+                pullRequestWatch: {
+                  watch: (ask, signal) =>
+                    pullRequestWatch.watch({
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      providerInstanceId: String(active.thread.providerInstanceId),
+                      ask,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                  unwatch: () =>
+                    pullRequestWatch.unwatch({
+                      threadId: active.thread.id,
+                      providerInstanceId: String(active.thread.providerInstanceId),
+                    }),
+                  request: (target, signal) =>
+                    this.#askPullRequestWatchApproval(active, target, signal),
+                },
+              }),
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
@@ -4390,14 +4472,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.androidToolchain === undefined
             ? {}
             : { android: this.#options.androidToolchain }),
-          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.githubReadTools?.({
           windowId: active.windowId,
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
         }),
-        this.#options.agentMessages?.({
+        this.#options.threads?.({
+          windowId: active.windowId,
           thread: active.thread,
           readPosture: () =>
             clampTurnAccessPosture({
@@ -4406,14 +4488,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
                 active.thread.executionPolicy,
             }),
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
-        this.#options.siblingThreads?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.contributedTools?.({
           windowId: active.windowId,
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+          folders: [active.checkoutRoot, ...active.extraFolders],
+          ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
         }),
-        this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.sideTasks?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
+        }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
@@ -4501,28 +4589,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // Only a thread whose person chose the runtime's artifact tool is told to
     // use it; the turn runner starts that thread's session with the same
     // choice, and every other thread keeps Canvas.
+    const artifactToolName =
+      active.thread.documentDelivery === "native-artifacts"
+        ? active.driver.nativeArtifactTool?.({
+            mode: "code",
+            executionPolicy: active.thread.executionPolicy,
+          })
+        : undefined;
     const deliveryInstructions = documentDeliveryInstructions({
-      artifactToolName:
-        active.thread.documentDelivery === "native-artifacts"
-          ? active.driver.nativeArtifactTool?.({
-              mode: "code",
-              executionPolicy: active.thread.executionPolicy,
-            })
-          : undefined,
+      artifactToolName,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
     const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
+    // This mode's rules before the tool notes, as in Work.
     const hostGuidance = [
+      ...(deliveryInstructions === undefined
+        ? []
+        : [
+            {
+              kind: "instructions" as const,
+              text: deliveryInstructions,
+              ...(artifactToolName === undefined ? { tool: CANVAS_TOOL_NAME } : {}),
+            },
+          ]),
       ...(extraFolderInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
-      ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
+      ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
         kind: "instructions" as const,
-        text,
+        text: line.text,
+        tool: line.tool,
       })),
-      ...(deliveryInstructions === undefined
-        ? []
-        : [{ kind: "instructions" as const, text: deliveryInstructions }]),
     ];
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,

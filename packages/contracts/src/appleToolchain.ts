@@ -222,6 +222,10 @@ export const AppleSimulatorRequest = Schema.Struct({
   url: Schema.optional(DeviceOpenUrl),
   /** The orientation `rotate` sets. Apple omits it: the host turns the Simulator the other way. */
   orientation: Schema.optional(DeviceOrientation),
+  /** How far back `logs` reads, in seconds; without it, the last five minutes. */
+  sinceSeconds: Schema.optional(Schema.Int.pipe(Schema.between(1, 600))),
+  /** Whether `logs` also reads the app's newest crash reports. */
+  includeCrashes: Schema.optional(Schema.Boolean),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -350,6 +354,8 @@ export const AppleBuildEvidence = Schema.Struct({
   diagnostics: Schema.Array(AppleDiagnostic).pipe(Schema.maxItems(64)),
   artifacts: Schema.Array(AppleEvidenceArtifact).pipe(Schema.maxItems(16)),
   cleanup: AppleCleanupState,
+  /** Set by `logs` when the host kept only part of what it read. */
+  truncated: Schema.optional(Schema.Boolean),
   durationMs: Schema.Int.pipe(Schema.nonNegative()),
   completedAt: UtcTimestamp,
 })

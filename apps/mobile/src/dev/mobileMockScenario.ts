@@ -972,8 +972,31 @@ function createMockTransport(input: {
             : { ...fields, attachmentId: header("attachment-id") },
         );
       }
+      if (request.method === "GET" && request.path === "/api/reply-detail") {
+        return Response.json(mockReplyDetailReading());
+      }
       return new Response("Mock route not found", { status: 404 });
     },
+  };
+}
+
+/**
+ * The mock host's Reply detail. A web preview may name the default and the
+ * review thread's own level in its address (`?replyDetail=medium`,
+ * `&threadReplyDetail=high`) so each level can be looked at; otherwise every
+ * thread follows Low, as on a host where no one has chosen.
+ */
+function mockReplyDetailReading() {
+  const search = new URLSearchParams(globalThis.location?.search ?? "");
+  const level = (value: string | null) =>
+    value === "low" || value === "medium" || value === "high" ? value : undefined;
+  const threadLevel = level(search.get("threadReplyDetail"));
+  return {
+    defaultLevel: level(search.get("replyDetail")) ?? "low",
+    threads:
+      threadLevel === undefined
+        ? []
+        : [{ mode: "chat" as const, threadId: CHAT_THREAD_ID, level: threadLevel }],
   };
 }
 

@@ -21,7 +21,7 @@ Create a Work Project from the sidebar:
 
 The selected directory becomes the confined root. Work threads cannot access paths outside this root. The renderer receives an opaque receipt rather than the raw path.
 
-Octant writes nothing of its own into the folder unless you ask it to. On the Project page, **Status file** turns on a `STATUS.md` at the top of the folder: every task reads it and updates where the work stands, and its dated follow-ups and deadlines become reminders on the board and in the inbox. It is off for every Project until you turn it on, and the default folder never offers it. Turning it off leaves the file where it is; Octant just stops reading and writing it.
+Octant writes nothing of its own into the folder unless you ask it to. On the Project page, **Status file** turns on a `STATUS.md` at the top of the folder: every task reads it, a task that moves the work forward updates it, and its dated follow-ups and deadlines become reminders on the board and in the inbox. It is off for every Project until you turn it on, and the default folder never offers it. Turning it off leaves the file where it is; Octant just stops reading and writing it.
 
 ## Authority and confinement
 
@@ -256,7 +256,8 @@ name, the schedule and time zone, the first run, what happens to runs missed
 while the computer is off, and the prompt each run starts with. Nothing exists
 until you click **Create routine**; dismissing it, or no answer within ten
 minutes, creates nothing. The agent can never create one on its own, even in a
-thread with Full access.
+thread with Full access. A Code thread in Plan mode can propose one too; the
+routine you create from it asks first like any other and never runs in Plan.
 
 You can also create one yourself: open **Routines** in the thread's
 Environment and choose **New routine**. Give it a name, the task for each run,
@@ -293,6 +294,26 @@ opened in Automation Center. Past five, choose **Show all**. A
 routine's own run cannot propose more routines. A provider that cannot use
 Octant's tools does not get this; create the routine in Automation Center
 instead.
+
+### What the agent can do with routines
+
+The agent can look at this Project's routines: their schedules, whether they
+are running or paused, their prompts, and how recent runs went. It can also
+ask you to pause or archive a routine that belongs to this thread, one it
+proposed or you created here, or the routine whose run started this thread.
+The request shows at the foot of the thread like a proposal, with the
+agent's reason; nothing changes until you click **Pause routine** or
+**Archive routine** (**Cancel follow-up** for a follow-up), and dismissing it
+keeps the routine as it is. The agent cannot resume, edit, or run a routine,
+and it cannot ask about another thread's routine; you do those in Automation
+Center.
+
+When a routine runs, its agent can report how the run went: succeeded,
+nothing to do, needs attention, or did not succeed, with a short summary. It
+shows beside that run in Automation Center's run history, as "Agent
+reported: …", and does not change the run's own status. A run cannot pause or
+archive its own routine, because nobody is there to confirm; it reports needs
+attention and says why, and you decide.
 
 ### Follow up later
 

@@ -7,7 +7,7 @@ import {
   sideChatReturnContextResolver,
 } from "./threadMentionService";
 import { resolveSideChatSourceContext } from "./sideChatSource";
-import { decodeMentionableThreadId } from "@octant/contracts";
+import { decodeMentionableThreadId, WEB_SEARCH_TOOL_DEFINITION } from "@octant/contracts";
 import {
   ThreadWorkItemId,
   EventActor,
@@ -381,7 +381,7 @@ function openFixture(options?: {
         readonly bytes: Uint8Array;
         readonly displayName: string;
       }>;
-      readonly tools: ReadonlyArray<{ readonly name: string }>;
+      readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
     }>;
     readonly driver: ProviderDriver;
     readonly queue: Queue.Queue<never>;
@@ -541,7 +541,7 @@ function openFixture(options?: {
       readonly bytes: Uint8Array;
       readonly displayName: string;
     }>;
-    readonly tools: ReadonlyArray<{ readonly name: string }>;
+    readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
   }> = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
@@ -581,7 +581,7 @@ function openFixture(options?: {
         readonly bytes: Uint8Array;
         readonly displayName: string;
       }>;
-      readonly tools: ReadonlyArray<{ readonly name: string }>;
+      readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
@@ -1303,6 +1303,7 @@ describe("ChatService", () => {
     expect(fakeDriver.sentTurns[0]?.context).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
+      tool: "octant_canvas",
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
@@ -3228,9 +3229,10 @@ describe("ChatService", () => {
       text: "Use only the selected build guidance.",
     });
     expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toEqual([
-      "octant_web_research",
+      "web-search",
       "build_project",
     ]);
+    expect(fakeDriver.sentTurns[0]?.tools[0]).toEqual(WEB_SEARCH_TOOL_DEFINITION);
   });
 
   it("blocks provider handoff before provider acquisition when extension authority drifts", async () => {
@@ -3751,7 +3753,7 @@ describe("ChatService", () => {
       catalogEpoch: `sha256:${"c".repeat(64)}` as never,
       origin: { kind: "draft" as const, reference: "draft-collision" },
     };
-    for (const collision of ["octant_web_research", "octant_app_tool"]) {
+    for (const collision of ["web-search", "octant_app_tool"]) {
       const resolveExtensionSelectionContext = vi.fn(async (input) => ({
         selections: input.selections,
         entries: [],
@@ -8101,6 +8103,46 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
+  it("offers a harness Chat thread with research on exactly one web search", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000097" as WindowId;
+    // The harness's own tool set offers `web-search` to a Chat thread with
+    // research on; the turn must not add a second search beside it.
+    const harnessSearch = vi.fn(async () => ({ result: { query: "x", results: [] } }));
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [WEB_SEARCH_TOOL_DEFINITION],
+        execute: harnessSearch,
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Harness research",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(created.thread.researchEnabled).toBe(true);
+
+    await (
+      service.execute as never as (
+        command: unknown,
+        context: { readonly windowId: WindowId },
+      ) => Promise<unknown>
+    )(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Look it up",
+      },
+      { windowId },
+    );
+
+    const searchTools = (fakeDriver.sentTurns[0]?.tools ?? []).filter(({ name }) =>
+      ["web-search", "octant_web_research"].includes(name),
+    );
+    expect(searchTools).toEqual([WEB_SEARCH_TOOL_DEFINITION]);
+  });
+
   it("offers Zen-only tools to the exact authenticated assistant thread and zero ordinary threads", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     let assistantThreadId: string | undefined;
@@ -8110,7 +8152,7 @@ describe("ChatService", () => {
           ? {
               definitions: [
                 {
-                  name: "octant_zen_search_threads",
+                  name: "octant_zen",
                   inputSchema: { type: "object", properties: {}, required: [] },
                 },
               ],
@@ -8163,12 +8205,8 @@ describe("ChatService", () => {
       { windowId },
     );
 
-    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).not.toContain(
-      "octant_zen_search_threads",
-    );
-    expect(fakeDriver.sentTurns[1]?.tools.map((tool) => tool.name)).toContain(
-      "octant_zen_search_threads",
-    );
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).not.toContain("octant_zen");
+    expect(fakeDriver.sentTurns[1]?.tools.map((tool) => tool.name)).toContain("octant_zen");
     expect(resolveAppManagedTools).toHaveBeenCalledTimes(2);
   });
 
@@ -8187,7 +8225,7 @@ describe("ChatService", () => {
           : {
               definitions: [
                 {
-                  name: "octant_thread_message",
+                  name: "octant_ask_thread",
                   inputSchema: { type: "object", properties: {}, required: [] },
                 },
               ],
@@ -8218,9 +8256,7 @@ describe("ChatService", () => {
       { windowId },
     );
 
-    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain(
-      "octant_thread_message",
-    );
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain("octant_ask_thread");
     expect(resolveAppManagedTools).toHaveBeenCalledWith(
       expect.objectContaining({ threadMentionIds: [targetThreadId] }),
     );

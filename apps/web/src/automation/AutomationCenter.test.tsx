@@ -322,6 +322,31 @@ describe("AutomationCenter detail disclosure", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows what a run's agent reported beside the run's own status", async () => {
+    const reported = {
+      ...completedRun,
+      reportedResult: {
+        outcome: "needs-attention" as const,
+        summary: "Two invoices lack a total.",
+        reportedAt: completedRun.claimedAt,
+      },
+    } as typeof completedRun;
+    const history = vi.fn(async () => ({
+      kind: "automation-history" as const,
+      automationId: definition.id,
+      runs: [reported],
+    }));
+    renderCenter({ client: fakeClient({ history: history as never }) });
+    const detail = await openDetail();
+
+    await userEvent.click(within(detail).getByText("Run history"));
+    const historyList = await within(detail).findByRole("list", { name: "Run history" });
+    expect(within(historyList).getByText("Completed")).toBeVisible();
+    expect(
+      within(historyList).getByText("Agent reported: Needs attention. Two invoices lack a total."),
+    ).toBeVisible();
+  });
+
   it("navigates run rows to the ordinary thread only after the thread exists", async () => {
     const onOpenThread = vi.fn();
     renderCenter({ onOpenThread });

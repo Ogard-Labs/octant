@@ -132,6 +132,11 @@ describe("pull-request merge policy", () => {
     expect(pullRequestChangeNeedsPerActApproval("labels")).toBe(false);
     expect(pullRequestChangeNeedsPerActApproval("close")).toBe(false);
   });
+
+  it("asks the person at every level before a thread watches its pull request, not to stop watching", () => {
+    expect(pullRequestChangeNeedsPerActApproval("watch")).toBe(true);
+    expect(pullRequestChangeNeedsPerActApproval("unwatch")).toBe(false);
+  });
 });
 
 describe("stack merge policy", () => {

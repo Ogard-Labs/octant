@@ -1,6 +1,6 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { CodeThreadId } from "@octant/contracts/code";
-import { memo, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import type { CodeBootstrap, CodeThreadId } from "@octant/contracts/code";
+import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   useCodeController,
   type CodeController,
@@ -215,6 +215,7 @@ export function useOpenCodeThreadProviderRequests(
 }
 
 export interface CodeThreadControllerSlotsProps {
+  readonly navigationBootstrap: CodeBootstrap | undefined;
   readonly registry: CodeThreadControllerRegistry;
   readonly threadIds: ReadonlyArray<CodeThreadId>;
   readonly client: CodeClient;
@@ -230,11 +231,16 @@ export interface CodeThreadControllerSlotsProps {
  * running.
  */
 export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps) {
+  const navigation = useMemo(
+    () => ({ bootstrap: props.navigationBootstrap }),
+    [props.navigationBootstrap],
+  );
   return (
     <>
       {props.threadIds.map((threadId) => (
         <CodeThreadControllerSlot
           client={props.client}
+          navigation={navigation}
           key={String(threadId)}
           readCursorStore={props.readCursorStore}
           registry={props.registry}
@@ -253,6 +259,7 @@ export function CodeThreadControllerSlots(props: CodeThreadControllerSlotsProps)
  * straight back through here as another publish.
  */
 const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
+  readonly navigation: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client: CodeClient;
   readonly readCursorStore: CodeReadCursorStore;
   readonly registry: CodeThreadControllerRegistry;
@@ -260,6 +267,7 @@ const CodeThreadControllerSlot = memo(function CodeThreadControllerSlot(props: {
 }) {
   const controller = useCodeController({
     activeThreadId: props.threadId,
+    navigation: props.navigation,
     client: props.client,
     // The thread list is the shell's to re-read. A poll per open thread would
     // ask the host for the same list several times a second and answer nothing

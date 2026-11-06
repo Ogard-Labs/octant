@@ -49,6 +49,8 @@ import {
   browserProfileKey,
   browserProfilePartition,
   awaitQuietPage,
+  BrowserRecordingFrames,
+  browserRecordingFrameKept,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SETTLE_QUIET_MS,
@@ -70,6 +72,11 @@ import {
   type BrowserPageReadRequest,
   type BrowserPageReadResult,
   type BrowserPageSnapshotRef,
+  browserPageCounters,
+  MAX_BROWSER_AUDIT_ELEMENTS,
+  MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
+  type BrowserPageAuditReading,
+  type BrowserPageCounters,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
@@ -86,7 +93,10 @@ import {
 } from "./browserSurfaceFrames";
 import {
   DEFAULT_BROWSER_WAIT_MS,
+  MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
+  MAX_BROWSER_RECORDING_EDGE,
+  MAX_BROWSER_RECORDING_MS,
   MAX_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   type BrowserActionRequest,
@@ -94,6 +104,7 @@ import {
   type BrowserContextPolicy,
   type BrowserDownloadReport,
   type BrowserEmulationReport,
+  type BrowserRecordingTruncation,
   type BrowserThreadId,
 } from "@octant/contracts";
 
@@ -420,6 +431,38 @@ interface OwnedSurface {
    * click never opens a menu in front of the person.
    */
   lastHumanPress: number;
+  /** The agent's recording of one tab, between `record-start` and `record-stop`. */
+  recording?: SurfaceRecording | undefined;
+}
+
+/**
+ * One recording: the tab's own screencast, read on the agent's debugger
+ * attachment, which the recording keeps between actions as an emulation does.
+ */
+interface SurfaceRecording {
+  /** The tab the recording started on, and the only one it shows. */
+  readonly tab: OwnedTab;
+  /** When frame collection stopped, if it has; see `endCollection`. */
+  readonly ended: () => RecordingEnd | undefined;
+  /**
+   * Note that frame collection stopped, for whatever reason: a bound, another
+   * tab in front, or the call's own stop. The recorded tab's address and title
+   * are read now, so a recording cut short is not labelled with a page the
+   * tab moved to after its last frame. The first end wins.
+   */
+  readonly endCollection: (atMs: number, reason?: "tab-changed") => RecordingEnd;
+  readonly client: BrowserSurfaceViewPort["webContents"]["debugger"];
+  readonly frames: BrowserRecordingFrames;
+  readonly listener: SurfaceProtocolListener;
+  readonly timer: ReturnType<typeof setTimeout>;
+  /** Settles once every frame that arrived so far has been looked at. */
+  readonly settled: () => Promise<void>;
+}
+
+interface RecordingEnd extends RecordedTabFacts {
+  readonly atMs: number;
+  /** A reason only the host can see; a bound's own reason is already in the frames. */
+  readonly reason?: "tab-changed";
 }
 
 /**
@@ -452,6 +495,17 @@ export class BrowserTargetStaleError extends Error {
   constructor() {
     super("The element behind that ref changed since the snapshot.");
     this.name = "BrowserTargetStaleError";
+  }
+}
+
+/**
+ * The page cannot be recorded: its debugger is someone else's (developer
+ * tools), or the view offers no protocol events to take frames from.
+ */
+export class BrowserRecordingUnavailableError extends Error {
+  constructor() {
+    super("This Browser cannot record the page.");
+    this.name = "BrowserRecordingUnavailableError";
   }
 }
 
@@ -491,6 +545,7 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "colorScheme"
       | "diagnosticsSince"
       | "diagnosticsWarnings"
+      | "auditKind"
     >
   > & {
     /**
@@ -554,6 +609,22 @@ export interface BrowserSurfaceRuntimeObservation {
     readonly method?: string;
     readonly failure: string;
   }>;
+  /** Only an audit fills this: what the fixed reader measured; the server shapes it. */
+  readonly audit?: BrowserPageAuditReading;
+  /** Only a `record-stop` fills this: the recording that ended, as the server reads it. */
+  readonly recording?:
+    | {
+        readonly status: "recorded";
+        readonly dataUrl: string;
+        readonly frames: number;
+        readonly durationMs: number;
+        readonly truncated?: BrowserRecordingTruncation;
+        /** The recorded tab's address and title when the recording stopped. */
+        readonly url?: string;
+        readonly title?: string;
+      }
+    | { readonly status: "withheld" }
+    | { readonly status: "empty" };
 }
 
 const ISOLATED_WORLD_ID = 1_001;
@@ -975,6 +1046,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     void owned.textComposition.close();
     closeEditingMenu(owned);
     owned.presentation.close();
+    dropRecording(owned);
     // Emptied before anything is closed: closing a page can report the page
     // gone, and a report that arrives while this list is still being walked
     // would take a tab out from under the walk.
@@ -1008,6 +1080,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
    * held, because a view that has only ever been created has none.
    */
   const showTab = (owned: OwnedSurface, incoming: OwnedTab): void => {
+    leaveRecordedTab(owned, incoming);
     for (const tab of owned.tabs) {
       if (tab === incoming) continue;
       tab.view.setVisible(false);
@@ -1036,6 +1109,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const forgetTab = (contextId: string, owned: OwnedSurface, tab: OwnedTab): void => {
     const index = owned.tabs.indexOf(tab);
     if (index === -1) return;
+    if (tab === owned.recording?.tab) leaveRecordedTab(owned, undefined);
     owned.tabs.splice(index, 1);
     tab.view.setVisible(false);
     owned.shellWindow?.contentView.removeChildView(tab.view);
@@ -2406,6 +2480,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         try {
           const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
             const contents = contentsView(owned).webContents;
+            // Ended before any check that can refuse, so a stop that is refused
+            // still ends the screencast and lets its attachment go; a refused
+            // stop's animation is never handed back.
+            const recording =
+              request.kind === "record-stop" ? await finishRecording(owned) : undefined;
             // Reading or driving a page is authorized by the origin approval put
             // on this context, and the page in front is not always one approval
             // covered: the person can take their own view somewhere else, and
@@ -2564,6 +2643,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               }
               case "screenshot":
                 break;
+              case "record-start":
+                await startRecording(owned, activeTab(owned));
+                break;
+              case "record-stop":
+                break;
               case "snapshot":
                 // The outline is the whole answer: no picture and no page text,
                 // and a credential field in it is named, never valued.
@@ -2583,6 +2667,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 // the failed request is the whole answer. The next read answers
                 // what happened since this one.
                 return readDiagnostics(owned, request);
+              case "audit":
+                // A read like a snapshot: nothing is navigated, reloaded, or
+                // changed, and the address and title keep a snapshot's refs good.
+                refuseUnapprovedPage(owned, contents);
+                return {
+                  ...(contents.getURL() === ""
+                    ? {}
+                    : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+                  ...(contents.getTitle() === ""
+                    ? {}
+                    : { title: contents.getTitle().slice(0, 1_024) }),
+                  audit: await auditOf(contentsView(owned), request.auditKind),
+                };
               case "close-tab":
                 await contents.loadURL("about:blank");
                 break;
@@ -2644,6 +2741,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
               ...(viewport === undefined ? {} : { viewport }),
               ...(emulation === undefined ? {} : { emulation }),
+              ...(recording === undefined ? {} : { recording }),
             };
           })();
           if (
@@ -2959,6 +3057,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     void owned.textComposition.close();
     closeEditingMenu(owned);
     owned.presentation.close();
+    dropRecording(owned);
     const closing = owned.tabs;
     owned.tabs = [];
     for (const tab of closing) {
@@ -3262,6 +3361,59 @@ async function snapshotOf(owned: OwnedSurface): Promise<{
       )
     : top.snapshot;
   return { snapshot: formatBrowserPageSnapshot(framed), snapshotRefs: framed.refs };
+}
+
+/**
+ * Audit the page in front with the fixed reader, in the isolated world. The
+ * performance timeline belongs to the window, so the isolated world reads the
+ * entries the page's own scripts would. Frames are not read: the reader counts
+ * them, and the answer says they were not audited.
+ */
+async function auditOf(
+  view: BrowserSurfaceViewPort,
+  kind: BrowserSurfaceAction["auditKind"],
+): Promise<BrowserPageAuditReading> {
+  if (kind === "accessibility") {
+    const read = await readPage(view, {
+      mode: "accessibility",
+      maxElements: MAX_BROWSER_AUDIT_ELEMENTS,
+      maxPerRule: MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
+    });
+    if (read.mode !== "accessibility") throw new Error("Browser audit is unavailable.");
+    return { kind: "accessibility", reading: read.reading };
+  }
+  if (kind !== "performance") throw new Error("An audit names which audit to run.");
+  const read = await readPage(view, {
+    mode: "performance",
+    maxEntries: MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
+  });
+  if (read.mode !== "performance") throw new Error("Browser audit is unavailable.");
+  return { kind: "performance", reading: read.reading, counters: await pageCounters(view) };
+}
+
+/**
+ * The browser's own counters for the page, through the debugger protocol.
+ * Its duration counters start when the Performance domain is enabled, so only
+ * the present-tense counts are read, and the domain is turned off again. While
+ * someone else holds the page's developer tools nothing is read.
+ */
+async function pageCounters(view: BrowserSurfaceViewPort): Promise<BrowserPageCounters> {
+  try {
+    return await withDebugger(view, async (send) => {
+      await send("Performance.enable");
+      try {
+        return browserPageCounters(await send("Performance.getMetrics"));
+      } finally {
+        await send("Performance.disable").catch(() => undefined);
+      }
+    });
+  } catch {
+    return {
+      status: "unavailable",
+      reason:
+        "The browser's counters could not be read; someone else may hold this page's developer tools.",
+    };
+  }
 }
 
 /** How page code names the element a selector reaches, open shadow roots included. */
@@ -4099,6 +4251,231 @@ function detachAgentDebugger(client: BrowserSurfaceViewPort["webContents"]["debu
   if (client.isAttached()) client.detach();
 }
 
+/** Debuggers a recording is reading frames on; each keeps its attachment between actions. */
+const recordingDebuggers = new WeakSet<object>();
+
+/**
+ * Whether the agent's attachment must outlive the action that holds it: a
+ * page's touch or color-scheme emulation lives on it, and so does a recording.
+ */
+function attachmentHeld(client: BrowserSurfaceViewPort["webContents"]["debugger"]): boolean {
+  return emulationOf(client).held || (client.isAttached() && recordingDebuggers.has(client));
+}
+
+/**
+ * Start recording the tab in front through its own screencast, in PNG frames
+ * scaled to the recording's edge, on the agent's attachment. A recording
+ * already running is dropped first: only the call that started one stops it.
+ * Each frame is looked at before the next is asked for, and a frame of a page
+ * that holds a credential field withholds the whole recording, as a
+ * screenshot of it would be withheld. A debugger someone else holds is theirs.
+ */
+async function startRecording(owned: OwnedSurface, tab: OwnedTab): Promise<void> {
+  dropRecording(owned);
+  const { view } = tab;
+  const client = view.webContents.debugger;
+  if (client.on === undefined) throw new BrowserRecordingUnavailableError();
+  let attachedHere = false;
+  if (!client.isAttached()) {
+    try {
+      client.attach("1.3");
+    } catch {
+      throw new BrowserRecordingUnavailableError();
+    }
+    agentDebuggers.add(client);
+    attachedHere = true;
+  } else if (!agentDebuggers.has(client)) {
+    throw new BrowserRecordingUnavailableError();
+  }
+  const frames = new BrowserRecordingFrames(performance.now());
+  let tail: Promise<void> = Promise.resolve();
+  let ended: RecordingEnd | undefined;
+  const endCollection = (atMs: number, reason?: "tab-changed"): RecordingEnd => {
+    ended ??= { atMs, ...(reason === undefined ? {} : { reason }), ...recordedTabFacts(tab) };
+    return ended;
+  };
+  const listener: SurfaceProtocolListener = (_event, method, params) => {
+    if (method !== "Page.screencastFrame") return;
+    const frame = (params ?? {}) as { readonly data?: unknown; readonly sessionId?: unknown };
+    tail = tail.then(async () => {
+      try {
+        if (!frames.recording || typeof frame.data !== "string") return;
+        // The view's address is read as the frame arrives and again after the
+        // credential check, so a frame is kept only if the page stayed on an
+        // approved origin throughout: the person can take this view anywhere,
+        // and the approval covers only these origins. The credential check
+        // fails closed: a page between documents counts as one with a field.
+        const shown = view.webContents.getURL();
+        const admitted = (credentialField: boolean) =>
+          browserRecordingFrameKept({
+            pageUrl: shown,
+            allowedOrigins: owned.policy.allowedOrigins,
+            credentialField,
+          });
+        if (
+          !admitted(false) ||
+          !admitted(await hasSensitiveDocument(view, owned.policy.credentialFieldProtection)) ||
+          view.webContents.getURL() !== shown
+        ) {
+          frames.leaveOut();
+          return;
+        }
+        frames.offer(Uint8Array.from(Buffer.from(frame.data, "base64")), performance.now());
+        // A bound this frame met stopped the frames; the page is the one it showed.
+        if (!frames.recording) endCollection(performance.now());
+      } catch {
+        frames.leaveOut();
+      } finally {
+        // Acknowledged after it was looked at: the page sends the next frame
+        // only then, so a busy page cannot queue frames without bound.
+        await client
+          .sendCommand("Page.screencastFrameAck", { sessionId: frame.sessionId })
+          .catch(() => undefined);
+      }
+    });
+  };
+  client.on("message", listener);
+  recordingDebuggers.add(client);
+  try {
+    await client.sendCommand("Page.startScreencast", {
+      format: "png",
+      maxWidth: MAX_BROWSER_RECORDING_EDGE,
+      maxHeight: MAX_BROWSER_RECORDING_EDGE,
+      everyNthFrame: 1,
+    });
+  } catch {
+    client.removeListener?.("message", listener);
+    recordingDebuggers.delete(client);
+    if (attachedHere && !emulationOf(client).held) detachAgentDebugger(client);
+    throw new BrowserRecordingUnavailableError();
+  }
+  const timer = setTimeout(() => {
+    frames.stop(frames.deadlineMs, "duration-limit");
+    endCollection(frames.deadlineMs);
+    // The frames wait for the call's stop; the attachment does not, so a
+    // recording whose stop never comes (the person took the page over) holds
+    // the page's debugger no longer than its duration bound.
+    endScreencast(owned, recording);
+  }, MAX_BROWSER_RECORDING_MS);
+  timer.unref?.();
+  const recording: SurfaceRecording = {
+    tab,
+    ended: () => ended,
+    endCollection,
+    client,
+    frames,
+    listener,
+    timer,
+    settled: () => tail,
+  };
+  owned.recording = recording;
+}
+
+/**
+ * Stop the screencast and stop holding the attachment for it. While an agent
+ * action runs on that page, the action's dialog guard lets the attachment go
+ * when it ends; otherwise (another tab, or no action running) it is let go
+ * here, unless an emulation still holds it.
+ */
+function endScreencast(owned: OwnedSurface, recording: SurfaceRecording): void {
+  clearTimeout(recording.timer);
+  const { client } = recording;
+  try {
+    client.removeListener?.("message", recording.listener);
+    recordingDebuggers.delete(client);
+    void client.sendCommand("Page.stopScreencast").catch(() => undefined);
+    const guarded =
+      owned.control === "agent" && client === contentsView(owned).webContents.debugger;
+    if (!guarded && !emulationOf(client).held && agentDebuggers.has(client)) {
+      detachAgentDebugger(client);
+    }
+  } catch {
+    // A page that went away with its tab has nothing left to stop or detach.
+  }
+}
+
+/** End the context's recording and build its animation; nothing running is empty. */
+async function finishRecording(
+  owned: OwnedSurface,
+): Promise<NonNullable<BrowserSurfaceRuntimeObservation["recording"]>> {
+  const recording = owned.recording;
+  if (recording === undefined) return { status: "empty" };
+  owned.recording = undefined;
+  // The screencast ends first and the frames it already sent are checked
+  // before the frames stop: stopped first, a frame whose credential check was
+  // still running when the stop came would be refused as late, and the
+  // recording would lose the page's last state.
+  // Still collecting at the stop, the recording's last frame is of the page in
+  // the tab now; cut short earlier, it is labelled as it was then.
+  const ended = recording.ended() ?? recording.endCollection(performance.now());
+  endScreencast(owned, recording);
+  // A page stuck in its own script would hold the credential check of the last
+  // frame; the recording ends without that frame rather than waiting.
+  await Promise.race([
+    recording.settled(),
+    new Promise((resolve) => setTimeout(resolve, 1_000).unref?.()),
+  ]);
+  recording.frames.stop(ended.atMs, ended.reason);
+  const result = recording.frames.finish(performance.now());
+  if (result.status !== "recorded") return result;
+  return {
+    status: "recorded",
+    dataUrl: `data:image/png;base64,${Buffer.from(result.bytes).toString("base64")}`,
+    frames: result.frames,
+    durationMs: result.durationMs,
+    ...(result.truncated === undefined ? {} : { truncated: result.truncated }),
+    ...(ended.url === undefined ? {} : { url: ended.url }),
+    ...(ended.title === undefined ? {} : { title: ended.title }),
+  };
+}
+
+/**
+ * The recorded tab stops being the one in front: another is shown (`front`),
+ * by the agent or by the person, or the recorded one closes (`front`
+ * undefined). A recording belongs to the tab it started on, so it ends here,
+ * as a resize ends it, under what that tab showed; the stop still looks at the
+ * frames already received. Without this the screencast went on with a tab
+ * behind the one in front, and the stop saved it under the front tab's address.
+ */
+function leaveRecordedTab(owned: OwnedSurface, front: OwnedTab | undefined): void {
+  const recording = owned.recording;
+  if (recording === undefined || recording.ended() !== undefined || front === recording.tab) {
+    return;
+  }
+  recording.endCollection(performance.now(), "tab-changed");
+  endScreencast(owned, recording);
+}
+
+interface RecordedTabFacts {
+  readonly url?: string;
+  readonly title?: string;
+}
+
+/** The recorded tab's address and title, read as an observation reads them. */
+function recordedTabFacts(tab: OwnedTab): RecordedTabFacts {
+  try {
+    const contents = tab.view.webContents;
+    const url = contents.getURL();
+    const title = contents.getTitle();
+    return {
+      ...(url === "" ? {} : { url: redactedObservationUrl(url).slice(0, 4_096) }),
+      ...(title === "" ? {} : { title: title.slice(0, 1_024) }),
+    };
+  } catch {
+    // A page that went away with its tab has nothing left to read.
+    return {};
+  }
+}
+
+/** Drop a recording without building it: its context is closing or a new one starts. */
+function dropRecording(owned: OwnedSurface): void {
+  const recording = owned.recording;
+  if (recording === undefined) return;
+  owned.recording = undefined;
+  recording.frames.withhold(performance.now());
+  endScreencast(owned, recording);
+}
+
 interface DialogReport {
   readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
   readonly message: string;
@@ -4118,11 +4495,12 @@ async function guardDialogs(
   const client = view.webContents.debugger;
   // A page that has not loaded yet is guarded too: its first load is when a
   // dialog most often opens.
-  // An attachment the device emulation holds is the agent's own: the guard
-  // listens on it and leaves it attached when the action ends.
+  // An attachment the device emulation or a recording holds is the agent's
+  // own, and one the person's popup watch holds is theirs: the guard listens on
+  // it and leaves it attached when the action ends.
   // Read first: it drops what an attachment that is gone used to hold.
-  const emulation = emulationOf(client);
-  const reused = client.isAttached() && (emulation.held || humanDebuggers.has(client));
+  const held = attachmentHeld(client) || humanDebuggers.has(client);
+  const reused = client.isAttached() && held;
   if ((client.isAttached() && !reused) || client.on === undefined) return async () => undefined;
   if (!reused) {
     try {
@@ -4164,9 +4542,9 @@ async function guardDialogs(
     client.removeListener?.("message", listener);
     agentDialogGuards.set(client, Math.max(0, (agentDialogGuards.get(client) ?? 1) - 1));
     agentGuardEnded.set(client, Date.now());
-    // The attachment holds the page's touch or color scheme, or the person's
-    // popup watch: it outlives the action.
-    if (emulation.held || humanDebuggers.has(client)) return;
+    // The attachment holds the page's touch, color scheme, or recording, or the
+    // person's popup watch: it outlives the action.
+    if (attachmentHeld(client) || humanDebuggers.has(client)) return;
     detachAgentDebugger(client);
   };
 }

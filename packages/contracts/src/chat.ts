@@ -1,3 +1,4 @@
+import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
@@ -128,6 +129,7 @@ export type ChatQuestionOption = typeof ChatQuestionOption.Type;
  * each carrying its place in the set.
  */
 export const ChatAttemptQuestion = Schema.Struct({
+  questionnaire: Schema.optional(Questionnaire),
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
@@ -146,12 +148,13 @@ export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
 
 /** A question the person answered, kept on the attempt that asked it. */
 export const ChatAttemptAnsweredQuestion = Schema.Struct({
+  questionnaire: Schema.optional(Questionnaire),
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
-  answer: ChatQuestionText,
+  answer: QuestionnaireAnswerText,
   answeredAt: UtcTimestamp,
 })
   .annotations(strict)
@@ -763,7 +766,7 @@ export const AnswerChatTurnQuestionCommand = Schema.Struct({
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  answer: QuestionnaireAnswerText,
 }).annotations(strict);
 
 export const DeleteChatThreadCommand = Schema.Struct({

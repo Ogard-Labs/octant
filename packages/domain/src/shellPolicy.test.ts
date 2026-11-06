@@ -163,6 +163,8 @@ describe("shell settings policy", () => {
       transcriptTextSize: "small",
       transcriptWidth: "narrow",
       usageBars: "smooth",
+      replyDetail: "low",
+      threadReplyDetail: [],
       showThreadProviderIcons: true,
       showThreadStats: true,
       homeCards: { order: [], visibility: [] },

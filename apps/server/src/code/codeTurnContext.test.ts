@@ -115,7 +115,11 @@ describe("composeCodeProfileContext", () => {
         },
       }),
     ]);
-    expect(composed.blocks).toEqual([{ kind: "instructions", text: "Review diffs in isolation." }]);
+    // A skill is third-party text: it travels as a skill block, which Codex
+    // sends as user-level context, never as Octant's developer instructions.
+    expect(composed.blocks).toEqual([
+      { kind: "skill-instructions", text: "Review diffs in isolation." },
+    ]);
     // The window accounting names a skill apart from a profile's instructions.
     expect(composed.sent).toEqual({ instructions: [], skills: composed.blocks });
   });
