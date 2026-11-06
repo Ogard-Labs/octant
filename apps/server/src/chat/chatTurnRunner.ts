@@ -1,3 +1,5 @@
+import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contracts";
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
@@ -219,6 +221,7 @@ export interface ChatTurnRunnerOptions {
  * without an answer.
  */
 interface OpenChatQuestion {
+  readonly questionnaire?: Questionnaire;
   readonly requestId: string;
   readonly deliver: (answer: string) => void;
   readonly answered: Promise<ChatAttempt>;
@@ -330,6 +333,12 @@ export class ChatTurnRunner {
   }): Promise<ChatAttempt | undefined> {
     const question = this.#openQuestions.get(input.attemptId);
     if (question === undefined || question.requestId !== input.requestId) return undefined;
+    if (
+      question.questionnaire !== undefined &&
+      validateQuestionnaireAnswer(question.questionnaire, input.answer).status === "invalid"
+    )
+      return undefined;
+    this.#openQuestions.delete(input.attemptId);
     question.deliver(input.answer);
     return await question.answered;
   }
@@ -694,6 +703,9 @@ export class ChatTurnRunner {
             abandonAnswered = reject;
           });
           openQuestions.set(String(input.attempt.id), {
+            ...(question.questionnaire === undefined
+              ? {}
+              : { questionnaire: question.questionnaire }),
             requestId: question.requestId,
             deliver: (answer) => {
               void Effect.runPromise(Deferred.succeed(answerDeferred, answer)).catch(
@@ -1184,6 +1196,7 @@ export class ChatTurnRunner {
                     let parsedInput: {
                       readonly prompt?: unknown;
                       readonly options?: unknown;
+                      readonly questionnaire?: unknown;
                     };
                     try {
                       const decoded: unknown = JSON.parse(event.inputJson);
@@ -1192,10 +1205,28 @@ export class ChatTurnRunner {
                           ? (decoded as {
                               readonly prompt?: unknown;
                               readonly options?: unknown;
+                              readonly questionnaire?: unknown;
                             })
                           : {};
                     } catch {
                       parsedInput = {};
+                    }
+                    let questionnaire: Questionnaire | undefined;
+                    try {
+                      if (parsedInput.questionnaire !== undefined)
+                        questionnaire = Schema.decodeUnknownSync(NativeHarnessAskUserArguments)(
+                          parsedInput,
+                        ).questionnaire;
+                    } catch {
+                      yield* callProvider(
+                        connection.answerTool({
+                          sessionId: input.attempt.providerSessionId,
+                          requestId: event.requestId,
+                          resultJson: JSON.stringify({ error: "question-invalid" }),
+                          isError: true,
+                        }),
+                      );
+                      return;
                     }
                     const prompt =
                       typeof parsedInput.prompt === "string"
@@ -1204,7 +1235,7 @@ export class ChatTurnRunner {
                     const rawOptions = Array.isArray(parsedInput.options)
                       ? parsedInput.options
                       : [];
-                    const options = rawOptions
+                    const options = (questionnaire === undefined ? rawOptions : [])
                       .filter((option): option is string => typeof option === "string")
                       .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
                       .map(boundedQuestionText)
@@ -1226,13 +1257,16 @@ export class ChatTurnRunner {
                         requestId: event.requestId,
                         prompt,
                         options,
+                        ...(questionnaire === undefined ? {} : { questionnaire }),
                       }),
                     );
                     yield* callProvider(
                       connection.answerTool({
                         sessionId: input.attempt.providerSessionId,
                         requestId: event.requestId,
-                        resultJson: JSON.stringify({ answer }),
+                        resultJson: JSON.stringify({
+                          answer: questionnaire === undefined ? answer : JSON.parse(answer),
+                        }),
                         isError: false,
                       }),
                     );

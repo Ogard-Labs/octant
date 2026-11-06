@@ -574,3 +574,21 @@ table.
   compacted, so the turn that carries it does not summarize it again. An endpoint that never reports the model's window,
   such as some Azure AI Foundry deployments, gives the lead no figure: the tool
   says the context is unavailable instead of reporting room against an estimate.
+
+## Answering a questionnaire
+
+An agent can ask a few related questions together, inline in your thread.
+Choose one option for a single-choice question, or tick several for a
+multiple-choice question. A recommended option starts unselected. When
+available, **Write another answer** lets you supply an alternative.
+Use **Anything to add?** to qualify your choices with an optional comment.
+
+Nothing is sent while you make your choices. **Send answers** sends the
+complete set and lets the agent continue. If delivery fails, your draft stays
+available. Submitted questionnaires become an expandable **Answers sent**
+summary, including your comment, and remain readable after reopening the
+thread. Another window answering the same request settles it everywhere.
+
+Questionnaires use Octant's app-owned question tool across providers that
+support app tools. They create no Canvas and grant no extra permissions.
+Never enter a password or API key in a questionnaire.

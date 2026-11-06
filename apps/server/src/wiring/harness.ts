@@ -593,7 +593,7 @@ export function wireHarness(deps: HarnessDependencies) {
   // reaches the observer and the lead fallback.
   const nativeHarnessHooks = {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
-      nativeHarnessQuestions.answer(threadId, questionId, answer);
+      return nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
     observeRemoteCommand: (
       threadId: string,

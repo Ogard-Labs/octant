@@ -1,3 +1,5 @@
+import { type Questionnaire } from "@octant/contracts";
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import {
   DEFAULT_WEB_SEARCH_RESULTS,
   decodeUtcTimestamp,
@@ -168,6 +170,7 @@ export interface NativeHarnessToolPorts {
   /** Asks the person and waits; resolves with the answer or how the wait ended. */
   readonly askUser?: (input: {
     readonly prompt: string;
+    readonly questionnaire?: Questionnaire;
     readonly options: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
   }) => Promise<
@@ -495,10 +498,17 @@ async function execute(
       const input = args as NativeHarnessAskUserArguments;
       const outcome = await ports.askUser!({
         prompt: input.prompt,
-        options: input.options ?? [],
+        ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
+        options: input.questionnaire === undefined ? (input.options ?? []) : [],
         ...(signal === undefined ? {} : { signal }),
       });
-      if (outcome.status === "answered") return ok({ answer: outcome.answer });
+      if (outcome.status === "answered") {
+        if (input.questionnaire === undefined) return ok({ answer: outcome.answer });
+        const validated = validateQuestionnaireAnswer(input.questionnaire, outcome.answer);
+        return validated.status === "valid"
+          ? ok({ answer: validated.response })
+          : refused("question-invalid-answer", validated.message);
+      }
       if (outcome.status === "too-many-waiting") {
         return refused(
           "question-too-many-waiting",

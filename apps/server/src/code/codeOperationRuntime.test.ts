@@ -3457,6 +3457,66 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("keeps a grouped question pending after an invalid answer and journals its full ask", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const answerQuestion = vi.fn(() => "invalid-answer" as const);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async () => undefined,
+        answerQuestion,
+      },
+    });
+    const operation = operationId(907);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const questionnaire = {
+      questions: [
+        {
+          id: "formats",
+          prompt: "Which formats?",
+          selection: "multiple" as const,
+          options: [{ id: "pdf", label: "PDF" }],
+        },
+      ],
+    };
+    expect(
+      fixture.runtime.raiseHarnessQuestion?.({
+        threadId: String(threadId),
+        questionId: "grouped-question",
+        prompt: "Exports",
+        options: [],
+        questionnaire,
+      }),
+    ).toBe(true);
+    const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+    expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
+      questionnaire,
+    });
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "answer-provider-input",
+      operationId: operationId(908),
+      threadId,
+      checkoutId,
+      requestId: "grouped-question",
+      response: fixture.response,
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", failure: { category: "invalid" } });
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+    expect(answerQuestion).toHaveBeenCalledOnce();
+    fixture.close();
+  });
+
   it("lists what a running turn waits on for a window that may answer it, and drops each once answered", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

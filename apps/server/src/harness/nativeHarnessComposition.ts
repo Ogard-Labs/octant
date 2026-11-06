@@ -535,6 +535,7 @@ export function createNativeHarnessComposition(
               projectId: scope.projectId,
               lead: scope.lead,
               prompt: input.prompt,
+              ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
               options: input.options,
               signal: input.signal,
             }),

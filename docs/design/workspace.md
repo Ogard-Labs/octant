@@ -1140,3 +1140,37 @@ kinds, labelling the leftover; it adds no authority of its own.
 - Render changed interactions at the affected window sizes, including keyboard
   navigation and unavailable states. A documentation-only consolidation needs
   consistency and link checks; it is not evidence of fresh rendered QA.
+
+## Inline questionnaires
+
+An agent can ask for related decisions through the app-owned `ask-user` tool
+in Chat, Work, and Code. A questionnaire belongs in its originating thread,
+with one compact card containing up to four questions. It creates no Canvas.
+Each question offers one choice or several choices, optional descriptions,
+and an optional written alternative. Recommendations are labelled and never
+preselected. A person can add a comment alongside their choices.
+
+Choosing an option only edits the draft. **Send answers** submits the complete
+set once; the host validates question and option identities, required answers,
+and selection limits before settling the request. Empty selection is allowed
+only when the question explicitly permits zero choices. A submitted answer
+from another window settles the same request; a stale or duplicate answer
+cannot replace it. Validation and delivery failures keep the draft available.
+
+Submitted questionnaires collapse into an expandable, readable summary of
+the questions, selected labels, written answers, and comment. The journal
+keeps the definition and response so the summary survives reopening. Expired,
+cancelled, and recovered requests cannot resume a dead provider session.
+Answers convey preferences within existing thread authority and never grant
+permissions. Credentials continue through the credential request mechanism.
+
+The tool carries a bounded typed `questionnaire` alongside its existing prompt.
+For example, `{ "prompt": "Choose the exports", "questionnaire": { "questions":
+[{ "id": "formats", "prompt": "Which formats?", "selection": "multiple",
+"options": [{ "id": "pdf", "label": "PDF" }, { "id": "md", "label": "Markdown" }] }] } }`.
+The existing answer channel carries a versioned JSON response with question
+IDs, selected option IDs, optional written alternatives, and a comment. The
+tool returns the decoded response to the model. This keeps the existing
+authenticated, thread-scoped answer routes and one-use request identity.
+Provider-native question formats keep their existing adapter contracts; the
+questionnaire capability uses the provider-neutral app tool boundary.

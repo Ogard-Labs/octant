@@ -1297,7 +1297,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 }).catch(() => undefined);
               }}
               onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
-                void enqueueThreadCommand(async (previous) => {
+                return enqueueThreadCommand(async (previous) => {
                   const result = await props.controller.execute({
                     kind: "answer-chat-turn-question",
                     threadId: view.thread.id,
@@ -1307,8 +1307,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     requestId,
                     answer,
                   });
-                  return { value: undefined, base: baseFromResult(result) };
-                }).catch(() => undefined);
+                  return {
+                    value: result?.kind === "attempt-updated",
+                    base: baseFromResult(result),
+                  };
+                }).catch(() => false);
               }}
               onDismissQuestion={(turnId, attemptId) => {
                 void enqueueThreadCommand(async (previous) => {

@@ -1,3 +1,4 @@
+export * from "./questionnaire";
 export * from "./browserAutomationPolicy";
 export * from "./browserDownloadPolicy";
 export * from "./browserPageSnapshot";

@@ -50,13 +50,34 @@ const thread = {
 } as unknown as CodeThread;
 
 describe("native harness composition", () => {
-  it.each([true, false])(
-    "offers child questions through either harness and refuses tools after authority is revoked (%s)",
-    async (isHarness) => {
+  it.each([
+    { isHarness: true, grouped: false },
+    { isHarness: false, grouped: false },
+    { isHarness: true, grouped: true },
+    { isHarness: false, grouped: true },
+  ])(
+    "offers questions through either harness and refuses tools after authority is revoked ($isHarness, $grouped)",
+    async ({ isHarness, grouped }) => {
+      const questionnaire = {
+        questions: [
+          {
+            id: "design",
+            prompt: "Which parts?",
+            selection: "multiple",
+            options: [{ id: "existing", label: "Existing design" }],
+          },
+        ],
+      };
+      const response = {
+        version: 1,
+        answers: [{ questionId: "design", selectedOptionIds: ["existing"] }],
+        comment: "Keep the spacing",
+      };
+      const answer = grouped ? JSON.stringify(response) : "Use the existing design";
       let authorized = true;
       const ask = vi.fn(async () => ({
         status: "answered" as const,
-        answer: "Use the existing design",
+        answer,
       }));
       const composition = createNativeHarnessComposition({
         isChildAuthorityCurrent: () => authorized,
@@ -104,11 +125,16 @@ describe("native harness composition", () => {
       expect(
         await tools?.execute({
           name: "ask-user",
-          inputJson: JSON.stringify({ prompt: "Which design?", options: [] }),
+          inputJson: JSON.stringify({
+            prompt: "Which design?",
+            options: [],
+            ...(grouped ? { questionnaire } : {}),
+          }),
           signal: new AbortController().signal,
         }),
-      ).toMatchObject({ result: { answer: "Use the existing design" } });
+      ).toMatchObject({ result: { answer: grouped ? response : answer } });
       expect(ask).toHaveBeenCalledOnce();
+      if (grouped) expect(ask).toHaveBeenCalledWith(expect.objectContaining({ questionnaire }));
       authorized = false;
       expect(
         await tools?.execute({

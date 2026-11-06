@@ -153,6 +153,13 @@ The design rests on a small set of invariants that every package obeys:
   question set reaches Chat, Work, and Code with a distinct request id. The
   adapter collects answers in the provider's original question order, rejects
   duplicate answers, and settles the underlying callback only when complete.
+- **App-owned questionnaires stay in their thread.** The provider-neutral
+  `ask-user` tool can collect a bounded group of single- or multiple-choice
+  answers and an optional comment. The host validates the complete response
+  against the journaled ask before settling its one-use request. It conveys
+  preferences, never permission. [Workspace: inline questionnaires](design/workspace.md#inline-questionnaires)
+  owns presentation and submitted summaries; provider-native question adapters
+  retain their existing callback contracts.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
   never silently emulated. Claude Code, Codex, Mistral Vibe, and OpenCode are
