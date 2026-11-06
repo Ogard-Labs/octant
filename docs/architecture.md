@@ -9305,6 +9305,25 @@ mechanisms are:
   the person proves presence, or for a short administration window after one
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
   Paired remote clients keep their own device-session path, unchanged.
+  **A native Nightly main is admitted per window.** Octant Nightly never holds
+  the bridge secret. Its window registration adds a main-only token, distinct
+  from the window capability and renderer identity, that Stable's main hands
+  only to the registered Nightly main and to the host. With that window's
+  capability and token, the Nightly main may call a closed list of brokered
+  routes in place of the secret, for that window alone: Project, plugin, skill
+  and runtime-binary picker receipts, the Code external editor and checkout
+  open targets, preview handoff, support bundle save, Code operation approval
+  prepare, confirm and cancel, and provider key status, set and clear. The
+  host keeps the list in one place and advertises its features in the window
+  bootstrap. The token is valid only while that window's native lease lives:
+  expiry, revocation and lease loss end it. A request with a renderer origin,
+  a forwarded remote principal, an ordinary local window's capability, or
+  another window's capability or window ID is refused. Administrative routes
+  (hub, private listener, remote devices and pairing, launch sessions, owner
+  unlock, host identity, window registration, provider sign-in and provider
+  removal) stay secret-only. Ordinary renderer requests have the token header
+  stripped, and the Nightly main keeps the token in memory only
+  ([Octant Nightly](design/nightly-app.md)).
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority

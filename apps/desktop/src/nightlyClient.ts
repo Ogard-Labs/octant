@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import type { DesktopIdentity } from "@octant/host-runtime";
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
+import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
@@ -130,6 +131,8 @@ export async function runNightlyClient(
   }
   const capabilities = new Map<number, string>();
   const bootstraps = new Map<number, NightlyWindowBootstrap>();
+  // Later brokered pickers and handoffs read their host headers from here.
+  const nativeMain = createNativeMainAuthority();
   let updates: Awaited<ReturnType<typeof createNightlyAppUpdates>> | undefined;
   const appUpdates = () => {
     if (updates === undefined) throw new Error("Nightly updates are not ready.");
@@ -365,6 +368,7 @@ export async function runNightlyClient(
             windows.set(id, window);
             capabilities.set(id, bootstrap.capability);
             bootstraps.set(id, bootstrap);
+            nativeMain.remember(id, bootstrap);
             trusted.set(id, {
               serverOrigin: bootstrap.hostOrigin,
               rendererIdentity: bootstrap.rendererIdentity,
@@ -392,6 +396,7 @@ export async function runNightlyClient(
               );
               capabilities.delete(id);
               bootstraps.delete(id);
+              nativeMain.forget(id);
               trusted.remove(id);
             });
             return {

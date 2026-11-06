@@ -1,5 +1,6 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 import { DESKTOP_FLAVOR_IDENTITIES } from "@octant/host-runtime";
+import { NATIVE_MAIN_AUTHORITY_HEADER } from "@octant/contracts/nightly-browser";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WindowBounds } from "./nativeWindowState";
@@ -24,7 +25,8 @@ export function decorateTrustedRendererHeaders(input: {
   for (const name of Object.keys(requestHeaders)) {
     if (
       name.toLowerCase() === RENDERER_IDENTITY_HEADER ||
-      name.toLowerCase() === "x-octant-human-presentation"
+      name.toLowerCase() === "x-octant-human-presentation" ||
+      name.toLowerCase() === NATIVE_MAIN_AUTHORITY_HEADER
     )
       delete requestHeaders[name];
   }

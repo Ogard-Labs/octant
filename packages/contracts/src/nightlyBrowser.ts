@@ -32,6 +32,35 @@ export const NativeWindowSource = Schema.Struct({
 }).annotations(strict);
 export type NativeWindowSource = typeof NativeWindowSource.Type;
 
+/**
+ * Header that carries a native window's main-only token. Only the native main
+ * process sends it; the trusted renderer header decoration strips it.
+ */
+export const NATIVE_MAIN_AUTHORITY_HEADER = "x-octant-native-main-authority";
+
+/** Brokered host features a native Nightly main may reach with its main-only token. */
+export const NIGHTLY_HOST_FEATURES = [
+  "project-root-receipts",
+  "local-folder-receipts",
+  "runtime-binary-receipts",
+  "code-external-editor-target",
+  "code-checkout-open-target",
+  "preview-handoff",
+  "support-bundle-save",
+  "code-operation-approval",
+  "provider-credentials",
+] as const;
+export const NightlyHostFeature = Schema.Literal(...NIGHTLY_HOST_FEATURES);
+export type NightlyHostFeature = typeof NightlyHostFeature.Type;
+
+/**
+ * A client reads names it knows and ignores newer ones, so a newer host never
+ * refuses an older client's window over a feature that client cannot use.
+ */
+const AdvertisedHostFeature = Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/));
+export const AdvertisedHostFeatures = Schema.Array(AdvertisedHostFeature).pipe(Schema.maxItems(64));
+export const decodeAdvertisedHostFeatures = Schema.decodeUnknownSync(AdvertisedHostFeatures);
+
 /** Separate from status: only an authenticated window registration returns this. */
 export const NightlyWindowBootstrap = Schema.Struct({
   kind: Schema.Literal("registered"),
@@ -42,6 +71,10 @@ export const NightlyWindowBootstrap = Schema.Struct({
   hostInstance: Schema.UUID,
   capability: Token,
   rendererIdentity: Token,
+  /** Main-only; distinct from the renderer identity. Absent from an older host. */
+  nativeMainToken: Schema.optional(Token),
+  /** Absent from an older host, which brokers nothing for a native main. */
+  hostFeatures: Schema.optional(AdvertisedHostFeatures),
   leaseMs: Schema.Literal(15_000),
 }).annotations(strict);
 export type NightlyWindowBootstrap = typeof NightlyWindowBootstrap.Type;
