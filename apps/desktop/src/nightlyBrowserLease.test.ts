@@ -7,7 +7,9 @@ import {
 
 const clientHandle = "00000000-0000-4000-8000-000000000593";
 const peer = "a".repeat(64);
-function fixture(onCount?: (count: number) => void) {
+const hostFeatures = ["project-root-receipts", "a-feature-from-a-newer-host"];
+
+function fixture(onCount?: (count: number) => void, nativeMain = true) {
   let receive: (event: unknown) => void = () => {};
   let elapsed = 0;
   let expire = () => {};
@@ -30,7 +32,7 @@ function fixture(onCount?: (count: number) => void) {
     return init?.method === "DELETE"
       ? new Response(null, { status: 204 })
       : Response.json(
-          { expiresAt: 15_000, generation: 1, leaseMs: 15_000 },
+          { expiresAt: 15_000, generation: 1, leaseMs: 15_000, hostFeatures },
           { status: init?.method === "POST" ? 201 : 200 },
         );
   });
@@ -58,7 +60,7 @@ function fixture(onCount?: (count: number) => void) {
       responses.set(requestId, resolve);
       receive({
         kind: "request",
-        request: { requestId, peer, windowId: clientHandle, generation: 1, operation },
+        request: { requestId, peer, windowId: clientHandle, generation: 1, operation, nativeMain },
       } satisfies NativeWindowEvent);
     });
   return {
@@ -90,10 +92,90 @@ describe("Nightly native window lease ownership", () => {
       expect(f.owner.hasWindow(reply.windowId)).toBe(true);
       expect(JSON.stringify(reply)).not.toContain("private-admin");
       expect(f.requests[0]?.body.windowId).toBe(reply.windowId);
+      // The host learns the main-only token; the reply carries it and the
+      // host's brokered features, and it is never the renderer identity.
+      expect(reply.nativeMainToken).toBeDefined();
+      expect(f.requests[0]?.body.nativeMainToken).toBe(reply.nativeMainToken);
+      expect(reply.nativeMainToken).not.toBe(reply.rendererIdentity);
+      expect(reply.nativeMainToken).not.toBe(reply.capability);
+      expect(reply.hostFeatures).toEqual(hostFeatures);
       f.replaceHost();
       expect(f.owner.hasWindow(reply.windowId)).toBe(false);
     } finally {
       await f.owner.close();
+    }
+  });
+
+  it("gives a client that does not accept native-main fields only its original bootstrap", async () => {
+    const f = fixture(undefined, false);
+    try {
+      const reply = await f.send(1, "register");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      // An older client decodes these exact keys strictly and refuses any other.
+      expect(Object.keys(reply).sort()).toEqual(
+        [
+          "capability",
+          "generation",
+          "hostInstance",
+          "hostOrigin",
+          "kind",
+          "leaseMs",
+          "protocol",
+          "rendererIdentity",
+          "windowId",
+        ].sort(),
+      );
+      expect(JSON.stringify(reply)).not.toContain(String(f.requests[0]?.body.nativeMainToken));
+      expect(f.owner.hasWindow(reply.windowId)).toBe(true);
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("registers the original way with an older host and opens the window without brokered fields", async () => {
+    const f = fixture();
+    const normal = f.fetch.getMockImplementation();
+    f.fetch.mockImplementationOnce(async (input, init) => {
+      const body: unknown = JSON.parse(String(init?.body));
+      if (typeof body === "object" && body !== null && "nativeMainToken" in body)
+        return Response.json(
+          { category: "invalid", message: "Request body is invalid." },
+          { status: 400 },
+        );
+      return normal === undefined ? new Response(null, { status: 500 }) : normal(input, init);
+    });
+    try {
+      const reply = await f.send(1, "register");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      const posts = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+      expect(posts).toHaveLength(2);
+      expect(Object.keys(JSON.parse(String(posts[0]?.[1]?.body)))).toContain("nativeMainToken");
+      expect(Object.keys(JSON.parse(String(posts[1]?.[1]?.body))).sort()).toEqual(
+        ["capability", "rendererIdentity", "source", "windowId"].sort(),
+      );
+      expect(reply.nativeMainToken).toBeUndefined();
+      expect(reply.hostFeatures).toBeUndefined();
+      expect(f.owner.hasWindow(reply.windowId)).toBe(true);
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("does not retry a registration the host refused for any other reason", async () => {
+    for (const refusal of [
+      new Response(null, { status: 409 }),
+      new Response(null, { status: 500 }),
+      Response.json({ category: "unauthorized" }, { status: 400 }),
+      new Response("not json", { status: 400 }),
+    ]) {
+      const f = fixture();
+      f.fetch.mockImplementationOnce(async () => refusal);
+      try {
+        expect((await f.send(1, "register")).kind).toBe("refused");
+        expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+      } finally {
+        await f.owner.close();
+      }
     }
   });
 
@@ -137,7 +219,10 @@ describe("Nightly native window lease ownership", () => {
         finish = resolve;
       });
       acquired = true;
-      return Response.json({ expiresAt: 15_000, generation: 1, leaseMs: 15_000 }, { status: 201 });
+      return Response.json(
+        { expiresAt: 15_000, generation: 1, leaseMs: 15_000, hostFeatures },
+        { status: 201 },
+      );
     });
     f.fetch.mockImplementation(async (input, init) => {
       if (init?.method === "DELETE") expect(acquired).toBe(true);
@@ -198,7 +283,7 @@ it("counts only acknowledged current-host leases and not pending registration", 
   );
   const pending = f.send(1, "register");
   expect(f.owner.activeWindowCount()).toBe(0);
-  settle(Response.json({ generation: 1, leaseMs: 15_000 }, { status: 201 }));
+  settle(Response.json({ generation: 1, leaseMs: 15_000, hostFeatures }, { status: 201 }));
   await pending;
   expect(f.owner.activeWindowCount()).toBe(1);
   f.replaceHost();

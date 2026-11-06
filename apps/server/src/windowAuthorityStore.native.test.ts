@@ -44,6 +44,48 @@ function fixture() {
 }
 
 describe("Native client window authority", () => {
+  it("admits a native main token only with its live lease, through renewal, until revoked", () => {
+    const f = fixture();
+    const nativeMainToken = token();
+    f.store.registerNative({
+      windowId,
+      capability: f.capability,
+      rendererIdentity: f.rendererIdentity,
+      nativeMainToken,
+      source,
+      now: 1_000,
+    });
+    expect(f.store.authenticateNativeMain(f.capability, nativeMainToken, 2_000)).toBe(windowId);
+    expect(() => f.store.authenticateNativeMain(f.capability, f.rendererIdentity, 2_000)).toThrow(
+      WindowAuthorityError,
+    );
+    f.advance(10_000);
+    f.store.renewNative({ windowId, capability: f.capability, source, now: 11_000 });
+    f.advance(20_000);
+    expect(f.store.authenticateNativeMain(f.capability, nativeMainToken, 21_000)).toBe(windowId);
+    f.store.revokeNative({ windowId, capability: f.capability, source });
+    expect(() => f.store.authenticateNativeMain(f.capability, nativeMainToken, 21_000)).toThrow(
+      WindowAuthorityError,
+    );
+  });
+
+  it("refuses a native main token that repeats the window's capability or renderer identity", () => {
+    const f = fixture();
+    for (const nativeMainToken of [f.capability, f.rendererIdentity]) {
+      expect(() =>
+        f.store.registerNative({
+          windowId,
+          capability: f.capability,
+          rendererIdentity: f.rendererIdentity,
+          nativeMainToken,
+          source,
+          now: 1_000,
+        }),
+      ).toThrow(WindowAuthorityError);
+    }
+    expect(f.store.size()).toBe(0);
+  });
+
   it("refuses native window and renderer requests at the exact short lease boundary", () => {
     const f = fixture();
     f.register();

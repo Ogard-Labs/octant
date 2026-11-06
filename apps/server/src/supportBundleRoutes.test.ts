@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,7 +73,7 @@ function setup() {
       };
     },
   });
-  return { handler, connection, directory, builds: () => built };
+  return { handler, connection, directory, windowAuthorityStore, builds: () => built };
 }
 
 function call(
@@ -247,6 +248,50 @@ describe("support bundle routes", () => {
       ];
       expect(refusals.map((response) => response?.status)).toEqual([401, 401, 401, 400, 400]);
       expect(existsSync(target)).toBe(false);
+    });
+
+    it("lets a native main create a new file there but never replace one", async () => {
+      const { handler, directory, windowAuthorityStore } = setup();
+      const token = () => randomBytes(32).toString("base64url");
+      const native = { capability: token(), nativeMainToken: token() };
+      windowAuthorityStore.registerNative({
+        windowId: "70000000-0000-4000-8000-000000000002" as never,
+        ...native,
+        rendererIdentity: token(),
+        source: {
+          kind: "native-nightly",
+          processRegistration: token(),
+          incarnation: "6".repeat(64),
+          generation: 1,
+        },
+        now: nowMs,
+      });
+      const headers = {
+        "x-octant-window-capability": native.capability,
+        "x-octant-native-main-authority": native.nativeMainToken,
+      };
+      const fresh = join(directory, "new.zip");
+      const created = await handler(
+        save("/api/diagnostics/bundle/save", { absolutePath: fresh }, headers),
+      );
+      expect(created?.status).toBe(200);
+      expect(readFileSync(fresh).readUInt32LE(0)).toBe(0x04034b50);
+
+      const existing = join(directory, "keep.txt");
+      writeFileSync(existing, "keep me");
+      const refused = await handler(
+        save("/api/diagnostics/bundle/save", { absolutePath: existing }, headers),
+      );
+      expect(refused?.status).toBe(409);
+      expect(readFileSync(existing, "utf8")).toBe("keep me");
+      expect(readdirSync(directory).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+
+      // Stable's main keeps replacing the file its own save dialog confirmed.
+      const replaced = await handler(
+        save("/api/diagnostics/bundle/save", { absolutePath: existing }, secret),
+      );
+      expect(replaced?.status).toBe(200);
+      expect(readFileSync(existing).readUInt32LE(0)).toBe(0x04034b50);
     });
 
     it("saves nothing and records nothing when the place cannot be written", async () => {

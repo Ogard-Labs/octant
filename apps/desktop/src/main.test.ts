@@ -163,6 +163,7 @@ describe("development renderer startup", () => {
       requestHeaders: {
         "X-Octant-Renderer-Identity": "forged",
         "X-Octant-Human-Presentation": "forged",
+        "X-Octant-Native-Main-Authority": "forged",
         accept: "application/json",
       },
       requestUrl: "http://127.0.0.1:13773/api/shell/bootstrap",
@@ -176,6 +177,8 @@ describe("development renderer startup", () => {
     expect(trusted["X-Octant-Renderer-Identity"]).toBeUndefined();
     expect(trusted["X-Octant-Human-Presentation"]).toBeUndefined();
     expect(trusted["x-octant-human-presentation"]).toBeUndefined();
+    expect(trusted["X-Octant-Native-Main-Authority"]).toBeUndefined();
+    expect(trusted["x-octant-native-main-authority"]).toBeUndefined();
 
     const untrustedFrame = decorateTrustedRendererHeaders({
       requestHeaders: { "x-octant-renderer-identity": "forged" },
