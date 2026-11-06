@@ -447,6 +447,22 @@ describe("SettingsView", () => {
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
   });
 
+  it("shows one Managed in Octant line where a Nightly client's remote access would be", () => {
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      hostBridge: {
+        managedInOctant: true,
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+      } as never,
+    });
+
+    const section = screen.getByRole("region", { name: "Remote access" });
+    expect(section).toHaveTextContent(/^Managed in Octant\./);
+    expect(within(section).getAllByRole("paragraph")).toHaveLength(1);
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(section).not.toHaveTextContent(/happen on the host machine/);
+  });
+
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {
     renderSettings({ initialDeepLink: { section: "remote-access" } });
 

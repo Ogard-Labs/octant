@@ -84,6 +84,8 @@ export function createMainBrowserWindowOptions(options: {
   readonly initialThreadMode?: "code" | "work";
   readonly initialThreadId?: string;
   readonly localUpdatePreferences?: boolean;
+  /** An Octant Nightly client window, whose bridge omits Octant-only administration. */
+  readonly nightlyClient?: boolean;
   readonly applicationFlavor?: "stable" | "nightly";
   /** Nightly's running Data role; present only where Nightly offers the choice. */
   readonly applicationData?: "octant" | "test-data";
@@ -121,6 +123,7 @@ export function createMainBrowserWindowOptions(options: {
             ]
           : []),
         ...(options.localUpdatePreferences === true ? ["--octant-local-update-preferences"] : []),
+        ...(options.nightlyClient === true ? ["--octant-nightly-client"] : []),
         `--octant-project-capability=${options.capability}`,
         `--octant-window-id=${options.windowId}`,
         ...(options.initialProjectId === undefined
