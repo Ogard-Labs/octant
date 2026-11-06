@@ -29,7 +29,6 @@ import {
 } from "@octant/contracts";
 import { prependEarlierTurns } from "@octant/domain";
 import { waitForReconnect } from "../lib/waitForReconnect";
-import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -41,7 +40,6 @@ import {
   type CodeOperationFailure,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
-  type CodeForkMergeBack,
   type CodeForkMergeBackOutcome,
   type CodeThreadFollowUpView,
   type CodeAttachmentId,
@@ -75,6 +73,7 @@ import {
   createCodeReadCursorStore,
   isActive,
   projectConversationTurns,
+  codeReplyMetadataUpdate,
   providerAnswerOutcome,
   providerRequestFromEvent,
   readConversationEvidence,
@@ -1488,48 +1487,12 @@ export function useCodeController(options: CodeControllerOptions) {
                     noteProviderRequest(event);
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
-                    if (event.kind === "conversation-turn-review-preview") {
-                      const preview = event.preview;
-                      setConversation((current) =>
-                        current.map((message) => {
-                          if (message.id !== `${operationId}:assistant`) return message;
-                          const capture = preview.capture ?? message.reviewPreview?.capture;
-                          return {
-                            ...message,
-                            reviewPreview: {
-                              ...preview,
-                              ...(capture === undefined ? {} : { capture }),
-                            },
-                          };
-                        }),
-                      );
-                    }
-                    if (event.kind === "conversation-turn-changed-files") {
-                      const changedFiles = event.changedFiles;
+                    const updateReply = codeReplyMetadataUpdate(event);
+                    if (updateReply !== undefined) {
                       setConversation((current) =>
                         current.map((message) =>
                           message.id === `${operationId}:assistant`
-                            ? { ...message, changedFiles }
-                            : message,
-                        ),
-                      );
-                    }
-                    if (event.kind === "context-handoff-attached") {
-                      const handoff = handoffSummary(event);
-                      setConversation((current) =>
-                        current.map((message) =>
-                          message.id === `${operationId}:assistant`
-                            ? { ...message, handoff }
-                            : message,
-                        ),
-                      );
-                    }
-                    if (event.kind === "fork-context-delivered") {
-                      const mergeBack = forkMergeBackSummary(event);
-                      setConversation((current) =>
-                        current.map((message) =>
-                          message.id === `${operationId}:assistant`
-                            ? withForkMergeBack(message, mergeBack)
+                            ? updateReply(message)
                             : message,
                         ),
                       );
@@ -2857,43 +2820,11 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               // The host journals the change list just before the turn settles,
               // so the reply gains its files here rather than on the next reopen.
-              if (event.kind === "conversation-turn-review-preview") {
-                const preview = event.preview;
-                setConversation((current) =>
-                  current.map((message) => {
-                    if (message.id !== `${operationId}:assistant`) return message;
-                    const capture = preview.capture ?? message.reviewPreview?.capture;
-                    return {
-                      ...message,
-                      reviewPreview: { ...preview, ...(capture === undefined ? {} : { capture }) },
-                    };
-                  }),
-                );
-              }
-              if (event.kind === "conversation-turn-changed-files") {
-                const changedFiles = event.changedFiles;
+              const updateReply = codeReplyMetadataUpdate(event);
+              if (updateReply !== undefined) {
                 setConversation((current) =>
                   current.map((message) =>
-                    message.id === assistantId ? { ...message, changedFiles } : message,
-                  ),
-                );
-              }
-              // Journaled before the provider is sent anything, so the reply
-              // says what was handed over while it is still being written.
-              if (event.kind === "context-handoff-attached") {
-                const handoff = handoffSummary(event);
-                setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId ? { ...message, handoff } : message,
-                  ),
-                );
-              }
-              // Journaled with the handoff, before the provider is sent anything.
-              if (event.kind === "fork-context-delivered") {
-                const mergeBack = forkMergeBackSummary(event);
-                setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId ? withForkMergeBack(message, mergeBack) : message,
+                    message.id === assistantId ? updateReply(message) : message,
                   ),
                 );
               }
@@ -3242,15 +3173,3 @@ function providerAnswerKey(answer: CodeProviderAnswer): string {
 }
 
 /** A reply gains each merge its turn carried once, however often the event replays. */
-function withForkMergeBack(
-  message: CodeConversationMessage,
-  mergeBack: CodeForkMergeBack,
-): CodeConversationMessage {
-  const existing = message.forkMergeBacks ?? [];
-  const known = existing.some(
-    (candidate) =>
-      String(candidate.forkThreadId) === String(mergeBack.forkThreadId) &&
-      String(candidate.throughOperationId) === String(mergeBack.throughOperationId),
-  );
-  return known ? message : { ...message, forkMergeBacks: [...existing, mergeBack] };
-}

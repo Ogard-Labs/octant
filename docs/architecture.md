@@ -4246,7 +4246,12 @@ or .zip>` write the same files, built by one host command
   stays `lost-in-restart` in the harness session: only Resume is offered, and
   the call it guarded never runs.
 
-- **Fast thread reads.** A thread paints from an authoritative snapshot before
+- **Fast thread reads.** Newly sent and resumed Code replies apply the same
+  review-preview, changed-file, handoff and fork-return metadata rules. Live
+  metadata targets the assistant row created by that stream, including the
+  optimistic row of a newly sent turn. Send, resume and reconnect keep their
+  own lifecycles and draft recovery.
+  A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside

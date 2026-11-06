@@ -1,3 +1,4 @@
+import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeBootstrap,
@@ -692,3 +693,39 @@ export {
   readConversationText,
   projectConversationTurns,
 };
+
+/** Only shared reply metadata; stream ownership and terminal states stay with their callers. */
+export function codeReplyMetadataUpdate(
+  event: CodeOperationEvent,
+): ((message: CodeConversationMessage) => CodeConversationMessage) | undefined {
+  switch (event.kind) {
+    case "conversation-turn-review-preview":
+      return (message) => {
+        const capture = event.preview.capture ?? message.reviewPreview?.capture;
+        return {
+          ...message,
+          reviewPreview: {
+            ...event.preview,
+            ...(capture === undefined ? {} : { capture }),
+          },
+        };
+      };
+    case "conversation-turn-changed-files":
+      return (message) => ({ ...message, changedFiles: event.changedFiles });
+    case "context-handoff-attached":
+      return (message) => ({ ...message, handoff: handoffSummary(event) });
+    case "fork-context-delivered":
+      return (message) => {
+        const mergeBack = forkMergeBackSummary(event);
+        const existing = message.forkMergeBacks ?? [];
+        const known = existing.some(
+          (candidate) =>
+            String(candidate.forkThreadId) === String(mergeBack.forkThreadId) &&
+            String(candidate.throughOperationId) === String(mergeBack.throughOperationId),
+        );
+        return known ? message : { ...message, forkMergeBacks: [...existing, mergeBack] };
+      };
+    default:
+      return undefined;
+  }
+}
