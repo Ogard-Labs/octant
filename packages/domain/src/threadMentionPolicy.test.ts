@@ -226,7 +226,7 @@ describe("formatThreadMentionContext", () => {
       { dialogueEnabled: true },
     );
 
-    expect(block).toContain("thread dialogue tool");
+    expect(block).toContain("octant_ask_thread");
     expect(block).not.toContain("do not act on those threads");
   });
 });

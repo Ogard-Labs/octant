@@ -1,5 +1,6 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   type ChatThread,
   type ChatThreadId,
@@ -43,7 +44,7 @@ import { createImageAgentTools } from "../image/imageAgentTools";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { childAgentTools } from "../chat/sideChatDelegation";
+import { withheldFromSideChat } from "../chat/sideChatToolScope";
 import { SideChatSidecarStore } from "../chat/sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
@@ -157,10 +158,11 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     readonly workThreadService: () => WorkThreadService;
     /** Wired by wireWork; read only after startup. */
     readonly workTurnService: () => WorkTurnService;
-  } & Pick<FoundationsWiring, "providerRuntimeRegistry">;
+  } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
 
 export function wireChat(deps: ChatDependencies) {
   const {
+    conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageProjection,
     agentMessageService,
@@ -249,7 +251,7 @@ export function wireChat(deps: ChatDependencies) {
       return {
         projectId: project.id,
         projectName: project.name,
-        canonicalRoot: project.binding.canonicalRoot,
+        canonicalRoot: approvedWorkingFolderRoot(project, thread.workingFolderId) ?? "",
         ...(thread.workingDirectory === undefined
           ? {}
           : { workingDirectory: String(thread.workingDirectory) }),
@@ -381,6 +383,7 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
+      conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
@@ -401,16 +404,20 @@ export function wireChat(deps: ChatDependencies) {
       },
       agentRuns: agentRunPersistence,
       resolveComputerUseTools: ({ windowId, thread }) =>
-        computerToolsFor(
-          decodeComputerUseOwner({
-            windowId,
-            threadId: thread.id,
-            mode: "chat",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-            executionPolicy: "approval-gated",
-          }),
-        ),
+        withheldFromSideChat({
+          sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
+          tools: () =>
+            computerToolsFor(
+              decodeComputerUseOwner({
+                windowId,
+                threadId: thread.id,
+                mode: "chat",
+                providerInstanceId: thread.providerInstanceId,
+                modelId: thread.modelId,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+        }),
       spendCeiling,
       persistence,
       issueContext: githubIssueContextService,
@@ -481,70 +488,80 @@ export function wireChat(deps: ChatDependencies) {
                 windowId,
                 sideChat,
               }),
-              ...chatToolContributors.map((contribute) => contribute(windowId, thread)),
               sideChatFileTools(windowId, thread.id),
-              threadDialogueService?.forThread({
-                windowId,
-                sourceThreadId: thread.id,
-                sourceTitle: thread.title,
-                targetThreadIds: threadMentionIds ?? [],
-                ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
-              }),
-              createImageAgentTools({
-                threadKind: "chat-thread",
-                scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                port: {
-                  listInstances: () => persistence.readProviderInstances(),
-                  readImageGenerationCustomSources: () =>
-                    (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                      .imageGeneration.customSources,
-                  enqueue: (input) => imageJobService.enqueue(input),
-                  listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-                },
-              }),
-              createSideTaskTools({
-                store: sideTasks,
-                threadId: String(thread.id),
-                mode: "chat",
-                projectId: thread.projectId,
-                suggestedBy: thread,
-                uuid: randomUUID,
-                clock: () => new Date().toISOString(),
+              withheldFromSideChat({
+                sideChat,
+                tools: () =>
+                  combineAppManagedToolSets(
+                    ...chatToolContributors.map((contribute) => contribute(windowId, thread)),
+                    threadDialogueService?.forThread({
+                      windowId,
+                      sourceThreadId: thread.id,
+                      sourceTitle: thread.title,
+                      targetThreadIds: threadMentionIds ?? [],
+                      ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+                    }),
+                    createImageAgentTools({
+                      threadKind: "chat-thread",
+                      scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                      port: {
+                        listInstances: () => persistence.readProviderInstances(),
+                        readImageGenerationCustomSources: () =>
+                          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                            .imageGeneration.customSources,
+                        enqueue: (input) => imageJobService.enqueue(input),
+                        listJobs: (scopeId) => imageJobService.listByScope(scopeId),
+                      },
+                    }),
+                    createSideTaskTools({
+                      store: sideTasks,
+                      threadId: String(thread.id),
+                      mode: "chat",
+                      projectId: thread.projectId,
+                      suggestedBy: thread,
+                      uuid: randomUUID,
+                      clock: () => new Date().toISOString(),
+                    }),
+                  ),
               }),
             ),
             threadId: thread.id,
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
-          // Outside the taint wrapper: a Canvas marks its reader only when a
-          // read or preview returns content from a Canvas that carries a mark,
-          // the rule Work and Code follow, so describe and a clean read leave
-          // the thread unmarked.
-          createCanvasAgentTools({
-            windowId,
-            thread,
-            port: canvasAgentToolPort,
-          }),
-          // Outside the taint wrapper too: what it returns is memory Octant
-          // wrote from the person's own messages, not outside content.
-          personMemoryAccess.toolsFor({
-            mode: "chat",
-            threadId: String(thread.id),
-            projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
-            createdAt: thread.createdAt,
-            windowId,
-          }),
-          // Host-internal: its results are Octant's own answers, not external
-          // content, and `delegate` itself refuses while the thread is tainted.
-          childAgentTools({
+          withheldFromSideChat({
             sideChat,
             tools: () =>
-              agentsManagedToolsFor({
-                windowId,
-                parentThreadId: String(thread.id),
-                mode: "chat",
-                ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
-              }),
+              combineAppManagedToolSets(
+                // Outside the taint wrapper: a Canvas marks its reader only
+                // when a read or preview returns content from a Canvas that
+                // carries a mark, the rule Work and Code follow, so describe
+                // and a clean read leave the thread unmarked.
+                createCanvasAgentTools({
+                  windowId,
+                  thread,
+                  port: canvasAgentToolPort,
+                }),
+                // Outside the taint wrapper too: what it returns is memory
+                // Octant wrote from the person's own messages, not outside
+                // content.
+                personMemoryAccess.toolsFor({
+                  mode: "chat",
+                  threadId: String(thread.id),
+                  projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+                  createdAt: thread.createdAt,
+                  windowId,
+                }),
+                // Outside the taint wrapper: only a child's reply is outside
+                // content, and `wait` marks the thread itself before it hands
+                // one back; `delegate` refuses while the thread is marked.
+                agentsManagedToolsFor({
+                  windowId,
+                  parentThreadId: String(thread.id),
+                  mode: "chat",
+                  ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                }),
+              ),
           }),
         );
       },
@@ -640,6 +657,7 @@ export function wireChat(deps: ChatDependencies) {
       resolveChatTargets: (windowId, threadIds) =>
         threadMentionService.chatDialogueTargets(windowId, threadIds),
       readChatThread: (threadId) => chatService.read(threadId),
+      isChatThread: (threadId) => persistence.readChatThread(threadId as never) !== undefined,
       executeChat: (command, context) => chatService.execute(command, context),
       // Unfinished claims count as sidecars too: the thread they name is
       // already a Side Chat, even before its selection is confirmed.
@@ -796,6 +814,19 @@ export function wireChat(deps: ChatDependencies) {
     // disk bound, not a precondition: a host that cannot read the store still
     // starts.
     yield* Effect.promise(() => agentMessageService.reconcileStoredBodies().catch(() => undefined));
+    let expiringMessages = false;
+    const messageExpiryTimer = setInterval(() => {
+      if (expiringMessages) return;
+      expiringMessages = true;
+      void agentMessageService
+        .expireQueued()
+        .catch(() => undefined)
+        .finally(() => {
+          expiringMessages = false;
+        });
+    }, 60_000);
+    messageExpiryTimer.unref();
+    yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(messageExpiryTimer)));
     return {
       chatHiddenThreadIds,
       chatRoutes,

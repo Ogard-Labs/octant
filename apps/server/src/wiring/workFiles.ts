@@ -1,8 +1,10 @@
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   decodeCodeThreadId,
   IMAGE_LIBRARY_SCOPE_ID,
   type ImageGenerationSaveResult,
   type ProjectId,
+  type Project,
   type WindowId,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
@@ -12,6 +14,7 @@ import { WorkFileListingService } from "../work/workFileListingService";
 import { WorkFilePreviewRefs } from "../work/workFilePreviewRefs";
 import { liveWorkFilesystem } from "../work/workFilesystemPort";
 import { WorkMutationEventStore } from "../work/workMutationEventStore";
+import type { WorkArtifactEntry } from "../work/workArtifactProjection";
 import { WorkMutationService } from "../work/workMutationService";
 import { WorkResolutionService } from "../work/workResolutionService";
 import { createWorkResearchRouteHandler } from "../workResearchRoutes";
@@ -98,6 +101,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     service: workMutationService,
     persistence,
     readThread: (threadId) => workThreadProjection.read(threadId),
+    readArtifact: (artifactId) => workArtifactProjection.lookup(artifactId),
     projects: projectService,
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
@@ -117,10 +121,23 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     previewRefs: workFilePreviewRefs,
     // The same projection the mutation service writes to, so a file the
     // panel calls Work's own is one this host recorded writing.
-    artifactsForProject: (projectId) =>
-      [...workArtifactProjection.snapshot().values()].filter(
-        (entry) => String(entry.projectId) === String(projectId),
-      ),
+    artifactsForProject: (projectId) => {
+      const project = persistence.readProject(projectId);
+      if (project?.type !== "work") return [];
+      return [...workArtifactProjection.snapshot().values()].flatMap((entry) => {
+        const source = workArtifactPreviewSource(project, entry);
+        if (!source.ok) return [];
+        return [
+          {
+            ...entry,
+            relativePath:
+              source.folder === project.binding.canonicalRoot
+                ? entry.relativePath
+                : `${source.folder}/${entry.relativePath}`,
+          },
+        ];
+      });
+    },
     // A provider writes with its own tools and never calls the mutation
     // service, so the artifact projection alone would show most of a
     // Project's real output as files the folder merely happened to hold.
@@ -350,11 +367,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
         if (kind !== "artifact-version") return { ok: false, code: "not-found" };
         for (const entry of workArtifactProjection.snapshot().values()) {
           if (entry.projectId === projectId && entry.artifactRef === opaqueRef && !entry.deleted) {
-            return {
-              ok: true,
-              relativePath: entry.relativePath,
-              displayName: entry.displayName,
-            };
+            return workArtifactPreviewSource(persistence.readProject(projectId), entry);
           }
         }
         return { ok: false, code: "not-found" };
@@ -397,6 +410,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   const previewRoutes = createPreviewRouteHandler(previewRouteDependencies);
   const previewHandoffBridgeRoutes = createPreviewHandoffBridgeRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
     resolve: async ({ windowId, target, kind, signal }) => {
       const authority = await resolvePreviewAuthority(previewRouteDependencies, windowId, target);
       if (authority.kind !== "ok") {
@@ -429,3 +443,22 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
 }
 
 export type WorkFilesWiring = ReturnType<typeof wireWorkFiles>;
+
+/** A saved artifact's root is its immutable recorded add/binding identity, never today's default. */
+export function workArtifactPreviewSource(project: Project | undefined, entry: WorkArtifactEntry) {
+  if (
+    project?.type !== "work" ||
+    project.lifecycle !== "active" ||
+    String(project.id) !== String(entry.projectId) ||
+    entry.deleted
+  )
+    return { ok: false, code: "not-found" } as const;
+  const folder = approvedWorkingFolderRoot(project, entry.workingFolderId);
+  if (folder === undefined) return { ok: false, code: "not-found" } as const;
+  return {
+    ok: true,
+    folder,
+    relativePath: entry.relativePath,
+    displayName: entry.displayName,
+  } as const;
+}

@@ -46,9 +46,10 @@ Manager). What you can do today is a slice of that shape:
   the destination is ready. Erase is not yet a workbench action.
 - **Capture screen** of a booted Simulator, stored as a screenshot artifact.
 
-macOS app staging, stopping only owned processes, launch and focus, unified
-logs and crashes, and handoff to Xcode or an external editor are not yet
-workbench actions. Tests that reach `xcodebuild test` run the scheme (Swift
+macOS app staging, stopping only owned processes, launch and focus, and
+handoff to Xcode or an external editor are not yet workbench actions. An app's
+unified log and crash reports are not workbench actions either, but an agent
+can read them with `octant_apple` `logs` (see below). Tests that reach `xcodebuild test` run the scheme (Swift
 Testing and XCTest as the scheme defines them). `xcodebuild` is given a
 result-bundle path; that `.xcresult` is not retained as a host artifact, and
 the evidence reference does not currently resolve to stored bytes. Logs, and
@@ -142,6 +143,12 @@ a booted Simulator and falls back to the desktop device helper when that
 stream is missing. The pane opens once per request; a tab you
 closed stays closed until the agent asks again.
 
+The managed stream runs in a native sandbox that grants its Simulator state,
+runtime and local services, without access to your Projects or provider
+sign-ins. A host that cannot start this sandbox keeps the native device helper.
+Device-tool versions and manual checks are available in **Settings › Device tools**;
+automatic updates remain off until you enable them.
+
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
@@ -221,10 +228,18 @@ A Code thread's agent also reaches these actions through the app-managed
 `octant_apple` tool, so it can discover the toolchain, read Simulator state,
 build, test, run, boot, open the in-app pane, shut down, capture the screen,
 and inject tap, swipe, typed text, and hardware keys.
+`logs` reads an app's recent unified-log lines, by its executable and its
+subsystem, and returns them in the tool result: the newest 500 lines or 32 KiB,
+over the last five minutes or up to ten minutes the agent names. With crashes
+asked for it adds the start of the app's three newest crash reports, which
+Octant reads itself from `~/Library/Logs/DiagnosticReports`. Reading logs
+changes nothing, so it works under Plan mode too. Describing the screen as a
+list of elements and tapping an element by name are Android-only for now; on a
+Simulator the agent reads a screenshot and taps a point.
 `boot`, `run`, and `open` show the Simulator in Octant's iOS Simulator pane
 — never by launching Simulator.app. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`. The host binds both to
-the same thread and checkout and refuses them with the same policy. Discover, status, screenshot, and `open` of a device that is already running (it only shows the pane) work under every posture, Plan included. On an
+the same thread and checkout and refuses them with the same policy. Discover, status, screenshot, logs, and `open` of a device that is already running (it only shows the pane) work under every posture, Plan included. On an
 approval-gated thread every other operation asks in the thread first and runs
 only once you allow it; input the window's **Allow input** already covers
 goes through without asking again. Plan mode refuses them, and Full access

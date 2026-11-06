@@ -25,7 +25,7 @@ On a computer that belongs to a replica, with sync on:
   reached, the copy waits on this computer, even across a restart, and goes
   out later in the order it was made. A copy that fails never undoes the
   version on this computer; Octant records why it failed. Versions committed
-  before this computer belonged to a replica are not copied.
+  before this computer belonged to a replica are not copied automatically.
 - **Other computers' versions are read in** when Octant starts, every few
   minutes, and whenever a pull is requested on this computer. Each one is checked first: the
   signature, that its writer is one of your computers, that its content
@@ -104,7 +104,36 @@ computers**, lists every version with the computer that wrote it.
 Keep this one and Restore send a version to your other computers, so they
 need sync on. If the store cannot be reached, the version waits on this
 computer and goes out later, and the library says so. Deleting an artifact
-on this computer, and erasing a thread or Project, stay on this computer.
+locally, and erasing a thread or Project, stay on this computer.
+
+### Publish older versions deliberately
+
+Open a local artifact's **Versions…** and review **Publish existing versions**.
+The dialog names the destination and shows each local version's size and whether
+it is eligible, excluded, queued or published. Select up to 24 versions, review
+the disclosure and check the consent box, then choose **Publish selected versions**.
+Only those versions leave; unselected older history stays here. The storage
+provider and anyone with access to the destination can read the selected artifact
+text, previews, Project name and computer identity. Threads, credentials and files
+are excluded. Plan tasks and unavailable Project/thread authority cannot publish.
+
+Progress counts versions actually published. **Stop publication** stops after the
+current upload and stays stopped across a restart; **Resume publication** retries
+the same selection. Offline uploads wait here, and pending membership is named.
+A changed destination, identity or artifact history needs a fresh review.
+
+### Delete from the synced library
+
+In **Versions…**, use the separate **Delete from synced library** action and
+confirmation. This sends a deletion for currently known versions to your other
+computers. It preserves local history and does not erase provider copies. A
+concurrent revision stays visible until you resolve it. Deletion stops a pending
+historical publication, including a deletion learned from another computer.
+Choose **Restore artifact** in the stopped publication when you want to keep
+its local revision. Wait for that explicit restore to publish before resuming;
+a restore still queued offline does not lift the stop. The review survives a
+restart, but a later deletion needs a fresh restore. Local erasure
+never sends a synchronized deletion.
 
 ## Set up a store
 

@@ -1,7 +1,9 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace octant::desktop_peer {
@@ -29,6 +31,32 @@ inline bool ordinary_desktop_arguments(bool stable,
     return false;
   }
   return true;
+}
+
+// A Developer ID team identifier: ten uppercase letters or digits. Anything
+// else would be spliced into a requirement's quoted subject value.
+inline bool developer_team(std::string_view team) {
+  return team.size() == 10 &&
+         team.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") ==
+             std::string_view::npos;
+}
+
+// The one code requirement every Octant peer check uses: Apple-anchored,
+// the exact bundle identifier, and a Developer ID Application leaf whose team
+// is the caller's own. It names one application; "validly signed" alone would
+// admit any publisher's app.
+inline std::optional<std::string>
+developer_id_requirement(std::string_view identifier, std::string_view team) {
+  if (!developer_team(team) || identifier.empty() ||
+      identifier.find_first_not_of(
+          "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") !=
+          std::string_view::npos)
+    return std::nullopt;
+  return "anchor apple generic and identifier \"" + std::string(identifier) +
+         "\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
+         "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and "
+         "certificate leaf[subject.OU] = \"" +
+         std::string(team) + "\"";
 }
 
 enum class FusePolicy { trusted, absent, malformed, incompatible };

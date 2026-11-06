@@ -31,6 +31,51 @@ function client(fetchImpl: typeof globalThis.fetch) {
 }
 
 describe("code file listing client", () => {
+  it("multiplexes sixteen extra folders and duplicate panes through one connection", async () => {
+    let output: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              output = controller;
+            },
+          }),
+        ),
+    );
+    const shared = client(fetchImpl);
+    const folders = [
+      undefined,
+      ...Array.from({ length: 16 }, (_, index) => `/approved/folder-${index}`),
+      undefined,
+    ];
+    const signals = folders.map(() => new AbortController());
+    const streams = folders.map((folder, index) =>
+      shared.watch(
+        { threadId, checkoutId, ...(folder === undefined ? {} : { folder }) },
+        signals[index]?.signal ?? AbortSignal.abort(),
+      ),
+    );
+    const initial = await Promise.all(streams.map((stream) => stream.next()));
+    expect(initial.every((frame) => frame.value?.truncated)).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(JSON.parse(url.searchParams.get("folders") ?? "[]")).toHaveLength(17);
+    const target = streams[16];
+    if (target === undefined) throw new Error("Missing fixture reader");
+    const next = target.next();
+    output?.enqueue(
+      new TextEncoder().encode(
+        `${JSON.stringify({ kind: "code-file-change", threadId, checkoutId, folder: folders[16], paths: ["changed.txt"], truncated: false, observedAt: "2026-11-06T12:00:00.000Z" })}\n`,
+      ),
+    );
+    expect((await next).value).toMatchObject({ folder: folders[16], paths: ["changed.txt"] });
+    signals[0]?.abort();
+    await streams[0]?.return(undefined);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    for (const signal of signals) signal.abort();
+    await Promise.all(streams.map((stream) => stream.return(undefined)));
+  });
   it("requests the listing for a thread checkout and decodes it", async () => {
     const fetchImpl = vi.fn(async () => Response.json(listedResult));
     const result = await client(fetchImpl as unknown as typeof globalThis.fetch).list({
@@ -116,9 +161,12 @@ describe("code file listing client", () => {
     expect((missing as CodeFileListingClientFailure).status).toBe(503);
 
     // A stream that opened and ended is an ordinary drop, unchanged.
-    const drop = await client((async () => dropped) as unknown as typeof globalThis.fetch)
-      .watch({ threadId, checkoutId }, controller.signal)
-      .next();
+    const stream = client((async () => dropped) as unknown as typeof globalThis.fetch).watch(
+      { threadId, checkoutId },
+      controller.signal,
+    );
+    expect((await stream.next()).value).toMatchObject({ truncated: true, paths: [] });
+    const drop = await stream.next();
     expect(drop.done).toBe(true);
     expect(isRefusedCodeFileWatch(drop.value)).toBe(false);
   });

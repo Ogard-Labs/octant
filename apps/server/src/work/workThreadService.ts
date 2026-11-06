@@ -123,6 +123,7 @@ import {
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WorkThreadProjection } from "./workThreadProjection";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
@@ -503,7 +504,9 @@ export class WorkThreadService {
         }
         const workingDirectory = command.workingDirectory ?? ("." as ThreadWorkingDirectory);
         try {
-          await this.#workingDirectories.resolve(project.binding.canonicalRoot, workingDirectory);
+          const root = approvedWorkingFolderRoot(project, command.workingFolderId);
+          if (root === undefined) throw new Error("Working folder is unavailable");
+          await this.#workingDirectories.resolve(root, workingDirectory);
         } catch {
           throw this.#failure("invalid", "Work working directory is unavailable.");
         }
@@ -567,6 +570,7 @@ export class WorkThreadService {
           const prepared = await this.#terminalSessions.prepare(
             command.terminalSession,
             project.binding.canonicalRoot,
+            project.id,
           );
           if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
           terminalSession = prepared.prepared;
@@ -583,6 +587,9 @@ export class WorkThreadService {
             : { modelOptionValues: command.modelOptionValues }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
+          ...(command.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: command.workingFolderId }),
           // The host decides the access from its Project's override, else its
           // own settings; nothing the renderer sends can raise it.
           access:
@@ -904,13 +911,31 @@ export class WorkThreadService {
           command.modelOptionValues,
         );
       } else if (command.kind === "change-work-thread-working-directory") {
+        if (
+          current.workingFolderId !== undefined &&
+          String(command.workingDirectory) !== String(current.workingDirectory ?? ".")
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose another working subfolder in a new task; this conversation keeps its original provider session.",
+          );
+        if (
+          command.workingFolderId !== undefined &&
+          command.workingFolderId !== current.workingFolderId
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose a different approved working folder in a new task; this conversation keeps its original provider session.",
+          );
         if (project === undefined)
           throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
         try {
-          await this.#workingDirectories.resolve(
-            project.binding.canonicalRoot,
-            command.workingDirectory,
+          const root = approvedWorkingFolderRoot(
+            project,
+            command.workingFolderId ?? current.workingFolderId,
           );
+          if (root === undefined) throw new Error("Working folder is unavailable");
+          await this.#workingDirectories.resolve(root, command.workingDirectory);
         } catch {
           throw this.#failure("invalid", "Work working directory is unavailable.");
         }
@@ -1044,6 +1069,9 @@ export class WorkThreadService {
                     : {
                         ...current,
                         workingDirectory: command.workingDirectory,
+                        ...(command.workingFolderId === undefined
+                          ? {}
+                          : { workingFolderId: command.workingFolderId }),
                         bindingRevisionId: bindingRevision?.revisionId,
                         version: command.expectedVersion + 1,
                         updatedAt,
@@ -1092,6 +1120,14 @@ export class WorkThreadService {
     if (destination === undefined) {
       throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
     }
+    if (
+      current.workingFolderId !== undefined &&
+      String(destination.id) !== String(current.projectId)
+    )
+      throw this.#failure(
+        "invalid",
+        "This task's working folder is bound to its current Project. Start a new task in the destination Project.",
+      );
     const destinationFolder = destination.type === "chat" ? "" : destination.binding.canonicalRoot;
     const signals = await this.#restSignals(current.id);
     const decision = decideThreadMove({
@@ -1588,6 +1624,7 @@ export class WorkThreadService {
         : { modelOptionValues: source.modelOptionValues }),
       bindingRevisionId: latestBinding.revisionId,
       workingDirectory: source.workingDirectory ?? ("." as ThreadWorkingDirectory),
+      ...(source.workingFolderId === undefined ? {} : { workingFolderId: source.workingFolderId }),
       access: DEFAULT_WORK_ACCESS,
       forkedFrom: {
         threadId: source.id,
@@ -1612,6 +1649,19 @@ export class WorkThreadService {
         providerSessionId: decodeProviderSessionId(this.#uuid()),
         carriedFrom: { threadId: source.id, requestId: turn.requestId },
         prompt: turn.prompt,
+        ...(turn.attachments === undefined
+          ? {}
+          : {
+              attachments: turn.attachments.map((attachment) => ({
+                ...attachment,
+                source: attachment.source ?? {
+                  mode: "work" as const,
+                  threadId: String(turn.threadId),
+                  attachmentId: String(attachment.attachmentId),
+                  projectId: String(turn.projectId),
+                },
+              })),
+            }),
         capabilities: turn.capabilities,
         acceptedAt: turn.acceptedAt,
       };

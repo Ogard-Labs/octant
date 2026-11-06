@@ -1,5 +1,9 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import type { RoutineProposal } from "@octant/contracts/automation";
+import type {
+  RoutineAgentRequest,
+  RoutineChangeRequest,
+  RoutineProposal,
+} from "@octant/contracts/automation";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -25,7 +29,24 @@ function proposal(overrides: Partial<RoutineProposal> = {}): RoutineProposal {
   } as RoutineProposal;
 }
 
-function client(proposals: ReadonlyArray<RoutineProposal>) {
+function changeRequest(overrides: Partial<RoutineChangeRequest> = {}): RoutineChangeRequest {
+  return {
+    kind: "routine-change-request",
+    proposalId,
+    threadId: thisThread,
+    mode: "work",
+    projectId: "bb000000-0000-4000-8000-000000000020",
+    automationId: "bb000000-0000-4000-8000-000000000030",
+    change: "pause",
+    displayName: "Friday digest",
+    expectedVersion: 3,
+    reason: "The reports folder moved.",
+    requestedAt: "2026-10-31T10:00:00.000Z",
+    ...overrides,
+  } as RoutineChangeRequest;
+}
+
+function client(proposals: ReadonlyArray<RoutineAgentRequest>) {
   const fake = {
     listProposals: vi.fn(async () => proposals),
     decideProposal: vi.fn(async () => ({ kind: "routine-proposal-declined" as const })),
@@ -94,6 +115,30 @@ describe("RoutineProposalPrompt", () => {
     expect(fake.decideProposal).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Schedule follow-up" }));
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
+  });
+
+  it("asks before pausing a routine, with the agent's reason, and pauses it only on the click", async () => {
+    const fake = client([changeRequest()]);
+    renderPrompt(fake);
+
+    const card = await screen.findByRole("article", { name: "Pause routine request" });
+    expect(card).toHaveTextContent("Friday digest");
+    expect(card).toHaveTextContent("until you resume it");
+    expect(card).toHaveTextContent("The reports folder moved.");
+    expect(fake.decideProposal).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Pause routine" }));
+    expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
+  });
+
+  it("calls archiving a follow-up cancelling it, and keeps it when dismissed", async () => {
+    const fake = client([changeRequest({ change: "archive", targetPolicy: "same-thread" })]);
+    renderPrompt(fake);
+
+    expect(
+      await screen.findByRole("article", { name: "Cancel follow-up request" }),
+    ).toHaveTextContent("will not be sent");
+    await userEvent.click(screen.getByRole("button", { name: "Keep Friday digest" }));
+    expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "decline" });
   });
 
   it("shows nothing for another thread's proposal", async () => {

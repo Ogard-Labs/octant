@@ -14,6 +14,7 @@ export interface AgentRunSettingsClientOptions {
 export interface AgentRunSettingsClient {
   current(): Promise<AgentRunPolicySettings>;
   update(input: {
+    readonly workingTimeLimitMinutes?: number;
     readonly creationPosture: AgentRunSelectableCreationPosture;
     /** Absent keeps the current limits. */
     readonly concurrency?: AgentRunConcurrency;

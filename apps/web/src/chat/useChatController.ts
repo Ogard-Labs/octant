@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   ChatClientFailure,
   createChatClient,
@@ -247,6 +248,7 @@ export function useChatController(options: ChatControllerOptions) {
   // after a later one cannot replace the later jump's range.
   const revealGeneration = useRef(0);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const [toolCatalogHandoffRequired, setToolCatalogHandoffRequired] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
   const composerDraft = useComposerThreadDraft({
     mode: "chat",
@@ -592,6 +594,7 @@ export function useChatController(options: ChatControllerOptions) {
     const request = ++bootstrapGeneration.current;
     if (!bootstrapped.current) setStatus("loading");
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const next = await client.bootstrap();
       if (!mounted.current || request !== bootstrapGeneration.current) return false;
@@ -615,6 +618,7 @@ export function useChatController(options: ChatControllerOptions) {
       streamAbort.current?.abort();
       streamAbort.current = undefined;
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       const isCurrent = () => mounted.current && request === threadGeneration.current;
       try {
         const view = await refreshTail(threadId, isCurrent);
@@ -651,6 +655,7 @@ export function useChatController(options: ChatControllerOptions) {
                 reconnectFailed = false;
                 setStatus("ready");
                 setErrorMessage(undefined);
+                setToolCatalogHandoffRequired(false);
               }
               await waitForReconnect(signal, reconnectDelayMs);
               return "again";
@@ -870,6 +875,7 @@ export function useChatController(options: ChatControllerOptions) {
     async (command: ChatCommand): Promise<ChatCommandResult | undefined> => {
       const commandThreadId = "threadId" in command ? String(command.threadId) : undefined;
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       lastExecuteError.current = undefined;
       if (command.kind === "update-chat-settings") setSettingsMessage(undefined);
       try {
@@ -948,6 +954,7 @@ export function useChatController(options: ChatControllerOptions) {
           return undefined;
         }
         setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
+        setToolCatalogHandoffRequired(failureCategory(error) === "tools-changed");
         if (command.kind === "update-chat-settings")
           setSettingsMessage(failureMessage(error, CHAT_UNAVAILABLE));
         return undefined;
@@ -977,6 +984,7 @@ export function useChatController(options: ChatControllerOptions) {
   const upload = useCallback(
     async (input: ChatAttachmentUpload) => {
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       try {
         const attachment = await client.upload(input);
         if (!mounted.current) return attachment;
@@ -1003,6 +1011,7 @@ export function useChatController(options: ChatControllerOptions) {
   const discard = useCallback(
     async (input: ChatAttachmentDiscard) => {
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       try {
         const attachment = await client.discard(input);
         if (!mounted.current) return attachment;
@@ -1388,9 +1397,11 @@ export function useChatController(options: ChatControllerOptions) {
        */
       sendOptions: {
         readonly composerDraft: "consume" | "keep";
+        readonly contextInputPolicy?: ConversationInputPolicy;
         readonly draftRevision?: number;
       } = { composerDraft: "consume" },
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
+      toolCatalogHandoff = false,
     ): Promise<boolean> => {
       if (
         activeView === undefined ||
@@ -1402,16 +1413,18 @@ export function useChatController(options: ChatControllerOptions) {
       // The reply arrives after the newest turn, so a reader looking at an
       // earlier run is brought back to the newest turns first.
       jumpToLatest();
-      const submissionKey = submissionIntentKey(
-        sendingThreadId,
-        prompt,
-        attachmentIds,
-        previewSelections,
-        canvasSelections,
-        extensionSelections,
-        threadMentionIds,
-        sideChatReturns,
-      );
+      const submissionKey =
+        `${toolCatalogHandoff}:` +
+        submissionIntentKey(
+          sendingThreadId,
+          prompt,
+          attachmentIds,
+          previewSelections,
+          canvasSelections,
+          extensionSelections,
+          threadMentionIds,
+          sideChatReturns,
+        );
       const submissionId =
         pendingSubmissionIds.current.get(submissionKey) ??
         decodeChatSubmissionId(globalThis.crypto.randomUUID());
@@ -1425,6 +1438,10 @@ export function useChatController(options: ChatControllerOptions) {
       const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
       const result = await execute({
         kind: "send-chat-turn",
+        ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+        ...(sendOptions.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: sendOptions.contextInputPolicy }),
         threadId: activeView.thread.id,
         expectedVersion: expectedVersion ?? activeView.thread.version,
         prompt,
@@ -1493,6 +1510,7 @@ export function useChatController(options: ChatControllerOptions) {
     snoozeThread,
     wakeThread,
     errorMessage,
+    toolCatalogHandoffRequired,
     // Failures on a thread that is not open never reach errorMessage; a
     // caller acting on a thread it just created reads the reason here.
     lastExecuteError,

@@ -1,3 +1,6 @@
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
+import type { ConversationInputManifest } from "@octant/contracts/conversation-inputs";
+import type { ProviderAttachmentInput } from "@octant/contracts";
 import { isAbsolute, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -10,6 +13,7 @@ import {
   decodeProviderResumeCursor,
   decodeUtcTimestamp,
   type AgentRun,
+  type AgentRunWorkingTime,
   type AgentRunAuthority,
   type AgentRunResultEvidence,
   type AgentRunContextSnapshotId,
@@ -61,7 +65,7 @@ import {
 
 const DEFAULT_MAX_EVENTS = 256;
 /**
- * The longest one managed child turn may work, from acquiring the provider to
+ * The default time one managed child turn may work, from acquiring the provider to
  * its terminal event.
  *
  * A child doing real work reads, edits, and runs checks for many minutes, and a
@@ -104,6 +108,10 @@ const AVERAGE_CHARACTERS_PER_TOKEN = 4;
  * change what the user consented to.
  */
 export interface AgentRunContextSnapshotPort {
+  readonly inputs?: (input: {
+    readonly runId: AgentRunId;
+    readonly contextSnapshotId: AgentRunContextSnapshotId;
+  }) => ConversationInputManifest | undefined;
   readonly resolve: (input: {
     readonly runId: AgentRunId;
     readonly contextSnapshotId: AgentRunContextSnapshotId;
@@ -131,6 +139,10 @@ export interface AgentRunContextSnapshotPort {
  */
 export function createRecordedAgentRunContextSnapshotPort(options: {
   readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+  readonly readAdmittedInputs?: (input: {
+    readonly runId: AgentRunId;
+    readonly contextSnapshotId: AgentRunContextSnapshotId;
+  }) => ConversationInputManifest | undefined;
   readonly readAdmittedContext: (input: {
     readonly runId: AgentRunId;
     readonly contextSnapshotId: AgentRunContextSnapshotId;
@@ -138,7 +150,38 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
   /** The reply a completed run left; absent when it was never recorded or was purged. */
   readonly readResultText?: (runId: AgentRunId) => string | undefined;
 }): AgentRunContextSnapshotPort {
+  const inputs: NonNullable<AgentRunContextSnapshotPort["inputs"]> = ({
+    runId,
+    contextSnapshotId,
+  }) => {
+    const run = options.getById(runId);
+    if (
+      run === undefined ||
+      String(run.routingReceipt.contextSnapshotId) !== String(contextSnapshotId) ||
+      run.routingReceipt.admittedInputCount === undefined
+    )
+      return undefined;
+    const manifest = options.readAdmittedInputs?.({ runId, contextSnapshotId });
+    if (
+      manifest?.purpose !== "child-delegation" ||
+      manifest.items.length + (manifest.omittedUnlistedInputs ?? 0) !==
+        run.routingReceipt.admittedInputCount ||
+      ((manifest.omittedUnlistedInputs !== undefined ||
+        manifest.sourceMetadataUnavailable === true) &&
+        run.routingReceipt.contextInputPolicy !== "text-only") ||
+      manifest.items.some(
+        (item) =>
+          item.status !==
+          ((run.routingReceipt.contextInputPolicy ?? "preserve") === "text-only"
+            ? "omitted"
+            : "included"),
+      )
+    )
+      return undefined;
+    return manifest;
+  };
   return {
+    inputs,
     resolve: ({ runId, contextSnapshotId }) => {
       const run = options.getById(runId);
       if (run === undefined) return undefined;
@@ -149,7 +192,12 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
         run.routingReceipt.admittedContextBlocks === undefined
           ? []
           : options.readAdmittedContext({ runId: run.id, contextSnapshotId });
-      if (admitted === undefined) return undefined;
+      if (
+        admitted === undefined ||
+        (run.routingReceipt.admittedInputCount !== undefined &&
+          inputs({ runId, contextSnapshotId }) === undefined)
+      )
+        return undefined;
       const dependencies = dependencyResultBlocks(run, options);
       return dependencies === undefined ? undefined : [...admitted, ...dependencies];
     },
@@ -253,6 +301,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly usage?: TurnUsage;
   }) => void;
   readonly context: AgentRunContextSnapshotPort;
+  readonly inputsCurrent?: (manifest: ConversationInputManifest) => boolean;
+  readonly prepareInputs?: (input: {
+    readonly run: AgentRun;
+    readonly manifest: ConversationInputManifest;
+    readonly signal: AbortSignal;
+  }) => Promise<ReadonlyArray<ProviderAttachmentInput> | undefined>;
   readonly uuid: () => string;
   /** Filesystem root for Chat children, which own no workspace of their own. */
   readonly scratchRoot?: (run: AgentRun) => string | undefined;
@@ -268,6 +322,8 @@ export interface AgentRunSessionRuntimeOptions {
   readonly capacityEnforcement?: SchedulerCapacityEnforcement;
   readonly maxEvents?: number;
   readonly timeoutMs?: number;
+  /** Person-owned settings, read for each new attempt; agents cannot supply this value. */
+  readonly workingTimeLimitMs?: () => number;
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
   /** Publishes ephemeral managed-child transcript facts to the host read model. */
@@ -280,6 +336,7 @@ export interface AgentRunSessionRuntimeOptions {
   readonly onSessionStarted?: (input: {
     readonly runId: AgentRunId;
     readonly resumed: boolean;
+    readonly workingTimeLimitMs: number;
   }) => void;
   /** Input attribution for the bounded display history; it never exposes private cursors. */
   readonly onUserMessage?: (input: {
@@ -486,16 +543,30 @@ export function createAgentRunSessionRuntime(
       );
     }
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
-    const context = options.context.resolve({
+    const resolvedContext = options.context.resolve({
       runId: run.id,
       contextSnapshotId: run.routingReceipt.contextSnapshotId,
     });
-    if (context === undefined) {
+    if (resolvedContext === undefined) {
       throw new AgentRunSessionError(
         "context-unavailable",
         "The AgentRun context snapshot could not be resolved for execution.",
       );
     }
+
+    const source =
+      run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.source : undefined;
+    const context: ReadonlyArray<ProviderContextBlock> = [
+      ...resolvedContext,
+      ...(source === undefined
+        ? []
+        : [
+            {
+              kind: "instructions" as const,
+              text: `Workspace source: current edits snapshot ${source.id}, committed base ${source.baseRevision}. Its ${source.files.length} changed files were copied into this isolated checkout with staging preserved. Later parent edits are separate.`,
+            },
+          ]),
+    ];
 
     const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
     if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
@@ -865,6 +936,7 @@ export function createAgentRunSessionRuntime(
         // input is still durable and must remain reachable through Resume.
         outcome = {
           kind: "interrupted",
+          ...(outcome.evidence === undefined ? {} : { evidence: outcome.evidence }),
           reason: boundedReason(
             `follow-up-not-sent: ${outcome.failure.category}: ${outcome.failure.message}`,
           ),
@@ -879,6 +951,8 @@ export function createAgentRunSessionRuntime(
       markFinished();
     };
 
+    const workingTimeLimitMs = options.workingTimeLimitMs?.() ?? timeoutMs;
+    let workingTime: AgentRunWorkingTime | undefined;
     const controller = new AbortController();
     const inputController = new AbortController();
     const live: LiveSession = {
@@ -895,11 +969,49 @@ export function createAgentRunSessionRuntime(
     void Effect.runPromiseExit(
       Effect.scoped(
         runManagedSession({
+          recordWorkingTime: (fact) => {
+            workingTime = fact;
+          },
           run,
           driver,
           authority,
           projectRoot,
           context: continuation === undefined ? context : [],
+          ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
+            ? {}
+            : {
+                inputManifest: options.context.inputs?.({
+                  runId: run.id,
+                  contextSnapshotId: run.routingReceipt.contextSnapshotId,
+                }),
+              }),
+          inputsCurrent: () => {
+            if (run.routingReceipt.admittedInputCount === undefined) return true;
+            const manifest = options.context.inputs?.({
+              runId: run.id,
+              contextSnapshotId: run.routingReceipt.contextSnapshotId,
+            });
+            return manifest !== undefined && options.inputsCurrent?.(manifest) === true;
+          },
+          prepareInputs: async (signal) => {
+            if (run.routingReceipt.admittedInputCount === undefined) return [];
+            const snapshot = {
+              runId: run.id,
+              contextSnapshotId: run.routingReceipt.contextSnapshotId,
+            };
+            const manifest = options.context.inputs?.(snapshot);
+            if (manifest === undefined) return undefined;
+            const attachments = await options.prepareInputs?.({ run, manifest, signal });
+            if (signal.aborted || options.context.inputs?.(snapshot) === undefined)
+              return undefined;
+            // A native continuation already owns its original inputs; revalidate
+            // source revocation without appending duplicates to the provider.
+            return continuation === undefined
+              ? attachments
+              : attachments === undefined
+                ? undefined
+                : [];
+          },
           reservationId,
           ...(spendReservationId === undefined ? {} : { spendReservationId }),
           ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
@@ -919,7 +1031,11 @@ export function createAgentRunSessionRuntime(
               // Recording Running is a lifecycle fact, not a precondition for the turn.
             }
             try {
-              options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
+              options.onSessionStarted?.({
+                runId: run.id,
+                resumed: continuation !== undefined,
+                workingTimeLimitMs,
+              });
               options.onUserMessage?.({
                 runId: run.id,
                 kind:
@@ -941,7 +1057,7 @@ export function createAgentRunSessionRuntime(
           recordContinuation,
           requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
           maxEvents,
-          timeoutMs,
+          timeoutMs: workingTimeLimitMs,
           shutdownTimeoutMs,
           shutdown,
           onTextDelta: options.onTextDelta,
@@ -994,6 +1110,17 @@ export function createAgentRunSessionRuntime(
     ).then(
       async (exit) => {
         let outcome = outcomeFromExit(exit);
+        if (workingTime !== undefined)
+          outcome = {
+            ...outcome,
+            evidence: {
+              ...(outcome.evidence ?? {
+                files: { status: "unavailable", items: [] },
+                checks: { status: "unavailable", items: [] },
+              }),
+              workingTime,
+            },
+          };
         try {
           // Teardown has completed before this promise resolves. An unconfirmed
           // provider shutdown cannot supply a final generation comparison.
@@ -1259,11 +1386,17 @@ function reserveCapacity(input: {
 }
 
 interface ManagedSessionInput {
+  readonly recordWorkingTime: (fact: AgentRunWorkingTime) => void;
   readonly run: AgentRun;
   readonly driver: ProviderDriver;
   readonly authority: AgentRunAuthority;
   readonly projectRoot: string;
   readonly context: ReadonlyArray<ProviderContextBlock>;
+  readonly inputManifest?: ConversationInputManifest | undefined;
+  readonly inputsCurrent: () => boolean;
+  readonly prepareInputs: (
+    signal: AbortSignal,
+  ) => Promise<ReadonlyArray<ProviderAttachmentInput> | undefined>;
   readonly reservationId: CapacityReservationId;
   readonly spendReservationId?: ReturnType<typeof decodeSpendCeilingReservationId>;
   readonly spendCeiling?: AgentRunSessionRuntimeOptions["spendCeiling"];
@@ -1328,6 +1461,7 @@ interface WorkingTimeDeadline {
   /** Resolves once the turn has worked for the whole bound. */
   readonly reached: Promise<void>;
   readonly awaitPerson: () => () => void;
+  readonly elapsedMs: () => number;
   readonly dispose: () => void;
 }
 
@@ -1345,6 +1479,7 @@ function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
     workingSince = Date.now();
     timer = setTimeout(() => {
       settled = true;
+      remainingMs = 0;
       timer = undefined;
       reach();
     }, remainingMs);
@@ -1352,6 +1487,11 @@ function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
   work();
   return {
     reached,
+    elapsedMs: () =>
+      Math.min(
+        boundMs,
+        Math.max(0, boundMs - remainingMs + (timer === undefined ? 0 : Date.now() - workingSince)),
+      ),
     awaitPerson: () => {
       if (personWaits === 0 && timer !== undefined) {
         clearTimeout(timer);
@@ -1481,8 +1621,34 @@ function runManagedSession(
       const finished = yield* Effect.raceFirst(
         runSessionTurn(input, state, releaseCapacity),
         Effect.promise(() => deadline.reached).pipe(Effect.as("timed-out" as const)),
+      ).pipe(
+        Effect.onExit(() =>
+          Effect.sync(() => {
+            const activeMs = deadline.elapsedMs();
+            input.recordWorkingTime({
+              attemptId: String(input.reservationId),
+              activeMs,
+              totalActiveMs: activeMs,
+              attempts: 1,
+              limitMs: input.timeoutMs,
+            });
+          }),
+        ),
       );
-      const evidence = sessionEvidence(state);
+      const activeMs = deadline.elapsedMs();
+      const evidence: AgentRunResultEvidence = {
+        ...(sessionEvidence(state) ?? {
+          files: { status: "unavailable", items: [] },
+          checks: { status: "unavailable", items: [] },
+        }),
+        workingTime: {
+          attemptId: String(input.reservationId),
+          activeMs,
+          totalActiveMs: activeMs,
+          attempts: 1,
+          limitMs: input.timeoutMs,
+        },
+      };
       if (finished === "timed-out") {
         // Deliberately not recorded on `state.outcome`: the provider never
         // reported a terminal event, so the shutdown below must still interrupt
@@ -1490,7 +1656,7 @@ function runManagedSession(
         state.timedOut = true;
         return {
           kind: "interrupted",
-          reason: "Managed AgentRun turn exceeded its runtime deadline.",
+          reason: `Working-time limit reached (${input.timeoutMs / 60_000} minutes). Retry or Resume starts a fresh working-time window; waiting for your input did not count.`,
           ...(evidence === undefined ? {} : { evidence }),
         };
       }
@@ -1551,12 +1717,31 @@ function runSessionTurn(
         message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
       } satisfies ProviderFailure);
     }
+    const attachments = yield* Effect.promise(input.prepareInputs);
+    if (attachments === undefined)
+      return yield* Effect.fail({
+        category: "provider-failed",
+        message:
+          "The admitted source inputs are unavailable or unsupported. Restore them or explicitly delegate with text-only context.",
+      } satisfies ProviderFailure);
     input.onSessionReady();
-    const connection = yield* input.driver.acquire({
-      instanceId: input.providerInstanceId,
-      projectRoot: input.projectRoot,
-      mode: input.run.routingReceipt.mode,
-    });
+    const connection = yield* input.driver
+      .acquire({
+        instanceId: input.providerInstanceId,
+        projectRoot: input.projectRoot,
+        mode: input.run.routingReceipt.mode,
+      })
+      .pipe(
+        Effect.timeoutFail({
+          duration: "2 minutes",
+          onTimeout: () =>
+            ({
+              category: "provider-failed",
+              message:
+                "The child provider did not become ready within 2 minutes. Retry after checking the provider.",
+            }) satisfies ProviderFailure,
+        }),
+      );
     state.acquired = true;
 
     // A stopped run must also stop a tool call still working for it.
@@ -1572,28 +1757,40 @@ function runSessionTurn(
       }),
     );
 
-    const handle = yield* input.resumeCursor === undefined
-      ? connection.start({
-          sessionId: input.sessionId,
-          modelId: input.modelId,
-          ...(input.modelOptionValues === undefined
-            ? {}
-            : { modelOptionValues: input.modelOptionValues }),
-          // The clamped run authority is what reaches the provider. Nothing here
-          // may widen it, and no parent-thread policy is consulted.
-          executionPolicy: input.authority.executionPolicy,
-          tools: input.appManagedTools?.definitions ?? [],
-        })
-      : connection.resume({
-          sessionId: input.sessionId,
-          resumeCursor: input.resumeCursor,
-          modelId: input.modelId,
-          ...(input.modelOptionValues === undefined
-            ? {}
-            : { modelOptionValues: input.modelOptionValues }),
-          executionPolicy: input.authority.executionPolicy,
-          tools: input.appManagedTools?.definitions ?? [],
-        });
+    const startup =
+      input.resumeCursor === undefined
+        ? connection.start({
+            sessionId: input.sessionId,
+            modelId: input.modelId,
+            ...(input.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: input.modelOptionValues }),
+            // The clamped run authority is what reaches the provider. Nothing here
+            // may widen it, and no parent-thread policy is consulted.
+            executionPolicy: input.authority.executionPolicy,
+            tools: input.appManagedTools?.definitions ?? [],
+          })
+        : connection.resume({
+            sessionId: input.sessionId,
+            resumeCursor: input.resumeCursor,
+            modelId: input.modelId,
+            ...(input.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: input.modelOptionValues }),
+            executionPolicy: input.authority.executionPolicy,
+            tools: input.appManagedTools?.definitions ?? [],
+          });
+    const handle = yield* startup.pipe(
+      Effect.timeoutFail({
+        duration: "2 minutes",
+        onTimeout: () =>
+          ({
+            category: "provider-failed",
+            message:
+              "The child provider did not start within 2 minutes. Retry after checking the provider.",
+          }) satisfies ProviderFailure,
+      }),
+    );
     if (
       String(handle.sessionId) !== String(input.sessionId) ||
       (input.requireResumeCursor &&
@@ -1614,6 +1811,11 @@ function runSessionTurn(
       connection,
       consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
       send: Effect.suspend(() => {
+        if (!input.inputsCurrent())
+          return Effect.fail({
+            category: "provider-failed",
+            message: "The source inputs were revoked before delivery.",
+          } satisfies ProviderFailure);
         if (!input.recordContinuation("delivery-unknown"))
           return Effect.fail({
             category: "stale-resume",
@@ -1623,8 +1825,13 @@ function runSessionTurn(
         return connection.send({
           sessionId: input.sessionId,
           prompt: input.prompt,
-          context: [...input.context],
-          attachments: [],
+          context: [
+            ...input.context,
+            ...(input.inputManifest === undefined
+              ? []
+              : [conversationInputReceiptBlock(input.inputManifest)]),
+          ],
+          attachments: [...attachments],
           tools: [...(input.appManagedTools?.definitions ?? [])],
         });
       }),

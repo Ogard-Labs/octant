@@ -905,6 +905,11 @@ describe("CodeTerminalPane", () => {
 
     fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Restart in notes" }));
+    expect(client.executeOperation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "stop-terminal" }),
+    );
+    expect(await screen.findByText(/Restarting stops this shell/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Stop and restart here" }));
 
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith({

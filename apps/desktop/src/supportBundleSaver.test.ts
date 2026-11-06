@@ -6,7 +6,7 @@ import {
 } from "./supportBundleSaver";
 
 const options = (overrides: Record<string, unknown> = {}) => ({
-  desktopBridgeSecret: "desktop-secret",
+  brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
   defaultDirectory: "/Users/demo/Downloads",
   now: () => new Date("2026-10-31T10:00:00.000Z"),
   resolveOwnedWindow: () => ({ isDestroyed: () => false }),

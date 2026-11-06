@@ -189,23 +189,44 @@ when you are ready to share what it shows.
 
 ## One-time token requests in Code
 
-An agent can use `request_credential` to open a private card in its Code
-conversation. Currently this supports a one-time Linear account access check.
+An agent can use the `octant_credential` tool to open a private card in its
+Code conversation. This supports a one-time Linear account access check and an Azure Resource Manager subscriptions-access check.
 Enter the API token and choose **Check access**, or choose **Decline**. The token
-is sent only to Linear for the displayed check; it does not become a chat
+is sent only to the displayed service for that check; it does not become a chat
 message or a saved sign-in. The destination and one-use scope are shown above
 the field. Use **Show token** to check your entry, or expand **Not saved or added
 to chat** for handling details.
 
+For Azure, obtain an unexpired short-lived Resource Manager access token yourself
+through your organization's approved sign-in, then enter it only in the private
+card. The complete approved subscriptions URL is shown; Octant sends one GET,
+refuses redirects and returns status only (the fixed [Azure subscriptions read](https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/list?view=rest-resources-2022-12-01)). It does not save, refresh or export
+the token, follow pagination, return subscription data to the agent, or provide
+Azure CLI credentials. Your token's own account and RBAC may allow more than this
+check; the fixed request does not narrow those permissions. If it expires or is
+refused, verify its access and ask for a fresh card; no broader sign-in is tried.
+
 The request expires after ten minutes and ends when the turn is cancelled or
 loses access. If the connection fails, Octant clears your entry and does not
-retry automatically. A token already sent to Linear cannot be recalled.
+retry automatically. A token already sent cannot be recalled.
 
 This card is available at the originating local window, outside Plan mode, for
 providers that support app-managed tools. It does not accept administrator
-passwords or hand credentials to arbitrary shell commands. Choosing a linked
-1Password item is not yet available in this card; existing Settings bindings
-continue to work separately.
+passwords or hand credentials to arbitrary shell commands. Choose **Use 1Password reference** to enter an `op://vault/item/field` reference
+from a store you already linked in Settings. Review the destination and choose
+**Check access**. Octant reads that field for this operation only and saves
+neither its value nor the reference. Switching input methods clears your entry.
+Octant does not link or unlock the store for you. If the store is locked,
+unlinked, unavailable or changes during lookup, or the field is missing, the
+card explains what to fix. Request a new card after fixing it; the failed card
+is never retried automatically.
+
+Agents see `octant_credential` only in Code, and only when there is something
+to use: a supported check like the one above, or a command saved for the Project
+as described below. It never returns a credential to the agent and does not run
+arbitrary commands. If an agent profile limits its tools, allow
+`octant_credential` by name; the former `request_credential` and
+`octant_command` names no longer allow anything.
 
 ## Run a named command with linked credentials
 
@@ -226,8 +247,8 @@ is unavailable. Runtime flags do not become credential mappings or reach the
 recipient.
 
 Open **Credential commands** in the Code conversation and choose **Review**.
-An agent can request the same review with `octant_command`; it cannot approve
-it. Check the executable, arguments, directory, account, reference mappings and
+An agent can request the same review with the `octant_credential` tool; it
+cannot approve it. Check the executable, arguments, directory, account, reference mappings and
 timeout, then choose **Approve one run**, **Deny**, or **Cancel command**.
 The task's ordinary command approval and Auto Shield still apply in addition
 to this credential approval. A binding cannot approve a command or a new

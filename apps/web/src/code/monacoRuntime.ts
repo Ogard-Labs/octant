@@ -52,6 +52,27 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     glyphMargin: options.onToggleBreakpoint !== undefined,
     theme: OCTANT_EDITOR_THEME,
   });
+  if (options.viewState !== undefined) {
+    editor.setPosition(lease.model.validatePosition(options.viewState));
+    editor.setScrollPosition({
+      scrollTop: options.viewState.scrollTop,
+      scrollLeft: options.viewState.scrollLeft,
+    });
+  }
+  const reportView = () => {
+    const position = editor.getPosition();
+    if (position !== null)
+      options.onViewState?.({
+        lineNumber: position.lineNumber,
+        column: position.column,
+        scrollTop: editor.getScrollTop(),
+        scrollLeft: editor.getScrollLeft(),
+      });
+  };
+  const viewScroll =
+    options.onViewState === undefined ? undefined : editor.onDidScrollChange(reportView);
+  const viewCursor =
+    options.onViewState === undefined ? undefined : editor.onDidChangeCursorPosition(reportView);
   const disposeMenu = installNativeEditorMenu(editor);
   const debugDecorations = editor.createDecorationsCollection();
   const disposeGutter =
@@ -94,6 +115,9 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      reportView();
+      viewScroll?.dispose();
+      viewCursor?.dispose();
       disposeMenu();
       disposeGutter?.();
       cursor?.dispose();

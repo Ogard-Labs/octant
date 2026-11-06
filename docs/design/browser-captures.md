@@ -1,8 +1,8 @@
 # Browser captures
 
 This topic specification owns how a thread keeps, retains, reads, and shows the
-screenshots taken in its Browser. Architecture owns the boundary: which
-screenshots are kept, where, for how many, and who may read them
+screenshots and recordings taken in its Browser. Architecture owns the
+boundary: which screenshots are kept, where, for how many, and who may read them
 ([Architecture: persistence](../architecture.md#persistence)). Workspace owns
 the Browser pane
 ([Workspace: tool lifecycles](workspace.md#tool-lifecycles)).
@@ -12,6 +12,10 @@ the Browser pane
 - Only an explicit screenshot is kept: the agent's `screenshot` operation on the
   browser tool, and the person's Screenshot control in the Browser pane. The
   picture the model receives after any other action is not kept.
+- The agent's recording is kept the same way: a `steps` or `flow-run` call
+  with `record: true` keeps one animated PNG of its page while the call ran
+  ([Recordings](#recordings)). Nothing else records, and the person's pane has
+  no record control.
 - The Screenshot control is the pane toolbar's camera button. It posts to its
   own route, `POST /api/browser/captures/take`, which wraps the ordinary action
   request and refuses any kind but `screenshot`. "Refresh preview" and every other
@@ -23,21 +27,30 @@ the Browser pane
 - A CLI the person types into a thread terminal that holds a Browser grant keeps
   nothing: no journal actor describes it, so it names no one
   ([Terminal Browser grant](terminal-browser-grant.md)).
-- Keeping writes only under the data directory, never a Project. Plan mode still
-  refuses the agent's Browser operations as the architecture states.
+- Keeping writes only under the data directory, never a Project. A screenshot
+  in Plan mode is kept like any other, as the thread's own capture
+  ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)).
 
 ## Storage
 
 - The bytes live in the managed attachment store under
   `browser-captures/<thread id>/<capture id>`, declared in the host data map
   (it appears under Caches in Settings → Data & storage as "Browser captures").
-- The media type is sniffed from the bytes, never read from the data URL. The
-  size is bounded by the screenshot envelope (about 40 KiB): a capture is the
-  picture the model received, not a full-resolution screenshot.
+- The media type is sniffed from the bytes, never read from the data URL. A
+  screenshot's size is bounded by the screenshot envelope (about 40 KiB): a
+  capture is the picture the model received, not a full-resolution screenshot.
+  A recording has its own bound, 2 MiB, and is always `image/png`.
 - The journal records `browser.capture-kept@1` on one `browser-capture`
   aggregate per thread (aggregate id = thread id): capture id, thread id, page
   origin, URL, title, SHA-256 content hash, size, media type, time, and, for a
-  page in a Project or Personal profile, that profile. Never bytes or a data URL.
+  page in a Project or Personal profile, that profile. A recording also carries
+  `recording`: its frame count, its length in milliseconds, and, when a bound
+  cut it short, which one (`truncated`). Never bytes or a data URL.
+- Rationale: a recording is the same event with one optional field, not a
+  sibling event, so it shares the one aggregate, the one retention rule, the
+  one listing, the export records, and the purge, and an old reader of the
+  event never meets a second shape. The schema holds a capture without
+  `recording` to the screenshot envelope, so only a recording may be larger.
 - The envelope actor says who took it: the agent (provider instance and thread)
   or the local person.
 - A capture is kept after the observation that produced it was recorded, so the
@@ -49,6 +62,9 @@ the Browser pane
 - A screenshot the thread kept returns `captureId` beside the image, so the agent
   can declare it as a `browser-capture` asset in a Canvas design. Nothing else of
   the capture is returned.
+- A recording the thread kept returns `recording` on the call's answer: its
+  `captureId`, `frames`, `durationMs`, and `truncated` when a bound cut it
+  short. The animation itself never reaches the model.
 
 ## Failure
 
@@ -59,12 +75,32 @@ the Browser pane
   the page holds a credential field. The agent sees
   `captureNotKept` in the tool result, and the pane says "This screenshot could
   not be kept" with the reason in words.
+- A recording that was not kept answers `recordingNotKept` with the same
+  reasons; `no-picture` there is a recording whose page showed a credential
+  field or painted nothing, and a stop that was refused names its refusal
+  (`browser-person-took-over`, for one). The call itself succeeds or fails on
+  its own steps either way.
 
 ## Retention
 
-- A thread keeps its newest 32 captures.
+- A thread keeps its newest 32 captures, screenshots and recordings together.
+- At most 8 of them are recordings. Keeping a ninth recording drops the
+  thread's oldest recording, never a screenshot: within the window, every
+  screenshot is kept and only the newest 8 recordings are.
 - Retention is a rule over the journal: the newest 32 aggregate versions
-  survive, and listing reads exactly that window.
+  survive, of those the recordings past the newest 8 do not, and listing reads
+  exactly what remains (`browserRetainedCaptures`). Reading, the export
+  records, a Canvas design asset, and recovery all go through that listing, so
+  a dropped recording is not found by any of them. No event records the drop;
+  its bytes are removed when the recording that replaced it is kept, and
+  otherwise by the next recovery pass.
+- Rationale for the recording cap: a recording may be 2 MiB, about fifty
+  screenshots, so 32 recordings could hold about 64 MiB per thread. Eight hold
+  about 16 MiB, enough for the checks a pull request shows. Dropping the
+  oldest recording rather than the oldest capture keeps a new recording from
+  pushing out the screenshots the proof's steps name; the 32-version window
+  still ages out the oldest capture of either kind as before, so screenshots
+  keep exactly the room they had.
 - Removing the bytes of an older capture is repeatable cleanup. `recover` at host
   start removes any finalized bytes the journal does not retain and any staged
   leftovers, so a crash between the append and the removal loses nothing.
@@ -122,7 +158,9 @@ the Browser pane
   thread, so another thread's capture and a dropped one are missing, and a Chat
   Canvas refuses the source.
 - The stored picture is already a screenshot, so the size bound stays the
-  screenshot envelope (about 40 KiB); the design asset caps are far above it.
+  screenshot envelope (about 40 KiB); the design asset caps are far above it. A
+  recording may be declared the same way: its 2 MiB bound is under a design
+  asset's 3 MiB cap, and it is drawn like any other PNG asset.
 - Exports and shares never carry the picture: a share carries no declared image,
   and a Canvas export leaves captures out like every other design asset.
 
@@ -134,6 +172,17 @@ the Browser pane
 - Each row is a small picture, the page title (the origin when there is none),
   and the origin. Choosing it opens the full picture with its URL and time as a
   workspace content view, or in place where none is available.
+- A recording's row shows its first frame, still, with a play mark (a triangle
+  and its length, such as "2.5 s") in the picture's corner, and the row's
+  control reads "Play recording of <title>, <length>". Opening it plays the
+  animation, with **Stop** and **Play** beside a caption that gives its length,
+  its frame count, and in words why it stopped early when a bound cut it short.
+  With reduced motion, from the system or Octant's own setting, it opens on its
+  first frame and plays only on **Play**.
+- Rationale: an animation that moved in the transcript on its own would be the
+  ambient motion the design system rules out, so a recording is still until
+  the person asks to watch it. The still frame is the same file with its
+  animation chunks left out, so no second picture is stored.
 - The strip reads every five seconds while the window is visible and stops
   asking for a thread once the host refuses the window. A transient failure
   retries on the next beat.
@@ -199,7 +248,9 @@ request, and only by choosing to.
   pull request body, offers "Include Browser proof", off by default. Choosing
   it reads the proof, says how many steps it will add, and on Create adds a
   "Browser check" section to the body after the person's text: the numbered
-  steps, and for each capture the name of its screenshot file. The files are
+  steps, and for each capture the name of its file, as "Screenshot:" or, for
+  a recording, "Recording:". A section with a recording says that a recording
+  plays as an animation where its file is dropped. The files are
   named by position, so if the captures changed after the person saved them,
   Create stops and asks for another save first. The proof is
   read again at Create, so the section reflects the steps as they stand then.
@@ -215,7 +266,10 @@ request, and only by choosing to.
   media type), so the person can drag them into the description. The names in
   the section are those files. The desktop main process writes the files, never
   overwrites one (a name already in the folder stops the whole save), and tells
-  the page only the count and the folder's name.
+  the page only the count and the folder's name. Recordings are saved in the
+  same numbered run: an animated PNG keeps `.png`, and GitHub draws one dragged
+  into a description as an animation. Once the thread has a recording the
+  control reads "Save screenshots and recordings…" and its result counts files.
 - Rationale: saving to a folder the person picks is the narrowest option that
   works: nothing is uploaded, no new credential or host is involved, and the
   picker is the person's consent for the one folder.
@@ -230,9 +284,131 @@ request, and only by choosing to.
   only by a local window. Attaching it to a pull request is the person's
   choice like any other proof.
 
+## Recordings
+
+A recording shows a reviewer what a change does: a short moving picture of
+the agent's page while one Browser call ran, kept beside the screenshots and
+attached the same way.
+
+- **Asked for, one call at a time.** The agent asks with `record: true` on a
+  `steps` or `flow-run` call, on a page that is already open. The tool starts
+  the recording, runs the call, and ends the recording when the call ends,
+  whether it succeeded, failed at a step, or the turn was stopped. Nothing
+  records between calls, and no call records by default
+  ([Browser for agents: Results](browser-agent-tool.md#results)).
+- **Bounds.** At most 30 seconds, a frame at most every 250 ms (4 frames a
+  second), at most 120 frames, each scaled by the page's own screencast to fit
+  800 pixels on its longer side, and at most 2 MiB in all. It stops taking
+  frames at whichever it meets first and says which (`duration-limit`,
+  `frame-limit`, `size-limit`). A frame of a different size (the page was
+  resized) ends it too (`viewport-changed`): an animation has one size. The
+  call goes on; only the recording stops. A capture is labelled with the
+  recorded tab's address and title as they were when frame collection
+  stopped: at the bound, for one cut short, so a later navigation of the same
+  tab does not lend it the name of a page it never showed; at the call's end,
+  for one that ran that long, whose last frame is of that page even when the
+  call navigated on the way.
+- **One tab.** A recording belongs to the tab it started on. When another tab
+  comes to the front (the call opens or switches to one, the person switches,
+  or the recorded tab closes), the recording stops at that moment
+  (`tab-changed`) and takes no frame from either tab after it; frames that had
+  already arrived are still checked and kept. The capture is kept under the
+  recorded tab's address and title as they were when the recording stopped,
+  never the tab in front when the call ends, so the page origin a capture
+  needs is the recorded tab's and the call's later steps do not appear in it.
+  The rule is the same on the desktop and the headless Browser.
+- Rationale: the screencast is a property of one page, so following the front
+  tab would mean a second screencast and frames of two pages, possibly of
+  different sizes, in one animation; and labelling one tab's frames with
+  another's address would file the capture under a page it does not show, or
+  refuse it for a blank new tab. Stopping, as a resize already does, keeps one
+  picture of one page under that page's own address.
+- **Frames.** The desktop and the headless Browser both take frames from the
+  page's own screencast (the debugger protocol's `Page.startScreencast`, in
+  PNG) and keep the newest frame of each 250 ms, so the last state of a change
+  survives; a frame identical to the one before is dropped, so a page that
+  waits adds nothing but time. Each frame is acknowledged only after it was
+  looked at, so a busy page cannot queue frames without bound.
+- **Credential fields.** Before a frame is kept, the page is checked for a
+  credential field the way a screenshot is: a frame of a page that holds one
+  anywhere, in a frame or a shadow root too, is left out, and so is a frame of
+  a page that could not be checked (the check fails closed, as a page between
+  documents does). The frame before it stays on screen in its place. A
+  recording whose every frame was left out keeps nothing (`no-picture`).
+- **Approved origins only.** A frame is kept only when the page it shows is on
+  an origin the thread's Browser context approved. A frame of a page on any
+  other origin is left out, and so is one whose page has no web origin to
+  check: a blank page, the browser's own error page, or an address that cannot
+  be read. The page's address is read as each frame arrives and again after
+  its credential check, and a frame whose page moved in between is left out
+  too. The rule is the same on the desktop and the headless Browser
+  (`browserRecordingFrameKept`), and a left-out frame is handled as a
+  credential frame is: the frame before it stays on screen, and a recording
+  whose every frame was left out keeps nothing.
+- Rationale: leaving out the frame, rather than the whole recording, is what
+  the screenshot rule says for each picture, and a flow that passes through a
+  page mid-load (every navigation does) would otherwise never be kept. The
+  origin rule exists because a frame is a picture of whatever the view shows,
+  not of what the approval covered: on the desktop the person can take the
+  agent's own view to any site while a call runs, and a request the context
+  refuses still paints an error page. The approval is the thread's whole
+  authority to look at a page, so a recording must hold no picture of a page
+  it did not cover, and a page whose origin cannot be told cannot be shown to
+  be covered. Each frame is checked within milliseconds of being painted (the
+  page sends the next frame only once the last is acknowledged), so the
+  remaining window is a page that left an approved origin and came back
+  between one paint and its check.
+- **When it ends early.** The page closing, or the context stopping or
+  expiring, drops the recording. While the person has taken the page over, or
+  is signing in, the call's closing stop is refused like any other agent call,
+  so nothing of what they did is kept; the frames are dropped when the next
+  recording starts or the page closes, and the screencast itself ends at the
+  duration bound at the latest. A turn that is stopped still ends the
+  recording it started and keeps what was recorded.
+- **Who may.** Recording is a read of a page the agent already drives, the same
+  class as `screenshot`, so it is allowed where a screenshot is, outside Plan: every
+  admission a screenshot passes (the thread's authority, the model binding, the
+  origin approval, the person's hold) applies to starting and ending it. Plan
+  admits a screenshot but refuses a recording, because the thread keeps the
+  recording as an artifact and Plan only reads; a recorded call in Plan runs
+  nothing, and a recording already running when Plan begins is stopped and
+  discarded ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). The
+  recorded observation marks the thread as having read outside content, as a
+  screenshot's does. Only the agent tool records: the service refuses a
+  recording from the pane, a paired device, a terminal CLI, and any caller that
+  does not name the agent, and the product route refuses a paired device first.
+  A Browser that cannot record (no screencast) refuses in words, and the call
+  does not run (`recording-refused`).
+- **The animated PNG.** The frames are joined into an animated PNG that loops:
+  the first frame's header, then each frame's compressed image data, carried
+  over byte for byte, behind its frame-control chunk. No frame is decoded or
+  compressed again, and no image library is used: the chunks need only their
+  framing and a CRC-32 the domain package computes itself
+  (`encodeBrowserRecordingApng`).
+- Rationale: GitHub draws an animated PNG dragged into a pull request body as
+  an animation, so a recording reaches a reviewer the same way a screenshot
+  does, with nothing uploaded by Octant, and a viewer that does not animate PNG
+  still shows the first frame. An animated GIF would need palette quantization
+  and an LZW encoder, and an animated WebP a VP8 encoder; a video would not play
+  inline in a description. The screencast already sends complete PNGs of one
+  size, so joining them is framing, not encoding. Tying a recording to one call
+  bounds it by that call as well as by its own limits, so it cannot outlive a
+  turn or be left running by an agent that forgot to stop it. The 2 MiB bound
+  keeps a recording below a Canvas design asset's cap, and with at most 8
+  recordings per thread ([Retention](#retention)) keeps a thread's recordings
+  within about 16 MiB; screen-sized PNG frames of an ordinary page are tens
+  of kilobytes, so the bound holds a few dozen distinct frames, and a waiting
+  page costs none.
+- **Privacy.** A recording follows every capture rule: it stays on this
+  computer, under the data directory; only a local window that can open the
+  thread reads it, never a paired device; it is in no telemetry, Canvas share,
+  replica sync, or diagnostics export; and it leaves the host only in the local
+  owner's thread or data export and in the folder the person saves it to.
+
 ## Verification
 
 `browserCapturePolicy.test.ts`, `browserCaptureService.test.ts`,
 `browserAutomationService.test.ts`, `browserAutomationRoutes.test.ts`,
 `threadPurge.test.ts`, `threadExportService.test.ts`, `canvasDesignAssets.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
 Proof adds `browserProofPolicy.test.ts`, the steps cases of `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, and `browserAutomationRoutes.test.ts`, `CodePullRequestPane.test.tsx`, and the desktop `browserProofSaver.test.ts` and `preload.test.ts`.
+Recordings add `browserRecording.test.ts` (an animated PNG read back by a parser in the test: frame count, delays, size, CRCs, the still frame, every bound, and which frames may be kept), the recording cases of `browserCapture.test.ts`, `browserCapturePolicy.test.ts` (the recording cap: newest eight kept, screenshots never dropped), `browserCaptureService.test.ts` (a ninth recording drops the oldest one and its bytes, recovery finishes the removal), `browserAutomationPolicy.test.ts`, `browserProofPolicy.test.ts`, `browserAutomationService.test.ts`, `browserAppManagedTools.test.ts`, `browserAutomationRoutes.test.ts`, `desktopBrowserRuntime.test.ts`, `BrowserCaptureList.test.tsx`, and the desktop `browserRuntimeBroker.test.ts` and `browserProofSaver.test.ts`; and real Chromium pages in `browserAgentTool.smoke.test.ts` (headless) and `browserSurfaceHost.realPage.test.ts` (the desktop Browser's code), which read the pixels of every kept frame to show that no page off the approved origin, and no blank or error page, was recorded.

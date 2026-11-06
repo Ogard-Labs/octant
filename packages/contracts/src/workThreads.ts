@@ -6,7 +6,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { ProjectId } from "./projects";
 import { BindingRevisionId } from "./projects";
 import { WorkStatusDatedItem } from "./workProjectStatus";
@@ -80,6 +80,7 @@ export const WorkThread = Schema.Struct({
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   /**
    * The level this thread runs at: taken from Work settings when it was
    * created, and changed from its composer since. A thread journaled before
@@ -129,6 +130,7 @@ export const CreateWorkThreadCommand = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   /** Confined working directory relative to the Project root; defaults to `.`. */
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
   /** A terminal session in the Project's folder the thread starts from. */
@@ -226,6 +228,7 @@ export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-working-directory"),
   ...WorkThreadCommandFields,
   workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
 }).annotations(strict);
 export type ChangeWorkThreadWorkingDirectoryCommand =
   typeof ChangeWorkThreadWorkingDirectoryCommand.Type;

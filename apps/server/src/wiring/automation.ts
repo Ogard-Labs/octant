@@ -12,6 +12,17 @@ import {
 import { captureAutomationDefinitionSnapshot } from "../automation/automationRunIdentity";
 import { readAutomationFileSourceActivity } from "../automation/automationFileSourceActivity";
 import { liveWorkFilesystem } from "../work/workFilesystemPort";
+import { prepareAutomationCodeFileInput } from "../automation/automationCodeFileInput";
+import {
+  automationFileContext,
+  automationRunFileSource,
+} from "../automation/automationFileContext";
+import { automationRunEventSource } from "../automation/automationFileContext";
+import {
+  AutomationEventSources,
+  prepareAutomationEventDefinition,
+} from "../automation/automationEventSources";
+import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
 import { liveWorkFileWatchPort } from "../work/workFileWatchPort";
 import type { HarnessWiring } from "./harness";
 import {
@@ -24,6 +35,7 @@ import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   type UtcTimestamp,
   type WorkThreadId,
@@ -33,18 +45,17 @@ import {
   CompletedThreadArchiveSweep,
 } from "../completedThreadArchiveSweep";
 import { AutomationCommandService } from "../automation/automationCommandService";
-import {
-  automationCodeEvidenceFromText,
-  createAutomationCodeDispatchPort,
-} from "../automation/automationCodeDispatchPort";
+import { createAutomationCodeDispatchPort } from "../automation/automationCodeDispatchPort";
+import { automationCodeOperationId } from "../automation/automationRunIdentity";
 import { createAutomationChatDispatchPort } from "../automation/automationChatDispatchPort";
 import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import { AutomationDispatchService } from "../automation/automationDispatchService";
-import { AutomationEventStore } from "../automation/automationEventStore";
 import { hydrateAutomationProjection } from "../automation/automationProjection";
 import { createAutomationRouteHandler } from "../automation/automationRoutes";
 import { AutomationSchedulerService } from "../automation/automationSchedulerService";
 import { createRoutineProposalTools } from "../automation/routineProposalTools";
+import { createRoutineTools } from "../automation/routineTools";
+import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { buildThreadRoutineDraft } from "../automation/threadRoutineDraft";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
@@ -73,6 +84,7 @@ import {
   defaultPermissionModeFor,
   defaultShellSettings,
   isAutomationRunLifecycleActive,
+  isAgentRunActiveStatus,
 } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -83,8 +95,13 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
-export type AutomationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "liveTurns" | "routineProposalService" | "windowAuthorityStore"> &
+export type AutomationDependencies = {
+  readonly integrationEventSources: IntegrationEventSourceProvider;
+} & Pick<ServerStart, "persistence"> &
+  Pick<
+    AuthorityWiring,
+    "automationEventStore" | "liveTurns" | "routineProposalService" | "windowAuthorityStore"
+  > &
   Pick<
     AgentRunsWiring,
     "capacityScheduler" | "agentRunOrchestration" | "externalContentIngestionStore"
@@ -97,16 +114,23 @@ export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
-  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
+  Pick<
+    FoundationsWiring,
+    "workThreadProjection" | "workTurnProjection" | "codeEvidence" | "codeBoardEventStore"
+  >;
 
 export function wireAutomation(deps: AutomationDependencies) {
   const {
+    integrationEventSources,
+    automationEventStore,
     capacityScheduler,
     agentRunOrchestration,
     externalContentIngestionStore,
     readHarnessProcessReceipts,
     chatService,
     codeCompletedThreadSource,
+    codeEvidence,
+    codeBoardEventStore,
     contributeCodeTools,
     liveTurns,
     persistence,
@@ -121,11 +145,6 @@ export function wireAutomation(deps: AutomationDependencies) {
     workTurnService,
   } = deps;
 
-  const automationEventStore = new AutomationEventStore({
-    journal: persistence.journal,
-    uuid: randomUUID,
-    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-  });
   // The Automation projection is in-memory; rebuild it from the
   // authoritative journal on every startup. Hydration fails closed: a
   // hostile or undecodable frame, or history past the scan cap, leaves the
@@ -239,6 +258,54 @@ export function wireAutomation(deps: AutomationDependencies) {
   // provider-backed first-turn runtime through the ordinary thread
   // and turn services.
   const automationCodeDispatch = createAutomationCodeDispatchPort({
+    sourceBranchForRun: (run) => {
+      const binding = run.definitionSnapshot.binding;
+      if (binding.kind !== "code") return undefined;
+      const checkout = persistence.readCodeCheckout(binding.checkoutId);
+      return checkout?.availability === "available" && checkout.head.kind === "branch"
+        ? checkout.head.name
+        : undefined;
+    },
+    prepareFileInput: async (run, input) => {
+      if (automationRunEventSource(run) !== undefined) {
+        const current = await prepareEventRunAdmission(run, input.signal, input.current);
+        const context = automationFileContext(run);
+        if (current === undefined || context === undefined || !current()) return undefined;
+        const marked = externalContentIngestionStore.record({
+          threadId: input.threadId,
+          provenance: { origin: "external-content", sourceLabel: "routine-integration-event" },
+          contentReference: context.referenceId,
+          correlationId: randomUUID(),
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded"
+          ? current
+          : undefined;
+      }
+      const authority = resolveAutomationFileSourceAuthority(
+        automationAuthorityDeps,
+        run.definitionSnapshot,
+        new Date().toISOString() as UtcTimestamp,
+      );
+      if (authority === undefined) return undefined;
+      const current = await prepareAutomationCodeFileInput({
+        ...input,
+        run,
+        filesystem: liveWorkFilesystem,
+        authority,
+        current: () => input.current() && routineFileInputCurrent(run),
+      });
+      const context = automationFileContext(run);
+      if (current === undefined || context === undefined || !current()) return undefined;
+      const marked = externalContentIngestionStore.record({
+        threadId: input.threadId,
+        provenance: { origin: "external-content", sourceLabel: "file-arrival-routine" },
+        contentReference: context.referenceId,
+        correlationId: randomUUID(),
+        authorized: true,
+      });
+      return marked.kind === "recorded" || marked.kind === "already-recorded" ? current : undefined;
+    },
     codeService: {
       execute: async (windowId, command) =>
         routeCodeService.execute(windowId, command as never) as Promise<{
@@ -256,14 +323,14 @@ export function wireAutomation(deps: AutomationDependencies) {
       },
     },
     operations: {
-      execute: async (windowId, command) => {
+      execute: async (windowId, command, options) => {
         if (routeCodeService.executeOperation === undefined) {
           throw new Error("Code operation runtime is unavailable.");
         }
-        return routeCodeService.executeOperation(windowId, command as never);
+        return routeCodeService.executeOperation(windowId, command as never, options);
       },
     },
-    evidence: automationCodeEvidenceFromText(),
+    evidence: codeEvidence,
     clock: () => new Date().toISOString() as UtcTimestamp,
     uuid: randomUUID,
     // Read at each run, so a routine opted into its Project's level runs at
@@ -283,6 +350,8 @@ export function wireAutomation(deps: AutomationDependencies) {
   const automationWorkDispatch = createAutomationWorkDispatchPort({
     readTurn: (requestId) => workTurnProjection.lookup(requestId),
     prepareFileInput: async (run, signal) => {
+      if (automationRunEventSource(run) !== undefined)
+        return prepareEventRunAdmission(run, signal, () => true);
       const authority = resolveAutomationFileSourceAuthority(
         automationAuthorityDeps,
         run.definitionSnapshot,
@@ -302,7 +371,13 @@ export function wireAutomation(deps: AutomationDependencies) {
       try {
         const marked = externalContentIngestionStore.record({
           threadId,
-          provenance: { origin: "external-content", sourceLabel: "file-arrival-routine" },
+          provenance: {
+            origin: "external-content",
+            sourceLabel:
+              automationRunEventSource(run) === undefined
+                ? "file-arrival-routine"
+                : "routine-integration-event",
+          },
           contentReference,
           correlationId: randomUUID(),
           authorized: true,
@@ -390,27 +465,112 @@ export function wireAutomation(deps: AutomationDependencies) {
       );
     },
   };
+  function routineSnapshotAuthorityCurrent(snapshot: AutomationDefinitionSnapshot): boolean {
+    const definition = { hostId: snapshot.hostId };
+    const run = {
+      definitionSnapshot: snapshot,
+      authoritySnapshot: {
+        ...snapshot.authorityProfile,
+        capturedAt: new Date().toISOString() as UtcTimestamp,
+      },
+    };
+    const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, { definition, run });
+    return revalidateAutomationAuthority({ definition, run, facts }).kind === "ok";
+  }
+  function readCodeRoutineTurn(run: AutomationRun) {
+    if (run.threadId === undefined) return undefined;
+    const threadId = decodeCodeThreadId(String(run.threadId));
+    const thread = persistence.readCodeThread(threadId);
+    if (thread === undefined) return undefined;
+    const result = codeBoardEventStore.conversationWindow({
+      threadId,
+      through: automationCodeOperationId(run),
+      limit: 1,
+    });
+    if (result.status !== "ok") return undefined;
+    const turn = result.window.turns.find(
+      (entry) => String(entry.operationId) === String(automationCodeOperationId(run)),
+    );
+    if (turn === undefined) return undefined;
+    const prompt = codeEvidence.read(turn.prompt);
+    return prompt === undefined ? undefined : { thread, turn, prompt };
+  }
+  function routineEventActivity(definition: {
+    readonly id: AutomationRun["automationId"];
+  }): "quiet" | "busy" | "unknown" {
+    const history = persistence.automationProjection.listRuns({
+      automationId: definition.id,
+      limit: 64,
+    });
+    if (history.nextCursor !== undefined) return "unknown";
+    for (const run of history.runs) {
+      if (isAutomationRunLifecycleActive(run.lifecycle)) return "busy";
+      if (run.threadId === undefined) continue;
+      if (
+        liveTurns.read(String(run.threadId)) !== undefined ||
+        agentRunOrchestration
+          .parentSummary(decodeAgentRunParentThreadId(String(run.threadId)))
+          .some((child) => isAgentRunActiveStatus(child.lifecycleStatus))
+      )
+        return "busy";
+      if (run.firstTurnAcceptance === undefined) continue;
+      if (run.definitionSnapshot.mode === "work") {
+        const turn = workTurnProjection.lookup(
+          decodeWorkTurnRequestId(String(run.firstTurnRequestId)),
+        );
+        if (turn === undefined) return "unknown";
+        if (String(turn.threadId) !== String(run.threadId)) return "unknown";
+        if (!["completed", "failed", "cancelled"].includes(turn.status)) return "busy";
+      } else if (run.definitionSnapshot.mode === "code") {
+        const observed = readCodeRoutineTurn(run);
+        if (observed === undefined) return "unknown";
+        if (String(observed.turn.sessionId) !== String(run.firstTurnRequestId)) return "unknown";
+        if (!["completed", "failed", "interrupted"].includes(observed.turn.status)) return "busy";
+      }
+    }
+    return "quiet";
+  }
   function routineFileInputCurrent(captured: AutomationRun): boolean {
+    const event = automationRunEventSource(captured);
+    if (event !== undefined) {
+      const definition = persistence.automationProjection.getDefinition(captured.automationId);
+      const run = persistence.automationProjection.getRun(captured.id);
+      const source = persistence.automationProjection.getEventSource(captured.automationId);
+      if (
+        definition?.lifecycle !== "enabled" ||
+        run === undefined ||
+        run.cancellationTombstone !== undefined ||
+        !isAutomationRunLifecycleActive(run.lifecycle) ||
+        source?.sourceIdentity !== event.checkpoint.sourceIdentity
+      )
+        return false;
+      const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, {
+        definition,
+        run,
+      });
+      return revalidateAutomationAuthority({ definition, run, facts }).kind === "ok";
+    }
     const definition = persistence.automationProjection.getDefinition(captured.automationId);
     const run = persistence.automationProjection.getRun(captured.id);
+    const receipt = run === undefined ? undefined : automationRunFileSource(run);
     if (
       definition?.lifecycle !== "enabled" ||
       run === undefined ||
       run.cancellationTombstone !== undefined ||
       !isAutomationRunLifecycleActive(run.lifecycle) ||
-      run.occurrence.kind !== "file-arrival" ||
+      receipt === undefined ||
       run.definitionSnapshot.trigger.kind !== "file-arrival"
     )
       return false;
     const source = persistence.automationProjection.getFileSource(definition.id);
     if (
-      source?.sourceIdentity !== run.occurrence.source.checkpoint.sourceIdentity ||
-      source.armGeneration !== run.occurrence.source.checkpoint.armGeneration
+      source?.sourceIdentity !== receipt.checkpoint.sourceIdentity ||
+      source.armGeneration !== receipt.checkpoint.armGeneration
     )
       return false;
     const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, { definition, run });
     if (
-      facts.project?.type !== "work" ||
+      (facts.project?.type !== "work" && facts.project?.type !== "code") ||
       revalidateAutomationAuthority({ definition, run, facts }).kind !== "ok"
     )
       return false;
@@ -419,9 +579,27 @@ export function wireAutomation(deps: AutomationDependencies) {
       run.definitionSnapshot.trigger.directory === "."
         ? root
         : joinWorkPath(root, run.definitionSnapshot.trigger.directory);
-    return run.occurrence.source.files.every(
+    return receipt.files.every(
       (path) => secretGuardRefusal(joinWorkPath(input, path)) === undefined,
     );
+  }
+  async function prepareEventRunAdmission(
+    run: AutomationRun,
+    signal: AbortSignal,
+    admissionCurrent: () => boolean,
+  ) {
+    const trigger = run.definitionSnapshot.trigger;
+    if (
+      trigger.kind !== "integration-event" ||
+      !routineFileInputCurrent(run) ||
+      !admissionCurrent()
+    )
+      return undefined;
+    const source = await integrationEventSources.bind(trigger, signal);
+    if (source === undefined || source.identity !== trigger.sourceIdentity || signal.aborted)
+      return undefined;
+    const current = () => admissionCurrent() && routineFileInputCurrent(run) && source.current();
+    return current() ? current : undefined;
   }
   const automationDispatch = new AutomationDispatchService({
     store: automationEventStore,
@@ -525,17 +703,24 @@ export function wireAutomation(deps: AutomationDependencies) {
   const automationScheduler = new AutomationSchedulerService({
     reconcileFileSources: () => {
       void automationFileSources.reconcile().catch(() => undefined);
+      automationEventSources.reconcile();
       return persistence.automationProjection
         .listDefinitions()
         .some(
           (definition) =>
-            definition.lifecycle === "enabled" && definition.trigger.kind === "file-arrival",
+            definition.lifecycle === "enabled" &&
+            (definition.trigger.kind === "file-arrival" ||
+              definition.trigger.kind === "integration-event"),
         )
         ? 2_000
         : undefined;
     },
-    stopFileSources: () => automationFileSources.close(),
+    stopFileSources: () => {
+      automationFileSources.close();
+      automationEventSources.stop();
+    },
     readWorkTurn: (requestId) => workTurnProjection.lookup(requestId),
+    readCodeTurn: readCodeRoutineTurn,
     onRunStatusChanged: observeRunStatusChanged,
     store: automationEventStore,
     projection: persistence.automationProjection,
@@ -573,6 +758,30 @@ export function wireAutomation(deps: AutomationDependencies) {
     monotonic: () => performance.now(),
     wake: () => automationScheduler.poke(),
   });
+  const automationEventSources = new AutomationEventSources({
+    projection: persistence.automationProjection,
+    scheduler: automationScheduler,
+    sources: integrationEventSources,
+    activity: routineEventActivity,
+    current: (definition) => {
+      const snapshot = captureAutomationDefinitionSnapshot(definition);
+      const run = {
+        definitionSnapshot: snapshot,
+        authoritySnapshot: {
+          ...snapshot.authorityProfile,
+          capturedAt: new Date().toISOString() as UtcTimestamp,
+        },
+      };
+      const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, {
+        definition,
+        run,
+      });
+      return revalidateAutomationAuthority({ definition, run, facts }).kind === "ok";
+    },
+    now: () => new Date().toISOString() as UtcTimestamp,
+    monotonic: () => performance.now(),
+    wake: () => automationScheduler.poke(),
+  });
   if (automationHistoryAvailable) automationScheduler.start();
   // The host's own timer for completed threads, fed by every mode's service
   // that can archive on the host's behalf.
@@ -596,26 +805,68 @@ export function wireAutomation(deps: AutomationDependencies) {
       (persistence.readShellSettings()?.settings ?? defaultShellSettings())
         .completedThreadArchiveAfterDays,
   });
-  // A Code turn's routine proposals ride the seam later areas use to add
-  // tools to a Code turn; the Work turn adds the same tool where it composes
-  // its own. Each run's own turn, which acts as the host, is refused it.
-  contributeCodeTools(({ windowId, thread, readThread }) =>
-    createRoutineProposalTools({
+  // A Code turn's routine tools ride the seam later areas use to add tools to
+  // a Code turn; the Work turn adds the same tools where it composes its own.
+  // Each run's own turn, which acts as the host, is refused proposals and
+  // change requests, and is the only turn handed its run to report on. Plan
+  // may propose a routine; a change request still reads the turn's posture.
+  contributeCodeTools(({ windowId, thread, readThread, routineRun }) => {
+    const turn = {
       windowId,
-      thread: { id: String(thread.id), mode: "code", projectId: String(thread.projectId) },
-      readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
+      thread: { id: String(thread.id), mode: "code" as const, projectId: String(thread.projectId) },
       isAutomationOrigin: isRoutineHostScope(windowId),
-      proposals: routineProposalService,
       now: Date.now,
-    }),
-  );
+    };
+    return combineAppManagedToolSets(
+      createRoutineProposalTools({ ...turn, proposals: routineProposalService }),
+      createRoutineTools({
+        ...turn,
+        readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
+        ...(routineRun === undefined ? {} : { routineRun }),
+        routines: {
+          hostId: LOCAL_HOST_ID,
+          projection: persistence.automationProjection,
+          store: automationEventStore,
+          changes: routineProposalService,
+        },
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        uuid: randomUUID,
+      }),
+    );
+  });
   const automationRoutes = createAutomationRouteHandler({
+    eventSourceChoices: integrationEventSources.choices,
+    prepareEventSource: ({ command, current, signal }) => {
+      const previous = persistence.automationProjection.getDefinition(command.automationId);
+      const checkpoint = persistence.automationProjection.getEventSource(command.automationId);
+      const snapshot = Schema.decodeUnknownSync(AutomationDefinitionSnapshot)({
+        ...command.definition,
+        automationId: command.automationId,
+        definitionRevision: previous === undefined ? 1 : previous.definitionRevision + 1,
+      });
+      return prepareAutomationEventDefinition({
+        definition: command.definition,
+        sources: integrationEventSources,
+        ...(previous === undefined ? {} : { previous }),
+        ...(checkpoint === undefined ? {} : { checkpoint }),
+        rearm: command.kind === "update-automation" && command.rearmEvents === true,
+        current: () =>
+          current() &&
+          routineSnapshotAuthorityCurrent(snapshot) &&
+          (command.kind !== "update-automation" ||
+            command.rearmEvents !== true ||
+            previous === undefined ||
+            routineEventActivity(previous) === "quiet"),
+        signal,
+        now: () => new Date().toISOString() as UtcTimestamp,
+      });
+    },
     projection: persistence.automationProjection,
     commands: {
       // Every authenticated command wakes the scheduler so pause/resume/
       // run-now/cancel re-arm timers immediately instead of at the next poll.
-      execute: (command, provenance, source) => {
-        const result = automationCommandService.execute(command, provenance, source);
+      execute: (command, provenance, source, eventSource) => {
+        const result = automationCommandService.execute(command, provenance, source, eventSource);
         automationScheduler.poke();
         return result;
       },
@@ -676,7 +927,6 @@ export function wireAutomation(deps: AutomationDependencies) {
                     active: thread.lifecycle !== "archived",
                     providerInstanceId: String(thread.providerInstanceId),
                     modelId: String(thread.modelId),
-                    executionPolicy: thread.executionPolicy,
                     permissionPersistence: thread.permissionPersistence,
                     ...(thread.profileId === undefined
                       ? {}

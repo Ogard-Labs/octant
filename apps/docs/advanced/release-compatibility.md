@@ -12,7 +12,7 @@ packaging; a Linux x64 AppImage can be built locally as an unsigned dogfood
 artifact. An AppImage launch can update itself from the signed feed when the
 file is writable. A package, archive, or non-writable location cannot.
 TestFlight and public store distribution of the mobile client are
-post-preview. This page records what that means for compatibility and
+not available yet. This page records what that means for compatibility and
 migration.
 
 ## Data location
@@ -22,7 +22,7 @@ overridable with the `OCTANT_DATA_DIR` environment variable. The directory
 and its database are created owner-only (mode 0700). Releases on other
 platforms are not shipped in the preview. The source headless runtime now uses
 safe XDG defaults on Linux, but signed or maintainer-published Linux release
-artifacts and real-host release validation remain post-preview work. The local
+artifacts and real-host release validation are not done yet. The local
 unsigned x64 AppImage is a dogfood exception: it is not code-signed, and
 in-app update applies only when that image was launched from a writable path
 and the signed feed verifies.
@@ -57,15 +57,23 @@ and the signed feed verifies.
   for how an update is verified and what a check sends (provisional until
   signed self-updating releases are final).
 
+## In scope but not built yet
+
+These are part of the first preview, but are not finished:
+
+- A full language-server, debugger and extension-host companion (Monaco and
+  external-editor handoff work today)
+- Signed Windows packaging (Windows Work and Code stay unavailable until a
+  Windows confinement design is approved) and native mobile store
+  distribution
+
 ## What is excluded from the preview
 
-- Full IDE/LSP/debugger/extension-host scope (Monaco and external-editor
-  handoff are primary)
 - Hosted relay, Octant cloud account, and cross-host command routing (a
   paired client can register several hosts, but every command runs on the
   one host that owns the thread)
-- Signed Intel and Windows packaging, an operating-system code signature on
-  the Linux image, and native mobile store distribution
+- Signed Intel packaging and an operating-system code signature on the Linux
+  image
 - Pull-request review mutation (approve, comment, request changes, close)
   and any merge an agent or paired device starts; you can merge a pull request
   yourself from its review on the desktop after confirming, or turn on Merge
@@ -74,8 +82,8 @@ and the signed feed verifies.
   the host is running
 - Connector/OAuth marketplace and data migration from current Octant
 
-These are tracked on the post-preview roadmap; nothing on this page is a
-commitment that a deferred capability will ship.
+These are tracked on the roadmap; nothing on this page is a
+commitment that an unfinished capability will ship by a given date.
 
 ## Next steps
 

@@ -29,6 +29,7 @@ import type { AutomationWiring } from "./automation";
 import type { WorkRequestsWiring } from "./workRequests";
 
 export type RoutesDependencies = {
+  readonly conversationInputRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
 } & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
@@ -54,6 +55,7 @@ export type RoutesDependencies = {
     | "goalRoutes"
     | "planRoutes"
     | "projectBindingRoutes"
+    | "replyDetailRoutes"
     | "shellRoutes"
     | "shipRoutes"
     | "themeRoutes"
@@ -145,6 +147,7 @@ export type RoutesDependencies = {
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
+    conversationInputRoutes,
     credentialRequestRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
@@ -211,6 +214,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     remoteServerGrantLocalRoutes,
     replicaSyncStatusRoutes,
     scaffoldRoutes,
+    replyDetailRoutes,
     shellRoutes,
     shipRoutes,
     sidebarBackgroundRoutes,
@@ -259,6 +263,7 @@ export function wireRoutes(deps: RoutesDependencies) {
   const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
     (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
+    (await conversationInputRoutes(request)) ??
     (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??
     (await launchSessionRoutes(request)) ??
@@ -308,6 +313,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await canvasRoutes(request)) ??
     (await imageRoutes(request)) ??
     (await speechRoutes(request)) ??
+    (await replyDetailRoutes(request)) ??
     (await artifactLibraryRoutes(request)) ??
     (await artifactMirrorRoutes(request)) ??
     (await syncedArtifactRoutes(request)) ??

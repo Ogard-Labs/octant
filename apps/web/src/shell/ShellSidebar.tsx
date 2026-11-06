@@ -445,7 +445,10 @@ export function ShellSidebar(props: ShellSidebarProps) {
           ) : null}
           {props.applicationIdentity !== undefined ? (
             <div className="sidebar__application-identity">
-              <ApplicationIdentity productName={props.applicationIdentity.productName} />
+              <ApplicationIdentity
+                productName={props.applicationIdentity.productName}
+                testData={props.applicationIdentity.data === "test-data"}
+              />
             </div>
           ) : null}
           <div className="sidebar__content window-no-drag" data-octant-sidebar-content>

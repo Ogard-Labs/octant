@@ -1,4 +1,6 @@
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { randomUUID } from "node:crypto";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { workExternalInputReceipt } from "./workExternalInput";
 import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import {
@@ -19,12 +21,14 @@ import {
   AutomationId,
   UtcTimestamp,
   WORK_TURN_CAPABILITIES,
+  decodeProjectExtraFolder,
   decodeContextCompactionId,
   decodeContextSubjectRef,
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
   ReplayCursor,
+  type ProviderContextBlock,
   type WorkAccess,
 } from "@octant/contracts";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
@@ -120,6 +124,82 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it("launches in the selected approved folder and refuses revocation without falling back", async () => {
+    const base = workProject();
+    const project = workProject({
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/notes",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+      ],
+    });
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw new Error("Missing approved choice");
+    const fixture = serviceFixture({ project });
+    const thread = { ...(await fixture.threads.read()), workingFolderId: choice.id };
+    fixture.threads.read.mockResolvedValue(thread);
+    fixture.threads.bootstrap.mockResolvedValue({ threads: [thread] });
+    const command = startCommand();
+    await fixture.service.startFirstTurn(ids.window, {
+      ...command,
+      authority: { ...command.authority, workingFolderId: choice.id },
+    });
+    await fixture.waitForIdle();
+    expect(fixture.acquireInputs[0]).toMatchObject({ projectRoot: "/approved/notes" });
+    fixture.persistence.readProject.mockReturnValue(base);
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...command,
+        requestId: randomUUID(),
+        turnId: randomUUID(),
+        authority: { ...command.authority, workingFolderId: choice.id },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.acquireInputs).toHaveLength(1);
+  });
+  it("interrupts a running provider when its selected folder is withdrawn", async () => {
+    const base = workProject();
+    const project = workProject({
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/notes",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+      ],
+    });
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw Error("Missing folder");
+    let runningSignal: AbortSignal | undefined;
+    const fixture = serviceFixture({
+      project,
+      turnRuntime: {
+        run: async (input) => {
+          runningSignal = input.signal;
+          await new Promise<void>((resolve) => {
+            if (input.signal.aborted) resolve();
+            else input.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { kind: "cancelled" };
+        },
+      },
+    });
+    const thread = { ...(await fixture.threads.read()), workingFolderId: choice.id };
+    fixture.threads.read.mockResolvedValue(thread);
+    fixture.threads.bootstrap.mockResolvedValue({ threads: [thread] });
+    const command = startCommand();
+    await fixture.service.startFirstTurn(ids.window, {
+      ...command,
+      authority: { ...command.authority, workingFolderId: choice.id },
+    });
+    await vi.waitFor(() => expect(runningSignal).toBeDefined());
+    fixture.persistence.readProject.mockReturnValue(base);
+    await vi.waitFor(() => expect(runningSignal?.aborted).toBe(true), { timeout: 2000 });
+    await fixture.waitForIdle();
+    expect(fixture.projection.lookup(ids.request)?.status).toBe("cancelled");
+  });
   it("journals the exact accepted framed input and keeps it through projection replay and an identical retry", async () => {
     const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
     const fixture = serviceFixture({ turnRuntime: { run } });
@@ -989,7 +1069,7 @@ describe("WorkTurnService", () => {
               {
                 providerInstanceId: decodeProviderInstanceId(ids.provider),
                 modelId: decodeProviderModelId("model-a"),
-                contextWindow: 100,
+                contextWindow: 60,
                 maxOutput: 20,
                 source: "runtime-reported",
                 confidence: "high",
@@ -2386,8 +2466,8 @@ describe("WorkTurnService", () => {
     await fixture.waitForIdle();
     expect(JSON.stringify(contexts.flat())).not.toContain("octant_browser");
   });
-  it("opens every task with the Project's status, and takes stock when the status is stale", async () => {
-    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+  it("opens every task with the Project's status, and takes stock when the status is stale unless the request is unrelated", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const disk = new Map<string, string>([
       [
         "/private/tmp/knowledge/STATUS.md",
@@ -2411,14 +2491,53 @@ describe("WorkTurnService", () => {
 
     const sent = contexts.flat();
     expect(sent).toContainEqual({
-      kind: "user-message",
+      kind: "project-memory",
+      key: "work-status-file",
       text: expect.stringContaining("Signed offer due"),
     });
-    const instruction = sent.find(
-      (block) => block.kind === "instructions" && block.text.includes("Take stock first"),
+    const standing = sent.find(
+      (block) => block.kind === "instructions" && block.text.includes("STATUS.md"),
     );
-    expect(instruction?.text).toMatch(/not been updated for a while.*date has passed/);
-    expect(instruction?.text).not.toContain("AGENTS.md");
+    expect(standing?.text).toContain("When this turn changes where the work stands");
+    expect(standing?.text).not.toContain("Take stock");
+    const nudge = sent.find((block) => block.kind === "turn-instructions");
+    expect(nudge?.text).toMatch(/not been updated for a while.*date has passed/);
+    expect(nudge?.text).toContain("answer it first");
+    expect(JSON.stringify(sent)).not.toContain("AGENTS.md");
+  });
+
+  it("takes stock only when a task opens, so later turns keep the same standing context", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const disk = new Map<string, string>([
+      ["/private/tmp/knowledge/STATUS.md", "Last updated: 2026-07-01\n"],
+    ]);
+    const fixture = serviceFixture({
+      project: workProject({ statusFile: "enabled" }),
+      projectStatusFiles: inMemoryStatusFiles(disk),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"),
+      turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"),
+      prompt: "Revise that",
+    });
+    await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"));
+
+    expect(contexts).toHaveLength(2);
+    const [opening = [], later = []] = contexts;
+    expect(opening.some((block) => block.kind === "turn-instructions")).toBe(true);
+    expect(later.some((block) => block.kind === "turn-instructions")).toBe(false);
+    expect(later.filter((block) => block.kind === "instructions")).toEqual(
+      opening.filter((block) => block.kind === "instructions"),
+    );
   });
 
   it("hands the runtime the Project's extra folders and names them to the agent", async () => {
@@ -2618,6 +2737,50 @@ describe("WorkTurnService", () => {
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("keeps a supported stopped Work attempt addressable and force-stops only its exact identity", async () => {
+    const gate = deferred<void>();
+    const forced = vi.fn(async () => true);
+    const runtime = {
+      run: vi.fn(async () => {
+        await gate.promise;
+        return { kind: "cancelled" as const };
+      }),
+      canForceStop: (requestId: string) => requestId === String(ids.request),
+      forceStop: forced,
+    };
+    const fixture = serviceFixture({ turnRuntime: runtime });
+    const command = {
+      kind: "force-stop-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    };
+    try {
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await vi.waitFor(() => expect(runtime.run).toHaveBeenCalled());
+      await expect(fixture.service.cancelFirstTurn(ids.window, command)).rejects.toMatchObject({
+        failure: { category: "invalid" },
+      });
+      expect(forced).not.toHaveBeenCalled();
+      expect(
+        await fixture.service.cancelFirstTurn(ids.window, { ...command, kind: "cancel-work-turn" }),
+      ).toMatchObject({ kind: "stop-requested" });
+      await expect(
+        fixture.service.cancelFirstTurn(ids.window, {
+          ...command,
+          turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      expect(await fixture.service.cancelFirstTurn(ids.window, command)).toMatchObject({
+        kind: "turn-cancelled",
+      });
+      expect(forced).toHaveBeenCalledWith(String(ids.request));
+    } finally {
+      gate.resolve();
+      await fixture.waitForIdle();
+    }
   });
 
   it("releases the spend reservation when a Work turn is cancelled", async () => {
@@ -2975,7 +3138,7 @@ describe("WorkTurnService", () => {
     expect(followUp.kind).toBe("accepted");
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"));
     expect(sent[1]).toEqual([
-      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "instructions", text: expect.stringContaining("this task's folder") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Revised summary" },
     ]);
@@ -3902,7 +4065,7 @@ describe("WorkTurnService", () => {
         turnRuntime: { run: resumableRun(sent) },
         resolveDriver: resumable,
       });
-      await runTurns(fixture, 3, 92);
+      await runTurns(fixture, 3, 100);
       const [first, second, third] = sent;
       // Two turns fit and the second continues the first one's session.
       expect(String(second?.providerSessionId)).toBe(String(first?.providerSessionId));
@@ -4178,6 +4341,117 @@ describe("WorkTurnService", () => {
     ).toMatchObject({ reason: "fork", messages: 2 });
   });
 
+  it("refuses a changed tool catalogue before acceptance and preserves the conversation on explicit continuation", async () => {
+    const base = workProject();
+    const project = workProject({
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/notes",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/assets",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+      ],
+    });
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw new Error("Missing approved folder");
+    let physicalCurrent = true;
+    let keepRunning = false;
+    let continuationSignal: AbortSignal | undefined;
+    const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+      input.onSessionReady?.({
+        sessionId: input.providerSessionId,
+        resumeCursor: { driverKind: "codex", value: "saved-session" },
+      });
+      if (keepRunning) {
+        continuationSignal = input.signal;
+        expect(input.admissionCurrent?.()).toBe(true);
+        await new Promise<void>((resolve) =>
+          input.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        return { kind: "cancelled" as const };
+      }
+      return { kind: "completed" as const, response: "A saved answer" };
+    });
+    const resolveAppManagedTools = vi.fn(() => undefined);
+    const fixture = serviceFixture({
+      project,
+      resolveAppManagedTools,
+      workingDirectoriesCurrent: () => () => physicalCurrent,
+      turnRuntime: { run },
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        conversationOwnership: "provider",
+        toolCatalogContinuation: () => "handoff-required",
+      }),
+    });
+    const thread = { ...(await fixture.threads.read()), workingFolderId: choice.id };
+    fixture.threads.read.mockResolvedValue(thread);
+    const command = {
+      ...startCommand(),
+      authority: { ...startCommand().authority, workingFolderId: choice.id },
+    };
+    await fixture.service.startFirstTurn(ids.window, command);
+    await fixture.waitForIdle();
+    const next = {
+      ...command,
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      prompt: "Use the updated tools",
+    };
+    await expect(fixture.service.startFirstTurn(ids.window, next)).rejects.toThrow(
+      "different tools",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    expect((await fixture.service.transcript(ids.window, ids.thread)).turns).toHaveLength(1);
+    keepRunning = true;
+    await fixture.service.startFirstTurn(ids.window, { ...next, toolCatalogHandoff: true });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    physicalCurrent = false;
+    expect(resolveAppManagedTools).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        projectRoot: "/approved/notes",
+        extraFolders: [project.binding.canonicalRoot, "/approved/assets"],
+      }),
+    );
+    expect(run.mock.calls[1]?.[0].projectRoot).toBe("/approved/notes");
+    expect(run.mock.calls[1]?.[0].extraFolders).toContain(project.binding.canonicalRoot);
+    await vi.waitFor(() => expect(continuationSignal?.aborted).toBe(true));
+    await fixture.waitForIdle(next.requestId);
+    expect(run).toHaveBeenCalledTimes(2);
+    await expect(fixture.service.startFirstTurn(ids.window, next)).rejects.toThrow(
+      "identity conflict",
+    );
+    expect(run).toHaveBeenCalledTimes(2);
+    const restored = new WorkTurnProjection();
+    for (const [request] of fixture.persistence.journal.append.mock.calls) {
+      for (const event of request.events) {
+        if (event.eventName === "work.turn-accepted@1")
+          restored.apply(decodeWorkTurnAccepted(event.payload));
+      }
+    }
+    expect(restored.lookup(next.requestId)?.toolCatalogHandoff).toBe(true);
+    expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+    expect(JSON.stringify(run.mock.calls[1]?.[0].context)).toContain("A saved answer");
+    expect(
+      (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
+    ).toMatchObject({ reason: "provider-switch", messages: 2 });
+    fixture.persistence.readProject.mockReturnValue(base);
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...next,
+        requestId: randomUUID(),
+        turnId: randomUUID(),
+        toolCatalogHandoff: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   describe("moving a Work conversation to another provider", () => {
     const nextProvider = decodeProviderInstanceId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     const followUpCommand = () => ({
@@ -4193,6 +4467,9 @@ describe("WorkTurnService", () => {
       readonly firstKeepsSession: boolean;
       readonly nextKeepsSession: boolean;
       readonly firstProviderRetired?: boolean;
+      readonly firstCommand?: ReturnType<typeof startCommand> & {
+        readonly attachmentIds?: ReadonlyArray<ReturnType<typeof decodeWorkAttachmentId>>;
+      };
       readonly fixture?: Parameters<typeof serviceFixture>[0];
       /** How the n-th provider run ends once its session is ready; completes by default. */
       readonly endsWith?: (runIndex: number) => "completed" | "failed" | "waiting" | "cancelled";
@@ -4226,7 +4503,7 @@ describe("WorkTurnService", () => {
                   : "host",
               },
       });
-      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.service.startFirstTurn(ids.window, options.firstCommand ?? startCommand());
       await fixture.waitForIdle();
       retired = options.firstProviderRetired === true;
       const previousThread = await fixture.threads.read();
@@ -4261,6 +4538,64 @@ describe("WorkTurnService", () => {
       truncatedCharacters: 0,
       sourceTruncatedMessages: 0,
     };
+
+    it.each([true, false])(
+      "preserves the original screenshot when switching to a provider with native history %s",
+      async (nextKeepsSession) => {
+        const root = await mkdtemp(join(tmpdir(), "octant-work-handoff-input-"));
+        attachmentRoots.push(root);
+        const store = new WorkAttachmentStore(root);
+        const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000001");
+        const bytes = new Uint8Array([137, 80, 78]);
+        await store.stage({
+          threadId: ids.thread,
+          attachmentId,
+          displayName: "Original.png",
+          mediaType: "image/png",
+          bytes,
+        });
+        let supports = false;
+        const transfer = new ConversationInputTransfer({
+          ownerCurrent: () => true,
+          dataDirectory: root,
+          sourceCurrent: (reference) => reference.source.threadId === String(ids.thread),
+          read: (reference) =>
+            store.read(decodeWorkThreadId(reference.source.threadId), {
+              attachmentId: decodeWorkAttachmentId(reference.source.attachmentId),
+              byteLength: reference.byteLength,
+              digest: reference.digest,
+            }),
+          supports: () => supports,
+        });
+        const { fixture, run } = await movedFixture({
+          firstKeepsSession: false,
+          nextKeepsSession,
+          firstCommand: { ...startCommand(), attachmentIds: [attachmentId] },
+          fixture: {
+            attachments: store,
+            supportsAttachments: () => true,
+            conversationInputTransfer: transfer,
+          },
+        });
+        await expect(fixture.service.startFirstTurn(ids.window, followUpCommand())).rejects.toThrow(
+          "Original.png (unsupported)",
+        );
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(acceptedEvents(fixture)).toHaveLength(1);
+        supports = true;
+        await fixture.service.startFirstTurn(ids.window, followUpCommand());
+        await fixture.waitForIdle();
+        expect(run.mock.calls[1]?.[0].attachments).toEqual([
+          expect.objectContaining({ displayName: "Original.png", bytes }),
+        ]);
+        expect(acceptedEvents(fixture).at(-1)).toMatchObject({
+          inputReceipt: { included: 1, omitted: 0, purpose: "provider-switch" },
+        });
+        expect(JSON.stringify(run.mock.calls[1]?.[0].context)).toContain(
+          "original person's inputs",
+        );
+      },
+    );
 
     it("starts a new session with the earlier conversation when a provider that keeps its own session takes over", async () => {
       const { fixture, run } = await movedFixture({
@@ -4523,7 +4858,7 @@ describe("WorkTurnService", () => {
     expect(run.mock.calls[1]?.[0]).toMatchObject({
       command: expect.objectContaining({ prompt: "Make that summary shorter" }),
       context: [
-        { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+        { kind: "instructions", text: expect.stringContaining("this task's folder") },
         { kind: "user-message", text: "Summarize the brief" },
         { kind: "assistant-message", text: "Provider reply" },
       ],
@@ -4810,6 +5145,9 @@ async function attachmentStore(): Promise<WorkAttachmentStore> {
 function serviceFixture(
   options: {
     readonly project?: Project;
+    readonly workingDirectoriesCurrent?: NonNullable<
+      WorkTurnServiceDependencies["workingDirectories"]["current"]
+    >;
     readonly nativeConversation?: boolean;
     readonly resolveDriver?: (
       id: Parameters<WorkTurnServiceDependencies["resolveDriver"]>[0],
@@ -4819,6 +5157,7 @@ function serviceFixture(
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
     readonly supportsModelSwitch?: () => boolean;
+    readonly conversationInputTransfer?: WorkTurnServiceDependencies["conversationInputTransfer"];
     readonly contextHarness?: ContextHarnessService;
     readonly contextFacts?: ProviderDriver["contextFacts"];
     readonly safeInputBudgetTokens?: number;
@@ -4972,8 +5311,16 @@ function serviceFixture(
       active: [{ id: ids.project, type: "work", lifecycle: "active" }],
     })),
   };
-  const workingDirectories = { resolve: vi.fn(async (root: string) => root) };
+  const workingDirectories = {
+    resolve: vi.fn(async (root: string) => root),
+    ...(options.workingDirectoriesCurrent === undefined
+      ? {}
+      : { current: options.workingDirectoriesCurrent }),
+  };
   const service = new WorkTurnService({
+    ...(options.conversationInputTransfer === undefined
+      ? {}
+      : { conversationInputTransfer: options.conversationInputTransfer }),
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),

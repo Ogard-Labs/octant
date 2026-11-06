@@ -1,9 +1,18 @@
+import { ChildWorktreeSnapshotId, ChildWorktreeSourceReview } from "./childWorktreeSources";
 import { Schema } from "effect";
-import { CodeTerminalId } from "./code";
-import { MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
-import { UtcTimestamp } from "./events";
-import { BindingRevisionId, ProjectActionId, ProjectActionDirectory, ProjectId } from "./projects";
+import { WorkThreadId } from "./workThreads";
+import { CodeTerminalId, CodeThreadId, CodeCheckoutId, WorktreeReceiptId } from "./code";
+import { CodeOperationId, MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
+import { UtcTimestamp, AggregateVersion } from "./events";
+import {
+  BindingRevisionId,
+  ProjectAction,
+  ProjectActionId,
+  ProjectActionDirectory,
+  ProjectId,
+} from "./projects";
 import { WindowId } from "./shell";
+import { AgentRunRequestId } from "./agentRun";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -57,9 +66,95 @@ export type ProjectTerminalPosture = typeof ProjectTerminalPosture.Type;
  * resolves the root, the posture, and the owning window itself, so a caller
  * cannot describe its way to a folder, a credential, or someone else's shell.
  */
+const ActionThread = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  head: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/))),
+}).annotations(strict);
+const ActionRun = Schema.Struct({
+  actionId: ProjectActionId,
+  name: Schema.String.pipe(Schema.maxLength(40)),
+  folder: Schema.String.pipe(Schema.maxLength(4608)),
+  branch: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  thread: Schema.optional(ActionThread),
+  workThreadId: Schema.optional(WorkThreadId),
+}).annotations(strict);
+
+export const WorktreePreparation = Schema.Struct({
+  recipe: ProjectAction,
+  state: Schema.Literal(
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+    "skipped",
+    "cleanup-uncertain",
+  ),
+  attemptId: Schema.optional(CodeOperationId),
+  startedAt: Schema.optional(UtcTimestamp),
+  completedAt: Schema.optional(UtcTimestamp),
+  exitCode: Schema.optional(Schema.Int),
+  reason: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type WorktreePreparation = typeof WorktreePreparation.Type;
+export const decodeWorktreePreparation = Schema.decodeUnknownSync(WorktreePreparation);
+export const WORKTREE_PREPARATION_UPDATED = "code.worktree-preparation-updated@1";
+export const WorktreePreparationUpdated = Schema.Struct({
+  kind: Schema.Literal("worktree-preparation-updated"),
+  receiptId: WorktreeReceiptId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  preparation: WorktreePreparation,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export const decodeWorktreePreparationUpdated = Schema.decodeUnknownSync(
+  WorktreePreparationUpdated,
+);
+
 export const ProjectTerminalCommand = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("child-worktree-source"),
+    projectId: ProjectId,
+    thread: ActionThread,
+    action: Schema.Literal("inspect", "capture", "use-committed", "use-snapshot"),
+    snapshotId: Schema.optional(ChildWorktreeSnapshotId),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("worktree-preparation"),
+    projectId: ProjectId,
+    thread: ActionThread,
+    childRequestId: Schema.optional(AgentRunRequestId),
+    attemptId: Schema.optional(CodeOperationId),
+    action: Schema.Literal("inspect", "retry", "cancel", "skip"),
+  })
+    .pipe(Schema.filter((command) => command.action !== "retry" || command.attemptId !== undefined))
+    .annotations(strict),
+
+  Schema.Struct({
+    kind: Schema.Literal("preview-action"),
+    projectId: ProjectId,
+    actionId: ProjectActionId,
+    ...Folder,
+    thread: Schema.optional(ActionThread),
+    workThreadId: Schema.optional(WorkThreadId),
+  }).annotations(strict),
+
+  Schema.Struct({
+    kind: Schema.Literal("start-action"),
+    ...Target,
+    ...TerminalGeometry,
+    ...Folder,
+    actionId: ProjectActionId,
+    thread: Schema.optional(ActionThread),
+    workThreadId: Schema.optional(WorkThreadId),
+    projectVersion: Schema.optional(AggregateVersion),
+  }).annotations(strict),
+
+  Schema.Struct({
     kind: Schema.Literal("start"),
+    workThreadId: Schema.optional(WorkThreadId),
     ...Target,
     ...TerminalGeometry,
     ...Folder,
@@ -83,9 +178,8 @@ export const ProjectTerminalCommand = Schema.Union(
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("stop"), ...Target }).annotations(strict),
   /**
-   * Type one of the Project's saved actions into a running terminal. The
-   * command names the action, never its text: the host reads the line from the
-   * Project record, so a caller cannot send a command the person did not save.
+   * Legacy clients may still name this command; the host refuses it and asks
+   * for a dedicated action run, because an existing shell may be busy.
    */
   Schema.Struct({
     kind: Schema.Literal("run-action"),
@@ -112,6 +206,7 @@ export const ProjectTerminalCommand = Schema.Union(
 export type ProjectTerminalCommand = typeof ProjectTerminalCommand.Type;
 
 export const ProjectTerminalView = Schema.Struct({
+  action: Schema.optional(ActionRun),
   ...Target,
   state: Schema.Literal("running", "exited", "interrupted"),
   exitCode: Schema.optional(Schema.Int),
@@ -158,6 +253,24 @@ export type ProjectActionSuggestion = typeof ProjectActionSuggestion.Type;
 
 export const ProjectTerminalResult = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("child-worktree-source"),
+    review: ChildWorktreeSourceReview,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("worktree-preparation"),
+    receiptId: WorktreeReceiptId,
+    preparation: Schema.optional(WorktreePreparation),
+    output: Schema.String.pipe(Schema.maxLength(MAX_PROJECT_TERMINAL_OUTPUT_CHARACTERS)),
+    outputTruncated: Schema.Boolean,
+  }).annotations(strict),
+
+  Schema.Struct({
+    kind: Schema.Literal("project-action-preview"),
+    projectId: ProjectId,
+    projectVersion: AggregateVersion,
+    action: ActionRun,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("project-terminal"),
     terminal: ProjectTerminalView,
     output: Schema.optional(ProjectTerminalOutput),
@@ -181,6 +294,7 @@ export type ProjectTerminalResult = typeof ProjectTerminalResult.Type;
  * of any record.
  */
 export const ProjectTerminalStarted = Schema.Struct({
+  action: Schema.optional(ActionRun),
   kind: Schema.Literal("project-terminal-started"),
   ...Target,
   windowId: WindowId,

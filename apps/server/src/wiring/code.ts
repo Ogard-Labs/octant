@@ -1,3 +1,5 @@
+import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { GitHistoryPort } from "../code/gitHistoryPort";
 import {
   MINIMUM_GIT_VERSION,
@@ -918,10 +920,15 @@ export function wireCode(deps: CodeDependencies) {
           // The runtime owns the journal a merge is recorded in and the turns
           // that carry it.
           forkMergeBack: {
-            merge: async (windowId, forkThreadId, throughOperationId) =>
+            merge: async (windowId, forkThreadId, throughOperationId, contextInputPolicy) =>
               codeOperationRuntime?.mergeForkContext === undefined
                 ? { status: "refused", reason: "unsupported" }
-                : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
+                : codeOperationRuntime.mergeForkContext(
+                    windowId,
+                    forkThreadId,
+                    throughOperationId,
+                    contextInputPolicy,
+                  ),
           },
           managedThreadCreation: withServerWorktreeCreation(
             { store: serverProjectStore, connection: serverConnection },
@@ -933,6 +940,22 @@ export function wireCode(deps: CodeDependencies) {
             },
           ),
           workingDirectories: {
+            validateChoice: async (windowId, projectId, folderId, directory) => {
+              if (!(await codeProjectAccess.canAccessProject(windowId, projectId))) return false;
+              const project = persistence.readProject(projectId);
+              if (project?.type !== "code" || project.lifecycle !== "active") return false;
+              const selected = approvedWorkingFolderRoot(project, folderId);
+              if (selected === undefined) return false;
+              try {
+                await resolveThreadWorkingDirectory(
+                  selected,
+                  directory ?? decodeThreadWorkingDirectory("."),
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            },
             resolve: async (windowId, thread, checkout, workingDirectory) => {
               const root = await roots.resolve(
                 windowId,
@@ -940,9 +963,17 @@ export function wireCode(deps: CodeDependencies) {
                 checkout,
                 codeWorkingDirectoryProbePath,
               );
-              return root === undefined
+              if (root === undefined) return undefined;
+              const project = persistence.readProject(thread.projectId);
+              if (project?.type !== "code") return undefined;
+              const selected = approvedWorkingFolderRoot(
+                project,
+                thread.workingFolderId,
+                root.rootPath,
+              );
+              return selected === undefined
                 ? undefined
-                : resolveThreadWorkingDirectory(root.rootPath, workingDirectory);
+                : resolveThreadWorkingDirectory(selected, workingDirectory);
             },
           },
           onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),

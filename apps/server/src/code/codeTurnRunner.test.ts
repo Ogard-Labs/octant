@@ -39,6 +39,37 @@ const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000
 const sessionId = decodeProviderSessionId("87000000-0000-4000-8000-000000000002");
 
 describe("CodeTurnRunner", () => {
+  it("refuses to send original continuation inputs revoked while the native session starts", async () => {
+    let current = true;
+    const connection = fakeConnection({
+      start: vi.fn(() =>
+        Effect.sync(() => {
+          current = false;
+          return { sessionId };
+        }),
+      ),
+      subscribe: Effect.succeed(Stream.never),
+    });
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              inputsCurrent: () => current,
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: { message: expect.stringContaining("original continuation inputs") },
+    });
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+  });
+
   it("resumes the same native session for a follow-up without creating another", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
@@ -94,6 +125,37 @@ describe("CodeTurnRunner", () => {
       },
     });
     expect(connection.resume).toHaveBeenCalledOnce();
+    expect(connection.start).not.toHaveBeenCalled();
+    expect(connection.send).not.toHaveBeenCalled();
+  });
+
+  it("preserves the typed tool refresh choice without sending or replaying a refused turn", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.empty),
+      resume: vi.fn(() =>
+        Effect.fail<ProviderFailure>({
+          category: "stale-resume",
+          toolCatalogHandoffRequired: true,
+          message: "Choose updated tools.",
+        }),
+      ),
+    });
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              resumeCursor: { driverKind: "codex", value: "saved-session" },
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(outcome).toMatchObject({
+      _tag: "Left",
+      left: { category: "waiting", resumeRefused: true, toolCatalogHandoffRequired: true },
+    });
     expect(connection.start).not.toHaveBeenCalled();
     expect(connection.send).not.toHaveBeenCalled();
   });
@@ -246,54 +308,60 @@ describe("CodeTurnRunner", () => {
     },
   );
 
-  it("subscribes before send and acquires Code in the exact checkout with thread authority", async () => {
-    let subscribed = false;
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = fakeConnection({
-      subscribe: Effect.sync(() => {
-        subscribed = true;
-        return Stream.fromQueue(queue);
-      }),
-      send: vi.fn(() =>
-        Effect.gen(function* () {
-          expect(subscribed).toBe(true);
-          yield* Queue.offer(queue, event({ kind: "text-delta", text: "hello" }));
-          yield* Queue.offer(queue, event({ kind: "completed" }));
+  it.each([undefined, "/private/approved/task"])(
+    "subscribes before send and launches in the chosen folder %s with thread authority",
+    async (providerRoot) => {
+      let subscribed = false;
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = fakeConnection({
+        subscribe: Effect.sync(() => {
+          subscribed = true;
+          return Stream.fromQueue(queue);
         }),
-      ),
-    });
-    const acquire = vi.fn(() => Effect.succeed(connection));
-    const events: CodeTurnEvent[] = [];
-    const outcomes: CodeTurnOutcome[] = [];
-    const runner = new CodeTurnRunner();
-
-    await Effect.runPromise(
-      Effect.scoped(
-        runner.run(
-          input({
-            provider: { acquire },
-            persistEvent: (next) => Effect.sync(() => events.push(next)),
-            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+        send: vi.fn(() =>
+          Effect.gen(function* () {
+            expect(subscribed).toBe(true);
+            yield* Queue.offer(queue, event({ kind: "text-delta", text: "hello" }));
+            yield* Queue.offer(queue, event({ kind: "completed" }));
           }),
         ),
-      ),
-    );
+      });
+      const acquire = vi.fn(() => Effect.succeed(connection));
+      const events: CodeTurnEvent[] = [];
+      const outcomes: CodeTurnOutcome[] = [];
+      const runner = new CodeTurnRunner();
 
-    expect(acquire).toHaveBeenCalledWith({
-      instanceId: providerInstanceId,
-      mode: "code",
-      projectRoot: "/private/worktrees/exact",
-      permissionPersistence: "current-session",
-    });
-    expect(connection.start).toHaveBeenCalledWith({
-      sessionId,
-      modelId: decodeProviderModelId("model-a"),
-      executionPolicy: "approval-gated",
-      tools: [],
-    });
-    expect(events).toContainEqual(expect.objectContaining({ category: "message", text: "hello" }));
-    expect(outcomes.at(-1)).toBe("completed");
-  });
+      await Effect.runPromise(
+        Effect.scoped(
+          runner.run(
+            input({
+              ...(providerRoot === undefined ? {} : { providerRoot }),
+              provider: { acquire },
+              persistEvent: (next) => Effect.sync(() => events.push(next)),
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+            }),
+          ),
+        ),
+      );
+
+      expect(acquire).toHaveBeenCalledWith({
+        instanceId: providerInstanceId,
+        mode: "code",
+        projectRoot: providerRoot ?? "/private/worktrees/exact",
+        permissionPersistence: "current-session",
+      });
+      expect(connection.start).toHaveBeenCalledWith({
+        sessionId,
+        modelId: decodeProviderModelId("model-a"),
+        executionPolicy: "approval-gated",
+        tools: [],
+      });
+      expect(events).toContainEqual(
+        expect.objectContaining({ category: "message", text: "hello" }),
+      );
+      expect(outcomes.at(-1)).toBe("completed");
+    },
+  );
 
   it("reconciles provider file, diff, and successful tool claims as observations, never proof", async () => {
     const providerEvents = [

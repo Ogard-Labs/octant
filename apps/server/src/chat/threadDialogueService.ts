@@ -1,4 +1,5 @@
 import {
+  THREAD_DIALOGUE_TOOL_NAME,
   decodeChatThreadId,
   decodeThreadDialogueMessageInput,
   decodeThreadDialogueResult,
@@ -11,7 +12,7 @@ import {
 } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
-const THREAD_DIALOGUE_TOOL = "octant_thread_message";
+const THREAD_DIALOGUE_TOOL = THREAD_DIALOGUE_TOOL_NAME;
 const MAX_THREAD_DIALOGUE_MESSAGES_PER_TURN = 3;
 const MAX_THREAD_DIALOGUE_REPLY_LENGTH = 8_000;
 
@@ -21,6 +22,12 @@ export interface ThreadDialogueServiceOptions {
     threadIds: ReadonlyArray<MentionableThreadId>,
   ) => Promise<ReadonlyArray<{ readonly threadId: MentionableThreadId; readonly title: string }>>;
   readonly readChatThread: (threadId: ChatThreadId) => ChatThreadView;
+  /**
+   * Whether a mentioned id names a Chat thread at all. A turn that mentions
+   * only Work or Code threads is not offered the ask, because every call would
+   * refuse; the call still re-resolves its target on the window's authority.
+   */
+  readonly isChatThread: (threadId: string) => boolean;
   readonly executeChat: (
     command: unknown,
     context: { readonly windowId: WindowId; readonly coordinationDepth: number },
@@ -54,8 +61,15 @@ export class ThreadDialogueService {
     readonly targetThreadIds: ReadonlyArray<MentionableThreadId>;
     readonly coordinationDepth?: number;
   }): AppManagedToolSet | undefined {
-    if ((input.coordinationDepth ?? 0) > 0 || input.targetThreadIds.length === 0) return undefined;
+    if ((input.coordinationDepth ?? 0) > 0) return undefined;
     if (this.#isSideChat(String(input.sourceThreadId))) return undefined;
+    const chatTargetIds = input.targetThreadIds.filter(
+      (threadId) =>
+        String(threadId) !== String(input.sourceThreadId) &&
+        this.#options.isChatThread(String(threadId)),
+    );
+    const firstTarget = chatTargetIds[0];
+    if (firstTarget === undefined) return undefined;
     let sends = 0;
     return {
       definitions: [THREAD_DIALOGUE_TOOL_DEFINITION],
@@ -68,21 +82,21 @@ export class ThreadDialogueService {
         }
         if (signal?.aborted) {
           return {
-            result: failedResult(input.targetThreadIds[0]!, "Thread dialogue was interrupted."),
+            result: failedResult(firstTarget, "Thread dialogue was interrupted."),
             isError: true,
           };
         }
         if (sends >= MAX_THREAD_DIALOGUE_MESSAGES_PER_TURN) {
           return {
             result: failedResult(
-              input.targetThreadIds[0]!,
+              firstTarget,
               "This turn reached the three-message coordination limit.",
             ),
             isError: true,
           };
         }
         sends += 1;
-        let requestedTargetId = input.targetThreadIds[0]!;
+        let requestedTargetId = firstTarget;
         let requestedTargetTitle = "Target Chat";
         try {
           const request = decodeThreadDialogueMessageInput(JSON.parse(inputJson));
@@ -103,7 +117,7 @@ export class ThreadDialogueService {
             };
           }
           const target = (
-            await this.#options.resolveChatTargets(input.windowId, input.targetThreadIds)
+            await this.#options.resolveChatTargets(input.windowId, chatTargetIds)
           ).find((candidate) => String(candidate.threadId) === String(request.targetThreadId));
           if (target === undefined || String(target.threadId) === String(input.sourceThreadId)) {
             return {
@@ -171,11 +185,14 @@ export class ThreadDialogueService {
 const THREAD_DIALOGUE_TOOL_DEFINITION: ProviderToolDefinition = {
   name: THREAD_DIALOGUE_TOOL,
   description:
-    "Send one bounded instruction to an explicitly mentioned Chat thread and wait for its reply. Use only when the user's request asks you to coordinate with that thread, then include the returned target reply in your own final response.",
+    "Ask a Chat thread the user mentioned in this message one bounded question or instruction, and wait for its reply. Use it only when the user asks you to coordinate with that thread, never to act on it otherwise; a turn may ask at most three times, and the thread you ask cannot ask onward. Waiting means that thread is busy: tell the user rather than retrying. Put the reply you get in your own answer.",
   inputSchema: {
     type: "object",
     properties: {
-      targetThreadId: { type: "string", description: "The explicitly mentioned Chat thread id." },
+      targetThreadId: {
+        type: "string",
+        description: "The id of a Chat thread the user mentioned in this message.",
+      },
       message: {
         type: "string",
         maxLength: 8_000,

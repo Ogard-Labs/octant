@@ -28,6 +28,7 @@
     "./code-operations": "./src/codeOperations.ts",
     "./code-debug": "./src/codeDebug.ts",
     "./code-language": "./src/codeLanguage.ts",
+    "./conversation-inputs": "./src/conversationInputs.ts",
     "./thread-board": "./src/threadBoard.ts",
     "./code-test-definitions": "./src/codeTestDefinitions.ts",
     "./context": "./src/context.ts",

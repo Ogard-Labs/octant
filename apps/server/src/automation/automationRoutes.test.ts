@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -209,7 +209,7 @@ async function json(response: Response | undefined): Promise<unknown> {
 
 describe("automation routes", () => {
   it("saves file setup through actual protected folder preparation without reading files or claiming readiness", async () => {
-    const root = mkdtempSync(join(tmpdir(), "octant-file-save-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-file-save-")));
     directories.push(root);
     mkdirSync(join(root, "Inbox"));
     writeFileSync(join(root, "Inbox/already.txt"), "not an arrival");
@@ -267,7 +267,7 @@ describe("automation routes", () => {
   it.each(["window", "rotated window", "Project"])(
     "refuses a late prepared Save after its %s ownership was revoked",
     async (owner) => {
-      const root = mkdtempSync(join(tmpdir(), "octant-file-save-revoke-"));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-file-save-revoke-")));
       directories.push(root);
       mkdirSync(join(root, "Inbox"));
       let release: (() => void) | undefined;

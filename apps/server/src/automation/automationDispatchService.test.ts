@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deriveAutomationOccurrenceKey,
   decodeAutomationDefinition,
+  decodeCodeThread,
+  CodeConversationTurn,
   ReplayCursor,
   type AutomationDefinition,
   type AutomationRun,
@@ -24,7 +26,8 @@ import {
 } from "./automationDispatchService";
 import { AutomationEventStore } from "./automationEventStore";
 import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
-import { automationRunIdForOccurrence } from "./automationRunIdentity";
+import { automationRunIdForOccurrence, automationCodeOperationId } from "./automationRunIdentity";
+import { automationCodeEvidenceFromText } from "./automationCodeDispatchPort";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import type {
   AutomationCapacityAdmissionPort,
@@ -766,6 +769,89 @@ describe("AutomationDispatchService", () => {
     expect(after?.threadId).toBe(automationThreadIdForOccurrence(String(run.occurrenceKey)));
     expect(after?.dispatchIntent?.threadId).toBe(after?.threadId);
     expect(after?.firstTurnAcceptance?.runtimeReceipt).toBe("code-operation:test");
+    session.connection.close();
+  });
+
+  it("observes the exact recorded Code turn and releases its run only on matching terminal evidence", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const operationId = automationCodeOperationId(run);
+    const code = createCodePort({
+      startOrRecoverFirstTurn: async () => ({
+        kind: "accepted",
+        runtimeReceipt: `code-operation:${operationId}`,
+        acceptedAt: definition.createdAt,
+      }),
+    });
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    await dispatcher.dispatchNow(definition.id, run.id);
+    const thread = decodeCodeThread({
+      id: automationThreadIdForOccurrence(String(run.occurrenceKey)),
+      projectId: definition.projectId,
+      bindingRevisionId: AUTOMATION_TEST_IDS.bindingRevision,
+      repositoryId: `repo_${"a".repeat(64)}`,
+      checkoutId: "aa000000-0000-4000-8000-0000000000e3",
+      title: "Routine",
+      lifecycle: "active",
+      providerInstanceId: definition.executionProfile.providerInstanceId,
+      modelId: definition.executionProfile.modelId,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+      deliveryTarget: {
+        branchIntent: "automation/example",
+        remoteName: "origin",
+        proposedBaseRepository: "example/project",
+        proposedBaseBranch: "main",
+        outcomeKind: "local-implementation",
+        confirmedAt: definition.createdAt,
+      },
+      version: 1,
+      createdAt: definition.createdAt,
+      updatedAt: definition.createdAt,
+    });
+    let turn = Schema.decodeUnknownSync(CodeConversationTurn)({
+      operationId,
+      providerInstanceId: thread.providerInstanceId,
+      modelId: thread.modelId,
+      sessionId: run.firstTurnRequestId,
+      checkoutId: thread.checkoutId,
+      prompt: automationCodeEvidenceFromText().put(definition.taskPrompt),
+      assistant: [],
+      status: "waiting",
+      startedAt: definition.createdAt,
+      updatedAt: definition.createdAt,
+    });
+    let prompt = "Different retained task";
+    const scheduler = new AutomationSchedulerService({
+      store: session.store,
+      projection: session.projection,
+      dispatch: { offer: () => undefined },
+      now: () => "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+      readCodeTurn: () => ({ thread, turn, prompt }),
+    });
+    scheduler.runPass();
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    prompt = definition.taskPrompt;
+    scheduler.runPass();
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("waiting");
+    turn = { ...turn, status: "completed" };
+    scheduler.runPass();
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
+    expect(session.projection.activeRun(definition.id)).toBeUndefined();
+    expect(code.create).toHaveBeenCalledOnce();
+    expect(
+      hydrateAutomationProjection({ store: session.store, projection: session.projection }),
+    ).toBe("ok");
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("completed");
     session.connection.close();
   });
 

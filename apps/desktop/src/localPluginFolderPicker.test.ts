@@ -24,7 +24,7 @@ describe("createLocalPluginFolderPicker", () => {
       return json();
     };
     const picker = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "fixture-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "fixture-secret" }),
       dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: ["/tmp/skills"] }) },
       fetch: async () => reply,
       resolveOwnedWindow: () => window,
@@ -46,7 +46,7 @@ describe("createLocalPluginFolderPicker", () => {
       Response.json({ receiptId: "S".repeat(43), expiresAt: 1000 }, { status: 201 }),
     );
     const picker = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "fixture-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "fixture-secret" }),
       dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: ["/tmp/skills"] }) },
       fetch,
       resolveOwnedWindow: () => window,
@@ -77,7 +77,7 @@ describe("createLocalPluginFolderPicker", () => {
     const selected = Promise.withResolvers<{ canceled: boolean; filePaths: string[] }>();
     const fetch = vi.fn();
     const picker = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "fixture-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "fixture-secret" }),
       dialog: { showOpenDialog: () => selected.promise },
       fetch,
       resolveOwnedWindow: () => window,
@@ -98,7 +98,7 @@ describe("createLocalPluginFolderPicker", () => {
         Response.json({ receiptId: "A".repeat(43), expiresAt: 1_000 }, { status: 201 }),
       );
     const picker = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: {
         showOpenDialog: vi.fn().mockResolvedValue({
           canceled: false,
@@ -132,7 +132,7 @@ describe("createLocalPluginFolderPicker", () => {
 
   it("returns cancelled when the dialog is dismissed", async () => {
     const picker = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: {
         showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
       },
@@ -145,7 +145,7 @@ describe("createLocalPluginFolderPicker", () => {
 
   it("rejects unauthorized or destroyed windows", async () => {
     const missing = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: { showOpenDialog: vi.fn() },
       resolveOwnedWindow: () => undefined,
       serverUrl: "http://127.0.0.1:13773",
@@ -154,7 +154,7 @@ describe("createLocalPluginFolderPicker", () => {
     await expect(missing({ sender: {} })).rejects.toBeInstanceOf(LocalPluginFolderPickerError);
 
     const destroyed = createLocalPluginFolderPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: { showOpenDialog: vi.fn() },
       resolveOwnedWindow: () => ({ isDestroyed: () => true }),
       serverUrl: "http://127.0.0.1:13773",

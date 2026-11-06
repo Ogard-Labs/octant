@@ -414,6 +414,9 @@ export function createThreadMessageQueuePort(
                 projectId: thread.projectId,
                 bindingRevisionId: thread.bindingRevisionId,
                 workingDirectory: thread.workingDirectory ?? ".",
+                ...(thread.workingFolderId === undefined
+                  ? {}
+                  : { workingFolderId: thread.workingFolderId }),
                 confinementPosture: "project-root-confined",
                 providerInstanceId: thread.providerInstanceId,
                 modelId: thread.modelId,

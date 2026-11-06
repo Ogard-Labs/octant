@@ -1,6 +1,6 @@
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
+import { hostDefaultFolder } from "../defaultFolder";
 import { join } from "node:path";
 import { ReplayCursor, type WindowId } from "@octant/contracts";
 import { Effect, Schema } from "effect";
@@ -32,6 +32,8 @@ import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
 import { createShellRouteHandler } from "../shellRoutes";
+import { createReplyDetailRouteHandler } from "../replyDetailRoutes";
+import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { notMeasuredProvider, SpendCeilingService } from "../spendCeilingService";
 import { requireJournalHydration } from "../persistence/journalHydration";
@@ -71,7 +73,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
   return Effect.gen(function* () {
     const projectRootPort = new ProjectRootPort();
     const managedRepositoryInventory = new ManagedRepositoryInventory({
-      inventoryPath: join(homedir(), "Octant", "Repositories"),
+      inventoryPath: join(hostDefaultFolder(), "Repositories"),
     });
     const managedCloneProcessPort = new ManagedCloneProcessPort({
       ghExecutable: options.ghExecutable ?? "gh",
@@ -163,6 +165,11 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       windowAuthorityStore,
       now: Date.now,
       ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
+    });
+    const replyDetailRoutes = createReplyDetailRouteHandler({
+      readShellSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      windowAuthorityStore,
+      now: Date.now,
     });
     const themeService = new ThemeService({
       persistence,
@@ -366,6 +373,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       projectBindingRoutes,
       projectRootPort,
       projectService,
+      replyDetailRoutes,
       shellRoutes,
       shellService,
       shipRoutes,

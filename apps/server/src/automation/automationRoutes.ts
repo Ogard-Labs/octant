@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  AutomationEventSourceChoices,
+  type AutomationEventSourceChoice,
   decodeAutomationCommandResult,
   decodeAutomationCommand,
   decodeAutomationFollowUpRequest,
@@ -22,9 +24,12 @@ import {
   type AutomationId,
   type HostId,
   type ProjectId,
+  type RoutineChangeRequest,
   type RoutineProposal,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import type { AutomationEventSourcePreparation } from "./automationEventSources";
 import { resolveNextAutomationOccurrence } from "@octant/domain";
 import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
@@ -48,6 +53,15 @@ const DEFAULT_PAGE_LIMIT = 50;
 const DETAIL_RUNS_LIMIT = 50;
 
 export interface AutomationRouteDependencies {
+  readonly eventSourceChoices?: () => Promise<ReadonlyArray<AutomationEventSourceChoice>>;
+  readonly prepareEventSource?: (input: {
+    readonly command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationEventSourcePreparation | undefined>;
   readonly projection: AutomationProjection;
   readonly commands: Pick<AutomationCommandService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -61,9 +75,11 @@ export interface AutomationRouteDependencies {
    */
   readonly historyAvailable?: () => boolean;
   /**
-   * Routines thread agents proposed. Listed and answered only by the window
-   * whose turn raised them; a confirm builds the routine from the thread's
-   * live facts and creates it through the same command path as `commands`.
+   * Routines thread agents proposed, and pauses or archives they asked for.
+   * Listed and answered only by the window whose turn raised them; a confirm
+   * builds the routine from the thread's live facts and creates it, or pauses
+   * or archives the named routine, through the same command path as
+   * `commands`.
    */
   readonly proposals?: {
     readonly service: Pick<RoutineProposalService, "list" | "claim">;
@@ -158,6 +174,20 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
     try {
       if (route === "list" && request.method === "GET") {
         return await handleList(dependencies, context, url, origin);
+      }
+      if (route === "event-sources" && request.method === "GET") {
+        if (context.principal.kind !== "local-window")
+          return failureResponse(
+            "Configure event sources from a window on this host.",
+            403,
+            origin,
+          );
+        const choices = (await dependencies.eventSourceChoices?.()) ?? [];
+        return jsonResponse(
+          Schema.decodeUnknownSync(AutomationEventSourceChoices)(choices),
+          200,
+          origin,
+        );
       }
       if (route === "get" && request.method === "GET") {
         return await handleGet(dependencies, context, url, origin);
@@ -309,10 +339,12 @@ async function handleGet(
   }
   const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
   const fileSource = dependencies.projection.getFileSourceSummary(automationId);
+  const eventSource = dependencies.projection.getEventSource(automationId);
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-detail",
       ...(fileSource === undefined ? {} : { fileSource }),
+      ...(eventSource === undefined ? {} : { eventSource }),
       automation: definition,
       runs: runs.runs,
     }),
@@ -456,7 +488,7 @@ async function handleCommand(
     return jsonResponse(decodeAutomationCommandResult(denial), 200, origin);
   }
 
-  const command = {
+  let command = {
     ...body,
     principal: context.principal,
     origin: { kind: "interactive" },
@@ -465,6 +497,55 @@ async function handleCommand(
     | AutomationFileSourcePreparation
     | AutomationFileSourceRearmPreparation
     | undefined;
+  let eventPreparation: AutomationEventSourcePreparation | undefined;
+  if (
+    (command.kind === "create-automation" || command.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    isRecord(body.definition.trigger) &&
+    body.definition.trigger.kind === "integration-event"
+  ) {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure("unauthorized", "Configure an event routine from a window on this host."),
+        200,
+        origin,
+      );
+    const checked = decodeAutomationCommand(command);
+    if (checked.kind !== "create-automation" && checked.kind !== "update-automation")
+      return jsonResponse(commandFailure("invalid", "The event routine is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      (checked.kind === "create-automation"
+        ? dependencies.projection.getDefinition(checked.automationId) === undefined
+        : dependencies.projection.getDefinition(checked.automationId)?.version ===
+          checked.expectedVersion);
+    eventPreparation = await dependencies.prepareEventSource?.({
+      command: checked,
+      current,
+      signal,
+    });
+    if (
+      eventPreparation === undefined ||
+      !eventPreparation.current() ||
+      authorizeCommandProject(
+        dependencies,
+        body,
+        await accessibleProjects(dependencies, context),
+      ) !== undefined ||
+      !current()
+    )
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "The selected event source is unavailable or changed. Check its connection and filters. Source changes require explicit re-arm.",
+        ),
+        200,
+        origin,
+      );
+    command = { ...checked, definition: eventPreparation.definition };
+  }
   if (command.kind === "rearm-file-automation") {
     if (context.principal.kind !== "local-window")
       return jsonResponse(
@@ -594,16 +675,19 @@ async function handleCommand(
       );
     }
   }
-  const result = dependencies.commands.execute(command, undefined, preparation);
+  const result =
+    eventPreparation === undefined
+      ? dependencies.commands.execute(command, undefined, preparation)
+      : dependencies.commands.execute(command, undefined, preparation, eventPreparation);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 
 /**
- * A person's answer to a thread's routine proposal. The proposal leaves the
- * waiting list on the first answer, so a retry cannot create a second
- * routine. A confirm is a create by this request's own principal, held to the
- * same Project check and command service as a create from the editor; only
- * the host adds which thread proposed it.
+ * A person's answer to a thread's routine proposal or change request. It
+ * leaves the waiting list on the first answer, so a retry cannot act twice.
+ * A confirm is a create, pause, or archive by this request's own principal,
+ * held to the same Project check and command service as the person's own;
+ * only the host adds which thread proposed a created routine.
  */
 async function handleProposalDecision(
   dependencies: AutomationRouteDependencies,
@@ -638,6 +722,25 @@ async function handleProposalDecision(
     claimed.settle({ status: "not-created", message: failure.message });
     return jsonResponse(decodeRoutineProposalDecisionResult(failure), 200, origin);
   };
+  if ("kind" in claimed.proposal) {
+    const changed = await changeThreadRoutine(dependencies, context, claimed.proposal);
+    if (changed.kind !== "automation-paused" && changed.kind !== "automation-archived") {
+      return refuse(
+        changed.kind === "automation-command-failed"
+          ? changed
+          : commandFailure("invalid", "The routine was not changed."),
+      );
+    }
+    claimed.settle({ status: "confirmed", automationId: changed.automation.id });
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({
+        kind: "routine-proposal-confirmed",
+        automation: changed.automation,
+      }),
+      200,
+      origin,
+    );
+  }
   const result = await createThreadRoutine(dependencies, context, claimed.proposal);
   if (result.kind !== "automation-created") {
     return refuse(
@@ -696,6 +799,38 @@ async function createThreadRoutine(
     } as AutomationCommand,
     { originThreadId: proposal.threadId },
   );
+}
+
+/**
+ * Pause or archive the routine a thread's agent asked about, as this
+ * request's own principal: the same Project check and command as the person's
+ * own pause or archive in Automation Center, at the version the agent saw, so
+ * a routine changed since the request is refused rather than changed.
+ */
+async function changeThreadRoutine(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  request: RoutineChangeRequest,
+): Promise<AutomationCommandResult> {
+  if (dependencies.historyAvailable?.() === false) {
+    return commandFailure(
+      "unsupported",
+      "Automation history could not be loaded, so Automations cannot change.",
+    );
+  }
+  const command = {
+    kind: request.change === "pause" ? "pause-automation" : "archive-automation",
+    automationId: request.automationId,
+    expectedVersion: request.expectedVersion,
+  };
+  const accessible = await accessibleProjects(dependencies, context);
+  const denial = authorizeCommandProject(dependencies, command, accessible);
+  if (denial !== undefined) return denial;
+  return dependencies.commands.execute({
+    ...command,
+    principal: context.principal,
+    origin: { kind: "interactive" },
+  } as AutomationCommand);
 }
 
 /**

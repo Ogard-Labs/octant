@@ -400,7 +400,7 @@ describe("CodeFileExplorerPanel extra folders", () => {
     );
   });
 
-  it("follows only the first extra folders live so the window keeps connections free", async () => {
+  it("follows every visible extra folder through the bounded shared connection", async () => {
     const list = vi.fn(async () => listing([]));
     const watch = vi.fn(async function* (_query: { readonly folder?: string }) {
       await new Promise(() => undefined);
@@ -420,8 +420,8 @@ describe("CodeFileExplorerPanel extra folders", () => {
     const watched = watch.mock.calls.map(([query]) => query.folder);
     expect(watched).toContain("/Users/me/a");
     expect(watched).toContain("/Users/me/b");
-    expect(watched).not.toContain("/Users/me/c");
-    expect(watched).not.toContain("/Users/me/d");
+    expect(watched).toContain("/Users/me/c");
+    expect(watched).toContain("/Users/me/d");
   });
 
   it("shows an extra folder whose name the file-path schema refuses as unavailable and keeps the checkout's tree", async () => {

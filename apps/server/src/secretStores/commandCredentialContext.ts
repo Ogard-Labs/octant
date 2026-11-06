@@ -7,6 +7,7 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { PersistenceService } from "../persistence/persistenceService";
 import type { CodeFileRootAuthorityPort } from "../code/codeService";
@@ -55,7 +56,7 @@ export function commandCredentialContext(options: {
       const thread = effective(windowId, read);
       if (
         thread.lifecycle !== "active" ||
-        !isToolAllowedByAllowlist(thread.toolConstraints ?? [], "octant_command") ||
+        !isToolAllowedByAllowlist(thread.toolConstraints ?? [], OCTANT_CREDENTIAL_TOOL.name) ||
         !options.canAccess(windowId, thread.projectId)
       )
         return undefined;

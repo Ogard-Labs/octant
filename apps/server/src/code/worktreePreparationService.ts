@@ -1,0 +1,422 @@
+import { lstat, realpath } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
+import {
+  WORKTREE_PREPARATION_UPDATED,
+  decodeCodeOperationId,
+  decodeUtcTimestamp,
+  decodeWorktreePreparationUpdated,
+  type CodeOperationId,
+  type EventActor,
+  type ProviderExecutionPolicy,
+  type WorktreePreparation,
+  type ProjectAction,
+} from "@octant/contracts";
+import type { Journal } from "../persistence/journal";
+import type { ManagedWorktreeReceipt } from "./managedWorktreeReceiptStore";
+import type { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
+
+export interface WorktreePreparationContext {
+  readonly commandAccess?: boolean;
+  readonly networkAllowed?: boolean;
+  readonly receiptId: string;
+  readonly root: string;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly current: () => boolean;
+  readonly recipeCurrent: () => boolean;
+}
+export interface WorktreePreparationOptions {
+  readonly processRecovery: "ready" | "uncertain";
+  readonly journal: Pick<
+    Journal,
+    "append" | "latestAggregateEvent" | "hasEventIdentity" | "headSequence"
+  >;
+  readonly loadReceipt: (id: string) => Promise<ManagedWorktreeReceipt | undefined>;
+  readonly execute: RepositoryTestProcessPort["executeReviewedAction"];
+  readonly actor: EventActor;
+  readonly clock: () => string;
+  readonly uuid: () => string;
+  readonly readRecipe?: (projectId: string) => ProjectAction | undefined;
+}
+export interface WorktreePreparationView {
+  readonly receiptId: string;
+  readonly preparation?: WorktreePreparation;
+  readonly output: string;
+  readonly outputTruncated: boolean;
+}
+export type WorktreePreparationRead =
+  | { readonly status: "available"; readonly view: WorktreePreparationView }
+  | { readonly status: "refused"; readonly message: string };
+const refuses = (message: string): WorktreePreparationRead => ({ status: "refused", message });
+const aggregateType = "worktree-preparation";
+const outputLimit = 64 * 1024;
+
+/** A reviewed recipe is a task-scoped command, never a new grant. Status is
+ * journaled before spawn; output is a bounded, host-lifetime tail. */
+export class WorktreePreparationService {
+  readonly #options: WorktreePreparationOptions;
+  readonly #active = new Map<
+    string,
+    { readonly abort: AbortController; readonly done: Promise<void> }
+  >();
+  readonly #output = new Map<string, { text: string; truncated: boolean }>();
+  #reconciledThroughSequence: number | undefined;
+  constructor(options: WorktreePreparationOptions) {
+    this.#options = options;
+  }
+
+  async context(input: {
+    readonly commandAccess?: boolean;
+    readonly networkAllowed?: boolean;
+    readonly receiptId: string;
+    readonly threadId: string;
+    readonly checkoutId: string;
+    readonly projectId: string;
+    readonly root: string;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly current: () => boolean;
+  }): Promise<WorktreePreparationContext | undefined> {
+    const receipt = await this.#options.loadReceipt(input.receiptId);
+    if (
+      receipt?.threadId !== input.threadId ||
+      receipt.checkoutId !== input.checkoutId ||
+      receipt.canonicalWorktreePath !== input.root ||
+      receipt.state !== "ready"
+    )
+      return undefined;
+    const identity = await lstat(input.root).catch(() => undefined);
+    if (identity === undefined || !identity.isDirectory() || identity.isSymbolicLink())
+      return undefined;
+    return {
+      commandAccess: input.commandAccess ?? true,
+      networkAllowed: input.networkAllowed ?? true,
+      receiptId: input.receiptId,
+      root: input.root,
+      executionPolicy: input.executionPolicy,
+      current: () => {
+        try {
+          const fresh = lstatSync(input.root);
+          return (
+            input.current() &&
+            fresh.isDirectory() &&
+            !fresh.isSymbolicLink() &&
+            fresh.dev === identity.dev &&
+            fresh.ino === identity.ino
+          );
+        } catch {
+          return false;
+        }
+      },
+      recipeCurrent: () =>
+        JSON.stringify(this.#options.readRecipe?.(input.projectId)) ===
+        JSON.stringify(receipt.setupRecipe),
+    };
+  }
+
+  /** Called only after owned-process reconciliation has finished. No recipe is replayed. */
+  reconciled(): void {
+    this.#reconciledThroughSequence = this.#options.journal.headSequence();
+  }
+
+  async inspect(context: WorktreePreparationContext): Promise<WorktreePreparationRead> {
+    const receipt = await this.#options.loadReceipt(context.receiptId);
+    if (
+      receipt === undefined ||
+      receipt.state !== "ready" ||
+      receipt.canonicalWorktreePath !== context.root ||
+      !context.current()
+    )
+      return refuses("Worktree preparation authority is unavailable.");
+    const latest = this.#options.journal.latestAggregateEvent({
+      aggregateType,
+      aggregateId: receipt.receiptId,
+    });
+    let preparation =
+      latest === undefined
+        ? receipt.setupRecipe === undefined
+          ? undefined
+          : { recipe: receipt.setupRecipe, state: "pending" as const }
+        : decodeWorktreePreparationUpdated(latest.payload).preparation;
+    if (preparation?.state === "running" && !this.#active.has(receipt.receiptId)) {
+      const reconciled =
+        latest !== undefined &&
+        this.#reconciledThroughSequence !== undefined &&
+        latest.globalSequence <= this.#reconciledThroughSequence;
+      preparation = {
+        ...preparation,
+        state: reconciled ? "interrupted" : "cleanup-uncertain",
+        completedAt: decodeUtcTimestamp(this.#options.clock()),
+        reason: reconciled
+          ? "The host restarted. Choose Retry or Skip; setup was not replayed."
+          : "Owned process cleanup has not been confirmed.",
+      };
+      if (reconciled) this.#record(receipt, preparation);
+    }
+    const output = this.#output.get(receipt.receiptId);
+    return {
+      status: "available",
+      view: {
+        receiptId: receipt.receiptId,
+        ...(preparation === undefined ? {} : { preparation }),
+        output: output?.text ?? "",
+        outputTruncated: output?.truncated ?? false,
+      },
+    };
+  }
+
+  async ensure(context: WorktreePreparationContext): Promise<string | undefined> {
+    const read = await this.inspect(context);
+    if (read.status === "refused") return read.message;
+    const view = read.view;
+    if (
+      view.preparation === undefined ||
+      view.preparation.state === "succeeded" ||
+      view.preparation.state === "skipped"
+    )
+      return undefined;
+    if (view.preparation.state === "pending") {
+      const refused = this.#refuses(context);
+      if (refused !== undefined) return refused;
+      await this.#start(context);
+    } else if (view.preparation.state === "running")
+      await this.#active.get(context.receiptId)?.done;
+    const finalRead = await this.inspect(context);
+    if (finalRead.status === "refused") return finalRead.message;
+    const final = finalRead.view;
+    return final.preparation?.state === "succeeded" || final.preparation?.state === "skipped"
+      ? undefined
+      : `Worktree setup is ${final.preparation?.state ?? "unavailable"}. Open Worktrees to review output, Retry, or Skip before starting the task.`;
+  }
+
+  async command(
+    context: WorktreePreparationContext,
+    action: "inspect" | "retry" | "cancel" | "skip",
+    attemptId?: CodeOperationId,
+  ) {
+    const read = await this.inspect(context);
+    if (read.status === "refused") return read;
+    const view = read.view;
+    if (view.preparation === undefined || action === "inspect") return read;
+    if (this.#options.processRecovery === "uncertain")
+      return refuses(
+        "Setup process recovery is uncertain. Restart the host after confirming cleanup.",
+      );
+    const active = this.#active.get(context.receiptId);
+    if (action === "cancel") {
+      active?.abort.abort();
+      await active?.done;
+    }
+    if (action === "skip") {
+      if (active !== undefined || view.preparation.state === "cleanup-uncertain")
+        return refuses("Cancel setup and confirm cleanup before skipping it.");
+      const receipt = await this.#options.loadReceipt(context.receiptId);
+      if (receipt === undefined || !context.current())
+        return refuses("Worktree authority changed.");
+      this.#record(receipt, {
+        ...view.preparation,
+        state: "skipped",
+        completedAt: decodeUtcTimestamp(this.#options.clock()),
+        reason: "Preparation deliberately skipped by the person.",
+      });
+    }
+    if (action === "retry") {
+      if (attemptId === undefined)
+        return refuses("A retry needs its own recorded decision identity.");
+      if (this.#options.journal.hasEventIdentity(String(attemptId))) return read;
+      const refusal = this.#refuses(context);
+      if (refusal !== undefined) return refuses(refusal);
+      if (active !== undefined || view.preparation.state === "cleanup-uncertain")
+        return refuses(
+          "A preparation process may still be running. Confirm cleanup before retrying.",
+        );
+      // Start returns immediately to inspection; the owned promise is bounded by
+      // process timeout and is joined by ensure, cancellation, and shutdown.
+      void this.#start(context, attemptId).catch(() => undefined);
+    }
+    return this.inspect(context);
+  }
+
+  async close(): Promise<void> {
+    const active = [...this.#active.values()];
+    for (const run of active) run.abort.abort();
+    await Promise.allSettled(active.map((run) => run.done));
+  }
+
+  #refuses(context: WorktreePreparationContext): string | undefined {
+    if (this.#options.processRecovery === "uncertain")
+      return "Setup process recovery is uncertain. Restart the host after confirming cleanup.";
+    if (!context.current()) return "Worktree authority changed. Review the checkout again.";
+    if (context.commandAccess === false)
+      return "This task does not authorize setup commands. Skip preparation before starting it.";
+    if (context.executionPolicy === "plan")
+      return "Plan cannot run setup. Choose Skip or change task access before Retry.";
+    if (!context.recipeCurrent())
+      return "The reviewed setup recipe changed. Skip this preparation or restore the reviewed recipe.";
+    return undefined;
+  }
+
+  async #start(context: WorktreePreparationContext, attemptId?: CodeOperationId): Promise<void> {
+    const existing = this.#active.get(context.receiptId);
+    if (existing !== undefined) return existing.done;
+    const abort = new AbortController();
+    // Install the reservation synchronously, before receipt or filesystem reads.
+    const done = Promise.resolve()
+      .then(() => this.#run(context, abort, attemptId))
+      .finally(() => this.#active.delete(context.receiptId));
+    this.#active.set(context.receiptId, { abort, done });
+    return done;
+  }
+
+  async #run(
+    context: WorktreePreparationContext,
+    abort: AbortController,
+    attemptId?: CodeOperationId,
+  ): Promise<void> {
+    const signal = abort.signal;
+    const receipt = await this.#options.loadReceipt(context.receiptId);
+    if (
+      receipt?.setupRecipe === undefined ||
+      receipt.state !== "ready" ||
+      receipt.canonicalWorktreePath !== context.root ||
+      this.#refuses(context) !== undefined
+    )
+      return;
+    const recipe = receipt.setupRecipe;
+    const running: WorktreePreparation = {
+      recipe,
+      state: "running",
+      attemptId: attemptId ?? decodeCodeOperationId(this.#options.uuid()),
+      startedAt: decodeUtcTimestamp(this.#options.clock()),
+    };
+    this.#record(receipt, running);
+    if (this.#output.size >= 64) {
+      const oldest = this.#output.keys().next().value;
+      if (oldest !== undefined) this.#output.delete(oldest);
+    }
+    this.#output.set(receipt.receiptId, { text: "", truncated: false });
+    const outputDecoder = new TextDecoder();
+    let final: WorktreePreparation;
+    let attempted = false;
+    try {
+      const root = await realpath(context.root).catch(() => undefined);
+      const cwd =
+        root === undefined
+          ? undefined
+          : await realpath(resolve(root, recipe.directory)).catch(() => undefined);
+      const delta = root === undefined || cwd === undefined ? undefined : relative(root, cwd);
+      if (
+        root === undefined ||
+        cwd === undefined ||
+        delta === undefined ||
+        root !== context.root ||
+        delta === ".." ||
+        delta.startsWith(`..${sep}`)
+      ) {
+        this.#record(receipt, {
+          ...running,
+          state: "failed",
+          completedAt: decodeUtcTimestamp(this.#options.clock()),
+          reason: "Setup folder is unavailable or leaves the checkout.",
+        });
+        return;
+      }
+      if (this.#refuses(context) !== undefined || signal.aborted) {
+        this.#record(receipt, {
+          ...running,
+          state: "cancelled",
+          completedAt: decodeUtcTimestamp(this.#options.clock()),
+          reason: "Setup authority changed before launch.",
+        });
+        return;
+      }
+      const authorityTimer = setInterval(() => {
+        if (this.#refuses(context) !== undefined) abort.abort();
+      }, 200);
+      let result: Awaited<ReturnType<RepositoryTestProcessPort["executeReviewedAction"]>>;
+      attempted = true;
+      try {
+        result = await this.#options.execute(
+          {
+            action: recipe,
+            cwd,
+            checkoutRoot: root,
+            executionPolicy: context.executionPolicy,
+            environment: {},
+            ...(context.networkAllowed === false ? { networkAccess: "none" as const } : {}),
+            timeoutMs: 10 * 60 * 1000,
+            beforeLaunch: () => this.#refuses(context) === undefined,
+            admitStart: () => this.#refuses(context) === undefined,
+            onOutput: (chunk) => {
+              const output = this.#output.get(receipt.receiptId);
+              if (output === undefined) return;
+              const text = output.text + outputDecoder.decode(chunk, { stream: true });
+              output.truncated ||= text.length > outputLimit;
+              output.text = text.slice(-outputLimit);
+            },
+          },
+          signal,
+        );
+      } finally {
+        clearInterval(authorityTimer);
+      }
+      final = {
+        ...running,
+        state: result.cleanupUncertain
+          ? "cleanup-uncertain"
+          : result.termination === "cancelled"
+            ? "cancelled"
+            : result.termination === "exited" && result.exitCode === 0
+              ? "succeeded"
+              : "failed",
+        completedAt: decodeUtcTimestamp(this.#options.clock()),
+        ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        ...(result.termination === "timed-out"
+          ? { reason: "Setup exceeded its ten minute limit." }
+          : result.termination === "unavailable"
+            ? { reason: "The confined setup process could not start." }
+            : {}),
+      };
+    } catch {
+      final = {
+        ...running,
+        state: attempted ? "cleanup-uncertain" : signal.aborted ? "cancelled" : "failed",
+        completedAt: decodeUtcTimestamp(this.#options.clock()),
+        reason: "Setup folder or task authority is unavailable. Review it before retrying.",
+      };
+    }
+    this.#record(receipt, final);
+  }
+
+  #record(receipt: ManagedWorktreeReceipt, preparation: WorktreePreparation): void {
+    const previous = this.#options.journal.latestAggregateEvent({
+      aggregateType,
+      aggregateId: receipt.receiptId,
+    });
+    const payload = decodeWorktreePreparationUpdated({
+      kind: "worktree-preparation-updated",
+      receiptId: receipt.receiptId,
+      threadId: receipt.threadId,
+      checkoutId: receipt.checkoutId,
+      preparation,
+      updatedAt: decodeUtcTimestamp(this.#options.clock()),
+    });
+    this.#options.journal.append({
+      aggregate: { aggregateType, aggregateId: receipt.receiptId },
+      expectedVersion: previous?.aggregateVersion ?? 0,
+      events: [
+        {
+          eventId:
+            preparation.state === "running" && preparation.attemptId !== undefined
+              ? String(preparation.attemptId)
+              : this.#options.uuid(),
+          eventName: WORKTREE_PREPARATION_UPDATED,
+          eventVersion: 1,
+          correlationId: this.#options.uuid(),
+          actor: this.#options.actor,
+          occurredAt: decodeUtcTimestamp(this.#options.clock()),
+          payload,
+        },
+      ],
+    });
+  }
+}

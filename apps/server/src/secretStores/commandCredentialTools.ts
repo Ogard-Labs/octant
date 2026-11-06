@@ -1,81 +1,68 @@
 import { randomUUID } from "node:crypto";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { CredentialToolSource } from "../credentials/credentialTool";
 import type { CommandCredentialBindings } from "./commandCredentialBindings";
 
-/** A provider selects a saved binding; only the person can approve its process. */
-export function commandCredentialTools(options: {
+/** What `list` shows of a saved command: never its account or vault references. */
+export interface SavedCredentialCommandEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+  readonly directory: string;
+}
+
+/**
+ * The `run-saved` side of the credential tool. A provider selects a saved
+ * binding by id; only the person can approve its process, through the same
+ * review the Code conversation offers them.
+ */
+export function savedCredentialCommands(options: {
   readonly service: CommandCredentialBindings;
   readonly windowId: string;
   readonly threadId: string;
   readonly projectId: string;
   readonly current: () => boolean;
-}): AppManagedToolSet {
+}): CredentialToolSource<SavedCredentialCommandEntry> {
   const lifetime = new AbortController();
   const requests = new Set<string>();
   const current = () => !lifetime.signal.aborted && options.current();
+  const bindings = () => {
+    const view = options.service.view(options.windowId, options.projectId);
+    return view.kind === "command-credential-view" ? view.bindings : [];
+  };
   return {
-    definitions: current()
-      ? [
-          {
-            name: "octant_command",
-            description:
-              "List saved credential commands for this Code Project or request one named command. A person must review and approve credential use in addition to ordinary command approvals. Plan refuses. Below Full access, the recipient remains OS-confined under current file and network rules while the credential tool authenticates outside the sandbox. Full access remains unrestricted. No secret values are returned by the credential store; masking cannot prevent deliberate disclosure to allowed destinations.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                operation: { type: "string", enum: ["list", "run"] },
-                bindingId: { type: "string" },
-              },
-              required: ["operation"],
-              additionalProperties: false,
-            },
-          },
-        ]
-      : [],
+    // Bindings live in host memory, so whether this Project has one is known
+    // when the turn's tools are composed. One saved during the turn is offered
+    // from the next turn.
+    offered: current() && bindings().length > 0,
+    list: () =>
+      current()
+        ? bindings().map(({ bindingId, definition }) => ({
+            id: bindingId,
+            label: definition.label,
+            executable: definition.executable,
+            args: definition.args,
+            directory: definition.directory,
+          }))
+        : undefined,
     close: async () => {
       lifetime.abort();
       for (const id of requests) options.service.cancel(options.windowId, id);
     },
-    execute: async ({ name, inputJson, signal }) => {
-      if (name !== "octant_command" || !current() || inputJson.length > 1024)
-        return { result: { status: "refused" }, isError: true };
-      let input: unknown;
-      try {
-        input = JSON.parse(inputJson);
-      } catch {
-        return { result: { status: "invalid" }, isError: true };
-      }
-      if (
-        typeof input !== "object" ||
-        input === null ||
-        !("operation" in input) ||
-        Object.keys(input).some((key) => key !== "operation" && key !== "bindingId")
-      )
-        return { result: { status: "invalid" }, isError: true };
-      if (input.operation === "list" && !("bindingId" in input)) {
-        const view = options.service.view(options.windowId, options.projectId);
-        return {
-          result: view.kind === "command-credential-view" ? { bindings: view.bindings } : view,
-          isError: view.kind !== "command-credential-view",
-        };
-      }
-      if (
-        input.operation !== "run" ||
-        !("bindingId" in input) ||
-        typeof input.bindingId !== "string"
-      )
-        return { result: { status: "invalid" }, isError: true };
+    use: async (bindingId, signal) => {
+      if (!current()) return { result: { status: "refused" }, isError: true };
+      if (bindingId === undefined) return { result: { status: "invalid" }, isError: true };
       const review = await options.service.review(
         options.windowId,
         options.threadId,
-        input.bindingId,
+        bindingId,
         randomUUID(),
       );
       if (review.kind !== "command-credential-view") return { result: review, isError: true };
       const request = review.requests.find(
         (entry) =>
           String(entry.threadId) === options.threadId &&
-          String(entry.binding.bindingId) === input.bindingId,
+          String(entry.binding.bindingId) === bindingId,
       );
       if (request === undefined) return { result: { status: "refused" }, isError: true };
       requests.add(request.requestId);

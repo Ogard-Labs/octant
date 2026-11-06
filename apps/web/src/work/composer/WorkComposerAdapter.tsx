@@ -1,3 +1,4 @@
+import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import {
   mentionChipsFromDraft,
@@ -260,6 +261,23 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     trimmed,
   ]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope:
+      props.projectId === undefined
+        ? undefined
+        : { mode: "work-draft", projectId: props.projectId },
+    draft: prompt,
+    onDraftChange: (text) => setPrompt(text),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.fixedHostId ?? props.selectedHostId,
+    refused: props.creating === true,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -339,6 +357,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           <WelcomeHeading projectChosen={props.projectId !== undefined} />
         </div>
         <div className="composer-stack">
+          {folderDrops.notice}
           <ThreadComposer
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
             planUsage={{
@@ -426,7 +445,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 ref={textareaRef}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
-                  if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+                  if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                    event.preventDefault();
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}

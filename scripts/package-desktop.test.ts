@@ -1,5 +1,16 @@
+import { packagedNativePath } from "./desktop-client-runtime";
 import { execFileSync } from "node:child_process";
-import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
+import {
+  readFile,
+  mkdtemp,
+  mkdir,
+  writeFile,
+  access,
+  rm,
+  readdir,
+  stat,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
@@ -44,7 +55,9 @@ import {
   createQuitAppleScript,
   createServerRuntimeManifest,
   createDesktopRuntimeManifest,
+  installNightlyCommand,
   installTerminalLauncher,
+  nightlyCommandLauncherScript,
   linuxPackageDirectoryName,
   packagedBundlePath,
   packagedLinuxBundlePath,
@@ -58,6 +71,7 @@ import {
   validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
+  NIGHTLY_CLIENT_HARNESS_MARKER,
   resolveReleaseVersion,
   validateBundledInternalRuntime,
   validateSandboxedPreloads,
@@ -72,7 +86,7 @@ import {
   stageBundledLanguageServer,
   stageExternalRuntimePackages,
   stageLinuxAppDir,
-  stageStableHostPayload,
+  stageHostPayload,
 } from "./package-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -139,7 +153,14 @@ describe("desktop packaging boundary", () => {
     };
     expect(() => validateDarwinBundleIdentity(metadata, stable)).toThrow(/host launch/);
     expect(() =>
-      validateDarwinBundleIdentity({ ...metadata, OctantHostLaunchPolicy: "host-only-v1" }, stable),
+      validateDarwinBundleIdentity(
+        {
+          ...metadata,
+          OctantHostLaunchPolicy: "host-only-v1",
+          CFBundleURLTypes: [{ CFBundleURLSchemes: ["octant"] }],
+        },
+        stable,
+      ),
     ).not.toThrow();
     const nightly = createPackagerOptions(
       "/tmp/stage",
@@ -200,7 +221,7 @@ describe("desktop packaging boundary", () => {
     });
   });
 
-  it("seals both desktop entries while keeping the Stable host physical", () => {
+  it("seals both desktop entries while keeping each app's worker host tree physical", () => {
     const nightly = createPackagerOptions(
       "/tmp/stage",
       "/tmp/out",
@@ -214,9 +235,18 @@ describe("desktop packaging boundary", () => {
       ),
     });
     expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("*.js") });
-    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0").asar).toEqual({
+    expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("apps/server/") });
+    expect(nightly.ignore).toEqual(/^\/apps\/server(?:\/|$)/);
+    const stable = createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0");
+    expect(stable.asar).toEqual({
       unpack: expect.stringContaining("cua_driver_node_runtime.node"),
     });
+    expect(stable.ignore).toEqual(nightly.ignore);
+    expect(
+      packagedNativePath(
+        "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      ),
+    ).toBe("Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node");
   });
 
   it("resolves packaging targets from the host or an explicit override", () => {
@@ -316,9 +346,24 @@ describe("desktop packaging boundary", () => {
         ...(identity.flavor === "stable" ? { OctantHostLaunchPolicy: "host-only-v1" } : {}),
         CFBundleName: identity.productName,
         CFBundleExecutable: identity.productName,
+        CFBundleURLTypes: [
+          { CFBundleURLName: "Code links", CFBundleURLSchemes: [identity.scheme] },
+        ],
       });
       expect(() => validateDarwinBundleIdentity(metadata(expected), expected)).not.toThrow();
       expect(() => validateDarwinBundleIdentity(metadata(other), expected)).toThrow();
+      expect(() =>
+        validateDarwinBundleIdentity({ ...metadata(expected), CFBundleURLTypes: [] }, expected),
+      ).toThrow(`does not declare its ${expected.scheme}:// Code links`);
+      expect(() =>
+        validateDarwinBundleIdentity(
+          {
+            ...metadata(expected),
+            CFBundleURLTypes: [{ CFBundleURLSchemes: [other.scheme] }],
+          },
+          expected,
+        ),
+      ).toThrow(/Code links/);
       expect(() =>
         validateLinuxDesktopEntry(createLinuxDesktopEntry("0.1.0", expected), expected),
       ).not.toThrow();
@@ -336,7 +381,7 @@ describe("desktop packaging boundary", () => {
         await mkdir(resolve(root, "Contents"));
         await writeFile(
           resolve(root, "Contents/Info.plist"),
-          '<?xml version="1.0"?><plist version="1.0"><dict><key>OctantDesktopEntryPolicy</key><string>sealed-main-v1</string><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string></dict></plist>',
+          '<?xml version="1.0"?><plist version="1.0"><dict><key>OctantDesktopEntryPolicy</key><string>sealed-main-v1</string><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>octant-nightly</string></array></dict></array></dict></plist>',
         );
         await expect(
           validateBundleIdentity(root, desktopIdentity("nightly")),
@@ -433,6 +478,7 @@ describe("desktop packaging boundary", () => {
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
+      "native/octant-desktop-peer-linux.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
@@ -475,8 +521,15 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant-linux-x64/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      "Octant-linux-x64/resources/native/octant-desktop-peer-linux.node",
     ];
     expect(() => validateLinuxNativePayloadAllowlist(allowed)).not.toThrow();
+    expect(() =>
+      validateLinuxNativePayloadAllowlist([
+        ...allowed,
+        "Octant-linux-x64/resources/app/apps/desktop/dist/native/octant-desktop-peer-linux.node",
+      ]),
+    ).toThrow(/unexpected native payload/);
     expect(() =>
       validateLinuxNativePayloadAllowlist([
         ...allowed,
@@ -541,6 +594,16 @@ describe("desktop packaging boundary", () => {
         ),
       ).toThrow(`missing ${missing}`);
     }
+    // Nightly's client shows Code approvals in the same native view as Octant,
+    // so its package carries that view's preload too.
+    const approvalPreload = `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`;
+    expect(() =>
+      validatePackagedPayload(
+        nightly.filter(({ path }) => path !== approvalPreload),
+        target,
+        identity,
+      ),
+    ).toThrow(`missing ${approvalPreload}`);
     expect(
       createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0-preview.20261104.1", target, identity)
         .icon,
@@ -1202,9 +1265,31 @@ describe("desktop packaging boundary", () => {
     expect(() =>
       validatePackagedPayload([
         ...required,
+        { path: "apps/desktop/dist/nightly-client-harness-nightly.mjs", content: "" },
+      ]),
+    ).toThrow("Nightly client smoke harness");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
+        {
+          path: "apps/desktop/dist/main.mjs",
+          content: `const m = "${NIGHTLY_CLIENT_HARNESS_MARKER}";`,
+        },
+      ]),
+    ).toThrow("Nightly client smoke harness in apps/desktop/dist/main.mjs");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
         { path: "apps/web/dist/app.js", content: "OpenOr" + "bit" },
       ]),
     ).toThrow("forbidden product identity");
+  });
+
+  it("finds its marker in every Nightly client smoke harness entry, so packaging refuses them", async () => {
+    for (const entry of ["nightly-client-harness-nightly.ts", "nightly-client-harness-stable.ts"]) {
+      const source = await readFile(resolve(import.meta.dirname, entry), "utf8");
+      expect(source).toContain(`"${NIGHTLY_CLIENT_HARNESS_MARKER}"`);
+    }
   });
 
   it("keeps output ignored and packages without third-party release tooling", async () => {
@@ -1230,6 +1315,23 @@ describe("desktop packaging boundary", () => {
     expect(
       createDesktopRuntimeManifest("0.1.0-preview.20260915.1", desktopIdentity("nightly")).version,
     ).toBe("0.1.0-preview.20260915.1");
+    expect(createDesktopRuntimeManifest("0.1.0-candidate.20261105.3")).toMatchObject({
+      version: "0.1.0-candidate.20261105.3",
+      productName: "Octant",
+      octantDesktopFlavor: "stable",
+    });
+  });
+
+  it("refuses a Nightly package on an Octant ring and an Octant package on the Nightly ring", () => {
+    expect(() =>
+      createDesktopRuntimeManifest("0.1.0-candidate.20261105.3", desktopIdentity("nightly")),
+    ).toThrow(/require Octant/);
+    expect(() => createDesktopRuntimeManifest("0.1.0", desktopIdentity("nightly"))).toThrow(
+      /require Octant/,
+    );
+    expect(() => createDesktopRuntimeManifest("0.1.0-preview.20261105.3")).toThrow(
+      /preview versions require Octant Nightly/,
+    );
   });
 
   it("refuses a release version that is not the one this repository declares", () => {
@@ -1410,6 +1512,97 @@ describe("the terminal launcher the desktop app ships", () => {
   );
 });
 
+describe("the octant-nightly command Octant Nightly ships", () => {
+  it("runs the bundled full command with the worker runtime through a link on PATH", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-nightly-command-"));
+    try {
+      const repository = resolve(root, "repository");
+      await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
+      await writeFile(resolve(repository, "packages/cli/dist/octant-nightly.mjs"), "// full CLI\n");
+      // An app moved to a path with a space, linked from a folder on PATH.
+      const contents = resolve(root, "Moved Apps/Octant Nightly.app/Contents");
+      const commandDirectory = resolve(contents, "Resources/command-line");
+      await installNightlyCommand(
+        repository,
+        commandDirectory,
+        desktopIdentity("nightly"),
+        "0.12.0-preview.20261106.1",
+      );
+      const runtime = resolve(
+        contents,
+        "Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime",
+      );
+      await mkdir(dirname(runtime), { recursive: true });
+      // Stands in for the worker runtime: reports how it was started.
+      await writeFile(
+        runtime,
+        '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "version=$OCTANT_CLI_VERSION" "$@"\n',
+        { mode: 0o755 },
+      );
+      const bin = resolve(root, "bin");
+      await mkdir(bin);
+      await symlink(resolve(commandDirectory, "octant-nightly"), resolve(bin, "octant-nightly"));
+
+      expect((await readdir(commandDirectory)).sort()).toEqual([
+        "octant-nightly",
+        "octant-nightly.mjs",
+      ]);
+      expect((await stat(resolve(commandDirectory, "octant-nightly"))).mode & 0o777).toBe(0o755);
+      const output = execFileSync("/bin/sh", ["-c", "octant-nightly project add --inspect ."], {
+        env: { PATH: `${bin}:/usr/bin:/bin` },
+        encoding: "utf8",
+      });
+      // Every argument reaches the bundled command, after its fixed script path.
+      expect(output.split("\n")).toEqual([
+        "node-mode=1",
+        "version=0.12.0-preview.20261106.1",
+        resolve(commandDirectory, "octant-nightly.mjs"),
+        "project",
+        "add",
+        "--inspect",
+        ".",
+        "",
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a link loop on PATH instead of following it forever", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-nightly-loop-"));
+    try {
+      const script = resolve(root, "launcher");
+      await writeFile(
+        script,
+        nightlyCommandLauncherScript(desktopIdentity("nightly"), "1.0.0-preview.20261106.1"),
+        { mode: 0o755 },
+      );
+      await symlink(resolve(root, "b"), resolve(root, "a"));
+      await symlink(resolve(root, "a"), resolve(root, "b"));
+      // $0 is the looping link, as a PATH lookup through it would give. The
+      // command and its arguments are constants; only the working folder varies.
+      let stderr = "";
+      try {
+        execFileSync("/bin/sh", ["-c", ". ./launcher", "./a"], { cwd: root, stdio: "pipe" });
+      } catch (error) {
+        stderr = String((error as { readonly stderr?: unknown }).stderr);
+      }
+      expect(stderr).toBe("octant-nightly: too many links\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is Nightly's alone and refuses a version that could leave its quotes", () => {
+    expect(() => nightlyCommandLauncherScript(desktopIdentity("stable"), "1.0.0")).toThrow(
+      "Only Octant Nightly ships octant-nightly.",
+    );
+    expect(() =>
+      nightlyCommandLauncherScript(desktopIdentity("nightly"), "1.0.0'; rm -rf /"),
+    ).toThrow("Invalid release version.");
+  });
+});
+
 it("keeps the worker server physical without copying a loose desktop entry", async () => {
   const root = await mkdtemp(resolve(tmpdir(), "octant-host-payload-"));
   try {
@@ -1420,7 +1613,7 @@ it("keeps the worker server physical without copying a loose desktop entry", asy
       await writeFile(resolve(stage, "apps", name, "dist/main.mjs"), name);
     }
     await writeFile(resolve(stage, "package.json"), "{}");
-    await stageStableHostPayload(stage, app);
+    await stageHostPayload(stage, app);
     expect(
       await readFile(resolve(app, "Contents/Resources/app/apps/server/dist/main.mjs"), "utf8"),
     ).toBe("server");

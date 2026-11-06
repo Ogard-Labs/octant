@@ -285,6 +285,24 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
   });
 
+  it("shows replies at low detail until another level is chosen in Appearance", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    const replyDetail = screen.getByRole("group", { name: "Reply detail" });
+    expect(within(replyDetail).getByRole("button", { name: "Low" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
+      "Where every thread starts unless it sets its own. Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+    );
+    await user.click(within(replyDetail).getByRole("button", { name: "High" }));
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ replyDetail: "high" });
+  });
+
   it("shows the stats line switch off when the saved preference is off", () => {
     renderSettings({ settings: { ...defaultShellSettings(), showThreadStats: false } });
     navigateTo("Appearance");
@@ -427,6 +445,22 @@ describe("SettingsView", () => {
       .getByRole("heading", { level: 1, name: "Remote access" })
       .closest("header")!;
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
+  });
+
+  it("shows one Managed in Octant line where a Nightly client's remote access would be", () => {
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      hostBridge: {
+        managedInOctant: true,
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+      } as never,
+    });
+
+    const section = screen.getByRole("region", { name: "Remote access" });
+    expect(section).toHaveTextContent(/^Managed in Octant\./);
+    expect(within(section).getAllByRole("paragraph")).toHaveLength(1);
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(section).not.toHaveTextContent(/happen on the host machine/);
   });
 
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {

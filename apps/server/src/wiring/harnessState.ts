@@ -24,7 +24,10 @@ import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 
 export type HarnessStateDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "agentRunParentAuthority" | "agentRunPersistence"> &
+  Pick<
+    AuthorityWiring,
+    "agentRunParentAuthority" | "agentRunPersistence" | "agentRunRequestOwner"
+  > &
   Pick<FoundationsWiring, "workThreadProjection">;
 
 /**
@@ -35,7 +38,13 @@ export type HarnessStateDependencies = Pick<ServerStart, "persistence"> &
  * the stores holding it.
  */
 export function wireHarnessState(deps: HarnessStateDependencies) {
-  const { agentRunParentAuthority, agentRunPersistence, persistence, workThreadProjection } = deps;
+  const {
+    agentRunParentAuthority,
+    agentRunPersistence,
+    agentRunRequestOwner,
+    persistence,
+    workThreadProjection,
+  } = deps;
 
   const questionAskedListeners: Array<NonNullable<NativeHarnessQuestionStoreOptions["onAsked"]>> =
     [];
@@ -99,6 +108,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     questions: nativeHarnessQuestions,
     providerName: (id) => persistence.readProviderInstance(id)?.displayName,
     parentAuthority: agentRunParentAuthority,
+    requestOwner: agentRunRequestOwner,
     parentLead: (run) => {
       const id = String(run.parentThreadId);
       const parent =
@@ -107,7 +117,12 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
           : run.routingReceipt.mode === "work"
             ? workThreadProjection.read(decodeWorkThreadId(id))
             : persistence.readCodeThread(decodeCodeThreadId(id));
-      return parent?.lifecycle === "active"
+      const expectedProject =
+        run.workspaceReceipt.kind === "chat-virtual"
+          ? run.routingReceipt.projectId
+          : run.workspaceReceipt.projectId;
+      return parent?.lifecycle === "active" &&
+        String(parent.projectId ?? "") === String(expectedProject ?? "")
         ? {
             hostId: run.routingReceipt.hostId,
             providerInstanceId: parent.providerInstanceId,

@@ -66,6 +66,57 @@ describe("openLocalControlSession", () => {
     });
   });
 
+  it("says Needs a newer Octant when the host has no route for the command", async () => {
+    await withRunningHost(async (host) => {
+      const session = await openLocalControlSession({
+        host,
+        fetch: mockFetch((input) => {
+          const path = new URL(String(input)).pathname;
+          if (path === "/api/desktop/window-authorities")
+            return Promise.resolve(new Response(null, { status: 204 }));
+          if (path === "/health")
+            return Promise.resolve(Response.json({ product: "Octant", version: "0.9.0" }));
+          if (path === "/api/projects/missing")
+            return Promise.resolve(Response.json({ message: "No such Project." }, { status: 404 }));
+          return Promise.resolve(new Response("Not Found", { status: 404 }));
+        }),
+      });
+      if (session.kind !== "opened") throw new Error("expected an opened session");
+
+      const lacking = await session.send({ path: "/api/new-feature?x=1", method: "POST" });
+      const missing = await session.send({ path: "/api/projects/missing", method: "GET" });
+
+      expect(lacking).toEqual({
+        status: 404,
+        body: {
+          message:
+            "Needs a newer Octant: the running host (0.9.0) does not offer POST /api/new-feature. Update Octant, then try again.",
+        },
+      });
+      // A route the host has keeps its own refusal for a missing resource.
+      expect(missing).toEqual({ status: 404, body: { message: "No such Project." } });
+    });
+  });
+
+  it("says Needs a newer Octant when the host does not accept command-line sessions", async () => {
+    await withRunningHost(async (host) => {
+      const session = await openLocalControlSession({
+        host,
+        fetch: mockFetch((input) =>
+          new URL(String(input)).pathname === "/health"
+            ? Promise.reject(new Error("connection reset"))
+            : Promise.resolve(new Response("Not Found", { status: 404 })),
+        ),
+      });
+
+      expect(session).toEqual({
+        kind: "refuses",
+        reason:
+          "Needs a newer Octant: the running host does not offer command-line sessions. Update Octant, then try again.",
+      });
+    });
+  });
+
   it("reports a server that stops answering mid-command instead of failing the process", async () => {
     await withRunningHost(async (host) => {
       let registered = false;

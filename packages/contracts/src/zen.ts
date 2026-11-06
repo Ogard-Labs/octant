@@ -1215,16 +1215,20 @@ export const ZenAssistantSnapshot = Schema.Struct({
 }).annotations(strict);
 export type ZenAssistantSnapshot = typeof ZenAssistantSnapshot.Type;
 
-export const ZenAssistantToolName = Schema.Literal(
-  "octant_zen_search_threads",
-  "octant_zen_pin_thread",
-  "octant_zen_list_widgets",
-  "octant_zen_create_widget",
-  "octant_zen_preview_recipe",
-  "octant_zen_place_element",
-  "octant_zen_update_appearance",
+/** The Zen assistant's one tool; its `operation` names what a call does. */
+export const ZEN_ASSISTANT_TOOL_NAME = "octant_zen";
+
+/** What `octant_zen` does besides `help`, which the host answers from static text. */
+export const ZenAssistantOperation = Schema.Literal(
+  "get-space",
+  "search-threads",
+  "pin-thread",
+  "create-widget",
+  "preview-recipe",
+  "place-element",
+  "update-appearance",
 );
-export type ZenAssistantToolName = typeof ZenAssistantToolName.Type;
+export type ZenAssistantOperation = typeof ZenAssistantOperation.Type;
 
 export const ZenAssistantSearchThreadsInput = Schema.Struct({
   query: Schema.String.pipe(Schema.maxLength(200)),
@@ -1234,11 +1238,15 @@ export type ZenAssistantSearchThreadsInput = typeof ZenAssistantSearchThreadsInp
 export const ZenAssistantPinThreadInput = ZenThreadPinRequest;
 export type ZenAssistantPinThreadInput = typeof ZenAssistantPinThreadInput.Type;
 
-export const ZenAssistantListWidgetsInput = Schema.Struct({}).annotations(strict);
-export type ZenAssistantListWidgetsInput = typeof ZenAssistantListWidgetsInput.Type;
+export const ZenAssistantGetSpaceInput = Schema.Struct({}).annotations(strict);
+export type ZenAssistantGetSpaceInput = typeof ZenAssistantGetSpaceInput.Type;
+
+/** The kinds `create-widget` makes; a recipe widget comes only from a confirmed preview. */
+export const ZenAssistantWidgetKind = Schema.Literal("notes", "checklist", "timer");
+export type ZenAssistantWidgetKind = typeof ZenAssistantWidgetKind.Type;
 
 export const ZenAssistantCreateWidgetInput = Schema.Struct({
-  kind: Schema.Literal("notes", "checklist", "timer", "reference", "recipe"),
+  kind: ZenAssistantWidgetKind,
   durationMs: Schema.optional(ZenTimerDurationMs),
   expectedVersion: AggregateVersion,
 })
@@ -1274,26 +1282,33 @@ export const ZenAssistantAppearanceInput = Schema.Struct({
   .annotations(strict);
 export type ZenAssistantAppearanceInput = typeof ZenAssistantAppearanceInput.Type;
 
-export const ZenAssistantAction = Schema.Literal(
-  "search-threads",
-  "pin-thread",
-  "list-widgets",
-  "create-widget",
-  "preview-recipe",
-  "place-element",
-  "update-appearance",
-  "unknown",
-);
+export const ZenAssistantAction = Schema.Union(ZenAssistantOperation, Schema.Literal("unknown"));
 export type ZenAssistantAction = typeof ZenAssistantAction.Type;
 
-export const ZenWidgetCapability = Schema.Struct({
-  kind: Schema.Literal("notes", "checklist", "timer", "reference", "recipe"),
-  available: Schema.Boolean,
-  reason: Schema.optional(Schema.NonEmptyTrimmedString),
+/**
+ * One element as `get-space` reports it: enough to arrange it and nothing of
+ * its content, so the assistant learns ids and layout without reading notes,
+ * checklists, or the threads pinned there.
+ */
+export const ZenAssistantElementSummary = Schema.Struct({
+  elementId: ZenElementId,
+  kind: ZenElementKind,
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+  geometry: ZenGeometry,
+  zIndex: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(1000)),
+  minimized: Schema.Boolean,
 }).annotations(strict);
-export type ZenWidgetCapability = typeof ZenWidgetCapability.Type;
+export type ZenAssistantElementSummary = typeof ZenAssistantElementSummary.Type;
 
 export const ZenAssistantToolResult = Schema.Union(
+  Schema.Struct({
+    action: Schema.Literal("get-space"),
+    status: Schema.Literal("ok"),
+    version: AggregateVersion,
+    dimming: ZenAppearance.fields.dimming,
+    elementOpacity: ZenAppearance.fields.elementOpacity,
+    elements: Schema.Array(ZenAssistantElementSummary),
+  }).annotations(strict),
   Schema.Struct({
     action: Schema.Literal("search-threads"),
     status: Schema.Literal("ok"),
@@ -1312,22 +1327,11 @@ export const ZenAssistantToolResult = Schema.Union(
     version: AggregateVersion,
   }).annotations(strict),
   Schema.Struct({
-    action: Schema.Literal("list-widgets"),
-    status: Schema.Literal("ok"),
-    widgets: Schema.Array(ZenWidgetCapability),
-  }).annotations(strict),
-  Schema.Struct({
     action: Schema.Literal("create-widget"),
     status: Schema.Literal("ok"),
-    kind: Schema.Literal("notes", "checklist", "timer"),
+    kind: ZenAssistantWidgetKind,
     elementId: ZenElementId,
     version: AggregateVersion,
-  }).annotations(strict),
-  Schema.Struct({
-    action: Schema.Literal("create-widget"),
-    status: Schema.Literal("unavailable"),
-    kind: Schema.Literal("notes", "checklist", "timer", "reference", "recipe"),
-    message: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
   Schema.Struct({
     action: Schema.Literal("place-element"),
@@ -1341,9 +1345,18 @@ export const ZenAssistantToolResult = Schema.Union(
     appearance: ZenAppearance,
     version: AggregateVersion,
   }).annotations(strict),
+  // A conflict carries the space's current version, so the assistant can read
+  // the space again and retry rather than guess.
   Schema.Struct({
     action: ZenAssistantAction,
-    status: Schema.Literal("conflict", "failed", "interrupted", "unsupported", "unavailable"),
+    status: Schema.Literal("conflict"),
+    code: Schema.Literal("stale-version"),
+    version: AggregateVersion,
+    message: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  Schema.Struct({
+    action: ZenAssistantAction,
+    status: Schema.Literal("failed", "interrupted", "unsupported"),
     code: Schema.optional(Schema.NonEmptyTrimmedString),
     message: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
@@ -1870,9 +1883,7 @@ export const decodeZenAssistantSearchThreadsInput = Schema.decodeUnknownSync(
 export const decodeZenAssistantPinThreadInput = Schema.decodeUnknownSync(
   ZenAssistantPinThreadInput,
 );
-export const decodeZenAssistantListWidgetsInput = Schema.decodeUnknownSync(
-  ZenAssistantListWidgetsInput,
-);
+export const decodeZenAssistantGetSpaceInput = Schema.decodeUnknownSync(ZenAssistantGetSpaceInput);
 export const decodeZenAssistantCreateWidgetInput = Schema.decodeUnknownSync(
   ZenAssistantCreateWidgetInput,
 );

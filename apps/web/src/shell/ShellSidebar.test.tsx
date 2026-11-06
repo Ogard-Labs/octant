@@ -33,6 +33,30 @@ describe("ShellSidebar", () => {
     expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
   });
 
+  it("labels Nightly's test data quietly beside the Nightly label", () => {
+    render(
+      <ShellSidebar
+        applicationIdentity={{
+          flavor: "nightly",
+          productName: "Octant Nightly",
+          data: "test-data",
+        }}
+        nativeHost
+        onAddFolder={vi.fn()}
+        onCollapseSidebar={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+    const identity = screen.getByLabelText("Octant Nightly, test data");
+    expect(within(identity).getByText("Test data")).toHaveAttribute("data-variant", "outline");
+    expect(within(identity).getByText("Nightly")).toBeTruthy();
+  });
+
   it("restores the saved sidebar decoration after workspace coverage ends", () => {
     const props = {
       projectSection: <nav aria-label="Project threads">Project threads</nav>,

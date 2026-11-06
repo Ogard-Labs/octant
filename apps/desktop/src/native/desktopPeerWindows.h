@@ -37,8 +37,23 @@ struct WindowPeer {
 struct WindowNotice {
   std::string peer, window, operation;
   uint64_t request = 0, generation = 0;
-  bool exited = false;
+  bool exited = false, native_main = false;
 };
+// A client that accepts the native-main bootstrap fields names this after the
+// request payload's leading NUL. The first window server checked only that
+// first byte, so it still answers such a client with its original bootstrap,
+// and an older client that sends nothing gets that original bootstrap too.
+constexpr char native_main_marker[] = "native-main-v1";
+bool window_request_payload(const WindowWire &request, bool &native_main) {
+  if (request.payload[0] != 0)
+    return false;
+  const char *text = request.payload + 1;
+  const size_t length = strnlen(text, sizeof(request.payload) - 1);
+  if (length == sizeof(request.payload) - 1)
+    return false;
+  native_main = length != 0;
+  return length == 0 || std::strcmp(text, native_main_marker) == 0;
+}
 struct WindowState {
   std::atomic<bool> stopping = false, finished = true;
   std::mutex lock;
@@ -173,6 +188,7 @@ void serve_windows(std::shared_ptr<WindowState> owned, Identity self,
     WindowEnvelope envelope{received};
     audit_token_t token{};
     auto *request = reinterpret_cast<WindowWire *>(&received);
+    bool native_main = false;
     if ((received.header.msgh_bits & MACH_MSGH_BITS_COMPLEX) ||
         !window_audit(received, token) ||
         received.header.msgh_id != window_request_id ||
@@ -180,7 +196,7 @@ void serve_windows(std::shared_ptr<WindowState> owned, Identity self,
         request->operation < 1 || request->operation > 3 ||
         request->generation < 1 || request->generation > 9007199254740991ULL ||
         request->window[36] != 0 || std::strlen(request->window) != 36 ||
-        request->payload[0] != 0 ||
+        !window_request_payload(*request, native_main) ||
         received.header.msgh_remote_port == MACH_PORT_NULL ||
         MACH_MSGH_BITS_REMOTE(received.header.msgh_bits) !=
             MACH_MSG_TYPE_PORT_SEND_ONCE) {
@@ -225,6 +241,7 @@ void serve_windows(std::shared_ptr<WindowState> owned, Identity self,
       notice->peer = key;
       notice->window = request->window;
       notice->generation = request->generation;
+      notice->native_main = native_main;
       notice->operation = request->operation == 1   ? "register"
                           : request->operation == 2 ? "renew"
                                                     : "revoke";
@@ -338,6 +355,7 @@ std::string call_window(uint32_t operation, const std::string &window,
   request.operation = operation;
   request.generation = generation;
   std::memcpy(request.window, window.c_str(), window.size() + 1);
+  std::memcpy(request.payload + 1, native_main_marker, sizeof(native_main_marker));
   request.header.msgh_bits =
       MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE);
   request.header.msgh_size = sizeof(request);
@@ -418,6 +436,8 @@ void window_callback(napi_env env, napi_value callback, void *, void *data) {
     napi_set_named_property(env, request, "requestId", number);
     napi_create_double(env, static_cast<double>(notice->generation), &number);
     napi_set_named_property(env, request, "generation", number);
+    napi_get_boolean(env, notice->native_main, &number);
+    napi_set_named_property(env, request, "nativeMain", number);
     napi_set_named_property(env, event, "request", request);
   }
   napi_get_global(env, &global);

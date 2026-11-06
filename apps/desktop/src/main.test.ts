@@ -102,6 +102,11 @@ describe("canonical local host endpoint", () => {
     expect(resolveConfiguredServerPort({})).toBe(13_773);
     expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" })).toBe(14_000);
   });
+
+  it("starts Nightly's test host on its own port unless OCTANT_SERVER_PORT overrides it", () => {
+    expect(resolveConfiguredServerPort({}, 13_774)).toBe(13_774);
+    expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" }, 13_774)).toBe(14_000);
+  });
 });
 
 describe("packaged desktop host capabilities", () => {
@@ -158,6 +163,7 @@ describe("development renderer startup", () => {
       requestHeaders: {
         "X-Octant-Renderer-Identity": "forged",
         "X-Octant-Human-Presentation": "forged",
+        "X-Octant-Native-Main-Authority": "forged",
         accept: "application/json",
       },
       requestUrl: "http://127.0.0.1:13773/api/shell/bootstrap",
@@ -171,6 +177,8 @@ describe("development renderer startup", () => {
     expect(trusted["X-Octant-Renderer-Identity"]).toBeUndefined();
     expect(trusted["X-Octant-Human-Presentation"]).toBeUndefined();
     expect(trusted["x-octant-human-presentation"]).toBeUndefined();
+    expect(trusted["X-Octant-Native-Main-Authority"]).toBeUndefined();
+    expect(trusted["x-octant-native-main-authority"]).toBeUndefined();
 
     const untrustedFrame = decorateTrustedRendererHeaders({
       requestHeaders: { "x-octant-renderer-identity": "forged" },
@@ -243,6 +251,18 @@ describe("Project window BrowserWindow construction", () => {
     expect(createMainBrowserWindowOptions(input).webPreferences?.additionalArguments).not.toContain(
       "--octant-application-flavor=nightly",
     );
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+        applicationData: "test-data",
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-data=test-data");
+    expect(
+      createMainBrowserWindowOptions({ ...input, applicationData: "test-data" }).webPreferences
+        ?.additionalArguments,
+    ).not.toContain("--octant-application-data=test-data");
   });
 
   it("consumes the resolved native presentation without overriding the frameless contract", () => {

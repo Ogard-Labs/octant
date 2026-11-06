@@ -1603,6 +1603,49 @@ describe("ShellService", () => {
     expect(append).toHaveBeenCalledTimes(1);
   });
 
+  it("forgets the reply detail of erased threads and leaves every other thread's", () => {
+    const kept = { mode: "chat" as const, threadId: "kept", level: "high" as const };
+    const settings = {
+      ...defaultShellSettings(),
+      threadReplyDetail: [
+        { mode: "work" as const, threadId: "gone", level: "medium" as const },
+        kept,
+        { mode: "code" as const, threadId: "gone-too", level: "low" as const },
+      ],
+    };
+    const { persistence, append } = persistenceStub({
+      settings: { settings, aggregateVersion: 4 as never },
+    });
+    const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+
+    service.forgetThreadReplyDetails([
+      { mode: "work", threadId: "gone" },
+      { mode: "code", threadId: "gone-too" },
+      // Same id, other mode: the chat thread's level is not this thread's.
+      { mode: "work", threadId: "kept" },
+    ]);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 4,
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            payload: { settings: { ...settings, threadReplyDetail: [kept] } },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("journals nothing when no erased thread had a reply detail of its own", () => {
+    const { persistence, append } = persistenceStub({
+      settings: { settings: defaultShellSettings(), aggregateVersion: 2 as never },
+    });
+    const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+    service.forgetThreadReplyDetails([{ mode: "chat", threadId: "never-chose" }]);
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it("refuses remembered browser origins added through replace-settings and journals them through the host path", () => {
     const { persistence, append } = persistenceStub();
     const service = new ShellService({

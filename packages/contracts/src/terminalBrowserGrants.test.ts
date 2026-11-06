@@ -24,6 +24,23 @@ const scope = {
 const at = "2026-10-13T08:00:00.000Z";
 
 describe("terminal Browser grant contracts", () => {
+  it("names a saved action and checkout without accepting executable text or a Browser grant", () => {
+    const command = {
+      kind: "start-action",
+      projectId: ids.project,
+      terminalId: ids.terminal,
+      actionId: ids.operation,
+      columns: 80,
+      rows: 24,
+      thread: { threadId: ids.thread, checkoutId: ids.checkout },
+    };
+    expect(decodeProjectTerminalCommand(command)).toEqual(command);
+    expect(() =>
+      decodeProjectTerminalCommand({ ...command, command: "printf injected" }),
+    ).toThrow();
+    expect(() => decodeProjectTerminalCommand({ ...command, browserGrant: "on" })).toThrow();
+  });
+
   it("lets a window start a thread terminal with the grant on and switch a live grant off", () => {
     const start = {
       kind: "start-terminal",

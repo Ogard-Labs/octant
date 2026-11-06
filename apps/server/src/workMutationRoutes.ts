@@ -1,3 +1,4 @@
+import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "./approvedWorkingFolders";
 import {
   decodeWorkMutationReply,
   decodeWorkMutationRequest,
@@ -6,6 +7,9 @@ import {
   type ProjectId,
   type WindowId,
   type WorkThreadId,
+  type WorkArtifactId,
+  type ProjectWorkingFolderId,
+  type Project,
 } from "@octant/contracts";
 import { classifyDestructiveChange, type WorkMutationKind } from "@octant/domain";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
@@ -33,15 +37,24 @@ export interface WorkMutationRouteDependencies {
         readonly approved: boolean;
         readonly signal?: AbortSignal;
         readonly directory?: string;
+        readonly workingFolderId?: ProjectWorkingFolderId;
+        readonly isCurrent?: () => boolean;
       },
     ): Promise<WorkMutationReply>;
   };
   readonly persistence: Pick<PersistenceService, "readProject">;
   /** A Work thread's Project and working directory, for an artifact made for it. */
-  readonly readThread?: (
-    threadId: WorkThreadId,
+  readonly readThread?: (threadId: WorkThreadId) =>
+    | {
+        readonly projectId: ProjectId;
+        readonly workingDirectory?: string | undefined;
+        readonly workingFolderId?: ProjectWorkingFolderId | undefined;
+      }
+    | undefined;
+  readonly readArtifact?: (
+    artifactId: WorkArtifactId,
   ) =>
-    | { readonly projectId: ProjectId; readonly workingDirectory?: string | undefined }
+    | { readonly projectId: ProjectId; readonly workingFolderId?: ProjectWorkingFolderId }
     | undefined;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -109,18 +122,44 @@ export function createWorkMutationRouteHandler(dependencies: WorkMutationRouteDe
         authenticatedWindowId,
         mutation.projectId,
       );
-      const directory = threadDirectory(dependencies, mutation);
+      const placement = mutationPlacement(dependencies, mutation, project);
+      const root = approvedWorkingFolderRoot(project, placement.workingFolderId);
+      if (root === undefined)
+        throw new WorkMutationRouteRejected(
+          "The artifact's approved folder is unavailable. It was not redirected to the main folder.",
+          404,
+        );
+      const isCurrent = () => {
+        const current = dependencies.persistence.readProject(mutation.projectId);
+        if (
+          current?.type !== "work" ||
+          current.lifecycle !== "active" ||
+          approvedWorkingFolderRoot(current, placement.workingFolderId) !== root
+        )
+          return false;
+        if (mutation.kind !== "create-artifact") return true;
+        try {
+          const selected = mutationPlacement(dependencies, mutation, current);
+          return (
+            String(selected.workingFolderId) === String(placement.workingFolderId) &&
+            selected.directory === placement.directory
+          );
+        } catch {
+          return false;
+        }
+      };
       const reply = await dependencies.service.mutate(mutation, {
         binding: {
-          canonicalRoot: project.binding.canonicalRoot,
-          knownCanonicalRoot: project.binding.canonicalRoot,
+          canonicalRoot: root,
+          knownCanonicalRoot: root,
           availability: "available",
           bindingSuperseded: false,
         },
         posture: "full",
         approved: userInitiatedMutationApproved(mutation),
         signal: request.signal,
-        ...(directory === undefined ? {} : { directory }),
+        ...placement,
+        isCurrent,
       });
       return jsonResponse(decodeWorkMutationReply(reply), 200, origin);
     } catch (error) {
@@ -138,18 +177,37 @@ export function createWorkMutationRouteHandler(dependencies: WorkMutationRouteDe
  * thread of another Project, or one that does not exist, is refused rather
  * than ignored, so an artifact never lands in a folder the caller did not mean.
  */
-function threadDirectory(
-  dependencies: Pick<WorkMutationRouteDependencies, "readThread">,
+function mutationPlacement(
+  dependencies: Pick<WorkMutationRouteDependencies, "readThread" | "readArtifact">,
   mutation: WorkMutationRequest,
-): string | undefined {
-  if (mutation.kind !== "create-artifact" || mutation.threadId === undefined) return undefined;
+  project: Extract<Project, { readonly type: "work" }>,
+): { readonly directory?: string; readonly workingFolderId?: ProjectWorkingFolderId } {
+  if (mutation.kind !== "create-artifact") {
+    const artifact = dependencies.readArtifact?.(mutation.artifactId);
+    if (
+      dependencies.readArtifact !== undefined &&
+      (artifact === undefined || String(artifact.projectId) !== String(project.id))
+    ) {
+      throw new WorkMutationRouteRejected("Work artifact is unavailable for this Project.", 404);
+    }
+    return artifact?.workingFolderId === undefined
+      ? {}
+      : { workingFolderId: artifact.workingFolderId };
+  }
+  const mainId = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "main")?.id;
+  if (mainId === undefined)
+    throw new WorkMutationRouteRejected("The Project's approved main folder is unavailable.", 404);
+  if (mutation.threadId === undefined) return { workingFolderId: mainId };
   const thread = dependencies.readThread?.(mutation.threadId);
-  if (thread === undefined || String(thread.projectId) !== String(mutation.projectId)) {
+  if (thread === undefined || String(thread.projectId) !== String(project.id)) {
     throw new WorkMutationRouteRejected("Work thread is unavailable for this Project.", 404);
   }
-  return thread.workingDirectory === undefined || thread.workingDirectory === "."
-    ? undefined
-    : thread.workingDirectory;
+  return {
+    workingFolderId: thread.workingFolderId ?? mainId,
+    ...(thread.workingDirectory === undefined || thread.workingDirectory === "."
+      ? {}
+      : { directory: thread.workingDirectory }),
+  };
 }
 
 async function loadAccessibleWorkProject(

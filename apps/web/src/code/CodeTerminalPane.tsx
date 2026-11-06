@@ -77,6 +77,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   );
   const [failure, setFailure] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [confirmingFolder, setConfirmingFolder] = useState<string>();
   const [confirmingBrowser, setConfirmingBrowser] = useState(false);
   const [browserPending, setBrowserPending] = useState(false);
   const [browserRefusal, setBrowserRefusal] = useState<string>();
@@ -598,7 +599,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     else if (value === "browser-on") setConfirmingBrowser(true);
     else if (value === "browser-off") void switchBrowserOff();
     else if (value === "stop" || value === "restart") void control(value);
-    else if (value.startsWith("folder:")) void restartInFolder(value.slice("folder:".length));
+    else if (value.startsWith("folder:")) setConfirmingFolder(value.slice("folder:".length));
   };
 
   const pane = (
@@ -686,6 +687,39 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       >
         {pane}
       </OctantContextMenu>
+      {confirmingFolder === undefined ? null : (
+        <OctantConfirmDialog
+          title="Restart terminal in another folder?"
+          confirmLabel="Stop and restart here"
+          onCancel={() => setConfirmingFolder(undefined)}
+          onConfirm={() => {
+            const folder = confirmingFolder;
+            setConfirmingFolder(undefined);
+            void restartInFolder(folder);
+          }}
+          details={
+            <>
+              <p>
+                Destination: <code>{confirmingFolder}</code>
+              </p>
+              {props.onOpenAnotherTerminal === undefined ? null : (
+                <OctantButton
+                  type="button"
+                  onClick={() => {
+                    setConfirmingFolder(undefined);
+                    props.onOpenAnotherTerminal?.();
+                  }}
+                >
+                  Open another terminal instead
+                </OctantButton>
+              )}
+            </>
+          }
+        >
+          Restarting stops this shell and any command running in it. Its current process state does
+          not transfer. The task's working folder does not change.
+        </OctantConfirmDialog>
+      )}
       {confirmingBrowser ? (
         <OctantConfirmDialog
           confirmLabel="Restart with the Browser"

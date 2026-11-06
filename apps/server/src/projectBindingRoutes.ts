@@ -1,7 +1,11 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { decodeWindowId, type ProjectFailure, type WindowId } from "@octant/contracts";
 import type { BindingReceiptStorePort } from "./bindingReceiptStore";
 import type { ProjectRootPort } from "./projectRootPort";
+import {
+  admitDesktopBroker,
+  admitsWindow,
+  NATIVE_MAIN_HOST_FEATURES,
+} from "./desktopBrokerAdmission";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
@@ -36,13 +40,18 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
     if (dependencies.desktopBridgeSecret === undefined) {
       return failure("unavailable", "Desktop Project binding is unavailable.", 503);
     }
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: dependencies.desktopBridgeSecret,
+      windowAuthorityStore: dependencies.windowAuthorityStore,
+      now: now(),
+    });
+    // Window registration stays with Stable's bridge secret; a native main may
+    // only trade a picked root for a receipt bound to its own window.
     if (
       !isLoopbackHostname(url.hostname) ||
-      request.headers.has("origin") ||
-      !secretsEqual(
-        dependencies.desktopBridgeSecret,
-        request.headers.get("x-octant-desktop-secret") ?? "",
-      )
+      admission.status !== "admitted" ||
+      (admission.kind !== "desktop-bridge" && !isReceiptRoute)
     ) {
       return failure("unauthorized", "Desktop Project binding is unauthorized.", 401);
     }
@@ -78,11 +87,16 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
             ? dependencies.windowAuthorityStore.registerNative({
                 ...body,
                 rendererIdentity: requireRendererIdentity(body.rendererIdentity),
+                nativeMainToken: requireRendererIdentity(body.nativeMainToken),
                 now: now(),
               })
             : dependencies.windowAuthorityStore.renewNative({ ...body, now: now() });
         return Response.json(
-          { ...lease, leaseMs: NATIVE_WINDOW_LEASE_MS },
+          {
+            ...lease,
+            leaseMs: NATIVE_WINDOW_LEASE_MS,
+            ...(request.method === "POST" ? { hostFeatures: NATIVE_MAIN_HOST_FEATURES } : {}),
+          },
           { status: request.method === "POST" ? 201 : 200 },
         );
       }
@@ -98,6 +112,9 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
         return new Response(null, { status: 204 });
       }
       const body = decodeReceiptRequest(decoded.value);
+      if (!admitsWindow(admission, body.windowId)) {
+        return failure("unauthorized", "Desktop Project binding is unauthorized.", 401);
+      }
       const canonicalBinding = await dependencies.projectRootPort.validate(
         body.projectType,
         body.path,
@@ -145,12 +162,6 @@ export function authenticateProjectRequest(input: {
     store: input.store,
     now: input.now,
   });
-}
-
-function secretsEqual(expected: string, actual: string): boolean {
-  const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
-  const actualDigest = createHash("sha256").update(actual, "utf8").digest();
-  return timingSafeEqual(expectedDigest, actualDigest);
 }
 
 async function readJson(
@@ -272,12 +283,13 @@ function decodeNativeAuthority(
   readonly windowId: WindowId;
   readonly capability: string;
   readonly rendererIdentity?: string;
+  readonly nativeMainToken?: string;
   readonly source: NativeWindowSource;
 } {
   requireKeys(
     value,
     registering
-      ? ["windowId", "capability", "rendererIdentity", "source"]
+      ? ["windowId", "capability", "rendererIdentity", "nativeMainToken", "source"]
       : ["windowId", "capability", "source"],
   );
   const source = value.source;
@@ -300,6 +312,9 @@ function decodeNativeAuthority(
       ? {
           rendererIdentity: requireRendererIdentity(
             typeof value.rendererIdentity === "string" ? value.rendererIdentity : undefined,
+          ),
+          nativeMainToken: requireRendererIdentity(
+            typeof value.nativeMainToken === "string" ? value.nativeMainToken : undefined,
           ),
         }
       : {}),

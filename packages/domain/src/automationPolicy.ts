@@ -792,6 +792,184 @@ export function assertAutomationMutationAllowed(origin: AutomationOrigin): void 
   }
 }
 
+/** A Work or Code thread's turn that reads or asks about routines, as the host knows it. */
+export interface RoutineAgentTurn {
+  readonly threadId: string;
+  readonly mode: "work" | "code";
+  readonly projectId: string;
+  /**
+   * The host runs this turn with nobody present: a routine's run, a
+   * usage-limit resume, a child result delivered back.
+   */
+  readonly hostStarted: boolean;
+  /** A Code turn in Plan, which is read-only. */
+  readonly plan: boolean;
+}
+
+/** The facts of one routine the routine policies read. */
+export interface RoutineAgentRoutine {
+  readonly id: string;
+  readonly mode: string;
+  readonly projectId: string;
+  readonly lifecycle: AutomationDefinition["lifecycle"];
+  readonly originThreadId?: string | undefined;
+}
+
+/**
+ * A thread's agent sees only the routines a thread like its own could have
+ * made: the same Project in the same mode. Anything else reads as absent.
+ */
+export function isRoutineVisibleToTurn(
+  routine: RoutineAgentRoutine,
+  turn: RoutineAgentTurn,
+): boolean {
+  return routine.mode === turn.mode && routine.projectId === turn.projectId;
+}
+
+export type RoutineChangeRequestDecision =
+  | { readonly kind: "allowed" }
+  | {
+      readonly kind: "refused";
+      readonly reason:
+        | "host-started-turn"
+        | "plan-read-only"
+        | "routine-unavailable"
+        | "not-this-threads-routine"
+        | "already-paused"
+        | "already-archived"
+        | "routine-finished";
+      readonly message: string;
+    };
+
+/**
+ * Whether a thread's agent may ask the person to pause or archive a routine.
+ * Asking changes nothing; the person's confirmation is their own pause or
+ * archive. Even so an agent may ask only about a routine that is this
+ * thread's own: one proposed or created from this thread, or the routine
+ * whose run started this thread. A turn the host runs on its own is refused,
+ * because nobody is there to confirm and acting without a confirmation would
+ * be automation-origin execution pausing or archiving a routine.
+ */
+export function decideRoutineChangeRequest(input: {
+  readonly turn: RoutineAgentTurn;
+  readonly routine: RoutineAgentRoutine | undefined;
+  /** The routine whose run started this thread, read from the run journal. */
+  readonly threadStartedByRoutineId?: string | undefined;
+  readonly change: "pause" | "archive";
+}): RoutineChangeRequestDecision {
+  const { turn, routine, change } = input;
+  if (turn.hostStarted) {
+    return {
+      kind: "refused",
+      reason: "host-started-turn",
+      message:
+        "Nobody is here to confirm in a turn the host runs on its own, such as a routine's run. Report the run's result as needs-attention and say what should change instead.",
+    };
+  }
+  if (turn.plan) {
+    return {
+      kind: "refused",
+      reason: "plan-read-only",
+      message: `Plan mode is read-only and cannot ask to ${change} a routine. Describe it in the plan instead.`,
+    };
+  }
+  if (routine === undefined || !isRoutineVisibleToTurn(routine, turn)) {
+    return {
+      kind: "refused",
+      reason: "routine-unavailable",
+      message: "No routine with that id is in this Project.",
+    };
+  }
+  const own =
+    routine.originThreadId === turn.threadId || routine.id === input.threadStartedByRoutineId;
+  if (!own) {
+    return {
+      kind: "refused",
+      reason: "not-this-threads-routine",
+      message:
+        "You can only ask about a routine proposed from this thread or one whose run started it. The person can change any other routine in Automation Center.",
+    };
+  }
+  if (routine.lifecycle === "archived") {
+    return {
+      kind: "refused",
+      reason: "already-archived",
+      message: "That routine is already archived.",
+    };
+  }
+  if (change === "pause" && routine.lifecycle === "paused") {
+    return {
+      kind: "refused",
+      reason: "already-paused",
+      message: "That routine is already paused.",
+    };
+  }
+  if (change === "pause" && routine.lifecycle === "exhausted") {
+    return {
+      kind: "refused",
+      reason: "routine-finished",
+      message: "That one-time routine has already run; there is nothing left to pause.",
+    };
+  }
+  return { kind: "allowed" };
+}
+
+export type RoutineRunResultDecision =
+  | { readonly kind: "allowed" }
+  | {
+      readonly kind: "refused";
+      readonly reason: "not-a-routine-run" | "run-unavailable" | "already-reported";
+      readonly message: string;
+    };
+
+/**
+ * Whether a turn may report its run's result. Only the turn the dispatcher
+ * started for that run may, identified by the run the host handed it rather
+ * than by anything the turn or its thread could claim, and only once per run.
+ */
+export function decideRoutineRunResultReport(input: {
+  readonly threadId: string;
+  /** The run the dispatcher started this turn for; absent for every other turn. */
+  readonly dispatchedRun: { readonly automationId: string; readonly runId: string } | undefined;
+  readonly run:
+    | {
+        readonly id: string;
+        readonly automationId: string;
+        readonly threadId?: string | undefined;
+        readonly reported: boolean;
+      }
+    | undefined;
+}): RoutineRunResultDecision {
+  const { dispatchedRun, run } = input;
+  if (dispatchedRun === undefined) {
+    return {
+      kind: "refused",
+      reason: "not-a-routine-run",
+      message: "Only the turn a routine's run started can report that run's result.",
+    };
+  }
+  if (
+    run === undefined ||
+    run.id !== dispatchedRun.runId ||
+    run.automationId !== dispatchedRun.automationId ||
+    run.threadId !== input.threadId
+  ) {
+    return {
+      kind: "refused",
+      reason: "run-unavailable",
+      message: "This run is no longer in the routine's history.",
+    };
+  }
+  if (run.reported) {
+    return {
+      kind: "refused",
+      reason: "already-reported",
+      message: "This run's result is already reported; a run reports once.",
+    };
+  }
+  return { kind: "allowed" };
+}
+
 export function canExhaustOnceAutomation(input: {
   readonly trigger: AutomationTrigger;
   readonly currentDefinitionRevision: number;
@@ -988,7 +1166,7 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
   }
   if (
     definition.lifecycle === "enabled" &&
-    (definition.trigger.kind === "file-arrival"
+    (definition.trigger.kind === "file-arrival" || definition.trigger.kind === "integration-event"
       ? definition.nextDueAt !== null
       : definition.trigger.kind === "once"
         ? definition.nextDueAt !== definition.trigger.scheduledAt

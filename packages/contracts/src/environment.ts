@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ApprovedWorkingFolder } from "./workingDirectory";
 export {
   MAX_THREAD_WORKING_DIRECTORY_BYTES,
   ThreadWorkingDirectory,
@@ -17,6 +17,8 @@ const BaseFields = {
   threadId: Schema.optional(CodeThreadId),
   checkoutId: Schema.optional(CodeCheckoutId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  workingFolder: Schema.optional(ApprovedWorkingFolder),
+  workingFolderUnavailable: Schema.optional(Schema.Boolean),
   threadVersion: Schema.optional(AggregateVersion),
 } as const;
 

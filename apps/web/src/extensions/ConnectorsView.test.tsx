@@ -322,7 +322,14 @@ describe("Connectors", () => {
         snapshot={snapshotWith()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
+    const connect = screen.getByRole("button", { name: "Connect Linear" });
+    expect(connect).toBeDisabled();
+    expect(connect).toHaveAccessibleDescription(
+      /Requires the Octant window on this host.*Sign in with your account on that host/,
+    );
+    expect(
+      within(connect.closest("li") as HTMLElement).getByRole("link", { name: "Host setup steps" }),
+    ).toHaveAttribute("href", expect.stringContaining("-host-setup"));
     expect(screen.getByRole("status")).toHaveTextContent(
       "Connect from the Octant window on this host",
     );

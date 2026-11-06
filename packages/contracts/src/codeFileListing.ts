@@ -1,5 +1,11 @@
 import { Schema } from "effect";
-import { CodeCheckoutId, CodeFileId, CodeRelativePath, CodeThreadId } from "./code";
+import {
+  CodeCheckoutId,
+  CodeFileId,
+  CodeRelativePath,
+  CodeProjectFilePath,
+  CodeThreadId,
+} from "./code";
 import { UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -107,6 +113,8 @@ export const CodeFileChangeNotice = Schema.Struct({
   kind: Schema.Literal("code-file-change"),
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
+  /** Present for an extra folder; paths stay relative to this approved root. */
+  folder: Schema.optional(CodeProjectFilePath),
   paths: Schema.Array(CodeRelativePath).pipe(Schema.maxItems(MAX_CODE_FILE_CHANGE_PATHS)),
   /**
    * True when more changed than the notice can name, including a host that

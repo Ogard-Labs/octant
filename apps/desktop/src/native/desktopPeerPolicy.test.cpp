@@ -32,6 +32,26 @@ int main(int argc, char **argv) {
       octant::desktop_peer::ordinary_desktop_arguments(true, runtime) ||
       octant::desktop_peer::ordinary_desktop_arguments(true, terminal))
     return 10;
+  const auto nightly = octant::desktop_peer::developer_id_requirement(
+      "app.octant.desktop.nightly", "ABCDE12345");
+  if (!nightly ||
+      *nightly !=
+          "anchor apple generic and identifier \"app.octant.desktop.nightly\" "
+          "and certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
+          "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and "
+          "certificate leaf[subject.OU] = \"ABCDE12345\"")
+    return 11;
+  // A malformed team or identifier never becomes a requirement, so it cannot
+  // close a quote early or widen the match.
+  for (auto team : {"", "abcde12345", "ABCDE1234", "ABCDE12345\" or 1",
+                    "ABCDE123456"})
+    if (octant::desktop_peer::developer_id_requirement(
+            "app.octant.desktop.nightly", team))
+      return 12;
+  if (octant::desktop_peer::developer_id_requirement("", "ABCDE12345") ||
+      octant::desktop_peer::developer_id_requirement(
+          "app.octant.desktop.nightly\" or anchor apple", "ABCDE12345"))
+    return 13;
   const std::string sentinel = "dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX";
   std::vector<uint8_t> bytes(sentinel.begin(), sentinel.end());
   bytes.push_back(1);

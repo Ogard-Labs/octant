@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
+import { ProjectId } from "./projects";
 import { WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -120,7 +121,25 @@ export type UnavailableFileMention = typeof UnavailableFileMention.Type;
  * paths into bounded read-only contents at send time. Both refuse a path
  * outside the root before any file bytes are read.
  */
+export const FolderMentionScope = Schema.Union(
+  FileMentionScope,
+  Schema.Struct({
+    mode: Schema.Literal("code-draft", "work-draft"),
+    projectId: ProjectId,
+  }).annotations(strict),
+);
+export type FolderMentionScope = typeof FolderMentionScope.Type;
+
 export const FileMentionCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("inspect-folder-mentions"),
+    requestId: FileMentionRequestId,
+    scope: FolderMentionScope,
+    paths: Schema.Array(FileMentionPathInput).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+    ),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("complete-file-mentions"),
     requestId: FileMentionRequestId,
@@ -140,6 +159,18 @@ export const FileMentionCommand = Schema.Union(
 export type FileMentionCommand = typeof FileMentionCommand.Type;
 
 export const FileMentionCommandResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("folder-mentions-inspected"),
+    requestId: FileMentionRequestId,
+    folders: Schema.Array(
+      Schema.Struct({ path: FileMentionPathInput, hostId: Schema.Literal("local") }).annotations(
+        strict,
+      ),
+    ).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+    unavailable: Schema.Array(UnavailableFileMention).pipe(
+      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+    ),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("file-mentions-completed"),
     requestId: FileMentionRequestId,

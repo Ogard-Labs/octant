@@ -408,30 +408,48 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               <EnvironmentGroup
                 headerRef={workingFolderRow}
                 icon={FolderOpen}
-                summary={workingFolderLabel(workingDirectory)}
+                summary={
+                  readyObservation?.workingFolderUnavailable === true
+                    ? "Working folder unavailable"
+                    : `${readyObservation?.workingFolder?.label ?? workingFolderLabel(workingDirectory)}${String(workingDirectory) === "." || readyObservation?.workingFolder === undefined ? "" : ` / ${workingDirectory}`}`
+                }
                 title="Working folder"
               >
-                <ChangeWorkingFolder
-                  row={workingFolderRow}
-                  value={workingDirectory}
-                  onApply={async (nextWorkingDirectory) => {
-                    const result = await props.onExecute?.({
-                      kind: "change-code-thread-working-directory",
-                      threadId: props.tab.threadId,
-                      expectedVersion: threadVersion,
-                      workingDirectory: nextWorkingDirectory,
-                    });
-                    if (
-                      result === undefined ||
-                      !("kind" in result) ||
-                      result.kind !== "thread-updated"
-                    ) {
-                      throw new Error("Code working directory was not updated.");
-                    }
-                    returnToWorkingFolder.current = true;
-                    await controller.refresh();
-                  }}
-                />
+                {readyObservation?.workingFolderUnavailable === true ? (
+                  <p>
+                    The recorded working folder is unavailable. Restore its original binding or
+                    start a new task in a current approved folder; output is never redirected.
+                  </p>
+                ) : readyObservation?.workingFolder === undefined ? (
+                  <ChangeWorkingFolder
+                    row={workingFolderRow}
+                    value={workingDirectory}
+                    onApply={async (nextWorkingDirectory) => {
+                      const result = await props.onExecute?.({
+                        kind: "change-code-thread-working-directory",
+                        threadId: props.tab.threadId,
+                        expectedVersion: threadVersion,
+                        workingDirectory: nextWorkingDirectory,
+                      });
+                      if (
+                        result === undefined ||
+                        !("kind" in result) ||
+                        result.kind !== "thread-updated"
+                      ) {
+                        throw new Error("Code working directory was not updated.");
+                      }
+                      returnToWorkingFolder.current = true;
+                      await controller.refresh();
+                    }}
+                  />
+                ) : (
+                  <p>
+                    {readyObservation.workingFolder.kind === "extra"
+                      ? "Shared approved folder; it is outside this task's child worktree. Git, changed-file receipts, Review and PR operations cover the Code checkout only. "
+                      : "Main folder of this Code checkout. "}
+                    Start a new task to choose another working folder or subfolder.
+                  </p>
+                )}
               </EnvironmentGroup>
             )}
             <EnvironmentExtraFolders

@@ -1,11 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
 import type { WindowId } from "@octant/contracts";
 import {
   decodePreviewHandoffRequest,
   type PreviewHandoffKind,
   type PreviewTarget,
 } from "@octant/contracts/previews";
+import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
 import type { PreviewHandoffResolution } from "./preview/previewService";
+import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -26,16 +27,26 @@ export interface PreviewHandoffBridgeResolveInput {
  */
 export function createPreviewHandoffBridgeRouteHandler(options: {
   readonly desktopBridgeSecret: string | undefined;
+  /** Admits a native window's main for its own window; absent, only Stable's main. */
+  readonly windowAuthorityStore?: WindowAuthorityStore;
+  readonly now?: () => number;
   readonly resolve: (input: PreviewHandoffBridgeResolveInput) => Promise<PreviewHandoffResolution>;
 }) {
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (url.pathname !== "/api/desktop/preview-handoff") return undefined;
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      ...(options.windowAuthorityStore === undefined
+        ? {}
+        : { windowAuthorityStore: options.windowAuthorityStore }),
+      now: (options.now ?? Date.now)(),
+    });
     if (
       options.desktopBridgeSecret === undefined ||
       url.hostname !== "127.0.0.1" ||
-      request.headers.has("origin") ||
-      !equal(options.desktopBridgeSecret, request.headers.get("x-octant-desktop-secret") ?? "")
+      admission.status !== "admitted"
     ) {
       return failure("unauthorized", 401);
     }
@@ -52,6 +63,7 @@ export function createPreviewHandoffBridgeRouteHandler(options: {
     if (typeof body.windowId !== "string" || !UUID.test(body.windowId)) {
       return failure("invalid", 400);
     }
+    if (!admitsWindow(admission, body.windowId)) return failure("unauthorized", 401);
     let decoded: { readonly target: PreviewTarget; readonly kind: PreviewHandoffKind };
     try {
       decoded = decodePreviewHandoffRequest({ target: body.target, kind: body.kind });
@@ -88,11 +100,6 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 function exact(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-}
-function equal(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 function failure(category: string, status: number): Response {
   return Response.json({ category, message: "Preview handoff is unavailable." }, { status });

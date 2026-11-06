@@ -296,7 +296,8 @@ export async function signAndNotarizeDesktop(input: {
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
   const identity = input.identity ?? desktopIdentity("stable");
-  if (identity.flavor === "stable") {
+  // Both apps carry the worker runtime; it is signed before the app that seals it.
+  {
     const runtime = `${input.appPath}/${DESKTOP_NODE_RUNTIME_APP}`;
     for (const path of SIGNING_ORDER.filter((path) => path.startsWith("Contents/Frameworks/"))) {
       await input.run(
@@ -321,14 +322,14 @@ export async function signAndNotarizeDesktop(input: {
   await input.run(
     createCodesignArgv({
       identity: input.credentials.identity,
-      target: `${input.appPath}/${packagedNativePath(BUNDLED_LANGUAGE_SERVER_SIGNING_PATH, identity)}`,
+      target: `${input.appPath}/${packagedNativePath(BUNDLED_LANGUAGE_SERVER_SIGNING_PATH)}`,
     }),
   );
   for (const relativePath of SIGNING_ORDER) {
     await input.run(
       createCodesignArgv({
         identity: input.credentials.identity,
-        target: `${input.appPath}/${packagedNativePath(relativePath, identity).replace("Contents/Frameworks/Octant Helper", `Contents/Frameworks/${identity.productName} Helper`)}`,
+        target: `${input.appPath}/${packagedNativePath(relativePath).replace("Contents/Frameworks/Octant Helper", `Contents/Frameworks/${identity.productName} Helper`)}`,
         entitlements,
       }),
     );

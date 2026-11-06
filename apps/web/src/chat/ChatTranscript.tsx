@@ -1,3 +1,5 @@
+import { ConversationInputs } from "../continuity/ConversationInputs";
+import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import type {
   ChatAttempt,
@@ -50,6 +52,8 @@ import {
 import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTranscriptWindow";
 
 export interface ChatTranscriptProps {
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   /** The decoded, authoritative transcript projection. */
   readonly view: ChatThreadView;
   readonly onReturnSideChatReply?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
@@ -84,7 +88,7 @@ export interface ChatTranscriptProps {
     readonly attemptId: ChatAttemptId;
     readonly requestId: string;
     readonly answer: string;
-  }) => void;
+  }) => void | boolean | Promise<void | boolean>;
   /** Cancels the turn a question belongs to, without answering it. */
   readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
   /** Starts a second thread carrying the conversation through this turn. */
@@ -581,6 +585,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
               {turn.attempts.map((attempt, index) => (
                 <AttemptBlock
+                  serverUrl={props.serverUrl}
+                  windowCapability={props.windowCapability}
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
@@ -786,6 +792,8 @@ const NO_CITATIONS: ChatThreadView["citations"] = [];
 
 const AttemptBlock = memo(function AttemptBlock(props: {
   readonly attempt: ChatAttempt;
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
   readonly onAnswerQuestion: ChatTranscriptProps["onAnswerQuestion"];
@@ -832,6 +840,16 @@ const AttemptBlock = memo(function AttemptBlock(props: {
     <>
       {handoff === undefined ? null : (
         <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
+      )}
+      {props.attempt.inputReceipt === undefined ? null : (
+        <ConversationInputs
+          mode="chat"
+          threadId={String(props.attempt.threadId)}
+          admissionId={String(props.attempt.id)}
+          receipt={props.attempt.inputReceipt}
+          serverUrl={props.serverUrl}
+          windowCapability={props.windowCapability}
+        />
       )}
       {props.attempt.handoff === undefined ? null : (
         <p className="chat-transcript__handoff" role="note">
@@ -963,6 +981,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         {props.attempt.pendingQuestion === undefined ||
         props.onAnswerQuestion === undefined ? null : (
           <ProviderQuestionCard
+            key={props.attempt.pendingQuestion.requestId}
+            questionnaire={props.attempt.pendingQuestion.questionnaire}
             onAnswer={(answer) =>
               props.onAnswerQuestion?.({
                 turnId: props.attempt.turnId,
@@ -1047,6 +1067,14 @@ function AssistantResponse(props: {
  * the reply grew from stays readable after the turn moves on.
  */
 function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQuestion }) {
+  if (props.question.questionnaire !== undefined)
+    return (
+      <QuestionnaireSummary
+        prompt={props.question.prompt}
+        questionnaire={props.question.questionnaire}
+        answer={props.question.answer}
+      />
+    );
   return (
     <div aria-label="Answered question" className="approval-row approval-row--request" role="group">
       <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />

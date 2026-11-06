@@ -752,6 +752,7 @@ function controller(): CodeController {
     setAccessNotice: vi.fn(),
     announceFirstPrompt: vi.fn(),
     answerProviderRequest: vi.fn(async () => true),
+    forceStopTurn: vi.fn(async () => false),
     cancelTurn: vi.fn(async () => true),
     archiveThread: vi.fn(async () => true),
     completeThread: vi.fn(async () => ({ status: "ok" }) as const),

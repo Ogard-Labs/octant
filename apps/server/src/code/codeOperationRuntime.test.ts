@@ -1,3 +1,4 @@
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
 import { withCodeOperationRuntime } from "../wiring/codeRuntime";
 import { createCodeRouteHandler } from "../codeRoutes";
@@ -26,8 +27,7 @@ import { delimiter, join, resolve } from "node:path";
 import {
   ActorId,
   decodeAgentMessageEndpointId,
-  CODE_DEFINITION_TOOL_NAME,
-  CODE_DIAGNOSTICS_TOOL_NAME,
+  CODE_LANGUAGE_TOOL_NAME,
   decodeCodeFileId,
   decodeCodeRelativePath,
   CodeOperationEventFrame,
@@ -65,7 +65,7 @@ import {
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
-import { Effect, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
   ProviderConnection,
   ProviderDriver,
@@ -98,10 +98,6 @@ import {
   readCodeReviewFinding,
   readCodeReviewFindings,
 } from "../persistence/codeProjection";
-import {
-  AGENT_MESSAGE_TOOL_NAME,
-  createAgentMessageTools,
-} from "../agentMessage/agentMessageTools";
 import { AgentMessageService } from "../agentMessage/agentMessageService";
 import { AgentMessageProjection } from "../agentMessage/agentMessageProjection";
 import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
@@ -118,16 +114,18 @@ import { CodeProjectAccess } from "../codeProjectAccess";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import {
   SiblingThreadsService,
-  createSiblingThreadTools,
+  createThreadsTools,
   type SiblingThreadOutcome,
   type SiblingThreadSource,
 } from "../siblingThreads/siblingThreadTools";
+import type { CodePlannerToolPort } from "./codePlannerTools";
 import { defaultWindowWorkspace, contextKeyForProject } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
-import { CODE_BOARD_TOOL_NAME, CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
+import { CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
 import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
+import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
 import {
@@ -522,6 +520,53 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("keeps the Git checkout separate from the provider folder and stops on folder revocation", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const acquire = vi.fn(() => Effect.succeed(connection));
+    let current = true;
+    const fixture = runtimeFixture({
+      provider: { ...providerDriver(connection), acquire },
+      approvalValidator: false,
+      resolveCheckoutRoot: async () => ({
+        checkoutRoot: "/private/exact",
+        workingDirectory: "/approved/notes",
+        rootCurrent: () => current,
+        shell: "/bin/zsh",
+        credentialReferences: [],
+        environment: {},
+      }),
+    });
+    try {
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), workingFolderId: `folder_${"a".repeat(64)}` }),
+      );
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(acquire).toHaveBeenCalled());
+      expect(acquire).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectRoot: "/approved/notes",
+          extraFolders: expect.arrayContaining(["/private/exact"]),
+        }),
+      );
+      current = false;
+      await vi.waitFor(() => expect(fixture.conversation().turns[0]?.status).toBe("interrupted"), {
+        timeout: 2000,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
   it("releases the spend reservation when a Code turn is cancelled", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -2659,6 +2704,7 @@ describe("CodeOperationRuntime", () => {
     expect(withCanvas).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
+      tool: "octant_canvas",
     });
     expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
     const withoutCanvas = (await turn(false)).context;
@@ -2682,6 +2728,105 @@ describe("CodeOperationRuntime", () => {
     });
     expect(canvasRule(chosen.context)).toHaveLength(0);
     expect(chosen.start).toMatchObject({ nativeArtifacts: true });
+  });
+
+  it("lets a Plan turn create and revise the thread's Canvas, and offers no way to publish or share it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      card: { canvasId: "canvas-1", versionId: "version-1" },
+    }));
+    const revise = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      receipt: { versionId: "version-2", sequence: 2 },
+    }));
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools: true,
+      canvas: ({ windowId: owner, thread: owning }) =>
+        createCanvasAgentTools({
+          windowId: owner,
+          mode: "code",
+          thread: {
+            id: String(owning.id),
+            projectId: String(owning.projectId),
+            providerInstanceId: owning.providerInstanceId,
+            modelId: owning.modelId,
+          },
+          port: {
+            activeContext: () => undefined,
+            project: async (_window, id) => ({ id, type: "code", lifecycle: "active" }),
+            canvas: {
+              create,
+              revise,
+              get: () => ({ kind: "unavailable" }),
+              threadReferenceCards: () => [],
+            } as never,
+            markReader: () => ({ status: "nothing-to-mark" }) as never,
+            uuid: randomUUID,
+            hostId: LOCAL_HOST_ID,
+            resolveWorkspace: () =>
+              ({
+                kind: "code-worktree",
+                projectId: String(owning.projectId),
+                repositoryId: "88888888-8888-4888-8888-888888888888",
+                worktreeId: "99999999-9999-4999-8999-999999999999",
+              }) as never,
+          },
+        }),
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const blocks = [
+      {
+        blockId: "steps",
+        schemaVersion: 1,
+        kind: "diagram",
+        nodes: [
+          { nodeId: "read", label: "Read" },
+          { nodeId: "propose", label: "Propose" },
+        ],
+        edges: [{ edgeId: "then", source: "read", target: "propose" }],
+      },
+    ];
+    const calls = [
+      { operation: "create", title: "Plan", blocks },
+      { operation: "revise", canvasId: "canvas-1", expectedSequence: 1, blocks },
+      { operation: "publish", canvasId: "canvas-1" },
+      { operation: "share", canvasId: "canvas-1" },
+    ];
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1301),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      for (const [index, input] of calls.entries()) {
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: `canvas-${String(index)}`,
+              toolName: "octant_canvas",
+              inputJson: JSON.stringify(input),
+            }),
+          ),
+        );
+      }
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledTimes(calls.length));
+      const answers = vi.mocked(connection.answerTool).mock.calls.map(([answer]) => answer);
+      expect(answers.map((answer) => answer.isError === true)).toEqual([false, false, true, true]);
+      expect(create).toHaveBeenCalledOnce();
+      expect(revise).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   describe("Octant Shield answering a provider runtime's prompts", () => {
@@ -2983,6 +3128,63 @@ describe("CodeOperationRuntime", () => {
       await fixture.runtime.close();
       fixture.close();
     });
+  });
+
+  it("force-stops only the stopped exact provider attempt and refuses a replaced attempt", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+      forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(710),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      const stopping = fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(711),
+        threadId,
+        checkoutId,
+      });
+      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(712),
+          turnOperationId: operationId(709),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.forceStop).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(713),
+          turnOperationId: operationId(710),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      await stopping;
+      expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
@@ -3357,6 +3559,66 @@ describe("CodeOperationRuntime", () => {
       checkoutId,
     });
     await vi.waitFor(() => expect(activeTurns.has(String(threadId))).toBe(false));
+    fixture.close();
+  });
+
+  it("keeps a grouped question pending after an invalid answer and journals its full ask", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const answerQuestion = vi.fn(() => "invalid-answer" as const);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async () => undefined,
+        answerQuestion,
+      },
+    });
+    const operation = operationId(907);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const questionnaire = {
+      questions: [
+        {
+          id: "formats",
+          prompt: "Which formats?",
+          selection: "multiple" as const,
+          options: [{ id: "pdf", label: "PDF" }],
+        },
+      ],
+    };
+    expect(
+      fixture.runtime.raiseHarnessQuestion?.({
+        threadId: String(threadId),
+        questionId: "grouped-question",
+        prompt: "Exports",
+        options: [],
+        questionnaire,
+      }),
+    ).toBe(true);
+    const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+    expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
+      questionnaire,
+    });
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "answer-provider-input",
+      operationId: operationId(908),
+      threadId,
+      checkoutId,
+      requestId: "grouped-question",
+      response: fixture.response,
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", failure: { category: "invalid" } });
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+    expect(answerQuestion).toHaveBeenCalledOnce();
     fixture.close();
   });
 
@@ -6111,6 +6373,49 @@ describe("provider switch handoff", () => {
     });
   }
 
+  it("uses a new session with a journaled text handoff when the person explicitly updates tools", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async (current) => ({
+        ...(await drivers.resolveProviderDriver(current)),
+        toolCatalogContinuation: () => "handoff-required",
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      const prompt = storedEvidence(86, "Use the updated tools.");
+      fixture.evidenceValues.set(prompt.contentId, "Use the updated tools.");
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId,
+        sessionId: switchSession,
+        prompt,
+        toolCatalogHandoff: true,
+      });
+      await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+      expect(drivers.provider.start).toHaveBeenCalledTimes(2);
+      expect(drivers.provider.resume).not.toHaveBeenCalled();
+      const sent = vi.mocked(drivers.provider.send).mock.calls[1]?.[0];
+      expect(JSON.stringify(sent?.context)).toContain("First reply.");
+      expect(sent?.prompt).toBe("Use the updated tools.");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      });
+      expect(fixture.conversation(threadId).turns).toHaveLength(2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       direction: "from a provider's session to the Octant Harness",
@@ -6489,8 +6794,87 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it.each([true, false])(
+    "carries original screenshot input on a Code provider switch only when supported: %s",
+    async (supports) => {
+      const drivers = twoHarnesses();
+      const bytes = new Uint8Array([137, 80, 78]);
+      const reference = {
+        source: {
+          mode: "code" as const,
+          threadId: String(threadId),
+          attachmentId: "30000000-0000-4000-8000-000000000001",
+          projectId: String(thread().projectId),
+        },
+        displayName: "Original.png",
+        mediaType: "image/png",
+        byteLength: bytes.length,
+        digest: createHash("sha256").update(bytes).digest("hex"),
+      };
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        inputTransfer: (directory) =>
+          new ConversationInputTransfer({
+            dataDirectory: directory,
+            ownerCurrent: () => true,
+            sourceCurrent: () => true,
+            read: async () => bytes,
+            supports: () => supports,
+          }),
+        providerSwitchContext: (input) => {
+          const selected = selectThreadConversation(fixture, input);
+          return selected.status === "available" ? { ...selected, inputs: [reference] } : selected;
+        },
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+        const result = await sendAfterSwitch(fixture);
+        if (!supports) {
+          expect(result).toMatchObject({
+            state: "failed",
+            failure: { message: expect.stringContaining("Original.png (unsupported)") },
+          });
+          expect(drivers.harness.start).not.toHaveBeenCalled();
+          expect(drivers.harness.send).not.toHaveBeenCalled();
+          return;
+        }
+        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+        expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+          expect.objectContaining({ displayName: "Original.png", bytes }),
+        ]);
+        expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+          inputReceipt: { purpose: "provider-switch", included: 1, omitted: 0 },
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("reads a journaled handoff back after a restart instead of choosing it again", async () => {
     const drivers = twoHarnesses();
+    const bytes = new Uint8Array([137, 80, 78]);
+    const originalInput = {
+      source: {
+        mode: "code" as const,
+        threadId: String(threadId),
+        attachmentId: "30000000-0000-4000-8000-000000000001",
+      },
+      displayName: "Original.png",
+      mediaType: "image/png",
+      byteLength: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const inputTransfer = (directory: string) =>
+      new ConversationInputTransfer({
+        dataDirectory: directory,
+        ownerCurrent: () => true,
+        sourceCurrent: () => true,
+        read: async () => bytes,
+        supports: () => true,
+      });
     // The new session opens and the handoff is journaled, but the prompt never
     // goes out and nothing streams back: what a host exit at that moment leaves.
     const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -6507,7 +6891,13 @@ describe("provider switch handoff", () => {
         String(current.providerInstanceId) === String(harnessInstance)
           ? stalled
           : drivers.resolveProviderDriver(current),
-      providerSwitchContext: (input) => firstSelection(input),
+      inputTransfer,
+      providerSwitchContext: (input) => {
+        const selection = firstSelection(input);
+        return selection.status === "available"
+          ? { ...selection, inputs: [originalInput] }
+          : selection;
+      },
     });
     const restartedDrivers = twoHarnesses();
     const restartedSelection = vi.fn(() => ({
@@ -6529,6 +6919,7 @@ describe("provider switch handoff", () => {
       restarted = runtimeFixture({
         resolveProviderDriver: restartedDrivers.resolveProviderDriver,
         providerSwitchContext: restartedSelection,
+        inputTransfer,
         restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
       });
       restarted.setThread(onProvider(harnessInstance, "harness-model", 2));
@@ -6538,6 +6929,9 @@ describe("provider switch handoff", () => {
       // The recovered start sends the handoff first disclosed, without reading
       // the conversation again, and journals no second handoff.
       expect(restartedSelection).not.toHaveBeenCalled();
+      expect(vi.mocked(restartedDrivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+        expect.objectContaining({ displayName: "Original.png", bytes }),
+      ]);
       const context = vi.mocked(restartedDrivers.harness.send).mock.calls[0]![0].context ?? [];
       expect(context.slice(0, journaled.blocks.length)).toEqual(journaled.blocks);
       const frames = await restarted.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
@@ -7199,6 +7593,102 @@ describe("provider switch handoff", () => {
       });
     });
 
+    it.each(["current", "folder-revoked", "source-revoked"] as const)(
+      "keeps a fork’s selected provider folder and original screenshot together (%s)",
+      async (admission) => {
+        const drivers = twoHarnesses();
+        let folderCurrent = true;
+        let sourceCurrent = true;
+        const acquired: Array<{
+          readonly projectRoot: string;
+          readonly extraFolders?: ReadonlyArray<string>;
+        }> = [];
+        const bytes = new Uint8Array([137, 80, 78]);
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(threadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Original.png",
+          mediaType: "image/png",
+          byteLength: bytes.length,
+          digest: createHash("sha256").update(bytes).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: async (current) => {
+            const driver = await drivers.resolveProviderDriver(current);
+            return {
+              ...driver,
+              acquire: (input) => {
+                acquired.push(input);
+                return driver.acquire(input);
+              },
+            };
+          },
+          resolveCheckoutRoot: async () => ({
+            checkoutRoot: "/private/exact",
+            workingDirectory: "/approved/notes",
+            rootCurrent: () => folderCurrent,
+            shell: "/bin/zsh",
+            credentialReferences: [],
+            environment: {},
+          }),
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => sourceCurrent,
+              read: async () => {
+                await Promise.resolve();
+                if (admission === "folder-revoked") folderCurrent = false;
+                if (admission === "source-revoked") sourceCurrent = false;
+                return bytes;
+              },
+              supports: () => true,
+            }),
+          forkContext: (input) => {
+            const selected = fixture.selectForkConversation(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
+        });
+        try {
+          await finishFirstTurn(fixture, drivers, providerInstance);
+          fixture.setOtherThread(
+            decodeCodeThread({
+              ...forkOn(harnessInstance, "harness-model"),
+              workingFolderId: `folder_${"a".repeat(64)}`,
+            }),
+          );
+          const result = await sendOnFork(fixture);
+          if (admission !== "current") {
+            expect(result).toMatchObject({ state: "failed" });
+            expect(acquired).toHaveLength(1);
+            expect(drivers.harness.send).not.toHaveBeenCalled();
+            return;
+          }
+          expect(acquired.at(-1)).toMatchObject({
+            projectRoot: "/approved/notes",
+            extraFolders: expect.arrayContaining(["/private/exact"]),
+          });
+          await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+          expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+            expect.objectContaining({ displayName: "Original.png", bytes }),
+          ]);
+          expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toMatchObject({
+            reason: "fork",
+            inputReceipt: { purpose: "fork", included: 1 },
+          });
+          expect(drivers.harness.resume).not.toHaveBeenCalled();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
     describe("merging a fork's conversation back into its source", () => {
       const sourceSession = sessionId;
 
@@ -7252,6 +7742,96 @@ describe("provider switch handoff", () => {
       async function sourceFrames(fixture: ReturnType<typeof runtimeFixture>, n = 85) {
         return fixture.runtime.subscribe(windowId, threadId, operationId(n), 0, 50);
       }
+
+      it("retains merge-back inputs and pending feedback until the exact original screenshot can be delivered", async () => {
+        const drivers = twoHarnesses();
+        const original = new Uint8Array([137, 80, 78]);
+        let bytes = original;
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(forkThreadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Fork original.png",
+          mediaType: "image/png",
+          byteLength: original.length,
+          digest: createHash("sha256").update(original).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => true,
+              read: async () => bytes,
+              supports: () => true,
+            }),
+          forkMergeBackContext: (input) => {
+            const selected = fixture.selectForkMergeBack(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
+        });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          expect(
+            await fixture.runtime.mergeForkContext?.(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toMatchObject({ status: "merged" });
+          await fixture.feedback.execute(windowId, {
+            kind: "capture-product-feedback",
+            threadId,
+            mode: "code",
+            contextId: operationId(40),
+            point: { x: 0.3, y: 0.5 },
+            comment: "Keep this feedback pending on a refused handoff.",
+          });
+          bytes = new Uint8Array([0, 1]);
+          expect(await sendOnSource(fixture)).toMatchObject({
+            state: "failed",
+            failure: { message: expect.stringContaining("Fork original.png (changed)") },
+          });
+          expect(drivers.provider.send).toHaveBeenCalledTimes(1);
+          expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+            { lifecycle: "pending" },
+          ]);
+          bytes = original;
+          await sendOnSource(fixture, 86);
+          await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+          expect(vi.mocked(drivers.provider.send).mock.calls[1]?.[0].attachments).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ displayName: "Fork original.png", bytes: original }),
+            ]),
+          );
+          expect(await sourceFrames(fixture, 86)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                event: expect.objectContaining({
+                  kind: "fork-context-delivered",
+                  inputReceipt: expect.objectContaining({
+                    purpose: "fork-merge-back",
+                    included: 1,
+                  }),
+                }),
+              }),
+            ]),
+          );
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
 
       it.each([
         {
@@ -7540,6 +8120,7 @@ function selectThreadConversation(
 }
 
 function runtimeFixture(options: {
+  inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   browserProfiles?: Parameters<typeof createCodeOperationRuntime>[0]["browserProfiles"];
@@ -7554,7 +8135,6 @@ function runtimeFixture(options: {
   resolveSelectedExtensions?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveSelectedExtensions"];
-  agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   shield?: Parameters<typeof createCodeOperationRuntime>[0]["shield"];
   chosenAutoReviewer?: Parameters<typeof createCodeOperationRuntime>[0]["chosenAutoReviewer"];
   resolveProviderCapabilities?: Parameters<
@@ -7563,7 +8143,7 @@ function runtimeFixture(options: {
   readThreadExternalContentTaint?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["readThreadExternalContentTaint"];
-  siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
+  threads?: Parameters<typeof createCodeOperationRuntime>[0]["threads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
@@ -7869,6 +8449,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.inputTransfer === undefined
+      ? {}
+      : { conversationInputTransfer: options.inputTransfer(directory) }),
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),
@@ -7925,7 +8508,6 @@ function runtimeFixture(options: {
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
-    ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.shield === undefined ? {} : { shield: options.shield }),
     ...(options.chosenAutoReviewer === undefined
       ? {}
@@ -7936,7 +8518,7 @@ function runtimeFixture(options: {
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
-    ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.threads === undefined ? {} : { threads: options.threads }),
     ...(options.serverCodeTurn === undefined ? {} : { serverCodeTurn: options.serverCodeTurn }),
     ...(options.holdsServerThread === undefined
       ? {}
@@ -8859,29 +9441,24 @@ it("offers the Computer tool and its host line on a Code turn whose send has no 
   fixture.close();
 });
 
-it("offers the agent message tool to a Code turn and withholds it from one in Plan", async () => {
+it("offers messaging in the threads tool to a Code turn and withholds it from one in Plan", async () => {
   const offered = async (executionPolicy: CodeThread["executionPolicy"], operation: number) => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const starts: Array<ProviderSessionStart> = [];
     const fixture = runtimeFixture({
       provider: providerDriver(providerConnection(queue, starts)),
       supportsAppManagedTools: true,
-      agentMessages: ({ thread: sender, readPosture }) =>
-        createAgentMessageTools({
-          service: {
-            send: async () => [],
-            recordRefusedSend: async () => undefined,
-            acknowledge: async () => ({
-              status: "refused",
-              reason: "unauthorized",
-              message: "Unavailable",
-            }),
-            statusForSender: () => [],
-          },
-          senderThreadId: String(sender.id),
+      threads: ({ windowId: turnWindowId, thread: sender, readPosture }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer: async () => Promise.reject(new Error("unused")) },
+          source: noSiblings,
+          callerThreadId: String(sender.id),
           toolConstraints: [],
           profileDisplayName: "the bound profile",
           readPosture,
+          messaging: quietMessaging,
         }),
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
@@ -8894,13 +9471,15 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
       prompt: fixture.prompt,
     });
     fixture.close();
-    return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+    return threadsOperations(starts[0]?.tools);
   };
 
-  expect(await offered("approval-gated", 83)).toContain(AGENT_MESSAGE_TOOL_NAME);
+  expect(await offered("approval-gated", 83)).toContain("send");
   // Plan is read-only, and sending stores a body and journals: the provider
-  // is never told the tool exists.
-  expect(await offered("plan", 84)).not.toContain(AGENT_MESSAGE_TOOL_NAME);
+  // is never told the operation exists.
+  const plan = await offered("plan", 84);
+  expect(plan).toContain("list");
+  expect(plan).not.toContain("send");
 });
 
 describe("language reads on Code turns", () => {
@@ -8931,14 +9510,15 @@ describe("language reads on Code turns", () => {
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools,
-      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread }) =>
+      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread, folders }) =>
         createCodeLanguageAgentTools({
           windowId: turnWindow,
           thread: turnThread,
           readThread,
+          folders,
           authority: () => authority,
           externalContentIngested: () => false,
-          language: { readForAgent },
+          language: { readForAgent, servesAgentsIn: () => true },
           uuid: randomUUID,
         }),
     });
@@ -8954,12 +9534,12 @@ describe("language reads on Code turns", () => {
     return { queue, starts, connection, readForAgent, fixture };
   }
 
-  it("offers a Plan turn the diagnostics and definition reads and answers one from the language service", async () => {
+  it("offers a Plan turn the language reads and answers one from the language service", async () => {
     const { queue, starts, connection, readForAgent, fixture } = await planTurn(true, 1301);
     try {
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
       expect(starts[0]?.tools?.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME, CODE_DEFINITION_TOOL_NAME]),
+        expect.arrayContaining([CODE_LANGUAGE_TOOL_NAME]),
       );
       await Effect.runPromise(
         Queue.offer(
@@ -8967,8 +9547,8 @@ describe("language reads on Code turns", () => {
           providerEvent({
             kind: "tool-request",
             requestId: "language-1",
-            toolName: CODE_DIAGNOSTICS_TOOL_NAME,
-            inputJson: JSON.stringify({ path: "src/b.ts" }),
+            toolName: CODE_LANGUAGE_TOOL_NAME,
+            inputJson: JSON.stringify({ operation: "diagnostics", path: "src/b.ts" }),
           }),
         ),
       );
@@ -8992,15 +9572,12 @@ describe("language reads on Code turns", () => {
     }
   });
 
-  it("offers neither read to a provider that cannot carry app-managed tools", async () => {
+  it("offers no language read to a provider that cannot carry app-managed tools", async () => {
     const { starts, connection, fixture } = await planTurn(false, 1302);
     try {
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
       expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
-        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME]),
-      );
-      expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
-        expect.arrayContaining([CODE_DEFINITION_TOOL_NAME]),
+        expect.arrayContaining([CODE_LANGUAGE_TOOL_NAME]),
       );
     } finally {
       await fixture.runtime.close();
@@ -9009,7 +9586,7 @@ describe("language reads on Code turns", () => {
   });
 });
 
-describe("sibling-threads tool on Code turns", () => {
+describe("the threads tool on Code turns", () => {
   const siblingId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
   const siblingReference = `${String(siblingId)}@${String(thread().projectId)}`;
   const quietSource: SiblingThreadSource = {
@@ -9033,30 +9610,17 @@ describe("sibling-threads tool on Code turns", () => {
       const fixture = runtimeFixture({
         provider: providerDriver(providerConnection(queue, starts)),
         supportsAppManagedTools: true,
-        agentMessages: ({ thread: sender, readPosture }) =>
-          createAgentMessageTools({
-            service: {
-              send: async () => [],
-              recordRefusedSend: async () => undefined,
-              acknowledge: async () => ({
-                status: "refused",
-                reason: "unauthorized",
-                message: "Unavailable",
-              }),
-              statusForSender: () => [],
-            },
-            senderThreadId: String(sender.id),
-            toolConstraints: sender.toolConstraints ?? [],
-            profileDisplayName: "the bound profile",
-            readPosture,
-          }),
-        siblingThreads: ({ thread: caller }) =>
-          createSiblingThreadTools({
+        threads: ({ windowId: turnWindowId, thread: caller, readPosture }) =>
+          createThreadsTools({
+            mode: "code",
+            windowId: turnWindowId,
             service: { answer: async () => waited() },
             source: quietSource,
             callerThreadId: String(caller.id),
             toolConstraints: caller.toolConstraints ?? [],
             profileDisplayName: "Reviewer",
+            readPosture,
+            messaging: quietMessaging,
           }),
       });
       fixture.setThread(decodeCodeThread({ ...thread(), ...overrides }));
@@ -9069,7 +9633,10 @@ describe("sibling-threads tool on Code turns", () => {
         prompt: fixture.prompt,
       });
       fixture.close();
-      return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+      return {
+        names: starts[0]?.tools?.map((tool) => tool.name) ?? [],
+        operations: threadsOperations(starts[0]?.tools),
+      };
     };
 
     for (const [executionPolicy, operation] of [
@@ -9077,40 +9644,53 @@ describe("sibling-threads tool on Code turns", () => {
       ["auto-accept-edits", 1202],
       ["full-access", 1203],
     ] as const) {
-      expect(await offered({ executionPolicy }, operation)).toEqual(
-        expect.arrayContaining([SIBLING_THREADS_TOOL_NAME, AGENT_MESSAGE_TOOL_NAME]),
+      expect((await offered({ executionPolicy }, operation)).operations).toEqual(
+        expect.arrayContaining(["list", "read", "wait", "send"]),
       );
     }
     // Plan reads its siblings like any other posture; messaging stays withheld.
     const plan = await offered({ executionPolicy: "plan" }, 1204);
-    expect(plan).toContain(SIBLING_THREADS_TOOL_NAME);
-    expect(plan).not.toContain(AGENT_MESSAGE_TOOL_NAME);
-    // A profile allowlist that does not name the tool keeps it off the turn.
-    const narrowed = await offered({ toolConstraints: [AGENT_MESSAGE_TOOL_NAME] }, 1205);
-    expect(narrowed).toContain(AGENT_MESSAGE_TOOL_NAME);
-    expect(narrowed).not.toContain(SIBLING_THREADS_TOOL_NAME);
-    expect(await offered({ toolConstraints: [SIBLING_THREADS_TOOL_NAME] }, 1206)).toContain(
+    expect(plan.operations).toEqual(["help", "list", "read", "wait"]);
+    // A profile allowlist names each group on its own, and one that names
+    // neither keeps the tool off the turn.
+    expect((await offered({ toolConstraints: ["octant_threads.send"] }, 1205)).operations).toEqual([
+      "help",
+      "send",
+      "acknowledge",
+      "receipts",
+    ]);
+    expect(
+      (await offered({ toolConstraints: [SIBLING_THREADS_TOOL_NAME] }, 1206)).operations,
+    ).toEqual(["help", "list", "read", "wait"]);
+    expect((await offered({ toolConstraints: ["octant_terminal"] }, 1207)).names).not.toContain(
       SIBLING_THREADS_TOOL_NAME,
     );
+    // None of the tools this one replaced reaches a turn under its old name.
+    for (const retired of ["octant_agent_message", "octant_board", "octant_propose_thread"]) {
+      expect((await offered({}, 1208)).names).not.toContain(retired);
+    }
   });
 
   it("gives each turn its own read and wait bounds", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const answer = vi.fn(async () => waited());
-    const toolSets = vi.fn(({ thread: caller }: { readonly thread: CodeThread }) =>
-      createSiblingThreadTools({
-        service: { answer },
-        source: quietSource,
-        callerThreadId: String(caller.id),
-        toolConstraints: [],
-        profileDisplayName: "Reviewer",
-      }),
+    const toolSets = vi.fn(
+      ({ windowId: turnWindowId, thread: caller }: { windowId: WindowId; thread: CodeThread }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer },
+          source: quietSource,
+          callerThreadId: String(caller.id),
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+        }),
     );
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools: true,
-      siblingThreads: toolSets,
+      threads: toolSets,
     });
     const answers = () =>
       vi
@@ -9125,7 +9705,7 @@ describe("sibling-threads tool on Code turns", () => {
               kind: "tool-request",
               requestId: `${prefix}-${String(index)}`,
               toolName: SIBLING_THREADS_TOOL_NAME,
-              inputJson: JSON.stringify({ action, reference: siblingReference }),
+              inputJson: JSON.stringify({ operation: action, reference: siblingReference }),
             }),
           ),
         );
@@ -9253,7 +9833,7 @@ describe("sibling-threads tool on Code turns", () => {
         ? responsesToolCallStream(
             "call_sibling",
             SIBLING_THREADS_TOOL_NAME,
-            JSON.stringify({ action: "read", reference: siblingReference }),
+            JSON.stringify({ operation: "read", reference: siblingReference }),
           )
         : responsesTextStream("done");
     });
@@ -9287,8 +9867,10 @@ describe("sibling-threads tool on Code turns", () => {
       provider: driver,
       supportsAppManagedTools: true,
       codeProjectAccess: access,
-      siblingThreads: ({ thread: caller }) =>
-        createSiblingThreadTools({
+      threads: ({ windowId: turnWindowId, thread: caller }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
           service,
           source,
           callerThreadId: String(caller.id),
@@ -9399,13 +9981,17 @@ it("reports an explicit recipient receipt through the real turn tool path after 
   const fixture = runtimeFixture({
     provider: providerDriver(provider),
     supportsAppManagedTools: true,
-    agentMessages: ({ thread: current, readPosture }) =>
-      createAgentMessageTools({
-        service,
-        senderThreadId: String(current.id),
+    threads: ({ windowId: turnWindowId, thread: current, readPosture }) =>
+      createThreadsTools({
+        mode: "code",
+        windowId: turnWindowId,
+        service: { answer: async () => Promise.reject(new Error("unused")) },
+        source: noSiblings,
+        callerThreadId: String(current.id),
         toolConstraints: current.toolConstraints ?? [],
         profileDisplayName: "Worker",
         readPosture,
+        messaging: service,
       }),
     carryAgentMessages: (id) => service.carryIntoTurn(id),
     confirmAgentMessagesDelivered: (ids) => service.confirmDelivered(ids),
@@ -9442,8 +10028,8 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-1",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
-          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+          toolName: SIBLING_THREADS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "acknowledge", messageIds: [messageId] }),
         }),
       ),
     );
@@ -9463,9 +10049,9 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-forgery",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
+          toolName: SIBLING_THREADS_TOOL_NAME,
           inputJson: JSON.stringify({
-            action: "acknowledge",
+            operation: "acknowledge",
             messageIds: [messageId],
             recipientThreadId: String(senderId),
           }),
@@ -9481,8 +10067,8 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-again",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
-          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+          toolName: SIBLING_THREADS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "acknowledge", messageIds: [messageId] }),
         }),
       ),
     );
@@ -9824,7 +10410,7 @@ describe("Project access inside a Code turn's tool calls", () => {
   const read = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "read" } };
   const write = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "write", command: "ls" } };
   const stop = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "stop" } };
-  const board = { name: CODE_BOARD_TOOL_NAME, input: { operation: "read" } };
+  const board = { name: SIBLING_THREADS_TOOL_NAME, input: { operation: "board" } };
 
   /** The host's access, reading the window's persisted Code binding on every check. */
   function windowBoundTo(
@@ -9868,6 +10454,27 @@ describe("Project access inside a Code turn's tool calls", () => {
     };
   }
 
+  /** The threads tool of a planner turn, which reads the board through the runtime's planner. */
+  const plannerThreads = ({
+    windowId: turnWindowId,
+    thread: caller,
+    planner,
+  }: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly planner?: CodePlannerToolPort;
+  }) =>
+    createThreadsTools({
+      mode: "code",
+      windowId: turnWindowId,
+      service: { answer: async () => Promise.reject(new Error("unused")) },
+      source: noSiblings,
+      callerThreadId: String(caller.id),
+      toolConstraints: [],
+      profileDisplayName: "Reviewer",
+      ...(planner === undefined ? {} : { planner }),
+    });
+
   /** The terminal answer a provider got back, reduced to what it says about access. */
   function terminalOutcome(answer: string | undefined): string {
     const parsed = JSON.parse(answer ?? "{}") as {
@@ -9889,6 +10496,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       codeProjectAccess: access,
       terminalExit: { exitCode: 0 },
       planner: boardStandIn(access, boardDecisions),
+      threads: plannerThreads,
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     try {
@@ -9917,7 +10525,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       expect(answers.map(terminalOutcome)).toEqual([
         "running",
         "running",
-        "stand-in",
+        "refused",
         "interrupted",
       ]);
       expect(boardDecisions).toEqual([true]);
@@ -10087,6 +10695,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       codeProjectAccess: access,
       terminalExit: { exitCode: 0 },
       planner: boardStandIn(access, boardDecisions),
+      threads: plannerThreads,
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     try {
@@ -12296,3 +12905,30 @@ it.each(
     }
   },
 );
+
+/** The operations a turn's threads tool offered the provider, in enum order. */
+function threadsOperations(
+  tools: ReadonlyArray<{ readonly name: string; readonly inputSchema: unknown }> | undefined,
+): ReadonlyArray<string> {
+  const schema = tools?.find((tool) => tool.name === SIBLING_THREADS_TOOL_NAME)?.inputSchema as
+    | { readonly properties?: { readonly operation?: { readonly enum?: ReadonlyArray<string> } } }
+    | undefined;
+  return schema?.properties?.operation?.enum ?? [];
+}
+
+/** Message delivery that admits nothing, for turns that only need to be offered messaging. */
+const quietMessaging: Pick<
+  AgentMessageService,
+  "send" | "recordRefusedSend" | "acknowledge" | "statusForSender"
+> = {
+  send: async () => [],
+  recordRefusedSend: async () => undefined,
+  acknowledge: async () => ({ status: "refused", reason: "unauthorized", message: "Unavailable" }),
+  statusForSender: () => [],
+};
+
+const noSiblings: SiblingThreadSource = {
+  thread: () => undefined,
+  projectThreads: () => [],
+  readTranscript: async () => undefined,
+};

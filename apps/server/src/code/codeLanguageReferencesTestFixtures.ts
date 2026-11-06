@@ -30,6 +30,8 @@ afterEach(async () => {
 export function codeLanguageReferencesFixture(
   options: {
     readonly capability?: unknown;
+    readonly editCapabilities?: boolean;
+    readonly pullsDiagnostics?: boolean;
     readonly requestDeadlineMs?: number;
     readonly extraFolder?: boolean;
   } = {},
@@ -83,6 +85,8 @@ export function codeLanguageReferencesFixture(
   };
   const controls: {
     beforeReferences?: () => Promise<void>;
+    beforeEdit?: () => Promise<void>;
+    diagnostics?: ReadonlyArray<unknown>;
     result?: unknown;
     beforeRoot?: (count: number) => Promise<void>;
     root?: string;
@@ -153,7 +157,14 @@ export function codeLanguageReferencesFixture(
         };
         notify = (method, params) => {
           const body = Buffer.from(
-            JSON.stringify({ jsonrpc: "2.0", id: "server-registration", method, params }),
+            JSON.stringify({
+              jsonrpc: "2.0",
+              ...(method === "textDocument/publishDiagnostics"
+                ? {}
+                : { id: "server-registration" }),
+              method,
+              params,
+            }),
           );
           fromServer.write(
             Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]),
@@ -184,8 +195,12 @@ export function codeLanguageReferencesFixture(
               send(message.id, {
                 capabilities: {
                   textDocumentSync: 1,
+                  ...(options.pullsDiagnostics ? { diagnosticProvider: {} } : {}),
                   definitionProvider: true,
                   referencesProvider: state.support.value,
+                  ...(options.editCapabilities
+                    ? { renameProvider: true, codeActionProvider: true }
+                    : {}),
                 },
               });
             else if (message.method === "shutdown") send(message.id, null);
@@ -194,6 +209,16 @@ export function codeLanguageReferencesFixture(
               fromServer.end();
               end();
             } else if (message.method === "textDocument/definition") send(message.id, []);
+            else if (
+              message.method === "textDocument/rename" ||
+              message.method === "textDocument/codeAction"
+            )
+              void (async () => {
+                await controls.beforeEdit?.();
+                send(message.id, controls.result);
+              })();
+            else if (message.method === "textDocument/diagnostic")
+              send(message.id, { kind: "full", items: controls.diagnostics ?? [] });
             else if (message.method === "textDocument/references")
               void (async () => {
                 await controls.beforeReferences?.();
@@ -281,6 +306,20 @@ export function codeLanguageReferencesFixture(
           threadId: thread.id,
           checkoutId: identity.id,
           fileId,
+        }),
+      ),
+    edits: (kind: "rename" | "quick-fixes" = "rename") =>
+      service.read(
+        caller,
+        decodeCodeLanguageReadRequest({
+          kind,
+          ...(kind === "rename" ? { newName: "renamed" } : {}),
+          threadId: thread.id,
+          checkoutId: identity.id,
+          fileId,
+          position: { line: 1, character: 13 },
+          expectedVersion: 1,
+          expectedRevision: acknowledgedRevision,
         }),
       ),
     references: () =>

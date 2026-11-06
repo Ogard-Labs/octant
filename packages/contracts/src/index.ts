@@ -1,3 +1,4 @@
+export * from "./questionnaire";
 export * from "./chat";
 export * from "./code";
 export * from "./codePlanner";
@@ -205,3 +206,5 @@ export * from "./browserCredentialUse";
 export * from "./browserPageScript";
 
 export * from "./ownerBrowser";
+
+export * from "./childWorktreeSources";

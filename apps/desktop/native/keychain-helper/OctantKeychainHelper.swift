@@ -5,52 +5,66 @@ import LocalAuthentication
 
 private let protocolVersion = 1
 private let maximumMessageBytes = 16 * 1_024
-private let providerService = "app.octant.provider-credentials"
-private let hostIdentityService = "app.octant.host-identity.v1"
+// Octant's services take no argument. Octant Nightly's own test host passes
+// exactly one, so its items live under service names of their own: a sign-in
+// made for test data never reads or replaces one of Octant's, and the legacy
+// re-scoping below only ever sees Nightly's own services. Any other argument
+// makes the request guard below refuse before any Keychain item is touched.
+private let servicePrefix: String? = {
+    let arguments = Array(CommandLine.arguments.dropFirst())
+    if arguments.isEmpty { return "app.octant." }
+    if arguments == ["--service-family=octant-nightly-test-data"] {
+        return "app.octant.desktop.nightly.test-data."
+    }
+    return nil
+}()
+private let services = servicePrefix ?? "app.octant.refused."
+private let providerService = services + "provider-credentials"
+private let hostIdentityService = services + "host-identity.v1"
 // Replica device signing keys live in their own service, so a provider
 // credential request that names the same instance UUID can never read,
 // replace, or delete one.
-private let replicaDeviceKeyService = "app.octant.replica-device-keys.v1"
+private let replicaDeviceKeyService = services + "replica-device-keys.v1"
 private let replicaDeviceKeyNamespace = "replica-device-key"
 // Sync buckets' access key pairs live in a service of their own as well, keyed
 // by the settings' credential reference. Unlike a device key, one is replaced
 // when a person enters a new key pair.
-private let replicaStoreCredentialService = "app.octant.replica-store-credentials.v1"
+private let replicaStoreCredentialService = services + "replica-store-credentials.v1"
 private let replicaStoreCredentialNamespace = "replica-store-credential"
 // A public link's owner secret proves to the share service that this host may
 // update or revoke that link. It lives apart from provider credentials, so a
 // provider purge never strands a link its owner can no longer revoke.
-private let canvasPublicShareSecretService = "app.octant.canvas-public-share-secrets.v1"
+private let canvasPublicShareSecretService = services + "canvas-public-share-secrets.v1"
 private let canvasPublicShareSecretNamespace = "canvas-public-share-secret"
 // The secret values a person gives an MCP server they added by hand (a header,
 // an environment variable) live in a service of their own, keyed by the secret
 // id the server's package references. A person may replace one.
-private let mcpServerCredentialService = "app.octant.mcp-server-credentials.v1"
+private let mcpServerCredentialService = services + "mcp-server-credentials.v1"
 private let mcpServerCredentialNamespace = "mcp-server-credential"
 // A cloud desktop provider's API key lives in a service of its own, keyed by
 // the desktop recipe's credential reference. A person may replace one.
-private let desktopProviderCredentialService = "app.octant.desktop-provider-credentials.v1"
+private let desktopProviderCredentialService = services + "desktop-provider-credentials.v1"
 private let desktopProviderCredentialNamespace = "desktop-provider-credential"
 // The removed App Store Connect key feature left this service behind. It stays
 // enumerable so a full data purge can still remove a leftover key; nothing
 // reads or writes it.
-private let appStoreConnectKeyService = "app.octant.app-store-connect-keys.v1"
+private let appStoreConnectKeyService = services + "app-store-connect-keys.v1"
 // The Apple and Google push credentials, and the sealing key, of a hub that
 // sends notifications directly live in a service of their own. A person may
 // replace one.
-private let pushPlatformCredentialService = "app.octant.push-platform-credentials.v1"
+private let pushPlatformCredentialService = services + "push-platform-credentials.v1"
 private let pushPlatformCredentialNamespace = "push-platform-credential"
 // The SSH sign-in keys Octant made for registered servers live in a service of
 // their own. The broker makes each key and signs with it; no route reads one
 // back, and a set never replaces a key: a server's key is deleted when the
 // person removes the server or stops signing in with it.
-private let sshKeyService = "app.octant.ssh-keys.v1"
+private let sshKeyService = services + "ssh-keys.v1"
 private let sshKeyNamespace = "ssh-key"
 // An owner device's unlock key: a P-256 key made in the Secure Enclave that
 // signs only after the person proves presence (Touch ID or the account
 // password). The Keychain item holds the key's opaque blob, which only this
 // Mac's enclave can use; the private half never leaves the enclave.
-private let ownerUnlockService = "app.octant.owner-unlock-keys.v1"
+private let ownerUnlockService = services + "owner-unlock-keys.v1"
 private let ownerUnlockNamespace = "app.octant.owner-unlock.v1"
 private let ownerUnlockPrompt = "Unlock this action on your computer"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
@@ -685,7 +699,8 @@ private func signHostPayload(_ payloadBase64: String, storeScope: String) -> (fi
     return (ensured.fingerprint, signatureData.base64EncodedString())
 }
 
-guard input.count <= maximumMessageBytes,
+guard servicePrefix != nil,
+      input.count <= maximumMessageBytes,
       input.last == 0x0A,
       input.dropLast().firstIndex(of: 0x0A) == nil,
       let object = try? JSONSerialization.jsonObject(with: input),

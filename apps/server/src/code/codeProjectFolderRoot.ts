@@ -87,6 +87,8 @@ export function withProjectExtraFolders(options: {
       fileId: options.fileId(thread.id, checkout.id, String(named)),
       rootPath: placed.folder,
       rootIdentity,
+      current: () =>
+        options.extraFolders(thread).includes(placed.folder) && main.current?.() !== false,
       ...(whole === undefined
         ? { relativePath: decodeCodeRelativePath(placed.path) }
         : { folderRoot: true as const }),

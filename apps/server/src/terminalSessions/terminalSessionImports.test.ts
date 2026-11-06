@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -200,6 +208,87 @@ describe("terminal session imports", () => {
       { provider: "claude", sessionId: claudeSession, title: "Upload test flake" },
       { provider: "codex", sessionId: codexSession, title: "Changelog" },
     ]);
+  });
+
+  it("discovers subfolder sessions with their exact canonical provenance and excludes symlink escapes", async () => {
+    const folder = temporaryDirectory("octant-terminal-folder-");
+    const nested = join(folder, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    const elsewhere = temporaryDirectory("octant-terminal-elsewhere-");
+    const roots = sessionsOnDisk(nested, elsewhere);
+    const imports = importsOn(openJournal(), roots);
+    expect(await imports.list(folder)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: "claude", workingDirectory: nested }),
+        expect.objectContaining({ provider: "codex", workingDirectory: nested }),
+      ]),
+    );
+    expect(await imports.prepare(request("claude", claudeSession), folder)).toMatchObject({
+      status: "ready",
+      prepared: {
+        imported: {
+          workingDirectory: nested,
+          continuity: { kind: "text-handoff", native: "unavailable" },
+        },
+      },
+    });
+    const alias = join(folder, "escape");
+    symlinkSync(elsewhere, alias);
+    const escaped = sessionsOnDisk(alias, elsewhere);
+    expect(await importsOn(openJournal(), escaped).list(folder)).toEqual([]);
+  });
+
+  it("reads an external worktree only when the host supplies its verified scope", async () => {
+    const folder = temporaryDirectory("octant-terminal-folder-");
+    const worktree = temporaryDirectory("octant-terminal-worktree-");
+    const roots = sessionsOnDisk(worktree, temporaryDirectory("octant-terminal-elsewhere-"));
+    const journal = openJournal();
+    const imports = new TerminalSessionImports({
+      journal,
+      roots: () => roots,
+      eligibleFolders: async (authorized) => (authorized === folder ? [worktree] : []),
+      clock: () => now,
+      uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${(++counter).toString(16).padStart(12, "0")}`,
+      actor: { kind: "local-user", actorId: "77777777-7777-4777-8777-777777777777" } as never,
+    });
+    expect(await imports.list(folder)).toHaveLength(2);
+    expect(await imports.prepare(request("codex", codexSession), folder)).toMatchObject({
+      status: "ready",
+      prepared: { imported: { workingDirectory: worktree } },
+    });
+    expect(await imports.list(temporaryDirectory("octant-unrelated-project-"))).toEqual([]);
+  });
+
+  it("refuses native adoption without account-bound runtime evidence and preserves an explicit text fallback", async () => {
+    const folder = temporaryDirectory("octant-terminal-folder-");
+    const imports = importsOn(
+      openJournal(),
+      sessionsOnDisk(folder, temporaryDirectory("octant-terminal-elsewhere-")),
+    );
+    const native = await imports.prepare(
+      { ...request("codex", codexSession), continuation: "native" },
+      folder,
+    );
+    expect(native).toMatchObject({
+      status: "refused",
+      message: expect.stringMatching(/account.*text handoff/i),
+    });
+    const fallback = await imports.prepare(
+      { ...request("codex", codexSession), continuation: "text-handoff" },
+      folder,
+    );
+    expect(fallback).toMatchObject({
+      status: "ready",
+      prepared: {
+        imported: {
+          continuity: {
+            kind: "text-handoff",
+            native: "unavailable",
+            reason: "account-binding-unavailable",
+          },
+        },
+      },
+    });
   });
 
   it("brings in only what the person and the assistant said, leaving out tool calls, thinking and text the tool injected", async () => {

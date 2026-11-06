@@ -16,8 +16,8 @@ const CORE = [
   "Call context-remaining before long work and checkpoint through todo-write while the window is still comfortable.",
   "Keep todo-write short and current; the user sees it.",
   "Ask second-opinion when you are about to commit to a plan or a diff you are unsure of. Its answer is advice, and the call is refused when no advisor model is chosen.",
-  "When a helper-agent tool is listed for this session and a task is separable and bounded, delegate it: start a child with a standalone brief (objective, output format, boundaries), continue your own work, then collect its reply. Children run on the model configured for their role.",
-  "With a helper-agent tool, for a larger job, plan a small graph: start independent children in parallel, start a task that needs their output with after so it waits and receives their replies, then wait and collect. Keep it to a few children at a time.",
+  "When octant_agents is listed for this session and a task is separable and bounded, delegate it: call it with operation delegate and a standalone brief (objective, output format, boundaries), continue your own work, then call operation wait for its reply. Children run on the model configured for their role.",
+  "With octant_agents, for a larger job, plan a small graph: delegate independent children in parallel, delegate a task that needs their output with after so it waits and receives their replies, then wait for each. Keep it to a few children at a time.",
   "When the thread has a goal, work toward its criteria, run goal-check on each one you believe holds, and stop when the goal completes or its budget is spent. Saying the goal is done does not complete it; only passing checks do.",
 ].join("\n");
 
@@ -43,25 +43,34 @@ export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<Provi
  */
 const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_agents: "start, watch, and stop helper agents that work beside you",
-  octant_agent_message: "send a short message to another thread or helper agent",
-  octant_android: "drive an Android emulator: boot, install, launch, tap, type, screenshot",
-  octant_apple: "build, test, and run Apple apps, and drive the iOS Simulator",
-  octant_board: "read this Project's work board",
+  octant_ask_thread: "ask a Chat thread the user mentioned something and wait for its reply",
+  octant_android:
+    "drive an Android emulator: boot, install, launch, read the screen, tap, type, read app logs",
+  octant_apple: "build, test, and run Apple apps, drive the iOS Simulator, and read app logs",
   octant_browser: "drive the built-in browser: open pages, read them, click, type, screenshot",
   octant_canvas: "write substantial deliverables as a Canvas document the user can open",
-  octant_code_definition: "find where a name in a saved checkout file is defined",
-  octant_code_diagnostics: "read the language server's errors and warnings for a saved file",
+  octant_code:
+    "ask the language server about a saved file: its errors, where a name is defined, where it is used",
   octant_computer: "operate macOS apps on the user's desktop",
   octant_create_image: "generate an image; it costs money, so only when asked",
-  octant_github: "read the repository's issues, pull requests, and projects",
+  octant_credential:
+    "have the person authorize a credential for a registered operation or saved command; not a command runner",
+  octant_github:
+    "read the repository's issues, pull requests, and projects, one issue in full, or search them",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
+  octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
-  octant_propose_thread: "propose a new thread on the Project board",
   octant_pull_request:
-    "open or change this thread's own pull request (draft, stacked, ready) when the user asks",
+    "open or change this thread's own pull request (draft, stacked, ready) when the user asks, or watch it to be woken when checks finish or reviews arrive instead of polling",
+  octant_routines:
+    "see this Project's routines, ask the user to pause or archive one this thread started, or report a routine run's result",
+  octant_side_chat_list_files: "list the files of the thread this side chat is about",
+  octant_side_chat_read_file: "read one file of the thread this side chat is about",
+  octant_side_chat_search_files: "search the files of the Code thread this side chat is about",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
-  octant_threads: "see this Project's other threads: list them, read one, or wait for one to stop",
-  octant_thread_message: "ask a mentioned thread something and wait for its reply",
+  octant_threads:
+    "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
+  octant_zen: "read and arrange this Zen space: pin threads, add widgets, move elements",
 };
 
 /**

@@ -818,6 +818,32 @@ describe("remote route policy", () => {
     ).toThrow("local-only");
   });
 
+  it("admits a paired device's reply detail read and nothing that could change it", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const status = (decision: ReturnType<typeof inspect>) =>
+      decision.kind === "reject" ? decision.response.status : decision.kind;
+
+    expect(inspect("/api/reply-detail", "GET")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(status(inspect("/api/reply-detail", "POST"))).toBe(405);
+    expect(status(inspect("/api/reply-detail?thread=1", "GET"))).not.toBe("allow");
+    expect(status(inspect("/api/reply-detail/extra", "GET"))).toBe(404);
+  });
+
   it("admits a paired device's dictation and voice status, and keeps read-aloud off the listener", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (

@@ -188,6 +188,31 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         onOpenIn={(threadId) =>
           void synced.runOnSelected((canvasId) => ({ kind: "open", canvasId, threadId }))
         }
+        onBackfill={(versionIds, previewToken) =>
+          void synced.runOnSelected((canvasId) => ({
+            kind: "backfill",
+            canvasId,
+            versionIds,
+            previewToken,
+            backfillId: crypto.randomUUID(),
+            confirmed: true,
+          }))
+        }
+        onBackfillControl={(backfillId, running) =>
+          void synced.runOnSelected((canvasId) => ({
+            kind: running ? "resume-backfill" : "pause-backfill",
+            canvasId,
+            backfillId,
+          }))
+        }
+        onDeleteSynced={(previewToken) =>
+          void synced.runOnSelected((canvasId) => ({
+            kind: "delete-synced",
+            canvasId,
+            previewToken,
+            confirmed: true,
+          }))
+        }
         onRestore={() => void synced.runOnSelected((canvasId) => ({ kind: "restore", canvasId }))}
         open={synced.selected !== undefined}
       />

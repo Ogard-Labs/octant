@@ -50,10 +50,9 @@ re-export, the serve helper, the out-of-process conformance kit, and an
 example loopback driver package that passes the kit and the host proxy's
 conformance in CI (see [Author kit rules](#author-kit-rules)); nothing is
 published to a registry ([decision 8](#maintainer-decisions)).
-The maintainer authorized this scope as
-post-preview work and accepted the [maintainer decisions](#maintainer-decisions)
-below on 2026-10-26; the release boundary in the architecture
-is updated separately. Slices and their evidence are tracked in Linear; this
+The maintainer authorized this scope on 2026-10-26, brought it into the first
+preview on 2026-11-06, and accepted the [maintainer decisions](#maintainer-decisions)
+below on 2026-10-26. Slices and their evidence are tracked in Linear; this
 file states the rules they implement.
 
 ## Outcome

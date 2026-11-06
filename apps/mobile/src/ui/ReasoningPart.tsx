@@ -8,6 +8,12 @@ export interface ReasoningPartProps {
   readonly text: string;
   /** Default collapsed. */
   readonly defaultExpanded?: boolean;
+  /**
+   * The first line beside the title while the panel is shut (Reply detail
+   * Medium). Hidden from assistive technology: the button's name stays the
+   * title, and the same words are read from the body once it opens.
+   */
+  readonly preview?: string;
   readonly testID?: string;
 }
 
@@ -26,10 +32,15 @@ export function ReasoningPart(props: ReasoningPartProps) {
           paddingVertical: 10,
         },
         title: {
-          flex: 1,
+          flex: props.preview === undefined || props.preview === "" ? 1 : 0,
           color: colors.textSecondary,
           fontSize: typography.caption.fontSize,
           fontWeight: "500",
+        },
+        preview: {
+          flex: 1,
+          color: colors.textTertiary,
+          fontSize: typography.caption.fontSize,
         },
         body: {
           paddingHorizontal: space.md,
@@ -40,13 +51,15 @@ export function ReasoningPart(props: ReasoningPartProps) {
         },
         wrap: { marginBottom: space.sm },
       }),
-    [colors],
+    [colors, props.preview],
   );
+  const preview = expanded ? "" : (props.preview ?? "");
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-reasoning-part"}>
       <GlassSurface material="ultraThin" radius={radii.sm}>
         <Pressable
+          accessibilityLabel={MOBILE_COPY.reasoningTitle}
           accessibilityRole="button"
           accessibilityState={{ expanded }}
           onPress={() => setExpanded((value) => !value)}
@@ -55,6 +68,16 @@ export function ReasoningPart(props: ReasoningPartProps) {
         >
           <Ionicons color={colors.textTertiary} name="sparkles-outline" size={16} />
           <Text style={styles.title}>{MOBILE_COPY.reasoningTitle}</Text>
+          {preview === "" ? null : (
+            <Text
+              aria-hidden
+              numberOfLines={1}
+              style={styles.preview}
+              testID="mobile-reasoning-preview"
+            >
+              {preview}
+            </Text>
+          )}
           <Ionicons
             color={colors.textTertiary}
             name={expanded ? "chevron-up" : "chevron-down"}

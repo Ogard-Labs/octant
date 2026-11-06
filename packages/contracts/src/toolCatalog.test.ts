@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODE_LANGUAGE_TOOL_DEFINITIONS,
+  CODE_LANGUAGE_TOOL_DEFINITION,
+  MAX_CODE_LANGUAGE_AGENT_REFERENCES,
   decodeProviderToolDefinition,
   decodeToolActionCapability,
   listClosedToolCatalog,
@@ -15,13 +16,11 @@ describe("closed tool catalog", () => {
       .sort();
     expect(ids).toEqual([
       "browser-automation",
-      "code-definition",
-      "code-diagnostics",
+      "code-language",
       "computer-use",
       "harness-ask-user",
       "harness-bash",
       "harness-context-remaining",
-      "harness-delegate",
       "harness-edit",
       "harness-glob",
       "harness-goal",
@@ -119,56 +118,71 @@ describe("native harness catalog entries", () => {
   });
 });
 
-describe("Code language read entries", () => {
-  const diagnostics = lookupClosedToolCatalogEntry(
-    decodeToolActionCapability({ id: "code-diagnostics", version: 1 }),
-  );
-  const definition = lookupClosedToolCatalogEntry(
-    decodeToolActionCapability({ id: "code-definition", version: 1 }),
+describe("Code language read entry", () => {
+  const language = lookupClosedToolCatalogEntry(
+    decodeToolActionCapability({ id: "code-language", version: 1 }),
   );
 
   it("reads inside the checkout in Code only, never asks, and never marks the thread", () => {
-    for (const entry of [diagnostics, definition]) {
-      expect(entry).toMatchObject({
-        owner: "core",
-        modes: ["code"],
-        requiredCapabilityClass: "filesystem",
-        approvalClass: "project-file-reads",
-        irreversibleUnderTaint: false,
-        resultTaintsThread: false,
-        requiresAppManagedTools: true,
-      });
-    }
+    expect(language).toMatchObject({
+      owner: "core",
+      modes: ["code"],
+      requiredCapabilityClass: "filesystem",
+      approvalClass: "project-file-reads",
+      irreversibleUnderTaint: false,
+      resultTaintsThread: false,
+      requiresAppManagedTools: true,
+    });
   });
 
-  it("takes a checkout-relative or extra-folder path and a one-based position, and nothing else", () => {
-    expect(diagnostics?.decodeArguments({ path: "src/a.ts" })).toEqual({ path: "src/a.ts" });
-    expect(definition?.decodeArguments({ path: "src/a.ts", line: 2, column: 14 })).toEqual({
+  it("takes an operation, a checkout-relative or extra-folder path, and a one-based position, and nothing else", () => {
+    const decode = (value: unknown) => language?.decodeArguments(value);
+    expect(decode({ operation: "diagnostics", path: "src/a.ts" })).toEqual({
+      operation: "diagnostics",
+      path: "src/a.ts",
+    });
+    expect(decode({ operation: "definition", path: "src/a.ts", line: 2, column: 14 })).toEqual({
+      operation: "definition",
       path: "src/a.ts",
       line: 2,
       column: 14,
     });
+    expect(
+      decode({
+        operation: "references",
+        path: "src/a.ts",
+        line: 2,
+        column: 14,
+        includeDeclaration: true,
+      }),
+    ).toMatchObject({ operation: "references", includeDeclaration: true });
     for (const path of ["../outside.ts", "src/../../a.ts", "src\\a.ts", ""]) {
-      expect(() => diagnostics?.decodeArguments({ path })).toThrow();
+      expect(() => decode({ operation: "diagnostics", path })).toThrow();
     }
     // A file in an extra folder is named by absolute path; the host refuses any
     // absolute path outside the Project's folders, so the schema only carries it.
-    expect(diagnostics?.decodeArguments({ path: "/notes/a.ts" })).toEqual({ path: "/notes/a.ts" });
-    expect(() => diagnostics?.decodeArguments({ path: "/notes/../a.ts" })).toThrow();
-    expect(() => diagnostics?.decodeArguments({ path: "a.ts", fileId: "x" })).toThrow();
-    expect(() => definition?.decodeArguments({ path: "a.ts", line: 0, column: 1 })).toThrow();
-    expect(() => definition?.decodeArguments({ path: "a.ts", line: 1, column: 0 })).toThrow();
-    expect(() => definition?.decodeArguments({ path: "a.ts", line: 1.5, column: 1 })).toThrow();
-    expect(() => definition?.decodeArguments({ path: "a.ts" })).toThrow();
+    expect(decode({ operation: "diagnostics", path: "/notes/a.ts" })).toMatchObject({
+      path: "/notes/a.ts",
+    });
+    expect(() => decode({ operation: "diagnostics", path: "/notes/../a.ts" })).toThrow();
+    expect(() => decode({ operation: "diagnostics", path: "a.ts", fileId: "x" })).toThrow();
+    expect(() => decode({ path: "a.ts" })).toThrow();
+    expect(() => decode({ operation: "rename", path: "a.ts", line: 1, column: 1 })).toThrow();
+    for (const operation of ["definition", "references"]) {
+      expect(() => decode({ operation, path: "a.ts", line: 0, column: 1 })).toThrow();
+      expect(() => decode({ operation, path: "a.ts", line: 1, column: 0 })).toThrow();
+      expect(() => decode({ operation, path: "a.ts", line: 1.5, column: 1 })).toThrow();
+      expect(() => decode({ operation, path: "a.ts" })).toThrow();
+    }
   });
 
-  it("offers each read as a provider tool definition every transport can carry", () => {
-    expect(CODE_LANGUAGE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([
-      "octant_code_diagnostics",
-      "octant_code_definition",
-    ]);
-    for (const tool of CODE_LANGUAGE_TOOL_DEFINITIONS) {
-      expect(decodeProviderToolDefinition(tool)).toEqual(tool);
-    }
+  it("offers the reads as one provider tool definition every transport can carry", () => {
+    expect(CODE_LANGUAGE_TOOL_DEFINITION.name).toBe("octant_code");
+    expect(CODE_LANGUAGE_TOOL_DEFINITION.description).toContain(
+      `at most ${MAX_CODE_LANGUAGE_AGENT_REFERENCES}`,
+    );
+    expect(decodeProviderToolDefinition(CODE_LANGUAGE_TOOL_DEFINITION)).toEqual(
+      CODE_LANGUAGE_TOOL_DEFINITION,
+    );
   });
 });

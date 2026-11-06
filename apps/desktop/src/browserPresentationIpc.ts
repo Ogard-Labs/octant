@@ -69,13 +69,16 @@ function composition(value: unknown): boolean {
   return boundary(value.selectionStart) && boundary(value.selectionEnd);
 }
 function editor(value: unknown): boolean {
+  if (!record(value) || !uuid(value.id)) return false;
+  // A password field carries its identity alone, never offsets or a caret.
+  if ("secure" in value) return keys(value, ["id", "secure"]) && value.secure === true;
+  const offsets = "selectionStart" in value || "selectionEnd" in value;
   if (
-    !record(value) ||
-    !keys(value, ["id", "selectionStart", "selectionEnd", "caret"]) ||
-    !uuid(value.id) ||
-    !integer(value.selectionStart, 1_048_576) ||
-    !integer(value.selectionEnd, 1_048_576) ||
-    value.selectionEnd < value.selectionStart ||
+    !keys(value, offsets ? ["id", "selectionStart", "selectionEnd", "caret"] : ["id", "caret"]) ||
+    (offsets &&
+      (!integer(value.selectionStart, 1_048_576) ||
+        !integer(value.selectionEnd, 1_048_576) ||
+        value.selectionEnd < value.selectionStart)) ||
     !record(value.caret) ||
     !keys(value.caret, ["x", "y", "width", "height"])
   )
@@ -87,6 +90,206 @@ function editor(value: unknown): boolean {
     number(value.caret.height, 1_200, Number.MIN_VALUE)
   );
 }
+const nodeId = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-z]{1,8}-[0-9]{1,12}$/.test(value);
+const wellFormed = (value: unknown, maximum: number): boolean =>
+  text(value, maximum) && value.isWellFormed();
+function accessibilityAction(value: unknown): boolean {
+  if (!record(value)) return false;
+  if (value.action === "set-value")
+    return keys(value, ["action", "value"]) && wellFormed(value.value, 1_024);
+  return (
+    keys(value, ["action"]) &&
+    ["press", "focus", "scroll-into-view", "increment", "decrement"].includes(String(value.action))
+  );
+}
+/** The mirror's closed roles; a test keeps this list equal to the contract's. */
+export const BROWSER_ACCESSIBILITY_IPC_ROLES: ReadonlyArray<string> = [
+  "alert",
+  "alertdialog",
+  "article",
+  "banner",
+  "button",
+  "cell",
+  "checkbox",
+  "columnheader",
+  "combobox",
+  "complementary",
+  "contentinfo",
+  "dialog",
+  "document",
+  "figure",
+  "form",
+  "generic",
+  "grid",
+  "gridcell",
+  "group",
+  "heading",
+  "img",
+  "link",
+  "list",
+  "listbox",
+  "listitem",
+  "log",
+  "main",
+  "menu",
+  "menubar",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "navigation",
+  "option",
+  "paragraph",
+  "progressbar",
+  "radio",
+  "region",
+  "row",
+  "rowheader",
+  "search",
+  "searchbox",
+  "separator",
+  "slider",
+  "spinbutton",
+  "status",
+  "switch",
+  "tab",
+  "table",
+  "tablist",
+  "tabpanel",
+  "text",
+  "textbox",
+  "tree",
+  "treeitem",
+];
+const ACCESSIBILITY_ROLES = new Set(BROWSER_ACCESSIBILITY_IPC_ROLES);
+/** The contract's tree rule: unique nodes, one parent each, all reached from the root, at most 64 deep. */
+function soundTree(
+  nodes: ReadonlyArray<{ readonly id: string; readonly children: ReadonlyArray<string> }>,
+  rootId: string,
+): boolean {
+  const byId = new Map<string, ReadonlyArray<string>>();
+  for (const node of nodes) {
+    if (byId.has(node.id)) return false;
+    byId.set(node.id, node.children);
+  }
+  if (!byId.has(rootId)) return false;
+  const parented = new Set<string>();
+  for (const children of byId.values())
+    for (const child of children) {
+      if (!byId.has(child) || child === rootId || parented.has(child)) return false;
+      parented.add(child);
+    }
+  let reached = 1;
+  let level = [rootId];
+  for (let depth = 1; level.length > 0; depth += 1) {
+    const next: string[] = [];
+    for (const id of level) next.push(...(byId.get(id) ?? []));
+    if ((next.length > 0 && depth >= 64) || reached + next.length > byId.size) return false;
+    reached += next.length;
+    level = next;
+  }
+  return reached === byId.size;
+}
+const NODE_FLAGS = [
+  "secure",
+  "disabled",
+  "focusable",
+  "required",
+  "invalid",
+  "readonly",
+  "multiline",
+] as const;
+const NODE_KEYS = [
+  "id",
+  "role",
+  "name",
+  "description",
+  "value",
+  "level",
+  "checked",
+  "pressed",
+  "expanded",
+  "selected",
+  "valueNow",
+  "valueMin",
+  "valueMax",
+  "live",
+  "bounds",
+  "children",
+  ...NODE_FLAGS,
+];
+function accessibilityNode(value: unknown): value is { id: string; children: string[] } {
+  if (
+    !record(value) ||
+    !keys(value, NODE_KEYS) ||
+    !nodeId(value.id) ||
+    !ACCESSIBILITY_ROLES.has(String(value.role)) ||
+    !Array.isArray(value.children) ||
+    value.children.length > 512 ||
+    !value.children.every(nodeId)
+  )
+    return false;
+  // A password field's value never reaches the renderer.
+  if (value.secure !== undefined && value.value !== undefined) return false;
+  const optional = (name: string, check: (field: unknown) => boolean) =>
+    value[name] === undefined || check(value[name]);
+  const tristate = (field: unknown) => ["true", "false", "mixed"].includes(String(field));
+  const range = (field: unknown) => number(field, 1e9, -1e9);
+  return (
+    optional("name", (field) => wellFormed(field, 512)) &&
+    optional("description", (field) => wellFormed(field, 512)) &&
+    optional("value", (field) => wellFormed(field, 1_024)) &&
+    optional("level", (field) => integer(field, 9, 1)) &&
+    optional("checked", tristate) &&
+    optional("pressed", tristate) &&
+    optional("expanded", (field) => typeof field === "boolean") &&
+    optional("selected", (field) => typeof field === "boolean") &&
+    optional("valueNow", range) &&
+    optional("valueMin", range) &&
+    optional("valueMax", range) &&
+    optional("live", (field) => field === "polite" || field === "assertive") &&
+    optional(
+      "bounds",
+      (field) =>
+        record(field) &&
+        keys(field, ["x", "y", "width", "height"]) &&
+        number(field.x, 1_920, -1_920) &&
+        number(field.y, 1_200, -1_200) &&
+        number(field.width, 3_840) &&
+        number(field.height, 2_400),
+    ) &&
+    NODE_FLAGS.every((flag) => optional(flag, (field) => field === true))
+  );
+}
+function accessibilityUpdate(value: unknown): boolean {
+  if (!record(value)) return false;
+  const head = ["kind", "revision", "rootId", "focusedId", "truncated", "nodes"];
+  if (
+    !integer(value.revision, Number.MAX_SAFE_INTEGER, 1) ||
+    !nodeId(value.rootId) ||
+    (value.focusedId !== undefined && !nodeId(value.focusedId)) ||
+    typeof value.truncated !== "boolean" ||
+    !Array.isArray(value.nodes) ||
+    value.nodes.length > 1_500 ||
+    !value.nodes.every(accessibilityNode)
+  )
+    return false;
+  if (value.kind === "full")
+    return (
+      keys(value, head) &&
+      soundTree(value.nodes, value.rootId) &&
+      (value.focusedId === undefined ||
+        value.nodes.some((node: { readonly id: string }) => node.id === value.focusedId))
+    );
+  return (
+    value.kind === "patch" &&
+    keys(value, [...head, "base", "removed"]) &&
+    integer(value.base, value.revision - 1, 1) &&
+    Array.isArray(value.removed) &&
+    value.removed.length <= 1_500 &&
+    value.removed.every(nodeId)
+  );
+}
 function isRequest(value: unknown): value is HumanBrowserRequest {
   if (!record(value) || !uuid(value.contextId) || !uuid(value.threadId)) return false;
   const base = ["contextId", "threadId", "kind"];
@@ -95,6 +298,15 @@ function isRequest(value: unknown): value is HumanBrowserRequest {
   const owned = [...base, "presentationId"];
   if (value.kind === "state" || value.kind === "detach" || value.kind === "editor")
     return keys(value, owned);
+  if (value.kind === "accessibility")
+    return keys(value, [...owned, "revision"]) && integer(value.revision, Number.MAX_SAFE_INTEGER);
+  if (value.kind === "accessibility-action")
+    return (
+      keys(value, [...owned, "revision", "nodeId", "action"]) &&
+      integer(value.revision, Number.MAX_SAFE_INTEGER, 1) &&
+      nodeId(value.nodeId) &&
+      accessibilityAction(value.action)
+    );
   if (value.kind === "composition")
     return keys(value, [...owned, "composition"]) && composition(value.composition);
   if (value.kind === "frame")
@@ -173,6 +385,8 @@ function isResult(value: unknown): value is HumanBrowserResult {
   if (["accepted", "idle", "refused", "editor-unavailable"].includes(String(value.status)))
     return keys(value, ["status"]);
   if (value.status === "editor") return keys(value, ["status", "editor"]) && editor(value.editor);
+  if (value.status === "accessibility")
+    return keys(value, ["status", "update"]) && accessibilityUpdate(value.update);
   if (value.status === "composition-started")
     return keys(value, ["status", "compositionId"]) && uuid(value.compositionId);
   if (value.status === "attached")

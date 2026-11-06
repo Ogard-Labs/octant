@@ -160,26 +160,38 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
             <EnvironmentGroup
               headerRef={workingFolderRow}
               icon={FolderOpen}
-              summary={workingFolderLabel(thread.workingDirectory ?? ".")}
+              summary={
+                thread.workingFolderId === undefined
+                  ? workingFolderLabel(thread.workingDirectory ?? ".")
+                  : `${project?.workingFolders?.find((folder) => folder.id === thread.workingFolderId)?.label ?? "Working folder unavailable"}${String(thread.workingDirectory ?? ".") === "." ? "" : ` / ${thread.workingDirectory}`}`
+              }
               title="Working folder"
             >
-              <ChangeWorkingFolder
-                row={workingFolderRow}
-                value={thread.workingDirectory ?? "."}
-                onApply={async (workingDirectory) => {
-                  const result = await props.threadClient.execute({
-                    kind: "change-work-thread-working-directory",
-                    threadId: thread.id,
-                    expectedVersion: thread.version,
-                    workingDirectory,
-                  });
-                  if ("kind" in result && result.kind === "thread-updated") {
-                    setThread(result.thread);
-                    return;
-                  }
-                  throw new Error("Work working directory was not updated.");
-                }}
-              />
+              {thread.workingFolderId === undefined ? (
+                <ChangeWorkingFolder
+                  row={workingFolderRow}
+                  value={thread.workingDirectory ?? "."}
+                  onApply={async (workingDirectory) => {
+                    const result = await props.threadClient.execute({
+                      kind: "change-work-thread-working-directory",
+                      threadId: thread.id,
+                      expectedVersion: thread.version,
+                      workingDirectory,
+                    });
+                    if ("kind" in result && result.kind === "thread-updated") {
+                      setThread(result.thread);
+                      return;
+                    }
+                    throw new Error("Work working directory was not updated.");
+                  }}
+                />
+              ) : (
+                <p>
+                  This task's provider, terminal, actions and new artifacts use its recorded folder.
+                  Start a new task to choose another root or subfolder. Existing artifacts keep
+                  their own recorded destination.
+                </p>
+              )}
             </EnvironmentGroup>
           )}
           <EnvironmentExtraFolders folders={project?.extraFolders} />

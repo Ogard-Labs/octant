@@ -1,3 +1,4 @@
+import type { ChildWorktreeSnapshotData } from "@octant/contracts";
 import { dirname, join } from "node:path";
 import type {
   BindingRevisionId,
@@ -6,6 +7,7 @@ import type {
   CodeThreadId,
   ManagedRootGrantId,
   ProjectId,
+  ProjectAction,
   WindowId,
 } from "@octant/contracts";
 import {
@@ -147,6 +149,7 @@ type ManagedWorktreeDeferred = Readonly<{
 }>;
 
 export interface ManagedWorktreeCreationInput {
+  readonly seed?: ChildWorktreeSnapshotData;
   readonly authenticatedWindowId: WindowId;
   readonly projectId: ProjectId;
   readonly bindingRevisionId: BindingRevisionId;
@@ -234,6 +237,7 @@ export type ManagedWorktreeRollbackResult =
   | Readonly<{ status: "refused" }>;
 
 export interface ManagedWorktreeServiceOptions {
+  readonly setupRecipe?: (projectId: ProjectId) => ProjectAction | undefined;
   readonly grants: ManagedRootGrantStore;
   readonly receipts: ManagedWorktreeReceiptPort;
   readonly repository: ManagedWorktreeRepositoryPort;
@@ -271,8 +275,10 @@ export class ManagedWorktreeService {
   readonly #git: ManagedWorktreeGitPort;
   readonly #authority: ManagedWorktreeAuthorityPort;
   readonly #now: () => number;
+  readonly #setupRecipe: ManagedWorktreeServiceOptions["setupRecipe"];
 
   constructor(options: ManagedWorktreeServiceOptions) {
+    this.#setupRecipe = options.setupRecipe;
     this.#grants = options.grants;
     this.#receipts = options.receipts;
     this.#repository = options.repository;
@@ -345,6 +351,7 @@ export class ManagedWorktreeService {
     }
 
     let receipt: ManagedWorktreeReceipt;
+    const setupRecipe = this.#setupRecipe?.(input.projectId);
     try {
       receipt = await this.#receipts.create({
         repositoryId: input.repositoryId,
@@ -356,6 +363,8 @@ export class ManagedWorktreeService {
         refIntent: `refs/heads/${input.branchIntent}`,
         expectedHead: input.startPoint,
         source: fresh.state.source,
+        ...(setupRecipe === undefined ? {} : { setupRecipe }),
+        ...(input.seed === undefined ? {} : { seed: input.seed }),
       });
     } catch {
       return { status: "interrupted" };

@@ -11,6 +11,9 @@ import {
   type AutomationRunId,
   type AutomationScheduledOccurrence,
   type AutomationFileArrivalOccurrence,
+  type AutomationIntegrationEventOccurrence,
+  type CodeConversationTurn,
+  type CodeThread,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -34,6 +37,10 @@ import {
   buildAutomationRunForOccurrence,
 } from "./automationRunIdentity";
 import type { AutomationFileObservationDecision } from "./automationFileSourceState";
+import type { AutomationEventObservation } from "./automationEventSourceState";
+import { automationCodeOperationId } from "./automationRunIdentity";
+import { automationDispatchPromptText } from "./automationFileContext";
+import { automationFollowUpTurnPrompt } from "@octant/contracts";
 
 export interface AutomationSchedulerConfig {
   /**
@@ -104,6 +111,13 @@ export interface AutomationSchedulerServiceOptions {
   readonly stopFileSources?: () => void;
   /** Only persisted first-turn truth; never starts or recovers a provider call. */
   readonly readWorkTurn?: (requestId: WorkTurnRequestId) => WorkTurnState | undefined;
+  readonly readCodeTurn?: (run: AutomationRun) =>
+    | {
+        readonly thread: CodeThread;
+        readonly turn: CodeConversationTurn;
+        readonly prompt: string;
+      }
+    | undefined;
   readonly onRunStatusChanged?: (input: {
     readonly run: AutomationRun;
     readonly previousLifecycle: AutomationRun["lifecycle"];
@@ -154,6 +168,7 @@ export class AutomationSchedulerService {
   readonly #reconcileFileSources: AutomationSchedulerServiceOptions["reconcileFileSources"];
   readonly #stopFileSources: AutomationSchedulerServiceOptions["stopFileSources"];
   readonly #readWorkTurn: AutomationSchedulerServiceOptions["readWorkTurn"];
+  readonly #readCodeTurn: AutomationSchedulerServiceOptions["readCodeTurn"];
   readonly #onRunStatusChanged: AutomationSchedulerServiceOptions["onRunStatusChanged"];
   readonly #offered = new Set<string>();
   #notify: (() => void) | undefined;
@@ -168,6 +183,7 @@ export class AutomationSchedulerService {
     this.#onHistoryUnavailable = options.onHistoryUnavailable;
     this.#config = { ...AUTOMATION_SCHEDULER_DEFAULTS, ...options.config };
     this.#readWorkTurn = options.readWorkTurn;
+    this.#readCodeTurn = options.readCodeTurn;
     this.#reconcileFileSources = options.reconcileFileSources;
     this.#stopFileSources = options.stopFileSources;
     this.#onRunStatusChanged = options.onRunStatusChanged;
@@ -214,6 +230,67 @@ export class AutomationSchedulerService {
       errors: out.errors,
       nextWakeAt: out.wakeMs === undefined ? undefined : toUtc(out.wakeMs),
     };
+  }
+
+  commitEventObservation(input: {
+    readonly automationId: AutomationId;
+    readonly expectedVersion: number;
+    readonly previousObservationRevision: number;
+    readonly decision: AutomationEventObservation;
+    readonly current: () => boolean;
+  }): "committed" | "stale" {
+    if (!input.current()) return "stale";
+    const definition = this.#projection.getDefinition(input.automationId);
+    const previous = this.#projection.getEventSource(input.automationId);
+    const checkpoint =
+      input.decision.kind === "claim"
+        ? input.decision.receipt.checkpoint
+        : input.decision.checkpoint;
+    if (
+      definition?.lifecycle !== "enabled" ||
+      definition.version !== input.expectedVersion ||
+      definition.trigger.kind !== "integration-event" ||
+      definition.trigger.sourceIdentity !== checkpoint.sourceIdentity ||
+      (previous?.observationRevision ?? 0) !== input.previousObservationRevision ||
+      checkpoint.observationRevision !== input.previousObservationRevision + 1 ||
+      checkpoint.automaticStarts !==
+        (previous?.automaticStarts ?? 0) + (input.decision.kind === "claim" ? 1 : 0) ||
+      checkpoint.automaticStarts > definition.trigger.automaticStartLimit
+    )
+      return "stale";
+    const at = this.#now();
+    const events: AutomationOccurrenceLedgerEvent[] = [
+      {
+        kind: "event-source-observed",
+        definitionRevision: definition.definitionRevision,
+        checkpoint,
+        at,
+      },
+    ];
+    let run: AutomationRun | undefined;
+    if (input.decision.kind === "claim") {
+      if (this.#projection.activeRun(definition.id) !== undefined) return "stale";
+      const occurrence: AutomationIntegrationEventOccurrence = {
+        kind: "integration-event",
+        automationId: definition.id,
+        definitionRevision: definition.definitionRevision,
+        source: input.decision.receipt,
+      };
+      run = buildAutomationRunForOccurrence({ definition, occurrence, now: at });
+      this.#store.appendRunCreated({ run });
+      events.push({ kind: "occurrence-claimed", occurrence, runId: run.id, at });
+    }
+    this.#store.appendOccurrenceLedger({
+      automationId: definition.id,
+      expectedVersion: definition.version,
+      events,
+    });
+    if (run !== undefined)
+      this.#offer(
+        this.#definition(definition.id) ?? definition,
+        this.#projection.getRun(run.id) ?? run,
+      );
+    return "committed";
   }
 
   /** Same run-first ledger as timed claims, after the source's last async authority fence. */
@@ -366,6 +443,7 @@ export class AutomationSchedulerService {
     // 2. Interrupted-lease recovery and dispatch re-offers for the active run.
     const previousActive = this.#projection.activeRun(definition.id);
     if (previousActive !== undefined) this.#observeWorkTurn(previousActive, out);
+    if (previousActive !== undefined) this.#observeCodeTurn(previousActive, out);
     const active = this.#projection.activeRun(definition.id);
     if (active !== undefined) this.#recoverAndOffer(definition, active, out);
 
@@ -452,8 +530,97 @@ export class AutomationSchedulerService {
     }
   }
 
+  #observeCodeTurn(run: AutomationRun, out: PassCollector): void {
+    const snapshot = run.definitionSnapshot;
+    if (
+      snapshot.mode !== "code" ||
+      snapshot.binding.kind !== "code" ||
+      (run.lifecycle !== "running" && run.lifecycle !== "waiting") ||
+      run.threadId === undefined ||
+      run.firstTurnAcceptance?.runtimeReceipt !== `code-operation:${automationCodeOperationId(run)}`
+    )
+      return;
+    const observed = this.#readCodeTurn?.(run);
+    if (observed === undefined) return;
+    const { thread, turn } = observed;
+    const prompt =
+      snapshot.targetPolicy === "same-thread"
+        ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+        : automationDispatchPromptText(run);
+    if (
+      String(thread.id) !== String(run.threadId) ||
+      String(thread.projectId) !== String(snapshot.projectId) ||
+      String(thread.bindingRevisionId) !== String(snapshot.binding.bindingRevisionId) ||
+      String(thread.repositoryId) !== String(snapshot.binding.repositoryId) ||
+      String(turn.checkoutId) !== String(thread.checkoutId) ||
+      String(turn.operationId) !== String(automationCodeOperationId(run)) ||
+      String(turn.sessionId) !== String(run.firstTurnRequestId) ||
+      String(turn.providerInstanceId) !== String(snapshot.executionProfile.providerInstanceId) ||
+      String(turn.modelId) !== String(snapshot.executionProfile.modelId) ||
+      observed.prompt !== prompt
+    )
+      return;
+    const lifecycle = turn.status === "incomplete" ? "running" : turn.status;
+    if (lifecycle === run.lifecycle) return;
+    try {
+      this.#store.appendRunStatusChanged({
+        automationId: run.automationId,
+        runId: run.id,
+        previousLifecycle: run.lifecycle,
+        lifecycle,
+        version: run.version + 1,
+        expectedVersion: run.version,
+        ...(lifecycle === "failed"
+          ? {
+              failure: {
+                reason: "runtime-failed",
+                message: "The routine's Code turn failed. Open its thread for details.",
+              },
+            }
+          : {}),
+        updatedAt: out.now,
+      });
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+      this.#rehydrate();
+      return;
+    }
+    const current = this.#projection.getRun(run.id);
+    if (current !== undefined) {
+      try {
+        this.#onRunStatusChanged?.({ run: current, previousLifecycle: run.lifecycle });
+      } catch {
+        /* Notification failure never changes the persisted run outcome. */
+      }
+    }
+  }
+
   #repairClaim(definition: AutomationDefinition, run: AutomationRun, out: PassCollector): void {
     const events: Array<AutomationOccurrenceLedgerEvent> = [];
+    if (
+      run.occurrence.kind === "integration-event" &&
+      run.occurrence.definitionRevision === definition.definitionRevision
+    ) {
+      const previous = this.#projection.getEventSource(definition.id);
+      const checkpoint = run.occurrence.source.checkpoint;
+      if (
+        (previous?.observationRevision ?? 0) === checkpoint.observationRevision - 1 &&
+        (previous?.automaticStarts ?? 0) === checkpoint.automaticStarts - 1
+      )
+        events.push({
+          kind: "event-source-observed",
+          definitionRevision: definition.definitionRevision,
+          checkpoint,
+          at: out.now,
+        });
+      else if (
+        previous === undefined ||
+        previous.sourceIdentity !== checkpoint.sourceIdentity ||
+        previous.observationRevision < checkpoint.observationRevision ||
+        previous.automaticStarts < checkpoint.automaticStarts
+      )
+        throw new Error("Integration event recovery requires its retained source cursor.");
+    }
     if (run.occurrence.kind === "file-arrival" && run.occurrence.source.rearm !== undefined) {
       const review = run.occurrence.source.rearm;
       const previous = this.#projection.getFileSource(definition.id);

@@ -1,3 +1,4 @@
+import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -1296,4 +1297,11 @@ describe("CodeComposerAdapter interactions", () => {
       expect(onCreateThread).not.toHaveBeenCalled();
     });
   });
+});
+
+it("refuses a native folder as an attachment when the desktop extraction bridge is unavailable", async () => {
+  render(<CodeComposerAdapter {...defaultProps} />);
+  const input = screen.getByRole("textbox", { name: "First message" });
+  fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
+  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
 });

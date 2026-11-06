@@ -1,3 +1,4 @@
+import { ConversationInputReceipt } from "./conversationInputs";
 import { Schema } from "effect";
 import { MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
@@ -51,6 +52,7 @@ export const ProviderSwitchConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type ProviderSwitchConversationHandoff = typeof ProviderSwitchConversationHandoff.Type;
 
@@ -68,5 +70,6 @@ export const RewindConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type RewindConversationHandoff = typeof RewindConversationHandoff.Type;

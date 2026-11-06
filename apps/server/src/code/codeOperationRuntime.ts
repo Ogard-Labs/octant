@@ -1,3 +1,13 @@
+import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import type {
+  ConversationInputReceipt,
+  ConversationInputPurpose,
+  ConversationInputPolicy,
+} from "@octant/contracts/conversation-inputs";
+import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
+import type { ProviderAttachmentInput } from "@octant/contracts";
+import { type Questionnaire } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler";
 import { boundReviewText } from "./codeReviewComparison";
@@ -56,7 +66,9 @@ import {
   type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeMergeStandingSource,
+  type CodeProjectPullRequestSwitchTarget,
   type CodeThreadId,
+  type AutomationRunReference,
   type EventActor,
   type PendingRequest,
   type ProviderCapabilities,
@@ -65,6 +77,8 @@ import {
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -145,6 +159,7 @@ import {
   type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
+import type { PullRequestWatchPort } from "./pullRequestWatchPort";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
   NativeHarnessTurnAdmission,
@@ -212,12 +227,14 @@ import {
   type CodeDeviceApprovalEffect,
   type PullRequestToolCommand,
 } from "./codeAppManagedTools";
+import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
   PROVIDER_CONTEXT_RESTATED,
   type ProviderTurnContextDelta,
 } from "@octant/provider-sdk/chat-conformance";
+import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
 import {
   documentDeliveryInstructions,
   offersCanvasTool,
@@ -278,6 +295,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 }
 
 export interface CodeOperationRuntimeOptions {
+  readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -352,10 +370,13 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
+  readonly pullRequestWatch?: PullRequestWatchPort;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
   readonly attachments?: CodeAttachmentStore;
+  readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   readonly approvalValidator?: CodeApprovalValidationPort;
   readonly approvalStore?: CodeOperationApprovalStore;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
@@ -501,8 +522,10 @@ export interface CodeOperationRuntimeOptions {
   /**
    * The planner capability: a Project-board read and an advisory work
    * proposal, both answered only for the Project's designated planner thread.
+   * The runtime hands it to the threads tool (`board`) and the side-task tool
+   * (target `board`) of each turn.
    */
-  readonly planner?: CodeAppManagedToolsOptions["planner"];
+  readonly planner?: CodePlannerToolPort;
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
     readonly windowId: WindowId;
@@ -510,37 +533,41 @@ export interface CodeOperationRuntimeOptions {
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
   /**
-   * The agent-message tool set for this thread, when the host admits agent
-   * messaging. The service is server-owned; the tool only
-   * petitions it. `readPosture` is the turn's access posture at the moment it
-   * is asked, so a turn in Plan is neither offered the tool nor able to send.
+   * The threads tool for one turn: a view of the other Code threads of this
+   * thread's Project, messaging them where the host admits it, and the
+   * planner's board. Asked once per turn, so its read and wait bounds are the
+   * turn's. `readPosture` is the turn's access posture at the moment it is
+   * asked, so a turn in Plan is neither offered messaging nor able to send.
    */
-  readonly agentMessages?: (input: {
-    readonly thread: CodeThread;
-    readonly readPosture: () => CodeThread["executionPolicy"];
-  }) => AppManagedToolSet | undefined;
-  /**
-   * The sibling-threads tool set for one turn: a read-only view of the other
-   * Code threads of this thread's Project, answered by the server for the
-   * turn's window. Asked once per turn, so its read and wait bounds are the
-   * turn's. Offered in Plan too, since no action changes anything outside the
-   * caller's own record.
-   */
-  readonly siblingThreads?: (input: {
+  readonly threads?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    readonly readPosture: () => CodeThread["executionPolicy"];
+    readonly planner?: CodePlannerToolPort;
   }) => AppManagedToolSet | undefined;
-  /** Lets the model offer out-of-scope work as a side task the person may start. */
-  readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /**
+   * Lets the model offer out-of-scope work as a side task the person may
+   * start, and the designated planner offer one to the Project board.
+   */
+  readonly sideTasks?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly planner?: CodePlannerToolPort;
+  }) => AppManagedToolSet | undefined;
   /**
    * Tool sets that areas built after this runtime add to each turn, such as
    * the language server's reads. `readThread` is the thread as the turn's
    * window sees it when a call runs, the running turn's posture included.
+   * `folders` are the turn's checkout root and extra folders, for a set that
+   * is offered only where it can answer for their files.
    */
   readonly contributedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
+    readonly folders: ReadonlyArray<string>;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
@@ -627,7 +654,11 @@ export interface CodeOperationRuntimeOptions {
     readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
     readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
     /** Settles a harness question the person answered through the Code question surface. */
-    readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
+    readonly answerQuestion?: (
+      threadId: string,
+      questionId: string,
+      answer: string,
+    ) => void | "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Marks a thread whose runtime read outside content with its own tools. */
@@ -785,6 +816,7 @@ export interface CodeOperationRuntime {
     windowId: WindowId,
     forkThreadId: CodeThreadId,
     throughOperationId: string,
+    contextInputPolicy?: ConversationInputPolicy,
   ): Promise<CodeForkMergeBackOutcome>;
   /** The files a fork of `source` at `throughOperationId` starts from. */
   forkPoint(
@@ -825,6 +857,7 @@ export interface CodeOperationRuntime {
   raiseHarnessQuestion?(input: {
     readonly threadId: string;
     readonly questionId: string;
+    readonly questionnaire?: Questionnaire;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean;
@@ -1190,6 +1223,7 @@ export function createCodeOperationRuntime(
         );
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
+    ...(options.prepareWorktree === undefined ? {} : { prepareWorktree: options.prepareWorktree }),
     terminals: terminal,
     ...(options.terminalBrowserGrants === undefined
       ? {}
@@ -1765,7 +1799,10 @@ export function createCodeOperationRuntime(
           acquire: {
             instanceId: thread.providerInstanceId,
             mode: "code",
-            projectRoot: root.checkoutRoot,
+            projectRoot:
+              stored.workingFolderId === undefined
+                ? root.checkoutRoot
+                : (root.workingDirectory ?? root.checkoutRoot),
             permissionPersistence: thread.permissionPersistence,
           },
           resume: {
@@ -1819,9 +1856,12 @@ export function createCodeOperationRuntime(
         providerInstanceId: thread.providerInstanceId,
       });
     },
-    mergeForkContext: (windowId, forkThreadId, throughOperationId) =>
+    mergeForkContext: (windowId, forkThreadId, throughOperationId, contextInputPolicy) =>
       mergeForkConversation(
         {
+          ...(options.conversationInputTransfer === undefined
+            ? {}
+            : { conversationInputTransfer: options.conversationInputTransfer }),
           read: options.forkMergeBackContext,
           readThread: (id) => options.persistence.readCodeThread(id),
           canAccessProject: (id, projectId) => options.windowAccess.canAccessProject(id, projectId),
@@ -1833,7 +1873,12 @@ export function createCodeOperationRuntime(
             : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
           uuid: options.uuid,
         },
-        { windowId, forkThreadId, throughOperationId },
+        {
+          windowId,
+          forkThreadId,
+          throughOperationId,
+          ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
+        },
       ),
     forkPoint: async (windowId, source, throughOperationId) => {
       if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
@@ -2368,6 +2413,7 @@ export function threadOfActiveSession(
 }
 
 interface ActiveTurn {
+  readonly inputsCurrent?: () => boolean;
   /**
    * A provider-switch or fork handoff this turn selected and has not
    * journaled yet. It is journaled when the new session is ready, before the
@@ -2397,9 +2443,13 @@ interface ActiveTurn {
   >;
   readonly windowId: WindowId;
   readonly thread: CodeThread;
+  /** The routine run this turn was started for, from the dispatcher only. */
+  readonly routineRun?: AutomationRunReference;
   readonly operationId: CodeOperationId;
   readonly sessionId: string;
   readonly requestedSessionId: string;
+  readonly providerRoot: string;
+  readonly folderCurrent?: () => boolean;
   readonly checkoutRoot: string;
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
@@ -2717,6 +2767,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#active.has(key)
     )
       return failStart();
+    if (command.toolCatalogHandoff === true && input.routineRun !== undefined) {
+      return failStart("Only a person can choose to replace a native session's tools.");
+    }
     const resolvedDriver = await this.#options.resolveProviderDriver(input.thread);
     if (resolvedDriver === undefined) return failStart();
     const recovered = this.#events.providerSessionForThread(input.thread.id, command.operationId);
@@ -2755,6 +2808,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const providerSwitch =
       previous?.kind === "provider-session-ready" &&
       (rewind !== undefined ||
+        (command.toolCatalogHandoff === true &&
+          resolvedDriver.toolCatalogContinuation !== undefined) ||
         String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
         (String(previous.modelId) !== String(input.thread.modelId) &&
           this.#options.supportsModelSwitch?.(input.thread) !== true))
@@ -2886,13 +2941,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (forkOrigin !== undefined && switchHandoff?.journaled !== "text") {
       // Seeding durably copies the source's session, so a turn whose admission
       // lapsed during driver and credential preparation copies nothing.
-      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
+      if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
+        return refuseRevokedAdmission();
       const seeded = await this.#options
         .forkProviderSession?.({
           fork: input.thread,
           origin: forkOrigin,
           sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.checkoutRoot,
+          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
           secrets,
         })
         .catch(() => undefined);
@@ -2914,13 +2970,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       switchHandoff?.status === "ready" &&
       switchHandoff.journaled !== "text"
     ) {
-      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
+      if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
+        return refuseRevokedAdmission();
       const seeded = await this.#options
         .forkProviderSession?.({
           fork: input.thread,
           origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
           sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.checkoutRoot,
+          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
           secrets,
         })
         .catch(() => undefined);
@@ -2959,6 +3016,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       | {
           readonly blocks: ReadonlyArray<ProviderContextBlock>;
           readonly record?: PendingHandoffRecord;
+          readonly inputSelection?: Extract<
+            AgentRunParentContextSelection,
+            { readonly status: "available" }
+          >;
+          readonly inputReceipt?: ConversationInputReceipt;
         }
       | undefined;
     if (forkOrigin !== undefined && switchHandoff === undefined) {
@@ -2992,10 +3054,99 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(CODE_FORK_HANDOFF_REFUSALS["handoff-unreadable"]);
     }
+    const transferredAttachments: ProviderAttachmentInput[] = [];
+    const inputGuards: Array<() => boolean> = [];
+    const inputContext: ProviderContextBlock[] = [];
+    for (const handoff of [switchHandoff, forkHandoff]) {
+      if (
+        handoff === undefined ||
+        handoff.record?.reason === "fork-native-session" ||
+        handoff.record?.reason === "rewind-native-session" ||
+        ("journaled" in handoff && handoff.journaled === "native-session")
+      )
+        continue;
+      const selection = handoff.inputSelection;
+      const receipt = handoff.inputReceipt;
+      if (
+        (selection?.inputs?.length ?? 0) === 0 &&
+        selection?.inputUnavailable !== true &&
+        receipt === undefined
+      )
+        continue;
+      const transfer = this.#options.conversationInputTransfer;
+      if (transfer === undefined) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "Original source inputs cannot be transferred on this host. Nothing was sent.",
+        );
+      }
+      if (
+        receipt !== undefined &&
+        command.contextInputPolicy !== undefined &&
+        command.contextInputPolicy !== receipt.policy
+      ) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "This admitted turn keeps its original input choice. Start a new turn to choose different inputs.",
+        );
+      }
+      const purpose: ConversationInputPurpose =
+        receipt?.purpose ??
+        (handoff.record?.reason === "fork"
+          ? "fork"
+          : handoff.record?.reason === "rewind"
+            ? "rewind"
+            : "provider-switch");
+      const prepared = await transfer.prepare({
+        owner: {
+          mode: "code",
+          threadId: String(input.thread.id),
+          projectId: String(input.thread.projectId),
+        },
+        purpose,
+        ...(selection === undefined ? {} : { selection }),
+        ...(receipt === undefined ? {} : { previous: receipt }),
+        ...(command.contextInputPolicy === undefined ? {} : { policy: command.contextInputPolicy }),
+        target: {
+          providerInstanceId: String(input.thread.providerInstanceId),
+          modelId: String(input.thread.modelId),
+        },
+        current: () => input.admissionCurrent?.() !== false,
+      });
+      if (prepared.status === "refused") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(prepared.message);
+      }
+      if (prepared.inputsCurrent !== undefined) inputGuards.push(prepared.inputsCurrent);
+      transferredAttachments.push(...prepared.attachments);
+      if (prepared.receipt !== undefined) {
+        inputContext.push(conversationInputReceiptBlock(prepared.manifest));
+        if (handoff.record !== undefined) {
+          const record = {
+            ...handoff.record,
+            inputReceipt: prepared.receipt,
+            ...("omissions" in handoff.record
+              ? {
+                  omissions: {
+                    ...handoff.record.omissions,
+                    attachments: Math.max(
+                      0,
+                      handoff.record.omissions.attachments - prepared.receipt.included,
+                    ),
+                  },
+                }
+              : {}),
+          };
+          if (handoff === switchHandoff) switchHandoff = { ...switchHandoff, record };
+          else forkHandoff = { ...forkHandoff, blocks: handoff.blocks, record };
+        }
+      }
+    }
     // Conversation a person merged back from a fork of this thread goes with
     // its next turn, disclosed and journaled before the prompt is sent. A turn
     // that cannot read it refuses rather than dropping it silently.
     let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
+    let recoveredMergeInputs = false;
     try {
       const replay = this.#events.replay({
         threadId: input.thread.id,
@@ -3003,6 +3154,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         afterCursor: 0,
         limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
       });
+      recoveredMergeInputs =
+        replay.status === "ok" &&
+        replay.frames.some((frame) => frame.event.kind === "fork-context-delivered");
       forkMerges =
         replay.status === "ok"
           ? await forkMergeDelivery(
@@ -3016,6 +3170,77 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (forkMerges.status === "refused") {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
+    }
+    for (const entry of forkMerges.inputReceipts ?? []) {
+      if (
+        recoveredMergeInputs &&
+        command.contextInputPolicy !== undefined &&
+        command.contextInputPolicy !== entry.receipt.policy
+      ) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "This admitted turn keeps its original merge-back input choice. Start a new turn to choose different inputs.",
+        );
+      }
+      const transfer = this.#options.conversationInputTransfer;
+      if (transfer === undefined) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "Merged original inputs are unavailable on this host. Pending feedback was retained.",
+        );
+      }
+      const prepared = await transfer.prepare({
+        owner: {
+          mode: "code",
+          threadId: String(input.thread.id),
+          projectId: String(input.thread.projectId),
+        },
+        purpose: "fork-merge-back",
+        previous: entry.receipt,
+        ...(command.contextInputPolicy === undefined ? {} : { policy: command.contextInputPolicy }),
+        target: {
+          providerInstanceId: String(input.thread.providerInstanceId),
+          modelId: String(input.thread.modelId),
+        },
+        current: () => input.admissionCurrent?.() !== false,
+      });
+      if (prepared.status === "refused") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(prepared.message);
+      }
+      if (prepared.inputsCurrent !== undefined) inputGuards.push(prepared.inputsCurrent);
+      transferredAttachments.push(...prepared.attachments);
+      inputContext.push(conversationInputReceiptBlock(prepared.manifest));
+      const deliveredReceipt = prepared.receipt;
+      if (deliveredReceipt !== undefined)
+        forkMerges = {
+          ...forkMerges,
+          records: forkMerges.records.map((record) =>
+            record.mergeOperationId === entry.mergeOperationId
+              ? {
+                  ...record,
+                  inputReceipt: deliveredReceipt,
+                  omissions: {
+                    ...record.omissions,
+                    attachments:
+                      record.omissions.attachments +
+                      Math.max(
+                        0,
+                        (record.inputReceipt?.included ?? entry.receipt.included) -
+                          deliveredReceipt.included,
+                      ),
+                  },
+                }
+              : record,
+          ),
+        };
+    }
+    const originalInputCount = (input.attachments?.length ?? 0) + transferredAttachments.length;
+    if (originalInputCount > MAX_PROVIDER_ATTACHMENTS) {
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return failStart(
+        "Current and continuation inputs exceed the provider's attachment limit. Remove an input or explicitly choose text-only continuation. Pending feedback was retained.",
+      );
     }
     // A server thread's tools are bound last, before anything launches, so
     // no refusal after this point leaves them behind. The provider is
@@ -3036,7 +3261,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
     }
     // Driver, credentials, and fork preparation may outlive the host's admission.
-    if (input.admissionCurrent?.() === false) {
+    if (
+      input.folderCurrent?.() === false ||
+      input.admissionCurrent?.() === false ||
+      inputGuards.some((current) => !current())
+    ) {
       await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }
@@ -3044,7 +3273,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // here does not yield between the final admission check and owning the turn.
     let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
     try {
-      feedback = input.takeProductFeedback?.();
+      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
     } catch {
       // A feedback read failure must not prevent the person's message from running.
     }
@@ -3052,13 +3281,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(switchHandoff?.blocks ?? []),
       ...(forkHandoff?.blocks ?? []),
       ...forkMerges.blocks,
+      ...inputContext,
       ...(input.context ?? []),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
         : [{ kind: "user-message", text: feedback.context } as const]),
     ];
-    const attachments = [...(input.attachments ?? []), ...(feedback?.attachments ?? [])];
+    const attachments = [
+      ...(input.attachments ?? []),
+      ...transferredAttachments,
+      ...(feedback?.attachments ?? []),
+    ];
     const active: ActiveTurn = {
+      ...(inputGuards.length === 0
+        ? {}
+        : { inputsCurrent: () => inputGuards.every((current) => current()) }),
       ...(switchHandoff?.record !== undefined
         ? { pendingHandoff: { blocks: switchHandoff.blocks, record: switchHandoff.record } }
         : forkHandoff?.record !== undefined
@@ -3075,16 +3312,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : { extensionSelections: command.extensionSelections }),
       windowId: input.windowId,
       thread: input.thread,
+      ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
       operationId: command.operationId,
       sessionId:
         previous?.kind === "provider-session-ready" && providerSwitch === undefined
           ? previous.sessionId
           : input.sessionId,
       requestedSessionId: input.sessionId,
+      providerRoot: input.providerRoot ?? input.checkoutRoot,
+      ...(input.folderCurrent === undefined ? {} : { folderCurrent: input.folderCurrent }),
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
-      extraFolders: this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? [],
+      extraFolders: [
+        ...new Set([
+          ...(this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? []),
+          ...(input.providerRoot !== undefined && input.providerRoot !== input.checkoutRoot
+            ? [input.checkoutRoot]
+            : []),
+        ]),
+      ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
       driver,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
@@ -3167,6 +3414,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         readonly record?: PendingHandoffRecord;
         /** What an already journaled record carried, when this read it back. */
         readonly journaled?: "text" | "native-session";
+        readonly inputSelection?: Extract<
+          AgentRunParentContextSelection,
+          { readonly status: "available" }
+        >;
+        readonly inputReceipt?: ConversationInputReceipt;
       }
     | { readonly status: "refused"; readonly refusal: HandoffRefusal }
     | undefined
@@ -3230,6 +3482,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         return {
           status: "ready",
           blocks: decodeAgentRunAdmittedContext(JSON.parse(text)),
+          ...(journaled.inputReceipt === undefined ? {} : { inputReceipt: journaled.inputReceipt }),
           journaled: "text",
         };
       } catch {
@@ -3297,6 +3550,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return {
       status: "ready",
       blocks: selection.blocks,
+      inputSelection: selection,
       record: {
         kind: "context-handoff-attached",
         reason,
@@ -3373,6 +3627,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         readonly status: "ready";
         readonly blocks: ReadonlyArray<ProviderContextBlock>;
         readonly record: PendingHandoffRecord;
+        readonly inputSelection: Extract<
+          AgentRunParentContextSelection,
+          { readonly status: "available" }
+        >;
       }
     | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
   > {
@@ -3400,6 +3658,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return {
       status: "ready",
       blocks: selection.blocks,
+      inputSelection: selection,
       record: {
         kind: "context-handoff-attached",
         reason: "fork",
@@ -3415,7 +3674,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
   }
 
-  async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
+  async answerInput(
+    input: Parameters<CodeOperationTurnPort["answerInput"]>[0],
+  ): Promise<Awaited<ReturnType<CodeOperationTurnPort["answerInput"]>>> {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined || !active.questions.has(input.requestId)) {
       return this.#settleDeadTurnRequest(input.thread, "input", String(input.requestId));
@@ -3423,13 +3684,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (active.harnessQuestions.has(input.requestId)) {
       // A harness question is the host's own; the provider never saw it and
       // is waiting on the tool call that asked.
-      active.questions.delete(input.requestId);
-      active.harnessQuestions.delete(input.requestId);
-      this.#options.nativeHarness?.answerQuestion?.(
+      const outcome = this.#options.nativeHarness?.answerQuestion?.(
         String(active.thread.id),
         input.requestId,
         input.response,
       );
+      if (outcome === "invalid-answer")
+        return {
+          state: active.state,
+          failure: {
+            category: "invalid",
+            message: "The questionnaire answer is incomplete or contains invalid choices.",
+          },
+        };
+      if (outcome === "already-settled" || outcome === "question-not-found")
+        return {
+          state: active.state,
+          failure: { category: "stale", message: "That question is no longer pending." },
+        };
+      active.questions.delete(input.requestId);
+      active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
     if (active.connection === undefined) return turnState("failed");
@@ -3453,6 +3727,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   raiseHarnessQuestion(input: {
     readonly threadId: string;
     readonly questionId: string;
+    readonly questionnaire?: Questionnaire;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean {
@@ -3466,6 +3741,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       expectedCursor: active.cursor,
       event: {
         kind: "input-requested",
+        ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
         requestId: input.questionId,
         prompt: input.prompt,
         options: input.options,
@@ -3897,6 +4173,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
+   * One watch the thread's agent asked for, asked of the person in the thread
+   * with the pull request and the watch's bounds named. Nothing is minted: the
+   * watch turns on inside this same tool call, right after the answer, and the
+   * switch service checks the window and the thread again before it does.
+   */
+  #askPullRequestWatchApproval(
+    active: ActiveTurn,
+    target: CodeProjectPullRequestSwitchTarget,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const summary = boundProviderSummary(
+      `Let this thread's agent watch pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName}? Octant will start a new turn here when its checks finish, a review or comment arrives, or a merge conflict appears: at most ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES} times, for up to ${CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS / 86_400_000} days, ending when it merges or closes. Each turn runs at this thread's access level.`,
+    );
+    return summary === undefined
+      ? Promise.resolve("unavailable")
+      : this.#askToolApproval(active, summary, undefined, signal);
+  }
+
+  /**
    * The wording and binding context of one device approval. A Simulator,
    * emulator, or device effect is asked only while the turn's posture decides
    * effects by approval; a device lease is asked under every posture, Full
@@ -4173,6 +4468,41 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  async forceStop(input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
+  }) {
+    const active = this.#owned(input.thread, input.checkoutRoot);
+    if (
+      active === undefined ||
+      String(active.operationId) !== String(input.turnOperationId) ||
+      !active.abort.signal.aborted ||
+      active.connection?.forceStop === undefined
+    )
+      return turnState("failed", {
+        category: "failed",
+        message:
+          "Only this host's exact stopped attempt on a supported runtime can be force-stopped.",
+      });
+    const connection = active.connection;
+    const kill = connection.forceStop;
+    if (kill === undefined) return turnState("failed");
+    try {
+      await Effect.runPromise(kill(decodeProviderSessionId(active.sessionId)));
+    } catch {
+      return turnState("failed", {
+        category: "failed",
+        message: "The owned runtime process could not be force-stopped.",
+      });
+    }
+    if (this.#owned(input.thread, input.checkoutRoot) !== active) return turnState("interrupted");
+    active.interruptMessage = "The provider attempt was stopped by force.";
+    active.state = "interrupted";
+    this.#persistRuntimeWork(active, "interrupted");
+    return turnState("interrupted");
+  }
+
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
@@ -4236,6 +4566,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const service = this.#service;
     if (supportsAppManagedTools && service !== undefined) {
       const browserProfiles = this.#options.browserProfiles;
+      const pullRequestWatch = this.#options.pullRequestWatch;
       sets.push(
         this.#options.computerUseTools?.({
           windowId: active.windowId,
@@ -4271,6 +4602,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               ? undefined
               : this.#options.standingMergeAllowance?.(current)[0];
           },
+          ...(pullRequestWatch === undefined
+            ? {}
+            : {
+                pullRequestWatch: {
+                  watch: (ask, signal) =>
+                    pullRequestWatch.watch({
+                      windowId: active.windowId,
+                      threadId: active.thread.id,
+                      providerInstanceId: String(active.thread.providerInstanceId),
+                      ask,
+                      signal: signal ?? active.abort.signal,
+                    }),
+                  unwatch: () =>
+                    pullRequestWatch.unwatch({
+                      threadId: active.thread.id,
+                      providerInstanceId: String(active.thread.providerInstanceId),
+                    }),
+                  request: (target, signal) =>
+                    this.#askPullRequestWatchApproval(active, target, signal),
+                },
+              }),
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
@@ -4390,14 +4742,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.androidToolchain === undefined
             ? {}
             : { android: this.#options.androidToolchain }),
-          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.githubReadTools?.({
           windowId: active.windowId,
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
         }),
-        this.#options.agentMessages?.({
+        this.#options.threads?.({
+          windowId: active.windowId,
           thread: active.thread,
           readPosture: () =>
             clampTurnAccessPosture({
@@ -4406,19 +4758,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
                 active.thread.executionPolicy,
             }),
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
-        this.#options.siblingThreads?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.contributedTools?.({
           windowId: active.windowId,
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+          folders: [active.providerRoot, ...active.extraFolders],
+          ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
         }),
-        this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.sideTasks?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
+        }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
-          checkoutRoot: active.checkoutRoot,
+          checkoutRoot: active.providerRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
@@ -4433,7 +4791,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           readExecutionPolicy: () =>
             this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
             active.thread.executionPolicy,
-          checkoutRoot: active.checkoutRoot,
+          checkoutRoot: active.providerRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           uuid: this.#options.uuid,
           pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
@@ -4501,28 +4859,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // Only a thread whose person chose the runtime's artifact tool is told to
     // use it; the turn runner starts that thread's session with the same
     // choice, and every other thread keeps Canvas.
+    const artifactToolName =
+      active.thread.documentDelivery === "native-artifacts"
+        ? active.driver.nativeArtifactTool?.({
+            mode: "code",
+            executionPolicy: active.thread.executionPolicy,
+          })
+        : undefined;
     const deliveryInstructions = documentDeliveryInstructions({
-      artifactToolName:
-        active.thread.documentDelivery === "native-artifacts"
-          ? active.driver.nativeArtifactTool?.({
-              mode: "code",
-              executionPolicy: active.thread.executionPolicy,
-            })
-          : undefined,
+      artifactToolName,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
     const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
+    // This mode's rules before the tool notes, as in Work.
     const hostGuidance = [
+      ...(deliveryInstructions === undefined
+        ? []
+        : [
+            {
+              kind: "instructions" as const,
+              text: deliveryInstructions,
+              ...(artifactToolName === undefined ? { tool: CANVAS_TOOL_NAME } : {}),
+            },
+          ]),
       ...(extraFolderInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
-      ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
+      ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
         kind: "instructions" as const,
-        text,
+        text: line.text,
+        tool: line.tool,
       })),
-      ...(deliveryInstructions === undefined
-        ? []
-        : [{ kind: "instructions" as const, text: deliveryInstructions }]),
     ];
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,
@@ -4570,10 +4937,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         attachments,
       }),
     };
+    const folderWatch =
+      active.folderCurrent === undefined
+        ? undefined
+        : setInterval(() => {
+            let revoked: boolean;
+            try {
+              revoked = active.folderCurrent?.() === false;
+            } catch {
+              revoked = true;
+            }
+            if (revoked) {
+              active.interruptMessage =
+                "The working folder became unavailable. Nothing was redirected.";
+              active.abort.abort();
+            }
+          }, 250);
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
           thread: active.thread,
+          ...(active.inputsCurrent === undefined ? {} : { inputsCurrent: active.inputsCurrent }),
           sessionId: active.sessionId as never,
           ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),
           onSessionReady: (handle) =>
@@ -4646,6 +5030,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
             }),
           checkoutRoot: active.checkoutRoot,
+          providerRoot: active.providerRoot,
           extraFolders: active.extraFolders,
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
@@ -4702,7 +5087,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           provider: {
             acquire: (acquireInput) => {
               if (
-                acquireInput.projectRoot !== active.checkoutRoot ||
+                acquireInput.projectRoot !== active.providerRoot ||
                 JSON.stringify(acquireInput.extraFolders ?? []) !==
                   JSON.stringify(active.extraFolders) ||
                 acquireInput.permissionPersistence !== active.thread.permissionPersistence
@@ -4820,7 +5205,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                           // transcript's parked-turn recovery keys on it, and
                           // a plain "failed" would make it indistinguishable
                           // from every other provider failure.
-                          category: failure?.resumeRefused === true ? "stale" : "failed",
+                          category:
+                            failure?.toolCatalogHandoffRequired === true
+                              ? "tools-changed"
+                              : failure?.resumeRefused === true
+                                ? "stale"
+                                : "failed",
                           message,
                           ...(failure?.usageLimit === undefined
                             ? {}
@@ -4859,6 +5249,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }
       })
       .finally(() => {
+        clearInterval(folderWatch);
         active.reviewCapture?.close();
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
@@ -5081,6 +5472,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         accessCurrent(active.windowId, active.thread.projectId) &&
         root?.rootCurrent?.() !== false &&
         root?.checkoutRoot === active.checkoutRoot &&
+        (active.thread.workingFolderId === undefined ||
+          root.workingDirectory === active.providerRoot) &&
         (active.rootIdentity === undefined ||
           (root.rootIdentity?.device === active.rootIdentity.device &&
             root.rootIdentity.inode === active.rootIdentity.inode)) &&

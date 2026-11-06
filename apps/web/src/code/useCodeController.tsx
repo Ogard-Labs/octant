@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -29,7 +30,6 @@ import {
 } from "@octant/contracts";
 import { prependEarlierTurns } from "@octant/domain";
 import { waitForReconnect } from "../lib/waitForReconnect";
-import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -41,7 +41,6 @@ import {
   type CodeOperationFailure,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
-  type CodeForkMergeBack,
   type CodeForkMergeBackOutcome,
   type CodeThreadFollowUpView,
   type CodeAttachmentId,
@@ -75,6 +74,7 @@ import {
   createCodeReadCursorStore,
   isActive,
   projectConversationTurns,
+  codeReplyMetadataUpdate,
   providerAnswerOutcome,
   providerRequestFromEvent,
   readConversationEvidence,
@@ -306,6 +306,8 @@ function readsConversationWindow(
  */
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
+  /** Window-owned metadata; a thread slot waits for it instead of bootstrapping. */
+  readonly navigation?: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client?: CodeClient;
   readonly draftStore?: ComposerThreadDraftStore;
   readonly readCursorStore?: CodeReadCursorStore;
@@ -322,6 +324,7 @@ export interface CodeControllerOptions {
 }
 
 export function useCodeController(options: CodeControllerOptions) {
+  const ownsNavigation = options.navigation === undefined;
   const reconnectDelayMs = options.reconnectDelayMs ?? 250;
   const navigationRefreshMs = options.navigationRefreshMs ?? 2_000;
   const readCursorStore = useMemo(
@@ -364,16 +367,20 @@ export function useCodeController(options: CodeControllerOptions) {
   composerDraftRef.current = composerDraft;
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
-  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
-    if (knownDraftThreads.current === undefined) {
-      composerDraftRef.current.dropUnknown(threadIds);
-    } else {
-      for (const threadId of knownDraftThreads.current) {
-        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+  const reconcileDrafts = useCallback(
+    (threadIds: ReadonlyArray<string>) => {
+      if (!ownsNavigation) return;
+      if (knownDraftThreads.current === undefined) {
+        composerDraftRef.current.dropUnknown(threadIds);
+      } else {
+        for (const threadId of knownDraftThreads.current) {
+          if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+        }
       }
-    }
-    knownDraftThreads.current = new Set(threadIds);
-  }, []);
+      knownDraftThreads.current = new Set(threadIds);
+    },
+    [ownsNavigation],
+  );
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   // The transcript as last set, and whose it is, for the window reads that
   // join a page onto it. A render keeps it level with live updates.
@@ -1488,48 +1495,12 @@ export function useCodeController(options: CodeControllerOptions) {
                     noteProviderRequest(event);
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
-                    if (event.kind === "conversation-turn-review-preview") {
-                      const preview = event.preview;
-                      setConversation((current) =>
-                        current.map((message) => {
-                          if (message.id !== `${operationId}:assistant`) return message;
-                          const capture = preview.capture ?? message.reviewPreview?.capture;
-                          return {
-                            ...message,
-                            reviewPreview: {
-                              ...preview,
-                              ...(capture === undefined ? {} : { capture }),
-                            },
-                          };
-                        }),
-                      );
-                    }
-                    if (event.kind === "conversation-turn-changed-files") {
-                      const changedFiles = event.changedFiles;
+                    const updateReply = codeReplyMetadataUpdate(event);
+                    if (updateReply !== undefined) {
                       setConversation((current) =>
                         current.map((message) =>
                           message.id === `${operationId}:assistant`
-                            ? { ...message, changedFiles }
-                            : message,
-                        ),
-                      );
-                    }
-                    if (event.kind === "context-handoff-attached") {
-                      const handoff = handoffSummary(event);
-                      setConversation((current) =>
-                        current.map((message) =>
-                          message.id === `${operationId}:assistant`
-                            ? { ...message, handoff }
-                            : message,
-                        ),
-                      );
-                    }
-                    if (event.kind === "fork-context-delivered") {
-                      const mergeBack = forkMergeBackSummary(event);
-                      setConversation((current) =>
-                        current.map((message) =>
-                          message.id === `${operationId}:assistant`
-                            ? withForkMergeBack(message, mergeBack)
+                            ? updateReply(message)
                             : message,
                         ),
                       );
@@ -1878,11 +1849,14 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const followUpThreadKey = useMemo(
     () =>
-      (bootstrap?.threads ?? [])
-        .filter((thread) => thread.lifecycle !== "archived")
-        .map((thread) => String(thread.id))
-        .join(","),
-    [bootstrap],
+      options.activeThreadId !== undefined
+        ? ""
+        : (bootstrap?.threads ?? [])
+            .filter((thread) => thread.lifecycle !== "archived")
+            .map((thread) => String(thread.id))
+            .sort()
+            .join(","),
+    [bootstrap, options.activeThreadId],
   );
 
   useEffect(() => {
@@ -1914,9 +1888,18 @@ export function useCodeController(options: CodeControllerOptions) {
     };
   }, [client, followUpThreadKey]);
 
+  const windowBootstrap = options.navigation?.bootstrap;
+  useEffect(() => {
+    if (ownsNavigation || windowBootstrap === undefined) return;
+    bootstrapRef.current = windowBootstrap;
+    setBootstrap(windowBootstrap);
+    // Window metadata neither reconciles a tab's drafts nor recovers a failed
+    // thread read. Only installing a successfully read view clears that failure.
+  }, [ownsNavigation, windowBootstrap]);
+
   useEffect(() => {
     mounted.current = true;
-    void loadBootstrap("bootstrap");
+    if (ownsNavigation) void loadBootstrap("bootstrap");
     return () => {
       mounted.current = false;
       bootstrapGeneration.current += 1;
@@ -1925,7 +1908,7 @@ export function useCodeController(options: CodeControllerOptions) {
       streamAbort.current?.abort();
       turnAbort.current?.abort();
     };
-  }, [loadBootstrap]);
+  }, [loadBootstrap, ownsNavigation]);
 
   useEffect(() => {
     activeThreadId.current = options.activeThreadId;
@@ -2168,6 +2151,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const beginProviderTurn = useCallback(
     async (input: {
+      readonly contextInputPolicy?: ConversationInputPolicy;
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
       readonly prompt: string;
@@ -2189,6 +2173,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly computerUseSelection?: ExtensionSelection;
       readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
+      readonly toolCatalogHandoff?: boolean;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -2204,6 +2189,10 @@ export function useCodeController(options: CodeControllerOptions) {
       const sessionId = decodeProviderSessionId(globalThis.crypto.randomUUID());
       const started = await client.executeOperation({
         kind: "start-provider-turn",
+        ...(input.toolCatalogHandoff === true ? { toolCatalogHandoff: true } : {}),
+        ...(input.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: input.contextInputPolicy }),
         operationId,
         threadId: input.threadId,
         checkoutId: input.checkoutId,
@@ -2376,11 +2365,15 @@ export function useCodeController(options: CodeControllerOptions) {
     async (input: {
       readonly threadId: CodeThreadId;
       readonly throughOperationId: string;
+      readonly contextInputPolicy?: ConversationInputPolicy;
     }): Promise<CodeForkMergeBackOutcome | undefined> => {
       const result = await execute({
         kind: "merge-code-fork-context",
         threadId: input.threadId,
         throughOperationId: input.throughOperationId,
+        ...(input.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: input.contextInputPolicy }),
       });
       return result?.kind === "fork-context-merge" ? result.outcome : undefined;
     },
@@ -2633,6 +2626,8 @@ export function useCodeController(options: CodeControllerOptions) {
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
       expectedDraftRevision?: number,
       reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>,
+      toolCatalogHandoff = false,
+      contextInputPolicy?: ConversationInputPolicy,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2696,9 +2691,11 @@ export function useCodeController(options: CodeControllerOptions) {
 
       try {
         const { operationId, started } = await beginProviderTurn({
+          ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
           threadId: view.thread.id,
           checkoutId: view.checkout.id,
           prompt: trimmed,
+          ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,
@@ -2714,7 +2711,7 @@ export function useCodeController(options: CodeControllerOptions) {
         if (controller.signal.aborted) return false;
         if (started.kind === "operation-failed") {
           setTurnStatus("failed");
-          setTurnError(started.failure.message);
+          setTurnError(started.failure.message, { category: started.failure.category });
           setTurnUsageLimit(started.failure.usageLimit);
           setLatestProviderTurnOperationId(undefined);
           restoreFailedPrompt();
@@ -2724,7 +2721,12 @@ export function useCodeController(options: CodeControllerOptions) {
           setTurnStatus("failed");
           const refusal =
             started.kind === "provider-turn-state" ? started.failure?.message : undefined;
-          setTurnError(refusal ?? "The provider turn could not be started.");
+          setTurnError(
+            refusal ?? "The provider turn could not be started.",
+            started.kind === "provider-turn-state" && started.failure !== undefined
+              ? { category: started.failure.category }
+              : undefined,
+          );
           if (started.kind === "provider-turn-state") {
             setTurnUsageLimit(started.failure?.usageLimit);
             setLatestProviderTurnOperationId(
@@ -2857,43 +2859,11 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               // The host journals the change list just before the turn settles,
               // so the reply gains its files here rather than on the next reopen.
-              if (event.kind === "conversation-turn-review-preview") {
-                const preview = event.preview;
-                setConversation((current) =>
-                  current.map((message) => {
-                    if (message.id !== `${operationId}:assistant`) return message;
-                    const capture = preview.capture ?? message.reviewPreview?.capture;
-                    return {
-                      ...message,
-                      reviewPreview: { ...preview, ...(capture === undefined ? {} : { capture }) },
-                    };
-                  }),
-                );
-              }
-              if (event.kind === "conversation-turn-changed-files") {
-                const changedFiles = event.changedFiles;
+              const updateReply = codeReplyMetadataUpdate(event);
+              if (updateReply !== undefined) {
                 setConversation((current) =>
                   current.map((message) =>
-                    message.id === assistantId ? { ...message, changedFiles } : message,
-                  ),
-                );
-              }
-              // Journaled before the provider is sent anything, so the reply
-              // says what was handed over while it is still being written.
-              if (event.kind === "context-handoff-attached") {
-                const handoff = handoffSummary(event);
-                setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId ? { ...message, handoff } : message,
-                  ),
-                );
-              }
-              // Journaled with the handoff, before the provider is sent anything.
-              if (event.kind === "fork-context-delivered") {
-                const mergeBack = forkMergeBackSummary(event);
-                setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId ? withForkMergeBack(message, mergeBack) : message,
+                    message.id === assistantId ? updateReply(message) : message,
                   ),
                 );
               }
@@ -3069,6 +3039,34 @@ export function useCodeController(options: CodeControllerOptions) {
     [activeView, client],
   );
 
+  const forceStopTurn = useCallback(async (): Promise<boolean> => {
+    const view = activeView;
+    if (view === undefined || latestProviderTurnOperationId === undefined) return false;
+    const owner = String(view.thread.id);
+    try {
+      const result = await client.executeOperation({
+        kind: "force-stop-provider-turn",
+        operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+        threadId: view.thread.id,
+        checkoutId: view.checkout.id,
+        turnOperationId: latestProviderTurnOperationId,
+      });
+      if (result.kind === "provider-turn-state" && result.state === "interrupted") return true;
+      if (mounted.current && String(activeThreadId.current) === owner)
+        setTurnError(
+          result.kind === "operation-failed"
+            ? result.failure.message
+            : result.kind === "provider-turn-state"
+              ? (result.failure?.message ?? "The attempt could not be force-stopped.")
+              : "The host refused Force stop.",
+        );
+    } catch (error) {
+      if (mounted.current && String(activeThreadId.current) === owner)
+        setTurnError(codeFailure(error).message);
+    }
+    return false;
+  }, [activeView, client, latestProviderTurnOperationId]);
+
   const cancelTurn = useCallback(async (): Promise<boolean> => {
     const view = activeView;
     if (view === undefined || turnStatus !== "running") {
@@ -3149,6 +3147,7 @@ export function useCodeController(options: CodeControllerOptions) {
     announceFirstPrompt,
     answerProviderRequest,
     cancelTurn,
+    forceStopTurn,
     archiveThread,
     completeThread,
     reopenThread,
@@ -3242,15 +3241,3 @@ function providerAnswerKey(answer: CodeProviderAnswer): string {
 }
 
 /** A reply gains each merge its turn carried once, however often the event replays. */
-function withForkMergeBack(
-  message: CodeConversationMessage,
-  mergeBack: CodeForkMergeBack,
-): CodeConversationMessage {
-  const existing = message.forkMergeBacks ?? [];
-  const known = existing.some(
-    (candidate) =>
-      String(candidate.forkThreadId) === String(mergeBack.forkThreadId) &&
-      String(candidate.throughOperationId) === String(mergeBack.throughOperationId),
-  );
-  return known ? message : { ...message, forkMergeBacks: [...existing, mergeBack] };
-}

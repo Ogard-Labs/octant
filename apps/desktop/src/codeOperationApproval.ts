@@ -42,10 +42,13 @@ export async function requestCodeOperationApprovalFromServer<TWindow>(options: {
 }): Promise<CodeApprovalId | undefined> {
   const request = decodeCodeOperationApprovalRequest(options.request);
   try {
+    const brokerHeaders = {
+      "x-octant-desktop-secret": options.desktopBridgeSecret,
+      "x-octant-window-capability": options.windowCapability,
+    };
     const challenge = await prepareCodeOperationApprovalChallengeFromServer({
       serverUrl: options.serverUrl,
-      desktopBridgeSecret: options.desktopBridgeSecret,
-      windowCapability: options.windowCapability,
+      brokerHeaders,
       request,
       fetch: options.fetch,
     });
@@ -62,8 +65,7 @@ export async function requestCodeOperationApprovalFromServer<TWindow>(options: {
     if (decision.response !== 0) return undefined;
     return await confirmCodeOperationApprovalFromServer({
       serverUrl: options.serverUrl,
-      desktopBridgeSecret: options.desktopBridgeSecret,
-      windowCapability: options.windowCapability,
+      brokerHeaders,
       challengeId: challenge.challengeId,
       fetch: options.fetch,
     });
@@ -75,8 +77,11 @@ export async function requestCodeOperationApprovalFromServer<TWindow>(options: {
 
 export async function prepareCodeOperationApprovalChallengeFromServer(options: {
   readonly serverUrl: string;
-  readonly desktopBridgeSecret: string;
-  readonly windowCapability: string;
+  /**
+   * Octant's bridge secret with the window capability, or a native Nightly
+   * main's window capability with its main-only token.
+   */
+  readonly brokerHeaders: Readonly<Record<string, string>>;
   readonly request: NativeCodeOperationApprovalRequest;
   readonly fetch: typeof globalThis.fetch;
 }): Promise<CodeOperationApprovalChallenge> {
@@ -85,11 +90,7 @@ export async function prepareCodeOperationApprovalChallengeFromServer(options: {
     new URL("/api/desktop/code-operation-approval-challenges", options.serverUrl),
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-octant-desktop-secret": options.desktopBridgeSecret,
-        "x-octant-window-capability": options.windowCapability,
-      },
+      headers: approvalHeaders(options),
       body: JSON.stringify(request),
     },
   );
@@ -99,8 +100,7 @@ export async function prepareCodeOperationApprovalChallengeFromServer(options: {
 
 export async function confirmCodeOperationApprovalFromServer(options: {
   readonly serverUrl: string;
-  readonly desktopBridgeSecret: string;
-  readonly windowCapability: string;
+  readonly brokerHeaders: Readonly<Record<string, string>>;
   readonly challengeId: string;
   readonly fetch: typeof globalThis.fetch;
 }): Promise<CodeApprovalId | undefined> {
@@ -118,8 +118,7 @@ export async function confirmCodeOperationApprovalFromServer(options: {
 
 export async function cancelCodeOperationApprovalFromServer(options: {
   readonly serverUrl: string;
-  readonly desktopBridgeSecret: string;
-  readonly windowCapability: string;
+  readonly brokerHeaders: Readonly<Record<string, string>>;
   readonly challengeId: string;
   readonly fetch: typeof globalThis.fetch;
 }): Promise<void> {
@@ -140,12 +139,7 @@ function throwApprovalResponseFailure(response: Response): never {
 }
 
 function approvalHeaders(options: {
-  readonly desktopBridgeSecret: string;
-  readonly windowCapability: string;
+  readonly brokerHeaders: Readonly<Record<string, string>>;
 }): Record<string, string> {
-  return {
-    "content-type": "application/json",
-    "x-octant-desktop-secret": options.desktopBridgeSecret,
-    "x-octant-window-capability": options.windowCapability,
-  };
+  return { "content-type": "application/json", ...options.brokerHeaders };
 }

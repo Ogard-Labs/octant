@@ -48,7 +48,6 @@ import {
 } from "../harness/nativeHarnessComposition";
 import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSecondOpinion";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
-import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
   createFollowUp,
@@ -67,6 +66,7 @@ import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessE
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
+import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
@@ -103,7 +103,6 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
-    | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "personMemory"
@@ -111,14 +110,10 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    | "agentRunAdmission"
     | "nativeHarnessRouter"
     | "nativeHarnessRoutingStore"
-    | "agentRunEligibleTargets"
-    | "agentRunOrchestration"
     | "contributeChildTools"
     | "externalContentIngestionStore"
-    | "remoteDelegation"
     | "sideTasks"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
@@ -158,13 +153,9 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
 export function wireHarness(deps: HarnessDependencies) {
   const {
     safeNetworkStore,
-    agentRunAdmission,
-    agentRunEligibleTargets,
     agentRunInteractions,
     serverProjectStore,
     serverRegistry,
-    agentRunOrchestration,
-    agentRunPersistence,
     codeBoardEventStore,
     codeEvidence,
     codeParentActiveTurn,
@@ -182,7 +173,6 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
-    remoteDelegation,
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
     nativeHarnessTranscripts,
@@ -494,6 +484,7 @@ export function wireHarness(deps: HarnessDependencies) {
     return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
   };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
+    mayAnswerChildFromDevice: agentRunInteractions.mayAnswerFromDevice,
     windowAuthorityStore,
     store: {
       read: (threadId) => {
@@ -603,14 +594,18 @@ export function wireHarness(deps: HarnessDependencies) {
   // reaches the observer and the lead fallback.
   const nativeHarnessHooks = {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
-      nativeHarnessQuestions.answer(threadId, questionId, answer);
+      return nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
     observeRemoteCommand: (
       threadId: string,
       projectId: string | undefined,
       event: ProviderRuntimeEvent,
     ) => runtimeRemoteCommands.observe(threadId, projectId, event),
+    // Orientation first and the reply formats it introduces next, ahead of
+    // each mode's own rules and tool notes, so every mode and provider opens
+    // its instructions the same way.
     contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
+      octantOrientation(scope.mode),
       ...nativeHarnessObserver.contextFor(scope),
       ...nativeHarnessObserver.runtimeServerNotes(scope),
       ...turnDecisionInstructions(scope.mode),
@@ -837,23 +832,6 @@ export function wireHarness(deps: HarnessDependencies) {
             }
           },
           scratchRoot: harnessWorkDirectory,
-          uuid: randomUUID,
-        },
-        scope,
-      ),
-    delegate: (scope) =>
-      createNativeHarnessDelegatePort(
-        {
-          admission: agentRunAdmission,
-          orchestration: agentRunOrchestration,
-          persistence: agentRunPersistence,
-          listTargets: () => agentRunEligibleTargets(scope.projectId),
-          isTainted: () =>
-            readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
-              .externalContentIngested,
-          remote: remoteDelegation,
-          router: nativeHarnessRouter,
-          sessions: nativeHarnessSessions,
           uuid: randomUUID,
         },
         scope,

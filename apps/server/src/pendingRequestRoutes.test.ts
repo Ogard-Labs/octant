@@ -1,5 +1,6 @@
 import {
   decodePendingRequest,
+  decodeUtcTimestamp,
   decodeWindowId,
   MAX_PENDING_REQUESTS,
   type PendingRequest,
@@ -305,6 +306,7 @@ function request(search = ""): Request {
 
 function fixture(
   options: {
+    readonly deferrals?: PendingRequestSources["deferrals"];
     readonly settings?: ProductSurfaceSettings;
     readonly work?: ReadonlyArray<PendingRequest>;
     readonly code?: ReadonlyArray<PendingRequest> | (() => Promise<ReadonlyArray<PendingRequest>>);
@@ -316,6 +318,7 @@ function fixture(
   store.register({ windowId, capability, now: 0 });
   const code = options.code;
   const sources = {
+    ...(options.deferrals === undefined ? {} : { deferrals: options.deferrals }),
     readSettings: () => options.settings ?? defaultShellSettings(),
     work: vi.fn(async () => [...(options.work ?? [workApproval])]),
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),
@@ -329,3 +332,105 @@ function fixture(
   });
   return { route, sources };
 }
+
+it("defers the exact question across windows and replay without answering it", async () => {
+  const records: Array<{ key: string; until: string | null }> = [];
+  const questions = [chatQuestion];
+  const source = {
+    readSettings: defaultShellSettings,
+    work: async () => [workApproval],
+    code: async () => [],
+    children: async () => [],
+    chat: () => questions,
+    now: () => Date.parse("2026-10-06T09:00:00Z"),
+    deferrals: {
+      read: (key: string) => records.filter((r) => r.key === key).at(-1)?.until ?? undefined,
+      record: (r: { key: string; until: string | null }) => {
+        records.push(r);
+      },
+    },
+  };
+  const service = new PendingRequestService(source);
+  const key =
+    (await service.list(windowId)).requests.find((r) => r.kind === "question")?.deferralKey ??
+    "missing";
+  const change = { key, until: decodeUtcTimestamp("2026-10-06T10:00:00.000Z") };
+  expect(await service.defer(windowId, change, () => true)).toBe(true);
+  expect(questions).toEqual([chatQuestion]);
+  expect(
+    (
+      await new PendingRequestService(source).list(
+        decodeWindowId("00000000-0000-4000-8000-000000000802"),
+      )
+    ).requests.find((r) => r.kind === "question")?.deferredUntil,
+  ).toBe(change.until);
+  expect(await service.defer(windowId, { ...change, until: null }, () => true)).toBe(true);
+  expect(
+    (await service.list(windowId)).requests.find((r) => r.kind === "question")?.deferredUntil,
+  ).toBeUndefined();
+  expect(await service.defer(windowId, change, () => false)).toBe(false);
+  questions.length = 0;
+  expect(await service.defer(windowId, change, () => true)).toBe(false);
+  expect((await service.list(windowId)).requests).toEqual([workApproval]);
+});
+
+it("authenticates question deferral, refuses approval keys and never calls an answer path", async () => {
+  const record = vi.fn();
+  const { route } = fixture({ deferrals: { read: () => undefined, record } });
+  const list = await (await route(request()))?.json();
+  const question = list.requests.find((r: PendingRequest) => r.kind === "question");
+  const send = (body: unknown, token = capability) =>
+    route(
+      new Request("http://127.0.0.1/api/pending-requests/defer", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify(body),
+      }),
+    );
+  const change = { key: question.deferralKey, until: "2099-01-01T00:00:00.000Z" };
+  expect((await send(change, "wrong"))?.status).toBe(401);
+  expect((await send({ ...change, answer: "Yes" }))?.status).toBe(400);
+  expect((await send({ ...change, key: "a".repeat(64) }))?.status).toBe(409);
+  expect(record).not.toHaveBeenCalled();
+  expect((await send(change))?.status).toBe(200);
+  expect(record).toHaveBeenCalledExactlyOnceWith(change);
+});
+
+it("keeps deferral bound to the current choices and access in every answerable mode", async () => {
+  const workQuestion = decodePendingRequest({
+    ...workApproval,
+    kind: "question",
+    options: [{ label: "Yes" }],
+  });
+  const codeQuestion = decodePendingRequest({
+    ...codeApproval,
+    kind: "question",
+    options: [{ label: "Yes" }],
+    answer: {
+      threadId: codeApproval.threadId,
+      checkoutId: "00000000-0000-4000-8000-000000000905",
+      requestId: "00000000-0000-4000-8000-000000000906",
+    },
+  });
+  for (const question of [chatQuestion, workQuestion, codeQuestion]) {
+    const record = vi.fn();
+    let available = [question];
+    const source = {
+      readSettings: defaultShellSettings,
+      work: async () => available.filter((r) => r.mode === "work"),
+      code: async () => available.filter((r) => r.mode === "code"),
+      chat: () => available.filter((r) => r.mode === "chat"),
+      children: async () => [],
+      deferrals: { read: () => undefined, record },
+    };
+    const service = new PendingRequestService(source);
+    const key = (await service.list(windowId)).requests[0]?.deferralKey ?? "missing";
+    const change = { key, until: decodeUtcTimestamp("2099-01-01T00:00:00.000Z") };
+    expect(await service.defer(windowId, change, () => true)).toBe(true);
+    available = [decodePendingRequest({ ...question, options: [{ label: "Changed" }] })];
+    expect(await service.defer(windowId, change, () => true)).toBe(false);
+    available = [];
+    expect(await service.defer(windowId, change, () => true)).toBe(false);
+    expect(record).toHaveBeenCalledTimes(1);
+  }
+});
