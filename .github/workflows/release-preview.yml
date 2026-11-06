@@ -16,7 +16,9 @@
 # under a new, strictly newer version: the updater only moves forward, so a
 # rollback is a roll-forward. Building runs the source's own code beside the
 # Apple credentials, so the feed key lives only in the separate `feed` job,
-# which runs this workflow's code against the uploaded archive. The flavor follows the ring
+# which runs this workflow's code against the uploaded archive. A Nightly run
+# builds only after its secret-free usable-client preflight passes; an Octant
+# candidate skips it. The flavor follows the ring
 # (`docs/design/nightly-app.md`, "Which build is which").
 # An updater fed by unsigned builds is an unauthenticated code-delivery
 # channel (`docs/architecture.md`, "Current Release Boundary"), so a ring either
@@ -71,16 +73,6 @@ jobs:
           # The decide script peels the latest published preview tag to a
           # commit. Depth 0 already fetches tags; this keeps that explicit.
           fetch-tags: true
-      # Identity foundations can be reviewed separately, but publishing them
-      # would deliver a client that cannot use the stable host. The functional
-      # client change must replace this gate with its parity preflight. Only the
-      # scheduled run and a rollback build Nightly; any other dispatched run
-      # builds Octant itself on the candidate ring and is not held by this gate.
-      - name: Require the functional Nightly desktop client before Nightly delivery
-        if: github.event_name == 'schedule' || inputs.rollback_ref != ''
-        run: |
-          echo "::error::Nightly desktop client support is pending. Complete the typed stable-host lifecycle, credential and native-surface connection before Nightly publication."
-          exit 1
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -171,10 +163,95 @@ jobs:
           # release target can be a branch name even when a SHA is needed.
           bun scripts/decide-preview-release.ts
 
+  # The usable-client preflight a Nightly build must pass before anything is
+  # built, signed or published (`docs/design/nightly-app.md`, "Before Nightly
+  # publishes"). It holds no secret and no environment: the channel table, the
+  # synthetic client smoke, an unsigned packaged Nightly, and the newest
+  # published Octant's host feature list, read with a read-only token. Only a
+  # Nightly run (scheduled, or a rollback) needs it; a dispatched Octant
+  # candidate skips it and is not held by it.
+  nightly-preflight:
+    name: Nightly usable-client preflight
+    needs: decide
+    if: needs.decide.outputs.build == 'true' && needs.decide.outputs.flavor == 'nightly'
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      # A rollback is checked as the source it rebuilds, against today's Octant.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      # The client smoke runs the Electron the desktop app pins, which its
+      # package fetches only on demand.
+      - run: node node_modules/electron/install.js
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+      - run: bun run --cwd apps/desktop build
+      # The packaged check reads the development-build refusal through System
+      # Events; without Accessibility access on the runner it reports that one
+      # check unverified and the rest still decide.
+      - name: Run the Nightly preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run nightly:preflight
+
+  # Linux Nightly's equivalents: the client trust tests the "Desktop Linux
+  # client trust" CI job runs, on this run's source. The AppImage payload check
+  # is part of packaging itself, which refuses before anything is uploaded.
+  # Keep the steps in step with that job in ci.yml.
+  nightly-preflight-linux:
+    name: Nightly Linux client trust
+    needs: decide
+    if: needs.decide.outputs.build == 'true' && needs.decide.outputs.flavor == 'nightly'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          bubblewrap dbus gnome-keyring libsecret-tools
+      - env:
+          OCTANT_REQUIRE_LINUX_ISOLATION: "1"
+        run: bun run --cwd scripts test -- build-desktop-peer-linux.test.ts
+      - run: bun run --cwd apps/desktop test -- --exclude=src/browserSurfaceHost.realPage.test.ts
+      - env:
+          OCTANT_SECRET_SERVICE_KEYRING_TEST: "1"
+        run: >-
+          dbus-run-session -- sh -c
+          'printf octant-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+          bun run --cwd packages/host-runtime test -- src/secretServiceKeyringSeparation.test.ts'
+
   publish:
     name: Build and publish (${{ matrix.target }})
-    needs: decide
-    if: needs.decide.outputs.build == 'true'
+    needs: [decide, nightly-preflight, nightly-preflight-linux]
+    # A Nightly build runs only after both preflights passed. An Octant
+    # candidate skips them: `skipped` is accepted for that flavor alone, so a
+    # failed, cancelled or skipped preflight never lets a Nightly through.
+    if: >-
+      ${{ !cancelled() && needs.decide.outputs.build == 'true' &&
+      ((needs.decide.outputs.flavor == 'nightly' &&
+      needs.nightly-preflight.result == 'success' &&
+      needs.nightly-preflight-linux.result == 'success') ||
+      (needs.decide.outputs.flavor == 'stable' &&
+      needs.nightly-preflight.result == 'skipped' &&
+      needs.nightly-preflight-linux.result == 'skipped')) }}
     # Holds the Developer ID and the notary profile, which packaging needs.
     # Scoping them to an environment keeps them off every other workflow in the
     # repository. This job runs the built source's own code (install scripts,
@@ -289,6 +366,16 @@ jobs:
         working-directory: ${{ env.SOURCE_DIR }}
         run: bun scripts/assert-packaged-server-starts.ts
 
+      # The signed and notarized bundle, read again: a Developer ID from the
+      # release's team, its fuses, the peer-status addon, its link scheme, its
+      # command and no client smoke harness. This workflow's own check runs on
+      # a rollback's bundle too.
+      - name: Refuse to publish a Nightly that is not the packaged client
+        if: matrix.apple_signing && needs.decide.outputs.flavor == 'nightly'
+        env:
+          OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
+        run: bun scripts/assert-packaged-nightly-client.ts --bundle "${SOURCE_DIR}/out/Octant Nightly.app" --require-developer-id
+
       - name: Publish the release archive
         id: release
         env:
@@ -357,10 +444,20 @@ jobs:
   # in the preview workflow and could read it).
   feed:
     name: Sign and publish the feed (${{ matrix.target }})
-    needs: [decide, publish]
+    needs: [decide, nightly-preflight, nightly-preflight-linux, publish]
     # A target whose build failed has no archive and fails here; the other
-    # target's feed still publishes, as when each build signed its own.
-    if: ${{ !cancelled() && needs.decide.outputs.build == 'true' }}
+    # target's feed still publishes, as when each build signed its own. The
+    # preflight condition repeats the build's, so no feed names a Nightly that
+    # did not pass it.
+    if: >-
+      ${{ !cancelled() && needs.decide.outputs.build == 'true' &&
+      needs.publish.result != 'skipped' &&
+      ((needs.decide.outputs.flavor == 'nightly' &&
+      needs.nightly-preflight.result == 'success' &&
+      needs.nightly-preflight-linux.result == 'success') ||
+      (needs.decide.outputs.flavor == 'stable' &&
+      needs.nightly-preflight.result == 'skipped' &&
+      needs.nightly-preflight-linux.result == 'skipped')) }}
     environment: preview
     strategy:
       fail-fast: false

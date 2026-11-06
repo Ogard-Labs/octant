@@ -8,34 +8,32 @@ one host per data folder, how updates are verified, and which rings exist
 [current release boundary](../architecture.md#current-release-boundary)).
 DESIGN.md owns Settings presentation.
 
-Status: identity, packaging, inverted icons, update-ring and authenticated window-bootstrap
-foundations are implemented. A compatible authenticated Stable app can register
-an ordinary Nightly window and give its own bundled renderer a short-lived host
-capability. Development, ad-hoc and incompatible builds refuse. Nightly never
-imports the host-owning desktop module, initializes host credentials, owns a
-host or migrates shared data. When Stable is closed, Nightly can ask a validated
-installed Stable to start its host without opening a Stable window. The bounded embedded Browser frame/input path is implemented. Complete Browser
-and other native broker parity remain unfinished; this is not yet a usable
-second app.
+Status: Octant Nightly is a usable second client. A compatible signed Octant
+registers an ordinary Nightly window, gives its bundled renderer a short-lived
+host capability and admits its native main per window; Nightly's local native
+surfaces, its pickers, file handoffs, provider keys and Code approvals through
+that admission, the embedded Browser (popups, fields, frames and
+accessibility), lifecycle and reconnect, the full `octant-nightly` command,
+roll-forward rollback, the app-named feed and Linux client trust are built.
+Development, ad-hoc and incompatible builds refuse. Nightly never imports the
+host-owning desktop module, initializes host credentials, owns Octant's host or
+migrates shared data. Canvas prototypes, Browser extensions, Computer Use,
+managed tools and a second Project window remain brokered and say they are not
+available in Nightly yet.
 
-The remaining delivery includes complete embedded browsing parity,
-full lifecycle acceptance, shared sign-in operations and the functional
-release preflight. The full `octant-nightly` command is built
-([below](#the-octant-nightly-command)). Coexistence and rollback
-still need their remaining implementation and packaged evidence. Bounded native
-lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
-preview workflow selects each run's flavor, artifact and payload-smoke paths
-from its ring. An explicit early gate stops only the scheduled Nightly run
-before build, signing or publication; a dispatched run builds Octant on
-`candidate` and is not held by it. The functional client change must replace
-the gate with lifecycle, credential and native-surface parity evidence. Stable
-release and local packaging are unaffected by that gate.
-Nothing in this foundation authorizes installation or publication.
+The early gate that stopped every scheduled Nightly run is replaced by the
+[usable-client preflight](#the-usable-client-preflight): a scheduled or
+rollback Nightly run is built, signed and published only after it passes, and
+a dispatched Octant candidate is not held by it. Publishing still needs a
+maintainer's release authorization, and the maintainer checks in
+[Before Nightly publishes](#before-nightly-publishes) remain open. Stable
+release and local packaging are unaffected by the preflight. Nothing here
+authorizes installation or publication.
 
 The two-binary channel split below (2026-11-05) is built: Octant follows
 `stable` or `candidate`, Nightly follows only `preview`, packaging and the
-release workflow stamp the flavor from the ring, and the scheduled Nightly run
-alone is held by the functional-client preflight. The Octant Nightly row in
+release workflow stamp the flavor from the ring, and only a Nightly run is held
+by the usable-client preflight. The Octant Nightly row in
 Octant's Settings › Updates is built for packaged macOS Octant, including its
 three checks; a signed install from a published Nightly build has not yet been
 exercised. Nightly's own host on separate test data is built for macOS: the
@@ -47,10 +45,9 @@ Nightly running its test host has not yet been exercised.
 Every desktop channel now has a class in Nightly's client mode, and Octant-only
 administration is absent from a Nightly client window
 ([below](#what-a-nightly-client-window-offers)). The four maintainer decisions of
-2026-11-06 ([below](#maintainer-decisions-2026-11-06)) are recorded; apart from
-that classification they are not built.
+2026-11-06 ([below](#maintainer-decisions-2026-11-06)) are recorded and built.
 [Before Nightly publishes](#before-nightly-publishes) lists what the first
-Nightly publication still needs.
+Nightly publication still needs: the maintainer checks.
 
 ## Maintainer decisions (2026-11-06)
 
@@ -650,9 +647,8 @@ then answers for that frame's fields in place of the preload; and a select list
 held in a frame the walk cannot follow stays closed rather than opening
 Chromium's popup in the hidden window.
 
-The current foundation remains publication-gated while full IME reconversion,
-other native brokers, the maintainers' physical VoiceOver check and the
-remaining lifecycle behavior need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
+Full IME reconversion is not supported, and the maintainers' physical IME and
+VoiceOver checks remain maintainer items. An isolated synthetic fixture validates only the exercised components; it does not establish
 packaged coexistence, signed-in browsing, or native identity verification.
 
 ### Accessibility
@@ -851,7 +847,8 @@ channel is missing from it:
 ## Before Nightly publishes
 
 The first scheduled Nightly publication needs all of these, each with its own
-evidence; the preflight that replaces the early gate checks them:
+evidence; the [usable-client preflight](#the-usable-client-preflight) checks
+them on every Nightly run:
 
 - [x] Every desktop channel classified; Octant-only administration hidden in
       the Nightly client.
@@ -864,7 +861,8 @@ evidence; the preflight that replaces the early gate checks them:
       negative tests, and a host feature list in the window bootstrap.
 - [x] Pickers and file handoffs, provider credentials and API keys, and Code
       operation approvals through that admission.
-- [ ] "Needs a newer Octant" driven by the host's feature list.
+- [x] "Needs a newer Octant" driven by the host's feature list (see
+      [native-main admission](#native-main-admission)).
 - [x] Embedded Browser page popups: select lists, page dialogs, link and
       image menus, file chooser and `window.open` (see
       [page popups](#page-popups)).
@@ -883,11 +881,67 @@ evidence; the preflight that replaces the early gate checks them:
 - [x] Roll-forward rollback, a published host feature list and the app named
       in the signed feed (decision 4).
 - [x] Linux client trust, designed and built (decision 3).
-- [ ] The usable-client preflight in place of the early gate, with no secrets,
-      checking compatibility against the published Octant features.
-- [ ] Maintainer checks: a signed pair, a signed install from Settings,
-      real-account sign-ins, physical IME and VoiceOver checks, and approval of
-      the first scheduled publication.
+- [x] The usable-client preflight in place of the early gate, with no secrets,
+      checking compatibility against the published Octant features (see
+      [the usable-client preflight](#the-usable-client-preflight)).
+- [ ] Maintainer checks, on the standing "Maintainer live smokes" list: a
+      signed pair, a signed install from Settings, real-account sign-ins,
+      physical IME and VoiceOver checks, publishing an Octant candidate that
+      carries `octant-host-features.json`, and approval of the first scheduled
+      publication.
+
+### The usable-client preflight
+
+`Release (preview)` runs two preflight jobs before a Nightly build, on the
+source it will build (a rollback's tag, or `main`). Neither has an environment
+or a secret; the macOS job reads releases with the run's read-only
+`GITHUB_TOKEN`. The build and feed jobs of a Nightly run need both to succeed;
+a dispatched Octant candidate skips them and builds as before.
+
+`bun run nightly:preflight` (`scripts/nightly-preflight.ts`) checks:
+
+1. **Channels.** Every desktop channel has a class in Nightly's table, no
+   class names a channel that is gone, and every core channel (pickers,
+   provider credentials and API keys, Code approvals, external links and
+   Open in, notifications and the badge, the application menu, `octant-nightly://`
+   links, and the Browser's presentation, commands and tabs) is `local`. A
+   `brokered` channel in that table is one Nightly still refuses, so it cannot
+   be core.
+2. **Synthetic client smoke.** `scripts/smoke-nightly-client.ts` passes (see
+   [synthetic client smoke](#synthetic-client-smoke)).
+3. **Unsigned packaged Nightly.** `scripts/smoke-packaged-nightly-unsigned.ts`
+   packages Nightly without signing and checks its version, its
+   development-build refusal and its test-data host start; the bundle then
+   passes the packaged client check below without the Developer ID. The
+   refusal alert is read through System Events, so on a runner without
+   Accessibility access that one check is skipped: the job prints a warning
+   and its summary says the refusal is unverified.
+4. **Compatibility.** The newest published Octant release, stable or
+   candidate by publication time, must carry `octant-host-features.json`
+   describing that version, with Nightly's native client protocol and every
+   feature in `NIGHTLY_HOST_FEATURES`. Otherwise the run fails with "Publish an
+   Octant candidate with these host features first: …", naming the missing
+   features. The document is unsigned and advisory: only this CI check reads
+   it.
+
+`--only` and `--releases-fixture` exist for local runs and refuse under CI.
+
+The Linux job runs the client trust tests of the "Desktop Linux client trust"
+CI job (kernel peer checks with Bubblewrap and another user, the desktop
+suite, the Secret Service separation) on the same source. The AppImage's
+payload check is part of packaging itself, which refuses before an archive is
+uploaded.
+
+After signing and notarizing, the build job runs
+`scripts/assert-packaged-nightly-client.ts` beside the packaged-server check:
+a Developer ID signature from the release's team, the desktop runtime's
+fuses, the native peer-status addon, the `octant-nightly` link scheme, the
+full `octant-nightly` command and its launcher, and no file of the client
+smoke's harness. A Nightly that fails it is not published.
+
+Passing the preflight makes a Nightly run publishable; it does not authorize
+one. The scheduled run publishes only once a maintainer has approved the first
+scheduled publication.
 
 ### Synthetic client smoke
 
@@ -1012,8 +1066,8 @@ an interpreter that also accepts arbitrary JavaScript would not identify trusted
 Nightly application code. Fixed-entry packaging alone does not authenticate a
 peer, grant a window capability, establish same-Team signed-app acceptance or
 complete the stable-host bridge. Opening the renderer requires the authenticated
-window protocol below. Publication remains gated until the full lifecycle,
-native brokers and embedded Browser parity are implemented and verified.
+window protocol below. Publication is held by the
+[usable-client preflight](#the-usable-client-preflight).
 
 ## Authenticated desktop status preflight
 
@@ -1187,7 +1241,7 @@ Unsigned native refusal and mechanical lifecycle tests are separate from
 Developer ID same-Team admission. Actual signed-pair registration, active-owner
 process exit and full-payload renderer/native acceptance still need their
 evidence. The retained-client policy has separate focused and synthetic evidence;
-full signed lifecycle acceptance remains unrun. The functional publication gate stays in force.
+full signed lifecycle acceptance remains unrun and stays with the maintainer checks.
 
 ## Linux client trust
 
@@ -1480,7 +1534,7 @@ workflow's declared version, today's date and the run number, so it is newer
 than every earlier Nightly, and signs and publishes it with the workflow's
 current scripts. The tag must already read the app-named Nightly feed; an older
 one would decode it as malformed and never update again, so the run refuses it.
-The run passes the same publication gate as a scheduled one.
+The run passes the same [usable-client preflight](#the-usable-client-preflight) as a scheduled one, run on the tag it rebuilds.
 
 Building runs the source's own code (install scripts, build, packaging) in the
 job that holds the Developer ID and notary credentials, so the rollback source
@@ -1515,8 +1569,9 @@ and candidate, carries `octant-host-features.json` beside its archives:
 
 `scripts/write-host-features.ts` writes it from the contracts the host
 advertises from (`NIGHTLY_NATIVE_CLIENT_PROTOCOL`, `NIGHTLY_HOST_FEATURES`), and
-decodes it with `OctantHostFeaturesDocument`. The Nightly preflight compares a
-Nightly build's needs with the published Octant's document before publishing.
+decodes it with `OctantHostFeaturesDocument`. The
+[Nightly preflight](#the-usable-client-preflight) compares a Nightly build's
+needs with the published Octant's document before publishing.
 The document reads whatever protocol a newer Octant names, and
 `readPublishedHostFeatures` reports a different protocol as a mismatch rather
 than an unreadable file. It is advisory: the asset is unsigned and rides on a

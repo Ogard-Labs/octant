@@ -13757,8 +13757,11 @@ Builds of `main` are meant to publish daily on the `preview` ring as the second
 app Octant Nightly, and on-demand pre-releases of the next stable on the
 `candidate` ring as Octant's Preview channel, as GitHub pre-releases named
 `v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip and a linux-x64
-AppImage. The scheduled Nightly run is stopped by a preflight until Nightly is
-a usable client. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
+AppImage. Nightly is a usable client; a scheduled or rollback Nightly run is
+built and published only after its secret-free
+[usable-client preflight](design/nightly-app.md#the-usable-client-preflight)
+passes, and the first scheduled publication still needs a maintainer's
+approval. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
 in the `stable` environment) has not been used, so Octant itself has not
 shipped. The first release counts as shipped when a maintainer approves the
 first stable version; daily builds stay previews. That first stable release is
