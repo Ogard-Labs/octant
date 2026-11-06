@@ -132,9 +132,15 @@ IME reconversion is not supported. A page's select lists, link and
 image menus open as native menus in the Nightly window, its alerts, confirmations
 and leave-page questions as sheets, and its file fields as Nightly's own open
 panel, also inside frames; links that would open a new window are refused, as in
-Octant. Page accessibility,
-other native brokers and full lifecycle acceptance remain
-unfinished, so this is not a usable Nightly release. Installation and
+Octant. With VoiceOver on, the page can be read and used in the Nightly window:
+headings, links, buttons, fields, sliders and frames are announced with their
+names, values and states, the VoiceOver cursor follows the page's focus, and
+activating, focusing or adjusting a control acts on the page as your own click
+or key would. A password field is announced by name only, never its contents.
+While an agent is acting on the page, these actions wait for it to finish.
+VoiceOver on a physical Mac has not been checked yet. Other native brokers and
+full lifecycle acceptance remain unfinished, so this is not a usable Nightly
+release. Installation and
 publication remain pending.
 
 Nightly has its own application menu, with **Settings…** (⌘,) and the same

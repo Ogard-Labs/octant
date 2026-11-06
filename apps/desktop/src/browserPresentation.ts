@@ -185,6 +185,60 @@ export class BrowserPresentation {
     point: { readonly x: number; readonly y: number },
     authorized: () => boolean,
   ): boolean {
+    return this.#buttonPair(id, point, "right", authorized);
+  }
+
+  /**
+   * A left click at a page point Stable computed for a mirrored node, sent as
+   * the person's own press and release through the same native input.
+   */
+  pressAt(
+    id: string,
+    point: { readonly x: number; readonly y: number },
+    authorized: () => boolean,
+  ): boolean {
+    return this.#buttonPair(id, point, "left", authorized);
+  }
+
+  /** One key press and release, as the person's own; refused while that key is held. */
+  keyPress(id: string, keyCode: string, authorized: () => boolean): boolean {
+    const owned = this.#current(id);
+    if (
+      owned === undefined ||
+      !owned.visible ||
+      !owned.inputReady ||
+      !authorized() ||
+      owned.keys.has(keyCode) ||
+      owned.buttons.size !== 0
+    )
+      return false;
+    const epoch = owned.layoutEpoch;
+    const current = () =>
+      this.#current(id) === owned && owned.visible && owned.layoutEpoch === epoch && authorized();
+    let accepted = false;
+    owned.keys.add(keyCode);
+    try {
+      owned.source.input({ type: "keyDown", keyCode, modifiers: [] });
+      accepted = current();
+    } catch {
+      /* A partial native press still needs its matching release. */
+    } finally {
+      try {
+        owned.source.input({ type: "keyUp", keyCode, modifiers: [] });
+      } catch {
+        accepted = false;
+      }
+      owned.keys.delete(keyCode);
+    }
+    return accepted && current();
+  }
+
+  #buttonPair(
+    id: string,
+    point: { readonly x: number; readonly y: number },
+    button: "left" | "right",
+    authorized: () => boolean,
+  ): boolean {
     const owned = this.#current(id);
     if (
       owned === undefined ||
@@ -204,11 +258,11 @@ export class BrowserPresentation {
     const current = () =>
       this.#current(id) === owned && owned.visible && owned.layoutEpoch === epoch && authorized();
     let accepted = false;
-    owned.buttons.set("right", point);
+    owned.buttons.set(button, point);
     try {
       owned.source.input({
         type: "mouseDown",
-        button: "right",
+        button,
         ...point,
         clickCount: 1,
         modifiers: [],
@@ -221,7 +275,7 @@ export class BrowserPresentation {
       try {
         owned.source.input({
           type: "mouseUp",
-          button: "right",
+          button,
           ...release,
           clickCount: 1,
           modifiers: [],
@@ -229,7 +283,7 @@ export class BrowserPresentation {
       } catch {
         accepted = false;
       }
-      owned.buttons.delete("right");
+      owned.buttons.delete(button);
     }
     return accepted && current();
   }

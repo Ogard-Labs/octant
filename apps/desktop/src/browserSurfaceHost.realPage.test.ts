@@ -84,6 +84,17 @@ const pages: Record<string, string> = {
     <div id="rich" contenteditable="true" style="position:absolute;left:10px;top:100px;width:200px;font:16px/20px sans-serif">one<br>two</div>
     <select id="size" style="position:absolute;left:10px;top:160px;width:120px" onchange="document.title = 'Size ' + this.value"><option value="s">Small</option><option value="l">Large</option></select>
     <button id="hello" style="position:absolute;left:200px;top:160px;width:100px;height:24px" onclick="alert('Hello from a frame'); document.title = 'Greeted'">Hello</button>`,
+  "/accessible": `<!doctype html><title>Accessible</title>
+    <h1>Fixture heading</h1>
+    <nav aria-label="Primary"><a id="more" href="/form">Read more</a></nav>
+    <label for="mail">Email</label><input id="mail" value="ada@example.com">
+    <label for="secret">Password</label><input id="secret" type="password" value="hunter2-secret">
+    <button id="save" style="display:block;width:120px;height:30px" onclick="document.title = 'Saved ' + document.getElementById('mail').value">Save</button>
+    <input id="level" type="range" aria-label="Level" min="0" max="10" value="4">
+    <div role="status" id="news"></div>
+    <iframe id="near" title="Near" src="/inner-accessible" width="300" height="80" style="border:0"></iframe>
+    <iframe id="far" title="Far" src="{{other}}/inner-accessible" width="300" height="80" style="border:0"></iframe>`,
+  "/inner-accessible": `<!doctype html><title>Inner</title><button id="inner" style="width:100px;height:30px" onclick="parent.postMessage('inner', '*'); document.title = 'Inner pressed'">Inner button</button>`,
   "/greets": `<!doctype html><title>Greeting</title><script>alert("Welcome"); document.title = "Greeted";</script>`,
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
@@ -1027,6 +1038,106 @@ describe.skipIf(chrome === undefined)(
         } finally {
           await rm(folder, { recursive: true, force: true });
         }
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("mirrors a page's headings, links, fields and frames, and presses a mirrored button as the person", async () => {
+      const { page, host, contextId, send } = await presentedPage("/accessible");
+      try {
+        await page.waitForFunction(() => document.querySelectorAll("iframe").length === 2);
+        await page.frameLocator("#far").locator("#inner").waitFor();
+        await page.frameLocator("#near").locator("#inner").waitFor();
+        let mirror: Extract<HumanBrowserResult, { status: "accessibility" }>["update"] | undefined;
+        type Mirrored = Extract<typeof mirror, { kind: "full" }>["nodes"][number];
+        let nodes: ReadonlyArray<Mirrored> = [];
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          const result = await send({ kind: "accessibility", revision: 0 });
+          if (result.status === "accessibility" && result.update.kind === "full") {
+            mirror = result.update;
+            nodes = result.update.nodes;
+            if (nodes.filter((node) => node.name === "Inner button").length === 2) break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        if (mirror === undefined) throw new Error("No mirror.");
+        const named = (name: string) =>
+          nodes.find((node) => node.name === name && node.role !== "text");
+        expect(named("Fixture heading")).toMatchObject({ role: "heading", level: 1 });
+        expect(named("Read more")).toMatchObject({ role: "link" });
+        expect(named("Primary")).toMatchObject({ role: "navigation" });
+        expect(named("Email")).toMatchObject({ role: "textbox", value: "ada@example.com" });
+        expect(named("Password")).toMatchObject({ role: "textbox", secure: true });
+        expect(named("Password")?.value).toBeUndefined();
+        expect(JSON.stringify(nodes)).not.toContain("hunter2");
+        expect(JSON.stringify(nodes)).not.toContain("/form");
+        expect(named("Level")).toMatchObject({
+          role: "slider",
+          valueNow: 4,
+          valueMin: 0,
+          valueMax: 10,
+        });
+        const save = named("Save");
+        expect(save).toMatchObject({ role: "button", focusable: true });
+        const box = await page.locator("#save").boundingBox();
+        expect(save?.bounds?.x).toBeCloseTo(box?.x ?? -1, 0);
+        expect(save?.bounds?.y).toBeCloseTo(box?.y ?? -1, 0);
+        // Both frames' buttons travel, in the top page's coordinates.
+        const inner = nodes.filter((node) => node.name === "Inner button");
+        expect(inner).toHaveLength(2);
+        for (const [index, frame] of (["#near", "#far"] as const).entries()) {
+          const frameBox = await page.locator(frame).boundingBox();
+          expect(inner[index]?.bounds?.y).toBeGreaterThanOrEqual((frameBox?.y ?? 0) - 1);
+          expect(inner[index]?.bounds?.y).toBeLessThan(
+            (frameBox?.y ?? 0) + (frameBox?.height ?? 0),
+          );
+        }
+
+        // Nothing changed: the held-open ask answers idle.
+        expect(await send({ kind: "accessibility", revision: mirror.revision })).toEqual({
+          status: "idle",
+        });
+
+        const act = (nodeId: string | undefined, action: Record<string, unknown>) =>
+          send({ kind: "accessibility-action", revision: mirror?.revision ?? 1, nodeId, action });
+        expect(await act(save?.id, { action: "press" })).toEqual({ status: "accepted" });
+        await expect.poll(() => page.title()).toBe("Saved ada@example.com");
+        expect(await act(named("Password")?.id, { action: "set-value", value: "x" })).toEqual({
+          status: "refused",
+        });
+        expect(
+          await act(named("Email")?.id, { action: "set-value", value: "grace@example.com" }),
+        ).toEqual({
+          status: "accepted",
+        });
+        expect(await page.locator("#mail").inputValue()).toBe("grace@example.com");
+        expect(await act(inner[1]?.id, { action: "press" })).toEqual({ status: "accepted" });
+        await expect
+          .poll(() =>
+            page
+              .frameLocator("#far")
+              .locator("body")
+              .evaluate(() => document.title),
+          )
+          .toBe("Inner pressed");
+
+        // While an agent action holds the page, the mirror's actions are refused.
+        const waiting = host.act(contextId, {
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Released", present: true }],
+            match: "all",
+            timeoutMs: 10_000,
+          },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(await act(save?.id, { action: "press" })).toEqual({ status: "refused" });
+        await page.evaluate(() => {
+          document.getElementById("news")?.append("Released");
+        });
+        await waiting;
         host.closeContext(contextId);
       } finally {
         await page.context().close();

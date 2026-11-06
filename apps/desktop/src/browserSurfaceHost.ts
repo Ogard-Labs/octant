@@ -22,6 +22,11 @@ import { humanFrameReach, mapHumanFramePoint, type HumanFrameScope } from "./bro
 import { BrowserPresentation, type HumanBrowserSource } from "./browserPresentation";
 import { BrowserPagePopups } from "./browserPagePopups";
 import {
+  actOnBrowserAccessibilityNode,
+  BrowserAccessibilityWatch,
+  readBrowserAccessibility,
+} from "./browserAccessibilityMirror";
+import {
   answerBrowserHeldSelect,
   dismissBrowserHeldSelect,
   readBrowserHeldSelect,
@@ -1636,6 +1641,73 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     };
   };
 
+  /**
+   * Each tab's accessibility mirror, made on Nightly's first ask and kept on
+   * Stable's own protocol attachment for the presentation. The page's
+   * accessibility events stay on only while Nightly keeps asking.
+   */
+  const accessibilityWatches = new WeakMap<OwnedTab, BrowserAccessibilityWatch>();
+  const accessibilityOf = (tab: OwnedTab): BrowserAccessibilityWatch | undefined => {
+    const known = accessibilityWatches.get(tab);
+    if (known !== undefined) return known;
+    const view = tab.view;
+    const client = view.webContents.debugger;
+    if (!humanDebuggers.has(client) || client.on === undefined || view.webContents.isDestroyed())
+      return undefined;
+    const send: SurfaceProtocolSend = (method, parameters, sessionId) =>
+      client.sendCommand(method, parameters, sessionId);
+    const targets = frameTargetsOf(client);
+    const enabled = new Map<string, string | undefined>();
+    const disable = () => {
+      for (const sessionId of enabled.values())
+        void send("Accessibility.disable", undefined, sessionId).catch(() => undefined);
+      enabled.clear();
+    };
+    let generation = scriptGenerations.get(view);
+    const watch = new BrowserAccessibilityWatch({
+      read: (ordinal) =>
+        readBrowserAccessibility({
+          send,
+          targets,
+          ordinal,
+          enable: async (sessionId) => {
+            const key = sessionId ?? "";
+            if (enabled.has(key) || enabled.size >= 64) return;
+            enabled.set(key, sessionId);
+            await send("Accessibility.enable", undefined, sessionId).catch(() => {
+              enabled.delete(key);
+            });
+          },
+        }),
+      idle: disable,
+    });
+    const listener: SurfaceProtocolListener = (_event, method) => {
+      if (scriptGenerations.get(view) !== generation) {
+        generation = scriptGenerations.get(view);
+        watch.replaced();
+        return;
+      }
+      if (
+        method === "Accessibility.nodesUpdated" ||
+        method === "Accessibility.loadComplete" ||
+        method === "DOM.documentUpdated" ||
+        method === "Page.frameNavigated"
+      )
+        watch.changed();
+    };
+    client.on("message", listener);
+    accessibilityWatches.set(tab, watch);
+    const release = tab.releasePopups;
+    tab.releasePopups = () => {
+      watch.close();
+      client.removeListener?.("message", listener);
+      if (accessibilityWatches.get(tab) === watch) accessibilityWatches.delete(tab);
+      if (humanDebuggers.has(client) && !view.webContents.isDestroyed()) disable();
+      release();
+    };
+    return watch;
+  };
+
   const heldSelectTokens = new WeakMap<BrowserPagePopups, string>();
   /** Read the select list a person's press held, and offer it once. */
   const offerHeldSelect = async (
@@ -1907,6 +1979,86 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         };
       }
       if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
+      if (request.kind === "accessibility") {
+        const tab = activeTab(owned);
+        const watch = owned.presentation.visible ? accessibilityOf(tab) : undefined;
+        if (watch === undefined) return { status: "refused" };
+        const live = () =>
+          current() &&
+          !signal?.aborted &&
+          activeTab(owned) === tab &&
+          owned.presentation.visible &&
+          owned.presentation.current(request.presentationId);
+        const next = await watch.next(request.revision, signal, live);
+        if (!live() || next === "refused") return { status: "refused" };
+        return next === "idle" ? { status: "idle" } : { status: "accessibility", update: next };
+      }
+      if (request.kind === "accessibility-action") {
+        // The mirror's actions are the person's own operations on the page,
+        // refused like a popup answer or composition while an agent holds it.
+        if (owned.control === "agent") return { status: "refused" };
+        const tab = activeTab(owned);
+        const found = accessibilityWatches.get(tab)?.address(request.revision, request.nodeId);
+        if (found === undefined) return { status: "refused" };
+        const view = tab.view;
+        const client = view.webContents.debugger;
+        const generation = scriptGenerations.get(view);
+        const live = () =>
+          current() &&
+          !signal?.aborted &&
+          activeTab(owned) === tab &&
+          owned.presentation.current(request.presentationId) &&
+          owned.control !== "agent" &&
+          (agentDialogGuards.get(client) ?? 0) === 0 &&
+          humanDebuggers.has(client) &&
+          scriptGenerations.get(view) === generation;
+        const counted = () => {
+          owned.control = "user";
+          owned.personInputs += 1;
+          for (const listener of personInputListeners) {
+            try {
+              listener(String(request.contextId));
+            } catch {
+              /* Isolate observers. */
+            }
+          }
+        };
+        const applied = await queueSurfaceAction(
+          owned,
+          async () => {
+            if (!live()) return false;
+            closeEditingMenu(owned);
+            await owned.textComposition.close();
+            if (!live()) return false;
+            const done = await actOnBrowserAccessibilityNode(
+              {
+                send: (method, parameters, sessionId) =>
+                  client.sendCommand(method, parameters, sessionId),
+                press: (point) => {
+                  const pressed = owned.presentation.pressAt(request.presentationId, point, live);
+                  // A press from the mirror opens a select list or dialog as the person's would.
+                  if (pressed) owned.lastHumanPress = Date.now();
+                  return pressed;
+                },
+                key: (keyCode) =>
+                  owned.presentation.keyPress(request.presentationId, keyCode, live),
+                insertText: async (text) => {
+                  if (!live()) return false;
+                  await client.sendCommand("Input.insertText", { text });
+                  return live();
+                },
+              },
+              found,
+              request.action,
+              live,
+            );
+            if (done) counted();
+            return done;
+          },
+          "humanInputTail",
+        );
+        return { status: applied && live() ? "accepted" : "refused" };
+      }
       if (
         request.kind === "popup" ||
         request.kind === "popup-answer" ||

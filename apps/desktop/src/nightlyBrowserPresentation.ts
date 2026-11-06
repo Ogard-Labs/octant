@@ -43,6 +43,11 @@ interface NightlyBrowserPresentationOptions {
   readonly current: () => boolean;
   readonly visible: () => boolean;
   readonly focused: () => boolean;
+  /**
+   * Whether an assistive technology such as VoiceOver is reading this app. The
+   * page's accessibility mirror is asked for, and acted through, only then.
+   */
+  readonly assistiveTechnology?: () => boolean;
   readonly execute: (
     request: HumanBrowserRequest,
     signal: AbortSignal,
@@ -85,6 +90,7 @@ export class NightlyBrowserPresentation {
   readonly #popupTasks = new Set<Promise<void>>();
   readonly #popupOpen = new Set<string>();
   readonly #pointers = new Map<string, { readonly x: number; readonly y: number }>();
+  readonly #mirrorReads = new Set<string>();
   #pageMenu: AbortController | undefined;
   #pageMenuPresentation: Presentation | undefined;
   readonly #pageMenuTasks = new Set<Promise<void>>();
@@ -116,9 +122,56 @@ export class NightlyBrowserPresentation {
         ].includes(request.kind)
       )
         return Promise.resolve(refused());
+      if (request.kind === "accessibility") return this.#readMirror(request);
+      if (request.kind === "accessibility-action" && !this.#assistiveTechnology())
+        return Promise.resolve(refused());
       return this.#enqueue(request, false);
     } catch {
       return Promise.resolve(refused());
+    }
+  }
+
+  #assistiveTechnology(): boolean {
+    try {
+      return this.#options.assistiveTechnology?.() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * One held-open ask for the page's accessibility mirror. It bypasses the
+   * ordered input queue, as Stable holds it open for up to a second, and is
+   * asked only while an assistive technology reads this app and the Browser
+   * view is shown: otherwise Stable never builds the mirror at all.
+   */
+  async #readMirror(
+    request: Extract<HumanBrowserRequest, { kind: "accessibility" }>,
+  ): Promise<HumanBrowserResult> {
+    const owned = this.#presentations.get(String(request.contextId));
+    const key = String(request.presentationId);
+    const allowed = () =>
+      this.#assistiveTechnology() &&
+      this.#options.current() &&
+      !this.#lifetime.signal.aborted &&
+      !this.#hidden &&
+      this.#options.visible() &&
+      owned !== undefined &&
+      this.#presentations.get(String(request.contextId)) === owned &&
+      owned.presentationId === request.presentationId &&
+      String(owned.threadId) === String(request.threadId) &&
+      owned.layout.visible;
+    if (!allowed() || this.#mirrorReads.has(key)) return refused();
+    this.#mirrorReads.add(key);
+    try {
+      const result = await this.#options
+        .execute(request, AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(2_000)]))
+        .catch(refused);
+      return allowed() && (result.status === "accessibility" || result.status === "idle")
+        ? result
+        : refused();
+    } finally {
+      this.#mirrorReads.delete(key);
     }
   }
 
@@ -290,6 +343,17 @@ export class NightlyBrowserPresentation {
         String(owned.threadId) !== String(request.threadId))
     )
       return refused();
+    // An action from the accessibility mirror is the person's own press: it
+    // waits on the same popups and menus, focus and visibility as a click.
+    if (
+      request.kind === "accessibility-action" &&
+      (internal ||
+        !this.#assistiveTechnology() ||
+        queuedMenuEpoch !== owned?.menuEpoch ||
+        this.#pageMenuPresentation === owned ||
+        (owned !== undefined && this.#popupOpen.has(String(owned.presentationId))))
+    )
+      return refused();
     if (
       !internal &&
       request.kind === "input" &&
@@ -311,7 +375,9 @@ export class NightlyBrowserPresentation {
     )
       return refused();
     if (
-      ["attach", "layout", "detach", "command", "tab"].includes(request.kind) ||
+      ["attach", "layout", "detach", "command", "tab", "accessibility-action"].includes(
+        request.kind,
+      ) ||
       (request.kind === "input" &&
         (request.input.type === "mouseDown" || menuKeyDown(request.input)))
     )
@@ -320,7 +386,10 @@ export class NightlyBrowserPresentation {
     if (!hiding && request.kind !== "detach" && (this.#hidden || !this.#options.visible()))
       return refused();
     if (
-      (request.kind === "input" || request.kind === "editor" || request.kind === "composition") &&
+      (request.kind === "input" ||
+        request.kind === "editor" ||
+        request.kind === "composition" ||
+        request.kind === "accessibility-action") &&
       !this.#options.focused() &&
       !(
         internal &&

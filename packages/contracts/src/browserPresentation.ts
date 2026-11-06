@@ -294,6 +294,210 @@ export const HumanBrowserPopupAnswer = Schema.Union(
   }).annotations(strict),
 );
 export type HumanBrowserPopupAnswer = typeof HumanBrowserPopupAnswer.Type;
+/**
+ * A bounded description of the page's accessibility tree, which Nightly mirrors
+ * over the Browser image so a screen reader can read and operate the page. It
+ * only describes: page addresses never travel, a password field carries its
+ * role and name but never its value, and every action from the mirror is
+ * checked in Stable as the person's own input.
+ */
+export const MAX_BROWSER_ACCESSIBILITY_NODES = 1_500;
+export const MAX_BROWSER_ACCESSIBILITY_DEPTH = 64;
+export const MAX_BROWSER_ACCESSIBILITY_CHILDREN = 512;
+export const MAX_BROWSER_ACCESSIBILITY_TEXT = 512;
+export const MAX_BROWSER_ACCESSIBILITY_VALUE = 1_024;
+export const BROWSER_ACCESSIBILITY_ROLES = [
+  "alert",
+  "alertdialog",
+  "article",
+  "banner",
+  "button",
+  "cell",
+  "checkbox",
+  "columnheader",
+  "combobox",
+  "complementary",
+  "contentinfo",
+  "dialog",
+  "document",
+  "figure",
+  "form",
+  "generic",
+  "grid",
+  "gridcell",
+  "group",
+  "heading",
+  "img",
+  "link",
+  "list",
+  "listbox",
+  "listitem",
+  "log",
+  "main",
+  "menu",
+  "menubar",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "navigation",
+  "option",
+  "paragraph",
+  "progressbar",
+  "radio",
+  "region",
+  "row",
+  "rowheader",
+  "search",
+  "searchbox",
+  "separator",
+  "slider",
+  "spinbutton",
+  "status",
+  "switch",
+  "tab",
+  "table",
+  "tablist",
+  "tabpanel",
+  "text",
+  "textbox",
+  "tree",
+  "treeitem",
+] as const;
+export const BrowserAccessibilityRole = Schema.Literal(...BROWSER_ACCESSIBILITY_ROLES);
+export type BrowserAccessibilityRole = typeof BrowserAccessibilityRole.Type;
+/** A mirrored node's identity: the frame's ordinal and the page's own node number. */
+export const BROWSER_ACCESSIBILITY_NODE_ID = /^[0-9a-z]{1,8}-[0-9]{1,12}$/;
+const AccessibilityNodeId = Schema.String.pipe(Schema.pattern(BROWSER_ACCESSIBILITY_NODE_ID));
+const AccessibilityText = (maximum: number) =>
+  Schema.String.pipe(
+    Schema.maxLength(maximum),
+    Schema.filter((text) => text.isWellFormed()),
+  );
+const Tristate = Schema.Literal("true", "false", "mixed");
+const RangeNumber = Schema.Number.pipe(Schema.between(-1e9, 1e9));
+export const BrowserAccessibilityNode = Schema.Struct({
+  id: AccessibilityNodeId,
+  role: BrowserAccessibilityRole,
+  name: Schema.optional(AccessibilityText(MAX_BROWSER_ACCESSIBILITY_TEXT)),
+  description: Schema.optional(AccessibilityText(MAX_BROWSER_ACCESSIBILITY_TEXT)),
+  value: Schema.optional(AccessibilityText(MAX_BROWSER_ACCESSIBILITY_VALUE)),
+  /** A password field: its value never leaves Stable. */
+  secure: Schema.optional(Schema.Literal(true)),
+  level: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.between(1, 9))),
+  checked: Schema.optional(Tristate),
+  pressed: Schema.optional(Tristate),
+  expanded: Schema.optional(Schema.Boolean),
+  selected: Schema.optional(Schema.Boolean),
+  disabled: Schema.optional(Schema.Literal(true)),
+  focusable: Schema.optional(Schema.Literal(true)),
+  required: Schema.optional(Schema.Literal(true)),
+  invalid: Schema.optional(Schema.Literal(true)),
+  readonly: Schema.optional(Schema.Literal(true)),
+  multiline: Schema.optional(Schema.Literal(true)),
+  valueNow: Schema.optional(RangeNumber),
+  valueMin: Schema.optional(RangeNumber),
+  valueMax: Schema.optional(RangeNumber),
+  live: Schema.optional(Schema.Literal("polite", "assertive")),
+  bounds: Schema.optional(PageRect),
+  children: Schema.Array(AccessibilityNodeId).pipe(
+    Schema.maxItems(MAX_BROWSER_ACCESSIBILITY_CHILDREN),
+  ),
+})
+  .pipe(Schema.filter((node) => node.secure !== true || node.value === undefined))
+  .annotations(strict);
+export type BrowserAccessibilityNode = typeof BrowserAccessibilityNode.Type;
+const AccessibilityRevision = Sequence.pipe(Schema.greaterThan(0));
+/**
+ * One change to the mirrored tree. A full tree replaces what Nightly holds; a
+ * patch applies to exactly its base revision and is refused against any other.
+ */
+export const BrowserAccessibilityUpdate = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("full"),
+    revision: AccessibilityRevision,
+    rootId: AccessibilityNodeId,
+    focusedId: Schema.optional(AccessibilityNodeId),
+    truncated: Schema.Boolean,
+    nodes: Schema.Array(BrowserAccessibilityNode).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_BROWSER_ACCESSIBILITY_NODES),
+    ),
+  })
+    .pipe(
+      Schema.filter(
+        (update) =>
+          browserAccessibilityTreeIsSound(update.nodes, update.rootId) &&
+          (update.focusedId === undefined ||
+            update.nodes.some((node) => node.id === update.focusedId)),
+      ),
+    )
+    .annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("patch"),
+    base: AccessibilityRevision,
+    revision: AccessibilityRevision,
+    rootId: AccessibilityNodeId,
+    focusedId: Schema.optional(AccessibilityNodeId),
+    truncated: Schema.Boolean,
+    nodes: Schema.Array(BrowserAccessibilityNode).pipe(
+      Schema.maxItems(MAX_BROWSER_ACCESSIBILITY_NODES),
+    ),
+    removed: Schema.Array(AccessibilityNodeId).pipe(
+      Schema.maxItems(MAX_BROWSER_ACCESSIBILITY_NODES),
+    ),
+  })
+    .pipe(Schema.filter((update) => update.base < update.revision))
+    .annotations(strict),
+);
+export type BrowserAccessibilityUpdate = typeof BrowserAccessibilityUpdate.Type;
+
+/**
+ * A mirrored tree is sound when its identities are unique, its root exists,
+ * every child exists and has one parent, every node is reachable from the root,
+ * and the tree is no deeper than the mirror's bound. Nightly checks the same
+ * rule after applying a patch.
+ */
+export function browserAccessibilityTreeIsSound(
+  nodes: ReadonlyArray<{ readonly id: string; readonly children: ReadonlyArray<string> }>,
+  rootId: string,
+): boolean {
+  if (nodes.length > MAX_BROWSER_ACCESSIBILITY_NODES) return false;
+  const byId = new Map<string, ReadonlyArray<string>>();
+  for (const node of nodes) {
+    if (byId.has(node.id)) return false;
+    byId.set(node.id, node.children);
+  }
+  if (!byId.has(rootId)) return false;
+  const parented = new Set<string>();
+  for (const children of byId.values())
+    for (const child of children) {
+      if (!byId.has(child) || child === rootId || parented.has(child)) return false;
+      parented.add(child);
+    }
+  // With one parent each and an unparented root, a walk from the root meets
+  // each node once; a cycle elsewhere is unreachable and fails the count.
+  let reached = 1;
+  let level = [rootId];
+  for (let depth = 1; level.length > 0; depth += 1) {
+    const next: string[] = [];
+    for (const id of level) next.push(...(byId.get(id) ?? []));
+    if (next.length > 0 && depth >= MAX_BROWSER_ACCESSIBILITY_DEPTH) return false;
+    reached += next.length;
+    if (reached > byId.size) return false;
+    level = next;
+  }
+  return reached === byId.size;
+}
+export const BrowserAccessibilityAction = Schema.Union(
+  Schema.Struct({
+    action: Schema.Literal("press", "focus", "scroll-into-view", "increment", "decrement"),
+  }).annotations(strict),
+  Schema.Struct({
+    action: Schema.Literal("set-value"),
+    value: AccessibilityText(MAX_BROWSER_ACCESSIBILITY_VALUE),
+  }).annotations(strict),
+);
+export type BrowserAccessibilityAction = typeof BrowserAccessibilityAction.Type;
 const Owner = { contextId: BrowserContextId, threadId: BrowserThreadId };
 export const HumanBrowserRequest = Schema.Union(
   Schema.Struct({
@@ -331,6 +535,21 @@ export const HumanBrowserRequest = Schema.Union(
     kind: Schema.Literal("popup-dismiss", "popup-watch"),
     presentationId: BrowserPresentationId,
     popupId: BrowserPagePopupId,
+  }).annotations(strict),
+  // Nightly's main asks for the mirror only while an assistive technology is on.
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("accessibility"),
+    presentationId: BrowserPresentationId,
+    revision: Sequence,
+  }).annotations(strict),
+  Schema.Struct({
+    ...Owner,
+    kind: Schema.Literal("accessibility-action"),
+    presentationId: BrowserPresentationId,
+    revision: AccessibilityRevision,
+    nodeId: AccessibilityNodeId,
+    action: BrowserAccessibilityAction,
   }).annotations(strict),
   Schema.Struct({ ...Owner, kind: Schema.Literal("attach") }).annotations(strict),
   Schema.Struct({
@@ -400,6 +619,10 @@ export const HumanBrowserResult = Schema.Union(
   Schema.Struct({ status: Schema.Literal("popup"), popup: HumanBrowserPagePopup }).annotations(
     strict,
   ),
+  Schema.Struct({
+    status: Schema.Literal("accessibility"),
+    update: BrowserAccessibilityUpdate,
+  }).annotations(strict),
   Schema.Struct({ status: Schema.Literal("editor"), editor: HumanBrowserEditor }).annotations(
     strict,
   ),

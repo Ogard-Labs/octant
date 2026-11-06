@@ -520,8 +520,8 @@ context-menu key uses the same policy but has no separate hardware acceptance.
 Clipboard actions are wired through the same closed commands but have no live
 clipboard acceptance evidence. Keyboard navigation within an open menu is
 separate from invoking it. A password field's menu offers what Chromium enables
-there, which never includes Cut or Copy. Spelling and page accessibility remain
-separate parity work; link and image menus and select lists follow below.
+there, which never includes Cut or Copy. Spelling remains separate parity work; link
+and image menus, select lists and page accessibility follow below.
 
 ### Page popups
 
@@ -650,9 +650,133 @@ held in a frame the walk cannot follow stays closed rather than opening
 Chromium's popup in the hidden window.
 
 The current foundation remains publication-gated while full IME reconversion,
-accessibility, other native brokers and the remaining lifecycle behavior
-need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
+other native brokers, the maintainers' physical VoiceOver check and the
+remaining lifecycle behavior need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
 packaged coexistence, signed-in browsing, or native identity verification.
+
+### Accessibility
+
+Nightly shows the page as pixels, so a screen reader there would find nothing to
+read. Stable reads the page's accessibility tree through its own protocol
+attachment on the hidden window and offers a bounded description of it over the
+same authenticated presentation route; Nightly mirrors that description as a
+positioned, visually transparent DOM subtree over the Browser image, which
+VoiceOver reads and operates like any other part of the window. A companion
+window is not a fallback.
+
+- **When.** Nightly's main asks Stable for the mirror only while Chromium
+  reports an assistive technology reading the app
+  (`app.accessibilitySupportEnabled`), the window is shown and the Browser
+  view's layout is visible. Otherwise it refuses the renderer's ask without
+  calling Stable, and Stable never reads the tree. Stable turns the page's
+  accessibility events on at the first ask and off again after 5 seconds
+  without one.
+- **What travels.** Each node carries a mirror identity (its document's ordinal
+  and the page's node number; a frame keeps its ordinal for as long as the top
+  document stands, so an identity Nightly holds never comes to name another
+  frame's node), one of a closed list of ARIA roles (anything
+  else is `generic`), its name and description (each at most 512 UTF16 units),
+  its value exactly as the field holds it (at most 1,024), its states (checked, pressed, expanded, selected,
+  disabled, focusable, required, invalid, read-only, multiline, heading level,
+  range values, live politeness), its border box in the top page's
+  coordinates, and its children in page order. A password field carries its
+  role, name and states with a `secure` flag and never a value: Stable checks
+  the element of every text, search, combo box and spin button node for the
+  password type, whatever role the page gave it, treats one it cannot check as
+  a password field, and also withholds a value Chromium shows as mask
+  characters. Link
+  addresses and other page addresses never travel. Ignored and unnamed generic
+  nodes give their children to their parent, except an unnamed live region, a form control (field, check box, option and the like) travels without its
+  descendants, a container named by its content (button, link, heading, menu
+  item, tab) keeps only descendants that are interactive, focusable, live or
+  named beyond its own name, such as a link inside a heading, and
+  line boxes are dropped.
+- **Bounds.** At most 1,500 nodes, 64 levels and 512 children per node; past
+  any bound the tree is cut in page order and marked truncated. The contract
+  refuses a tree whose identities repeat, whose children are missing or have
+  two parents, that the root does not reach in full, that is deeper than the
+  bound, or whose focused node is absent. Content further than the page
+  rectangle's range from the viewport travels without bounds.
+- **Frames.** A frame element holds its document's tree, at most 8 frames deep
+  and 16 documents per page. A frame on the page's site is read in its
+  parent's session by its frame identity, and the same renderer already
+  reports its boxes in the top page's coordinates; a frame on another site is
+  its own target, found by the attachment's automatic frame attachment, and
+  its boxes are moved by its frame element's content box, measured again
+  before a press, as the page may have scrolled since the read.
+- **Updates.** Nightly's ask names the revision it holds and is held open for
+  up to half a second while nothing changes. Stable rebuilds at most every
+  250 ms, on the page's accessibility, document and frame events and otherwise
+  every half second, keeps the revision when a rebuild finds the same tree,
+  and answers with nothing when the tree is the same, a patch against
+  exactly the held revision when few nodes changed, or the full tree. A new
+  document starts again from a full tree. One ask per presentation is in
+  flight, outside the ordered input queue, so the person's typing never waits
+  behind it. A read that takes longer than 1 second is dropped, and no new read
+  starts while it still runs, so an ask stays inside the route's 2-second
+  bound. Nightly keeps the mirror it holds through one or two refused asks and
+  drops it after the third, so a slow read does not cost VoiceOver its place.
+- **Mirror.** Nightly renders each node with its ARIA role, name and states at
+  its scaled bounds; the subtree takes no pointer events, so the person's
+  clicks still reach the image. Text fields are local fields showing the
+  page's value; a password field is a local empty password field, so Chromium
+  holds macOS secure input while it has focus, and a dead key's character is
+  sent on as typed. Focus follows the page's focused node while the person is
+  in the Browser, and moving VoiceOver's focus to a node focuses it in the page.
+  While the person composes in a mirrored field, the field keeps the candidate
+  and ignores the page's snapshot value; the committed text is sent as a new
+  value and shown until the page's value matches it, for at most 2 seconds.
+  Live regions are announced through Nightly's own polite and assertive live
+  regions when their text changes after the first read, each announcement as a
+  fresh element, and an emptied region clears its announcement so the same
+  words are said again; the mirrored live nodes themselves stay quiet so
+  nothing is said twice.
+- **Actions.** A mirrored node can be pressed, focused, scrolled into view,
+  stepped up or down (sliders and spin buttons) and, for a native `input` or
+  `textarea` text field whose whole value travelled and that is not a password
+  field, given a value; a rich text editor or a field cut at the value bound
+  takes none, as replacing it would rewrite text Nightly never held. Each action names the
+  node and a revision of the current document, travels on the ordered input
+  queue under the same focus, visibility, popup and menu rules as a press, and
+  in Stable runs on the person's input lane: a press is a click at the node's
+  centre through the presentation's own native input, after scrolling it into
+  view; a step is an arrow key on the focused node; a value selects the field's
+  text and types over it as a composition commit does. A disabled node takes
+  only focus and scrolling. Every action is refused while an agent action holds
+  the page, counts as the person's input so the agent must read the page again,
+  and a press from the mirror may open a select list or dialog as the person's
+  own press would. Trusted keys pressed on a mirrored node reach the page
+  through the Browser group as ordinary typing; a key an assistive technology
+  makes up becomes the matching step or is dropped.
+
+The mirror grants nothing: it only describes the page, and its actions pass the
+same checks in Stable as the person's own input. Its identities are not
+selectors and name nothing outside the current document.
+
+Evidence: contract and preload tests for the bounds, the tree rule, password
+values and the closed actions; Stable tests for reduction (roles, names,
+password withholding, flattening, node, depth, child and text bounds, frame
+grafting, an unnamed live region, exact field values), updates and revisions
+(nothing sent for an unchanged rebuild, a frame's ordinal kept when an earlier
+frame appears), and the action rules (a value only for a whole native field, a
+frame measured again before a press); a real-page test in
+Chromium that a fixture's heading, link, navigation, fields, slider and the
+buttons of a same-site and a cross-site frame appear with their names, values
+and page-coordinate bounds, that the password value never travels, that
+pressing a mirrored button and a cross-site frame's button clicks them, that a
+value replaces an email field's text and is refused for the password field,
+and that an action is refused while an agent action holds the page; Nightly
+presentation tests that nothing is asked or acted on without an assistive
+technology, while hidden or unfocused, and that a held ask never delays typing;
+and renderer tests of the mirror's roles, names, values, bounds, focus, live
+announcements, actions and patch refusal. Known limits: the maintainers'
+physical VoiceOver check is outstanding; the Chromium harness has no native
+view, so whether VoiceOver's own cursor and rotor behave over the transparent
+subtree rests on that check; whether a composition in a mirrored field
+commits on a physical input method rests on it too; a frame with a transform is offset by its content
+box but not scaled; while a mirrored text field has focus, input methods commit
+through a new value rather than through the page's own composition; and a
+truncated tree leaves the page's later content unreachable from the mirror.
 
 ## What a Nightly client window offers
 
@@ -747,7 +871,9 @@ evidence; the preflight that replaces the early gate checks them:
       nested frames on either site (fields, composition, editing menus and
       popups), rich text editors and multiline caret (see
       [standard text composition](#standard-text-composition)).
-- [ ] Embedded Browser accessibility (decision 2).
+- [x] Embedded Browser accessibility (decision 2): a bounded mirror of the
+      page's accessibility tree that VoiceOver reads and operates (see
+      [accessibility](#accessibility)).
 - [x] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
       an unsigned packaged Nightly smoke, run locally rather than in CI. The
       signed pair's own run stays with the maintainer checks below.
