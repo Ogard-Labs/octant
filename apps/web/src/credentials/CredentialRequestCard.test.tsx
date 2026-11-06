@@ -78,3 +78,38 @@ describe("credential card", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for confirmation");
   });
 });
+
+it("submits a linked reference without sending the discarded manual token", async () => {
+  const user = userEvent.setup();
+  const answer = vi.fn(async () => true);
+  render(<CredentialRequestCard card={card} answer={answer} />);
+  await user.type(
+    screen.getByLabelText("Linear API token", { selector: "input" }),
+    "discarded-token",
+  );
+  await user.click(screen.getByRole("button", { name: "Use 1Password reference" }));
+  await user.type(
+    screen.getByLabelText("1Password field reference"),
+    "op://Private/Linear/credential",
+  );
+  await user.click(screen.getByRole("button", { name: "Check access" }));
+  expect(answer).toHaveBeenCalledWith({
+    id: card.id,
+    action: "allow-linked",
+    store: "onepassword",
+    reference: "op://Private/Linear/credential",
+  });
+  expect(answer).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("1Password field reference")).toHaveValue("");
+});
+it("explains a locked store without showing a value or replaying the request", () => {
+  const answer = vi.fn();
+  render(
+    <CredentialRequestCard
+      card={{ ...card, state: "failed", failure: "locked" }}
+      answer={answer}
+    />,
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("Unlock 1Password");
+  expect(answer).not.toHaveBeenCalled();
+});

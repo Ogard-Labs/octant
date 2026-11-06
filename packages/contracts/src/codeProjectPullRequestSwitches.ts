@@ -24,6 +24,18 @@ const boundedNonEmptyText = (maximumBytes: number) =>
 export const CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS = 3;
 /** Failures one Auto-fix observation or wake names. */
 export const MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES = 32;
+/**
+ * Started wakes one watch makes before it stops, so a pull request that keeps
+ * changing hands the thread back to the person instead of waking it forever.
+ */
+export const CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES = 10;
+/**
+ * How long a watch lasts after it is turned on. Three days covers a review
+ * round across a weekend; a watch nobody renews then ends on its own.
+ */
+export const CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS = 3 * 24 * 60 * 60 * 1000;
+/** Signals one watch baseline or wake names. */
+export const MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS = 32;
 
 /** The one pull request a switch belongs to. */
 export const CodeProjectPullRequestSwitchTarget = Schema.Struct({
@@ -225,7 +237,9 @@ export const CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED =
   "code.project-pull-request-merge-when-ready-recorded@1";
 export const CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED =
   "code.project-pull-request-auto-fix-recorded@1";
-/** Both switch events share one aggregate per pull request. */
+export const CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED =
+  "code.project-pull-request-watch-recorded@1";
+/** Every switch and watch event shares this aggregate type. */
 export const CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE = "code-project-pull-request-switches";
 
 /**
@@ -282,6 +296,74 @@ export const CodeProjectPullRequestAutoFixRecorded = Schema.Struct({
 export type CodeProjectPullRequestAutoFixRecorded =
   typeof CodeProjectPullRequestAutoFixRecorded.Type;
 
+/**
+ * One thing that happened on a watched pull request, by kind and a short
+ * opaque identity: the head SHA for settled checks and a conflict, the
+ * decision for a review decision, and the forge's id for a review or comment.
+ */
+export const CodeProjectPullRequestWatchSignal = Schema.Struct({
+  kind: Schema.Literal(
+    "checks-passed",
+    "checks-failed",
+    "review-decision",
+    "review",
+    "comment",
+    "conflict",
+  ),
+  key: boundedNonEmptyText(512),
+}).annotations(strict);
+export type CodeProjectPullRequestWatchSignal = typeof CodeProjectPullRequestWatchSignal.Type;
+
+/** Why a watch ended on its own. */
+export const CodeProjectPullRequestWatchStopReason = Schema.Literal(
+  "merged",
+  "closed",
+  "thread-unavailable",
+  "authority-lost",
+  "expired",
+  "wake-limit",
+);
+export type CodeProjectPullRequestWatchStopReason =
+  typeof CodeProjectPullRequestWatchStopReason.Type;
+
+/**
+ * One change to a thread's watch on its own pull request, or one wake it
+ * made. `enabled` and `disabled` are the thread's agent (turning it on took
+ * the person's approval of that act); `woke` and `stopped` are the host. The
+ * baseline is what was already true when the watch began, so it never wakes
+ * for that; a wake records its signals, so what already woke the thread is
+ * rebuilt from the journal alone. Forge text never enters the journal.
+ */
+export const CodeProjectPullRequestWatchRecorded = Schema.Struct({
+  target: CodeProjectPullRequestSwitchTarget,
+  threadId: CodeThreadId,
+  change: Schema.Union(
+    Schema.Struct({
+      kind: Schema.Literal("enabled"),
+      baseline: Schema.Array(CodeProjectPullRequestWatchSignal).pipe(
+        Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
+      ),
+    }).annotations(strict),
+    Schema.Struct({ kind: Schema.Literal("disabled") }).annotations(strict),
+    Schema.Struct({
+      kind: Schema.Literal("woke"),
+      /** The head the signals were observed on. */
+      headSha: boundedNonEmptyText(64),
+      signals: Schema.Array(CodeProjectPullRequestWatchSignal).pipe(
+        Schema.minItems(1),
+        Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
+      ),
+      wake: Schema.Int.pipe(Schema.between(1, CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)),
+      result: CodeProjectPullRequestAutoFixWakeResult,
+    }).annotations(strict),
+    Schema.Struct({
+      kind: Schema.Literal("stopped"),
+      reason: CodeProjectPullRequestWatchStopReason,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeProjectPullRequestWatchRecorded = typeof CodeProjectPullRequestWatchRecorded.Type;
+
 export const decodeCodeProjectPullRequestSwitchTarget = Schema.decodeUnknownSync(
   CodeProjectPullRequestSwitchTarget,
 );
@@ -305,4 +387,7 @@ export const decodeCodeProjectPullRequestMergeWhenReadyRecorded = Schema.decodeU
 );
 export const decodeCodeProjectPullRequestAutoFixRecorded = Schema.decodeUnknownSync(
   CodeProjectPullRequestAutoFixRecorded,
+);
+export const decodeCodeProjectPullRequestWatchRecorded = Schema.decodeUnknownSync(
+  CodeProjectPullRequestWatchRecorded,
 );

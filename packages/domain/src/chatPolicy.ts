@@ -585,6 +585,7 @@ export function answerChatTurnQuestion(
     ...(attempt.answeredQuestions ?? []),
     {
       requestId: question.requestId,
+      ...(question.questionnaire === undefined ? {} : { questionnaire: question.questionnaire }),
       prompt: question.prompt,
       options: [...question.options],
       ...(question.questionIndex === undefined || question.questionCount === undefined

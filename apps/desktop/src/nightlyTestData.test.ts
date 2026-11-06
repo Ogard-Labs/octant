@@ -142,13 +142,39 @@ describe("what the host-owning desktop may start", () => {
     });
   });
 
-  it("refuses the test host on Linux, where credentials would be shared", () => {
-    expect(
-      startup(testHost("/home/test/.local/share/octant-nightly/test-data"), { platform: "linux" }),
-    ).toEqual({
-      kind: "refused",
-      message: expect.stringContaining("macOS only"),
+  it("starts the Linux test host with XDG logs and its own Secret Service family", () => {
+    const linuxHome = "/home/test";
+    const result = resolveHostOwningStartup({
+      identity: nightly,
+      role: testHost("/home/test/.local/share/octant-nightly/test-data"),
+      platform: "linux",
+      appDataDirectory: join(linuxHome, ".config"),
+      env: { XDG_STATE_HOME: "/home/test/state" },
     });
+    expect(result).toEqual({
+      kind: "start",
+      configuredDataDirectory: "/home/test/.local/share/octant-nightly/test-data",
+      serverPort: 13_774,
+      logsDirectory: "/home/test/state/octant-nightly/logs",
+      keychainServiceFamily: "octant-nightly-test-data",
+      hostEnvironment: {
+        OCTANT_LOGS_DIR: "/home/test/state/octant-nightly/logs",
+        OCTANT_KEYCHAIN_SERVICE_FAMILY: "octant-nightly-test-data",
+        OCTANT_DEFAULT_FOLDER: "/home/test/Octant Nightly",
+      },
+    });
+  });
+
+  it("refuses a Linux test folder inside Octant's XDG data folder", () => {
+    expect(
+      resolveHostOwningStartup({
+        identity: nightly,
+        role: testHost("/home/test/data/octant/test"),
+        platform: "linux",
+        appDataDirectory: "/home/test/.config",
+        env: { XDG_DATA_HOME: "/home/test/data" },
+      }),
+    ).toEqual({ kind: "refused", message: expect.stringContaining("overlaps") });
   });
 
   it("refuses a test folder that overlaps Octant's unless the data folder was set explicitly", () => {
@@ -250,6 +276,50 @@ describe("removing Nightly's test data", () => {
 
   it("reports nothing to remove when there is no test data", async () => {
     await expect(remove({ kind: "octant-client" }).result).resolves.toEqual({ kind: "absent" });
+  });
+
+  function removeOnLinux(clearTestDataSecrets?: () => Promise<void>) {
+    const trashItem = vi.fn(async (_path: string) => undefined);
+    return {
+      trashItem,
+      result: removeNightlyTestData({
+        role: { kind: "octant-client" },
+        identity: nightly,
+        platform: "linux",
+        appDataDirectory: join(home, ".config"),
+        env: {},
+        trashItem,
+        ...(clearTestDataSecrets === undefined ? {} : { clearTestDataSecrets }),
+      }),
+    };
+  }
+  const linuxTestData = () => join(home, ".local", "share", "octant-nightly", "test-data");
+
+  it("removes the Linux test folder and its Secret Service items together", async () => {
+    await mkdir(linuxTestData(), { recursive: true });
+    const clear = vi.fn(async () => undefined);
+    const { trashItem, result } = removeOnLinux(clear);
+    await expect(result).resolves.toEqual({ kind: "removed" });
+    expect(clear).toHaveBeenCalledOnce();
+    expect(trashItem).toHaveBeenCalledExactlyOnceWith(linuxTestData());
+  });
+
+  it("keeps the Linux folder when its Secret Service items cannot be removed", async () => {
+    await mkdir(linuxTestData(), { recursive: true });
+    const failing = removeOnLinux(async () => {
+      throw new Error("locked");
+    });
+    await expect(failing.result).resolves.toEqual({ kind: "failed" });
+    expect(failing.trashItem).not.toHaveBeenCalled();
+    const unwired = removeOnLinux();
+    await expect(unwired.result).resolves.toEqual({ kind: "failed" });
+    expect(unwired.trashItem).not.toHaveBeenCalled();
+  });
+
+  it("still removes Linux test-data items whose folder is already gone", async () => {
+    const clear = vi.fn(async () => undefined);
+    await expect(removeOnLinux(clear).result).resolves.toEqual({ kind: "absent" });
+    expect(clear).toHaveBeenCalledOnce();
   });
 });
 

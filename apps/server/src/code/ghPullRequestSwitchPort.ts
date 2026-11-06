@@ -46,6 +46,42 @@ export interface GhAutoFixFailureDetail {
   readonly detail: string;
 }
 
+/**
+ * What a watch reads on one pass: every check on the head, the review
+ * decision, a conflict, and the reviews and comments with their forge text.
+ */
+export interface GhPullRequestActivity {
+  /** `passed` and `failed` only once no check on the head is still running. */
+  readonly checks: "none" | "pending" | "passed" | "failed";
+  readonly failedChecks: ReadonlyArray<string>;
+  readonly reviewDecision?: "approved" | "changes-requested" | "review-required";
+  readonly conflicting: boolean;
+  readonly reviews: ReadonlyArray<{
+    readonly id: string;
+    readonly author: string;
+    readonly state: string;
+    readonly at: string;
+    readonly body: string;
+  }>;
+  readonly comments: ReadonlyArray<{
+    readonly id: string;
+    readonly author: string;
+    readonly at: string;
+    readonly body: string;
+  }>;
+}
+
+/**
+ * Which reads one observation makes. `failures` is what Merge when ready waits
+ * on and Auto-fix fixes (required checks, review threads, failed job logs);
+ * `activity` is what a watch wakes on. Each costs forge calls, so a pass reads
+ * only what a switch that may act needs.
+ */
+export interface GhPullRequestSwitchReads {
+  readonly failures: boolean;
+  readonly activity: boolean;
+}
+
 export type GhPullRequestSwitchObservation =
   | Readonly<{
       status: "observed";
@@ -56,11 +92,34 @@ export type GhPullRequestSwitchObservation =
       autoMergeEnabled: boolean;
       waitingOn: ReadonlyArray<CodeProjectPullRequestMergeWait>;
       failures: ReadonlyArray<GhAutoFixFailureDetail>;
+      /** Present only when the observation was asked for activity. */
+      activity?: GhPullRequestActivity;
     }>
   | Readonly<{ status: "unavailable" }>;
 
 const VIEW_FIELDS =
   "state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
+const ACTIVITY_VIEW_FIELDS = `${VIEW_FIELDS},statusCheckRollup`;
+/** The newest reviews and comments a watch keeps from one read. */
+const MAX_ACTIVITY_ENTRIES = 50;
+/**
+ * A watch's reviews and comments come from their own query, not from
+ * `gh pr view --json reviews,comments`: that pages through the pull request's
+ * whole history, and a long enough discussion outgrows the command's 1 MiB
+ * output cap, so every pass would fail. Only the newest window is asked for.
+ */
+const DISCUSSION_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(last:${MAX_ACTIVITY_ENTRIES}){nodes{id author{login} state submittedAt body}} comments(last:${MAX_ACTIVITY_ENTRIES}){nodes{id author{login} createdAt body viewerDidAuthor}}}}}`;
+/**
+ * Bodies are cut inside `gh`, before they reach stdout. jq slices by code
+ * point, one past the byte clamp, so a body over the clamp still reaches
+ * `clampBytes` long enough to be marked cut. Control characters are dropped
+ * because `tojson` escapes each to six bytes; what is left costs at most four
+ * bytes per code point, so 2 × 50 bodies stay near 820 KB, under the cap
+ * however long the history is. (`tojson` is printed raw; gh's own encoder
+ * would also escape `<`, `>` and `&` to six bytes.)
+ */
+const DISCUSSION_FILTER = `def cut: (.body // "")[0:${MAX_COMMENT_BYTES + 1}] | explode | map(select(. == 9 or . == 10 or . == 13 or (. > 31 and . != 127))) | implode; .data.repository.pullRequest | {reviews: [(.reviews.nodes // [])[] | .body = cut], comments: [(.comments.nodes // [])[] | .body = cut]} | tojson`;
+const PASSING_CHECK_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
 const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:${REVIEW_THREADS_PAGE},after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:10){nodes{author{login} body}}}}}}}`;
 
 /**
@@ -166,18 +225,28 @@ export class GhPullRequestSwitchPort {
   /**
    * One read of what the switches watch: state, head, whether the forge still
    * holds auto-merge, failed required checks with a trimmed log tail,
-   * unresolved review threads with their comments, and a merge conflict.
+   * unresolved review threads with their comments, and a merge conflict; and,
+   * for a watch, every check on the head with the reviews and comments.
    */
   async observe(
     request: GhPullRequestSwitchRequest,
     signal: AbortSignal,
+    reads: GhPullRequestSwitchReads = { failures: true, activity: false },
   ): Promise<GhPullRequestSwitchObservation> {
     const repository = `${request.owner}/${request.name}`;
     if (!validRepository(repository) || !validNumber(request.number)) {
       return { status: "unavailable" };
     }
     const view = await this.#run(
-      ["pr", "view", String(request.number), "--repo", repository, "--json", VIEW_FIELDS],
+      [
+        "pr",
+        "view",
+        String(request.number),
+        "--repo",
+        repository,
+        "--json",
+        reads.activity ? ACTIVITY_VIEW_FIELDS : VIEW_FIELDS,
+      ],
       signal,
     );
     if (view === undefined || view.exitCode !== 0) return { status: "unavailable" };
@@ -190,6 +259,12 @@ export class GhPullRequestSwitchPort {
     const reviewsPending =
       pullRequest.reviewDecision === "REVIEW_REQUIRED" ||
       pullRequest.reviewDecision === "CHANGES_REQUESTED";
+    let activity: GhPullRequestActivity | undefined;
+    if (reads.activity) {
+      const discussion = await this.#recentDiscussion(request, signal);
+      if (discussion === undefined) return { status: "unavailable" };
+      activity = pullRequestActivity(pullRequest, discussion, conflicting);
+    }
     const base = {
       status: "observed" as const,
       state,
@@ -197,8 +272,9 @@ export class GhPullRequestSwitchPort {
       headBranch: typeof pullRequest.headRefName === "string" ? pullRequest.headRefName : "",
       baseBranch: typeof pullRequest.baseRefName === "string" ? pullRequest.baseRefName : "",
       autoMergeEnabled: isRecord(pullRequest.autoMergeRequest),
+      ...(activity === undefined ? {} : { activity }),
     };
-    if (state !== "open") return { ...base, waitingOn: [], failures: [] };
+    if (state !== "open" || !reads.failures) return { ...base, waitingOn: [], failures: [] };
 
     const checks = await this.#requiredChecks(repository, request.number, signal);
     if (checks === undefined) return { status: "unavailable" };
@@ -339,6 +415,33 @@ export class GhPullRequestSwitchPort {
     return threads;
   }
 
+  /** The newest reviews and comments, bodies already cut by `DISCUSSION_FILTER`. */
+  async #recentDiscussion(
+    request: GhPullRequestSwitchRequest,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown> | undefined> {
+    const result = await this.#run(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${DISCUSSION_QUERY}`,
+        "-F",
+        `owner=${request.owner}`,
+        "-F",
+        `name=${request.name}`,
+        "-F",
+        `number=${request.number}`,
+        "--jq",
+        DISCUSSION_FILTER,
+      ],
+      signal,
+    );
+    if (result === undefined || result.exitCode !== 0) return undefined;
+    const discussion = parseJson(result.stdout);
+    return isRecord(discussion) ? discussion : undefined;
+  }
+
   async #failedJobLog(
     repository: string,
     jobId: string,
@@ -385,6 +488,116 @@ function reviewThreadFailure(node: unknown): GhAutoFixFailureDetail | undefined 
     failure: { kind: "review-thread", key: node.id.slice(0, 512) },
     detail: `On ${where}:\n${lines.join("\n")}`,
   };
+}
+
+function pullRequestActivity(
+  pullRequest: Record<string, unknown>,
+  discussion: Record<string, unknown>,
+  conflicting: boolean,
+): GhPullRequestActivity {
+  let pending = false;
+  const failedChecks: string[] = [];
+  const rollup = Array.isArray(pullRequest.statusCheckRollup) ? pullRequest.statusCheckRollup : [];
+  // A rollup entry is either a check run (status, then conclusion) or a
+  // commit status (one state); both name what they report on the head.
+  for (const entry of rollup.filter(isRecord)) {
+    const name =
+      typeof entry.name === "string"
+        ? entry.name
+        : typeof entry.context === "string"
+          ? entry.context
+          : "a check";
+    if (entry.__typename === "StatusContext" || typeof entry.context === "string") {
+      if (entry.state === "PENDING" || entry.state === "EXPECTED") pending = true;
+      else if (entry.state !== "SUCCESS") failedChecks.push(name.slice(0, 512));
+      continue;
+    }
+    if (entry.status !== "COMPLETED") pending = true;
+    else if (
+      typeof entry.conclusion !== "string" ||
+      !PASSING_CHECK_CONCLUSIONS.has(entry.conclusion)
+    ) {
+      failedChecks.push(name.slice(0, 512));
+    }
+  }
+  const checks =
+    rollup.length === 0
+      ? "none"
+      : pending
+        ? "pending"
+        : failedChecks.length > 0
+          ? "failed"
+          : "passed";
+  const reviewDecision =
+    pullRequest.reviewDecision === "APPROVED"
+      ? "approved"
+      : pullRequest.reviewDecision === "CHANGES_REQUESTED"
+        ? "changes-requested"
+        : pullRequest.reviewDecision === "REVIEW_REQUIRED"
+          ? "review-required"
+          : undefined;
+  const reviews = (Array.isArray(discussion.reviews) ? discussion.reviews : [])
+    .filter(isRecord)
+    .flatMap((review) =>
+      // A pending review is the reviewer's unsent draft: nobody said it yet.
+      typeof review.id !== "string" ||
+      review.id === "" ||
+      typeof review.submittedAt !== "string" ||
+      review.state === "PENDING"
+        ? []
+        : [
+            {
+              id: review.id.slice(0, 512),
+              author: authorLogin(review),
+              state:
+                typeof review.state === "string"
+                  ? review.state.toLowerCase().replaceAll("_", " ")
+                  : "commented",
+              at: review.submittedAt,
+              body: clampBytes(
+                typeof review.body === "string" ? review.body : "",
+                MAX_COMMENT_BYTES,
+              ),
+            },
+          ],
+    )
+    .slice(-MAX_ACTIVITY_ENTRIES);
+  const comments = (Array.isArray(discussion.comments) ? discussion.comments : [])
+    .filter(isRecord)
+    .flatMap((comment) =>
+      // The host's own login wrote it: the person, or the agent posting under
+      // their name with their approval. Neither is news to the thread.
+      typeof comment.id !== "string" ||
+      comment.id === "" ||
+      typeof comment.createdAt !== "string" ||
+      comment.viewerDidAuthor === true
+        ? []
+        : [
+            {
+              id: comment.id.slice(0, 512),
+              author: authorLogin(comment),
+              at: comment.createdAt,
+              body: clampBytes(
+                typeof comment.body === "string" ? comment.body : "",
+                MAX_COMMENT_BYTES,
+              ),
+            },
+          ],
+    )
+    .slice(-MAX_ACTIVITY_ENTRIES);
+  return {
+    checks,
+    failedChecks,
+    ...(reviewDecision === undefined ? {} : { reviewDecision }),
+    conflicting,
+    reviews,
+    comments,
+  };
+}
+
+function authorLogin(entry: Record<string, unknown>): string {
+  const login = readPath(entry, ["author", "login"]);
+  return typeof login === "string" && login !== "" ? login.slice(0, 128) : "someone";
 }
 
 function classifyFailure(result: GhCommandResult):

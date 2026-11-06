@@ -82,6 +82,8 @@ export class SkillDiscoveryService {
   #watchers: FSWatcher[] = [];
   #reconcileTimer: ReturnType<typeof setTimeout> | undefined;
   #rootStatuses = new Map<string, SkillRootStatus>();
+  /** Watch state per added root, kept apart from scan results so a later scan cannot erase it. */
+  #watchedSourceRefs = new Map<string, boolean>();
   #reconcileTail: Promise<void> = Promise.resolve();
   #watching = false;
   #watchGeneration = 0;
@@ -100,7 +102,10 @@ export class SkillDiscoveryService {
   }
 
   rootStatuses(): ReadonlyArray<SkillRootStatus> {
-    return [...this.#rootStatuses.values()];
+    return [...this.#rootStatuses.values()].map((status) => ({
+      ...status,
+      watching: this.#watchedSourceRefs.get(status.sourceRef) === true,
+    }));
   }
 
   reconcile(): Promise<SkillCatalog> {
@@ -164,9 +169,7 @@ export class SkillDiscoveryService {
       if (!this.#activeWatch(generation)) return;
       for (const extra of roots.extraSkillRoots ?? []) {
         const watching = await watchRoot(extra.path);
-        const status = this.#rootStatuses.get(extra.sourceRef);
-        if (status !== undefined && this.#activeWatch(generation))
-          this.#rootStatuses.set(extra.sourceRef, { ...status, watching });
+        if (this.#activeWatch(generation)) this.#watchedSourceRefs.set(extra.sourceRef, watching);
       }
       const boundRoot = await canonicalDirectory(roots.projectRoot);
       const workingDirectory = await canonicalDirectory(roots.workingDirectory);
@@ -198,8 +201,7 @@ export class SkillDiscoveryService {
     this.#watching = false;
     this.#watchGeneration += 1;
     this.#watchRefreshRequested = false;
-    for (const [key, status] of this.#rootStatuses)
-      this.#rootStatuses.set(key, { ...status, watching: false });
+    this.#watchedSourceRefs.clear();
     for (const watcher of this.#watchers.splice(0)) watcher.close();
     if (this.#reconcileTimer !== undefined) {
       clearTimeout(this.#reconcileTimer);
@@ -226,8 +228,12 @@ export class SkillDiscoveryService {
       if (!this.#activeWatch(generation)) return;
       this.#watchRefreshPending = true;
       this.#watchRefreshRequested = false;
-      void this.reconcile()
-        .then(() => (this.#activeWatch(generation) ? this.startWatching() : undefined))
+      // Re-arm before scanning. Scanning first left the package directories unwatched while
+      // the watchers were rebuilt, so a SKILL.md edit in that window raised no event and the
+      // catalog kept the earlier instructions until some unrelated change arrived (seen on
+      // loaded CI as an edit made right after a refresh never appearing).
+      void this.startWatching()
+        .then(() => (this.#watching ? this.reconcile() : undefined))
         .catch(() => undefined)
         .finally(() => {
           this.#watchRefreshPending = false;

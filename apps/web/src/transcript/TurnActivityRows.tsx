@@ -13,6 +13,7 @@ import {
   ShieldX,
 } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
+import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
 import { PublishedSnapshot } from "./PublishedSnapshot";
@@ -107,6 +108,10 @@ function rowKey(row: TurnActivityRow): string {
   return `${row.kind}:${row.id}`;
 }
 
+/** Disclosure ids beside the rows', which are always `kind:id` and cannot collide. */
+const THINKING_ID = "thinking";
+const TOOL_CALLS_ID = "tool-calls";
+
 function boundAccessibleSummary(text: string): string {
   if (text.length <= ACCESSIBLE_SUMMARY_LIMIT) return text;
   return `${text.slice(0, ACCESSIBLE_SUMMARY_LIMIT - 1)}…`;
@@ -148,22 +153,23 @@ function setHas(values: ReadonlySet<string>, id: string, present: boolean): Read
  *
  * Each tool call and the thinking channel is its own native disclosure. Bodies
  * stay in the document while closed: in-page find can match them, and Chromium
- * expands the hit. Expanding is remembered per row for as long as this turn
- * stays mounted, so a streaming state change does not collapse a row the user
- * opened.
+ * expands the hit. Opening or closing one is remembered per row for as long as
+ * this turn stays mounted and the Reply detail level is unchanged, so a
+ * streaming state change does not collapse a row the user opened.
  *
- * When the turn has settled, the whole toolchain folds behind one summary line
- * that the user can expand. Waiting or in-flight rows never hide inside that
- * outer fold — an approval-pending edit stays visible so it can be judged.
+ * When the turn has settled, the whole toolchain folds behind one summary line.
+ * At the low Reply detail level that fold starts closed; at medium and high it
+ * starts open. Waiting or in-flight rows never hide inside that outer fold — an
+ * approval-pending edit stays visible so it can be judged.
  */
 export function TurnActivityRows(props: TurnActivityRowsProps) {
-  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The outer fold is one of these choices too, so it is remembered on this
+  // turn alone: expanding one settled turn must not re-fold another that the
+  // user already opened.
+  const disclosures = useReplyDisclosures();
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  // Outer fold is remembered on this turn alone: expanding one settled turn
-  // must not re-fold another that the user already opened.
-  const [toolchainOpen, setToolchainOpen] = useState(false);
   const { activity, running } = props;
   const settled = props.settled === true;
   const hasRows = activity.rows.length > 0;
@@ -181,15 +187,25 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     (row): row is PublishedToolRow => row.kind === "tool" && row.published !== undefined,
   );
 
+  const { opening } = disclosures;
+  const isOpen = (id: string): boolean =>
+    disclosures.isOpen(
+      id,
+      id === THINKING_ID
+        ? opening.thinking
+        : id === TOOL_CALLS_ID
+          ? opening.toolCalls
+          : opening.toolDetail,
+    );
+
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
-    const nextOpen = event.newState === "open";
-    setOpenIds((current) => setHas(current, id, nextOpen));
+    disclosures.choose(id, event.currentTarget.open);
   };
 
   const onSummaryKeyDown = (id: string) => (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
-    setOpenIds((current) => setHas(current, id, !current.has(id)));
+    disclosures.choose(id, !isOpen(id));
   };
 
   const renderDisclosure = (row: TurnActivityRow) => {
@@ -200,7 +216,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         key={id}
         onKeyDown={onSummaryKeyDown(id)}
         onToggle={onToggle(id)}
-        open={openIds.has(id)}
+        open={isOpen(id)}
         revealed={revealedSummaryIds.has(id)}
         row={row}
         settled={settled && !running}
@@ -209,16 +225,19 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     );
   };
 
+  const thinkingOpen = isOpen(THINKING_ID);
+  const thinkingPreview =
+    opening.thinkingPreview && !thinkingOpen ? thinkingPreviewLine(activity.reasoning) : "";
   const thinkingDisclosure = hasReasoning ? (
     <details
       className="turn-activity__disclosure turn-activity__disclosure--thinking"
-      onToggle={onToggle("thinking")}
-      open={openIds.has("thinking")}
+      onToggle={onToggle(THINKING_ID)}
+      open={thinkingOpen}
     >
       <summary
-        aria-expanded={openIds.has("thinking")}
+        aria-expanded={thinkingOpen}
         aria-label="Thinking"
-        onKeyDown={onSummaryKeyDown("thinking")}
+        onKeyDown={onSummaryKeyDown(THINKING_ID)}
         role="button"
       >
         <ChevronRight
@@ -228,6 +247,14 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
           strokeWidth={2}
         />
         <span className="turn-activity__name">Thinking</span>
+        {/* Hidden from assistive technology: the button's name stays
+            "Thinking", and the same words are read from the body once it
+            opens. */}
+        {thinkingPreview === "" ? null : (
+          <span aria-hidden="true" className="turn-activity__preview">
+            {thinkingPreview}
+          </span>
+        )}
       </summary>
       <div className="turn-activity__thinking-body">
         <ChatRichText body={activity.reasoning} />
@@ -249,17 +276,13 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
           {pinnedRows.map(renderDisclosure)}
           <details
             className="turn-activity__disclosure turn-activity__disclosure--toolchain"
-            onToggle={(event) => setToolchainOpen(event.newState === "open")}
-            open={toolchainOpen}
+            onToggle={onToggle(TOOL_CALLS_ID)}
+            open={isOpen(TOOL_CALLS_ID)}
           >
             <summary
-              aria-expanded={toolchainOpen}
+              aria-expanded={isOpen(TOOL_CALLS_ID)}
               aria-label={summary}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                setToolchainOpen((current) => !current);
-              }}
+              onKeyDown={onSummaryKeyDown(TOOL_CALLS_ID)}
               role="button"
             >
               <ChevronRight

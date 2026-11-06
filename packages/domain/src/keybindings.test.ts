@@ -100,6 +100,29 @@ describe("matchKeybinding", () => {
     );
   });
 
+  it("changes the thread's reply detail on Mod+Shift+D, a chord no other default holds", () => {
+    expect(matchKeybinding(bindings, keyEvent("D", { meta: true, shift: true }), true)).toBe(
+      "reply-detail-cycle",
+    );
+    expect(matchKeybinding(bindings, keyEvent("D", { ctrl: true, shift: true }), false)).toBe(
+      "reply-detail-cycle",
+    );
+    expect(bindings.conflicts).toEqual([]);
+  });
+
+  it("keeps overrides saved before reply detail had a chord", () => {
+    const saved = parseKeybindingOverrides('{ "command-palette": "Mod+J" }\n');
+    if (saved.status !== "ok") throw new Error("expected the saved document to read");
+    const resolved = resolveKeybindings(saved.overrides);
+    const chordOf = (actionId: Parameters<typeof resolved.bindings.get>[0]) => {
+      const chord = resolved.bindings.get(actionId);
+      return chord === undefined ? undefined : formatChord(chord);
+    };
+    expect(resolved.rejected).toEqual([]);
+    expect(chordOf("command-palette")).toBe("Mod+J");
+    expect(chordOf("reply-detail-cycle")).toBe("Mod+Shift+D");
+  });
+
   it("runs the override rather than the default once one is set", () => {
     const rebound = resolveKeybindings({ "command-palette": "Alt+Shift+K" });
 

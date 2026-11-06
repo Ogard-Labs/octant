@@ -35,6 +35,7 @@ vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: fixture.status,
   ensureNightlyHostReady: fixture.status,
   closeDesktopPeerStatus: fixture.status,
+  linuxRendererSandboxDisabled: () => false,
 }));
 vi.mock("./desktopLaunch", async (original) => ({
   ...(await original<typeof import("./desktopLaunch")>()),

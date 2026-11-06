@@ -73,7 +73,7 @@ export type AgentRunControlAdmission =
 
 /**
  * The one path that turns a control request into an admitted child: the
- * thread's agent asking through the Octant Harness delegate tool. Parent
+ * thread's agent asking through `octant_agents`. Parent
  * authority, workspace admission, routing, and posture are all
  * decided here from the server's own records; the request supplies a role, a
  * task, and an idempotency key.

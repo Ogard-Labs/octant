@@ -19,6 +19,7 @@ import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/con
 import {
   BROWSER_RESIZE_BOUNDS,
   BrowserActionKind,
+  BrowserAuditKind,
   BrowserColorScheme,
   BrowserObservationPart,
   decodeBrowserWaitFor,
@@ -31,6 +32,7 @@ import {
 import type { BrowserProfileStore } from "./browserProfileStore";
 import {
   BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserSurfaceAction,
@@ -408,6 +410,9 @@ async function handleBrokerRequest(
     if (error instanceof BrowserNavigationBlockedError) {
       return Response.json({ error: "navigation-blocked", url: error.url }, { status: 422 });
     }
+    if (error instanceof BrowserRecordingUnavailableError) {
+      return Response.json({ error: "recording-unavailable" }, { status: 422 });
+    }
     return failure("browser-operation-failed", 503);
   }
 }
@@ -539,6 +544,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "colorScheme",
     "diagnosticsSince",
     "diagnosticsWarnings",
+    "auditKind",
     "downloads",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
@@ -567,6 +573,8 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     (value.diagnosticsSince === undefined ||
       (Number.isSafeInteger(value.diagnosticsSince) && (value.diagnosticsSince as number) >= 0)) &&
     (value.diagnosticsWarnings === undefined || typeof value.diagnosticsWarnings === "boolean") &&
+    (value.auditKind === undefined ||
+      (BrowserAuditKind.literals as ReadonlyArray<unknown>).includes(value.auditKind)) &&
     (value.viewport === undefined || isViewportSize(value.viewport)) &&
     (value.deviceScaleFactor === undefined ||
       (typeof value.deviceScaleFactor === "number" &&

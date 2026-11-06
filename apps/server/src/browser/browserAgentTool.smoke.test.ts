@@ -5,8 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { inflateSync } from "node:zlib";
 import type {
+  BrowserAccessibilityAudit,
+  BrowserContextId,
   BrowserFlow,
+  BrowserPerformanceAudit,
   BrowserThreadId,
   ToolActionAuthority,
   WindowId,
@@ -91,6 +95,29 @@ const pages: Record<string, string> = {
   "/noisy": `<!doctype html><title>Noisy</title>
     <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
+  "/audit": `<!doctype html><html><head><title>Audit</title>
+    <style>.faint { color: #aaaaaa; background: #ffffff }</style></head>
+    <body><h1>Shop</h1><h3>Deals</h3>
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E">
+    <button id="icon"><svg aria-hidden="true" width="20" height="20"></svg></button>
+    <input id="unlabelled"><label for="mail">Email</label><input id="mail">
+    <p class="faint">Faint words</p><p>Plain words</p>
+    <div><button style="width:16px;height:16px;padding:0;border:0">A</button><button style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div>
+    </body></html>`,
+  "/perf": `<!doctype html><html lang="en"><title>Perf</title>
+    <div id="above"></div>
+    <h1 style="font-size:64px">Fast enough</h1>
+    <img src="/pixel.svg?token=s3cret" width="300" height="200" alt="Pixel">
+    <script>
+      addEventListener("load", () => setTimeout(() => {
+        document.getElementById("above").style.height = "120px";
+        const start = performance.now(); while (performance.now() - start < 150) {}
+      }, 100));
+    </script></html>`,
+  "/panel": `<!doctype html><title>Panel</title>
+    <style>#box { width: 160px; height: 90px; background: rgb(200, 40, 40); }</style>
+    <button id="paint" onclick="document.getElementById('box').style.background = 'rgb(40, 160, 60)'; setTimeout(() => { document.getElementById('box').style.background = 'rgb(40, 60, 200)'; document.getElementById('note').textContent = 'Done'; document.title = 'Painted'; }, 400)">Paint</button>
+    <div id="box"></div><p id="note"></p>`,
   "/downloads": `<!doctype html><title>Downloads</title>
     <a id="report" href="/dl/report.pdf">Report</a>
     <a id="elf" href="/dl/notes.txt">Notes</a>
@@ -158,6 +185,21 @@ beforeAll(async () => {
         </script>`);
       return;
     }
+    if (path === "/pixel.svg") {
+      response.writeHead(200, { "content-type": "image/svg+xml" });
+      response.end(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='200'><rect width='300' height='200'/></svg>",
+      );
+      return;
+    }
+    if (path === "/red-away") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Red</title>
+        <style>html, body { margin: 0; height: 100%; background: rgb(220, 30, 30); }</style>
+        <a id="away" href="http://localhost:${String(port)}/other">Away</a>`);
+      return;
+    }
     if (path === "/leave") {
       const port = (server.address() as AddressInfo).port;
       response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
@@ -199,12 +241,54 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
-});
+  // The runtime launches Chromium on its first page. On a loaded CI runner that
+  // launch alone took the first test past its 30 s budget, so it is paid here,
+  // in a hook with its own budget, and each test times only its own steps.
+  if (available) {
+    const warmup = randomUUID() as BrowserContextId;
+    await runtime.createContext(
+      warmup,
+      {
+        profileMode: "isolated",
+        allowedOrigins: [origin],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 60_000,
+      },
+      new AbortController().signal,
+    );
+    await runtime.closeContext(warmup);
+  }
+}, 120_000);
 
 afterAll(async () => {
   await runtime.closeAll();
   await new Promise((resolve) => server.close(resolve));
 });
+
+/**
+ * The colour of each animation frame's top-left pixel. Whatever filter a row
+ * uses, the first pixel of the first row is stored as it is, so inflating a
+ * frame's data is enough to read it.
+ */
+function apngCorners(dataUrl: string): ReadonlyArray<readonly [number, number, number]> {
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  const frames: Buffer[][] = [];
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "fcTL") frames.push([]);
+    if (type === "IDAT") frames.at(-1)?.push(data);
+    if (type === "fdAT") frames.at(-1)?.push(data.subarray(4));
+    offset += 12 + length;
+  }
+  return frames.map((parts) => {
+    const pixels = inflateSync(Buffer.concat(parts));
+    return [pixels[1] ?? 0, pixels[2] ?? 0, pixels[3] ?? 0] as const;
+  });
+}
 
 function agentTool(
   options: {
@@ -230,6 +314,8 @@ function agentTool(
     /** How the person answers an origin question; approved when absent. */
     readonly originAnswer?: "approved" | "denied";
     readonly plan?: boolean;
+    /** Where the thread keeps captures; absent, none are kept. */
+    readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -239,6 +325,7 @@ function agentTool(
     authority: { canAccessWindow: () => true, resolve: () => authority },
     agentDownloadsEnabled: () => options.downloads === true,
     downloads: journal,
+    ...(options.captures === undefined ? {} : { captures: options.captures }),
     uuid: () => randomUUID(),
     clock: () => new Date().toISOString(),
     now: () => Date.now(),
@@ -838,6 +925,169 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.stop();
   });
 
+  it("records a batch as an animated PNG the thread keeps, and never a page with a credential field", async () => {
+    const kept: Array<{ readonly dataUrl: string; readonly recording?: unknown }> = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push({
+            dataUrl: input.dataUrl,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          });
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    const opened = await tool.call({ operation: "navigate", url: `${origin}/panel` });
+    const revision = opened.result.page?.observationRevision;
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        // Named from the read before the recording: starting one leaves the
+        // page's revision where it was.
+        { operation: "click", selector: "#paint", expectedObservationRevision: revision },
+        { operation: "wait", conditions: [{ text: "Done", present: true }], timeoutMs: 5_000 },
+      ],
+    });
+    expect(recorded.isError).toBe(false);
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording).toMatchObject({ captureId: expect.any(String) });
+    expect(Number(recording?.frames)).toBeGreaterThanOrEqual(2);
+    expect(Number(recording?.durationMs)).toBeGreaterThan(0);
+    // The file is an animated PNG with as many frames as the answer says,
+    // each no wider or taller than a recording's edge.
+    const bytes = Buffer.from(kept[0]?.dataUrl.split(",")[1] ?? "", "base64");
+    expect(kept[0]?.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    const actl = bytes.indexOf("acTL");
+    expect(actl).toBeGreaterThan(0);
+    expect(bytes.readUInt32BE(actl + 4)).toBe(recording?.frames);
+    expect(Math.max(bytes.readUInt32BE(16), bytes.readUInt32BE(20))).toBeLessThanOrEqual(800);
+    // The revision the batch answered with is still current after the stop.
+    const after = await tool.call({
+      operation: "click",
+      selector: "#paint",
+      expectedObservationRevision: recorded.result.page?.observationRevision,
+    });
+    expect(after.isError).toBe(false);
+
+    await tool.call({ operation: "navigate", url: `${origin}/login` });
+    const withheld = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "click", selector: "button" }],
+    });
+    expect((withheld.result as { readonly recordingNotKept?: string }).recordingNotKept).toBe(
+      "no-picture",
+    );
+    expect(kept).toHaveLength(1);
+    await tool.stop();
+  });
+
+  it("ends a recording at the tab a batch opens, and keeps it under the tab it recorded", async () => {
+    const kept: Array<{ readonly url?: string; readonly title?: string }> = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push({
+            ...(input.url === undefined ? {} : { url: input.url }),
+            ...(input.title === undefined ? {} : { title: input.title }),
+          });
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/panel` });
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        { operation: "click", selector: "#paint" },
+        { operation: "wait", conditions: [{ text: "Done", present: true }], timeoutMs: 5_000 },
+        { operation: "tab-open", url: `${origin}/other` },
+      ],
+    });
+    expect(recorded.isError).toBe(false);
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording).toMatchObject({ captureId: expect.any(String), truncated: "tab-changed" });
+    // The recorded tab's own title when the tab changed, set by its paint.
+    expect(kept).toEqual([{ url: `${origin}/panel`, title: "Painted" }]);
+    await tool.stop();
+  });
+
+  it("keeps no frame of a page off the approved origin, or of one whose origin cannot be told", async () => {
+    const kept: string[] = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push(input.dataUrl);
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/red-away` });
+    // The link leads to another origin: the context refuses the request, the
+    // page shows the browser's own error page, and the runtime then leaves it
+    // for a blank page. None of those is a page this thread approved.
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        { operation: "wait", selector: "#away", timeoutMs: 1_000 },
+        { operation: "click", selector: "#away" },
+        { operation: "wait", conditions: [{ text: "never", present: true }], timeoutMs: 1_000 },
+      ],
+    });
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording?.captureId).toEqual(expect.any(String));
+    const corners = apngCorners(kept[0] ?? "");
+    expect(corners.length).toBe(recording?.frames);
+    expect(corners.length).toBeGreaterThan(0);
+    // Every kept frame is the approved red page.
+    expect(corners.filter(([red, green, blue]) => !(red > 180 && green < 80 && blue < 80))).toEqual(
+      [],
+    );
+    await tool.stop();
+  });
+
+  it("refuses to record in Plan, or before a page is open", async () => {
+    const planned = agentTool({ plan: true });
+    const refused = await planned.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "snapshot" }],
+    });
+    expect(refused.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "plan-mode-read-only" },
+    });
+    const fresh = agentTool();
+    const unopened = await fresh.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "snapshot" }],
+    });
+    expect(unopened.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "browser-navigation-required" },
+    });
+  });
+
   it("resizes the agent's page within bounds and restores it", async () => {
     const tool = agentTool();
     await tool.call({ operation: "navigate", url: `${origin}/slow` });
@@ -1066,6 +1316,75 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(after.consoleErrors).toEqual([]);
     expect(after.httpErrors).toEqual([]);
     await tool.stop();
+  });
+
+  it("audits a page's accessibility by the snapshot's refs and changes nothing it audits", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/audit` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const unlabelled = refFor(outline, /^- textbox \[ref=e\d+\]$/);
+    const answer = await tool.call({ operation: "audit", kind: "accessibility" });
+    expect(answer.isError).toBe(false);
+    const audit = answer.result.page?.audit as BrowserAccessibilityAudit;
+    expect(audit.findings).toContainEqual(
+      expect.objectContaining({ rule: "field-name", severity: "serious", ref: unlabelled }),
+    );
+    expect(audit.findings).toContainEqual(
+      expect.objectContaining({
+        rule: "color-contrast",
+        text: "Faint words",
+        message: expect.stringContaining("2.32:1"),
+      }),
+    );
+    expect(audit.found.map((entry) => entry.rule).sort()).toEqual([
+      "button-name",
+      "color-contrast",
+      "document-lang",
+      "field-name",
+      "heading-order",
+      "image-alt",
+    ]);
+    expect(audit.notRun).toEqual([expect.objectContaining({ rule: "target-size" })]);
+    // The audit read the page and changed nothing, so the snapshot's ref still acts.
+    expect((await tool.call({ operation: "type", ref: unlabelled, text: "Ada" })).isError).toBe(
+      false,
+    );
+    await tool.call({ operation: "resize", preset: "phone" });
+    const touched = (await tool.call({ operation: "audit", kind: "accessibility" })).result.page
+      ?.audit as BrowserAccessibilityAudit;
+    expect(touched.notRun).toEqual([]);
+    expect(touched.found).toContainEqual({ rule: "target-size", count: 2 });
+    await tool.stop();
+  });
+
+  it("audits a page's load with rated vitals and redacted addresses, and Plan admits an audit", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/perf` });
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const answer = await tool.call({ operation: "audit", kind: "performance" });
+    expect(answer.isError).toBe(false);
+    const audit = answer.result.page?.audit as BrowserPerformanceAudit;
+    expect(audit.vitals.map((vital) => vital.metric)).toEqual(["ttfb", "fcp", "lcp", "cls", "tbt"]);
+    const vital = (metric: string) => audit.vitals.find((each) => each.metric === metric);
+    expect(vital("tbt")?.value).toBeGreaterThanOrEqual(90);
+    expect(vital("cls")?.value).toBeGreaterThan(0);
+    expect(vital("lcp")).toMatchObject({ rating: "good" });
+    expect(audit.largestResources).toContainEqual({
+      url: `${origin}/pixel.svg?token=redacted`,
+      type: "image",
+      transferBytes: expect.any(Number),
+    });
+    expect(JSON.stringify(audit)).not.toContain("s3cret");
+    expect(audit.page?.domNodes).toBeGreaterThan(0);
+    expect(audit.notMeasured).toContainEqual(expect.objectContaining({ metric: "inp" }));
+    expect(audit.longTasks?.longestMs).toBeGreaterThanOrEqual(140);
+    await tool.stop();
+    // Plan reaches the page like any read: with none open it is asked to
+    // navigate, not refused as read-only.
+    const planned = agentTool({ plan: true });
+    expect((await planned.call({ operation: "audit", kind: "performance" })).result).toEqual({
+      error: "browser-navigation-required",
+    });
   });
 
   describe("downloads", () => {
@@ -1405,17 +1724,20 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     await allowed.stop();
   });
 
-  it("refuses to save, run, or list in Plan mode, and to save or run for a paired device", async () => {
+  it("refuses to save or run in Plan mode but lists, and refuses to save or run for a paired device", async () => {
     const flows = flowPort();
     await recordOrderCheck(flows);
     const planning = agentTool({ flows, plan: true });
     for (const call of [
       { operation: "flow-save", name: "x" },
       { operation: "flow-run", name: "Order check" },
-      { operation: "flow-list" },
     ]) {
       expect((await planning.call(call)).result).toEqual({ error: "plan-mode-read-only" });
     }
+    // Listing reads the Project's saved flows and touches no page.
+    expect((await planning.call({ operation: "flow-list" })).result).toMatchObject({
+      flows: [{ name: "Order check" }],
+    });
     const paired = agentTool({ flows, pairedDevice: true });
     expect((await paired.call({ operation: "flow-run", name: "Order check" })).result).toEqual({
       error: "flow-needs-this-computer",

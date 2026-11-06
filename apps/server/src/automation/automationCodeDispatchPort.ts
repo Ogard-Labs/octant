@@ -4,6 +4,7 @@ import {
   decodeCodeDeliveryTarget,
   decodeCodeOperationId,
   type AutomationRun,
+  type AutomationRunReference,
   type AutomationRunLevel,
   type CodeEvidenceContentId,
   type CodeEvidenceReference,
@@ -42,7 +43,11 @@ export interface AutomationCodeRouteService {
 }
 
 export interface AutomationCodeOperationService {
-  readonly execute: (windowId: WindowId, command: unknown) => Promise<CodeOperationResult>;
+  readonly execute: (
+    windowId: WindowId,
+    command: unknown,
+    options?: { readonly routineRun?: AutomationRunReference },
+  ) => Promise<CodeOperationResult>;
 }
 
 export interface AutomationCodeEvidencePort {
@@ -228,7 +233,11 @@ async function startOrRecover(
       : {}),
   };
   try {
-    const result = await options.operations.execute(input.scopeId, command);
+    // The run this turn is for, handed over here and nowhere else, so only
+    // this turn can report the run's result.
+    const result = await options.operations.execute(input.scopeId, command, {
+      routineRun: { automationId: input.run.automationId, runId: input.run.id },
+    });
     if (
       result.kind === "provider-turn-state" &&
       (result.state === "running" || result.state === "waiting")

@@ -191,7 +191,7 @@ describe("extension zero-context composition", () => {
       capability.id === instructionCapabilityId
         ? {
             context: {
-              kind: "instructions" as const,
+              kind: "skill-instructions" as const,
               text: "Use the selected build guidance.",
             },
             tools: [],
@@ -208,7 +208,7 @@ describe("extension zero-context composition", () => {
 
     expect(result).toMatchObject({
       status: "selected",
-      providerContext: [{ kind: "instructions", text: "Use the selected build guidance." }],
+      providerContext: [{ kind: "skill-instructions", text: "Use the selected build guidance." }],
       tools: [],
     });
     expect(result.contextEntries.map((contextEntry) => String(contextEntry.id))).toEqual([
