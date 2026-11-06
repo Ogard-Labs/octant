@@ -96,13 +96,25 @@ describe("AppBackdrop", () => {
     expect(ground).toHaveAttribute("data-octant-app-backdrop", "builtin");
     const builtin = container.querySelector<HTMLElement>(".app-backdrop__builtin");
     expect(builtin?.style.getPropertyValue("--app-backdrop-image")).toBe(
-      'url("zen-backgrounds/perspective-dot-plane-dark.webp")',
+      `url("${new URL("zen-backgrounds/perspective-dot-plane-dark.webp", document.baseURI).href}")`,
     );
     expect(builtin?.style.getPropertyValue("--app-backdrop-image-light")).toBe("");
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("carries a light-theme picture so the ground follows the window's scheme", () => {
+  it.each([
+    [
+      "file:///Applications/Octant.app/Contents/Resources/app.asar/apps/web/dist/index.html",
+      "file:///Applications/Octant.app/Contents/Resources/app.asar/apps/web/dist/zen-backgrounds/",
+    ],
+    ["http://localhost:5173/", "http://localhost:5173/zen-backgrounds/"],
+    ["https://octant.example/", "https://octant.example/zen-backgrounds/"],
+    [
+      "https://octant.example/workspace/index.html?client=remote#home",
+      "https://octant.example/workspace/zen-backgrounds/",
+    ],
+  ])("resolves both theme pictures from the document at %s", (baseUri, pictureRoot) => {
+    vi.spyOn(document, "baseURI", "get").mockReturnValue(baseUri);
     const { container } = render(
       <AppBackdrop
         fetcher={vi.fn()}
@@ -121,10 +133,10 @@ describe("AppBackdrop", () => {
     );
     const builtin = container.querySelector<HTMLElement>(".app-backdrop__builtin");
     expect(builtin?.style.getPropertyValue("--app-backdrop-image")).toBe(
-      'url("zen-backgrounds/soft-glow.jpg")',
+      `url("${pictureRoot}soft-glow.jpg")`,
     );
     expect(builtin?.style.getPropertyValue("--app-backdrop-image-light")).toBe(
-      'url("zen-backgrounds/soft-glow-light.jpg")',
+      `url("${pictureRoot}soft-glow-light.jpg")`,
     );
   });
 
