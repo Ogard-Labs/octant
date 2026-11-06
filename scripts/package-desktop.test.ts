@@ -140,7 +140,14 @@ describe("desktop packaging boundary", () => {
     };
     expect(() => validateDarwinBundleIdentity(metadata, stable)).toThrow(/host launch/);
     expect(() =>
-      validateDarwinBundleIdentity({ ...metadata, OctantHostLaunchPolicy: "host-only-v1" }, stable),
+      validateDarwinBundleIdentity(
+        {
+          ...metadata,
+          OctantHostLaunchPolicy: "host-only-v1",
+          CFBundleURLTypes: [{ CFBundleURLSchemes: ["octant"] }],
+        },
+        stable,
+      ),
     ).not.toThrow();
     const nightly = createPackagerOptions(
       "/tmp/stage",
@@ -326,9 +333,24 @@ describe("desktop packaging boundary", () => {
         ...(identity.flavor === "stable" ? { OctantHostLaunchPolicy: "host-only-v1" } : {}),
         CFBundleName: identity.productName,
         CFBundleExecutable: identity.productName,
+        CFBundleURLTypes: [
+          { CFBundleURLName: "Code links", CFBundleURLSchemes: [identity.scheme] },
+        ],
       });
       expect(() => validateDarwinBundleIdentity(metadata(expected), expected)).not.toThrow();
       expect(() => validateDarwinBundleIdentity(metadata(other), expected)).toThrow();
+      expect(() =>
+        validateDarwinBundleIdentity({ ...metadata(expected), CFBundleURLTypes: [] }, expected),
+      ).toThrow(`does not declare its ${expected.scheme}:// Code links`);
+      expect(() =>
+        validateDarwinBundleIdentity(
+          {
+            ...metadata(expected),
+            CFBundleURLTypes: [{ CFBundleURLSchemes: [other.scheme] }],
+          },
+          expected,
+        ),
+      ).toThrow(/Code links/);
       expect(() =>
         validateLinuxDesktopEntry(createLinuxDesktopEntry("0.1.0", expected), expected),
       ).not.toThrow();
@@ -346,7 +368,7 @@ describe("desktop packaging boundary", () => {
         await mkdir(resolve(root, "Contents"));
         await writeFile(
           resolve(root, "Contents/Info.plist"),
-          '<?xml version="1.0"?><plist version="1.0"><dict><key>OctantDesktopEntryPolicy</key><string>sealed-main-v1</string><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string></dict></plist>',
+          '<?xml version="1.0"?><plist version="1.0"><dict><key>OctantDesktopEntryPolicy</key><string>sealed-main-v1</string><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>octant-nightly</string></array></dict></array></dict></plist>',
         );
         await expect(
           validateBundleIdentity(root, desktopIdentity("nightly")),

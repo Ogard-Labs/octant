@@ -2,7 +2,9 @@ import { expect, it } from "vitest";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
   NIGHTLY_CLIENT_CHANNELS,
+  NIGHTLY_CLIENT_PUSH_CHANNELS,
   nightlyClientChannelClass,
+  nightlyClientChannelGaps,
   nightlyClientRefusal,
 } from "./nightlyClientChannels";
 
@@ -37,4 +39,27 @@ it("says where each refused class lives and never blames the Octant version", ()
   expect(nightlyClientRefusal("replaced")).toMatch(/Browser presentation/);
   for (const channelClass of ["local", "brokered", "octant-only", "replaced"] as const)
     expect(nightlyClientRefusal(channelClass)).not.toMatch(/newer Octant/);
+});
+
+it("names every answered channel the table does not mark local and every unanswered local one", () => {
+  const local = Object.values(DESKTOP_IPC_CHANNELS).filter(
+    (channel) =>
+      nightlyClientChannelClass(channel) === "local" && !NIGHTLY_CLIENT_PUSH_CHANNELS.has(channel),
+  );
+  expect(nightlyClientChannelGaps(new Set(local), new Set())).toEqual({
+    unmarked: [],
+    unanswered: [],
+  });
+  const [withheld, ...rest] = local;
+  if (withheld === undefined) throw new Error("No local channel");
+  expect(nightlyClientChannelGaps(new Set(rest), new Set()).unanswered).toEqual([withheld]);
+  expect(nightlyClientChannelGaps(new Set(rest), new Set([withheld])).unanswered).toEqual([]);
+  expect(
+    nightlyClientChannelGaps(
+      new Set([...local, DESKTOP_IPC_CHANNELS.remotePairingTicket]),
+      new Set(),
+    ).unmarked,
+  ).toEqual([DESKTOP_IPC_CHANNELS.remotePairingTicket]);
+  for (const channel of NIGHTLY_CLIENT_PUSH_CHANNELS)
+    expect(nightlyClientChannelClass(channel)).toBe("local");
 });

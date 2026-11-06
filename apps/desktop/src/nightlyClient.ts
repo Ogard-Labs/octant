@@ -17,7 +17,12 @@ import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
-import { nightlyClientChannelClass, nightlyClientRefusal } from "./nightlyClientChannels";
+import {
+  nightlyClientChannelClass,
+  nightlyClientChannelGaps,
+  nightlyClientRefusal,
+} from "./nightlyClientChannels";
+import { installNightlyClientSurfaces } from "./nightlyClientSurfaces";
 import {
   createMainBrowserWindowOptions,
   createTrustedRendererRequestRegistry,
@@ -54,7 +59,18 @@ export async function runNightlyClient(
       kind: "refused",
       message: "Needs a newer Octant. Native window registration is unavailable.",
     };
+  // macOS delivers a link that launched Nightly before the app is ready, so
+  // links are held until the window surfaces exist.
+  const earlyLinks: string[] = [];
+  let acceptCodeLink: (url: string) => void = (url) => void earlyLinks.push(url);
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    acceptCodeLink(url);
+  });
+  const linkArguments = (args: ReadonlyArray<string>) =>
+    args.filter((argument) => argument.startsWith(`${identity.scheme}://`));
   await app.whenReady();
+  app.setAsDefaultProtocolClient(identity.scheme);
   const windows = new Map<number, BrowserWindow>();
   const trusted = createTrustedRendererRequestRegistry();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -88,13 +104,26 @@ export async function runNightlyClient(
     return window;
   };
   const supported = new Set<string>();
-  const register = (channel: string, handler: (event: Electron.IpcMainInvokeEvent) => unknown) => {
+  const register = (
+    channel: string,
+    handler: (event: Electron.IpcMainInvokeEvent, ...values: unknown[]) => unknown,
+  ) => {
     supported.add(channel);
-    ipcMain.handle(channel, (event) => {
+    ipcMain.handle(channel, (event, ...values: unknown[]) => {
       owns(event);
-      return handler(event);
+      return handler(event, ...values);
     });
   };
+  const surfaces = installNightlyClientSurfaces({
+    identity,
+    platform: process.platform,
+    register,
+    owns,
+    quit: () => app.quit(),
+  });
+  acceptCodeLink = surfaces.acceptCodeLink;
+  for (const url of [...earlyLinks.splice(0), ...linkArguments(process.argv)])
+    surfaces.acceptCodeLink(url);
   register(DESKTOP_IPC_CHANNELS.minimize, (event) => owns(event).minimize());
   register(DESKTOP_IPC_CHANNELS.maximizeOrRestore, (event) => {
     const window = owns(event);
@@ -103,7 +132,7 @@ export async function runNightlyClient(
   });
   register(DESKTOP_IPC_CHANNELS.close, (event) => owns(event).close());
   register(DESKTOP_IPC_CHANNELS.hostCapabilities, () => ({
-    sidebarVibrancySupported: false,
+    sidebarVibrancySupported: process.platform === "darwin",
     liveBrowserSupported: true,
     embeddedBrowserSupported: true,
     liveSimulatorFrameSupported: false,
@@ -203,6 +232,12 @@ export async function runNightlyClient(
     relaunch: () => app.relaunch(),
   });
   const offersTestData = nightlyTestDataSupported(identity, process.platform);
+  const dataChannels = [
+    DESKTOP_IPC_CHANNELS.nightlyDataState,
+    DESKTOP_IPC_CHANNELS.nightlyDataChoose,
+    DESKTOP_IPC_CHANNELS.nightlyDataRemove,
+    DESKTOP_IPC_CHANNELS.nightlyDataRelaunch,
+  ];
   if (offersTestData) {
     const data = createNightlyDataControl({
       identity,
@@ -217,23 +252,19 @@ export async function runNightlyClient(
     register(DESKTOP_IPC_CHANNELS.nightlyDataState, () => data.state());
     register(DESKTOP_IPC_CHANNELS.nightlyDataRemove, () => data.remove());
     register(DESKTOP_IPC_CHANNELS.nightlyDataRelaunch, () => data.relaunch());
-    supported.add(DESKTOP_IPC_CHANNELS.nightlyDataChoose);
-    ipcMain.handle(DESKTOP_IPC_CHANNELS.nightlyDataChoose, (event, value: unknown) => {
-      owns(event);
-      return data.choose(value);
-    });
+    register(DESKTOP_IPC_CHANNELS.nightlyDataChoose, (_event, value) => data.choose(value));
   }
   // Every other channel refuses by its class in the closed table: Octant-only
   // administration says where it lives, and a feature awaiting its broker says
   // it is not here yet. No arbitrary channel is proxied.
+  const gaps = nightlyClientChannelGaps(supported, new Set(offersTestData ? [] : dataChannels));
+  if (gaps.unmarked.length > 0)
+    throw new Error("Octant Nightly answers a channel its table does not mark local.");
+  if (gaps.unanswered.length > 0)
+    throw new Error("Octant Nightly leaves a channel its table marks local unanswered.");
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {
-    const channelClass = nightlyClientChannelClass(channel);
-    if (supported.has(channel)) {
-      if (channelClass !== "local")
-        throw new Error("Octant Nightly answers a channel its table does not mark local.");
-      continue;
-    }
-    const message = nightlyClientRefusal(channelClass);
+    if (supported.has(channel)) continue;
+    const message = nightlyClientRefusal(nightlyClientChannelClass(channel));
     ipcMain.handle(channel, (event) => {
       owns(event);
       throw new Error(message);
@@ -277,7 +308,8 @@ export async function runNightlyClient(
       app.quit();
     })();
   });
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, commandLine: ReadonlyArray<string>) => {
+    for (const url of linkArguments(commandLine.slice(1))) surfaces.acceptCodeLink(url);
     const window = [...windows.values()].find((candidate) => !candidate.isDestroyed());
     if (window === undefined) return;
     if (window.isMinimized()) window.restore();
@@ -318,10 +350,11 @@ export async function runNightlyClient(
                   dirname(fileURLToPath(import.meta.url)),
                   DESKTOP_PRELOAD_FILENAME,
                 ),
-                browserWindow: { backgroundColor: "#101013", frame: true },
+                browserWindow: surfaces.presentation().browserWindow,
               }),
             );
             const id = window.webContents.id;
+            surfaces.attach(window, bootstrap.windowId);
             installNativeEditingMenus(window);
             const rememberBounds = () => {
               if (!window.isDestroyed()) bounds = window.getNormalBounds();

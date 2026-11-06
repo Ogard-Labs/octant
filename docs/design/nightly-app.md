@@ -490,10 +490,34 @@ channel is missing from it:
 | `replaced`    | Nightly uses another mechanism: the Browser's human presentation          | Names the Browser presentation                   |
 
 - Nightly's main refuses to start if it answers a channel its table does not
-  mark `local`. An unlisted channel counts as Octant-only.
+  mark `local`, or leaves a `local` channel unanswered. The exceptions are the
+  channels it only sends to the renderer (menu commands, Code links, the
+  resolved sidebar material) and the Data channels where Nightly does not offer
+  Data. An unlisted channel counts as Octant-only.
 - Brokered channels stay refused until the native-main token of decision 1
-  admits them; local ones still unanswered come with Nightly's own native
-  surfaces.
+  admits them. Opening a Project in a new window is brokered: a second window
+  needs its own lease from the host.
+- Nightly's own main, without the host, answers the native surfaces a window
+  needs:
+  - An application menu named Octant Nightly, with **Settings…** (⌘,) and the
+    guarded ⌘Q. A packaged Nightly drops Reload and the developer tools
+    from View; on Linux a packaged Nightly shows no menu bar.
+  - External links, such as sign-in pages, open in the default browser after
+    the same check Octant runs: only `http` and `https` URLs without embedded
+    credentials leave the app.
+  - Attention notifications and the Dock badge, summed across Nightly's
+    windows.
+  - `octant-nightly://` Code links. Nightly claims the scheme, holds a link
+    until a window has loaded, and drops any link Octant would drop.
+  - Resetting the window's bounds, and the sidebar material and vibrancy Octant
+    uses, from the same window presentation.
+  - Window capture for the composer, under Nightly's own Screen Recording
+    grant; the Open in list; and saving Browser proof pictures to a folder the
+    person picks.
+  - The menu-bar open-thread report is accepted and dropped: Nightly has no
+    menu-bar item, and Octant's lists the host's threads.
+    Opening a checkout in one of the listed apps still needs the host, so it
+    stays brokered.
 - The preload of a Nightly client window omits every member that reaches an
   Octant-only channel, so the shared renderer hides those screens as it does
   for a remote client. Where Settings › Remote access would be, it shows one
@@ -509,7 +533,7 @@ evidence; the preflight that replaces the early gate checks them:
 - [x] Every desktop channel classified; Octant-only administration hidden in
       the Nightly client.
 - [ ] A synthetic Nightly client smoke that runs in CI, never packaged.
-- [ ] Nightly's local native surfaces: app menu without developer tools,
+- [x] Nightly's local native surfaces: app menu without developer tools,
       external links, notifications and badge, `octant-nightly://` links,
       reset bounds, sidebar material, window capture and the Open in list.
 - [ ] Native-main token admission on the host's closed route allowlist, with
