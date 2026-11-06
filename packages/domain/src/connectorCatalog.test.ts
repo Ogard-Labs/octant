@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("offers Atlassian v2 and Airtable sign-in with a distinct scoped Airtable PAT alternative", () => {
+    expect(connectorCatalog().find((e) => e.id === "atlassian")).toMatchObject({
+      url: "https://mcp.atlassian.com/v2/mcp",
+      auth: { kind: "sign-in" },
+    });
+    expect(connectorCatalog().find((e) => e.id === "airtable")).toMatchObject({
+      url: "https://mcp.airtable.com/mcp",
+      auth: { kind: "sign-in" },
+    });
+    expect(connectorCatalog().find((e) => e.id === "airtable-pat")).toMatchObject({
+      url: "https://mcp.airtable.com/mcp",
+      auth: {
+        kind: "key",
+        header: "Authorization",
+        prefix: "Bearer",
+        keyPage: "https://airtable.com/create/tokens",
+      },
+    });
+  });
+
   it("requires owned confidential client setup for HubSpot without inventing fixed scopes", () => {
     expect(connectorCatalog().find((entry) => entry.id === "hubspot")).toMatchObject({
       displayName: "HubSpot",

@@ -9305,6 +9305,32 @@ preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
 
+**Atlassian and Airtable setup.** Both non-featured entries use the existing
+MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
+uses `https://mcp.atlassian.com/v2/mcp`; its path-scoped issuer, published DCR and
+S256 metadata were checked on 2026-11-06. A Cloud account and organization
+permission for the client are required; site restrictions and IP allowlists
+still apply. Do not switch a failed connection to a legacy SSE endpoint.
+Airtable uses `https://mcp.airtable.com/mcp`, with the exact origin resource
+`https://mcp.airtable.com` advertised by its protected-resource metadata. Only
+that exact transport has this resource alias; arbitrary sibling paths and
+queries retain exact resource matching. Its issuer advertises S256, public DCR
+and metadata-document identities. Shared Client setup also supports a manually
+registered public client and retained exact callback before separate consent.
+
+A separate Airtable personal-token entry sends a broker-held Bearer token at the
+same vendor endpoint. The person limits scopes and selected bases/workspaces in
+Airtable; OAuth selection and the vendor's third-party integrations page control
+OAuth base access. The catalog and Library do not invent a list of accessible
+bases from a credential: authorized task tools report accessible resources, and
+permission errors remain visible. Read-only tokens omit write scopes. Revoked
+OAuth credentials follow normal refresh/reconnect without tool replay; a missing
+or revoked PAT is replaced explicitly through the existing key flow. An admin
+may need to allowlist the integration. No vendor CLI or extra authority is
+required for either HTTP connector.
+Sources: [Atlassian setup](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/)
+and [Airtable setup](https://airtable.com/developers/agents/mcp/getting-started).
+
 **HubSpot setup.** The non-featured HubSpot entry uses the vendor's Streamable
 HTTP address `https://mcp.hubspot.com/` and opens the shared registered-client
 setup before separate account consent. A person creates a HubSpot MCP connector,
@@ -9444,8 +9470,9 @@ token endpoint is `https://slack.com/api/oauth.v2.user.access`. Configuration,
 discovery, broker descriptors and persisted grants retain and check the
 transport/issuer/resource/endpoints independently; the origin is never a
 wildcard for bearer delivery. The dedicated endpoints cannot fall back to a
-generic dialect for another transport or resource. Every other MCP server
-keeps exact transport/resource equality.
+generic dialect for another transport or resource. Apart from the exact Airtable
+transport-to-origin alias described above, other MCP servers keep exact
+transport/resource equality.
 
 The observed dedicated metadata advertises `client_secret_post`, not public
 `none`, Basic or dynamic registration. A supplied registered app therefore uses

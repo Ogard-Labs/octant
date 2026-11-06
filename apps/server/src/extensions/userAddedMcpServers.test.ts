@@ -335,8 +335,10 @@ describe("MCP servers added by hand", () => {
   it.each([
     { id: "slack", name: "Slack", url: "https://mcp.slack.com/mcp" },
     { id: "hubspot", name: "HubSpot", url: "https://mcp.hubspot.com/" },
+    { id: "atlassian", name: "Atlassian", url: "https://mcp.atlassian.com/v2/mcp" },
+    { id: "airtable", name: "Airtable", url: "https://mcp.airtable.com/mcp" },
   ])(
-    "adds the exact registered $name connector and refuses catalog binding forgeries",
+    "adds the exact $name connector and refuses catalog binding forgeries",
     async ({ id, name, url }) => {
       const { store: servers, registry } = await store();
       const { source } = await servers.add({
@@ -347,11 +349,15 @@ describe("MCP servers added by hand", () => {
       expect(registry.get(source.sourceRef)).toBeDefined();
       for (const server of [
         { type: "streamable-http", url: `${url}other`, headers: [] },
-        {
-          type: "streamable-http",
-          url,
-          headers: [{ name: "Authorization", value: "synthetic-key", secret: false }],
-        },
+        ...(id === "slack" || id === "hubspot"
+          ? ([
+              {
+                type: "streamable-http",
+                url,
+                headers: [{ name: "Authorization", value: "synthetic-key", secret: false }],
+              },
+            ] as const)
+          : []),
       ] as const)
         await expect(
           servers.add({ name: `Other ${name}`, connectorId: id, server }),

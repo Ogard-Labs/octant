@@ -523,6 +523,26 @@ store is unavailable, restore it before retrying. Application setup never
 replaces your account consent or expands what a task may do. GitHub continues
 to accept personal access tokens.
 
+Choose **Atlassian** for a new v2 connection to your Atlassian Cloud account.
+Sign in and review the sites and permissions. Your organization may need to
+allowlist the local client, approve the integration or permit this host's IP.
+A permission error is not a reason to switch to an older endpoint or bypass
+admin controls. Sign out and reconnect after restoring access; check failed
+operations before retrying.
+
+Choose **Airtable** to sign in and select the bases the connection can access.
+Manage that selection in Airtable under **Integrations → Third-party
+integrations**. For a manually registered app, use **Client setup** and register
+the shown exact callback before separately signing in. **Airtable personal
+token** is a separate option: create a token with only the bases and scopes you
+need, then use **Add key**. Read-only tokens should include only read scopes
+such as `data.records:read` and `schema.bases:read`; omit write scopes. Octant
+stores the token through its credential broker. Ask an authorized task to list
+accessible bases; the Library does not infer their names from a credential.
+Admin restrictions and your normal base/workspace permissions still apply.
+Replace a revoked personal token explicitly; reconnect a revoked OAuth grant.
+Neither route automatically repeats a failed tool operation.
+
 Choose **HubSpot** in Library or Connectors. **Connect** opens **Client setup**
 before account consent. Follow the linked HubSpot guide to create an MCP
 connector in your account. Copy Octant's exact **Callback address** into that
