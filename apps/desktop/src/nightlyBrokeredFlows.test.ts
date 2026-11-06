@@ -137,8 +137,6 @@ describe("Nightly brokered pickers and handoffs", () => {
       bootstrap({ nativeMainToken: token(), hostFeatures: ["project-root-receipts"] }),
     );
     const handler = handlers.get(DESKTOP_IPC_CHANNELS.selectProjectRoot);
-    await expect(async () => handler?.({ sender: { id: 8 } }, "work")).rejects.toThrow(
-      "not owned",
-    );
+    await expect(async () => handler?.({ sender: { id: 8 } }, "work")).rejects.toThrow("not owned");
   });
 });

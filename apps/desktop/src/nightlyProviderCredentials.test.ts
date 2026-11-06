@@ -63,9 +63,9 @@ describe("Nightly provider keys through Octant's host", () => {
       Response.json({ outcome: "stored", instanceId: INSTANCE, displayName: "Gateway" }),
     );
     await invoke(DESKTOP_IPC_CHANNELS.setProviderCredential, INSTANCE, "sk-test");
-    expect(JSON.parse(String((fetch.mock.calls[0] as unknown as [URL, RequestInit])[1].body))).toEqual(
-      { instance: INSTANCE, credential: "sk-test", replace: true },
-    );
+    expect(
+      JSON.parse(String((fetch.mock.calls[0] as unknown as [URL, RequestInit])[1].body)),
+    ).toEqual({ instance: INSTANCE, credential: "sk-test", replace: true });
     await expect(invoke(DESKTOP_IPC_CHANNELS.providerCredentialStatus, INSTANCE)).resolves.toBe(
       "stored",
     );

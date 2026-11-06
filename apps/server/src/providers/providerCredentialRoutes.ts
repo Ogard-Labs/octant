@@ -207,9 +207,7 @@ export function createProviderCredentialRouteHandler(
       const keyRequest = decodeKeyRequest(route, body.value);
       if (keyRequest === undefined) return refuse("invalid");
       if (credentialsForPool === undefined) return refuse("credential-store-unavailable");
-      return serialized(() =>
-        changeApiKeys(keyRequest, windowId, credentialsForPool, options),
-      );
+      return serialized(() => changeApiKeys(keyRequest, windowId, credentialsForPool, options));
     }
     const decoded = decodeRequest(route, body.value);
     if (decoded === undefined) return refuse("invalid");
@@ -504,7 +502,12 @@ type KeyRequest =
       readonly credential: string;
       readonly label: string | undefined;
     }
-  | { readonly kind: "rename"; readonly instance: string; readonly keyId: string; readonly label: string }
+  | {
+      readonly kind: "rename";
+      readonly instance: string;
+      readonly keyId: string;
+      readonly label: string;
+    }
   | {
       readonly kind: "replace";
       readonly instance: string;
@@ -550,7 +553,9 @@ function decodeKeyRequest(route: Route, value: unknown): KeyRequest | undefined 
         ? { kind: "add", instance, credential: validCredential, label }
         : undefined;
     case ROUTES.keysRename:
-      return keys === "instance,keyId,label" && validKeyId !== undefined && typeof label === "string"
+      return keys === "instance,keyId,label" &&
+        validKeyId !== undefined &&
+        typeof label === "string"
         ? { kind: "rename", instance, keyId: validKeyId, label }
         : undefined;
     case ROUTES.keysReplace:
@@ -562,7 +567,11 @@ function decodeKeyRequest(route: Route, value: unknown): KeyRequest | undefined 
     case ROUTES.keysRemove:
     case ROUTES.keysSetActive:
       return keys === "instance,keyId" && validKeyId !== undefined
-        ? { kind: route === ROUTES.keysRemove ? "remove" : "set-active", instance, keyId: validKeyId }
+        ? {
+            kind: route === ROUTES.keysRemove ? "remove" : "set-active",
+            instance,
+            keyId: validKeyId,
+          }
         : undefined;
     case ROUTES.keysMove:
       return keys === "direction,instance,keyId" &&
@@ -589,7 +598,8 @@ async function changeApiKeys(
   options: ProviderCredentialRouteOptions,
 ): Promise<Response> {
   const target = resolveInstance(request.instance, options.readProviderInstances(), []);
-  if (target.kind !== "existing") return refuse(target.kind === "ambiguous" ? "ambiguous" : "not-found");
+  if (target.kind !== "existing")
+    return refuse(target.kind === "ambiguous" ? "ambiguous" : "not-found");
   if (!usesStoredKey(target.instance)) return refuse("no-stored-key-authentication");
   const { id } = target;
   try {

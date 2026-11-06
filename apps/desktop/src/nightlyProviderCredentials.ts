@@ -49,17 +49,18 @@ export function installNightlyProviderCredentials(options: NightlyProviderCreden
     const id = event.sender.id;
     const bootstrap = options.bootstrap(id);
     const headers = options.nativeMain.headers(id);
-    if (bootstrap === undefined || headers === undefined || !options.nativeMain.supports(id, feature))
+    if (
+      bootstrap === undefined ||
+      headers === undefined ||
+      !options.nativeMain.supports(id, feature)
+    )
       throw new Error(NEEDS_NEWER_OCTANT);
-    const response = await options.fetch(
-      new URL(`/api/desktop/provider-credentials/${path}`, bootstrap.hostOrigin),
-      {
-        method: "POST",
-        redirect: "error",
-        headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify(body),
-      },
-    );
+    const response = await options.fetch(new URL(path, bootstrap.hostOrigin), {
+      method: "POST",
+      redirect: "error",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
     let value: unknown;
     try {
       value = await response.json();
@@ -71,12 +72,15 @@ export function installNightlyProviderCredentials(options: NightlyProviderCreden
   const { register } = options;
   register(DESKTOP_IPC_CHANNELS.providerCredentialStatus, async (event, instanceId) => {
     const instance = validateInstanceId(instanceId);
-    const answer = await post(event, "provider-credentials", "status", { instance }).catch(
-      (error: unknown) => {
-        if (error instanceof Error && error.message === NEEDS_NEWER_OCTANT) throw error;
-        return undefined;
-      },
-    );
+    const answer = await post(
+      event,
+      "provider-credentials",
+      "/api/desktop/provider-credentials/status",
+      { instance },
+    ).catch((error: unknown) => {
+      if (error instanceof Error && error.message === NEEDS_NEWER_OCTANT) throw error;
+      return undefined;
+    });
     if (answer === undefined) return "unavailable";
     const outcome = field(answer.value, "outcome");
     if (answer.status === 200 && (outcome === "stored" || outcome === "missing")) return outcome;
@@ -89,28 +93,34 @@ export function installNightlyProviderCredentials(options: NightlyProviderCreden
     const instance = validateInstanceId(instanceId);
     const value = validateCredential(credential);
     await change(
-      post(event, "provider-credentials", "set", { instance, credential: value, replace: true }),
+      post(event, "provider-credentials", "/api/desktop/provider-credentials/set", {
+        instance,
+        credential: value,
+        replace: true,
+      }),
       "Octant could not store the provider credential.",
     );
   });
   register(DESKTOP_IPC_CHANNELS.clearProviderCredential, async (event, instanceId) => {
     const instance = validateInstanceId(instanceId);
     await change(
-      post(event, "provider-credentials", "remove", { instance }),
+      post(event, "provider-credentials", "/api/desktop/provider-credentials/remove", { instance }),
       "Octant could not clear the provider credential.",
     );
   });
   const keys = (event: Electron.IpcMainInvokeEvent, path: string, body: Record<string, unknown>) =>
-    poolChange(post(event, "provider-api-keys", `keys/${path}`, body));
+    poolChange(post(event, "provider-api-keys", path, body));
   register(DESKTOP_IPC_CHANNELS.listProviderApiKeys, async (event, instanceId) => {
-    const value = await keys(event, "list", { instance: validateInstanceId(instanceId) });
+    const value = await keys(event, "/api/desktop/provider-credentials/keys/list", {
+      instance: validateInstanceId(instanceId),
+    });
     const list = field(value, "keys");
     if (!Array.isArray(list) || !list.every(isApiKeySummary))
       throw new Error("Octant could not update the provider API keys.");
     return list.map(({ id, label, active }) => ({ id, label, active }));
   });
   register(DESKTOP_IPC_CHANNELS.addProviderApiKey, async (event, instanceId, credential, label) => {
-    const value = await keys(event, "add", {
+    const value = await keys(event, "/api/desktop/provider-credentials/keys/add", {
       instance: validateInstanceId(instanceId),
       credential: validateCredential(credential),
       ...(label === undefined ? {} : { label: validateLabel(label) }),
@@ -120,7 +130,7 @@ export function installNightlyProviderCredentials(options: NightlyProviderCreden
     return { id: key.id, label: key.label, active: key.active };
   });
   register(DESKTOP_IPC_CHANNELS.renameProviderApiKey, async (event, instanceId, keyId, label) => {
-    await keys(event, "rename", {
+    await keys(event, "/api/desktop/provider-credentials/keys/rename", {
       instance: validateInstanceId(instanceId),
       keyId: validateKeyId(keyId),
       label: validateLabel(label),
@@ -129,7 +139,7 @@ export function installNightlyProviderCredentials(options: NightlyProviderCreden
   register(
     DESKTOP_IPC_CHANNELS.replaceProviderApiKey,
     async (event, instanceId, keyId, credential) => {
-      await keys(event, "replace", {
+      await keys(event, "/api/desktop/provider-credentials/keys/replace", {
         instance: validateInstanceId(instanceId),
         keyId: validateKeyId(keyId),
         credential: validateCredential(credential),
@@ -137,20 +147,20 @@ export function installNightlyProviderCredentials(options: NightlyProviderCreden
     },
   );
   register(DESKTOP_IPC_CHANNELS.removeProviderApiKey, async (event, instanceId, keyId) => {
-    await keys(event, "remove", {
+    await keys(event, "/api/desktop/provider-credentials/keys/remove", {
       instance: validateInstanceId(instanceId),
       keyId: validateKeyId(keyId),
     });
   });
   register(DESKTOP_IPC_CHANNELS.setActiveProviderApiKey, async (event, instanceId, keyId) => {
-    await keys(event, "set-active", {
+    await keys(event, "/api/desktop/provider-credentials/keys/set-active", {
       instance: validateInstanceId(instanceId),
       keyId: validateKeyId(keyId),
     });
   });
   register(DESKTOP_IPC_CHANNELS.moveProviderApiKey, async (event, instanceId, keyId, direction) => {
     if (direction !== "up" && direction !== "down") throw new Error(INVALID_KEY_REQUEST);
-    await keys(event, "move", {
+    await keys(event, "/api/desktop/provider-credentials/keys/move", {
       instance: validateInstanceId(instanceId),
       keyId: validateKeyId(keyId),
       direction,

@@ -801,4 +801,3 @@ export function decodeCodeOperationApprovalPresentation(value: unknown): {
   }
   return { projectId: value.projectId, composerId: value.composerId };
 }
-

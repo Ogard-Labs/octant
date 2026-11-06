@@ -64,7 +64,10 @@ function harness(features: ReadonlyArray<string>) {
   });
   const nativeMain = createNativeMainAuthority();
   nativeMain.remember(7, bootstrap);
-  const window = { isDestroyed: () => false, getContentBounds: () => ({ width: 1200, height: 800 }) };
+  const window = {
+    isDestroyed: () => false,
+    getContentBounds: () => ({ width: 1200, height: 800 }),
+  };
   const handlers = new Map<string, (event: unknown, ...values: unknown[]) => unknown>();
   const viewTokens: string[] = [];
   const view: CodeOperationApprovalViewPort = {

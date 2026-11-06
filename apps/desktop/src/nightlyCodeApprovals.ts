@@ -136,7 +136,10 @@ export function installNightlyCodeApprovals<TWindow extends ApprovalHostWindow>(
     if (decoded !== undefined) palettes.set(windowId, decoded);
   });
   options.handleViewDecision(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.decision, async (event, value) =>
-    controller.decision({ senderId: event.sender.id, ...decodeCodeOperationApprovalViewDecision(value) }),
+    controller.decision({
+      senderId: event.sender.id,
+      ...decodeCodeOperationApprovalViewDecision(value),
+    }),
   );
   return Object.freeze({
     /** Ends the window's approvals, cancelling any challenge it still holds. */

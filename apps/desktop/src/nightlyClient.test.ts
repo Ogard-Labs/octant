@@ -248,7 +248,9 @@ it("refuses unanswered channels by their class instead of asking for a newer Oct
   );
   expect(await refusal(DESKTOP_IPC_CHANNELS.browserSurfaceAttach)).toMatch(/Browser presentation/);
   // A brokered flow the host did not grant this window says so, rather than "not yet".
-  expect(await refusal(DESKTOP_IPC_CHANNELS.selectRuntimeBinary)).toMatch(/^Needs a newer Octant\./);
+  expect(await refusal(DESKTOP_IPC_CHANNELS.selectRuntimeBinary)).toMatch(
+    /^Needs a newer Octant\./,
+  );
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS))
     expect(fixture.handlers.has(channel)).toBe(true);
   for (const channel of [

@@ -10,7 +10,10 @@ import {
 import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import { NEEDS_NEWER_OCTANT } from "./nightlyClientChannels";
 import type { NativeMainAuthority } from "./nightlyNativeMainAuthority";
-import { launchOpenInApplication, openCodeCheckoutInApplicationFromServer } from "./openInApplications";
+import {
+  launchOpenInApplication,
+  openCodeCheckoutInApplicationFromServer,
+} from "./openInApplications";
 import { createNativePreviewHandoffExecutor, openPreviewHandoffFromServer } from "./previewHandoff";
 import { createProjectRootPicker } from "./projectRootPicker";
 import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
@@ -113,15 +116,15 @@ export function installNightlyBrokeredFlows<TWindow extends BrokeredWindow>(
     showOpenDialog: (
       owner: TWindow,
       dialogOptions: { readonly properties: ReadonlyArray<OpenDialogProperty> },
-    ) =>
-      options.dialog.showOpenDialog(owner, { properties: [...dialogOptions.properties] }),
+    ) => options.dialog.showOpenDialog(owner, { properties: [...dialogOptions.properties] }),
   };
   register(DESKTOP_IPC_CHANNELS.selectProjectRoot, async (event, projectType) => {
     const call = brokered(event, "project-root-receipts");
-    return await createProjectRootPicker<TWindow>({ ...call, dialog: openDialog, fetch: options.fetch })(
-      event as BrokeredEvent,
-      projectType,
-    );
+    return await createProjectRootPicker<TWindow>({
+      ...call,
+      dialog: openDialog,
+      fetch: options.fetch,
+    })(event as BrokeredEvent, projectType);
   });
   for (const [channel, purpose] of [
     [DESKTOP_IPC_CHANNELS.selectLocalPluginFolder, "plugin-import"],
