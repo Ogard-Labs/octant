@@ -303,6 +303,17 @@ authority; it never changes Stable's channel or stops Stable's host. See
 Lease loss destroys the old Nightly renderer before a bounded fresh native
 registration retry; only an already retained current client receives managed
 restart grace. See [reconnect rules](design/nightly-app.md#reconnecting-after-host-loss).
+Packaged Linux has no signature or audit token, so the same status and window
+protocols run over a `0600` `SOCK_SEQPACKET` path socket in the private
+per-user runtime folder. Each side admits the other only for the same user, a
+pidfd-held process incarnation with the same mount, user and PID namespaces
+and root, and a kernel credential on every message; pidfd exit or EOF revokes
+leases. Executable paths and `$APPIMAGE` grant nothing, and a Nightly whose
+renderers run unsandboxed registers no window. A closed Linux Octant starts
+only from the launcher record its last packaged launch wrote, by descriptor,
+with the host-only role and a minimal environment. Same-user unconfined code
+can pass this check, an accepted limit. See
+[Linux client trust](design/nightly-app.md#linux-client-trust).
 Full IME reconversion, accessibility, native popups and full lifecycle
 acceptance remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
@@ -9806,7 +9817,11 @@ mechanisms are:
   unlock, host identity, window registration, provider sign-in and provider
   removal) stay secret-only. Ordinary renderer requests have the token header
   stripped, and the Nightly main keeps the token in memory only
-  ([Octant Nightly](design/nightly-app.md)).
+  ([Octant Nightly](design/nightly-app.md)). On Linux the window registration
+  that carries the token is admitted by kernel peer checks on a private path
+  socket instead of code signatures, and any same-user unconfined process can
+  pass them, the same reach it already has to the bridge secret
+  ([Linux client trust](design/nightly-app.md#linux-client-trust)).
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority
@@ -13909,9 +13924,9 @@ macOS-only.
   Nightly-channel install row (packaged macOS Octant, person-started,
   feed signature, artifact hash and a Nightly-specific code requirement) are
   built; a signed install from a published Nightly build has not been
-  exercised. Nightly's own host on separate test data (macOS only: its own
-  folder, port, logs and Keychain service names, chosen in Settings and decided
-  once at launch) is built; a signed Nightly running it has not been
+  exercised. Nightly's own host on separate test data (macOS and Linux: its own
+  folder, port, logs and Keychain service names or Secret Service `service`
+  values, chosen in Settings and decided once at launch) is built; a signed Nightly running it has not been
   exercised. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load

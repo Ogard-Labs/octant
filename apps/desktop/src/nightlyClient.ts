@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DesktopIdentity } from "@octant/host-runtime";
+import { clearSecretServiceTestData, type DesktopIdentity } from "@octant/host-runtime";
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
@@ -49,6 +49,7 @@ import {
   resolveWhatsNewStatePath,
 } from "./bundledWhatsNew";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
+import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 import {
@@ -63,6 +64,21 @@ export async function runNightlyClient(
   native: unknown,
   launchLinks: Pick<NightlyLaunchLinks, "handOff">,
 ): Promise<{ readonly kind: "started" } | { readonly kind: "refused"; readonly message: string }> {
+  // The entry already refused this before any status check; repeated here so
+  // no later path can register a window from unsandboxed renderers.
+  if (
+    process.platform === "linux" &&
+    linuxRendererSandboxDisabled({
+      hasSwitch: (name) => app.commandLine.hasSwitch(name),
+      argv: process.argv,
+      env: process.env,
+    })
+  )
+    return {
+      kind: "refused",
+      message:
+        "Octant Nightly connects to Octant only while Chromium's sandbox protects its windows. Start it without --no-sandbox or ELECTRON_DISABLE_SANDBOX.",
+    };
   const protocol = desktopWindowProtocol(native);
   if (protocol === undefined)
     return {
@@ -288,6 +304,7 @@ export async function runNightlyClient(
       windowStorageDirectory: app.getPath("userData"),
       env: process.env,
       trashItem: (path) => shell.trashItem(path),
+      clearTestDataSecrets: () => clearSecretServiceTestData(),
       requestRelaunch: () => relaunch.request(),
     });
     register(DESKTOP_IPC_CHANNELS.nightlyDataState, () => data.state());
