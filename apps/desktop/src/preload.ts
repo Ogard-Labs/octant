@@ -24,6 +24,7 @@ import type { PreviewHandoffRequest } from "@octant/contracts/previews";
 import {
   DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
   KEYRING_ADVICE_MARKER,
+  NEEDS_NEWER_OCTANT,
   MAX_PROVIDER_CREDENTIAL_BYTES,
   OPEN_IN_APPLICATION_IDS,
   PROVIDER_INSTANCE_ID_PATTERN,
@@ -484,10 +485,22 @@ export function createHostBridge(
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
-  const invokeApiKey = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
+  // A flow Nightly's matching Octant does not broker arrives with Electron's
+  // remote-call prefix; the window gets the fixed sentence alone, and every
+  // wrapper that replaces other failures lets it through.
+  const invokeBrokered = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
     try {
       return await ipc.invoke(channel, ...args);
     } catch (error) {
+      if (needsNewerOctant(error)) throw new Error(NEEDS_NEWER_OCTANT);
+      throw error;
+    }
+  };
+  const invokeApiKey = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
+    try {
+      return await invokeBrokered(channel, ...args);
+    } catch (error) {
+      if (needsNewerOctant(error)) throw error;
       const known = error instanceof Error ? knownApiKeyFailure(error.message) : undefined;
       throw new Error(known ?? "Octant could not update the provider API keys.");
     }
@@ -715,8 +728,9 @@ export function createHostBridge(
     clearProviderCredential: async (providerInstanceId: string) => {
       validateProviderInstanceId(providerInstanceId);
       try {
-        await invoke(IPC_CHANNELS.clearProviderCredential, providerInstanceId);
-      } catch {
+        await invokeBrokered(IPC_CHANNELS.clearProviderCredential, providerInstanceId);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         throw new Error("Octant could not clear the provider credential.");
       }
     },
@@ -749,7 +763,10 @@ export function createHostBridge(
     minimize: () => invoke(IPC_CHANNELS.minimize),
     openCodeExternalEditor: (request: CodeExternalEditorRequest) => {
       // The decoded value crosses the bridge, not the raw renderer payload.
-      return invoke(IPC_CHANNELS.openCodeExternalEditor, decodeCodeExternalEditorRequest(request));
+      return invokeBrokered(
+        IPC_CHANNELS.openCodeExternalEditor,
+        decodeCodeExternalEditorRequest(request),
+      ).then(() => undefined);
     },
     listOpenInApplications: async () => {
       const value: unknown = await ipc.invoke(IPC_CHANNELS.listOpenInApplications);
@@ -759,10 +776,10 @@ export function createHostBridge(
       return Object.freeze(value.map((entry) => Object.freeze({ ...entry })));
     },
     openCodeCheckoutInApplication: (request: CodeCheckoutOpenRequest) => {
-      return invoke(
+      return invokeBrokered(
         IPC_CHANNELS.openCodeCheckoutInApplication,
         decodeCodeCheckoutOpenRequest(request),
-      );
+      ).then(() => undefined);
     },
     openInNewWindow: async (target: ProjectWindowTarget) => {
       validateProjectWindowTarget(target);
@@ -770,7 +787,7 @@ export function createHostBridge(
     },
     previewHandoff: (request: PreviewHandoffRequest) => {
       validatePreviewHandoffRequest(request);
-      return invoke(IPC_CHANNELS.previewHandoff, request);
+      return invokeBrokered(IPC_CHANNELS.previewHandoff, request).then(() => undefined);
     },
     requestCodeOperationApproval: async (
       request: CodeOperationApprovalRequest,
@@ -781,8 +798,8 @@ export function createHostBridge(
       if (presentation !== undefined) validateCodeOperationApprovalPresentation(presentation);
       const value =
         presentation === undefined
-          ? await ipc.invoke(IPC_CHANNELS.requestCodeOperationApproval, request)
-          : await ipc.invoke(IPC_CHANNELS.requestCodeOperationApproval, request, presentation);
+          ? await invokeBrokered(IPC_CHANNELS.requestCodeOperationApproval, request)
+          : await invokeBrokered(IPC_CHANNELS.requestCodeOperationApproval, request, presentation);
       if (value === undefined) return undefined;
       if (typeof value !== "string" || !PROVIDER_INSTANCE_ID_PATTERN.test(value)) {
         throw new Error("Octant received an invalid Code approval receipt.");
@@ -858,8 +875,9 @@ export function createHostBridge(
       validateProviderInstanceId(providerInstanceId);
       let value: unknown;
       try {
-        value = await ipc.invoke(IPC_CHANNELS.providerCredentialStatus, providerInstanceId);
-      } catch {
+        value = await invokeBrokered(IPC_CHANNELS.providerCredentialStatus, providerInstanceId);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         throw new Error("Octant could not check the provider credential.");
       }
       if (value !== "stored" && value !== "missing" && value !== "unavailable") {
@@ -874,7 +892,7 @@ export function createHostBridge(
       }
       try {
         return decodeProjectRootPickerResult(
-          await ipc.invoke(IPC_CHANNELS.selectProjectRoot, projectType),
+          await invokeBrokered(IPC_CHANNELS.selectProjectRoot, projectType),
         );
       } catch (error) {
         // ipcRenderer.invoke recreates main-process errors with a remote
@@ -889,18 +907,22 @@ export function createHostBridge(
     },
     selectLocalPluginFolder: async () =>
       decodePickerReceiptResult(
-        await ipc.invoke(IPC_CHANNELS.selectLocalPluginFolder),
+        await invokeBrokered(IPC_CHANNELS.selectLocalPluginFolder),
         "local plugin folder",
       ),
     selectSkillFolder: async () =>
-      decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectSkillFolder), "skill folder"),
+      decodePickerReceiptResult(
+        await invokeBrokered(IPC_CHANNELS.selectSkillFolder),
+        "skill folder",
+      ),
     selectRuntimeBinary: async () =>
-      decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectRuntimeBinary), "binary"),
+      decodePickerReceiptResult(await invokeBrokered(IPC_CHANNELS.selectRuntimeBinary), "binary"),
     saveSupportBundle: async () => {
       let answer: unknown;
       try {
-        answer = await ipc.invoke(IPC_CHANNELS.saveSupportBundle);
-      } catch {
+        answer = await invokeBrokered(IPC_CHANNELS.saveSupportBundle);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         // The main process's own sentence arrives with a remote-call prefix;
         // the renderer gets one fixed sentence.
         throw new Error("Octant could not save the diagnostics. Nothing was written.");
@@ -952,8 +974,9 @@ export function createHostBridge(
         throw new TypeError("Invalid provider credential.");
       }
       try {
-        await invoke(IPC_CHANNELS.setProviderCredential, providerInstanceId, credential);
-      } catch {
+        await invokeBrokered(IPC_CHANNELS.setProviderCredential, providerInstanceId, credential);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         throw new Error("Octant could not store the provider credential.");
       }
     },
@@ -1774,6 +1797,10 @@ function decodeProviderApiKeySummaries(value: unknown): readonly ProviderApiKeyS
     throw new Error("Octant received an invalid API key list.");
   }
   return value.map((key) => ({ id: key.id, label: key.label, active: key.active }));
+}
+
+function needsNewerOctant(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(NEEDS_NEWER_OCTANT);
 }
 
 function knownApiKeyFailure(message: string): string | undefined {
