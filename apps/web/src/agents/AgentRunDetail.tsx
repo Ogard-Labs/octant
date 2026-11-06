@@ -154,6 +154,18 @@ export function AgentRunDetail(props: {
           <div className="agent-run-detail__brief" aria-label="Original inputs">
             <span className="agent-run-detail__label">Original inputs</span>
             <p>Source inputs selected for this child, separate from its brief and report.</p>
+            {props.conversation.inputManifest.sourceMetadataUnavailable === true ? (
+              <p>
+                Some original input details were unavailable and explicitly omitted; their names and
+                number are unknown.
+              </p>
+            ) : null}
+            {props.conversation.inputManifest.omittedUnlistedInputs === undefined ? null : (
+              <p>
+                {props.conversation.inputManifest.omittedUnlistedInputs} additional original inputs
+                were explicitly omitted without retaining their individual details.
+              </p>
+            )}
             <ul className="agent-run-detail__inputs">
               {props.conversation.inputManifest.items.map((item) => (
                 <li

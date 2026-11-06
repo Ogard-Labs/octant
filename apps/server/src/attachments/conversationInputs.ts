@@ -3,6 +3,7 @@ import { permitsConversationInputs } from "@octant/domain/conversation-input-pol
 import { decodeProviderAttachmentInput, type ProviderAttachmentInput } from "@octant/contracts";
 import {
   MAX_CONVERSATION_INPUTS,
+  MAX_CONVERSATION_INPUT_SELECTIONS,
   MAX_CONVERSATION_INPUT_BYTES,
   type ConversationInputManifest,
   type ConversationInputOmissionReason,
@@ -31,6 +32,7 @@ export async function prepareConversationInputs(input: {
   readonly purpose: ConversationInputPurpose;
   readonly inputs: ReadonlyArray<ConversationInputReference>;
   readonly policy?: ConversationInputPolicy;
+  readonly sourceMetadataUnavailable?: boolean;
   readonly supports: (mediaType: string) => boolean;
   readonly current: () => boolean;
   readonly read: (reference: ConversationInputReference) => Promise<Uint8Array | undefined>;
@@ -46,7 +48,17 @@ export async function prepareConversationInputs(input: {
     truncated: references.length > MAX_CONVERSATION_INPUTS,
   });
   if (!input.current()) return refused("source-unavailable");
-  if (input.inputs.length > MAX_CONVERSATION_INPUTS) return refused("too-many");
+  if (
+    input.inputs.length > MAX_CONVERSATION_INPUT_SELECTIONS ||
+    (input.policy !== "text-only" && input.inputs.length > MAX_CONVERSATION_INPUTS)
+  )
+    return refused("too-many");
+  if (input.sourceMetadataUnavailable === true && input.policy !== "text-only")
+    return refused("source-unavailable");
+  const unsupported = input.inputs.find(
+    (reference) => !permitsConversationInputs(input.purpose, reference.source.mode),
+  );
+  if (unsupported !== undefined) return refused("unsupported", [unsupported]);
   if (
     input.policy !== "text-only" &&
     input.inputs.reduce((sum, item) => sum + item.byteLength, 0) > MAX_CONVERSATION_INPUT_BYTES
@@ -58,7 +70,7 @@ export async function prepareConversationInputs(input: {
   if (new Set(keys).size !== keys.length) return refused("changed");
   const attachments: ProviderAttachmentInput[] = [];
   const items: ConversationInputManifest["items"][number][] = [];
-  for (const reference of input.inputs) {
+  for (const reference of input.inputs.slice(0, MAX_CONVERSATION_INPUTS)) {
     if (!input.current()) return refused("source-unavailable");
     if (!permitsConversationInputs(input.purpose, reference.source.mode))
       return refused("unsupported", [reference]);
@@ -91,7 +103,21 @@ export async function prepareConversationInputs(input: {
     items.push({ status: "included", input: reference });
   }
   return input.current()
-    ? { status: "ready", manifest: { version: 1, purpose: input.purpose, items }, attachments }
+    ? {
+        status: "ready",
+        manifest: {
+          version: 1,
+          purpose: input.purpose,
+          items,
+          ...(input.inputs.length > MAX_CONVERSATION_INPUTS
+            ? { omittedUnlistedInputs: input.inputs.length - MAX_CONVERSATION_INPUTS }
+            : {}),
+          ...(input.sourceMetadataUnavailable === true
+            ? { sourceMetadataUnavailable: true as const }
+            : {}),
+        },
+        attachments,
+      }
     : refused("source-unavailable");
 }
 

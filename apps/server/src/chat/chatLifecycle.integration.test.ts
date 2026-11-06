@@ -1,3 +1,5 @@
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { ChatAttachmentStore } from "./chatAttachmentStore";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -313,6 +315,24 @@ function createFixture(behaviors?: {
       service: new ChatService({
         persistence,
         dataDirectory,
+        conversationInputTransfer: new ConversationInputTransfer({
+          dataDirectory,
+          ownerCurrent: (owner) =>
+            persistence.readChatThread(decodeChatThreadId(owner.threadId))?.lifecycle === "active",
+          sourceCurrent: (reference) =>
+            persistence.readChatThread(decodeChatThreadId(reference.source.threadId))?.lifecycle ===
+            "active",
+          supports: (target) => target.providerInstanceId === ids.providerA,
+          read: (reference) =>
+            new ChatAttachmentStore(dataDirectory).read({
+              chatThreadId: decodeChatThreadId(reference.source.threadId),
+              chatAttachmentId: decodeChatAttachmentId(reference.source.attachmentId),
+              displayName: reference.displayName,
+              size: reference.byteLength,
+              hash: reference.digest,
+              finalizedAt: now,
+            }),
+        }),
         uuid,
         clock: () => now,
         threadWork,
@@ -681,7 +701,7 @@ describe("Chat lifecycle integration", () => {
     fixture.close();
   });
 
-  it("cancels, validates handoff, omits unsupported historical attachments, and persists research and work state", async () => {
+  it("cancels, refuses unsupported original inputs until an explicit text-only choice, and persists research and work state", async () => {
     const fixture = createFixture({
       providerA: ["complete", "pending"],
       providerB: ["complete", "complete"],
@@ -784,12 +804,30 @@ describe("Chat lifecycle integration", () => {
       researchRouting: "searxng",
     });
     if (searxng.kind !== "thread-updated") throw new Error("Expected a research update.");
+    const beforeRefusal = fixture.service.read(created.thread.id);
+    const sendsBeforeRefusal = fixture.sentTurns.length;
+    await expect(
+      fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: searxng.thread.version,
+        prompt: "Use configured search.",
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: expect.stringContaining("historical-note.txt (unsupported)") },
+    });
+    expect(fixture.sentTurns).toHaveLength(sendsBeforeRefusal);
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(beforeRefusal.turns.length);
     await fixture.service.execute({
       kind: "send-chat-turn",
       threadId: created.thread.id,
       expectedVersion: searxng.thread.version,
       prompt: "Use configured search.",
+      contextInputPolicy: "text-only",
     });
+    expect(
+      fixture.service.read(created.thread.id).turns.at(-1)?.attempts.at(-1)?.inputReceipt,
+    ).toMatchObject({ purpose: "provider-switch", policy: "text-only", included: 0, omitted: 1 });
     const searxngTurn = fixture.sentTurns.at(-1);
     expect(searxngTurn).toMatchObject({
       providerInstanceId: ids.providerB,

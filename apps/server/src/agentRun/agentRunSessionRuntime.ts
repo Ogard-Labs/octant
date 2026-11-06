@@ -164,7 +164,11 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
     const manifest = options.readAdmittedInputs?.({ runId, contextSnapshotId });
     if (
       manifest?.purpose !== "child-delegation" ||
-      manifest.items.length !== run.routingReceipt.admittedInputCount ||
+      manifest.items.length + (manifest.omittedUnlistedInputs ?? 0) !==
+        run.routingReceipt.admittedInputCount ||
+      ((manifest.omittedUnlistedInputs !== undefined ||
+        manifest.sourceMetadataUnavailable === true) &&
+        run.routingReceipt.contextInputPolicy !== "text-only") ||
       manifest.items.some(
         (item) =>
           item.status !==

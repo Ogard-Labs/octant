@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import {
   ConversationInputManifest,
   ConversationInputPolicy,
-  MAX_CONVERSATION_INPUTS,
+  MAX_CONVERSATION_INPUT_SELECTIONS,
 } from "./conversationInputs";
 import { CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -243,7 +243,9 @@ export const AgentRunRoutingReceipt = Schema.Struct({
       Schema.lessThanOrEqualTo(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
     ),
   ),
-  admittedInputCount: Schema.optional(Schema.Int.pipe(Schema.between(1, MAX_CONVERSATION_INPUTS))),
+  admittedInputCount: Schema.optional(
+    Schema.Int.pipe(Schema.between(0, MAX_CONVERSATION_INPUT_SELECTIONS)),
+  ),
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
   effectiveAuthorityDigest: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   capacityReservationId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),

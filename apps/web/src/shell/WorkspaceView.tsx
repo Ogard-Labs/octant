@@ -1,3 +1,6 @@
+import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
+import { workspaceContentStorageKey } from "./workspaceContentPersistence";
+import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
@@ -773,105 +776,139 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     return facts;
   }, [codeNavigation, props.projects]);
 
+  const keptViews = useWorkspaceViewStore(
+    workspaceContentStorageKey(
+      props.projectServerUrl ?? globalThis.location?.origin ?? "",
+      props.workspace.windowId,
+    ),
+    JSON.stringify(props.workspace.contextByMode[props.mode]),
+  );
+  const continuityScreen = useMemo(() => {
+    const host = props.workspace.contextByMode[props.mode].host;
+    const bridge =
+      host === "local" &&
+      props.hostBridge?.getPrivateListenerStatus !== undefined &&
+      props.hostBridge.getRemoteDeviceInventory !== undefined
+        ? {
+            getPrivateListenerStatus: props.hostBridge.getPrivateListenerStatus,
+            getRemoteDeviceInventory: props.hostBridge.getRemoteDeviceInventory,
+          }
+        : undefined;
+    return {
+      hostLabel:
+        props.hosts?.find((item) => String(item.hostId) === String(host))?.displayName ??
+        (host === "local" ? "This computer" : String(host)),
+      screenLabel: "This workspace window",
+      ...(bridge === undefined ? {} : { bridge }),
+    };
+  }, [props.mode, props.workspace.contextByMode, props.hosts, props.hostBridge]);
   return (
-    <TabActivationProvider
-      {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
-    >
-      <main className="workspace" hidden={props.hidden}>
-        {inlineNotice ? null : contextNotice}
-        <SplitWorkspace
-          key={JSON.stringify(props.workspace.contextByMode[props.mode])}
-          {...(props.contentTabs === undefined ? {} : { contentTabs: props.contentTabs })}
-          {...(props.onActivateContentTab === undefined
-            ? {}
-            : { onActivateContentTab: props.onActivateContentTab })}
-          {...(props.onKeepContentTab === undefined
-            ? {}
-            : { onKeepContentTab: props.onKeepContentTab })}
-          {...(props.onArrangeSideBySide === undefined
-            ? {}
-            : { onArrangeSideBySide: props.onArrangeSideBySide })}
-          {...(props.onCloseContentTab === undefined
-            ? {}
-            : { onCloseContentTab: props.onCloseContentTab })}
-          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
-          {...(props.environmentNames === undefined
-            ? {}
-            : { environmentNames: props.environmentNames })}
-          paneFactsByThreadId={paneFactsByThreadId}
-          drag={props.drag}
-          layout={props.layout}
-          mode={props.mode}
-          onActivatePane={props.onActivatePane}
-          onClearFocus={props.onClearFocus}
-          onClosePane={(paneId) => void closePane(paneId)}
-          onCommitResize={props.onCommitResize}
-          onFocus={props.onFocus}
-          {...(props.onSelectPullRequest === undefined
-            ? {}
-            : { onSelectPullRequest: props.onSelectPullRequest })}
-          onPreviewResize={props.onPreviewResize}
-          onSplitPane={props.onSplitPane}
-          activePaneId={props.workspace.activePaneIds[props.mode]}
-          {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
-          renderSurface={(surface, paneId) => (
-            <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
-              <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
-                <ComposerNoticeProvider
-                  value={paneId === activePaneId && inlineNotice ? contextNotice : null}
-                >
-                  <ComposerContextMeterGate
-                    enabled={
-                      paneId === props.workspace.activePaneIds[props.mode] &&
-                      offersThreadComposer(surface)
-                    }
-                  >
-                    <SurfaceLinkActionsProvider
-                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                      {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
-                      paneId={paneId}
-                      surface={surface}
+    <WorkspaceViewStateContext.Provider value={keptViews}>
+      <ContinuityScreenContext.Provider value={continuityScreen}>
+        <TabActivationProvider
+          {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
+        >
+          <main className="workspace" hidden={props.hidden}>
+            {inlineNotice ? null : contextNotice}
+            <SplitWorkspace
+              key={JSON.stringify(props.workspace.contextByMode[props.mode])}
+              {...(props.contentTabs === undefined ? {} : { contentTabs: props.contentTabs })}
+              {...(props.onActivateContentTab === undefined
+                ? {}
+                : { onActivateContentTab: props.onActivateContentTab })}
+              {...(props.onKeepContentTab === undefined
+                ? {}
+                : { onKeepContentTab: props.onKeepContentTab })}
+              {...(props.onArrangeSideBySide === undefined
+                ? {}
+                : { onArrangeSideBySide: props.onArrangeSideBySide })}
+              {...(props.onCloseContentTab === undefined
+                ? {}
+                : { onCloseContentTab: props.onCloseContentTab })}
+              {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+              {...(props.environmentNames === undefined
+                ? {}
+                : { environmentNames: props.environmentNames })}
+              paneFactsByThreadId={paneFactsByThreadId}
+              drag={props.drag}
+              layout={props.layout}
+              mode={props.mode}
+              onActivatePane={props.onActivatePane}
+              onClearFocus={props.onClearFocus}
+              onClosePane={(paneId) => void closePane(paneId)}
+              onCommitResize={props.onCommitResize}
+              onFocus={props.onFocus}
+              {...(props.onSelectPullRequest === undefined
+                ? {}
+                : { onSelectPullRequest: props.onSelectPullRequest })}
+              onPreviewResize={props.onPreviewResize}
+              onSplitPane={props.onSplitPane}
+              activePaneId={props.workspace.activePaneIds[props.mode]}
+              {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
+              renderSurface={(surface, paneId) => (
+                <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
+                  <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
+                    <ComposerNoticeProvider
+                      value={paneId === activePaneId && inlineNotice ? contextNotice : null}
                     >
-                      <TaskAccessContext value={taskAccessFor(surface, props)}>
-                        <OutsideContentContext
-                          value={outsideContentFor(surface, props.contextClient)}
+                      <ComposerContextMeterGate
+                        enabled={
+                          paneId === props.workspace.activePaneIds[props.mode] &&
+                          offersThreadComposer(surface)
+                        }
+                      >
+                        <SurfaceLinkActionsProvider
+                          {...(props.hostBridge === undefined
+                            ? {}
+                            : { hostBridge: props.hostBridge })}
+                          {...(props.onOpenLink === undefined
+                            ? {}
+                            : { onOpenLink: props.onOpenLink })}
+                          paneId={paneId}
+                          surface={surface}
                         >
-                          {onWelcomeGround(
-                            surface,
-                            props.welcomeBackdrop,
-                            renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                          )}
-                        </OutsideContentContext>
-                      </TaskAccessContext>
-                    </SurfaceLinkActionsProvider>
-                  </ComposerContextMeterGate>
-                </ComposerNoticeProvider>
-              </ComposerSubagentsContext>
-            </FollowUpSuggestionContext>
-          )}
-          {...(props.liveThreadTitles === undefined
-            ? {}
-            : { liveThreadTitles: props.liveThreadTitles })}
-          {...(props.providerByThreadId === undefined
-            ? {}
-            : { providerByThreadId: props.providerByThreadId })}
-          {...(props.runningThreadIds === undefined
-            ? {}
-            : { runningThreadIds: props.runningThreadIds })}
-          {...(props.waitingThreadIds === undefined
-            ? {}
-            : { waitingThreadIds: props.waitingThreadIds })}
-          {...(props.showProviderIcons === undefined
-            ? {}
-            : { showProviderIcons: props.showProviderIcons })}
-          totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
-            (count, layout) => count + countPanes(layout),
-            0,
-          )}
-          showSinglePaneHeader={singlePaneSurfaceNeedsHeader(activeSurface)}
-        />
-      </main>
-    </TabActivationProvider>
+                          <TaskAccessContext value={taskAccessFor(surface, props)}>
+                            <OutsideContentContext
+                              value={outsideContentFor(surface, props.contextClient)}
+                            >
+                              {onWelcomeGround(
+                                surface,
+                                props.welcomeBackdrop,
+                                renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
+                              )}
+                            </OutsideContentContext>
+                          </TaskAccessContext>
+                        </SurfaceLinkActionsProvider>
+                      </ComposerContextMeterGate>
+                    </ComposerNoticeProvider>
+                  </ComposerSubagentsContext>
+                </FollowUpSuggestionContext>
+              )}
+              {...(props.liveThreadTitles === undefined
+                ? {}
+                : { liveThreadTitles: props.liveThreadTitles })}
+              {...(props.providerByThreadId === undefined
+                ? {}
+                : { providerByThreadId: props.providerByThreadId })}
+              {...(props.runningThreadIds === undefined
+                ? {}
+                : { runningThreadIds: props.runningThreadIds })}
+              {...(props.waitingThreadIds === undefined
+                ? {}
+                : { waitingThreadIds: props.waitingThreadIds })}
+              {...(props.showProviderIcons === undefined
+                ? {}
+                : { showProviderIcons: props.showProviderIcons })}
+              totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
+                (count, layout) => count + countPanes(layout),
+                0,
+              )}
+              showSinglePaneHeader={singlePaneSurfaceNeedsHeader(activeSurface)}
+            />
+          </main>
+        </TabActivationProvider>
+      </ContinuityScreenContext.Provider>
+    </WorkspaceViewStateContext.Provider>
   );
 }
 

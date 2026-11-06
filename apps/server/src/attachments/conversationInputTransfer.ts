@@ -103,7 +103,15 @@ export class ConversationInputTransfer {
       );
       return manifest.purpose === reference.purpose &&
         manifest.items.filter((item) => item.status === "included").length === reference.included &&
-        manifest.items.filter((item) => item.status === "omitted").length === reference.omitted
+        manifest.items.filter((item) => item.status === "omitted").length +
+          (manifest.omittedUnlistedInputs ?? 0) ===
+          reference.omitted &&
+        manifest.sourceMetadataUnavailable === reference.sourceMetadataUnavailable &&
+        (reference.policy === "text-only"
+          ? manifest.items.every((item) => item.status === "omitted")
+          : manifest.omittedUnlistedInputs === undefined &&
+            manifest.sourceMetadataUnavailable === undefined &&
+            manifest.items.every((item) => item.status === "included"))
         ? manifest
         : undefined;
     } catch {
@@ -129,6 +137,14 @@ export class ConversationInputTransfer {
       );
     const policy = input.policy ?? input.previous?.policy ?? "preserve";
     if (
+      policy === "preserve" &&
+      (previous?.omittedUnlistedInputs !== undefined ||
+        previous?.sourceMetadataUnavailable === true)
+    )
+      return refuse(
+        "The omitted originals were not retained by this text-only admission. Start a new handoff to select them explicitly.",
+      );
+    if (
       previous === undefined &&
       input.selection?.inputUnavailable === true &&
       policy === "preserve"
@@ -141,8 +157,10 @@ export class ConversationInputTransfer {
       this.#options.ownerCurrent(input.owner) &&
       (policy === "text-only" || inputs.every(this.#options.sourceCurrent));
     const current = () => input.current() && inputsCurrent();
-    const prepared = await prepareConversationInputs({
+    let prepared = await prepareConversationInputs({
       purpose: input.purpose,
+      sourceMetadataUnavailable:
+        previous?.sourceMetadataUnavailable === true || input.selection?.inputUnavailable === true,
       inputs,
       policy,
       supports: (type) => this.#options.supports(input.target, type),
@@ -153,7 +171,13 @@ export class ConversationInputTransfer {
       return refuse(
         `The source input ${prepared.items.map((item) => `${item.input.displayName} (${item.reason})`).join(", ") || "selection"} could not be transferred. Retry, remove it, or explicitly choose text-only context. Nothing was sent.`,
       );
-    if (inputs.length === 0) return { ...prepared, inputsCurrent };
+    if (previous?.omittedUnlistedInputs !== undefined)
+      prepared = {
+        ...prepared,
+        manifest: { ...prepared.manifest, omittedUnlistedInputs: previous.omittedUnlistedInputs },
+      };
+    if (inputs.length === 0 && prepared.manifest.sourceMetadataUnavailable !== true)
+      return { ...prepared, inputsCurrent };
     if (input.previous !== undefined && policy === input.previous.policy)
       return { ...prepared, inputsCurrent, receipt: input.previous };
     const store = this.#stores[input.owner.mode];
@@ -183,7 +207,12 @@ export class ConversationInputTransfer {
           byteLength: retained.size,
           digest: retained.hash,
           included: prepared.manifest.items.filter((item) => item.status === "included").length,
-          omitted: prepared.manifest.items.filter((item) => item.status === "omitted").length,
+          omitted:
+            prepared.manifest.items.filter((item) => item.status === "omitted").length +
+            (prepared.manifest.omittedUnlistedInputs ?? 0),
+          ...(prepared.manifest.sourceMetadataUnavailable === true
+            ? { sourceMetadataUnavailable: true }
+            : {}),
         }),
       };
     } catch {

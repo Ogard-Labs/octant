@@ -13,6 +13,16 @@ const command = {
   payload: { mode: "chat", prompt: "Keep this reply\n" },
 };
 describe("durable thread message queue contract", () => {
+  it("keeps the explicit original-input choice in each durable queued payload", () => {
+    for (const mode of ["chat", "work", "code"])
+      expect(
+        decodeThreadMessageQueuePayload({
+          mode,
+          prompt: "Keep this input choice",
+          contextInputPolicy: "text-only",
+        }),
+      ).toMatchObject({ mode, contextInputPolicy: "text-only" });
+  });
   it("keeps raw text and requires the payload to belong to the addressed mode", () => {
     expect(decodeThreadMessageQueueCommand(command)).toEqual(command);
     expect(() =>

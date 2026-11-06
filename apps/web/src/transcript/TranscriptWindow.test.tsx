@@ -1,3 +1,4 @@
+import { WorkspaceViewStateContext, type WorkspaceViewStore } from "../shell/workspaceViewState";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -122,6 +123,34 @@ describe("TranscriptWindow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Append" }));
     expect(screen.getByRole("button", { name: "Row 0" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Row 20" })).not.toBeInTheDocument();
+  });
+
+  it("restores a persisted reading position after the first page arrives without following new output", async () => {
+    let width = 0;
+    const store: WorkspaceViewStore = {
+      read: () => ({ kind: "transcript", offset: 640, following: false, firstKey: "row-0", width }),
+      write: vi.fn(),
+    };
+    function Example() {
+      const [loaded, setLoaded] = useState(false);
+      return (
+        <WorkspaceViewStateContext.Provider value={store}>
+          <button onClick={() => setLoaded(true)}>Load kept transcript</button>
+          <TranscriptWindow
+            items={loaded ? rows(100) : []}
+            itemKey={(item) => item.id}
+            renderItem={(item) => <button>{item.label}</button>}
+            restoreKey="persisted-async"
+          />
+        </WorkspaceViewStateContext.Provider>
+      );
+    }
+    render(<Example />);
+    width = scroller().clientWidth;
+    fireEvent.click(screen.getByRole("button", { name: "Load kept transcript" }));
+    await waitFor(() => expect(scroller().scrollTop).toBe(640));
+    fireEvent.scroll(scroller());
+    expect(screen.queryByRole("button", { name: "Row 99" })).not.toBeInTheDocument();
   });
 
   it("restores the previous scroll offset when the same thread mounts again", async () => {

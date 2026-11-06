@@ -1,3 +1,4 @@
+import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { ContextSubjectRef } from "@octant/contracts/context";
 import {
   defaultRangeExtractor,
@@ -6,6 +7,7 @@ import {
   type VirtualItem,
 } from "@tanstack/react-virtual";
 import {
+  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -175,9 +177,20 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const items = props.items;
   const itemKey = props.itemKey;
   const restoreKey = props.restoreKey;
+  const viewStore = useContext(WorkspaceViewStateContext);
+  const savedView = viewStore?.read(`transcript:${restoreKey}`);
   const revealKey = props.revealKey;
   const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
-  const remembered = scrollMemory.get(restoreKey);
+  const remembered =
+    (viewStore === undefined ? scrollMemory.get(restoreKey) : undefined) ??
+    (savedView?.kind === "transcript"
+      ? {
+          offset: savedView.offset,
+          following: savedView.following,
+          firstKey: savedView.firstKey,
+          measurements: [],
+        }
+      : undefined);
   const restored = remembered?.firstKey === firstKey ? remembered : undefined;
   const followingRef = useRef(follows && (restored?.following === true || restored === undefined));
   const appliedRevealKeyRef = useRef<string | undefined>(undefined);
@@ -273,14 +286,15 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     return () => {
       const offset = virtualizer.scrollOffset;
       if (offset === null) return;
-      rememberScroll(restoreKey, {
-        offset,
-        measurements: virtualizer.takeSnapshot(),
-        following: followingRef.current,
-        firstKey: firstKeyRef.current,
-      });
+      if (viewStore === undefined)
+        rememberScroll(restoreKey, {
+          offset,
+          measurements: virtualizer.takeSnapshot(),
+          following: followingRef.current,
+          firstKey: firstKeyRef.current,
+        });
     };
-  }, [restoreKey, virtualizer]);
+  }, [restoreKey, virtualizer, viewStore]);
 
   // Updated after the cleanup above has read it, so leaving a thread records
   // the first row it was showing rather than the next thread's.
@@ -301,7 +315,15 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   revealPendingRef.current = revealKey !== undefined;
   useLayoutEffect(() => {
     const scroll = scrollElementRef.current;
-    if (scroll === null || restored === undefined || restored.following) return;
+    if (scroll === null || restored === undefined) return;
+    followingRef.current = follows && restored.following;
+    if (restored.following) return;
+    if (savedView?.kind === "transcript" && Math.abs(savedView.width - scroll.clientWidth) > 1) {
+      followingRef.current = follows;
+      if (follows) scrollToContentEnd(scroll);
+      else scroll.scrollTop = 0;
+      return;
+    }
     if (revealPendingRef.current) return;
     const offset = restored.offset;
     const inputs = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
@@ -332,16 +354,21 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     for (const type of inputs) scroll.addEventListener(type, stop, { passive: true });
     apply();
     return stop;
-  }, [restoreKey]);
+  }, [restoreKey, firstKey, viewStore]);
 
   useLayoutEffect(() => {
-    followingRef.current = follows && (restored?.following === true || restored === undefined);
+    followingRef.current =
+      follows &&
+      (restored?.following === true ||
+        restored === undefined ||
+        (savedView?.kind === "transcript" &&
+          Math.abs(savedView.width - (scrollElementRef.current?.clientWidth ?? 0)) > 1));
     appliedRevealKeyRef.current = undefined;
     setStickyIndexes(new Set());
     setLiveMessage("");
     lastKeyRef.current = lastKeyOf(items, itemKey);
     countRef.current = items.length;
-  }, [restoreKey]);
+  }, [restoreKey, viewStore]);
 
   // Rows measure taller than their estimate once they mount, which moves the
   // end of the list after it was scrolled there. Following the total size
@@ -616,6 +643,14 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     const scroll = scrollElementRef.current;
     if (scroll === null) return;
     followingRef.current = follows && isAtContentEnd(scroll);
+    if (firstKeyRef.current !== undefined)
+      viewStore?.write(`transcript:${restoreKey}`, {
+        kind: "transcript",
+        offset: scroll.scrollTop,
+        following: followingRef.current,
+        firstKey: firstKeyRef.current,
+        width: scroll.clientWidth,
+      });
   }
 
   const list = (

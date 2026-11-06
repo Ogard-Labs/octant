@@ -45,6 +45,38 @@ settlement, duplicate requests, authority refusals, and dead approvals/questions
 Rendered checks at 1000px and 390px confirm the notice, actionable refusal,
 single-click continuation, and preservation of the composer draft.
 
+## Continue elsewhere
+
+An existing Chat, Work or Code conversation offers **Continue elsewhere** beside
+its composer. Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
+the source provider and the authoritative current destination. Choosing another
+provider uses the same provider/model command as its composer picker and sends
+nothing. Task state, the checkout and pending feedback remain on the execution
+host. The next turn uses the ordinary handoff and original-input checks described
+in the [architecture](../architecture.md#stop-reasons).
+
+The person may explicitly choose **Text only: omit files and images** for the
+next continuation. The choice is scoped to this endpoint and task, survives a
+reload with its unsent draft, travels in a queued message and resets after
+admission. Missing or unsupported originals refuse a preserving send; a text-only
+send records its omissions. A receiving thread's **Original inputs** disclosure
+reads the manifest admitted for that exact turn, attempt or operation, separately
+from the task briefing and agent reports. Unavailable or purged manifests remain
+unavailable; the renderer never substitutes a later input.
+
+A local window can read its existing paired-screen inventory and configured,
+browser-verifiable private listener. Copying a task link for a paired screen
+carries only mode and thread identity. After normal paired authentication, that
+screen selects the same host's existing task through ordinary read paths; it
+creates no thread, session, checkout or writer and sends no message. The receipt
+states that unsent drafts and local view state stay on their source screen,
+while host-held inputs, task state and pending feedback stay with the task. A
+paired browser can copy its already authenticated origin's task link. A missing
+browser-verifiable listener offers the existing paired app's task selection
+instead; opening the flow never pairs a device or enables a listener. Moving
+execution to another host remains subject to the existing supported host paths
+and is not implied by changing screens.
+
 ## Navigation and Projects
 
 The window is mode-first: a persistent left sidebar with the Work and Code
@@ -320,7 +352,14 @@ closed, and selecting a missing or revoked reference shows the ordinary host
 refusal without opening a substitute. A pane/context change drops old references.
 Storage is bounded to 128 references per pane, 64 panes and 512 KiB on read;
 malformed or unavailable storage falls back to the current visible surface. Closing image creation stops
-observation, while only Cancel job cancels generation on the host. Editor drafts
+observation, while only Cancel job cancels generation on the host. Editor cursor/scroll state is restored only for the same thread, checkout, file
+identity and digest. Review retains its selected file and scroll for the exact
+captured diff; an absent selected file stays explicit rather than retargeting.
+Transcript offsets require the same first loaded row and viewport width. These
+presentation references share the endpoint/window/context boundary, retain at
+most 64 entries and 128 KiB, and write no document text, native process identity,
+approval or authority. They never take focus or perform a host operation during
+restore. Composer drafts retain their existing durable storage. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the

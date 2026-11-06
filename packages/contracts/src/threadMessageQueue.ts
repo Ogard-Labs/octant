@@ -1,3 +1,4 @@
+import { ConversationInputPolicy } from "./conversationInputs";
 import { CodeReviewFindingReferences } from "./codeOperations";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { Schema } from "effect";
@@ -36,6 +37,7 @@ const work = StartWorkThreadTurnCommand.fields;
 export const ThreadMessageQueuePayload = Schema.Union(
   Schema.Struct({
     mode: Schema.Literal("chat"),
+    contextInputPolicy: chat.contextInputPolicy,
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: chat.attachmentIds,
     previewSelections: chat.previewSelections,
@@ -46,6 +48,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("work"),
+    contextInputPolicy: work.contextInputPolicy,
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: work.attachmentIds,
     extensionSelections: work.extensionSelections,
@@ -56,6 +59,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("code"),
+    contextInputPolicy: Schema.optional(ConversationInputPolicy),
     reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
     sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
     prompt: ThreadMessageQueuePrompt,

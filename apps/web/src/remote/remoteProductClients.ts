@@ -1,4 +1,8 @@
 import {
+  createConversationInputClient,
+  type ConversationInputClient,
+} from "@octant/client-runtime/conversation-input-client";
+import {
   createDefaultDeviceKeyStore,
   createRemoteProductFetch,
   type RemoteSessionBridge,
@@ -33,6 +37,7 @@ import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browse
 import { platformPasskeys } from "../host/ownerPasskey";
 
 export interface RemoteProductClients {
+  readonly conversationInputs?: ConversationInputClient;
   readonly chat: ChatClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
@@ -66,6 +71,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     windowCapability: NO_WINDOW_CAPABILITY,
   };
   return {
+    conversationInputs: createConversationInputClient(port),
     chat: createChatClient(port),
     // A host may ask this paired browser's merge for an owner unlock first;
     // the browser gives it with its passkey if it is an owner of that host.

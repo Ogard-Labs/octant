@@ -1,3 +1,9 @@
+import { createConversationInputRoutes } from "./attachments/conversationInputRoutes";
+import type { ConversationInputOwner } from "./attachments/conversationInputTransfer";
+import type {
+  ConversationInputQuery,
+  ConversationInputReceipt,
+} from "@octant/contracts/conversation-inputs";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import { commandCredentialPostureAllowed } from "@octant/domain/command-credential-policy";
 import { CommandCredentialBindings } from "./secretStores/commandCredentialBindings";
@@ -13,7 +19,15 @@ import {
   secretStoresJournal,
 } from "./secretStores/secretStoresJournal";
 import { makeSecretStoreBrokerClient } from "./secretStores/secretStoreBrokerClient";
-import { decodeProjectId, decodeWindowId } from "@octant/contracts";
+import {
+  decodeProjectId,
+  decodeWindowId,
+  decodeChatThreadId,
+  decodeWorkTurnRequestId,
+  decodeCodeThreadId,
+  decodeCodeOperationId,
+  MAX_CODE_OPERATION_REPLAY_LIMIT,
+} from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
@@ -1347,7 +1361,91 @@ export function startOctantServer(
         }),
       });
     });
+    const admittedInputReceipt = async (
+      windowId: WindowId,
+      query: ConversationInputQuery,
+    ): Promise<
+      | { readonly owner: ConversationInputOwner; readonly receipt: ConversationInputReceipt }
+      | undefined
+    > => {
+      if (query.mode === "chat") {
+        const view = chatService.read(decodeChatThreadId(query.threadId));
+        const attempt = view.turns
+          .flatMap((turn) => turn.attempts)
+          .find((item) => String(item.id) === query.admissionId);
+        return attempt?.inputReceipt?.snapshotId !== query.snapshotId
+          ? undefined
+          : {
+              owner: {
+                mode: "chat",
+                threadId: query.threadId,
+                projectId:
+                  view.thread.projectId === undefined ? null : String(view.thread.projectId),
+              },
+              receipt: attempt.inputReceipt,
+            };
+      }
+      if (query.mode === "work") {
+        const result = await workTurnService.lookupFirstTurn(
+          windowId,
+          String(decodeWorkTurnRequestId(query.admissionId)),
+        );
+        if (
+          result.kind !== "accepted" ||
+          String(result.turn.threadId) !== query.threadId ||
+          result.turn.inputReceipt?.snapshotId !== query.snapshotId
+        )
+          return undefined;
+        return {
+          owner: {
+            mode: "work",
+            threadId: query.threadId,
+            projectId: String(result.turn.projectId),
+          },
+          receipt: result.turn.inputReceipt,
+        };
+      }
+      if (codeOperationRuntime === undefined) return undefined;
+      const threadId = decodeCodeThreadId(query.threadId);
+      const frames = await codeOperationRuntime.subscribe(
+        windowId,
+        threadId,
+        decodeCodeOperationId(query.admissionId),
+        0,
+        MAX_CODE_OPERATION_REPLAY_LIMIT,
+      );
+      const receipt = frames
+        .flatMap((frame) =>
+          (frame.event.kind === "context-handoff-attached" ||
+            frame.event.kind === "fork-context-delivered") &&
+          "inputReceipt" in frame.event &&
+          frame.event.inputReceipt !== undefined
+            ? [frame.event.inputReceipt]
+            : [],
+        )
+        .find((item) => item.snapshotId === query.snapshotId);
+      const thread = persistence.readCodeThread(threadId);
+      return receipt === undefined || thread === undefined
+        ? undefined
+        : {
+            owner: { mode: "code", threadId: query.threadId, projectId: String(thread.projectId) },
+            receipt,
+          };
+    };
+    const conversationInputRoutes = createConversationInputRoutes({
+      windowAuthorityStore,
+      read: async (windowId, query) => {
+        const admitted = await admittedInputReceipt(windowId, query);
+        if (admitted === undefined) return undefined;
+        const manifest = await conversationInputTransfer.read(admitted.owner, admitted.receipt);
+        const current = await admittedInputReceipt(windowId, query);
+        return current === undefined || JSON.stringify(current) !== JSON.stringify(admitted)
+          ? undefined
+          : manifest;
+      },
+    });
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
+      conversationInputRoutes,
       credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,

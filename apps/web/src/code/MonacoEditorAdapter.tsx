@@ -18,6 +18,13 @@ export interface MonacoEditorPosition {
   readonly column: number;
 }
 
+export interface MonacoEditorView {
+  readonly lineNumber: number;
+  readonly column: number;
+  readonly scrollTop: number;
+  readonly scrollLeft: number;
+}
+
 /** A diagnostic the host's language server reported for this file. */
 export interface MonacoEditorMarker {
   readonly range: MonacoEditorRange;
@@ -83,6 +90,8 @@ export interface MonacoAdapterRuntime {
       readonly language: string;
       /** Answers definitions while a language server serves this model. */
       readonly languageBridge?: MonacoLanguageBridge;
+      readonly viewState?: MonacoEditorView;
+      readonly onViewState?: (view: MonacoEditorView) => void;
       readonly modelUri: string;
       readonly onChange: (value: string) => void;
       readonly onCursorPosition?: (position: MonacoEditorPosition) => void;
@@ -129,6 +138,8 @@ export interface MonacoDiffRuntime {
 }
 
 export interface MonacoEditorAdapterProps {
+  readonly viewState?: MonacoEditorView | undefined;
+  readonly onViewState?: ((view: MonacoEditorView) => void) | undefined;
   readonly ariaLabel: string;
   readonly language: string;
   readonly languageBridge?: MonacoLanguageBridge;
@@ -195,6 +206,12 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
                 },
               }),
           modelUri: props.modelUri,
+          ...(latestProps.current.viewState === undefined
+            ? {}
+            : { viewState: latestProps.current.viewState }),
+          ...(latestProps.current.onViewState === undefined
+            ? {}
+            : { onViewState: (view: MonacoEditorView) => latestProps.current.onViewState?.(view) }),
           onChange: (nextValue) => latestProps.current.onChange(nextValue),
           ...(latestProps.current.onCursorPosition === undefined
             ? {}

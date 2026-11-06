@@ -832,17 +832,23 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         const observed = providerRuntimeRegistry.observedState(target.providerInstanceId);
         const prepared = await prepareConversationInputs({
           purpose: "child-delegation",
+          sourceMetadataUnavailable: manifest.sourceMetadataUnavailable === true,
           inputs: manifest.items.map((item) => item.input),
           policy: run.routingReceipt.contextInputPolicy ?? "preserve",
           supports: (mediaType) =>
             supportsConversationInput(observed, String(target.modelId), mediaType),
           current: () =>
-            !signal.aborted && manifest.items.every((item) => inputSource.current(item.input)),
+            !signal.aborted &&
+            (run.routingReceipt.contextInputPolicy === "text-only" ||
+              manifest.items.every((item) => inputSource.current(item.input))),
           read: inputSource.read,
         });
         return prepared.status === "ready" ? prepared.attachments : undefined;
       },
-      inputsCurrent: (manifest) => manifest.items.every((item) => inputSource.current(item.input)),
+      inputsCurrent: (manifest) =>
+        manifest.items.every(
+          (item) => item.status === "omitted" || inputSource.current(item.input),
+        ),
       uuid: randomUUID,
       scratchRoot: (run) => {
         const root = join(persistence.dataDirectory, "agent-run-scratch", String(run.id));

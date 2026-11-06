@@ -290,3 +290,11 @@ Octant checks the original bytes and the receiving model's support before
 sending. If an original is unavailable or unsupported, the turn refuses with a
 reason; an explicit text-only continuation records what was omitted. Native
 session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

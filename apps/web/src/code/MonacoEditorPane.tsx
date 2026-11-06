@@ -1,3 +1,4 @@
+import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeClient, CodeFileSaveResult } from "@octant/client-runtime/code-client";
 import type {
   CodeCheckoutId,
@@ -9,13 +10,22 @@ import type {
 } from "@octant/contracts/code";
 import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
 import type { ProjectId } from "@octant/contracts/projects";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   MonacoEditorAdapter,
   type MonacoAdapterRuntime,
   type MonacoEditorRange,
   type MonacoEditorPosition,
+  type MonacoEditorView,
   type MonacoLanguageBridge,
 } from "./MonacoEditorAdapter";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -122,6 +132,8 @@ function AvailableEditor(
     readonly file: Extract<CodeEditorFileProjection, { readonly state: "available" }>;
   },
 ) {
+  const viewStore = useContext(WorkspaceViewStateContext);
+
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [draft, setDraft] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -132,6 +144,8 @@ function AvailableEditor(
   const dirtyRef = useRef(false);
   const draftRef = useRef("");
   const metadataRef = useRef(props.file.metadata);
+  const viewKey = `editor:${JSON.stringify([props.file.threadId, props.file.checkoutId, props.file.fileId, metadataRef.current.identity, metadataRef.current.digest])}`;
+  const savedView = viewStore?.read(viewKey);
   const debugLoadedFile = useRef<
     { readonly key: string; readonly metadata: CodeFileMetadata } | undefined
   >(undefined);
@@ -752,6 +766,13 @@ function AvailableEditor(
       {loadState.kind === "ready" ? (
         <MonacoEditorAdapter
           ariaLabel={`Editor for ${props.file.path}`}
+          viewState={savedView?.kind === "editor" ? savedView : undefined}
+          {...(viewStore === undefined
+            ? {}
+            : {
+                onViewState: (view: MonacoEditorView) =>
+                  viewStore.write(viewKey, { kind: "editor", ...view }),
+              })}
           language={props.file.language}
           {...(props.client.readLanguage === undefined ? {} : { languageBridge })}
           languageMarkers={languageMarkers}

@@ -6585,7 +6585,12 @@ scope, verifies exact bytes and observes the target model's attachment support.
 It refuses a missing, changed, unsupported or revoked input before provider send;
 no description, transcript excerpt or model summary substitutes for the original.
 Only an explicit text-only choice may omit original inputs, and its receipt names
-those omissions. New-turn inputs and retained product feedback share the provider's
+those omissions. A text-only selection retains at most eight individual input
+references and counts additional omitted inputs within the bounded 384-input
+source selection; unavailable original metadata is marked unknown rather than
+inventing filenames or a count. Those unlisted or unknown originals cannot be
+restored by upgrading the same admission: a fresh handoff must select them
+explicitly. New-turn inputs and retained product feedback share the provider's
 attachment bound; an oversized pending feedback batch stays pending.
 
 The bounded manifest lives in the receiving thread's existing purgeable attachment

@@ -3960,28 +3960,32 @@ describe("moving a Code thread to another Project", () => {
 describe("merging a fork's conversation back", () => {
   const throughOperationId = "00000000-0000-4000-8000-000000005101";
 
-  it("hands an authorized fork to the host's merge and answers with its outcome", async () => {
-    const merge = vi.fn(async () => ({
-      status: "refused" as const,
-      reason: "already-merged" as const,
-    }));
-    const fixture = serviceFixture({ threads: [thread()], forkMergeBack: { merge } });
+  it.each([undefined, "text-only"] as const)(
+    "hands an authorized fork and its explicit input choice %s to the host merge",
+    async (policy) => {
+      const merge = vi.fn(async () => ({
+        status: "refused" as const,
+        reason: "already-merged" as const,
+      }));
+      const fixture = serviceFixture({ threads: [thread()], forkMergeBack: { merge } });
 
-    const result = await fixture.service.execute(ids.window, {
-      kind: "merge-code-fork-context",
-      threadId: ids.thread,
-      throughOperationId,
-    });
+      const result = await fixture.service.execute(ids.window, {
+        kind: "merge-code-fork-context",
+        ...(policy === undefined ? {} : { contextInputPolicy: policy }),
+        threadId: ids.thread,
+        throughOperationId,
+      });
 
-    expect(merge).toHaveBeenCalledWith(ids.window, ids.thread, throughOperationId);
-    expect(result).toEqual({
-      kind: "fork-context-merge",
-      threadId: ids.thread,
-      outcome: { status: "refused", reason: "already-merged" },
-    });
-    // The thread record itself is never written by a merge.
-    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
-  });
+      expect(merge).toHaveBeenCalledWith(ids.window, ids.thread, throughOperationId, policy);
+      expect(result).toEqual({
+        kind: "fork-context-merge",
+        threadId: ids.thread,
+        outcome: { status: "refused", reason: "already-merged" },
+      });
+      // The thread record itself is never written by a merge.
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuses a fork in a Project this window may not reach before merging anything", async () => {
     const merge = vi.fn();

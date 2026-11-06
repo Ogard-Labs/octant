@@ -243,3 +243,14 @@ redacted issue text through the same `externalContentFraming.ts` and appends
 
 The behavior rules for both integrations are in
 [Workspace: boards and integrations](workspace.md#boards-and-integrations).
+
+### Admitted original input details
+
+`GET /api/conversation-inputs` reads a private manifest for `mode`, `threadId`,
+`admissionId` and `snapshotId`. The host resolves the receipt from the named Chat
+attempt, Work request or Code operation after that mode's normal thread read
+authorization, reads only the destination-owned purgeable snapshot, and rechecks
+the same admission after the file read. Callers supply no path, bytes, digest or
+free-standing store reference. Responses are uncached, schema-checked available
+manifests or explicit unavailable results. Paired screens use the existing
+project-overview read action; no mutation is forwarded.

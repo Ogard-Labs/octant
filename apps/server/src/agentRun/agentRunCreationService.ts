@@ -1,5 +1,6 @@
 import {
   MAX_CONVERSATION_INPUTS,
+  MAX_CONVERSATION_INPUT_SELECTIONS,
   MAX_CONVERSATION_INPUT_BYTES,
   type ConversationInputManifest,
   type ConversationInputReference,
@@ -143,7 +144,8 @@ export function assertParentInputAdmission(input: {
       "A selected source input is unavailable. Restore it or explicitly choose text-only parent context.",
     );
   if (
-    references.length > MAX_CONVERSATION_INPUTS ||
+    references.length > MAX_CONVERSATION_INPUT_SELECTIONS ||
+    (input.policy === "preserve" && references.length > MAX_CONVERSATION_INPUTS) ||
     (input.policy === "preserve" &&
       references.reduce((sum, item) => sum + item.byteLength, 0) > MAX_CONVERSATION_INPUT_BYTES)
   )
@@ -313,16 +315,24 @@ export function buildAgentRunRequestCommand(
     ...(executionCandidate === undefined ? {} : { target: executionCandidate }),
   });
   const admittedInputs: ConversationInputManifest | undefined =
-    references.length === 0
+    references.length === 0 && admittedSelection?.inputUnavailable !== true
       ? undefined
       : {
           version: 1,
           purpose: "child-delegation",
-          items: references.map((reference) =>
-            inputPolicy === "text-only"
-              ? { status: "omitted", input: reference, reason: "person-excluded" }
-              : { status: "included", input: reference },
-          ),
+          ...(references.length > MAX_CONVERSATION_INPUTS
+            ? { omittedUnlistedInputs: references.length - MAX_CONVERSATION_INPUTS }
+            : {}),
+          ...(admittedSelection?.inputUnavailable === true
+            ? { sourceMetadataUnavailable: true as const }
+            : {}),
+          items: references
+            .slice(0, MAX_CONVERSATION_INPUTS)
+            .map((reference) =>
+              inputPolicy === "text-only"
+                ? { status: "omitted", input: reference, reason: "person-excluded" }
+                : { status: "included", input: reference },
+            ),
         };
   const executionSelection =
     input.executionSelection ??
@@ -378,7 +388,7 @@ export function buildAgentRunRequestCommand(
     ...(admittedContext === undefined
       ? {}
       : { admittedContextBlocks: admittedContext.length, contextInputPolicy: inputPolicy }),
-    ...(admittedInputs === undefined ? {} : { admittedInputCount: admittedInputs.items.length }),
+    ...(admittedInputs === undefined ? {} : { admittedInputCount: references.length }),
     effectiveAuthorityDigest,
     usageQuality: "unavailable",
     hostId: LOCAL_HOST_ID,

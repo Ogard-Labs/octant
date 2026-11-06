@@ -1,5 +1,8 @@
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
+import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
+import { ConversationInputs } from "../continuity/ConversationInputs";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
@@ -272,6 +275,7 @@ export interface CodeThreadWorkspaceProps {
  * Overview/Git/Terminal remain secondary surfaces opened from the thread toolbar.
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
+  const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
     props.controller.activeView?.thread.id === props.threadId
       ? props.controller.activeView
@@ -928,6 +932,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         await messageQueue.enqueue(
           {
             mode: "code",
+            ...(continuation.policy === "text-only"
+              ? { contextInputPolicy: continuation.policy }
+              : {}),
             prompt: draft,
             attachmentIds: captured.map((entry) => entry.reference.attachmentId),
             threadMentionIds,
@@ -938,6 +945,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
           () => {
             attachments.acceptQueueClaim(captured);
+            continuation.reset();
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
             if (
               (props.controller.readDraftRevision?.(originThreadKey) ??
@@ -979,8 +987,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       sendArguments[9] = props.controller.draftRevision;
     if (reviewFindingReferences.length > 0) sendArguments[10] = reviewFindingReferences;
     if (toolCatalogHandoff) sendArguments[11] = true;
+    if (continuation.policy === "text-only") sendArguments[12] = continuation.policy;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
+      continuation.reset();
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
       // bumps the revision, and that newer draft stays. The host keeps the
@@ -1129,6 +1139,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setMerging(true);
     try {
       const outcome = await props.controller.mergeForkContext({
+        ...(continuation.policy === "text-only" ? { contextInputPolicy: continuation.policy } : {}),
         threadId: view.thread.id,
         throughOperationId: String(operationId),
       });
@@ -1698,6 +1709,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         })}
                       </OctantSeparatorWithLabel>
                     ) : null}
+                    {message.role === "assistant" &&
+                    message.operationId !== undefined &&
+                    message.handoff !== undefined &&
+                    "inputReceipt" in message.handoff &&
+                    message.handoff.inputReceipt !== undefined ? (
+                      <ConversationInputs
+                        mode="code"
+                        threadId={String(message.sourceThreadId ?? props.threadId)}
+                        admissionId={String(message.operationId)}
+                        receipt={message.handoff.inputReceipt}
+                        serverUrl={props.serverUrl}
+                        windowCapability={props.windowCapability}
+                      />
+                    ) : null}
                     {message.role === "assistant" && message.handoff !== undefined ? (
                       <p className="code-thread-workspace__handoff" role="note">
                         {conversationHandoffDisclosure(message.handoff, (selection) =>
@@ -1707,13 +1732,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     ) : null}
                     {message.role === "assistant"
                       ? (message.forkMergeBacks ?? []).map((mergeBack) => (
-                          <p
+                          <div
                             className="code-thread-workspace__handoff"
                             key={`${String(mergeBack.forkThreadId)}:${String(mergeBack.throughOperationId)}`}
                             role="note"
                           >
                             {forkMergeBackDisclosure(mergeBack)}
-                          </p>
+                            {mergeBack.inputReceipt === undefined ||
+                            message.operationId === undefined ? null : (
+                              <ConversationInputs
+                                mode="code"
+                                threadId={String(message.sourceThreadId ?? props.threadId)}
+                                admissionId={String(message.operationId)}
+                                receipt={mergeBack.inputReceipt}
+                                serverUrl={props.serverUrl}
+                                windowCapability={props.windowCapability}
+                              />
+                            )}
+                          </div>
                         ))
                       : null}
                     <article
@@ -2108,6 +2144,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId={decodeBrowserThreadId(String(thread.id))}
           />
         )}
+        <ContinueElsewhere
+          mode="code"
+          threadId={String(thread.id)}
+          groups={threadModelGroups}
+          selected={thread}
+          policy={continuation.policy}
+          onPolicyChange={continuation.change}
+          onProviderChange={changeProvider}
+          disabled={busy}
+        />
         {props.controller.providerRequests.length === 0 ? null : (
           <div
             aria-label="Pending provider requests"

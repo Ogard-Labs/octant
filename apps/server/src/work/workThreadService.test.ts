@@ -2597,6 +2597,19 @@ describe("forking a Work thread from one of its turns", () => {
         providerSessionId: "72000000-0000-4000-8000-000000000060" as never,
         resumeCursor: { driverKind: "pi", value: "source-session" },
         prompt,
+        ...(requestId === first
+          ? {
+              attachments: [
+                {
+                  attachmentId: "30000000-0000-4000-8000-000000000001" as never,
+                  displayName: "Original.png",
+                  mediaType: "image/png" as const,
+                  byteLength: 12,
+                  digest: "a".repeat(64) as never,
+                },
+              ],
+            }
+          : {}),
         capabilities: WORK_TURN_CAPABILITIES,
         acceptedAt: now,
       });
@@ -2662,6 +2675,15 @@ describe("forking a Work thread from one of its turns", () => {
     ]);
     // A carried copy names its source turn and none of the source's session.
     expect(carried[0]?.carriedFrom).toEqual({ threadId: ids.thread, requestId: first });
+    expect(carried[0]?.attachments?.[0]).toMatchObject({
+      displayName: "Original.png",
+      source: {
+        mode: "work",
+        threadId: String(ids.thread),
+        attachmentId: "30000000-0000-4000-8000-000000000001",
+        projectId: String(ids.project),
+      },
+    });
     expect(carried[0]?.resumeCursor).toBeUndefined();
     expect(String(carried[0]?.requestId)).not.toBe(String(first));
     expect(fixture.turns.listForThread(ids.thread).map((turn) => turn.requestId)).toEqual([

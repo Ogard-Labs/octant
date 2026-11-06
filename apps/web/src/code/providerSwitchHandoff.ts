@@ -19,6 +19,7 @@ export function handoffSummary(
         messages: event.messages,
         omissions: event.omissions,
         externalContentIngested: event.externalContentIngested,
+        ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
       };
     case "fork":
@@ -28,6 +29,7 @@ export function handoffSummary(
         messages: event.messages,
         omissions: event.omissions,
         externalContentIngested: event.externalContentIngested,
+        ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
       };
     case "fork-native-session":
       return { reason: event.reason, forkedFrom: event.forkedFrom };

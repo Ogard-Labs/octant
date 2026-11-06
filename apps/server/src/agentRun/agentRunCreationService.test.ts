@@ -135,6 +135,41 @@ describe("buildAgentRunRequestCommand", () => {
     expect(reduced.admittedInputs?.items).toEqual([
       { status: "omitted", input: reference, reason: "person-excluded" },
     ]);
+    const many = buildAgentRunRequestCommand({
+      ...options,
+      request: baseRequest({ includeParentContext: true, contextInputPolicy: "text-only" }),
+      parentContext: {
+        resolve: () => ({
+          blocks: [{ kind: "user-message", text: "Explicit text-only context" }],
+          inputs: Array.from({ length: 12 }, (_, n) => ({
+            ...reference,
+            source: {
+              ...reference.source,
+              attachmentId: `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+            },
+          })),
+          inputUnavailable: true,
+        }),
+      },
+    });
+    expect(many.admittedInputs?.items).toHaveLength(8);
+    expect(many.admittedInputs).toMatchObject({
+      omittedUnlistedInputs: 4,
+      sourceMetadataUnavailable: true,
+    });
+    expect(many.routingReceipt.admittedInputCount).toBe(12);
+    const unknown = buildAgentRunRequestCommand({
+      ...options,
+      request: baseRequest({ includeParentContext: true, contextInputPolicy: "text-only" }),
+      parentContext: {
+        resolve: () => ({
+          blocks: [{ kind: "user-message", text: "Explicit text-only context" }],
+          inputUnavailable: true,
+        }),
+      },
+    });
+    expect(unknown.admittedInputs).toMatchObject({ items: [], sourceMetadataUnavailable: true });
+    expect(unknown.routingReceipt.admittedInputCount).toBe(0);
   });
 
   it("records nothing when the parent selected no context", () => {

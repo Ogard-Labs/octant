@@ -2151,6 +2151,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const beginProviderTurn = useCallback(
     async (input: {
+      readonly contextInputPolicy?: ConversationInputPolicy;
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
       readonly prompt: string;
@@ -2189,6 +2190,9 @@ export function useCodeController(options: CodeControllerOptions) {
       const started = await client.executeOperation({
         kind: "start-provider-turn",
         ...(input.toolCatalogHandoff === true ? { toolCatalogHandoff: true } : {}),
+        ...(input.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: input.contextInputPolicy }),
         operationId,
         threadId: input.threadId,
         checkoutId: input.checkoutId,
@@ -2623,6 +2627,7 @@ export function useCodeController(options: CodeControllerOptions) {
       expectedDraftRevision?: number,
       reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>,
       toolCatalogHandoff = false,
+      contextInputPolicy?: ConversationInputPolicy,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2686,6 +2691,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
       try {
         const { operationId, started } = await beginProviderTurn({
+          ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
           threadId: view.thread.id,
           checkoutId: view.checkout.id,
           prompt: trimmed,

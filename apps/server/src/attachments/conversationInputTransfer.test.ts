@@ -26,6 +26,66 @@ const original = {
 const owner = { mode: "work" as const, threadId: "33333333-3333-4333-8333-333333333333" };
 
 describe("durable conversation input transfer", () => {
+  it("keeps a bounded explicit omission receipt for an over-limit selection and unavailable source metadata through restart", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-input-omissions-")));
+    directories.push(directory);
+    const make = () =>
+      new ConversationInputTransfer({
+        ownerCurrent: () => true,
+        dataDirectory: directory,
+        sourceCurrent: () => false,
+        read: async () => {
+          throw new Error("Text-only must not read original bytes");
+        },
+        supports: () => false,
+      });
+    const inputs = Array.from({ length: 12 }, (_, n) => ({
+      ...original,
+      source: {
+        ...original.source,
+        attachmentId: `22222222-2222-4222-8222-${String(n).padStart(12, "0")}`,
+      },
+    }));
+    const request = {
+      owner,
+      purpose: "provider-switch" as const,
+      selection: { inputs, inputUnavailable: true },
+      policy: "text-only" as const,
+      target: { providerInstanceId: "provider", modelId: "text" },
+      current: () => true,
+    };
+    const initial = await make().prepare(request);
+    expect(initial).toMatchObject({
+      status: "ready",
+      attachments: [],
+      manifest: { omittedUnlistedInputs: 4, sourceMetadataUnavailable: true },
+      receipt: { included: 0, omitted: 12, sourceMetadataUnavailable: true },
+    });
+    if (initial.status !== "ready" || initial.receipt === undefined)
+      throw new Error("Expected durable omissions");
+    const replay = {
+      owner,
+      purpose: "provider-switch" as const,
+      previous: initial.receipt,
+      target: request.target,
+      current: request.current,
+    };
+    expect(await make().prepare(replay)).toMatchObject({
+      status: "ready",
+      receipt: initial.receipt,
+      manifest: { omittedUnlistedInputs: 4, sourceMetadataUnavailable: true },
+    });
+    expect(await make().prepare({ ...replay, policy: "preserve" })).toMatchObject({
+      status: "refused",
+    });
+    expect(
+      await make().prepare({ ...request, selection: { inputUnavailable: true } }),
+    ).toMatchObject({
+      status: "ready",
+      receipt: { included: 0, omitted: 0, sourceMetadataUnavailable: true },
+    });
+  });
+
   it("restores the exact admitted input after restart and refuses changed bytes or a purged destination", async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-input-transfer-")));
     directories.push(directory);

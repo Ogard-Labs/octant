@@ -228,6 +228,8 @@ export function classifyProductAction(request: Request): string | undefined {
   }
   // The Reply detail default and the threads' own levels: a presentation read,
   // never a write. Changing either is the shell route's, which a device never reaches.
+  if (path === "/api/conversation-inputs")
+    return method === "GET" ? "project.overview.read" : undefined;
   if (path === "/api/reply-detail") {
     return method === "GET" ? "settings.read-non-secret" : undefined;
   }
