@@ -120,14 +120,19 @@ or Shift+F10.
 Its source and lease remain checked while the menu is open; source retirement
 dismisses the menu. Pointer invocation, Select All and Undo have native evidence.
 Keyboard invocation preserves the current field and selection, and menu
-retirement releases held page keys. Live clipboard acceptance remains pending. Standard text
-inputs and textareas support native composition with a caret anchored to the
-Stable-owned field. Password, custom editors, embedded frames and full IME
-reconversion are not supported by that path. A page's select lists, link and
+retirement releases held page keys. Live clipboard acceptance remains pending. Text,
+search, address, telephone, email and number fields, textareas and rich text
+editors support native composition with a caret anchored to the Stable-owned
+field, on each line of a multiline field. In an email or number field the input
+window sits at the start of the field. While a password field has focus, Nightly
+turns on macOS secure input: typing still reaches the page, but no input method
+window opens and Nightly never receives the field's contents or selection. All of
+this works the same inside the page's frames, on its own site or another. Full
+IME reconversion is not supported. A page's select lists, link and
 image menus open as native menus in the Nightly window, its alerts, confirmations
 and leave-page questions as sheets, and its file fields as Nightly's own open
-panel; links that would open a new window are refused, as in Octant. Selects and
-dialogs inside embedded frames, page accessibility,
+panel, also inside frames; links that would open a new window are refused, as in
+Octant. Page accessibility,
 other native brokers and full lifecycle acceptance remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.

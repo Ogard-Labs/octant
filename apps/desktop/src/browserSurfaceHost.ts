@@ -12,7 +12,13 @@ import type {
 } from "@octant/contracts/browser-page-script";
 import { BrowserPageEditMenu } from "./browserPageEditMenu";
 import { BrowserTextComposition, type BrowserTextSource } from "./browserTextComposition";
-import { readBrowserEditableTarget, type BrowserEditableTarget } from "./browserEditableTarget";
+import {
+  readBrowserEditableInFrame,
+  readBrowserEditableTarget,
+  sameBrowserEditableTarget,
+  type BrowserEditableTarget,
+} from "./browserEditableTarget";
+import { humanFrameReach, mapHumanFramePoint, type HumanFrameScope } from "./browserHumanFrames";
 import { BrowserPresentation, type HumanBrowserSource } from "./browserPresentation";
 import { BrowserPagePopups } from "./browserPagePopups";
 import {
@@ -24,7 +30,10 @@ import { lstat } from "node:fs/promises";
 import {
   decodeBrowserEditMenuId,
   MAX_BROWSER_DIALOG_TEXT,
+  MAX_HUMAN_FRAME_HEIGHT,
+  MAX_HUMAN_FRAME_WIDTH,
   type BrowserEditMenuId,
+  type HumanBrowserEditor,
   type HumanBrowserPopupAnswer,
   type HumanBrowserRequest,
   type HumanBrowserResult,
@@ -67,6 +76,7 @@ import {
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
+  autoAttachSurfaceFrames,
   scriptString,
   surfaceFrames,
   watchSurfaceFrameTargets,
@@ -1246,12 +1256,15 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         offerLinkMenu(contextId, owned, view, popups, raw);
         return;
       }
+      // The menu event may come from a nested frame. The armed field is read
+      // again from whichever frame holds focus before the menu is offered.
       if (
         contentsView(owned) !== view ||
         typeof raw !== "object" ||
         raw === null ||
         !("frame" in raw) ||
-        raw.frame !== view.webContents.mainFrame ||
+        typeof raw.frame !== "object" ||
+        raw.frame === null ||
         !("isEditable" in raw) ||
         raw.isEditable !== true ||
         !("editFlags" in raw) ||
@@ -1429,6 +1442,31 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       return unwatched;
     }
     humanDebuggers.add(client);
+    const send: SurfaceProtocolSend = (method, parameters, sessionId) =>
+      client.sendCommand(method, parameters, sessionId);
+    const targets = frameTargetsOf(client);
+    // A frame on another site is its own target: its file chooser is held in
+    // its own session, and the person's focus is followed into it.
+    const frameSessions = new Set<string>();
+    const watchFrame = (sessionId: string) => {
+      if (frameSessions.size >= 64) return;
+      frameSessions.add(sessionId);
+      void send("Page.enable", undefined, sessionId).catch(() => undefined);
+      void send("Page.setInterceptFileChooserDialog", { enabled: true }, sessionId).catch(
+        () => undefined,
+      );
+      void autoAttachSurfaceFrames(send, targets, sessionId).catch(() => undefined);
+    };
+    const reach = humanFrameReach({
+      send,
+      listen: (listener) => {
+        client.on?.("message", listener);
+        return () => client.removeListener?.("message", listener);
+      },
+      targets,
+      frameSession: watchFrame,
+    });
+    humanFrameReaches.set(view, reach);
     const live = () =>
       surfaces.get(contextId) === owned &&
       !view.webContents.isDestroyed() &&
@@ -1459,7 +1497,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       void held.handle(answer === "accepted");
     });
     const listener: SurfaceProtocolListener = (_event, method, params, sessionId) => {
-      if (sessionId !== undefined) return;
+      if (method === "Target.detachedFromTarget") {
+        const ended = (params ?? {}) as { readonly sessionId?: unknown };
+        if (typeof ended.sessionId === "string") frameSessions.delete(ended.sessionId);
+        return;
+      }
+      // Chromium reports a dialog from any frame, on either site, to the page
+      // itself; a frame target reports only its own file chooser.
+      if (sessionId !== undefined && method !== "Page.fileChooserOpened") return;
       if (method === "Page.javascriptDialogClosed") {
         heldDialog = undefined;
         return popups.retire("dialog");
@@ -1553,10 +1598,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 return false;
               owned.control = "user";
               owned.personInputs += 1;
-              await client.sendCommand("DOM.setFileInputFiles", {
-                files: [...answer.paths],
-                backendNodeId: node,
-              });
+              await client.sendCommand(
+                "DOM.setFileInputFiles",
+                { files: [...answer.paths], backendNodeId: node },
+                sessionId,
+              );
               return true;
             });
           },
@@ -1569,14 +1615,22 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     void client
       .sendCommand("Page.setInterceptFileChooserDialog", { enabled: true })
       .catch(() => undefined);
+    void autoAttachSurfaceFrames(send, targets, undefined).catch(() => undefined);
     return () => {
       popups.close();
       client.removeListener?.("message", listener);
+      reach.stop();
+      if (humanFrameReaches.get(view) === reach) humanFrameReaches.delete(view);
       humanDialogHandoffs.delete(client);
       if (!humanDebuggers.delete(client) || view.webContents.isDestroyed()) return;
       void client
         .sendCommand("Page.setInterceptFileChooserDialog", { enabled: false })
         .catch(() => undefined);
+      // An attachment an agent keeps would otherwise swallow a frame's chooser.
+      for (const sessionId of frameSessions)
+        void client
+          .sendCommand("Page.setInterceptFileChooserDialog", { enabled: false }, sessionId)
+          .catch(() => undefined);
       if (!emulationOf(client).held && (agentDialogGuards.get(client) ?? 0) === 0)
         detachAgentDebugger(client);
     };
@@ -1596,8 +1650,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       return popup !== undefined && popup.kind !== "select";
     };
     if (view.human === undefined || pending() || !humanPressRecent(owned)) return;
-    const evaluate = (world: number, scripts: ReadonlyArray<{ readonly code: string }>) =>
-      view.webContents.executeJavaScriptInIsolatedWorld(world, scripts);
+    // A held list sits in the frame its press focused, on any site.
+    const scope = await humanScope(view);
+    if (scope === undefined) return;
+    const evaluate = scope.evaluate;
     const held = await readBrowserHeldSelect(evaluate);
     if (
       held === undefined ||
@@ -1619,10 +1675,18 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     )
       return void dismissBrowserHeldSelect(evaluate, held.token);
     const generation = scriptGenerations.get(view);
-    const { status: _status, token, age: _age, ...popup } = held;
+    const { status: _status, token, age: _age, anchor: local, ...popup } = held;
+    const anchor = mapHumanFramePoint(scope.offset, local);
+    if (
+      Math.abs(anchor.x) > MAX_HUMAN_FRAME_WIDTH ||
+      Math.abs(anchor.y) > MAX_HUMAN_FRAME_HEIGHT ||
+      anchor.width > MAX_HUMAN_FRAME_WIDTH * 2 ||
+      anchor.height > MAX_HUMAN_FRAME_HEIGHT * 2
+    )
+      return void dismissBrowserHeldSelect(evaluate, token);
     heldSelectTokens.set(popups, token);
     popups.offer(
-      { kind: "select", ...popup },
+      { kind: "select", anchor, ...popup },
       {
         current: () =>
           contentsView(owned) === view &&
@@ -1694,19 +1758,26 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           source: () => {
             const view = contentsView(owned);
             const source: BrowserTextSource = {
-              editor: () => view.human?.editor?.() ?? Promise.resolve(undefined),
+              editor: async () => {
+                const observed = await humanEditor(view);
+                return observed === undefined ? undefined : presentedEditor(observed);
+              },
               apply: async (editorId, edit, authorized) => {
                 if (view.webContents.isDestroyed()) return false;
-                const target = await readBrowserEditableTarget((world, scripts) =>
-                  view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
-                );
-                if (target?.id !== editorId || view.webContents.isDestroyed() || !authorized())
+                // A password field never composes: its candidate would pass
+                // through a local input context the secure field must not use.
+                const editable = (target: BrowserEditableTarget | undefined) =>
+                  target !== undefined &&
+                  String(target.id) === String(editorId) &&
+                  target.kind !== "secure";
+                const target = await humanTarget(view);
+                if (!editable(target) || view.webContents.isDestroyed() || !authorized())
                   return false;
+                // Input commands go to the page, which delivers them to its
+                // focused frame, on the same site or another.
                 return withDebugger(view, async (send) => {
-                  const latest = await readBrowserEditableTarget((world, scripts) =>
-                    view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
-                  );
-                  if (latest?.id !== editorId || view.webContents.isDestroyed() || !authorized())
+                  const latest = await humanTarget(view);
+                  if (!editable(latest) || view.webContents.isDestroyed() || !authorized())
                     return false;
                   // Only cancellation may outlive visibility. The captured view
                   // and document-start field incarnation still have to match.
@@ -1906,18 +1977,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           if (!live()) return false;
           const existing = await owned.pageEditMenu.read();
           if (!live()) return false;
-          const editor = await pending.view.human?.editor?.();
+          const editor = await humanEditor(pending.view);
           if (
-            editor === undefined ||
-            editor.id !== pending.target.id ||
-            editor.selectionStart !== pending.target.selectionStart ||
-            editor.selectionEnd !== pending.target.selectionEnd ||
+            editor?.caret === undefined ||
+            !sameBrowserEditableTarget(editor.target, pending.target) ||
             !live()
           )
             return false;
-          const x = Math.floor(
-            editor.caret.x + (editor.selectionEnd > editor.selectionStart ? 1 : 0),
-          );
+          const target = editor.target;
+          const selected =
+            target.kind === "text" || target.kind === "secure"
+              ? target.selectionEnd > target.selectionStart
+              : target.kind === "rich" && !target.collapsed;
+          const x = Math.floor(editor.caret.x + (selected ? 1 : 0));
           const y = Math.floor(editor.caret.y + editor.caret.height / 2);
           if (existing.status === "edit-menu") return true;
           return owned.presentation.contextMenuAtCaret(request.presentationId, { x, y }, live);
@@ -1995,9 +2067,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               closeEditingMenu(owned);
               const target =
                 keyboard || (request.input.type === "mouseDown" && request.input.button === "right")
-                  ? await readBrowserEditableTarget((world, scripts) =>
-                      view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
-                    )
+                  ? await humanTarget(view)
                   : undefined;
               await owned.textComposition.close();
               if (!current() || signal?.aborted || contentsView(owned) !== view || !scope())
@@ -2021,12 +2091,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 }
                 owned.pageEditMenu.arm(target.id, {
                   current: () => current() && contentsView(owned) === view && scope(),
-                  editor: async () =>
-                    (
-                      await readBrowserEditableTarget((world, scripts) =>
-                        view.webContents.executeJavaScriptInIsolatedWorld(world, scripts),
-                      )
-                    )?.id,
+                  editor: async () => (await humanTarget(view))?.id,
                   apply: (action) => {
                     const edit = view.webContents[action];
                     if (edit === undefined) throw new Error("Native editing command unavailable.");
@@ -3940,6 +4005,89 @@ function frameTargetsOf(client: BrowserSurfaceViewPort["webContents"]["debugger"
   });
   frameTargets.set(client, watched);
   return watched;
+}
+
+/** The person's presentation reaches into the focused nested frame of its hidden window. */
+const humanFrameReaches = new WeakMap<BrowserSurfaceViewPort, ReturnType<typeof humanFrameReach>>();
+
+/** The document that holds the person's focus, top or nested; undefined refuses. */
+async function humanScope(view: BrowserSurfaceViewPort): Promise<HumanFrameScope | undefined> {
+  const top = (world: number, scripts: ReadonlyArray<{ readonly code: string }>) =>
+    view.webContents.executeJavaScriptInIsolatedWorld(world, scripts);
+  const reach = humanFrameReaches.get(view);
+  if (reach !== undefined) return reach.focused(top);
+  return (await readBrowserEditableInFrame(top))
+    ? undefined
+    : { evaluate: top, offset: { x: 0, y: 0, scaleX: 1, scaleY: 1 }, nested: false };
+}
+
+/** The focused field, with a page-computed caret moved to where its frame sits in the page. */
+async function humanTarget(
+  view: BrowserSurfaceViewPort,
+): Promise<BrowserEditableTarget | undefined> {
+  const scope = await humanScope(view);
+  if (scope === undefined) return undefined;
+  const target = await readBrowserEditableTarget(scope.evaluate);
+  if (target === undefined || target.kind === "text" || target.kind === "secure") return target;
+  const caret = mapHumanFramePoint(scope.offset, target.caret);
+  return { ...target, caret: { ...caret, width: 0 } };
+}
+
+type ObservedEditor = {
+  readonly target: BrowserEditableTarget;
+  /** In the presentation's CSS pixels; a password field may have none. */
+  readonly caret:
+    | { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+    | undefined;
+};
+
+/**
+ * The focused field and its caret. A text control's caret comes from the
+ * native text input lookup at its observed offsets, checked against the same
+ * field and selection after the lookup; an email or number field and a rich
+ * editor give theirs from the page's own layout.
+ */
+async function humanEditor(view: BrowserSurfaceViewPort): Promise<ObservedEditor | undefined> {
+  const target = await humanTarget(view);
+  if (target === undefined) return undefined;
+  let caret:
+    | { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+    | undefined;
+  if (target.kind === "text" || target.kind === "secure") {
+    caret = view.human?.caret?.(target.selectionStart, target.selectionEnd);
+    if (caret === undefined && target.kind === "text") return undefined;
+    if (caret !== undefined && !sameBrowserEditableTarget(target, await humanTarget(view)))
+      return undefined;
+  } else caret = target.caret;
+  const shown =
+    caret !== undefined &&
+    caret.x >= 0 &&
+    caret.y >= 0 &&
+    caret.x <= MAX_HUMAN_FRAME_WIDTH &&
+    caret.y <= MAX_HUMAN_FRAME_HEIGHT &&
+    caret.height > 0 &&
+    caret.height <= MAX_HUMAN_FRAME_HEIGHT &&
+    caret.width >= 0 &&
+    caret.width <= MAX_HUMAN_FRAME_WIDTH
+      ? caret
+      : undefined;
+  if (shown === undefined && target.kind !== "secure") return undefined;
+  return { target, caret: shown };
+}
+
+/** What Nightly may know of the field: never a password field's offsets or caret. */
+function presentedEditor(observed: ObservedEditor): HumanBrowserEditor | undefined {
+  const { target, caret } = observed;
+  if (target.kind === "secure") return { id: target.id, secure: true };
+  if (caret === undefined) return undefined;
+  return target.kind === "text"
+    ? {
+        id: target.id,
+        selectionStart: target.selectionStart,
+        selectionEnd: target.selectionEnd,
+        caret,
+      }
+    : { id: target.id, caret };
 }
 
 /** Detach the agent's attachment, forgetting the frame sessions that ended with it. */

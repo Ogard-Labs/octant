@@ -1,4 +1,7 @@
-import { observeBrowserEditableTarget } from "./browserEditableObservation";
+import {
+  BROWSER_EDITABLE_WORLD_NAME,
+  observeBrowserEditableTarget,
+} from "./browserEditableObservation";
 import { observeBrowserSelectPopup } from "./browserSelectObservation";
 import {
   decodeHumanBrowserRequest,
@@ -65,7 +68,22 @@ const pages: Record<string, string> = {
   "/framed-file": `<!doctype html><title>Framed file</title>
     <iframe id="near" title="Near" src="/inner-file" width="400" height="80"></iframe>
     <iframe id="far" title="Far" src="{{other}}/inner-file" width="400" height="80"></iframe>`,
-  "/inner-file": `<!doctype html><input id="pick" type="file" style="width:300px;height:40px">`,
+  "/inner-file": `<!doctype html><input id="pick" type="file" style="width:300px;height:40px" onchange="document.title = 'Picked ' + this.files[0].name">`,
+  "/fields": `<!doctype html><title>Fields</title>
+    <input id="mail" type="email" value="ada@example.com" style="display:block;padding:4px;border:2px solid">
+    <input id="count" type="number" value="4242" style="display:block">
+    <input id="secret" type="password" value="hunter2-secret" style="display:block">
+    <input id="when" type="date" style="display:block">
+    <div id="rich" contenteditable="true" style="width:300px;font:16px/20px sans-serif">first line<br>second line<br>third line</div>`,
+  "/framed-fields": `<!doctype html><title>Framed fields</title>
+    <iframe id="near" title="Near" src="/inner-fields" width="400" height="220" style="position:absolute;left:30px;top:40px;border:0"></iframe>
+    <iframe id="far" title="Far" src="{{other}}/inner-fields" width="400" height="220" style="position:absolute;left:30px;top:300px;border:0"></iframe>`,
+  "/inner-fields": `<!doctype html><title>Inner fields</title>
+    <input id="mail" type="email" style="position:absolute;left:10px;top:20px;height:20px;padding:0;border:0">
+    <input id="name" style="position:absolute;left:10px;top:60px">
+    <div id="rich" contenteditable="true" style="position:absolute;left:10px;top:100px;width:200px;font:16px/20px sans-serif">one<br>two</div>
+    <select id="size" style="position:absolute;left:10px;top:160px;width:120px" onchange="document.title = 'Size ' + this.value"><option value="s">Small</option><option value="l">Large</option></select>
+    <button id="hello" style="position:absolute;left:200px;top:160px;width:100px;height:24px" onclick="alert('Hello from a frame'); document.title = 'Greeted'">Hello</button>`,
   "/greets": `<!doctype html><title>Greeting</title><script>alert("Welcome"); document.title = "Greeted";</script>`,
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
@@ -253,7 +271,30 @@ afterAll(async () => {
 });
 
 /** A WebContentsView port backed by one real page. */
-async function pageView(): Promise<{
+/** The protocol events the host listens for, from the page and from each frame target. */
+const FORWARDED_EVENTS = [
+  "Page.javascriptDialogOpening",
+  "Page.javascriptDialogClosed",
+  "Page.fileChooserOpened",
+  "Runtime.executionContextCreated",
+  "Runtime.executionContextDestroyed",
+  "Runtime.executionContextsCleared",
+] as const;
+
+const OBSERVERS = `globalThis.octantBrowserEditable = (${observeBrowserEditableTarget.toString()})();
+globalThis.octantBrowserSelect = (${observeBrowserSelectPopup.toString()})();`;
+
+/** The observers in a world of the preload's name, from document start in every frame of a session. */
+async function installBridge(session: CDPSession) {
+  await session.send("Page.enable");
+  await session.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: OBSERVERS,
+    worldName: BROWSER_EDITABLE_WORLD_NAME,
+    runImmediately: true,
+  });
+}
+
+async function pageView(options: { readonly bridge?: boolean } = {}): Promise<{
   view: BrowserSurfaceViewPort;
   page: Page;
   /** Plays the person's key into the page, as Electron's input event does. */
@@ -272,6 +313,36 @@ async function pageView(): Promise<{
   // Frames on another site, each with its own protocol session, as Electron's
   // debugger announces them once the host asks to attach to them.
   const frameSessions = new Map<string, CDPSession>();
+  // Each debugger attachment is announced its frames afresh.
+  let announced = new WeakSet<object>();
+  let autoAttaching = false;
+  const announce = async (frame: ReturnType<Page["mainFrame"]>) => {
+    if (frame === page.mainFrame() || announced.has(frame)) return;
+    // Only a frame in its own process has a session of its own.
+    const child = await page
+      .context()
+      .newCDPSession(frame)
+      .catch(() => undefined);
+    if (child === undefined || announced.has(frame)) return;
+    announced.add(frame);
+    // Electron's preload names the observer's world in every frame; here the
+    // frame's own session installs the observers into a world of that name.
+    if (options.bridge === true) await installBridge(await page.context().newCDPSession(frame));
+    const { targetInfo } = await child.send("Target.getTargetInfo");
+    const id = `frame-${String(frameSessions.size + 1)}`;
+    frameSessions.set(id, child);
+    for (const method of FORWARDED_EVENTS)
+      child.on(method, (params) => {
+        for (const listener of messageListeners) listener({}, method, params, id);
+      });
+    for (const listener of messageListeners) {
+      listener({}, "Target.attachedToTarget", { sessionId: id, targetInfo }, undefined);
+    }
+  };
+  page.on("framenavigated", (frame) => {
+    if (autoAttaching) void announce(frame);
+  });
+  if (options.bridge === true) await installBridge(await page.context().newCDPSession(page));
   // Electron applies a device change synchronously; this stand-in finishes it
   // before the page is next read, which is the same order of events.
   let deviceChange: Promise<void> = Promise.resolve();
@@ -289,12 +360,7 @@ async function pageView(): Promise<{
     const opened = await opening.finally(() => {
       opening = undefined;
     });
-    for (const method of [
-      "Page.javascriptDialogOpening",
-      "Page.javascriptDialogClosed",
-      "Page.fileChooserOpened",
-      "Page.screencastFrame",
-    ] as const)
+    for (const method of [...FORWARDED_EVENTS, "Page.screencastFrame"] as const)
       opened.on(method, (params) => {
         for (const listener of messageListeners) listener({}, method, params);
       });
@@ -353,6 +419,8 @@ async function pageView(): Promise<{
         },
         detach: () => {
           attached = false;
+          announced = new WeakSet();
+          autoAttaching = false;
           void session?.detach().catch(() => undefined);
           session = undefined;
         },
@@ -364,21 +432,11 @@ async function pageView(): Promise<{
             return child.send(method as "Runtime.evaluate", parameters as never);
           }
           if (method === "Target.setAutoAttach") {
-            for (const frame of page.frames()) {
-              if (frame === page.mainFrame()) continue;
-              // Only a frame in its own process has a session of its own.
-              const child = await page
-                .context()
-                .newCDPSession(frame)
-                .catch(() => undefined);
-              if (child === undefined) continue;
-              const { targetInfo } = await child.send("Target.getTargetInfo");
-              const id = `frame-${String(frameSessions.size + 1)}`;
-              frameSessions.set(id, child);
-              for (const listener of messageListeners) {
-                listener({}, "Target.attachedToTarget", { sessionId: id, targetInfo }, undefined);
-              }
-            }
+            // Chromium announces every frame on another site, at any depth,
+            // and each one that appears later; frames already announced are
+            // not announced again.
+            autoAttaching = true;
+            for (const frame of page.frames()) await announce(frame);
             return {};
           }
           const answer = await (
@@ -601,13 +659,11 @@ function entry(
  * human presentation whose presses arrive as trusted Chromium input.
  */
 async function presentedPage(path: string) {
-  const { view, page } = await pageView();
+  const { view, page } = await pageView({ bridge: true });
   let receive:
     | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
     | undefined;
-  await page.addInitScript(
-    `globalThis.octantBrowserSelect = (${observeBrowserSelectPopup.toString()})();`,
-  );
+  await page.addInitScript(OBSERVERS);
   await page.goto(origin + path);
   let pointer: Promise<void> = Promise.resolve();
   const host = createBrowserSurfaceHost({
@@ -618,6 +674,9 @@ async function presentedPage(path: string) {
       human: {
         visible: () => undefined,
         bounds: () => undefined,
+        // No native view here: a text control's caret is a fixed stand-in,
+        // while email, number and rich editors give their own from the page.
+        caret: () => ({ x: 4, y: 4, width: 0, height: 18 }),
         frames: (listener) => {
           receive = listener;
           return () => undefined;
@@ -669,10 +728,7 @@ async function presentedPage(path: string) {
     toJPEG: () => new Uint8Array([1]),
   });
   await send({ kind: "frame", acknowledgement: 0 });
-  const click = async (selector: string) => {
-    const box = await page.locator(selector).boundingBox();
-    if (box === null) throw new Error("No element.");
-    const at = { x: Math.round(box.x + 10), y: Math.round(box.y + box.height / 2) };
+  const clickAt = async (at: { readonly x: number; readonly y: number }) => {
     for (const type of ["mouseDown", "mouseUp"])
       expect(
         await send({
@@ -683,6 +739,20 @@ async function presentedPage(path: string) {
       ).toMatchObject({ status: "accepted" });
     await pointer;
   };
+  const click = async (selector: string) => {
+    const box = await page.locator(selector).boundingBox();
+    if (box === null) throw new Error("No element.");
+    await clickAt({ x: Math.round(box.x + 10), y: Math.round(box.y + box.height / 2) });
+  };
+  /** The focused field as the presentation sees it, once the page has it. */
+  const editor = async () => {
+    let seen: HumanBrowserResult = { status: "editor-unavailable" };
+    for (let attempt = 0; attempt < 20 && seen.status !== "editor"; attempt += 1) {
+      seen = await send({ kind: "editor" });
+      if (seen.status !== "editor") await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return seen;
+  };
   const popup = async () => {
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const result = await send({ kind: "popup" });
@@ -690,7 +760,7 @@ async function presentedPage(path: string) {
     }
     throw new Error("No popup.");
   };
-  return { page, host, contextId, send, click, popup };
+  return { page, host, contextId, send, click, clickAt, popup, editor };
 }
 
 // A real browser on a shared CI runner can take longer than the 5 s default.
@@ -912,7 +982,7 @@ describe.skipIf(chrome === undefined)(
       }
     });
 
-    it("holds a file chooser in a frame on the page's own site but not in a frame on another site", async () => {
+    it("holds a file chooser in a frame on the page's own site and in a frame on another site", async () => {
       const { page, host, contextId, send, popup } = await presentedPage("/framed-file");
       try {
         await page.waitForFunction(() => document.querySelectorAll("iframe").length === 2);
@@ -937,11 +1007,228 @@ describe.skipIf(chrome === undefined)(
         const chooser = await popup();
         expect(chooser).toMatchObject({ kind: "file", multiple: false });
         await send({ kind: "popup-dismiss", popupId: chooser.id });
-        // A frame on another site is its own protocol target; its chooser is
-        // part of the nested-frame parity work and is not offered here.
+        // A frame on another site is its own protocol target, held in its own session.
         await press("#far");
+        const far = await popup();
+        expect(far).toMatchObject({ kind: "file", multiple: false });
+        const folder = await mkdtemp(join(tmpdir(), "octant-frame-file-"));
+        try {
+          const chosen = join(folder, "notes.txt");
+          await writeFile(chosen, "notes");
+          expect(
+            await send({
+              kind: "popup-answer",
+              popupId: far.id,
+              answer: { kind: "file", paths: [chosen] },
+            }),
+          ).toEqual({ status: "accepted" });
+          const inner = page.frames().find((frame) => frame.url().startsWith("http://localhost:"));
+          await expect.poll(() => inner?.title()).toBe("Picked notes.txt");
+        } finally {
+          await rm(folder, { recursive: true, force: true });
+        }
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("presents email, number and rich editors with their caret and a password field by identity alone", async () => {
+      const { page, host, contextId, send, editor } = await presentedPage("/fields");
+      try {
+        await page.locator("#mail").focus();
+        const mail = await editor();
+        if (mail.status !== "editor") throw new Error("No email editor.");
+        const box = await page.locator("#mail").boundingBox();
+        expect(Object.keys(mail.editor).sort()).toEqual(["caret", "id"]);
+        // The caret sits at the start of the field's text box, inside its border and padding.
+        expect("caret" in mail.editor && mail.editor.caret.x).toBeCloseTo((box?.x ?? 0) + 6, 0);
+        expect(JSON.stringify(mail)).not.toContain("ada@example.com");
+
+        await page.locator("#count").focus();
+        const count = await editor();
+        expect(count).toMatchObject({ status: "editor", editor: { caret: { width: 0 } } });
+        expect(JSON.stringify(count)).not.toContain("4242");
+
+        await page.locator("#secret").focus();
+        const secret = await editor();
+        if (secret.status !== "editor") throw new Error("No password editor.");
+        expect(secret.editor).toEqual({ id: expect.any(String), secure: true });
+        expect(JSON.stringify(secret)).not.toMatch(/hunter2|selection|caret/);
+        // A password field never composes through Nightly's input context.
+        expect(
+          await send({
+            kind: "composition",
+            composition: { phase: "begin", editorId: secret.editor.id },
+          }),
+        ).toEqual({ status: "refused" });
+        expect(await page.locator("#secret").inputValue()).toBe("hunter2-secret");
+
+        await page.locator("#when").focus();
+        expect(await send({ kind: "editor" })).toEqual({ status: "editor-unavailable" });
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("places a rich editor's caret on its own line and composes there", async () => {
+      const { page, host, contextId, send, editor } = await presentedPage("/fields");
+      try {
+        const caretAt = async (line: number) => {
+          await page.evaluate((index) => {
+            const rich = document.getElementById("rich");
+            const text = Array.from(rich?.childNodes ?? []).filter((node) => node.nodeType === 3)[
+              index
+            ];
+            if (rich === null || text === undefined) throw new Error("No line.");
+            rich.focus();
+            const range = document.createRange();
+            range.setStart(text, 2);
+            range.collapse(true);
+            document.getSelection()?.removeAllRanges();
+            document.getSelection()?.addRange(range);
+          }, line);
+          const seen = await editor();
+          if (seen.status !== "editor" || !("caret" in seen.editor))
+            throw new Error("No rich caret.");
+          return seen.editor;
+        };
+        const first = await caretAt(0);
+        const third = await caretAt(2);
+        const box = await page.locator("#rich").boundingBox();
+        expect(third.caret.y - first.caret.y).toBeCloseTo(40, 0);
+        expect(first.caret.y).toBeGreaterThanOrEqual((box?.y ?? 0) - 1);
+        // One line high, never the editor's whole selection or box.
+        expect(third.caret.height).toBeLessThanOrEqual(21);
+        expect(third.id).toBe(first.id);
+        const started = await send({
+          kind: "composition",
+          composition: { phase: "begin", editorId: third.id },
+        });
+        if (started.status !== "composition-started") throw new Error("Composition refused.");
+        expect(
+          await send({
+            kind: "composition",
+            composition: {
+              phase: "update",
+              compositionId: started.compositionId,
+              text: "に",
+              selectionStart: 1,
+              selectionEnd: 1,
+            },
+          }),
+        ).toEqual({ status: "accepted" });
+        expect(
+          await send({
+            kind: "composition",
+            composition: { phase: "commit", compositionId: started.compositionId, text: "に" },
+          }),
+        ).toEqual({ status: "accepted" });
+        await expect
+          .poll(() => page.locator("#rich").innerText())
+          .toBe("first line\nsecond line\nthにird line");
+        host.closeContext(contextId);
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it("follows the person's focus into a frame on the page's site and one on another site", async () => {
+      const { page, host, contextId, send, clickAt, popup, editor } =
+        await presentedPage("/framed-fields");
+      try {
+        await page.waitForFunction(() => document.querySelectorAll("iframe").length === 2);
+        await expect.poll(() => page.frames().length).toBe(3);
         await new Promise((resolve) => setTimeout(resolve, 300));
-        expect(await send({ kind: "popup" })).toEqual({ status: "idle" });
+        for (const [selector, site] of [
+          ["#near", origin],
+          ["#far", "http://localhost:"],
+        ] as const) {
+          const inner = page
+            .frames()
+            .find((frame) => frame.url().startsWith(site) && frame !== page.mainFrame());
+          const owner = await page.locator(selector).boundingBox();
+          if (inner === undefined || owner === null) throw new Error("No frame.");
+          await inner.waitForSelector("#mail");
+
+          await inner.locator("#mail").focus();
+          const mail = await editor();
+          if (mail.status !== "editor" || !("caret" in mail.editor))
+            throw new Error("No frame email editor.");
+          // Moved by where the frame sits in the page.
+          expect(mail.editor.caret.x).toBeCloseTo(owner.x + 10, 0);
+          expect(mail.editor.caret.y).toBeCloseTo(owner.y + 20, 0);
+
+          await inner.locator("#name").focus();
+          const name = await editor();
+          if (name.status !== "editor") throw new Error("No frame text editor.");
+          expect(name.editor).toMatchObject({ selectionStart: 0, selectionEnd: 0 });
+          expect(name.editor.id).not.toBe(mail.editor.id);
+          const started = await send({
+            kind: "composition",
+            composition: { phase: "begin", editorId: name.editor.id },
+          });
+          if (started.status !== "composition-started") throw new Error("Composition refused.");
+          expect(
+            await send({
+              kind: "composition",
+              composition: { phase: "commit", compositionId: started.compositionId, text: "frame" },
+            }),
+          ).toEqual({ status: "accepted" });
+          await expect.poll(() => inner.locator("#name").inputValue()).toBe("frame");
+
+          await inner.evaluate(() => {
+            const rich = document.getElementById("rich");
+            const second = rich?.childNodes[2];
+            if (rich === null || second === undefined) throw new Error("No line.");
+            rich.focus();
+            const range = document.createRange();
+            range.setStart(second, 1);
+            range.collapse(true);
+            document.getSelection()?.removeAllRanges();
+            document.getSelection()?.addRange(range);
+          });
+          const rich = await editor();
+          if (rich.status !== "editor" || !("caret" in rich.editor))
+            throw new Error("No frame rich editor.");
+          // A line box starts within a pixel or two of its line's top.
+          expect(Math.abs(rich.editor.caret.y - (owner.y + 120))).toBeLessThanOrEqual(3);
+
+          await clickAt({ x: Math.round(owner.x + 30), y: Math.round(owner.y + 170) });
+          const list = await popup();
+          expect(list).toMatchObject({ kind: "select", selectedIndex: 0 });
+          if (list.kind !== "select") throw new Error("No select list.");
+          expect(list.anchor.x).toBeCloseTo(owner.x + 10, 0);
+          expect(
+            await send({
+              kind: "popup-answer",
+              popupId: list.id,
+              answer: { kind: "select", index: 1 },
+            }),
+          ).toEqual({ status: "accepted" });
+          await expect.poll(() => inner.evaluate(() => document.title)).toBe("Size l");
+
+          await clickAt({ x: Math.round(owner.x + 240), y: Math.round(owner.y + 172) });
+          const greeting = await popup();
+          expect(greeting).toMatchObject({
+            kind: "dialog",
+            dialog: "alert",
+            message: "Hello from a frame",
+          });
+          expect(
+            await send({
+              kind: "popup-answer",
+              popupId: greeting.id,
+              answer: { kind: "dialog", accept: true },
+            }),
+          ).toEqual({ status: "accepted" });
+          // Playwright's own title read can go stale after a frame dialog.
+          await expect.poll(() => inner.evaluate(() => document.title)).toBe("Greeted");
+          await inner.evaluate(() => {
+            document.title = "Inner fields";
+          });
+        }
         host.closeContext(contextId);
       } finally {
         await page.context().close();
@@ -974,10 +1261,16 @@ describe.skipIf(chrome === undefined)(
         await page.locator("#a").focus();
         const next = await readAvailable();
         expect(next?.id).not.toBe(first?.id);
-        for (const selector of ["#password", "#custom", "#readonly"]) {
-          await page.locator(selector).focus();
-          expect(await read()).toBeUndefined();
-        }
+        await page.locator("#password").focus();
+        const secret = await readAvailable();
+        expect(secret).toMatchObject({ kind: "secure" });
+        expect(JSON.stringify(secret)).not.toContain("fixture-password");
+        await page.locator("#custom").focus();
+        const custom = await readAvailable();
+        expect(custom).toMatchObject({ kind: "rich", caret: { width: 0 } });
+        expect(JSON.stringify(custom)).not.toContain("fixture");
+        await page.locator("#readonly").focus();
+        expect(await read()).toBeUndefined();
         expect(observeBrowserEditableTarget.toString()).not.toMatch(
           /\.value\b|textContent|innerText/,
         );

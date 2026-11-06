@@ -8,7 +8,6 @@ import {
   type HumanBrowserInput,
   type HumanBrowserLayout,
   type HumanBrowserResult,
-  type HumanBrowserEditor,
 } from "@octant/contracts/browser-presentation";
 
 export interface HumanBrowserImage {
@@ -20,7 +19,16 @@ export interface HumanBrowserSource {
   readonly visible: (visible: boolean) => void;
   readonly bounds: (width: number, height: number) => void;
   readonly input: (input: HumanBrowserInput) => void;
-  readonly editor?: () => Promise<HumanBrowserEditor | undefined>;
+  /**
+   * The native caret at a host-observed UTF16 selection in the focused field,
+   * in the page's CSS pixels. The host observes the field before and after.
+   */
+  readonly caret?: (
+    start: number,
+    end: number,
+  ) =>
+    | { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+    | undefined;
 }
 interface Attached {
   readonly id: BrowserPresentationId;

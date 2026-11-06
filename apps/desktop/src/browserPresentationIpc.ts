@@ -69,13 +69,16 @@ function composition(value: unknown): boolean {
   return boundary(value.selectionStart) && boundary(value.selectionEnd);
 }
 function editor(value: unknown): boolean {
+  if (!record(value) || !uuid(value.id)) return false;
+  // A password field carries its identity alone, never offsets or a caret.
+  if ("secure" in value) return keys(value, ["id", "secure"]) && value.secure === true;
+  const offsets = "selectionStart" in value || "selectionEnd" in value;
   if (
-    !record(value) ||
-    !keys(value, ["id", "selectionStart", "selectionEnd", "caret"]) ||
-    !uuid(value.id) ||
-    !integer(value.selectionStart, 1_048_576) ||
-    !integer(value.selectionEnd, 1_048_576) ||
-    value.selectionEnd < value.selectionStart ||
+    !keys(value, offsets ? ["id", "selectionStart", "selectionEnd", "caret"] : ["id", "caret"]) ||
+    (offsets &&
+      (!integer(value.selectionStart, 1_048_576) ||
+        !integer(value.selectionEnd, 1_048_576) ||
+        value.selectionEnd < value.selectionStart)) ||
     !record(value.caret) ||
     !keys(value.caret, ["x", "y", "width", "height"])
   )

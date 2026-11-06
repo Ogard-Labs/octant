@@ -82,20 +82,31 @@ export const HumanBrowserComposition = Schema.Union(
   }).annotations(strict),
 );
 export type HumanBrowserComposition = typeof HumanBrowserComposition.Type;
-export const HumanBrowserEditor = Schema.Struct({
-  id: BrowserEditorId,
-  selectionStart: Schema.Number.pipe(Schema.int(), Schema.between(0, 1_048_576)),
-  selectionEnd: Schema.Number.pipe(Schema.int(), Schema.between(0, 1_048_576)),
-  caret: Schema.Struct({
-    x: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_WIDTH)),
-    y: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_HEIGHT)),
-    width: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_WIDTH)),
-    height: Schema.Number.pipe(
-      Schema.greaterThan(0),
-      Schema.lessThanOrEqualTo(MAX_HUMAN_FRAME_HEIGHT),
-    ),
-  }).annotations(strict),
+const EditorCaret = Schema.Struct({
+  x: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_WIDTH)),
+  y: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_HEIGHT)),
+  width: Schema.Number.pipe(Schema.between(0, MAX_HUMAN_FRAME_WIDTH)),
+  height: Schema.Number.pipe(
+    Schema.greaterThan(0),
+    Schema.lessThanOrEqualTo(MAX_HUMAN_FRAME_HEIGHT),
+  ),
 }).annotations(strict);
+/**
+ * The focused page field, as Nightly may know it. A standard text control
+ * carries its UTF16 selection offsets; an email or number field and a rich
+ * text editor carry only their caret; a password field carries only its
+ * identity, never a value, offset, caret or selection text.
+ */
+export const HumanBrowserEditor = Schema.Union(
+  Schema.Struct({
+    id: BrowserEditorId,
+    selectionStart: Schema.Number.pipe(Schema.int(), Schema.between(0, 1_048_576)),
+    selectionEnd: Schema.Number.pipe(Schema.int(), Schema.between(0, 1_048_576)),
+    caret: EditorCaret,
+  }).annotations(strict),
+  Schema.Struct({ id: BrowserEditorId, caret: EditorCaret }).annotations(strict),
+  Schema.Struct({ id: BrowserEditorId, secure: Schema.Literal(true) }).annotations(strict),
+);
 export type HumanBrowserEditor = typeof HumanBrowserEditor.Type;
 export const decodeHumanBrowserEditor = Schema.decodeUnknownSync(HumanBrowserEditor);
 const Sequence = Schema.Number.pipe(Schema.int(), Schema.between(0, Number.MAX_SAFE_INTEGER));

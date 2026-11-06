@@ -373,6 +373,9 @@ export function EmbeddedBrowserSurface(props: {
             : (mount.current?.getBoundingClientRect().height ?? frame.height) / frame.height
         }
         compose={(composition) => compose.current(composition)}
+        secureText={(text) => {
+          for (const character of text) sendInput.current({ type: "char", keyCode: character });
+        }}
       />
       {failed ? (
         <OctantButton onClick={() => setAttempt((value) => value + 1)}>
