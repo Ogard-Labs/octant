@@ -138,7 +138,11 @@ import {
   waitForReplacedProcessExit,
 } from "./portableImageUpdate";
 import { createQuitShortcutGuard } from "./quitShortcutGuard";
-import { buildApplicationMenuTemplate, developerToolsAllowed } from "./applicationMenu";
+import {
+  buildApplicationMenuTemplate,
+  buildStableMenuTemplate,
+  developerToolsAllowed,
+} from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
   acknowledgeWhatsNew,
@@ -4595,8 +4599,9 @@ function installApplicationMenu(): void {
     version: app.getVersion(),
   });
   if (process.platform !== "darwin") {
-    // Electron's default menu carries Toggle Developer Tools and its shortcut.
-    if (!developerTools) Menu.setApplicationMenu(null);
+    // Electron's default menu carries Toggle Developer Tools and its shortcut;
+    // replace it with the same menu minus those items, not with no menu.
+    if (!developerTools) Menu.setApplicationMenu(Menu.buildFromTemplate(buildStableMenuTemplate()));
     return;
   }
   Menu.setApplicationMenu(

@@ -78,3 +78,18 @@ export function buildApplicationMenuTemplate(
     { role: "windowMenu" },
   ];
 }
+
+/**
+ * The Windows and Linux menu bar of a packaged stable release: the standard
+ * File, Edit, View and Window menus without the macOS application menu and
+ * without Reload or Toggle Developer Tools. Removing the menu outright would
+ * also take away zoom, fullscreen and the Edit roles' clipboard shortcuts.
+ */
+export function buildStableMenuTemplate(): MenuItemConstructorOptions[] {
+  return buildApplicationMenuTemplate({
+    appName: "Octant",
+    onOpenSettings: () => {},
+    onQuit: () => {},
+    developerTools: false,
+  }).slice(1);
+}

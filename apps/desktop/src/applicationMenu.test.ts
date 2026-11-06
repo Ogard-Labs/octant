@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildApplicationMenuTemplate, developerToolsAllowed } from "./applicationMenu";
+import {
+  buildApplicationMenuTemplate,
+  buildStableMenuTemplate,
+  developerToolsAllowed,
+} from "./applicationMenu";
 
 describe("native application menu", () => {
   it("keeps Settings in the Octant menu and invokes the shared settings action", () => {
@@ -85,5 +89,24 @@ describe("developer tools by build", () => {
     expect(developerToolsAllowed({ packaged: true, version: "0.2.0-candidate.3" })).toBe(true);
     expect(developerToolsAllowed({ packaged: true, version: "0.2.0-preview.5" })).toBe(true);
     expect(developerToolsAllowed({ packaged: true, version: "0.2.0" })).toBe(false);
+  });
+});
+
+describe("stable Windows and Linux menu", () => {
+  it("keeps zoom, fullscreen and the Edit menu and offers neither reload nor developer tools", () => {
+    const template = buildStableMenuTemplate();
+    const roles = JSON.stringify(template);
+    expect(template.map((item) => item.role ?? item.label)).toEqual([
+      "fileMenu",
+      "editMenu",
+      "View",
+      "windowMenu",
+    ]);
+    for (const role of ["zoomIn", "zoomOut", "resetZoom", "togglefullscreen"]) {
+      expect(roles).toContain(`"${role}"`);
+    }
+    for (const role of ["reload", "forceReload", "toggleDevTools", "viewMenu"]) {
+      expect(roles).not.toContain(`"${role}"`);
+    }
   });
 });
