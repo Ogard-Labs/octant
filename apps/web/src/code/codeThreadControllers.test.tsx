@@ -1,6 +1,6 @@
-import type { CodeClient } from "@octant/client-runtime/code-client";
+import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId, CodeThreadView } from "@octant/contracts/code";
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeThreadControllerSlots,
@@ -264,6 +264,42 @@ describe("CodeThreadControllerSlots", () => {
     expect(api.bootstrap).not.toHaveBeenCalled();
     expect(api.readFollowUp).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["late", "updated"] as const)(
+    "keeps a failed thread load retryable when %s window metadata arrives",
+    async (timing) => {
+      const registry = createCodeThreadControllers();
+      const api = client();
+      vi.mocked(api.thread).mockRejectedValueOnce(
+        new CodeClientFailure({ category: "unavailable", message: "Thread load unavailable" }),
+      );
+      const props = {
+        client: api,
+        readCursorStore: createCodeReadCursorStore(),
+        registry,
+        threadIds: [threadA],
+      };
+      const view = render(
+        <CodeThreadControllerSlots
+          {...props}
+          navigationBootstrap={timing === "late" ? undefined : bootstrap()}
+        />,
+      );
+      await waitFor(() =>
+        expect(registry.get(threadA)?.errorMessage).toBe("Thread load unavailable"),
+      );
+      const failedStatus = registry.get(threadA)?.status;
+      view.rerender(<CodeThreadControllerSlots {...props} navigationBootstrap={bootstrap()} />);
+      expect(registry.get(threadA)?.errorMessage).toBe("Thread load unavailable");
+      expect(registry.get(threadA)?.status).toBe(failedStatus);
+      expect(api.thread).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await registry.get(threadA)?.retry();
+      });
+      await waitFor(() => expect(registry.get(threadA)?.activeView?.thread.id).toBe(threadA));
+      expect(registry.get(threadA)?.errorMessage).toBeUndefined();
+    },
+  );
 
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();

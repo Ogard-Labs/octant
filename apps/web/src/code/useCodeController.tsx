@@ -1929,11 +1929,9 @@ export function useCodeController(options: CodeControllerOptions) {
     if (ownsNavigation || windowBootstrap === undefined) return;
     bootstrapRef.current = windowBootstrap;
     setBootstrap(windowBootstrap);
-    // The window owns catalog reconciliation. A just-created tab can appear
-    // before its thread reaches that catalog, so it must not purge its draft.
-    clearFailure();
-    setStatus("ready");
-  }, [clearFailure, ownsNavigation, windowBootstrap]);
+    // Window metadata neither reconciles a tab's drafts nor recovers a failed
+    // thread read. Only installing a successfully read view clears that failure.
+  }, [ownsNavigation, windowBootstrap]);
 
   useEffect(() => {
     mounted.current = true;
