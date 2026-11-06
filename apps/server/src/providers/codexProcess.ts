@@ -18,6 +18,7 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, type Scope } from "effect";
 
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import { processGroupHasRunningMember } from "../process/processGroupRunningMember";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
@@ -428,10 +429,20 @@ function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
+/**
+ * A group whose members have all exited still answers a signal probe until
+ * each zombie is reaped, and orphaned descendants are reaped by PID 1 on its
+ * own schedule, so exit is judged by whether any member can still run.
+ */
+async function processGroupRunning(child: ChildProcess): Promise<boolean> {
+  if (!processGroupExists(child) || child.pid === undefined) return false;
+  return processGroupHasRunningMember(child.pid);
+}
+
 async function waitForProcessGroupExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (processGroupExists(child) && Date.now() < deadline) await wait(10);
-  return !processGroupExists(child);
+  while ((await processGroupRunning(child)) && Date.now() < deadline) await wait(10);
+  return !(await processGroupRunning(child));
 }
 
 function makeProcessTerminator(
@@ -441,9 +452,14 @@ function makeProcessTerminator(
   let termination: Promise<void> | undefined;
   return () => {
     termination ??= (async () => {
+      // Whether to signal is decided by the signal probe alone. The `/proc`
+      // reading only judges when a signalled group has finished: a group of
+      // zombies takes a signal harmlessly, while a reading that missed a live
+      // member would leave it running.
       if (!processGroupExists(child)) return;
       signalProcessGroup(child, "SIGTERM");
-      if (await waitForProcessGroupExit(child, shutdownTimeoutMs)) return;
+      await waitForProcessGroupExit(child, shutdownTimeoutMs);
+      if (!processGroupExists(child)) return;
       signalProcessGroup(child, "SIGKILL");
       const forcedShutdownTimeoutMs = Math.min(5_000, Math.max(250, shutdownTimeoutMs * 3));
       if (!(await waitForProcessGroupExit(child, forcedShutdownTimeoutMs))) {

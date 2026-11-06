@@ -92,9 +92,23 @@ function processPids(root: string): number[] {
 function processIsRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+  // A signal probe also reaches a zombie. The fixture's descendant is
+  // reparented to PID 1 when the runtime exits, and a container init was seen
+  // reaping it about 1.5 seconds later, past the tests' one-second waits,
+  // though it had already exited.
+  if (process.platform !== "linux") return true;
+  try {
+    const processStat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = processStat
+      .slice(processStat.lastIndexOf(")") + 1)
+      .trim()
+      .split(/\s+/)[0];
+    return state !== "Z" && state !== "X";
+  } catch {
+    return false;
   }
 }
 
