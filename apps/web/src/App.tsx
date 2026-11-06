@@ -7634,6 +7634,7 @@ function LaunchedShell(
         the turn that thread is running. */}
                 <CodeThreadControllerSlots
                   client={codeClient}
+                  navigationBootstrap={codeController.bootstrap}
                   readCursorStore={codeReadCursorStore}
                   registry={codeThreadControllers}
                   threadIds={openCodeThreadIds}

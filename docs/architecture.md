@@ -4246,7 +4246,11 @@ or .zip>` write the same files, built by one host command
   stays `lost-in-restart` in the harness session: only Resume is offered, and
   the call it guarded never runs.
 
-- **Fast thread reads.** A thread paints from an authoritative snapshot before
+- **Fast thread reads.** A window owns Code navigation bootstrap and the
+  follow-up navigation list. Its open thread controllers consume that metadata
+  while keeping independent transcripts, streams and active-thread follow-up
+  reads; opening another tab does not bootstrap the window's list again.
+  A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
