@@ -12,7 +12,12 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { useWorkspaceContentView } from "../shell/WorkspaceContentView";
 import { OctantButton } from "../ui/base/OctantButton";
-import { BrowserCaptureImage, captureLabel } from "./BrowserCaptureImage";
+import {
+  BrowserCaptureImage,
+  BrowserRecordingBadge,
+  captureLabel,
+  recordingLength,
+} from "./BrowserCaptureImage";
 import { BrowserProofPanel } from "./BrowserProofPanel";
 import "./browser-captures.css";
 
@@ -137,18 +142,25 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
           {captures.map((capture) => (
             <li className="browser-capture" key={capture.captureId}>
               <OctantButton
-                aria-label={`Open capture of ${captureLabel(capture)}`}
+                aria-label={
+                  capture.recording === undefined
+                    ? `Open capture of ${captureLabel(capture)}`
+                    : `Play recording of ${captureLabel(capture)}, ${recordingLength(capture.recording.durationMs)}`
+                }
                 className="browser-capture__hit"
                 onClick={() => open(capture)}
                 type="button"
                 variant="bare"
               />
-              <BrowserCaptureImage
-                capture={capture}
-                className="browser-capture__thumb"
-                client={props.client}
-                threadId={props.threadId}
-              />
+              <span className="browser-capture__media">
+                <BrowserCaptureImage
+                  capture={capture}
+                  className="browser-capture__thumb"
+                  client={props.client}
+                  threadId={props.threadId}
+                />
+                <BrowserRecordingBadge capture={capture} />
+              </span>
               <span className="browser-capture__text">
                 <span className="browser-capture__title">{captureLabel(capture)}</span>
                 <span className="oct-meta oct-meta--mono browser-capture__origin">
@@ -175,18 +187,58 @@ function BrowserCaptureView(props: {
   readonly client: BrowserAutomationClient;
   readonly threadId: BrowserThreadId;
 }) {
+  const recording = props.capture.recording;
+  // Opening a recording is asking to watch it, so it plays, unless the person
+  // asked for less motion: then it waits on its first frame for Play.
+  const [playing, setPlaying] = useState(() => !prefersLessMotion());
   return (
     <figure className="browser-capture-view" data-testid="browser-capture-view">
       <BrowserCaptureImage
         capture={props.capture}
         className="browser-capture-view__image"
         client={props.client}
+        play={playing}
         threadId={props.threadId}
       />
-      <figcaption className="oct-meta">
-        <span className="oct-meta--mono">{props.capture.url}</span>
-        <span> · {new Date(props.capture.capturedAt).toLocaleString()}</span>
+      <figcaption className="oct-meta browser-capture-view__caption">
+        {recording === undefined ? null : (
+          <OctantButton
+            onClick={() => setPlaying((current) => !current)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {playing ? "Stop" : "Play"}
+          </OctantButton>
+        )}
+        <span className="browser-capture-view__facts">
+          {recording === undefined
+            ? null
+            : `Recording · ${recordingLength(recording.durationMs)} · ${recording.frames} ${recording.frames === 1 ? "frame" : "frames"}${recording.truncated === undefined ? "" : ` · ${RECORDING_TRUNCATION[recording.truncated]}`} · `}
+          <span className="oct-meta--mono">{props.capture.url}</span>
+          <span> · {new Date(props.capture.capturedAt).toLocaleString()}</span>
+        </span>
       </figcaption>
     </figure>
+  );
+}
+
+/** Why a recording ended before the call it covered did, in words. */
+const RECORDING_TRUNCATION: Readonly<
+  Record<NonNullable<NonNullable<BrowserCapture["recording"]>["truncated"]>, string>
+> = {
+  "duration-limit": "stopped at 30 seconds",
+  "frame-limit": "stopped at its frame limit",
+  "size-limit": "stopped at its size limit",
+  "viewport-changed": "stopped when the page was resized",
+  "tab-changed": "stopped when another tab came to the front",
+};
+
+/** The system's or Octant's own reduced-motion choice, read when a recording opens. */
+function prefersLessMotion(): boolean {
+  if (document.documentElement.dataset.octantReducedMotion === "true") return true;
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 }

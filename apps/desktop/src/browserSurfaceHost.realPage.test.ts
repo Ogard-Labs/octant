@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { inflateSync } from "node:zlib";
 import { chromium, type Browser, type CDPSession, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -177,6 +178,8 @@ const pages: Record<string, string> = {
         const start = performance.now(); while (performance.now() - start < 150) {}
       }, 100));
     </script></html>`,
+  "/red": `<!doctype html><title>Red</title><style>html, body { margin: 0; height: 100%; background: rgb(220, 30, 30); }</style><p>Approved</p>`,
+  "/blue": `<!doctype html><title>Blue</title><style>html, body { margin: 0; height: 100%; background: rgb(30, 30, 220); }</style><p>Elsewhere</p>`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
@@ -266,6 +269,9 @@ async function pageView(): Promise<{
     const opened = await page.context().newCDPSession(page);
     opened.on("Page.javascriptDialogOpening", (params) => {
       for (const listener of messageListeners) listener({}, "Page.javascriptDialogOpening", params);
+    });
+    opened.on("Page.screencastFrame", (params) => {
+      for (const listener of messageListeners) listener({}, "Page.screencastFrame", params);
     });
     session = opened;
     return opened;
@@ -525,6 +531,30 @@ async function twoThreads(firstPath: string, secondPath: string) {
   const firstPage = pool[0]?.page;
   if (firstPage === undefined) throw new Error("No page.");
   return { host, first, second, firstOwner, secondOwner, firstPage, close };
+}
+
+/**
+ * The colour of each animation frame's top-left pixel. Whatever filter a row
+ * uses, the first pixel of the first row is stored as it is, so inflating a
+ * frame's data is enough to read it.
+ */
+function apngCorners(dataUrl: string): ReadonlyArray<readonly [number, number, number]> {
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  const frames: Buffer[][] = [];
+  let offset = 8;
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "fcTL") frames.push([]);
+    if (type === "IDAT") frames.at(-1)?.push(data);
+    if (type === "fdAT") frames.at(-1)?.push(data.subarray(4));
+    offset += 12 + length;
+  }
+  return frames.map((parts) => {
+    const pixels = inflateSync(Buffer.concat(parts));
+    return [pixels[1] ?? 0, pixels[2] ?? 0, pixels[3] ?? 0] as const;
+  });
 }
 
 function entry(
@@ -922,6 +952,100 @@ describe.skipIf(chrome === undefined)(
         destination: "#done",
       });
       expect(dragged.title).toBe("Dropped card");
+      await page.close();
+    });
+
+    it("records the agent's actions as an animated PNG and lets the debugger go when the recording ends", async () => {
+      const { host, contextId, page, view } = await surface("/controls");
+      await host.act(contextId, { kind: "record-start" });
+      // The recording holds the attachment between actions, as an emulation does.
+      expect(view.webContents.debugger.isAttached()).toBe(true);
+      await host.act(contextId, { kind: "select", target: "#size", value: "l" });
+      await host.act(contextId, { kind: "hover", target: "#menu" });
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      expect(recording.frames).toBeGreaterThanOrEqual(1);
+      const bytes = Buffer.from(recording.dataUrl.split(",")[1] ?? "", "base64");
+      const actl = bytes.indexOf("acTL");
+      expect(actl).toBeGreaterThan(0);
+      expect(bytes.readUInt32BE(actl + 4)).toBe(recording.frames);
+      expect(Math.max(bytes.readUInt32BE(16), bytes.readUInt32BE(20))).toBeLessThanOrEqual(800);
+      // A stop with nothing running is empty, not an error.
+      expect((await host.act(contextId, { kind: "record-stop" })).recording).toEqual({
+        status: "empty",
+      });
+      await page.close();
+    });
+
+    it("keeps no frame of a page the person took to a site the thread did not approve", async () => {
+      const { host, contextId, page } = await surface("/red");
+      const other = `http://localhost:${String((server.address() as AddressInfo).port)}`;
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      // The person takes the agent's own view to another site and back.
+      await page.goto(`${other}/blue`);
+      await page.waitForTimeout(900);
+      await page.goto(`${origin}/red`);
+      await page.waitForTimeout(600);
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      const corners = apngCorners(recording.dataUrl);
+      expect(corners.length).toBe(recording.frames);
+      expect(corners.some(([red, , blue]) => red > 180 && blue < 80)).toBe(true);
+      expect(corners.filter(([red, , blue]) => blue > 180 && red < 80)).toEqual([]);
+      await page.close();
+    });
+
+    it("ends a recording when another tab comes to the front, under the recorded tab's address", async () => {
+      const { host, contextId, page, view } = await surface("/red", 2);
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "tab-open", target: `${origin}/blue` });
+      await page.waitForTimeout(600);
+      const stopped = await host.act(contextId, { kind: "record-stop", include: ["text"] });
+      // The observation is of the tab in front; the recording is of the one it started on.
+      expect(stopped.url).toBe(`${origin}/blue`);
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      expect(recording).toMatchObject({
+        truncated: "tab-changed",
+        url: `${origin}/red`,
+        title: "Red",
+      });
+      const corners = apngCorners(recording.dataUrl);
+      expect(corners.filter(([red, , blue]) => blue > 180 && red < 80)).toEqual([]);
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      await page.close();
+    });
+
+    it("keeps a recording a resize cut short under the page it showed, not the one the tab moved to", async () => {
+      const { host, contextId, page } = await surface("/red");
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "resize", viewport: { width: 390, height: 844 } });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "navigate", target: `${origin}/blue` });
+      await page.waitForTimeout(300);
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(stopped.url).toBe(`${origin}/blue`);
+      expect(stopped.recording).toMatchObject({
+        status: "recorded",
+        truncated: "viewport-changed",
+        url: `${origin}/red`,
+        title: "Red",
+      });
+      await page.close();
+    });
+
+    it("withholds a recording of a page that holds a credential field", async () => {
+      const { host, contextId, page } = await surface("/login");
+      await host.act(contextId, { kind: "record-start" });
+      await host.act(contextId, { kind: "hover", target: "button" });
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(stopped.recording).toEqual({ status: "withheld" });
       await page.close();
     });
 

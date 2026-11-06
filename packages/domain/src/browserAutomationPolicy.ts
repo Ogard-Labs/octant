@@ -258,6 +258,11 @@ export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicy
   if (kind === "close-tab") {
     return { kind: "denied", reason: "Closing a host browser tab is not a remote action." };
   }
+  // A recording is the agent's, around a call of its own, and a capture a
+  // paired device could never read back.
+  if (kind === "record-start" || kind === "record-stop") {
+    return { kind: "denied", reason: "Recording the host's browser is not a remote action." };
+  }
   // Choosing an option, dragging, sending a file, and changing tabs decide what
   // the page holds or shows, as typing and navigating do.
   if (

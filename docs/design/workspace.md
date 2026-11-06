@@ -735,6 +735,8 @@ page's picture with the thread, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a
 thread with Browser steps also shows a folded _Browser proof_ panel there: the
 agent's steps as a numbered list with each capture under the step that took it.
+An agent's recording sits in the strip and the panel like a screenshot, still,
+with a play mark and its length, and plays when the person opens it.
 The rules are in [Browser captures](browser-captures.md) and
 [Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use

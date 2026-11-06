@@ -32,6 +32,7 @@ import {
 import type { BrowserProfileStore } from "./browserProfileStore";
 import {
   BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserSurfaceAction,
@@ -408,6 +409,9 @@ async function handleBrokerRequest(
     }
     if (error instanceof BrowserNavigationBlockedError) {
       return Response.json({ error: "navigation-blocked", url: error.url }, { status: 422 });
+    }
+    if (error instanceof BrowserRecordingUnavailableError) {
+      return Response.json({ error: "recording-unavailable" }, { status: 422 });
     }
     return failure("browser-operation-failed", 503);
   }

@@ -203,8 +203,9 @@ appears in the conversation beside any generated images, newest first, each
 with the page title and its origin. Choose one to see it full size with its
 address and time. The strip is absent until the thread has a capture.
 
-- Only a screenshot is kept. The picture the agent receives after other actions,
-  such as clicking or scrolling, is not.
+- Only a screenshot, or a [recording](#browser-recordings) the agent asked for,
+  is kept. The picture the agent receives after other actions, such as clicking
+  or scrolling, is not.
 - A thread keeps its newest 32 captures; the oldest is dropped when a new one
   arrives. Deleting the thread deletes its captures.
 - Captures stay on this computer, in Octant's data folder. **Settings → Data &
@@ -224,6 +225,37 @@ address and time. The strip is absent until the thread has a capture.
 - A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
+#### Browser recordings
+
+To show what a change does, the agent can record a short check: it runs a few
+Browser steps, or replays a saved flow, and asks for a recording of that call.
+Octant keeps an animated picture of the page while the call ran, as a capture
+of the thread. Ask the agent to "record the check" when you want one; it never
+records on its own.
+
+- In the strip a recording shows its first frame with a play mark and its
+  length. Choose it to watch it play; **Stop** and **Play** sit under it. With
+  reduced motion turned on (in your system settings or in Octant), it waits
+  for **Play**.
+- A recording lasts at most 30 seconds, takes up to 4 frames a second, is at
+  most 800 pixels on its longer side, and at most 2 MB. It stops early at any
+  of these, when the page is resized, and when another tab comes to the front,
+  and says so under the picture. A recording shows only the tab it started on
+  and is listed under that tab's address.
+- A page with a password or other credential field on screen is never recorded:
+  its frames are left out, and a recording of nothing else keeps nothing.
+- Only the sites you approved for the agent's page are recorded. If the page
+  shows any other site (for example because you took it somewhere else while
+  the agent worked), a blank page, or an error page, those moments are left
+  out the same way.
+- If you take over the page, or the agent asks you to sign in, while it is
+  recording, nothing of what you do is kept.
+- Recordings follow every capture rule above: they stay on this computer, count
+  toward the thread's 32 captures, are not sent anywhere, and a paired device
+  cannot see them. The agent cannot record in Plan.
+- A thread keeps at most 8 recordings. A newer one replaces the oldest
+  recording; your screenshots are never dropped to make room.
+
 #### Browser proof
 
 Octant also keeps a short record of the steps the agent took in its Browser, at
@@ -241,7 +273,10 @@ that took it.
   is not sent anywhere, and a paired device cannot see it.
 - **Save screenshots…** (in the Octant desktop app) asks you for a folder and
   writes the thread's captures there as `browser-check-01.png`, `-02`, and so
-  on. It never replaces a file that is already there.
+  on. It never replaces a file that is already there. When the thread has a
+  recording the button reads **Save screenshots and recordings…**: a recording
+  is saved in the same numbered run as an animated `.png`, which GitHub plays
+  when you drag it into a pull request description.
 - To put the steps in a pull request, see [Code threads](../guide/code.md): the
   **Include Browser proof** choice there is off unless you turn it on.
 

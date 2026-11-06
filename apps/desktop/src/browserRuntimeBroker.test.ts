@@ -1,7 +1,11 @@
 import { decodeBrowserPageScriptPlanId } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { startBrowserRuntimeBroker } from "./browserRuntimeBroker";
-import { BrowserNavigationBlockedError, BrowserTargetStaleError } from "./browserSurfaceHost";
+import {
+  BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
+  BrowserTargetStaleError,
+} from "./browserSurfaceHost";
 import { createBrowserSurfaceHost } from "./browserSurfaceHost";
 import type {
   OwnerBrowserNativeCommand,
@@ -556,6 +560,21 @@ describe("BrowserRuntimeBroker", () => {
         error: "navigation-blocked",
         url: "https://www.example.com/",
       });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("reports a page it cannot record as a structured 422", async () => {
+    const surface = host();
+    surface.act.mockRejectedValueOnce(new BrowserRecordingUnavailableError());
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const response = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: { kind: "record-start" } }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({ error: "recording-unavailable" });
     } finally {
       await broker.close();
     }

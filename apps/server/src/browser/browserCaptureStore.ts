@@ -1,7 +1,7 @@
 import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
-  MAX_BROWSER_CAPTURE_BYTES,
+  MAX_BROWSER_RECORDING_BYTES,
   type BrowserCaptureId,
   type BrowserThreadId,
   type ImageArtifactMediaType,
@@ -14,7 +14,7 @@ export class BrowserCaptureTooLarge extends Error {
 
   constructor(readonly byteLength: number) {
     super(
-      `Browser capture is too large (${byteLength} bytes). The maximum size is ${MAX_BROWSER_CAPTURE_BYTES} bytes.`,
+      `Browser capture is too large (${byteLength} bytes). The maximum size is ${MAX_BROWSER_RECORDING_BYTES} bytes.`,
     );
     this.name = "BrowserCaptureTooLarge";
   }
@@ -53,7 +53,9 @@ const DISPLAY_NAME = "browser-capture";
  * Bytes of the pictures a thread keeps, one managed-store scope per thread.
  * Staging, digest-checked finalization, and crash recovery live in the shared
  * managed store; this class decodes the browser identities and refuses bytes
- * that are not a recognised image whatever the data URL declared.
+ * that are not a recognised image whatever the data URL declared. The store's
+ * bound is a recording's, the larger kind; the service holds a screenshot to
+ * the screenshot envelope before it gets here.
  */
 export class BrowserCaptureStore {
   readonly #store: ManagedAttachmentStore;
@@ -61,7 +63,7 @@ export class BrowserCaptureStore {
   constructor(dataDirectory: string) {
     this.#store = new ManagedAttachmentStore(dataDirectory, {
       scopesDirectory: "browser-captures",
-      maxBytes: MAX_BROWSER_CAPTURE_BYTES,
+      maxBytes: MAX_BROWSER_RECORDING_BYTES,
       decodeScopeId: (value) => String(decodeBrowserThreadId(value)),
       decodeAttachmentId: (value) => String(decodeBrowserCaptureId(value)),
       tooLarge: (byteLength) => new BrowserCaptureTooLarge(byteLength),
@@ -75,7 +77,7 @@ export class BrowserCaptureStore {
     readonly captureId: BrowserCaptureId;
     readonly bytes: Uint8Array;
   }): Promise<BrowserCaptureStaged> {
-    if (input.bytes.length > MAX_BROWSER_CAPTURE_BYTES) {
+    if (input.bytes.length > MAX_BROWSER_RECORDING_BYTES) {
       throw new BrowserCaptureTooLarge(input.bytes.length);
     }
     if (sniffGeneratedImageMediaType(input.bytes) === undefined) {

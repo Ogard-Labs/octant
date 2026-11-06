@@ -12,9 +12,11 @@ import {
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
+  runRecordedBrowserCall,
   signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
+  type BrowserToolRecordingOperation,
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
@@ -574,9 +576,18 @@ export function createBrowserAppManagedTools(
       if (signal?.aborted) return failure("tool-interrupted");
       const input = parseBrowserToolInput(inputJson, { allowProfile: true });
       if (input === undefined) return failure("invalid-browser-input");
-      if (isBrowserToolFlowInput(input)) return runFlow(input, signal);
+      // The stop runs without the turn's signal, so a turn that ends mid-call
+      // still ends its recording and keeps what was recorded.
+      const record = (operation: BrowserToolRecordingOperation) =>
+        runOne({ operation }, operation === "record-stop" ? undefined : signal);
+      if (isBrowserToolFlowInput(input)) {
+        return input.operation === "flow-run" && input.record === true
+          ? runRecordedBrowserCall(() => runFlow(input, signal), record)
+          : runFlow(input, signal);
+      }
       if (input.operation === "steps") {
-        return runBrowserToolSteps(input.steps, (step) => runRecorded(step, signal));
+        const batch = () => runBrowserToolSteps(input.steps, (step) => runRecorded(step, signal));
+        return input.record === true ? runRecordedBrowserCall(batch, record) : batch();
       }
       return runRecorded(input, signal);
     },

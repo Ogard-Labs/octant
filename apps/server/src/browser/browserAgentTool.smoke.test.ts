@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { inflateSync } from "node:zlib";
 import type {
   BrowserAccessibilityAudit,
   BrowserContextId,
@@ -113,6 +114,10 @@ const pages: Record<string, string> = {
         const start = performance.now(); while (performance.now() - start < 150) {}
       }, 100));
     </script></html>`,
+  "/panel": `<!doctype html><title>Panel</title>
+    <style>#box { width: 160px; height: 90px; background: rgb(200, 40, 40); }</style>
+    <button id="paint" onclick="document.getElementById('box').style.background = 'rgb(40, 160, 60)'; setTimeout(() => { document.getElementById('box').style.background = 'rgb(40, 60, 200)'; document.getElementById('note').textContent = 'Done'; document.title = 'Painted'; }, 400)">Paint</button>
+    <div id="box"></div><p id="note"></p>`,
   "/downloads": `<!doctype html><title>Downloads</title>
     <a id="report" href="/dl/report.pdf">Report</a>
     <a id="elf" href="/dl/notes.txt">Notes</a>
@@ -187,6 +192,14 @@ beforeAll(async () => {
       );
       return;
     }
+    if (path === "/red-away") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Red</title>
+        <style>html, body { margin: 0; height: 100%; background: rgb(220, 30, 30); }</style>
+        <a id="away" href="http://localhost:${String(port)}/other">Away</a>`);
+      return;
+    }
     if (path === "/leave") {
       const port = (server.address() as AddressInfo).port;
       response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
@@ -253,6 +266,30 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
+/**
+ * The colour of each animation frame's top-left pixel. Whatever filter a row
+ * uses, the first pixel of the first row is stored as it is, so inflating a
+ * frame's data is enough to read it.
+ */
+function apngCorners(dataUrl: string): ReadonlyArray<readonly [number, number, number]> {
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  const frames: Buffer[][] = [];
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "fcTL") frames.push([]);
+    if (type === "IDAT") frames.at(-1)?.push(data);
+    if (type === "fdAT") frames.at(-1)?.push(data.subarray(4));
+    offset += 12 + length;
+  }
+  return frames.map((parts) => {
+    const pixels = inflateSync(Buffer.concat(parts));
+    return [pixels[1] ?? 0, pixels[2] ?? 0, pixels[3] ?? 0] as const;
+  });
+}
+
 function agentTool(
   options: {
     readonly uploadRoot?: string;
@@ -277,6 +314,8 @@ function agentTool(
     /** How the person answers an origin question; approved when absent. */
     readonly originAnswer?: "approved" | "denied";
     readonly plan?: boolean;
+    /** Where the thread keeps captures; absent, none are kept. */
+    readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -286,6 +325,7 @@ function agentTool(
     authority: { canAccessWindow: () => true, resolve: () => authority },
     agentDownloadsEnabled: () => options.downloads === true,
     downloads: journal,
+    ...(options.captures === undefined ? {} : { captures: options.captures }),
     uuid: () => randomUUID(),
     clock: () => new Date().toISOString(),
     now: () => Date.now(),
@@ -883,6 +923,169 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       { type: "alert", message: "kept", answer: "accepted" },
     ]);
     await tool.stop();
+  });
+
+  it("records a batch as an animated PNG the thread keeps, and never a page with a credential field", async () => {
+    const kept: Array<{ readonly dataUrl: string; readonly recording?: unknown }> = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push({
+            dataUrl: input.dataUrl,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          });
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    const opened = await tool.call({ operation: "navigate", url: `${origin}/panel` });
+    const revision = opened.result.page?.observationRevision;
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        // Named from the read before the recording: starting one leaves the
+        // page's revision where it was.
+        { operation: "click", selector: "#paint", expectedObservationRevision: revision },
+        { operation: "wait", conditions: [{ text: "Done", present: true }], timeoutMs: 5_000 },
+      ],
+    });
+    expect(recorded.isError).toBe(false);
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording).toMatchObject({ captureId: expect.any(String) });
+    expect(Number(recording?.frames)).toBeGreaterThanOrEqual(2);
+    expect(Number(recording?.durationMs)).toBeGreaterThan(0);
+    // The file is an animated PNG with as many frames as the answer says,
+    // each no wider or taller than a recording's edge.
+    const bytes = Buffer.from(kept[0]?.dataUrl.split(",")[1] ?? "", "base64");
+    expect(kept[0]?.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    const actl = bytes.indexOf("acTL");
+    expect(actl).toBeGreaterThan(0);
+    expect(bytes.readUInt32BE(actl + 4)).toBe(recording?.frames);
+    expect(Math.max(bytes.readUInt32BE(16), bytes.readUInt32BE(20))).toBeLessThanOrEqual(800);
+    // The revision the batch answered with is still current after the stop.
+    const after = await tool.call({
+      operation: "click",
+      selector: "#paint",
+      expectedObservationRevision: recorded.result.page?.observationRevision,
+    });
+    expect(after.isError).toBe(false);
+
+    await tool.call({ operation: "navigate", url: `${origin}/login` });
+    const withheld = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "click", selector: "button" }],
+    });
+    expect((withheld.result as { readonly recordingNotKept?: string }).recordingNotKept).toBe(
+      "no-picture",
+    );
+    expect(kept).toHaveLength(1);
+    await tool.stop();
+  });
+
+  it("ends a recording at the tab a batch opens, and keeps it under the tab it recorded", async () => {
+    const kept: Array<{ readonly url?: string; readonly title?: string }> = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push({
+            ...(input.url === undefined ? {} : { url: input.url }),
+            ...(input.title === undefined ? {} : { title: input.title }),
+          });
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/panel` });
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        { operation: "click", selector: "#paint" },
+        { operation: "wait", conditions: [{ text: "Done", present: true }], timeoutMs: 5_000 },
+        { operation: "tab-open", url: `${origin}/other` },
+      ],
+    });
+    expect(recorded.isError).toBe(false);
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording).toMatchObject({ captureId: expect.any(String), truncated: "tab-changed" });
+    // The recorded tab's own title when the tab changed, set by its paint.
+    expect(kept).toEqual([{ url: `${origin}/panel`, title: "Painted" }]);
+    await tool.stop();
+  });
+
+  it("keeps no frame of a page off the approved origin, or of one whose origin cannot be told", async () => {
+    const kept: string[] = [];
+    const tool = agentTool({
+      captures: {
+        keep: async (input) => {
+          kept.push(input.dataUrl);
+          return {
+            status: "kept",
+            captureId: randomUUID() as never,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          };
+        },
+      },
+    });
+    await tool.call({ operation: "navigate", url: `${origin}/red-away` });
+    // The link leads to another origin: the context refuses the request, the
+    // page shows the browser's own error page, and the runtime then leaves it
+    // for a blank page. None of those is a page this thread approved.
+    const recorded = await tool.call({
+      operation: "steps",
+      record: true,
+      steps: [
+        { operation: "wait", selector: "#away", timeoutMs: 1_000 },
+        { operation: "click", selector: "#away" },
+        { operation: "wait", conditions: [{ text: "never", present: true }], timeoutMs: 1_000 },
+      ],
+    });
+    const recording = (recorded.result as { readonly recording?: Record<string, unknown> })
+      .recording;
+    expect(recording?.captureId).toEqual(expect.any(String));
+    const corners = apngCorners(kept[0] ?? "");
+    expect(corners.length).toBe(recording?.frames);
+    expect(corners.length).toBeGreaterThan(0);
+    // Every kept frame is the approved red page.
+    expect(corners.filter(([red, green, blue]) => !(red > 180 && green < 80 && blue < 80))).toEqual(
+      [],
+    );
+    await tool.stop();
+  });
+
+  it("refuses to record in Plan, or before a page is open", async () => {
+    const planned = agentTool({ plan: true });
+    const refused = await planned.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "snapshot" }],
+    });
+    expect(refused.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "plan-mode-read-only" },
+    });
+    const fresh = agentTool();
+    const unopened = await fresh.call({
+      operation: "steps",
+      record: true,
+      steps: [{ operation: "snapshot" }],
+    });
+    expect(unopened.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "browser-navigation-required" },
+    });
   });
 
   it("resizes the agent's page within bounds and restores it", async () => {

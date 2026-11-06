@@ -37,7 +37,11 @@ import {
 } from "./browserAutomationService";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
-import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
+import {
+  BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
+  type BrowserRuntimePort,
+} from "./browserRuntimePort";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 const otherWindowId = "10000000-0000-4000-8000-000000000002" as WindowId;
@@ -1827,6 +1831,147 @@ describe("BrowserAutomationService", () => {
       expect(completed.failure).toBeUndefined();
       expect(captures.keep).not.toHaveBeenCalled();
       expect(completed.observation?.capture).toEqual({ status: "not-kept", reason: "no-picture" });
+    });
+
+    describe("recordings", () => {
+      const recorded = {
+        status: "recorded" as const,
+        dataUrl: "data:image/png;base64,BBBB",
+        frames: 6,
+        durationMs: 1_500,
+        truncated: "size-limit" as const,
+      };
+
+      it("keeps the agent's recording with its frames, and leaves the page's revision where it was", async () => {
+        const captures = {
+          keep: vi.fn(async (input: KeepBrowserCaptureInput) => ({
+            status: "kept" as const,
+            captureId,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          })),
+          recordStep: vi.fn(),
+        };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        const read = await service.act({ windowId, request: request(), capturedBy: "agent" });
+        const revision = read.observation?.revision;
+        const started = await service.act({
+          windowId,
+          request: request({ kind: "record-start" }),
+          capturedBy: "agent",
+        });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/start",
+          title: "Thread one",
+          contentHash: "after",
+          recording: recorded,
+        });
+        const stopped = await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+        });
+
+        expect(started.observation?.revision).toBe(revision);
+        expect(stopped.observation?.revision).toBe(revision);
+        expect(captures.keep).toHaveBeenCalledOnce();
+        expect(captures.keep).toHaveBeenCalledWith(
+          expect.objectContaining({
+            dataUrl: recorded.dataUrl,
+            recording: { frames: 6, durationMs: 1_500, truncated: "size-limit" },
+            takenBy: "agent",
+          }),
+        );
+        expect(stopped.observation?.capture).toEqual({
+          status: "kept",
+          captureId,
+          recording: { frames: 6, durationMs: 1_500, truncated: "size-limit" },
+        });
+        // Starting and stopping a recording are not steps of the proof.
+        expect(captures.recordStep).toHaveBeenCalledOnce();
+      });
+
+      it("keeps a recording under the address of the tab it recorded, not the tab in front", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/other",
+          title: "Other tab",
+          recording: {
+            ...recorded,
+            truncated: "tab-changed",
+            url: "https://example.com/start",
+            title: "Recorded tab",
+          },
+        });
+        await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+        });
+
+        expect(captures.keep).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: "https://example.com/start",
+            title: "Recorded tab",
+            recording: { frames: 6, durationMs: 1_500, truncated: "tab-changed" },
+          }),
+        );
+      });
+
+      it("records only for the agent's own call, never for the pane or an unnamed caller", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        for (const capturedBy of ["person", undefined] as const) {
+          const refused = await service.act({
+            windowId,
+            request: request({ kind: "record-start" }),
+            ...(capturedBy === undefined ? {} : { capturedBy }),
+          });
+          expect(refused.failure).toMatchObject({ category: "policy-denied" });
+        }
+        expect(runtime.act).not.toHaveBeenCalled();
+        expect(captures.keep).not.toHaveBeenCalled();
+      });
+
+      it("says in words when the Browser cannot record", async () => {
+        const { runtime, service } = harness();
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockRejectedValueOnce(new BrowserRecordingUnavailableError());
+        const refused = await service.act({
+          windowId,
+          request: request({ kind: "record-start" }),
+          capturedBy: "agent",
+        });
+        expect(refused.failure).toEqual({
+          category: "unavailable",
+          message: "This Browser cannot record the page.",
+        });
+      });
+
+      it("keeps nothing when the recording showed a credential field or painted nothing", async () => {
+        for (const status of ["withheld", "empty"] as const) {
+          const captures = { keep: keep() };
+          const { runtime, service } = harness({ captures });
+          await service.create({ windowId, threadId: threadOne, action: action(), policy });
+          vi.mocked(runtime.act).mockResolvedValueOnce({
+            url: "https://example.com/sign-in",
+            recording: { status },
+          });
+          const stopped = await service.act({
+            windowId,
+            request: request({ kind: "record-stop" }),
+            capturedBy: "agent",
+          });
+          expect(captures.keep).not.toHaveBeenCalled();
+          expect(stopped.observation?.capture).toEqual({
+            status: "not-kept",
+            reason: "no-picture",
+          });
+        }
+      });
     });
   });
 

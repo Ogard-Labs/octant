@@ -307,6 +307,11 @@ describe("what a paired device may do in the host's browser", () => {
     expect(remoteBrowserActionReach("hover").kind).toBe("allowed");
     expect(remoteBrowserActionReach("tab-list").kind).toBe("allowed");
   });
+
+  it("keeps recording the page with the host's agent", () => {
+    expect(remoteBrowserActionReach("record-start").kind).toBe("denied");
+    expect(remoteBrowserActionReach("record-stop").kind).toBe("denied");
+  });
 });
 
 describe("which keys an agent may press", () => {

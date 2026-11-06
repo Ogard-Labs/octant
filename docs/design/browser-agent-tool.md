@@ -17,7 +17,8 @@ batched steps, waits, settling, dialogs, viewport size and device emulation
 (presets, touch, color scheme), the sign-in handoff, person and agent together
 (the person's input kept, Take over and Hand back), diagnostics with a
 cursor, and accessibility and performance audits are built on the headless
-and desktop Browsers. Flows (recording a run,
+and desktop Browsers, and so is recording a call as an animated PNG. Flows
+(recording a run,
 saving it in the Project, and replaying it by name) are built in Work and Code;
 the person can list and delete a Project's flows in Settings, and runs one by
 asking the agent.
@@ -29,7 +30,8 @@ asking the agent.
   Code thread and a Work thread read an operation's arguments and shape its
   answer the same way; they differ only in who approves and how a page opens.
 - The always-visible description tells the model to take a snapshot after it
-  navigates and to act by ref. The full usage stays behind `help`.
+  navigates and to act by ref, and, to show a reviewer a UI change, to run the
+  short flow as `steps` with `record: true`. The full usage stays behind `help`.
 - Stored-profile selection through `navigate`, and a task's default Browser
   profile, are wired in both Work's and Code's adapters, each through the
   stored-profile site approval. See
@@ -130,7 +132,21 @@ asking the agent.
   nor the desktop Browser captures the page after an agent's action unless the
   call is a `screenshot` or includes one, and neither returns the page's text
   unless it is a `read-page` or includes it. Each still reads the page's text
-  for the hash.
+  for the hash. Neither records the page unless the call is a `steps` or
+  `flow-run` that asks with `record: true`, and then only while that call runs.
+- **Recording a call.** `record: true` on `steps` or `flow-run` keeps a short
+  animated PNG of the page while the call runs, as a thread capture the person
+  can attach to a pull request; the model never receives the animation. It
+  needs a page already open and is admitted like a `screenshot`; a start that
+  is refused answers `recording-refused` with the refusal, and the call does
+  not run. The call's answer carries `recording` (`captureId`, `frames`,
+  `durationMs`, and `truncated` when a bound cut it short) or
+  `recordingNotKept` with the reason. Starting and ending a recording leave
+  the observation revision where it was, so a batch's first step may name the
+  revision the call before it returned, and the next call may name the one the
+  batch returned. The bounds, the frames, the credential rule, and the
+  rationale for one recording per call are in
+  [Browser captures: Recordings](browser-captures.md#recordings).
 - **The person keeps their picture.** The activity preview takes its own
   picture through the host's peek, which now runs right after an agent action
   that took none (at most once per 1.5 seconds), so the preview shows the page
@@ -345,6 +361,9 @@ turned on a switch, and then only after they answer for that file.
   before any step runs.
 - A batch is a list of fixed operations, never a script: nothing an agent
   writes runs in the page.
+- `record: true` on the batch records the page while it runs
+  ([Results](#results)). A step cannot carry it, and the start and end of a
+  recording are never steps a model can write or a flow can store.
 - An agent's action that names an `expectedObservationRevision` the page has
   moved past is refused as `stale` and does not run, so a batch stops there
   rather than carrying on as if the step had run. The person's pane, which
@@ -393,7 +412,9 @@ runs, not when it was recorded.
   element it could not find, or the refusal) and lists the steps that ran with
   what each changed; a replay that finishes answers as a `steps` batch does. A
   replayed navigation still raises its origin approval, and the replay's own
-  steps are recorded like any other operation of the agent.
+  steps are recorded like any other operation of the agent. `flow-run` with
+  `record: true` keeps an animated recording of the replay, as a `steps` batch
+  does ([Results](#results)); a saved flow never holds a recording.
 - **Who may.** The thread's own agent in Work and Code saves, lists, and runs. A
   paired device may not save or run (a flow navigates and types, which it may
   not), and Plan mode refuses every flow operation like every other Browser
@@ -1128,6 +1149,19 @@ stale until the page is read again.
   nothing on the clean elements, reads the load without reloading the
   document, and leaves the counters unread while someone else holds the
   developer tools.
+- Recording runs against real Chromium in both Browsers: the smoke test above
+  records a batch into an animated PNG with the frame count its answer names,
+  keeps the revision the batch answered with current, withholds a page with a
+  password field, keeps no frame of the error and blank pages a refused
+  off-origin link leaves, and refuses Plan and a page that is not open; the
+  desktop real-page test records the desktop Browser's actions through its own
+  debugger attachment, lets the attachment go when the recording ends,
+  withholds a credential page, and keeps no frame of a site the person took
+  the view to that the thread did not approve (both read each kept frame's
+  pixels). `browserAppManagedTools.test.ts` covers the start, the stop after a
+  failed step, a Browser that cannot record, and the `record` argument;
+  `browserRecording.test.ts` covers the animated PNG, its bounds, and which
+  frames may be kept.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
   page being out of reach of another thread, a subagent, and another thread's
   terminal grant, and the Project's page list.

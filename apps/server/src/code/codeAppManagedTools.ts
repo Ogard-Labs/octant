@@ -22,9 +22,11 @@ import {
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
+  runRecordedBrowserCall,
   signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
+  type BrowserToolRecordingOperation,
 } from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
 import {
@@ -1206,8 +1208,14 @@ async function browserTool(
   signal?: AbortSignal,
 ): Promise<BrowserToolAnswer> {
   if (input === undefined || options.browser === undefined) return failure("invalid-browser-input");
+  // The stop runs without the turn's signal, so a turn that ends mid-call
+  // still ends its recording and keeps what was recorded; see Work's tool.
+  const record = (operation: BrowserToolRecordingOperation) =>
+    browserToolOne(options, { operation }, operation === "record-stop" ? undefined : signal);
   if (input.operation === "steps") {
-    return runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+    const batch = () =>
+      runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+    return input.record === true ? runRecordedBrowserCall(batch, record) : batch();
   }
   const browser = options.browser;
   const threadId = browserThreadIdOf(options);
@@ -1223,15 +1231,19 @@ async function browserTool(
     if (flowAuthority === undefined) return failure("browser-authority-unavailable");
     const flowPosture = browserAuthorityFailure(options);
     if (flowPosture !== undefined) return failure(flowPosture);
-    return runBrowserFlowOperation(input, {
-      flows,
-      projectId: flowAuthority.projectId,
-      caller: flows.caller(options.windowId),
-      actor: () => browserFlowAgentActor(flowAuthority, String(threadId)),
-      contextId,
-      refs,
-      run: (step) => browserTool(options, step, signal),
-    });
+    const replay = () =>
+      runBrowserFlowOperation(input, {
+        flows,
+        projectId: flowAuthority.projectId,
+        caller: flows.caller(options.windowId),
+        actor: () => browserFlowAgentActor(flowAuthority, String(threadId)),
+        contextId,
+        refs,
+        run: (step) => browserTool(options, step, signal),
+      });
+    return input.operation === "flow-run" && input.record === true
+      ? runRecordedBrowserCall(replay, record)
+      : replay();
   }
   // Every operation of the agent passes here, so a flow records what ran and a
   // replay runs each step exactly as a call of its own would.

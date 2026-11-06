@@ -4,6 +4,7 @@ export * from "./browserPageSnapshot";
 export * from "./browserPageAudit";
 export * from "./browserCapturePolicy";
 export * from "./browserProofPolicy";
+export * from "./browserRecording";
 export * from "./browserProfilePolicy";
 export * from "./browserExtensionPolicy";
 export * from "./computerUsePolicy";

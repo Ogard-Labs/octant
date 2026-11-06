@@ -3,7 +3,9 @@ import {
   BrowserActionKind,
   BrowserActionRequest,
   BrowserCaptureId,
+  BrowserRecordingFacts,
   BrowserThreadId,
+  MAX_BROWSER_RECORDING_BYTES,
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
 } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
@@ -14,11 +16,18 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
 
 /**
- * Browser captures a thread keeps: the explicit `screenshot` action, and
- * nothing else. The picture is the one the host already hands the model, so its
- * size is bounded by the screenshot envelope rather than by a second limit.
+ * Browser captures a thread keeps: the explicit `screenshot` action and the
+ * agent's explicit recording, and nothing else. A screenshot is the picture the
+ * host already hands the model, so its size is bounded by the screenshot
+ * envelope; a recording has its own bound, `MAX_BROWSER_RECORDING_BYTES`.
  */
 export const MAX_BROWSER_CAPTURES_PER_THREAD = 32;
+/**
+ * How many of those captures may be recordings. A recording is up to 2 MiB,
+ * fifty times a screenshot, so eight bound a thread's recordings at about
+ * 16 MiB; past eight the oldest recording goes, never a screenshot.
+ */
+export const MAX_BROWSER_RECORDINGS_PER_THREAD = 8;
 export const MAX_BROWSER_CAPTURE_BYTES = Math.floor(
   (MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS * 3) / 4,
 );
@@ -45,7 +54,7 @@ export const BrowserCapture = Schema.Struct({
   url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
   title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   hash: ContentDigest,
-  size: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_BROWSER_CAPTURE_BYTES)),
+  size: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_BROWSER_RECORDING_BYTES)),
   mime: ImageArtifactMediaType,
   capturedAt: UtcTimestamp,
   /**
@@ -54,7 +63,23 @@ export const BrowserCapture = Schema.Struct({
    * capture kept before profiles existed, or of a Private page, has none.
    */
   profile: Schema.optional(StoredBrowserProfile),
-}).annotations(strict);
+  /**
+   * Present when the capture is a recording: an animated PNG of the agent's
+   * page during one call it asked to record. Absent, it is a screenshot.
+   */
+  recording: Schema.optional(BrowserRecordingFacts),
+})
+  .annotations(strict)
+  .pipe(
+    // A screenshot is the picture the model received, so it keeps the
+    // screenshot envelope; only a recording, always an animated PNG, may be
+    // larger.
+    Schema.filter((capture) =>
+      capture.recording === undefined
+        ? capture.size <= MAX_BROWSER_CAPTURE_BYTES
+        : capture.mime === "image/png",
+    ),
+  );
 export type BrowserCapture = typeof BrowserCapture.Type;
 
 export const BrowserCaptureKept = BrowserCapture;
