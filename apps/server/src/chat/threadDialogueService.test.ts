@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  THREAD_DIALOGUE_TOOL_NAME,
   decodeChatThreadId,
   decodeMentionableThreadId,
   type ChatThreadView,
@@ -19,6 +20,7 @@ describe("ThreadDialogueService", () => {
     const service = new ThreadDialogueService({
       resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
       readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
       executeChat,
     });
     const tools = service.forThread({
@@ -29,7 +31,7 @@ describe("ThreadDialogueService", () => {
     });
 
     const result = await tools?.execute({
-      name: "octant_thread_message",
+      name: THREAD_DIALOGUE_TOOL_NAME,
       inputJson: JSON.stringify({ targetThreadId, message: "Check the parser and report back." }),
     });
 
@@ -54,6 +56,7 @@ describe("ThreadDialogueService", () => {
     const service = new ThreadDialogueService({
       resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
       readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
       executeChat,
       isSideChat: (threadId) => threadId === String(sourceThreadId),
     });
@@ -74,6 +77,7 @@ describe("ThreadDialogueService", () => {
     const service = new ThreadDialogueService({
       resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
       readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
       executeChat,
       isSideChat: (threadId) => threadId === String(targetThreadId),
     });
@@ -85,7 +89,7 @@ describe("ThreadDialogueService", () => {
     });
 
     const result = await tools?.execute({
-      name: "octant_thread_message",
+      name: THREAD_DIALOGUE_TOOL_NAME,
       inputJson: JSON.stringify({ targetThreadId, message: "Append this." }),
     });
 
@@ -98,6 +102,7 @@ describe("ThreadDialogueService", () => {
     const service = new ThreadDialogueService({
       resolveChatTargets: async () => [],
       readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
       executeChat,
     });
     const tools = service.forThread({
@@ -108,7 +113,7 @@ describe("ThreadDialogueService", () => {
     });
 
     const result = await tools?.execute({
-      name: "octant_thread_message",
+      name: THREAD_DIALOGUE_TOOL_NAME,
       inputJson: JSON.stringify({ targetThreadId, message: "Do this." }),
     });
 
@@ -117,10 +122,38 @@ describe("ThreadDialogueService", () => {
     expect(executeChat).not.toHaveBeenCalled();
   });
 
+  it("is offered as octant_ask_thread only when the turn mentions a Chat thread", async () => {
+    const workThreadId = decodeMentionableThreadId("80000000-0000-4000-8000-000000000001");
+    const resolveChatTargets = vi.fn(async () => [
+      { threadId: targetThreadId, title: "Target Chat" },
+    ]);
+    const service = new ThreadDialogueService({
+      resolveChatTargets,
+      readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
+      executeChat: vi.fn(),
+    });
+    const offered = (targetThreadIds: ReadonlyArray<typeof targetThreadId>) =>
+      service.forThread({ windowId, sourceThreadId, sourceTitle: "Source Chat", targetThreadIds });
+
+    // A Work or Code mention is read-only context: there is nothing to ask.
+    expect(offered([workThreadId])).toBeUndefined();
+    expect(offered([])).toBeUndefined();
+    const mixed = offered([workThreadId, targetThreadId]);
+    expect(mixed?.definitions.map((definition) => definition.name)).toEqual(["octant_ask_thread"]);
+    await mixed?.execute({
+      name: THREAD_DIALOGUE_TOOL_NAME,
+      inputJson: JSON.stringify({ targetThreadId: workThreadId, message: "Do this." }),
+    });
+    // Only the Chat mentions are ever resolved as targets.
+    expect(resolveChatTargets).toHaveBeenCalledWith(windowId, [targetThreadId]);
+  });
+
   it("does not expose coordination tools to a target turn", () => {
     const service = new ThreadDialogueService({
       resolveChatTargets: async () => [],
       readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
       executeChat: vi.fn(),
     });
 
@@ -145,6 +178,7 @@ describe("ThreadDialogueService", () => {
     const service = new ThreadDialogueService({
       resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
       readChatThread: () => targetView(),
+      isChatThread: (threadId) => threadId === String(targetChatThreadId),
       executeChat,
     });
     const tools = service.forThread({
@@ -155,7 +189,7 @@ describe("ThreadDialogueService", () => {
     });
 
     const result = await tools?.execute({
-      name: "octant_thread_message",
+      name: THREAD_DIALOGUE_TOOL_NAME,
       inputJson: JSON.stringify({ targetThreadId, message: "Do this later." }),
     });
 

@@ -2878,7 +2878,7 @@ it("collects after failed delivery before following up and preserves both journa
     }),
   ).toMatchObject({ kind: "run-command-failed" });
   expect(persistence.getById(completed.id)).toEqual(undelivered.run);
-  const collected = collectAgentRunResult(persistence, undelivered.run, "First reply");
+  const collected = collectAgentRunResult(persistence, undelivered.run, "First reply", () => true);
   expect(collected).toMatchObject({
     status: "completed",
     text: "First reply",

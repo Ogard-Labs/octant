@@ -104,9 +104,15 @@ export function composeCodeProfileContext(input: {
         preview: { redacted: true, label: attribution.label },
       }),
     );
-    const block = { kind: "instructions", text: attribution.text } as const;
+    // A skill is third-party text, so it keeps its own kind and never takes the
+    // developer channel a runtime gives Octant's own instructions.
+    const ownInstructions = attribution.sourceKind === "instruction";
+    const block: ProviderContextBlock = {
+      kind: ownInstructions ? "instructions" : "skill-instructions",
+      text: attribution.text,
+    };
     blocks.push(block);
-    (attribution.sourceKind === "instruction" ? instructions : skills).push(block);
+    (ownInstructions ? instructions : skills).push(block);
   }
   return { entries, blocks, sent: { instructions, skills } };
 }

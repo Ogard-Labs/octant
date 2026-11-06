@@ -623,7 +623,9 @@ export function readChatThreads(connection: SqliteConnection): ReadonlyArray<Cha
 }
 
 /**
- * Read the complete sidebar projection in one bounded-metadata query. The
+ * Read active sidebar metadata through each thread's indexed rows. A global
+ * activity grouping also scanned archived history on every navigation read,
+ * including reads during streamed replies. The
  * thread view intentionally remains the transcript read; using it here would
  * load every turn, attachment, citation, and work item once per row.
  *
@@ -636,35 +638,35 @@ export function readChatNavigation(
 ): ReadonlyArray<ChatNavigationThread> {
   const rows = connection
     .prepare(`
-      WITH activity AS (
-        SELECT thread_id, last_sequence FROM chat_thread_projection
-        UNION ALL SELECT thread_id, last_sequence FROM chat_turn_projection
-        UNION ALL SELECT thread_id, last_sequence FROM chat_attempt_projection
-        UNION ALL SELECT thread_id, last_sequence FROM chat_attachment_projection
-        UNION ALL SELECT thread_id, last_sequence FROM chat_citation_projection
-        UNION ALL SELECT thread_id, last_sequence FROM thread_work_item_projection
-        UNION ALL SELECT thread_id, last_sequence FROM thread_follow_up_projection
-        UNION ALL SELECT thread_id, last_sequence FROM chat_purge_projection
-        UNION ALL SELECT thread_id, last_sequence FROM chat_turn_route_projection
-      ), activity_by_thread AS (
-        SELECT thread_id, max(last_sequence) AS last_sequence
-        FROM activity
-        GROUP BY thread_id
-      ), executing_threads AS (
-        SELECT DISTINCT thread_id
-        FROM chat_attempt_projection
-        WHERE json_extract(attempt_json, '$.outcome') IN ('queued', 'streaming')
-      )
       SELECT thread.schema_version, thread.thread_json,
-             activity.last_sequence,
+             (SELECT max(last_sequence) FROM (
+               SELECT thread.last_sequence AS last_sequence
+               UNION ALL SELECT last_sequence FROM chat_turn_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM chat_attempt_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM chat_attachment_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM chat_citation_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM thread_work_item_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM thread_follow_up_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM chat_purge_projection
+                 WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM chat_turn_route_projection
+                 WHERE thread_id = thread.thread_id
+             )) AS last_sequence,
              coalesce(follow_up.state = 'open', 0) AS follow_up_open,
-             CASE WHEN executing.thread_id IS NOT NULL THEN 1 ELSE 0 END AS executing
+             EXISTS (
+               SELECT 1 FROM chat_attempt_projection
+               WHERE thread_id = thread.thread_id
+                 AND json_extract(attempt_json, '$.outcome') IN ('queued', 'streaming')
+             ) AS executing
       FROM chat_thread_projection AS thread
-      INNER JOIN activity_by_thread AS activity ON activity.thread_id = thread.thread_id
       LEFT JOIN thread_follow_up_projection AS follow_up
         ON follow_up.thread_id = thread.thread_id
-      LEFT JOIN executing_threads AS executing
-        ON executing.thread_id = thread.thread_id
       WHERE thread.lifecycle = 'active'
       ORDER BY thread.updated_at DESC, thread.thread_id ASC
     `)

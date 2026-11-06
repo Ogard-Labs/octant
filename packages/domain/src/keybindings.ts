@@ -19,6 +19,7 @@ export type OctantKeybindingActionId =
   | "toggle-sidebar"
   | "home"
   | "next-waiting-thread"
+  | "reply-detail-cycle"
   | "zen-next-space"
   | "zen-previous-space"
   | "review-next"
@@ -83,6 +84,16 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     label: "Jump to the next thread that needs you",
     area: "Shell",
     defaultChord: "Mod+Shift+J",
+  },
+  {
+    id: "reply-detail-cycle",
+    label: "Change reply detail in this thread",
+    area: "Shell",
+    // Mod+Shift+D is held by no default here, no desktop menu item, and no
+    // macOS or Windows system chord. In a browser it is Bookmark all tabs
+    // (Safari: Add to Reading List), which a page may take; the window
+    // listener prevents the default only when the chord runs this action.
+    defaultChord: "Mod+Shift+D",
   },
   {
     id: "zen-next-space",

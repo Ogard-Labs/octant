@@ -429,6 +429,20 @@ export type ClaudeDecodedMessage =
 
 export interface ClaudeUserMessage {
   readonly text: string;
+  /**
+   * Octant's context for this message, handed to Claude Code by the
+   * `UserPromptSubmit` hook so the message itself is only the person's text.
+   * Claude Code records it beside the message, not in it, and keeps it in the
+   * session's history across resume.
+   */
+  readonly context?: string;
+  /**
+   * Called once the prompt hook has handed `context` to Claude Code for this
+   * message. A hook that never runs for it (a policy that turns hooks off, a
+   * prompt Claude Code rewrote) never calls it, so the caller can tell that the
+   * context did not arrive.
+   */
+  readonly onContextDelivered?: () => void;
   readonly appManagedTools?: ReadonlyArray<ProviderToolDefinition>;
   readonly onAppToolCall?: (
     name: string,
@@ -493,6 +507,7 @@ export interface ClaudeAgentSdkInputMessage {
 
 interface ClaudeAgentSdkHookInput {
   readonly hook_event_name?: unknown;
+  readonly prompt?: unknown;
   readonly session_id?: unknown;
   readonly cwd?: unknown;
   readonly tool_name?: unknown;
@@ -514,6 +529,55 @@ interface ClaudeAgentSdkHookOutput {
     readonly updatedInput?: Readonly<Record<string, unknown>>;
   };
 }
+
+/** Why a listed Octant tool the current turn does not offer is refused. */
+const WITHDRAWN_TOOL_MESSAGE = "This Octant tool is not available in this turn.";
+const WITHDRAWN_TOOL_ANSWER: ManagedToolAnswer = {
+  resultJson: '{"error":"tool-unavailable"}',
+  isError: true,
+};
+
+/**
+ * The session's tool list after a turn offers `offered`: unchanged when it
+ * already lists every offered tool as offered, otherwise the listed tools
+ * followed by each new one, with a changed definition replacing the listed
+ * one in place. A listed tool the turn does not offer is kept.
+ */
+function growToolListing(
+  listed: ReadonlyArray<ProviderToolDefinition>,
+  offered: ReadonlyArray<ProviderToolDefinition>,
+):
+  | { readonly kind: "unchanged" }
+  | { readonly kind: "grown"; readonly tools: ReadonlyArray<ProviderToolDefinition> }
+  | { readonly kind: "invalid" } {
+  const names = new Set<string>();
+  for (const tool of offered) {
+    if (names.has(tool.name)) return { kind: "invalid" };
+    names.add(tool.name);
+  }
+  const tools = [...listed];
+  let grown = false;
+  for (const tool of offered) {
+    const index = tools.findIndex((candidate) => candidate.name === tool.name);
+    if (index === -1) {
+      tools.push(tool);
+      grown = true;
+    } else if (JSON.stringify(tools[index]) !== JSON.stringify(tool)) {
+      tools[index] = tool;
+      grown = true;
+    }
+  }
+  return grown ? { kind: "grown", tools } : { kind: "unchanged" };
+}
+
+type ClaudeAgentSdkPromptHookOutput =
+  | {
+      readonly hookSpecificOutput: {
+        readonly hookEventName: "UserPromptSubmit";
+        readonly additionalContext: string;
+      };
+    }
+  | Record<string, never>;
 
 /** The settings files a query reads: the account's home, the Project's, and the Project's local file. */
 export type ClaudeSettingSource = "user" | "project" | "local";
@@ -616,6 +680,17 @@ interface ClaudeAgentSdkInvocationOptions {
             toolUseId: string | undefined,
             options: ClaudeAgentSdkHookOptions,
           ) => Promise<ClaudeAgentSdkHookOutput>,
+        ];
+      },
+    ];
+    readonly UserPromptSubmit: readonly [
+      {
+        readonly hooks: readonly [
+          (
+            input: ClaudeAgentSdkHookInput,
+            toolUseId: string | undefined,
+            options: ClaudeAgentSdkHookOptions,
+          ) => Promise<ClaudeAgentSdkPromptHookOutput>,
         ];
       },
     ];
@@ -862,6 +937,7 @@ function liveBridge(): ClaudeAgentSdkBridge {
             }),
         hooks: {
           PreToolUse: [{ hooks: [...invocation.options.hooks.PreToolUse[0].hooks] }],
+          UserPromptSubmit: [{ hooks: [...invocation.options.hooks.UserPromptSubmit[0].hooks] }],
         },
       };
       return queryClaude({
@@ -914,6 +990,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
           const issuedMessageIds = new Set<string>();
+          // Several messages can wait in the input at once, and the hook names
+          // a message only by its text, so every message sent waits here in
+          // order, with or without context. Matching by text alone let a
+          // context-free message take the context of a later one with the
+          // same text, a turn early, leaving its own turn without any.
+          const submissions: Array<
+            Pick<ClaudeUserMessage, "text" | "context" | "onContextDelivered">
+          > = [];
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
           let costBaseline: number | undefined;
@@ -922,12 +1006,24 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           let managedServer:
             | import("@modelcontextprotocol/sdk/server/mcp.js").McpServer
             | undefined;
-          let managedToolNames: ReadonlyArray<string> = [];
-          const isManagedTool = (name: string) => managedToolNames.includes(name);
+          // The session's Octant tool list only grows. Claude Code keeps the
+          // tools a server listed when it first connected: replacing the
+          // server under the same name changed nothing the model saw (2.1.211
+          // against a local stand-in endpoint), and any change to the list
+          // re-bills the whole conversation's cached prefix. So a tool joins
+          // the list the first time a turn offers it, stays listed after, and
+          // is refused while the current turn does not offer it.
+          let listedTools: ReadonlyArray<ProviderToolDefinition> = [];
+          let offeredToolNames: ReadonlyArray<string> = [];
+          let answerToolCall: ClaudeUserMessage["onAppToolCall"];
+          const managedName = (name: string) => `mcp__octant__${name}`;
+          const isManagedTool = (name: string) => offeredToolNames.includes(name);
+          const isWithdrawnTool = (name: string) =>
+            !isManagedTool(name) && listedTools.some((tool) => managedName(tool.name) === name);
           const decodingInput = (): ClaudeOpenQueryInput => ({
             ...input,
-            tools: [...input.tools, ...managedToolNames],
-            managedToolServer: managedToolNames.length > 0,
+            tools: [...input.tools, ...listedTools.map((tool) => managedName(tool.name))],
+            managedToolServer: listedTools.length > 0,
           });
           const closeCoordinator = makeClaudeCloseCoordinator(
             () => prompt.close(),
@@ -971,6 +1067,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               // This only authorizes forwarding to the app. The in-process
               // handler still waits for the server's tool policy and answer.
               if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
+              if (isWithdrawnTool(toolName)) {
+                return { behavior: "deny", message: WITHDRAWN_TOOL_MESSAGE };
+              }
               if (!claudeOffersTool(input, toolName)) {
                 return {
                   behavior: "deny",
@@ -995,6 +1094,28 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 signal: callback.signal,
               });
             };
+            const userPromptSubmit: ClaudeAgentSdkInvocationOptions["hooks"]["UserPromptSubmit"][0]["hooks"][0] =
+              async (hookInput) => {
+                // A subagent's prompt, or one Octant did not send, takes
+                // nothing. Claude Code reads its input in order, so messages
+                // queued ahead of the one named here will never reach the
+                // hook and are dropped with it.
+                if (hookInput.agent_id !== undefined || hookInput.agent_type !== undefined)
+                  return {};
+                const index = submissions.findIndex(
+                  (submission) => submission.text === hookInput.prompt,
+                );
+                if (index === -1) return {};
+                const [pending] = submissions.splice(0, index + 1).slice(-1);
+                if (pending?.context === undefined) return {};
+                pending.onContextDelivered?.();
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: "UserPromptSubmit",
+                    additionalContext: pending.context,
+                  },
+                };
+              };
             const preToolUse: ClaudeAgentSdkInvocationOptions["hooks"]["PreToolUse"][0]["hooks"][0] =
               async (hookInput, toolUseId, callback) => {
                 if (
@@ -1042,6 +1163,15 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
                       permissionDecision: "allow",
+                    },
+                  };
+                }
+                if (isWithdrawnTool(hookInput.tool_name)) {
+                  return {
+                    hookSpecificOutput: {
+                      hookEventName: "PreToolUse",
+                      permissionDecision: "deny",
+                      permissionDecisionReason: WITHDRAWN_TOOL_MESSAGE,
                     },
                   };
                 }
@@ -1144,7 +1274,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 return spawned;
               },
               canUseTool,
-              hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
+              hooks: {
+                PreToolUse: [{ hooks: [preToolUse] }],
+                UserPromptSubmit: [{ hooks: [userPromptSubmit] }],
+              },
             };
             query = sdk.query({ prompt, options: invocationOptions });
             const initialization = {
@@ -1330,43 +1463,53 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text, appManagedTools = [], onAppToolCall }) =>
+              send: ({ text, context, onContextDelivered, appManagedTools = [], onAppToolCall }) =>
                 request(async () => {
-                  if (appManagedTools.length > 0 || managedServer !== undefined) {
-                    if (
-                      query?.setMcpServers === undefined ||
-                      (appManagedTools.length > 0 && onAppToolCall === undefined)
-                    ) {
+                  if (appManagedTools.length > 0) {
+                    if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
                       throw protocol("App tool transport is unavailable.");
                     }
-                    const prepared =
-                      appManagedTools.length === 0 || onAppToolCall === undefined
-                        ? undefined
-                        : createManagedMcpTools(appManagedTools, onAppToolCall);
-                    if (prepared?.kind === "invalid")
+                    const listing = growToolListing(listedTools, appManagedTools);
+                    if (listing.kind === "invalid")
                       throw protocol("App tool catalogue is invalid.");
-                    const next = prepared?.server;
-                    const previous = managedServer;
-                    const previousNames = managedToolNames;
-                    managedToolNames = appManagedTools.map((tool) => `mcp__octant__${tool.name}`);
-                    try {
-                      const result = await query.setMcpServers(
-                        next === undefined
-                          ? {}
-                          : {
-                              octant: { type: "sdk", name: "octant", instance: next },
-                            },
+                    if (listing.kind === "grown") {
+                      const prepared = createManagedMcpTools(
+                        listing.tools,
+                        (name, inputJson, signal) => {
+                          const answer = answerToolCall;
+                          return offeredToolNames.includes(managedName(name)) &&
+                            answer !== undefined
+                            ? answer(name, inputJson, signal)
+                            : Promise.resolve(WITHDRAWN_TOOL_ANSWER);
+                        },
                       );
-                      if (Object.keys(result.errors).length > 0)
-                        throw protocol("App tool transport could not connect.");
-                      managedServer = next;
-                      await previous?.close();
-                    } catch (error) {
-                      managedToolNames = previousNames;
-                      await next?.close();
-                      throw error;
+                      if (prepared.kind === "invalid")
+                        throw protocol("App tool catalogue is invalid.");
+                      const previous = managedServer;
+                      try {
+                        // Claude Code reloads a server's tools only when the
+                        // server is removed and added again.
+                        if (previous !== undefined) {
+                          managedServer = undefined;
+                          listedTools = [];
+                          await query.setMcpServers({});
+                          await previous.close();
+                        }
+                        const result = await query.setMcpServers({
+                          octant: { type: "sdk", name: "octant", instance: prepared.server },
+                        });
+                        if (Object.keys(result.errors).length > 0)
+                          throw protocol("App tool transport could not connect.");
+                        managedServer = prepared.server;
+                        listedTools = listing.tools;
+                      } catch (error) {
+                        await prepared.server.close();
+                        throw error;
+                      }
                     }
                   }
+                  offeredToolNames = appManagedTools.map((tool) => managedName(tool.name));
+                  answerToolCall = onAppToolCall;
                   // Read at each prompt, not from the last successful result:
                   // a resumed session also contains interrupted/failed usage.
                   // Overlapping inputs have no separable session-cost window.
@@ -1390,14 +1533,30 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   }
                   const messageId = crypto.randomUUID();
                   issuedMessageIds.add(messageId);
-                  return prompt.offer({
-                    type: "user",
-                    message: { role: "user", content: text },
-                    parent_tool_use_id: null,
-                    origin: { kind: "human" },
-                    uuid: messageId,
-                    session_id: initializedSessionId ?? announcedSessionId ?? "",
-                  });
+                  const submission =
+                    context === undefined
+                      ? { text }
+                      : {
+                          text,
+                          context,
+                          ...(onContextDelivered === undefined ? {} : { onContextDelivered }),
+                        };
+                  submissions.push(submission);
+                  try {
+                    return await prompt.offer({
+                      type: "user",
+                      message: { role: "user", content: text },
+                      parent_tool_use_id: null,
+                      origin: { kind: "human" },
+                      uuid: messageId,
+                      session_id: initializedSessionId ?? announcedSessionId ?? "",
+                    });
+                  } catch (error) {
+                    // A message the input refused never reaches the hook.
+                    const index = submissions.indexOf(submission);
+                    if (index !== -1) submissions.splice(index, 1);
+                    throw error;
+                  }
                 }, "input delivery"),
               requestCompaction: () =>
                 request(async () => {
@@ -1419,6 +1578,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               interrupt: () =>
                 request(async () => {
                   for (const message of prompt.clear()) issuedMessageIds.delete(message.uuid);
+                  // An interrupted turn never counts as holding its context, so
+                  // the next turn sends it again; a stale entry left here could
+                  // attach to a later message with the same text.
+                  // A message Claude Code read but had not started is named by
+                  // the interrupt receipt, which closes the session below, so
+                  // nothing left here is still owed context.
+                  submissions.length = 0;
                   try {
                     const receipt = decodeInterruptReceipt(await query!.interrupt());
                     if (

@@ -24,6 +24,7 @@ import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import {
   ActorId,
+  type AutomationRunReference,
   CorrelationId,
   EventId,
   MAX_WORK_TRANSCRIPT_TURNS,
@@ -158,13 +159,26 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 /**
  * The standing rule for every turn in a Work Project that keeps a status
- * file, plus the resume brief when the
- * status has gone quiet or a date is close. Says what to do with `STATUS.md`,
- * never what the status is; the file itself is in the context beside it.
+ * file. Says what to do with `STATUS.md`, never what the status is; the file
+ * itself is in the context beside it. Its text never changes, so a session
+ * holds it once and a provider's cached prompt prefix is never invalidated by
+ * it.
  */
-function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string {
-  const standing = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. Before you finish this task, update ${WORK_STATUS_FILE_NAME}: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today.`;
-  if (reasons.length === 0) return standing;
+const STATUS_UPKEEP_INSTRUCTION = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. When this turn changes where the work stands, update ${WORK_STATUS_FILE_NAME} before you finish: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Leave it unchanged for questions and conversation.`;
+
+/** Identifies the status file's block, so a newer version replaces the one a session holds. */
+const STATUS_FILE_CONTEXT_KEY = "work-status-file";
+
+/**
+ * Asks a task that opens on a quiet or dated status to take stock first.
+ *
+ * A one-turn instruction, not part of the standing rule: folded into it, the
+ * rule's text changed whenever the status crossed a staleness or date
+ * threshold, which withdrew the held rule and sent the whole standing context
+ * again.
+ */
+function takeStockInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string | undefined {
+  if (reasons.length === 0) return undefined;
   const why = [
     reasons.includes("stale") ? "the status has not been updated for a while" : undefined,
     reasons.includes("overdue") ? "at least one deadline or follow-up date has passed" : undefined,
@@ -172,7 +186,7 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
   ]
     .filter((part) => part !== undefined)
     .join(", and ");
-  return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request.`;
+  return `Take stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request. When the request is a greeting or unrelated to this work, answer it first and offer the update at the end instead.`;
 }
 
 /**
@@ -222,6 +236,12 @@ export interface WorkTurnStartOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /**
+   * Set by the routine dispatcher for the turn it starts for a run, and only
+   * there: the turn may report that run's result. Host-only: the wire command
+   * cannot carry it.
+   */
+  readonly routineRun?: AutomationRunReference;
 }
 
 /**
@@ -350,6 +370,8 @@ export interface WorkTurnServiceDependencies {
     /** The Project's extra folders, which file tools treat as the root. */
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Work threads in a Project on a registered server, whose turns act there. */
   readonly serverProjects?: ServerWorkTurns;
@@ -1119,17 +1141,17 @@ export class WorkTurnService {
       uuid: this.#uuid,
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
+      leading: harnessContext.map(
+        (block, index): WorkTurnContextContribution => ({
+          text: block.text,
+          sourceKind: "instruction",
+          referenceId: `native-harness:${index}`,
+          category: "octant-policy",
+          posture: "required",
+          block,
+        }),
+      ),
       contributions: [
-        ...harnessContext.map(
-          (block, index): WorkTurnContextContribution => ({
-            text: block.text,
-            sourceKind: "instruction",
-            referenceId: `native-harness:${index}`,
-            category: "octant-policy",
-            posture: "required",
-            block,
-          }),
-        ),
         ...skillContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
@@ -1148,7 +1170,11 @@ export class WorkTurnService {
         ...(project === undefined ? [] : extraFolderContributions(project)),
         ...(project === undefined
           ? []
-          : await this.#projectBriefContributions(project, command.threadId)),
+          : await this.#projectBriefContributions(
+              project,
+              command.threadId,
+              previous === undefined,
+            )),
         ...priorTranscript,
         ...(handoff === undefined
           ? []
@@ -1343,6 +1369,7 @@ export class WorkTurnService {
       ...(options?.admissionCurrent === undefined
         ? {}
         : { admissionCurrent: options.admissionCurrent }),
+      ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       signal: controller.signal,
     }).finally(() => {
@@ -1703,6 +1730,7 @@ export class WorkTurnService {
      */
     readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
     readonly admissionCurrent?: () => boolean;
+    readonly routineRun?: AutomationRunReference;
     /** The selected MCP servers' tools, resolved when the turn was accepted. */
     readonly extensionTools?: AppManagedToolSet;
     readonly signal: AbortSignal;
@@ -1730,6 +1758,7 @@ export class WorkTurnService {
               projectRoot: input.projectRoot,
               ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
               windowId: input.windowId,
+              ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
             });
     const appManagedTools =
       input.extensionTools === undefined
@@ -2197,14 +2226,18 @@ export class WorkTurnService {
    *
    * `STATUS.md` is read from the bound root on every turn, so a task started
    * two weeks later knows where the work stands without the person
-   * re-explaining. A missing file is seeded here. When the status is stale or
-   * a dated line is overdue or near, the turn is also told to take stock
-   * first — summarize, ask what happened, update the file — before doing what
-   * it was asked.
+   * re-explaining. It is keyed standing context: a runtime that keeps its own
+   * conversation is sent it again only when the file changed, where it once
+   * received a full copy every turn. A missing file is seeded here. When a
+   * task opens on a stale status or a dated line overdue or near, that first
+   * turn is also told to take stock — summarize, ask what happened, update the
+   * file — before doing what it was asked, unless the request is a greeting or
+   * unrelated to the work.
    */
   async #projectBriefContributions(
     project: Extract<Project, { readonly type: "work" }>,
     threadId: WorkThreadId,
+    opensTask: boolean,
   ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
     const files = this.#projectStatusFiles;
     if (files === undefined || !workProjectKeepsStatusFile(project)) return [];
@@ -2230,28 +2263,40 @@ export class WorkTurnService {
         category: "workspace-context",
         posture: "compressible",
         block: {
-          kind: "user-message",
+          kind: "project-memory",
+          key: STATUS_FILE_CONTEXT_KEY,
           text: `Contents of ${WORK_STATUS_FILE_NAME} at the top of this Project's folder:\n\n${status.text}`,
         },
       });
     }
-    const instruction = statusUpkeepInstruction(
-      status === undefined
-        ? []
-        : decideWorkResumeBrief(
-            parseWorkStatus(status.text, today),
-            today,
-            this.#statusStaleAfterDays,
-          ),
-    );
     contributions.push({
-      text: instruction,
+      text: STATUS_UPKEEP_INSTRUCTION,
       sourceKind: "instruction",
       referenceId: `project-brief:instruction:${String(threadId)}`,
       category: "octant-policy",
       posture: "required",
-      block: { kind: "instructions", text: instruction },
+      block: { kind: "instructions", text: STATUS_UPKEEP_INSTRUCTION },
     });
+    const takeStock =
+      !opensTask || status === undefined
+        ? undefined
+        : takeStockInstruction(
+            decideWorkResumeBrief(
+              parseWorkStatus(status.text, today),
+              today,
+              this.#statusStaleAfterDays,
+            ),
+          );
+    if (takeStock !== undefined) {
+      contributions.push({
+        text: takeStock,
+        sourceKind: "instruction",
+        referenceId: `project-brief:take-stock:${String(threadId)}`,
+        category: "octant-policy",
+        posture: "required",
+        block: { kind: "turn-instructions", text: takeStock },
+      });
+    }
     return contributions;
   }
 

@@ -12,10 +12,11 @@ import {
   decodeProviderInstanceId,
   decodeProviderRuntimeEvent,
   decodeProviderServiceLimits,
-  decodeToolActionAuthority,
   decodeWindowId,
+  NATIVE_HARNESS_BUILT_IN_SLOTS,
   type AgentRunAuthority,
   type AgentRunResultDeliveryMark,
+  type NativeHarnessRouteDecision,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import type {
@@ -25,18 +26,15 @@ import type {
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
-import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
-import { createNativeHarnessTools } from "../harness/nativeHarnessTools";
 import { MemoryNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 import type { NativeHarnessRequest } from "../harness/nativeHarnessTransport";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
-import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   AgentResultDeliveryService,
@@ -373,41 +371,31 @@ function fixture(
       },
     ],
   };
-  const granted = decodeToolActionAuthority({
-    hostId: "10000000-0000-4000-8000-000000000007",
-    mode: "chat",
-    providerInstanceId: parent.providerInstanceId,
-    extension: { kind: "core" },
-  });
-  const tools =
-    parentHarness === "Octant Harness"
-      ? createNativeHarnessTools({
-          threadId: String(ids.thread),
-          mode: "chat",
-          uuid: randomUUID,
-          resolveAuthority: () => granted,
-          authority: new ToolCallAuthorityService({
-            resolveGrantedAuthority: () => granted,
-            resolveLiveFacts: () => ({
-              providerAppManagedTools: "supported",
-              host: { computerUseEnabled: false },
-              executionPolicy: "plan",
-              approvalSatisfied: false,
-              externalContentIngested: false,
-            }),
-          }),
-          ports: {
-            delegate: createNativeHarnessDelegatePort(
-              { ...common, router, sessions },
-              { ...common, lead: parent },
-            ),
+  // Both parent harnesses delegate through the same `octant_agents` tool; an
+  // Octant Harness lead's role routing is journaled on its harness session.
+  const tools = createAgentsManagedTools({
+    ...common,
+    isTainted: () => false,
+    authorizeCancel: () => true,
+    recordResultIngestion: () => true,
+    ...(parentHarness === "Octant Harness"
+      ? {
+          routing: {
+            router,
+            recordDecision: (_parent: unknown, decision: NativeHarnessRouteDecision) => {
+              sessions.ensure({
+                threadId: String(ids.thread),
+                mode: "chat",
+                projectId: undefined,
+                leadSlotId: NATIVE_HARNESS_BUILT_IN_SLOTS.default,
+                lead: parent,
+              });
+              sessions.recordRouteDecision(String(ids.thread), decision);
+            },
           },
-        })
-      : createAgentsManagedTools({
-          ...common,
-          isTainted: () => false,
-          authorizeCancel: () => true,
-        });
+        }
+      : {}),
+  });
 
   // The parent admission port is a fixture sink. Actual mode turn admission,
   // journaled parent marks, crash recovery and dedup are covered by the mode
@@ -505,9 +493,9 @@ function fixture(
     release,
     delegate: (task: string) =>
       tools.execute({
-        name: parentHarness === "Octant Harness" ? "delegate" : "octant_agents",
+        name: "octant_agents",
         inputJson: JSON.stringify({
-          operation: parentHarness === "Octant Harness" ? "start" : "delegate",
+          operation: "delegate",
           role: "research",
           task,
           providerInstanceId: target.providerInstanceId,
@@ -516,7 +504,7 @@ function fixture(
       }),
     followUp: (runId: string, expectedVersion: number, message: string) =>
       tools.execute({
-        name: parentHarness === "Octant Harness" ? "delegate" : "octant_agents",
+        name: "octant_agents",
         inputJson: JSON.stringify({ operation: "follow-up", runId, expectedVersion, message }),
       }),
     acknowledge: (runId: string, expectedVersion: number, foreign = false) =>

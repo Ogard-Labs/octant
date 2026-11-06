@@ -249,7 +249,7 @@ export class CodePlannerService {
     });
   }
 
-  /** Used only to decide whether a turn advertises the planner tools. */
+  /** Used only to decide whether a turn advertises the planner's board operation and target. */
   isPlannerThread(threadId: CodeThreadId): boolean {
     return this.boardScope(threadId).status === "allowed";
   }

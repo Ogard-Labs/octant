@@ -174,6 +174,17 @@ describe("browserProofPullRequestSection", () => {
     );
   });
 
+  it("names a recording's file as a recording that plays where it is dropped", () => {
+    const recording = decodeBrowserCapture({
+      ...capture(1, "2026-10-12T09:00:02.500Z"),
+      size: 900_000,
+      recording: { frames: 12, durationMs: 4_000 },
+    });
+    const section = browserProofPullRequestSection([step(1)], [recording]);
+    expect(section).toContain("   - Recording: browser-check-01.png");
+    expect(section).toContain("a recording plays there as an animation.");
+  });
+
   it("adds nothing when the thread has no steps", () => {
     expect(browserProofPullRequestSection([], [])).toBeUndefined();
     expect(bodyWithBrowserProof("Body", undefined)).toBe("Body");

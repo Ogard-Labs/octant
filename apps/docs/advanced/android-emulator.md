@@ -80,8 +80,27 @@ for live input the same way the iOS pane does.
 A Code thread's agent reaches these actions through `octant_android`. Begin
 with `discover` or `status`. `boot`, `open`, `install`, and `launch` show the
 emulator in Octant's pane — do not start an external emulator window as the
-place to look. Discover, status, screenshot, and `open` of a device that is already running (it only shows the pane) work under every posture, Plan included. On an approval-gated thread every other operation asks in the
-thread first and runs only once you allow it; input the window's
+place to look. Discover, status, screenshot, `describe-ui`, `logs`, and
+`open` of a device that is already running (it only shows the pane) work under
+every posture, Plan included. On an approval-gated thread every other
+operation asks in the thread first and runs only once you allow it; input the window's
 **Allow input** already covers goes through without asking again. Plan mode
 refuses them, and Full access runs them without asking. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`.
+
+The agent can read the screen as text as well as a picture:
+
+- `describe-ui` lists the labelled elements on screen, one line each with its
+  class, text, content description (`desc`), resource-id (`id`), centre, and
+  bounds, in the same pixels a tap uses. It shows at most 300 elements and says
+  when it cut the list. If the screen keeps changing, uiautomator cannot read
+  it and the agent is told to try again in a moment.
+- `tap` can name an element (`target`) instead of a point. Octant reads the
+  screen and taps the centre of the one element whose resource-id, content
+  description, or text is exactly that name, in that order. When no element or
+  more than one has it, nothing is tapped and the agent is told how many
+  matched. It asks first on an approval-gated thread like any tap.
+- `logs` returns a running app's own log lines (by `packageName`) in the tool
+  result: the newest 500 lines or 32 KiB, or the last `sinceSeconds` (up to ten
+  minutes) by the emulator's clock. With crashes asked for it adds the
+  emulator's crash buffer, which also covers an app that has already stopped.

@@ -42,6 +42,15 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+In Plan mode the agent can still look at the page already open in its thread's
+Browser: take a snapshot, read its text, take a screenshot, read what it
+logged and failed to load, audit its accessibility or performance, list its
+tabs, wait for it to reach a state, list the Project's saved flows, and stop
+the Browser. It cannot open a page or tab, click, type, scroll, resize, switch
+or close a tab, upload, save a download, sign in, run a script, record, or save
+or run a flow. You are still asked about a site
+or a model you have not allowed, even for a read.
+
 ### Recovering the agent's page
 
 If the agent's Browser reaches a site the page has not approved, the tool's
@@ -126,8 +135,8 @@ cannot open a signed-in page, and neither can a paired phone or browser, which
 sees only "Signed-in page — open it on this Mac." If a turn you started from
 your phone needs such a site, its question waits for a window on this Mac. While
 the agent drives a signed-in page, the Browser's status label and the floating
-preview name the profile. Plan mode refuses the Browser as it always did, and
-fixed readers keep password and one-time-code values protected.
+preview name the profile. Plan mode allows only reads of the page already open,
+as above, and fixed readers keep password and one-time-code values protected.
 
 ### Synchronous page scripts
 
@@ -203,8 +212,9 @@ appears in the conversation beside any generated images, newest first, each
 with the page title and its origin. Choose one to see it full size with its
 address and time. The strip is absent until the thread has a capture.
 
-- Only a screenshot is kept. The picture the agent receives after other actions,
-  such as clicking or scrolling, is not.
+- Only a screenshot, or a [recording](#browser-recordings) the agent asked for,
+  is kept. The picture the agent receives after other actions, such as clicking
+  or scrolling, is not.
 - A thread keeps its newest 32 captures; the oldest is dropped when a new one
   arrives. Deleting the thread deletes its captures.
 - Captures stay on this computer, in Octant's data folder. **Settings → Data &
@@ -224,6 +234,38 @@ address and time. The strip is absent until the thread has a capture.
 - A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
+#### Browser recordings
+
+To show what a change does, the agent can record a short check: it runs a few
+Browser steps, or replays a saved flow, and asks for a recording of that call.
+Octant keeps an animated picture of the page while the call ran, as a capture
+of the thread. Ask the agent to "record the check" when you want one; it never
+records on its own.
+
+- In the strip a recording shows its first frame with a play mark and its
+  length. Choose it to watch it play; **Stop** and **Play** sit under it. With
+  reduced motion turned on (in your system settings or in Octant), it waits
+  for **Play**.
+- A recording lasts at most 30 seconds, takes up to 4 frames a second, is at
+  most 800 pixels on its longer side, and at most 2 MB. It stops early at any
+  of these, when the page is resized, and when another tab comes to the front,
+  and says so under the picture. A recording shows only the tab it started on
+  and is listed under that tab's address.
+- A page with a password or other credential field on screen is never recorded:
+  its frames are left out, and a recording of nothing else keeps nothing.
+- Only the sites you approved for the agent's page are recorded. If the page
+  shows any other site (for example because you took it somewhere else while
+  the agent worked), a blank page, or an error page, those moments are left
+  out the same way.
+- If you take over the page, or the agent asks you to sign in, while it is
+  recording, nothing of what you do is kept.
+- Recordings follow every capture rule above: they stay on this computer, count
+  toward the thread's 32 captures, are not sent anywhere, and a paired device
+  cannot see them. The agent cannot record in Plan, and a recording already
+  running when Plan begins is stopped and not kept.
+- A thread keeps at most 8 recordings. A newer one replaces the oldest
+  recording; your screenshots are never dropped to make room.
+
 #### Browser proof
 
 Octant also keeps a short record of the steps the agent took in its Browser, at
@@ -241,7 +283,10 @@ that took it.
   is not sent anywhere, and a paired device cannot see it.
 - **Save screenshots…** (in the Octant desktop app) asks you for a folder and
   writes the thread's captures there as `browser-check-01.png`, `-02`, and so
-  on. It never replaces a file that is already there.
+  on. It never replaces a file that is already there. When the thread has a
+  recording the button reads **Save screenshots and recordings…**: a recording
+  is saved in the same numbered run as an animated `.png`, which GitHub plays
+  when you drag it into a pull request description.
 - To put the steps in a pull request, see [Code threads](../guide/code.md): the
   **Include Browser proof** choice there is off unless you turn it on.
 
@@ -271,7 +316,8 @@ a shell-launched browser. The tool can navigate, take a snapshot of the page,
 read page text, click and fill elements, hover over a menu, choose an option
 in a list, drag one element onto another, press a key or a shortcut such as
 Control+A, scroll horizontally or vertically, wait for an element, open and
-switch between tabs, take a screenshot, and stop its session.
+switch between tabs, take a screenshot, audit the page's accessibility or
+performance, and stop its session.
 
 The agent can also put files into a page's file field, for example to attach a
 report to a form. It may only send files from the thread's own folder (the
@@ -331,6 +377,21 @@ else puts the size, touch, and color scheme back. This changes only the agent's
 own page. Your own Browser window and your other pages keep their size and
 look, and a page you opened developer tools on keeps its touch and color
 scheme as they are. The agent is told what the page now reports.
+
+While you build a web app, the agent can audit the page it has open. An
+accessibility audit finds images without a text alternative, buttons, links,
+and form fields without a name, a missing page title or language, skipped
+heading levels, repeated ids that labels point at, text with too little
+contrast, focusable elements hidden from screen readers, and, after the agent
+switches the page to a phone, touch targets that are too small and too close
+together. Each problem names the element so the agent can go and fix it. A
+performance audit reports how the page loaded: time to first byte, first and
+largest paint, layout shift, and blocking time, each rated good, needs
+improvement, or poor, with the requests by type and the largest files (their
+addresses with secrets removed). An audit only reads the page: it never
+reloads it, so to measure a fresh load the agent opens the page again first.
+Audits run on this computer and send nothing anywhere, and Plan mode allows
+them, since an audit only reads the page already open.
 
 When a page needs you to sign in, the agent can hand it to you instead of
 giving up. A card in the thread says which site and why, with **Continue** and

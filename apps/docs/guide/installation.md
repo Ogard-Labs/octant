@@ -183,9 +183,9 @@ It cannot start or migrate that host data.
 Packaged Octant follows the stable ring or, when you choose Preview or Nightly, the
 candidate ring, and refuses a feed signed for preview. The Nightly identity
 follows only preview and refuses stable and candidate feeds. Development runs
-keep their existing behavior. The stable-host connection, full Nightly command
-and coexistence remain required before Nightly can be offered as a usable
-download.
+keep their existing behavior. The stable-host connection, full Nightly command,
+Nightly labels and coexistence remain required before Nightly can be offered as
+a usable download.
 
 Settings › Updates has an update channel switch with Stable, Preview and
 Nightly. Stable is the released build, Preview tests the next release, and

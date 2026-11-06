@@ -69,6 +69,8 @@ export const AndroidEmulatorActionKind = Schema.Literal(
   "start-recording",
   "stop-recording",
   "rotate",
+  "describe-ui",
+  "logs",
 );
 export type AndroidEmulatorActionKind = typeof AndroidEmulatorActionKind.Type;
 
@@ -88,10 +90,20 @@ export const AndroidEmulatorRequest = Schema.Struct({
   emulatorId: AndroidEmulatorId,
   requestedBy: Schema.optional(EventActor),
   point: Schema.optional(AndroidPoint),
+  /**
+   * The element a tap lands on, named by its resource-id, content-desc, or
+   * text exactly, in place of a point. The host reads the screen and taps the
+   * element's centre, or refuses when no element or several match.
+   */
+  target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   toPoint: Schema.optional(AndroidPoint),
   durationMs: Schema.optional(Schema.Int.pipe(Schema.between(50, 5_000))),
   text: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096))),
   key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+  /** How far back `logs` reads, in seconds; without it, the newest lines. */
+  sinceSeconds: Schema.optional(Schema.Int.pipe(Schema.between(1, 600))),
+  /** Whether `logs` also reads the device's crash buffer. */
+  includeCrashes: Schema.optional(Schema.Boolean),
   apkPath: Schema.optional(
     Schema.NonEmptyTrimmedString.pipe(
       Schema.maxLength(1024),
@@ -129,7 +141,11 @@ export const AndroidEmulatorRequest = Schema.Struct({
     Schema.filter((request) => {
       if (request.kind === "open-input") return request.requestedBy !== undefined;
       if (request.kind === "tap") {
-        return request.requestedBy !== undefined && request.point !== undefined;
+        // A point or an element, never both: either one alone says where.
+        return (
+          request.requestedBy !== undefined &&
+          (request.point === undefined) !== (request.target === undefined)
+        );
       }
       if (request.kind === "swipe") {
         return (
@@ -149,7 +165,9 @@ export const AndroidEmulatorRequest = Schema.Struct({
         return request.requestedBy !== undefined && request.key !== undefined;
       }
       if (request.kind === "install") return request.apkPath !== undefined;
-      if (request.kind === "launch") return request.packageName !== undefined;
+      if (request.kind === "launch" || request.kind === "logs") {
+        return request.packageName !== undefined;
+      }
       if (request.kind === "open-url") {
         return request.requestedBy !== undefined && request.url !== undefined;
       }
@@ -212,6 +230,8 @@ export const AndroidEmulatorEvidence = Schema.Struct({
   diagnostics: Schema.Array(AndroidDiagnostic).pipe(Schema.maxItems(64)),
   artifacts: Schema.Array(AndroidEvidenceArtifact).pipe(Schema.maxItems(16)),
   cleanup: AndroidCleanupState,
+  /** Set by `describe-ui` and `logs` when the host kept only part of what it read. */
+  truncated: Schema.optional(Schema.Boolean),
   durationMs: Schema.Int.pipe(Schema.nonNegative()),
   completedAt: UtcTimestamp,
 })
@@ -249,6 +269,7 @@ export const AndroidActionProgress = Schema.Struct({
     "installing",
     "launching",
     "capturing-screen",
+    "collecting-logs",
     "injecting-input",
     "cleaning-up",
     "completed",

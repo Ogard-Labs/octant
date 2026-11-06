@@ -44,7 +44,11 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly supportedModels = vi.fn(async () => initialization.models);
   readonly accountInfo = vi.fn(async () => initialization.account);
   readonly close = vi.fn(() => undefined);
-  readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
+  readonly setMcpServers = vi.fn(async (_servers: Readonly<Record<string, unknown>>) => ({
+    added: ["octant"],
+    removed: [],
+    errors: {},
+  }));
   getContextUsage?: () => Promise<unknown>;
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
     readonly skipBehaviors?: boolean;
@@ -188,6 +192,79 @@ describe("Claude Agent SDK port", () => {
         }),
       ),
     );
+  });
+
+  describe("a session's Octant tool list", () => {
+    const alpha = { name: "octant_alpha", inputSchema: { type: "object" } } as const;
+    const bravo = { name: "octant_bravo", inputSchema: { type: "object" } } as const;
+    const answer = async () => ({ resultJson: "{}", isError: false });
+    const runTurns = (turns: ReadonlyArray<ReadonlyArray<typeof alpha | typeof bravo>>) => {
+      const harness = makeHarness();
+      const decisions: Array<Record<string, unknown>> = [];
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            yield* Stream.runHead(query.messages);
+            const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+            const permission = harness.invocation!.options.canUseTool;
+            for (const tools of turns) {
+              yield* query.send({
+                text: "turn",
+                appManagedTools: tools,
+                ...(tools.length === 0 ? {} : { onAppToolCall: answer }),
+              });
+              yield* Effect.promise(() => iterator.next());
+            }
+            for (const name of ["mcp__octant__octant_alpha", "mcp__octant__octant_bravo"]) {
+              decisions.push(
+                yield* Effect.promise(() =>
+                  permission(
+                    name,
+                    {},
+                    {
+                      signal: new AbortController().signal,
+                      toolUseID: `tool-${name}`,
+                      requestId: "request-1",
+                    },
+                  ),
+                ),
+              );
+            }
+          }),
+        ),
+      ).then(() => ({ calls: harness.query.setMcpServers.mock.calls, decisions }));
+    };
+
+    test("reconnects the tool server when a later turn adds a tool, so the model can see it", async () => {
+      const { calls, decisions } = await runTurns([[alpha], [alpha, bravo]]);
+      expect(calls.map(([servers]) => Object.keys(servers))).toEqual([["octant"], [], ["octant"]]);
+      expect(decisions).toEqual([
+        { behavior: "allow", updatedInput: {} },
+        { behavior: "allow", updatedInput: {} },
+      ]);
+    });
+
+    test("keeps a tool listed but refuses it once a later turn stops offering it, leaving the list untouched", async () => {
+      const { calls, decisions } = await runTurns([[alpha, bravo], [alpha]]);
+      expect(calls).toHaveLength(1);
+      expect(decisions).toEqual([
+        { behavior: "allow", updatedInput: {} },
+        { behavior: "deny", message: "This Octant tool is not available in this turn." },
+      ]);
+    });
+
+    test("keeps the tool server connected through a turn that offers no tools", async () => {
+      const { calls, decisions } = await runTurns([[alpha], []]);
+      expect(calls).toHaveLength(1);
+      expect(decisions).toEqual([
+        { behavior: "deny", message: "This Octant tool is not available in this turn." },
+        {
+          behavior: "deny",
+          message: "Claude requested a tool outside the configured allowlist.",
+        },
+      ]);
+    });
   });
 
   test("constructs an isolated streaming query with exact root, executable, resume, policy, and tools", async () => {
@@ -532,6 +609,95 @@ describe("Claude Agent SDK port", () => {
             done: false,
             value: { message: { content: "second" } },
           });
+        }),
+      ),
+    );
+  });
+
+  test("hands each message's Octant context to the prompt hook for that message alone", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({ text: "hei", context: "Octant's rules." });
+          const offered = yield* Effect.promise(() => iterator.next());
+          expect(offered.value).toMatchObject({ message: { role: "user", content: "hei" } });
+          yield* query.send({ text: "plain" });
+          yield* Effect.promise(() => iterator.next());
+
+          const promptHook = harness.invocation?.options.hooks.UserPromptSubmit[0]?.hooks[0];
+          if (promptHook === undefined) throw new Error("Expected the prompt hook.");
+          const signal = new AbortController().signal;
+          const submit = (prompt: string) =>
+            Effect.promise(() =>
+              promptHook(
+                { hook_event_name: "UserPromptSubmit", prompt, session_id: "session-1" },
+                undefined,
+                { signal },
+              ),
+            );
+          expect(yield* submit("hei")).toEqual({
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: "Octant's rules.",
+            },
+          });
+          expect(yield* submit("plain")).toEqual({});
+          expect(yield* submit("hei")).toEqual({});
+
+          yield* query.send({ text: "again", context: "Rules before the interrupt." });
+          yield* query.interrupt();
+          expect(yield* submit("again")).toEqual({});
+        }),
+      ),
+    );
+  });
+
+  test("keeps a queued message's context for that message when an earlier one has the same text", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({ text: "continue" });
+          yield* Effect.promise(() => iterator.next());
+          const delivered = vi.fn();
+          yield* query.send({
+            text: "continue",
+            context: "Rules for the second turn.",
+            onContextDelivered: delivered,
+          });
+          yield* Effect.promise(() => iterator.next());
+
+          const promptHook = harness.invocation?.options.hooks.UserPromptSubmit[0]?.hooks[0];
+          if (promptHook === undefined) throw new Error("Expected the prompt hook.");
+          const signal = new AbortController().signal;
+          const submit = (prompt: string, extra: Record<string, unknown> = {}) =>
+            Effect.promise(() =>
+              promptHook(
+                { hook_event_name: "UserPromptSubmit", prompt, session_id: "session-1", ...extra },
+                undefined,
+                { signal },
+              ),
+            );
+          // A prompt Octant did not send, and one inside a subagent, take nothing.
+          expect(yield* submit("something else")).toEqual({});
+          expect(yield* submit("continue", { agent_id: "agent-1" })).toEqual({});
+          expect(yield* submit("continue")).toEqual({});
+          expect(delivered).not.toHaveBeenCalled();
+          expect(yield* submit("continue")).toEqual({
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: "Rules for the second turn.",
+            },
+          });
+          // The driver counts the context as delivered only on this word.
+          expect(delivered).toHaveBeenCalledOnce();
         }),
       ),
     );

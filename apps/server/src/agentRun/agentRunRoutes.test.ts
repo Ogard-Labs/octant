@@ -60,7 +60,7 @@ import {
   type AgentRunControlAdmissionDependencies,
 } from "./agentRunControlAdmission";
 import { AGENT_RUN_SETTINGS_UPDATED, AgentRunSettingsStore } from "./agentRunSettingsStore";
-import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
+import { createAgentsManagedTools } from "./agentRunManagedTools";
 
 const directories: string[] = [];
 const now = "2026-08-01T15:00:00.000Z";
@@ -403,29 +403,16 @@ function createHandler(
     }
     return accepted;
   };
-  const delegate = () =>
-    createNativeHarnessDelegatePort(
-      {
+  /** Starts a child the way a thread's agent does, through `octant_agents`. */
+  const delegate = async (input: Record<string, unknown>) =>
+    (
+      await createAgentsManagedTools({
         admission,
         orchestration,
         persistence,
-        router: {
-          resolve: () =>
-            ({
-              kind: "primary",
-              job: "researcher",
-              slotId: "default",
-              decidedAt: "2026-10-03T10:00:00.000Z",
-              rejected: [],
-              candidate: { hostId: "local", providerInstanceId: ids.provider, modelId: "gpt-4o" },
-            }) as never,
-        },
-        sessions: {
-          ensure: () => ({}) as never,
-          recordRouteDecision: () => undefined,
-          read: () => undefined,
-        },
-        uuid: () => String(ids.request),
+        mode: options.parentMode ?? "chat",
+        windowId: String(windowId),
+        parentThreadId: String(ids.thread),
         listTargets: () => [
           {
             providerInstanceId: String(ids.provider),
@@ -434,18 +421,29 @@ function createHandler(
             driverKind: "openai",
           },
         ],
-      },
-      {
-        parentThreadId: String(ids.thread),
-        windowId: String(windowId),
-        mode: options.parentMode ?? "chat",
-        lead: {
-          hostId: "local",
-          providerInstanceId: ids.provider,
-          modelId: "gpt-4o",
-        } as never,
-      },
-    );
+        isTainted: () => false,
+        routing: {
+          router: {
+            resolve: () =>
+              ({
+                kind: "primary",
+                job: "researcher",
+                slotId: "default",
+                decidedAt: "2026-10-03T10:00:00.000Z",
+                rejected: [],
+                candidate: { hostId: "local", providerInstanceId: ids.provider, modelId: "gpt-4o" },
+              }) as never,
+          },
+          recordDecision: () => undefined,
+        },
+        authorizeCancel: () => true,
+        recordResultIngestion: () => true,
+        uuid: () => String(ids.request),
+      }).execute({
+        name: "octant_agents",
+        inputJson: JSON.stringify({ operation: "delegate", ...input }),
+      })
+    ).result;
   return {
     handler,
     windowAuthorityStore,
@@ -1571,7 +1569,7 @@ describe("agentRunRoutes", () => {
     const { delegate, persistence, settings } = createHandler();
     expect(settings.current().creationPosture).toBe("automatic");
 
-    const outcome = await delegate().start({
+    const outcome = await delegate({
       role: "research",
       task: "Summarize the open PRs in this repository.",
       includeParentContext: false,
@@ -1591,7 +1589,7 @@ describe("agentRunRoutes", () => {
     const { delegate, persistence, settings } = createHandler();
     settings.update({ creationPosture: "off", expectedVersion: 0 });
 
-    const outcome = await delegate().start({
+    const outcome = await delegate({
       role: "research",
       task: "Summarize the open PRs in this repository.",
       includeParentContext: false,

@@ -6,7 +6,7 @@ import {
   type ThreadMessageQueueClient,
 } from "../messageQueue/threadMessageQueueClient";
 import { leadApproval, ThreadHarnessApproval } from "./ThreadHarnessApproval";
-import { workLeadQuestion, ThreadHarnessQuestion } from "./ThreadHarnessQuestion";
+import { threadLeadQuestion, ThreadHarnessQuestion } from "./ThreadHarnessQuestion";
 import { ThreadHarnessSteering } from "./ThreadHarnessSteering";
 import { useThreadHarnessSession } from "./useThreadHarnessSession";
 
@@ -104,7 +104,7 @@ function refreshInterval(
     input.waiting ||
     view?.session.status === "recovery-required" ||
     leadApproval(view) !== undefined ||
-    workLeadQuestion(view) !== undefined
+    threadLeadQuestion(view) !== undefined
   ) {
     return input.every ?? 1_500;
   }
