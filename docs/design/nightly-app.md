@@ -551,8 +551,9 @@ refuses them.
   When an agent action starts while a dialog is held for the person, the
   page is blocked behind it, so the action's fixed policy answers that dialog,
   reports it to the agent and retires the person's popup. After three dialogs
-  within 10 seconds in one page load, Stable answers that load's further
-  dialogs by the same fixed policy and tells the person once with a system
+  within 10 seconds in one page load, Stable answers every further dialog of
+  that load by the same fixed policy, however long the page waits, until a new
+  document loads, and tells the person once with a system
   notification instead of a sheet. Chromium reports a dialog from any frame,
   on the page's site or another, to the page itself, so a frame's dialog is held
   the same way. Electron has no sheet scoped to part of a
@@ -569,7 +570,11 @@ refuses them.
 - **File choosers.** Stable intercepts the hidden window's file chooser through
   the same protocol attachment, so Chromium opens no panel there, and offers it
   only right after the person's press. Nightly shows its own open panel,
-  allowing several files only for a `multiple` field. At most 8 absolute paths
+  allowing several files only for a `multiple` field. Electron's open panel
+  takes no abort and has no call that closes it, so when Stable retires the
+  chooser (an agent navigates, say) the panel stays until the person closes
+  it; its choice then reaches nothing, and Nightly shows that window's next
+  popup only after the panel has closed. At most 8 absolute paths
   of at most 1,024 UTF16 units each return, under the route's body bound; Stable
   hands the field only paths that are existing regular files, through
   Chromium's file-input command for the same chooser node and document. That

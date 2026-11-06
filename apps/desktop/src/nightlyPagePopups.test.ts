@@ -1,8 +1,17 @@
 import { decodeBrowserPagePopupId } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("electron", () => ({ dialog: {}, screen: {}, Menu: {} }));
-const { nightlyChosenFiles, nightlyPageDialog, nightlyPageMenu } =
+const electron = vi.hoisted(() => ({
+  showOpenDialog: vi.fn(),
+  showMessageBox: vi.fn(),
+}));
+vi.mock("electron", () => ({
+  dialog: { showOpenDialog: electron.showOpenDialog, showMessageBox: electron.showMessageBox },
+  screen: {},
+  Menu: {},
+  Notification: { isSupported: () => false },
+}));
+const { nightlyChosenFiles, nightlyPageDialog, nightlyPageMenu, presentNightlyPagePopup } =
   await import("./nightlyPagePopups");
 const { decodeNativeMenuRequest } = await import("./nativeContextMenus");
 
@@ -99,5 +108,38 @@ describe("Nightly's native page popups", () => {
         true,
       ),
     ).toBeUndefined();
+  });
+
+  it("stops waiting on an open panel whose chooser Stable retired, and holds later popups behind it", async () => {
+    let close: (value: { canceled: boolean; filePaths: string[] }) => void = () => {};
+    electron.showOpenDialog.mockImplementation(
+      () =>
+        new Promise((done) => {
+          close = done;
+        }),
+    );
+    electron.showMessageBox.mockResolvedValue({ response: 0 });
+    const window = { isDestroyed: () => false } as unknown as import("electron").BrowserWindow;
+    const retired = new AbortController();
+    const chooser = presentNightlyPagePopup(
+      window,
+      { kind: "file", id, multiple: false },
+      { pointer: undefined },
+      retired.signal,
+    );
+    retired.abort();
+    expect(await chooser).toBeUndefined();
+    const dialog = presentNightlyPagePopup(
+      window,
+      { kind: "dialog", id, dialog: "alert", message: "Hi" },
+      { pointer: undefined },
+      new AbortController().signal,
+    );
+    await new Promise((done) => setTimeout(done, 20));
+    // No sheet is stacked over the panel still on screen.
+    expect(electron.showMessageBox).not.toHaveBeenCalled();
+    close({ canceled: false, filePaths: ["/late.txt"] });
+    expect(await dialog).toEqual({ kind: "dialog", accept: true });
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
   });
 });

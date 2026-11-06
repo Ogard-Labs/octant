@@ -661,13 +661,13 @@ export class NightlyBrowserPresentation {
         signal.addEventListener("abort", finish, { once: true });
       });
     let shownId: string | undefined;
+    const presentable = () =>
+      !this.#hidden &&
+      this.#options.visible() &&
+      this.#options.focused() &&
+      presentation.layout.visible;
     while (current()) {
-      if (
-        this.#hidden ||
-        !this.#options.visible() ||
-        !this.#options.focused() ||
-        !presentation.layout.visible
-      ) {
+      if (!presentable()) {
         await pause(250);
         continue;
       }
@@ -679,6 +679,9 @@ export class NightlyBrowserPresentation {
         if (next.status !== "idle") await pause(250);
         continue;
       }
+      // The poll is held open; the window may have lost focus or hidden while
+      // it waited. The popup stays pending in Stable for the next focused poll.
+      if (!presentable()) continue;
       const popup = next.popup;
       // A popup already shown and still pending is never shown again; Stable
       // retires or replaces it.
