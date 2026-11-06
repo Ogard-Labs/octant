@@ -683,7 +683,8 @@ never remembered.
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
 `octant_browser`, `octant_computer`, `octant_threads` in Work and Code, and in
-Code `octant_terminal`, `octant_apple`, and `octant_android` — with its actions
+Code `octant_terminal`, `octant_apple`, `octant_android`, and
+`octant_pull_request` — with its actions
 in an `operation` enum. The always-visible tool prefix stays small and
 cache-stable, so a family's description says only what an agent must know
 before its first call, and its `help` operation returns the full usage on
@@ -754,7 +755,8 @@ ignored; the composers drop it from a restored draft with a note.
 - **Computer** is offered in Chat, Work, and Code only when all of these hold:
   the bundled plugin is enabled, there is a screen bridge or a leased desktop,
   the provider carries app-managed tools, the tool is not constrained out, and
-  the turn is not in Plan. Otherwise no definition is offered at all.
+  the turn is not in Plan or a Side Chat's. Otherwise no definition is offered
+  at all.
 - **Providers.** Claude Code and Codex carry both tools; other providers carry
   them only through a verified app-tool transport, per the table above. A
   runtime without app tools gets neither, and Settings says so on its card.
@@ -1387,7 +1389,8 @@ except where a bullet says otherwise.
   can see when it was used; a Code window, which is counted by part, counts
   it with Octant's instructions.
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
-  offered in Chat, Work, and Code beside the thread's other host tools. It
+  offered in Chat (not a Side Chat), Work, and Code beside the thread's other
+  host tools. It
   searches the digests and entries above and answers with at most five short
   excerpts, each naming its thread, mode, Project, and date. It reads no
   thread transcript, no file, and no other Project's folder, and it grants no
@@ -2290,7 +2293,8 @@ hold for every action in it:
   request may only target
   the branch of the thread or linked thread it stacks on.
 - **Refusals.** Plan mode refuses every action, and so does revoked forge
-  access.
+  access. The tool's `help` operation is not an action: it returns the
+  tool's own usage text in any posture, asks nothing, and reaches no forge.
 - **Force-push.** Rewriting the thread's own branch uses force-with-lease
   (`push-git` with `force`), which names the remote head it replaces, so a
   branch someone else moved is refused by Git. The host accepts a force only on
@@ -7394,7 +7398,8 @@ the top of the composer of each local thread pane.
 
 Side tasks are the mid-turn counterpart (`apps/server/src/sideTasks`). On any
 provider that runs app-managed tools, every Chat, Work, and Code turn's tool
-set includes `octant_offer_side_task`; Work and Code turns also carry browser
+set includes `octant_offer_side_task` (a Side Chat's excepted; see
+[Side Chat reads](#security-and-authority)); Work and Code turns also carry browser
 and computer use. The
 model offers out-of-scope work it noticed (title, one-sentence reason,
 standalone prompt, and in a Code thread in a Project a worktree or the current
@@ -11266,7 +11271,12 @@ access` agree); a thread's own change is journaled as
   authority. The file tools (`octant_side_chat_list_files`,
   `octant_side_chat_search_files` for Code, `octant_side_chat_read_file`)
   are the only tools it gains beyond the Harness advice tools of the parity checklist, and
-  it is never offered a task list, goal, question, or delegation tool. Before every call the host checks that the
+  it is never offered a task list, goal, question, or delegation tool. The
+  host tools an ordinary Chat thread is offered are withheld from it too:
+  side tasks, images, Canvas, past threads, Computer, the `#thread`
+  dialogue, and child agents (`withheldFromSideChat`). They once reached
+  every Side Chat only because it shares Chat's tool composition, which put
+  Computer and paid image jobs in a lane that only reads. Before every call the host checks that the
   sidecar link still exists and that the caller's window can still Open the
   source, and the call then runs through the same host read the Files panel
   uses (Code's checkout listing and search; Work's folder listing and

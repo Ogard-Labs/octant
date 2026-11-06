@@ -247,6 +247,8 @@ function toolAction(name: string) {
 const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   {
     name: "octant_zen_search_threads",
+    description:
+      "Search the Chat, Work, and Code threads this window can open, to find one to pin into this Zen space. query matches a thread's title, mode, Project name, status, or last activity (an empty query lists them all); results come newest activity first, and each entry's catalogRef is what octant_zen_pin_thread takes. This only reads.",
     inputSchema: {
       type: "object",
       properties: { query: { type: "string", maxLength: 200 } },
@@ -256,6 +258,8 @@ const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   },
   {
     name: "octant_zen_pin_thread",
+    description:
+      "Pin a thread into this Zen space as a card the person can read and reply in. catalogRef must come from octant_zen_search_threads; a thread this window can no longer open is refused. expectedVersion is the Zen space version the change applies to: an out-of-date one is refused as a conflict and changes nothing, and each change returns the new version.",
     inputSchema: {
       type: "object",
       properties: {
@@ -268,10 +272,14 @@ const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   },
   {
     name: "octant_zen_list_widgets",
+    description:
+      "List the widget kinds this Zen space offers and whether each is available now, before creating one. This only reads.",
     inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
     name: "octant_zen_create_widget",
+    description:
+      "Add an empty Notes, Checklist, or Timer widget to this Zen space. A timer takes durationMs (25 minutes when omitted, at most 8 hours); durationMs is refused for any other kind. Reference widgets are not available, and a recipe widget is made through octant_zen_preview_recipe instead. expectedVersion is the Zen space version the change applies to: an out-of-date one is refused as a conflict and changes nothing, and each change returns the new version.",
     inputSchema: {
       type: "object",
       properties: {
@@ -285,6 +293,8 @@ const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   },
   {
     name: "octant_zen_preview_recipe",
+    description:
+      "Propose a custom widget recipe (a recipeId, a name, one to ten primitives, its fields, and an optional description) for the person to review. This creates nothing: the widget exists only once the person confirms the preview in Zen, and the preview expires after ten minutes or when the space changes. Pass previewId to replace a preview you made earlier; at most four are open at once. expectedVersion is the Zen space version the preview is for; an out-of-date one is refused as a conflict.",
     inputSchema: {
       type: "object",
       properties: {
@@ -317,6 +327,8 @@ const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   },
   {
     name: "octant_zen_place_element",
+    description:
+      "Arrange one element of this Zen space: move-resize (with geometry x, y, width, and height), focus to bring it to the front, minimize, restore, or remove it from the space. elementId comes from an earlier Zen result. expectedVersion is the Zen space version the change applies to: an out-of-date one is refused as a conflict and changes nothing, and each change returns the new version.",
     inputSchema: {
       type: "object",
       properties: {
@@ -344,6 +356,8 @@ const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   },
   {
     name: "octant_zen_update_appearance",
+    description:
+      "Change how this Zen space looks: dimming over its background (0 to 90) and elementOpacity of its elements (0.1 to 1); give at least one. expectedVersion is the Zen space version the change applies to: an out-of-date one is refused as a conflict and changes nothing, and each change returns the new version.",
     inputSchema: {
       type: "object",
       properties: {

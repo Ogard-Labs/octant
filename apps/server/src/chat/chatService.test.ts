@@ -381,7 +381,7 @@ function openFixture(options?: {
         readonly bytes: Uint8Array;
         readonly displayName: string;
       }>;
-      readonly tools: ReadonlyArray<{ readonly name: string }>;
+      readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
     }>;
     readonly driver: ProviderDriver;
     readonly queue: Queue.Queue<never>;
@@ -541,7 +541,7 @@ function openFixture(options?: {
       readonly bytes: Uint8Array;
       readonly displayName: string;
     }>;
-    readonly tools: ReadonlyArray<{ readonly name: string }>;
+    readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
   }> = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
@@ -581,7 +581,7 @@ function openFixture(options?: {
         readonly bytes: Uint8Array;
         readonly displayName: string;
       }>;
-      readonly tools: ReadonlyArray<{ readonly name: string }>;
+      readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
@@ -3232,6 +3232,7 @@ describe("ChatService", () => {
       "octant_web_research",
       "build_project",
     ]);
+    expect(fakeDriver.sentTurns[0]?.tools[0]?.description).toMatch(/at most five results/);
   });
 
   it("blocks provider handoff before provider acquisition when extension authority drifts", async () => {

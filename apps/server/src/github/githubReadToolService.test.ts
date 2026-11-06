@@ -132,6 +132,12 @@ function execute(toolSet: ReturnType<GithubReadToolService["createToolSet"]>, in
 }
 
 describe("GithubReadToolService", () => {
+  it("tells the model what the read covers and that it changes nothing on GitHub", () => {
+    const { toolSet } = setup();
+    expect(toolSet.definitions[0]?.description).toMatch(/issues, pull requests, or projects/);
+    expect(toolSet.definitions[0]?.description).toMatch(/changes nothing on GitHub/);
+  });
+
   it("serves a bounded issues read fixed to the current Code Project repository", async () => {
     const { toolSet, read } = setup();
     const outcome = await execute(toolSet, { operation: "issues" });

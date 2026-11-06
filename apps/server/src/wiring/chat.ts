@@ -43,7 +43,7 @@ import { createImageAgentTools } from "../image/imageAgentTools";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { childAgentTools } from "../chat/sideChatDelegation";
+import { withheldFromSideChat } from "../chat/sideChatToolScope";
 import { SideChatSidecarStore } from "../chat/sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
@@ -401,16 +401,20 @@ export function wireChat(deps: ChatDependencies) {
       },
       agentRuns: agentRunPersistence,
       resolveComputerUseTools: ({ windowId, thread }) =>
-        computerToolsFor(
-          decodeComputerUseOwner({
-            windowId,
-            threadId: thread.id,
-            mode: "chat",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-            executionPolicy: "approval-gated",
-          }),
-        ),
+        withheldFromSideChat({
+          sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
+          tools: () =>
+            computerToolsFor(
+              decodeComputerUseOwner({
+                windowId,
+                threadId: thread.id,
+                mode: "chat",
+                providerInstanceId: thread.providerInstanceId,
+                modelId: thread.modelId,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+        }),
       spendCeiling,
       persistence,
       issueContext: githubIssueContextService,
@@ -481,71 +485,80 @@ export function wireChat(deps: ChatDependencies) {
                 windowId,
                 sideChat,
               }),
-              ...chatToolContributors.map((contribute) => contribute(windowId, thread)),
               sideChatFileTools(windowId, thread.id),
-              threadDialogueService?.forThread({
-                windowId,
-                sourceThreadId: thread.id,
-                sourceTitle: thread.title,
-                targetThreadIds: threadMentionIds ?? [],
-                ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
-              }),
-              createImageAgentTools({
-                threadKind: "chat-thread",
-                scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                port: {
-                  listInstances: () => persistence.readProviderInstances(),
-                  readImageGenerationCustomSources: () =>
-                    (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                      .imageGeneration.customSources,
-                  enqueue: (input) => imageJobService.enqueue(input),
-                  listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-                },
-              }),
-              createSideTaskTools({
-                store: sideTasks,
-                threadId: String(thread.id),
-                mode: "chat",
-                projectId: thread.projectId,
-                suggestedBy: thread,
-                uuid: randomUUID,
-                clock: () => new Date().toISOString(),
+              withheldFromSideChat({
+                sideChat,
+                tools: () =>
+                  combineAppManagedToolSets(
+                    ...chatToolContributors.map((contribute) => contribute(windowId, thread)),
+                    threadDialogueService?.forThread({
+                      windowId,
+                      sourceThreadId: thread.id,
+                      sourceTitle: thread.title,
+                      targetThreadIds: threadMentionIds ?? [],
+                      ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+                    }),
+                    createImageAgentTools({
+                      threadKind: "chat-thread",
+                      scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                      port: {
+                        listInstances: () => persistence.readProviderInstances(),
+                        readImageGenerationCustomSources: () =>
+                          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                            .imageGeneration.customSources,
+                        enqueue: (input) => imageJobService.enqueue(input),
+                        listJobs: (scopeId) => imageJobService.listByScope(scopeId),
+                      },
+                    }),
+                    createSideTaskTools({
+                      store: sideTasks,
+                      threadId: String(thread.id),
+                      mode: "chat",
+                      projectId: thread.projectId,
+                      suggestedBy: thread,
+                      uuid: randomUUID,
+                      clock: () => new Date().toISOString(),
+                    }),
+                  ),
               }),
             ),
             threadId: thread.id,
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
-          // Outside the taint wrapper: a Canvas marks its reader only when a
-          // read or preview returns content from a Canvas that carries a mark,
-          // the rule Work and Code follow, so describe and a clean read leave
-          // the thread unmarked.
-          createCanvasAgentTools({
-            windowId,
-            thread,
-            port: canvasAgentToolPort,
-          }),
-          // Outside the taint wrapper too: what it returns is memory Octant
-          // wrote from the person's own messages, not outside content.
-          personMemoryAccess.toolsFor({
-            mode: "chat",
-            threadId: String(thread.id),
-            projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
-            createdAt: thread.createdAt,
-            windowId,
-          }),
-          // Outside the taint wrapper: only a child's reply is outside content,
-          // and `wait` marks the thread itself before it hands one back;
-          // `delegate` refuses while the thread is marked.
-          childAgentTools({
+          withheldFromSideChat({
             sideChat,
             tools: () =>
-              agentsManagedToolsFor({
-                windowId,
-                parentThreadId: String(thread.id),
-                mode: "chat",
-                ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
-              }),
+              combineAppManagedToolSets(
+                // Outside the taint wrapper: a Canvas marks its reader only
+                // when a read or preview returns content from a Canvas that
+                // carries a mark, the rule Work and Code follow, so describe
+                // and a clean read leave the thread unmarked.
+                createCanvasAgentTools({
+                  windowId,
+                  thread,
+                  port: canvasAgentToolPort,
+                }),
+                // Outside the taint wrapper too: what it returns is memory
+                // Octant wrote from the person's own messages, not outside
+                // content.
+                personMemoryAccess.toolsFor({
+                  mode: "chat",
+                  threadId: String(thread.id),
+                  projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+                  createdAt: thread.createdAt,
+                  windowId,
+                }),
+                // Outside the taint wrapper: only a child's reply is outside
+                // content, and `wait` marks the thread itself before it hands
+                // one back; `delegate` refuses while the thread is marked.
+                agentsManagedToolsFor({
+                  windowId,
+                  parentThreadId: String(thread.id),
+                  mode: "chat",
+                  ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                }),
+              ),
           }),
         );
       },

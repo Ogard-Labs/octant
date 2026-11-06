@@ -143,6 +143,11 @@ describe("ZenAssistantTools", () => {
       "octant_zen_place_element",
       "octant_zen_update_appearance",
     ]);
+    // A model meets these tools by their descriptions; a name alone does not
+    // say which ones only read and which change the space.
+    for (const definition of exact.tools.forThread(windowId, thread)?.definitions ?? []) {
+      expect(definition.description, definition.name).toMatch(/\S/);
+    }
     expect(ordinary.tools.forThread(windowId, thread)).toBeUndefined();
   });
 

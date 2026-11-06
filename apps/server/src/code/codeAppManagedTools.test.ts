@@ -2881,6 +2881,7 @@ describe("Code tool families", () => {
       appleDiscover: vi.fn(async () => appleDiscovery()),
       androidExecute: vi.fn(async () => androidEvidence()),
       androidDiscover: vi.fn(async () => androidDiscovery()),
+      pullRequestApproval: vi.fn(async () => ({ status: "denied" }) as const),
     };
     const device = (execute: unknown, discover: unknown, snapshot: unknown) =>
       ({
@@ -2907,6 +2908,7 @@ describe("Code tool families", () => {
       },
       apple: device(ports.appleExecute, ports.appleDiscover, appleSnapshot()),
       android: device(ports.androidExecute, ports.androidDiscover, androidSnapshot()),
+      pullRequestApproval: { request: ports.pullRequestApproval },
     });
     return { tools, ports };
   }
@@ -2948,25 +2950,28 @@ describe("Code tool families", () => {
     expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_420);
   });
 
-  it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
-    "returns %s's full usage from help without touching the host",
-    async (name) => {
-      const { tools, ports } = familyTools({ executionPolicy: "plan" });
-      const definition = tools.definitions.find((candidate) => candidate.name === name);
-      if (definition === undefined) throw new Error(`Expected ${name} to be offered.`);
-      const operations = (
-        definition.inputSchema as { properties: { operation: { enum: ReadonlyArray<string> } } }
-      ).properties.operation.enum;
-      expect(operations).toContain("help");
+  it.each([
+    "octant_browser",
+    "octant_terminal",
+    "octant_apple",
+    "octant_android",
+    "octant_pull_request",
+  ])("returns %s's full usage from help without touching the host", async (name) => {
+    const { tools, ports } = familyTools({ executionPolicy: "plan" });
+    const definition = tools.definitions.find((candidate) => candidate.name === name);
+    if (definition === undefined) throw new Error(`Expected ${name} to be offered.`);
+    const operations = (
+      definition.inputSchema as { properties: { operation: { enum: ReadonlyArray<string> } } }
+    ).properties.operation.enum;
+    expect(operations).toContain("help");
 
-      const outcome = await tools.execute({ name, inputJson: '{"operation":"help"}' });
+    const outcome = await tools.execute({ name, inputJson: '{"operation":"help"}' });
 
-      expect(outcome.isError).toBe(false);
-      const help = (outcome.result as { help: string }).help;
-      expect(help.length).toBeGreaterThan(definition.description?.length ?? 0);
-      for (const port of Object.values(ports)) expect(port).not.toHaveBeenCalled();
-    },
-  );
+    expect(outcome.isError).toBe(false);
+    const help = (outcome.result as { help: string }).help;
+    expect(help.length).toBeGreaterThan(definition.description?.length ?? 0);
+    for (const port of Object.values(ports)) expect(port).not.toHaveBeenCalled();
+  });
 
   it("still refuses an effect under a denied posture after help answered", async () => {
     const { tools, ports } = familyTools({ executionPolicy: "plan" });
