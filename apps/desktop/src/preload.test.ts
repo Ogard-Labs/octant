@@ -164,6 +164,30 @@ describe("desktop preload bridge", () => {
     },
   );
 
+  it("gives Octant the Nightly row's requests with no arguments and gives Nightly none", async () => {
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn().mockResolvedValue({ status: "installed" }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const octant = createHostBridge(ipc, projectWindowCapability, undefined, "darwin");
+    expect(await octant.installNightly?.()).toEqual({ status: "installed" });
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.nightlyInstall);
+    vi.mocked(ipc.invoke).mockResolvedValueOnce({ status: "everywhere" });
+    await expect(octant.readNightlyInstall?.()).rejects.toThrow("Invalid Octant Nightly state.");
+
+    const nightly = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+    );
+    for (const method of ["readNightlyInstall", "installNightly", "openNightly", "removeNightly"])
+      expect(method in nightly).toBe(false);
+  });
+
   it("replays the current local update state when Settings subscribes without checking the feed", async () => {
     const state = {
       status: "idle",
@@ -528,6 +552,7 @@ describe("desktop preload bridge", () => {
       "hubAdministrationRequest",
       "initialProjectTarget",
       "installAppUpdate",
+      "installNightly",
       "listCaptureWindows",
       "listOpenInApplications",
       "listPairedComputers",
@@ -545,6 +570,7 @@ describe("desktop preload bridge", () => {
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
       "openInNewWindow",
+      "openNightly",
       "openRemoteServerPage",
       "ownerUnlockForgetKey",
       "ownerUnlockMakeKey",
@@ -557,8 +583,10 @@ describe("desktop preload bridge", () => {
       "projectWindowCapability",
       "providerCredentialStatus",
       "readBundledWhatsNew",
+      "readNightlyInstall",
       "reconcileExpiredRemoteDevices",
       "recoverRemoteHostIdentity",
+      "removeNightly",
       "removeProviderApiKey",
       "renameProviderApiKey",
       "renameRemoteDevice",

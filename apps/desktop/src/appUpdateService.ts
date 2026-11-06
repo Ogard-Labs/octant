@@ -17,6 +17,7 @@ import {
   fetchUpdateFeed,
   fetchVerifiedArtifact,
   type FeedVerifier,
+  isEmptyFeedMarker,
   updateFeedUrl,
 } from "./appUpdateFeed";
 import type { PortableImageApplyResult, PortableImagePort } from "./portableImageUpdate";
@@ -376,15 +377,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       const document = fetched.document;
       // The feed can report an unpublished channel, but that unsigned marker
       // proves nothing about the installed version and must never carry an offer.
-      if (
-        typeof document === "object" &&
-        document !== null &&
-        "schemaVersion" in document &&
-        document.schemaVersion === 1 &&
-        "status" in document &&
-        document.status === "empty" &&
-        Object.keys(document).length === 2
-      ) {
+      if (isEmptyFeedMarker(document)) {
         return publishWithoutOffer({
           status: "idle",
           checkedAt: clock() as AppUpdateState["checkedAt"],

@@ -138,6 +138,62 @@ export function resolveUpdateOffer(input: {
   return { kind: "offer", release: feed.release };
 }
 
+export type NightlyInstallRelease =
+  | { readonly kind: "offer"; readonly release: AppUpdateRelease }
+  | {
+      readonly kind: "refuse";
+      readonly refusal: Extract<
+        AppUpdateRefusal,
+        "malformed" | "untrusted-signature" | "wrong-platform" | "wrong-ring"
+      >;
+    };
+
+/**
+ * Decide whether a fetched `preview` feed names a Nightly build Octant may
+ * place beside itself.
+ *
+ * Octant's own updater never reads this ring; only the person-started Nightly
+ * installer does. The signature is checked against the preview ring's trust
+ * set whatever ring the document claims, and the signed ring and the version's
+ * own tag must both say preview, so a genuine Stable or Preview release served
+ * at the Nightly address is refused rather than installed as Nightly.
+ *
+ * There is no version comparison: Nightly is a second app, not a newer copy of
+ * the one asking, so "newer than Octant" means nothing here.
+ */
+export function resolveNightlyInstallRelease(input: {
+  readonly document: unknown;
+  readonly platform: string;
+  readonly arch: string;
+  readonly verifySignature: (
+    message: Uint8Array,
+    signature: string,
+    ring: AppReleaseRing,
+  ) => boolean;
+}): NightlyInstallRelease {
+  const decoded = decodeFeed(input.document);
+  if (decoded._tag === "Left") return { kind: "refuse", refusal: "malformed" };
+  const feed = decoded.right;
+  let verified = false;
+  try {
+    verified = input.verifySignature(
+      canonicalReleaseBytes(feed.release),
+      feed.signature,
+      "preview",
+    );
+  } catch {
+    verified = false;
+  }
+  if (!verified) return { kind: "refuse", refusal: "untrusted-signature" };
+  if (feed.release.platform !== input.platform || feed.release.arch !== input.arch) {
+    return { kind: "refuse", refusal: "wrong-platform" };
+  }
+  if (feed.release.ring !== "preview" || ringForVersion(feed.release.version) !== "preview") {
+    return { kind: "refuse", refusal: "wrong-ring" };
+  }
+  return { kind: "offer", release: feed.release };
+}
+
 /**
  * Order two versions: negative when `left` is older, positive when newer.
  *

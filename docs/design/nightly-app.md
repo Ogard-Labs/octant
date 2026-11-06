@@ -20,8 +20,7 @@ second app.
 
 The remaining delivery includes complete embedded browsing parity,
 full lifecycle acceptance, shared sign-in operations, the complete
-`octant-nightly` command, the installer and removal controls,
-and the functional release preflight. Coexistence and rollback
+`octant-nightly` command and the functional release preflight. Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
 preview workflow selects each run's flavor, artifact and payload-smoke paths
@@ -35,19 +34,27 @@ Nothing in this foundation authorizes installation or publication.
 The two-binary channel split below (2026-11-05) is built: Octant follows
 `stable` or `candidate`, Nightly follows only `preview`, packaging and the
 release workflow stamp the flavor from the ring, and the scheduled Nightly run
-alone is held by the functional-client preflight. The install row is not yet
-offered from Preview, and Nightly cannot yet run its own test-data host.
+alone is held by the functional-client preflight. The Octant Nightly row in
+Octant's Settings › Updates is built for packaged macOS Octant, including its
+three checks; a signed install from a published Nightly build has not yet been
+exercised. Nightly cannot yet run its own test-data host.
 
 ## Two apps, one set of data
 
 Octant ships as two apps that install side by side and can be open at the same
 time (maintainer decision, 2026-11-05):
 
-- **Octant** is the app a person works in. It follows Stable (the `stable`
-  ring) or, when the person chooses it in Settings › Updates, Preview (the
-  `candidate` ring): pre-release builds of the next stable version, cut from
-  the ref a maintainer chooses. One binary serves both channels; the channel is
-  an in-app choice, not a second download.
+- **Octant** is the app a person works in. Settings › Updates has a three-option
+  channel switch, Stable | Preview | Nightly. Stable follows the `stable` ring.
+  Preview follows the `candidate` ring: pre-release builds of the next stable
+  version, cut from the ref a maintainer chooses. Nightly keeps Octant on the
+  `candidate` ring too and adds the Octant Nightly install row; Octant never
+  follows `preview`. Because Preview and Nightly share a ring, the choice is
+  stored as its own shared setting, `updateChannel`, beside `releaseRing`; where
+  it is absent it derives from the ring (`stable` is Stable, `candidate` is
+  Preview), and a stored channel that disagrees with the ring is ignored. One
+  binary serves every channel; the channel is an in-app choice, not a second
+  download.
 - **Octant Nightly** follows Nightly (the `preview` ring): scheduled builds of
   `main`. It shows what is next. It has no channel choice.
 
@@ -603,8 +610,10 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 
 ## Getting Octant Nightly
 
-- **From Octant on Preview.** Nightly is opt-in. When Octant follows Preview,
-  Settings › Updates shows an Octant Nightly row below the channel switch:
+- **From Octant on the Nightly channel.** Nightly is opt-in. When the channel
+  switch is on Nightly (Octant itself stays on `candidate`), Settings › Updates
+  shows an Octant Nightly row directly under the switch. Choosing Nightly
+  downloads nothing; only the explicit click does:
   "Install Octant Nightly" downloads the newest Nightly (`preview` ring) build
   and places it beside Octant after three checks:
   - The feed signature, against the preview ring's trust set (the preview key
@@ -621,10 +630,45 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     Nightly", which moves the app to the Trash and leaves the shared data alone.
     Installing is a download the person starts; Octant never installs Nightly by
     itself.
+  - The desktop main process decides every step; the renderer only asks, with
+    no arguments. The location is fixed: `Octant Nightly.app` in the folder
+    that holds the running `Octant.app` (normally `/Applications`). A launch
+    that is not a plain `Octant.app` bundle, or that macOS translocated,
+    refuses. The feed and artifact downloads together must finish within 15
+    minutes, or the install stops as timed out. The download is written to a
+    private temporary folder and
+    extracted with `ditto` into a staging folder beside the target, the
+    requirement is checked on that extracted bundle, and only then is it
+    renamed into place. Something other than Octant Nightly at the location
+    (by its Info.plist bundle id) is left alone and refuses. An installed
+    Nightly is replaced only by a strictly newer build, by the updater's own
+    version ordering against its `CFBundleShortVersionString`: an equal or
+    older offer (a replayed feed, say) refuses as not newer, and an installed
+    version that cannot be read refuses rather than allowing a downgrade. With
+    no Nightly installed, any verified preview build may install. The
+    replacement is a rename; the old copy is restored if the new one cannot be
+    moved in, and otherwise goes to the Trash, since it was never verified
+    here. Replacing and removing refuse while Octant Nightly is running (or
+    when that cannot be told), asking the person to quit it first, and check
+    again just before the move. No quarantine attribute is set or cleared: the
+    file is written by Octant itself, as Octant's own updater does.
+    "Installed" means that location holds a bundle whose id is Nightly's;
+    that decides whether the row shows. Open and Remove act only on a bundle
+    that also verifies against Nightly's requirement: Open then opens it
+    through Launch Services, and Remove moves it to the Trash. A bundle that
+    is installed but does not verify is left alone. Each refusal names the
+    check that refused, and a check that could not run says so instead of
+    blaming the signature.
+  - Linux has no code-signature check to bind the download to Octant's
+    publisher, so packaged Linux Octant does not offer the row and refuses an
+    install as not supported on this platform; Linux Nightly comes from the
+    website.
 - **From the website.** octant.sh offers both downloads. The Nightly download
   says it works with Octant and needs it installed.
-- Switching Octant back to Stable leaves an installed Nightly in place; the
-  row stays while Nightly is installed so it can still be opened or removed.
+- Switching Octant to Stable or Preview leaves an installed Nightly in place;
+  the row stays while Nightly is installed so it can still be opened or
+  removed, and is hidden otherwise. Main still allows an install only while
+  Octant follows `candidate`.
 - Nightly then updates itself on its own ring. Octant's updater only ever
   checks `stable` or `candidate`.
 
@@ -642,7 +686,12 @@ directory. Its bundled preload marks these preferences as local: the renderer
 neither synchronizes shared host update settings into Nightly nor writes a
 Nightly choice back to those shared settings. Nightly follows only `preview`
 and shows no channel switch; Octant's running identity permits `stable` and
-`candidate`. Automatic checks
+`candidate`. Its Updates section otherwise matches Octant's: the same Version
+row (What's new, Check for updates, Relaunch to update), the same ready and
+refusal notices, the same Automatic checks row and "What a check sends"
+disclosure, and the same copy style. In place of the switch is one quiet line
+saying Nightly gets a new build of what is being built every night, and there
+is no install row. Automatic checks
 start off until Nightly's own stored choice is read. Invalid or redirected
 preference files leave them off. What's new and its acknowledgement also stay
 in Nightly's own bundled resources and window storage.

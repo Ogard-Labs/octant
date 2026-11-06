@@ -65,9 +65,16 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("app-update-ring"),
-          label: "Release ring",
+          label: "Update channel",
           scope: "app",
-          keywords: "release ring stable preview candidate nightly beta channel updates",
+          keywords:
+            "update channel release ring stable preview candidate nightly beta channel updates",
+        },
+        {
+          id: settingId("app-update-nightly"),
+          label: "Octant Nightly",
+          scope: "app",
+          keywords: "octant nightly install open remove second app builds preview updates",
         },
       ],
     },

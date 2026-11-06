@@ -1,6 +1,10 @@
 import type { EmbeddedBrowserBridge } from "@octant/contracts/desktop-bridge";
 import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
-import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
+import type {
+  AppReleaseRing,
+  AppUpdateState,
+  NightlyInstallState,
+} from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 
@@ -435,6 +439,14 @@ export interface OctantHostBridge
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateState>;
   readonly setAppUpdateRing?: (ring: AppReleaseRing) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState?: (listener: (state: AppUpdateState) => void) => () => void;
+  /**
+   * Octant's Octant Nightly row. Absent in Nightly and on a remote client; the
+   * desktop main process decides every install, open and remove.
+   */
+  readonly readNightlyInstall?: () => Promise<NightlyInstallState>;
+  readonly installNightly?: () => Promise<NightlyInstallState>;
+  readonly openNightly?: () => Promise<NightlyInstallState>;
+  readonly removeNightly?: () => Promise<NightlyInstallState>;
   /**
    * Local What's new for the build on disk. Desktop-owned; never a network
    * fetch. Absent on a remote client.

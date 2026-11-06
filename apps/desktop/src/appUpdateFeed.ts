@@ -242,6 +242,24 @@ export async function fetchUpdateFeed(
   }
 }
 
+/**
+ * The feed's "nothing published on this ring yet" marker.
+ *
+ * Unsigned and carrying nothing but its shape, so it can only ever mean "no
+ * offer"; it never proves anything about a release.
+ */
+export function isEmptyFeedMarker(document: unknown): boolean {
+  return (
+    typeof document === "object" &&
+    document !== null &&
+    "schemaVersion" in document &&
+    document.schemaVersion === 1 &&
+    "status" in document &&
+    document.status === "empty" &&
+    Object.keys(document).length === 2
+  );
+}
+
 export type ArtifactFetchOutcome =
   | { readonly kind: "verified"; readonly bytes: Uint8Array }
   | { readonly kind: "unreachable" }

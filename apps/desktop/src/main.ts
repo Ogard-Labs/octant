@@ -123,6 +123,7 @@ import type {
   HostCapabilities,
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
+import { createNightlyInstaller } from "./nightlyInstaller";
 import {
   createPortableImagePort,
   defaultProcessIsAlive,
@@ -1245,6 +1246,7 @@ let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | und
 let browserExtensionBridge: ReturnType<typeof createExtensionBridge> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
+let nightlyInstallerInstance: ReturnType<typeof createNightlyInstaller> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
   readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
@@ -3604,6 +3606,20 @@ function installIpcHandlers(): void {
     if (!isAppReleaseRing(value)) throw new Error("Octant rejected an unknown release ring.");
     return appUpdates().setRing(value);
   });
+  // The renderer only asks. Each request carries nothing: the install
+  // location, the feed and the ring are main's own, never a caller's choice.
+  for (const [channel, request] of [
+    [IPC_CHANNELS.nightlyInstallState, () => nightlyInstaller().state()],
+    [IPC_CHANNELS.nightlyInstall, () => nightlyInstaller().install()],
+    [IPC_CHANNELS.nightlyInstallOpen, () => nightlyInstaller().open()],
+    [IPC_CHANNELS.nightlyInstallRemove, () => nightlyInstaller().remove()],
+  ] as const) {
+    ipcMain.handle(channel, (event, ...rest: ReadonlyArray<unknown>) => {
+      ownedTopLevelWindowContext(event);
+      if (rest.length !== 0) throw new Error("Octant rejected an Octant Nightly request.");
+      return request();
+    });
+  }
   ipcMain.handle(IPC_CHANNELS.appUpdateWhatsNew, async (event) => {
     ownedTopLevelWindowContext(event);
     return await loadBundledWhatsNew(bundledWhatsNewOptions());
@@ -3923,6 +3939,35 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
     },
   });
   return appUpdateService;
+}
+
+function nightlyInstaller(): ReturnType<typeof createNightlyInstaller> {
+  nightlyInstallerInstance ??= createNightlyInstaller({
+    role: () => ({
+      packaged: app.isPackaged,
+      flavor: applicationIdentity.flavor,
+      platform: process.platform,
+      ring: appUpdates().state().ring,
+    }),
+    executablePath: process.execPath,
+    feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
+    app: {
+      version: app.getVersion() as AppVersion,
+      platform: process.platform,
+      arch: process.arch,
+    },
+    temporaryDirectory: app.getPath("temp"),
+    // The same signed native component that already authenticates Nightly
+    // peers; it is absent outside packaged macOS, which refuses the check.
+    native: () =>
+      loadDesktopPeerStatus({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+      }),
+    trash: (path) => shell.trashItem(path),
+  });
+  return nightlyInstallerInstance;
 }
 
 function validateExternalBrowserUrl(value: unknown): string {
