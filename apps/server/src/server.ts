@@ -450,6 +450,9 @@ export function startOctantServer(
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      worktreePreparation,
+      childWorktreeSources,
+      resolveChildWorktree,
       managedWorktreeSourcePreview,
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
@@ -708,6 +711,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      worktreePreparation,
       browserModelBindings,
       personMemoryAccess,
       serverConnection,
@@ -821,6 +825,10 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      agentRunPersistence,
+      worktreePreparation,
+      childWorktreeSources,
+      resolveChildWorktree,
       browserAuthority,
       serverConnection,
       serverProjectStore,

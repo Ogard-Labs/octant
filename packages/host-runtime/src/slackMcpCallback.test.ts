@@ -386,10 +386,10 @@ describe("host-owned pending MCP cancellation", () => {
   });
   it("rejects another actor or descriptor and cancels only the owned attempt", async () => {
     const firstPort = await availablePort();
-    const secondPort = await availablePort();
     const { runtime, forms } = fixture();
     try {
       const first = await begin(runtime, firstPort);
+      const secondPort = await availablePort();
       const second = await begin(runtime, secondPort);
       expect(await runtime.cancel({ ...cancelInput(first), actorId: randomUUID() })).toEqual({
         kind: "refused",

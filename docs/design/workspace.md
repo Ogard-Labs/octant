@@ -1110,8 +1110,11 @@ and the journal record follow the
 Project's saved actions (Run, Test, Dev) are buttons in the window header, three
 inline and the rest under More, and entries in the command palette's Actions
 group; the Project overview's Actions section edits them and offers suggestions
-the person confirms. Choosing one runs it in the window's pinned Project
-terminal, or opens and pins one, and enters Zen to show it (see
+the person confirms. Choosing one previews its actual folder and branch,
+then starts a dedicated run beside the task. A Code thread defaults to its
+active checkout; the Project folder and approved extra folders remain explicit
+choices. Output, exit status and Stop stay in the action dialog; Open terminal
+explicitly opens Zen. A lost reply is never retried automatically (see
 [Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
@@ -1191,3 +1194,18 @@ tool returns the decoded response to the model. This keeps the existing
 authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
+
+A Code task's **Worktrees** header control opens its Setup tab beside
+that task, including a selector for its child checkouts. It shows the reviewed
+command and relative folder, bounded output, exit result, Retry, Cancel and
+explicit Skip. The Project overview's Actions list lets the person review and
+designate one automatic worktree setup recipe. See the owning
+[worktree setup rule](../architecture.md#security-and-authority).
+
+The same dialog's **Child source** tab controls the parent task's source for
+future children. **Committed revision** is the default. **Review current edits**
+captures a preview with base revision, snapshot identity, tracked changes and
+eligible untracked paths; **Use this snapshot** is the separate enabling
+choice. It shows the selected source and an actionable stale-source refusal.
+Existing children retain their recorded source. The rule belongs to
+[Code child workspaces](../architecture.md#modes-chat-work-and-code).

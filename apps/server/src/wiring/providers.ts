@@ -1,3 +1,7 @@
+import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
+import { GitObservationPort } from "../code/gitObservationPort";
+import { WorktreePreparationService } from "../code/worktreePreparationService";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createLocalUsageHistoryCheckpointStore } from "../persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
@@ -1173,8 +1177,49 @@ export function wireProviders(deps: ProvidersDependencies) {
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
     });
+    const preparationProcess = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "worktree-preparation-processes"),
+    });
+    const preparationRecovered = yield* Effect.promise(() =>
+      preparationProcess.reconcile().then(
+        () => true,
+        () => false,
+      ),
+    );
+    const worktreePreparation = new WorktreePreparationService({
+      processRecovery: preparationRecovered ? "ready" : "uncertain",
+      journal: persistence.journal,
+      loadReceipt: (id) => managedWorktreeReceipts.load(id),
+      execute: (input, signal) => preparationProcess.executeReviewedAction(input, signal),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      readRecipe: (projectId) => {
+        const project = persistence.readProject(decodeProjectId(projectId));
+        return project?.type === "code"
+          ? project.actions?.find((action) => action.preparesWorktrees === true)
+          : undefined;
+      },
+    });
+    if (preparationRecovered) worktreePreparation.reconciled();
+    yield* Effect.addFinalizer(() => Effect.promise(() => worktreePreparation.close()));
+    const childWorktreeSources = new ChildWorktreeSourceService({
+      journal: persistence.journal,
+      mutation: new GitMutationPort(),
+      observation: new GitObservationPort(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+    });
     const managedWorktreePorts = createManagedWorktreeNodePorts();
     const managedWorktreeService = new ManagedWorktreeService({
+      setupRecipe: (projectId) => {
+        const project = persistence.readProject(projectId);
+        return project?.type === "code"
+          ? project.actions?.find((action) => action.preparesWorktrees === true)
+          : undefined;
+      },
+
       grants: new ManagedRootGrantStore(randomUUID, processAuthorityNow),
       receipts: managedWorktreeReceipts,
       ...managedWorktreePorts,
@@ -1202,6 +1247,51 @@ export function wireProviders(deps: ProvidersDependencies) {
       now: Date.now,
     });
     agentRunChildWorktree.current = createAgentRunChildWorktreePort({
+      sourceSnapshot: async (request) => {
+        const parent = persistence.readCodeThread(decodeCodeThreadId(request.parentThreadId));
+        if (parent === undefined)
+          return { status: "refused", message: "The parent task is unavailable." };
+        return childWorktreeSources.selected({
+          threadId: String(parent.id),
+          checkoutId: String(parent.checkoutId),
+          bindingRevisionId: request.bindingRevisionId,
+          root: request.parentCheckoutRoot,
+          head: request.startPoint,
+          executionPolicy: parent.executionPolicy,
+          current: () => {
+            const fresh = persistence.readCodeThread(parent.id);
+            return (
+              fresh?.lifecycle === "active" &&
+              String(fresh.bindingRevisionId) === request.bindingRevisionId &&
+              String(fresh.checkoutId) === String(parent.checkoutId)
+            );
+          },
+        });
+      },
+      applySourceSnapshot: (receipt) => childWorktreeSources.apply(receipt),
+      sourceSnapshotApplied: (receipt) => childWorktreeSources.applied(receipt),
+      prepareForExecution: async (receipt, request) => {
+        const parent = persistence.readCodeThread(decodeCodeThreadId(request.parentThreadId));
+        if (parent === undefined) return "The parent task is unavailable.";
+        const context = await worktreePreparation.context({
+          receiptId: receipt.receiptId,
+          threadId: receipt.threadId,
+          checkoutId: receipt.checkoutId,
+          projectId: String(parent.projectId),
+          root: receipt.canonicalWorktreePath,
+          executionPolicy: request.executionPolicy,
+          commandAccess: request.commandAccess,
+          networkAllowed: request.networkAllowed,
+          current: () =>
+            !request.signal.aborted &&
+            persistence.readCodeThread(parent.id)?.lifecycle === "active" &&
+            String(persistence.readCodeThread(parent.id)?.bindingRevisionId) ===
+              String(parent.bindingRevisionId),
+        });
+        return context === undefined
+          ? "Child preparation ownership is unavailable."
+          : worktreePreparation.ensure(context);
+      },
       service: managedWorktreeService,
       repository: managedWorktreePorts.repository,
       observeExecutionIdentity: observeManagedWorktreeExecutionIdentity,
@@ -1964,6 +2054,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      worktreePreparation,
+      childWorktreeSources,
+      resolveChildWorktree: agentRunChildWorktree.current.preparationReceipt,
       managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
       nativeHarnessLeadFallback,

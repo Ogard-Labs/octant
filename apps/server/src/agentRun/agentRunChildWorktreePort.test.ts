@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   decodeCodeCheckoutIdentity,
+  decodeChildWorktreeSnapshotData,
+  type ChildWorktreeSnapshotData,
   decodeProviderInstanceId,
   decodeProviderModelId,
   type AgentRunAuthority,
@@ -19,6 +21,7 @@ import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore
 import { ManagedWorktreeService } from "../code/managedWorktreeService";
 import {
   createAgentRunChildWorktreePort,
+  agentRunChildWorktreeLookup,
   deriveAgentRunChildWorktreeThreadId,
   resolveAgentRunChildWorktreeThreadId,
   resolveAgentRunCodeWorkspaceContext,
@@ -44,7 +47,12 @@ afterEach(async () => {
   );
 });
 
-async function fixture() {
+async function fixture(
+  options: Pick<
+    Parameters<typeof createAgentRunChildWorktreePort>[0],
+    "sourceSnapshot" | "applySourceSnapshot" | "sourceSnapshotApplied"
+  > = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "octant-child-workspaces-"));
   directories.push(root);
   const repository = join(root, "repository");
@@ -81,6 +89,7 @@ async function fixture() {
     observeExecutionIdentity: observeManagedWorktreeExecutionIdentity,
     loadReceipt: (id) => managedReceipts.load(id),
     findActive: (lookup) => managedReceipts.findActive(lookup),
+    ...options,
   });
   const workspaceReceipts = new AgentRunWorkspaceReceiptStore({
     dataDirectory: join(root, "data"),
@@ -111,6 +120,124 @@ async function fixture() {
 }
 
 describe("Code child workspace ownership", () => {
+  it("admits a selected snapshot only after its child copy is recorded complete", async () => {
+    let seed: ChildWorktreeSnapshotData | undefined;
+    const applied = new Set<string>();
+    let copies = 0;
+    const f = await fixture({
+      sourceSnapshot: async () => ({
+        status: "selected",
+        ...(seed === undefined ? {} : { snapshot: seed }),
+      }),
+      applySourceSnapshot: async (receipt) => {
+        copies++;
+        applied.add(receipt.receiptId);
+        return true;
+      },
+      sourceSnapshotApplied: (receipt) => applied.has(receipt.receiptId),
+    });
+    seed = decodeChildWorktreeSnapshotData({
+      id: requestId,
+      baseRevision: f.code.startPoint,
+      capturedAt: "2026-11-06T10:00:00.000Z",
+      worktree: "b".repeat(40),
+      index: "c".repeat(40),
+      files: [{ path: "shared.txt", index: "M", worktree: "M" }],
+    });
+    const prepared = await f.workspace.prepare({
+      requestId,
+      windowId,
+      parent: f.parent,
+      code: f.code,
+    });
+    if (prepared.status !== "prepared" || prepared.workspace.kind !== "code-worktree")
+      throw new Error("Expected snapshot child");
+    const receipt = await f.managedReceipts.load(String(prepared.workspace.worktreeReceiptId));
+    expect(receipt?.seed).toEqual(seed);
+    expect(copies).toBe(1);
+    expect(
+      await f.workspace.confirm({
+        requestId,
+        windowId,
+        parent: f.parent,
+        worktreeReceiptId: String(prepared.workspace.worktreeReceiptId),
+      }),
+    ).toMatchObject({ status: "confirmed" });
+    const admitted = await f.workspace.admit({
+      requestId,
+      windowId,
+      parent: f.parent,
+      role: "implementation",
+      requested: {
+        kind: "code-worktree",
+        mode: "code",
+        worktreeReceiptId: prepared.workspace.worktreeReceiptId,
+      },
+    });
+    expect(admitted).toMatchObject({
+      status: "admitted",
+      workspace: { source: { id: seed.id, baseRevision: f.code.startPoint } },
+    });
+  });
+  it("refuses a partial snapshot before admission and never reapplies it after a lost preparation reply", async () => {
+    let seed: ChildWorktreeSnapshotData | undefined;
+    let copies = 0;
+    const f = await fixture({
+      sourceSnapshot: async () => ({
+        status: "selected",
+        ...(seed === undefined ? {} : { snapshot: seed }),
+      }),
+      applySourceSnapshot: async () => {
+        copies++;
+        return false;
+      },
+      sourceSnapshotApplied: () => false,
+    });
+    seed = decodeChildWorktreeSnapshotData({
+      id: requestId,
+      baseRevision: f.code.startPoint,
+      capturedAt: "2026-11-06T10:00:00.000Z",
+      worktree: "b".repeat(40),
+      index: "c".repeat(40),
+      files: [],
+    });
+    for (let attempt = 0; attempt < 2; attempt++)
+      expect(
+        await f.workspace.prepare({ requestId, windowId, parent: f.parent, code: f.code }),
+      ).toMatchObject({ status: "refused", reason: "stale" });
+    expect(copies).toBe(1);
+    const receipt = await f.managedReceipts.findActive(
+      agentRunChildWorktreeLookup({
+        repositoryId: f.code.repositoryId,
+        repositoryRoot: f.code.repositoryRoot,
+        childThreadId: deriveAgentRunChildWorktreeThreadId(parentThreadId, requestId),
+      }),
+    );
+    if (receipt === undefined) throw new Error("Missing partial fixture");
+    expect(
+      await f.port.confirm({
+        requestId,
+        parentThreadId,
+        repositoryId: f.code.repositoryId,
+        repositoryRoot: f.code.repositoryRoot,
+        parentCheckoutRoot: f.code.parentCheckoutRoot,
+        startingRevision: f.code.startPoint,
+        worktreeReceiptId: receipt.receiptId,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await f.port.verifyExecution({
+        requestId,
+        parentThreadId,
+        repositoryId: f.code.repositoryId,
+        repositoryRoot: f.code.repositoryRoot,
+        parentCheckoutRoot: f.code.parentCheckoutRoot,
+        worktreeRoot: receipt.canonicalWorktreePath,
+        signal,
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
   it("verifies live child ownership after commits while preserving strict preparation", async () => {
     const f = await fixture();
     const prepared = await f.workspace.prepare({

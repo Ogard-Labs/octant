@@ -28,11 +28,13 @@ optionally a folder inside the Project. Octant also looks in the Project's
 nothing is saved until you add one and choose **Save actions**.
 
 Each action becomes a button in the window header (the first three, with the
-rest under **More**) and an entry in the command palette. Choosing it types the
-command into the Project terminal and opens that terminal in Zen. It runs with
-the same sandbox and approvals as anything else you type there. If the terminal
-is already running a program, the command goes to that program, so stop it
-first. Actions are set from this computer's window, not from a paired device.
+rest under **More**) and an entry in the command palette. Choosing one previews
+its actual folder and branch. A thread defaults to its active checkout; use
+**Run in** to choose the Project folder or an approved extra folder explicitly.
+**Run action** starts a dedicated process and shows output, exit status and
+**Stop action** beside the task. **Open terminal** is an explicit Zen handoff.
+Closing the dialog leaves the run alone; reopening attaches to it. A lost reply
+is reported as unknown and never automatically launches a second command.
 
 ## Project planner
 
@@ -629,3 +631,32 @@ Select text in one of the agent's replies and choose **New thread from
 selection**, from the small button under the reply or the right-click menu. A
 new Code draft opens in the same Project with your selection quoted at the top.
 Nothing is sent until you send it.
+
+### Preparing a new worktree
+
+In the Project overview's Actions list, write a setup command and a folder
+relative to each new worktree. Check the review statement on that action and
+save to enable it for future worktrees. Only one action can prepare worktrees.
+
+**Worktrees → Setup** in the task header shows the recorded recipe and its result;
+choose a child checkout there to inspect its preparation. The first agent task
+waits for setup. You can Cancel a running setup, explicitly Retry a failed or
+interrupted one, or Skip it. Plan cannot run setup. A host restart never repeats
+a potentially non-idempotent recipe automatically. Output is retained only for
+the current host session. Setup uses task access and does not copy secret files
+or the parent environment.
+
+### Giving a child current edits
+
+Children normally start from committed revision. To delegate unfinished edits,
+open **Worktrees → Child source** on the parent task and choose **Review current
+edits**. Inspect the base revision and every included path, then choose **Use
+this snapshot**. Capturing a preview alone does not change the source.
+
+Children prepared from that task now receive independent copies of that stable
+snapshot, including its staging state. Later parent edits and sibling edits do
+not change their files. The child details record the snapshot and committed
+base. Choose **Committed revision** to return to the default for future children.
+Ignored files are excluded; protected or incomplete captures are refused. A
+stale revision needs a new capture or the committed choice. An interrupted copy
+never starts a child or overwrites one on retry; prepare a new child instead.

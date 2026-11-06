@@ -713,7 +713,7 @@ A child run starts only when the thread's agent delegates through `octant_agents
 - The harness's retired `delegate` tool name stays readable in journaled turn records and approvals, so old journals replay.
 - Subagent creation is one setting with two values, Off and Automatic. Only the thread's agent starts a child, and the parent and child hierarchy is the only subagent surface. _Here only._
 - The host prepares the child's workspace (research-only for Chat, the Project root for Work, an isolated managed worktree for Code); no client supplies a path, and wider-than-parent grants are refused.
-- Children start from committed source only, and provider-owned hidden subagents stay disabled.
+- Children default to committed revision. The person may explicitly review and select a stable current-edits checkpoint for children from a parent task; each child records its base/snapshot and preserves staging independently. Incomplete or stale snapshots refuse before admission; copies are never silently reapplied. Provider-owned hidden subagents stay disabled.
 - Concurrency is the person's setting (defaults 4 per thread and 8 per host, at most 16); a turn defaults to 30 working minutes, person-selectable from 1–240 before the next attempt. Retry/Resume start fresh; approval and answer waits pause the clock, and independent two-minute acquisition/startup bounds remain. Recorded attempt and cumulative working time use the existing result evidence and label gaps.
 - Cancelling a child tree proceeds leaves-up and completes only after each process is confirmed stopped; an ambiguous outcome becomes waiting, failed or interrupted, never completed. _Here only._
 
@@ -1722,15 +1722,21 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority]
 
 ### Project actions
 
-A Work or Code Project keeps up to twelve named actions (such as Run, Test and Dev), each a one-line command and a folder inside the bound root, which the person runs in a Project terminal.
-
-- Only a local window saves the list; a paired device is refused, because a saved line is later typed into the person's own shell.
-- The host suggests actions from the root package scripts and build targets without running anything, and saves nothing until the person confirms.
-- Running one names the action, never its text; the host reads the line from the Project record and types it into a terminal the window owns, under that terminal's confinement and checks.
-- A lost reply is reported and never retried, because the command may not be safe to run twice.
-- A Work Project's actions appear once its Developer tools are on (2026-10-31).
+- Work and Code Projects save up to twelve named one-line commands and relative directories through the existing versioned events. Saving and launching remain local-person actions. Suggestions from root scripts and build targets are read-only until confirmed. A Work Project shows actions only when its Developer tools are on.
+- The host previews the folder and branch. A Code thread defaults to its active checkout; the Project and approved extra folders stay explicit choices. Current binding, checkout, policy and command are rechecked before launch; Plan refuses.
+- Each action gets a fresh tracked command process with output, exit status and cancellation, and never receives input through an existing busy shell. Its journaled identity precedes launch and cannot launch twice after restart.
+- Results stay beside the task; Open terminal is an explicit Zen handoff. The window retains the run identity for reattachment; unknown replies and host restart never automatically repeat side effects.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project actions](../architecture.md#security-and-authority).
+
+### Worktree setup
+
+- A Code Project can mark one reviewed saved action as its optional preparation recipe. New managed worktrees record that recipe separately from Git readiness.
+- The first task waits for setup or the person's explicit Skip. Setup uses admitted task access and the existing confined process lifecycle, with bounded output, a ten minute timeout, cancellation and no parent environment or secret copying. Plan refuses execution.
+- Failure needs an explicit Retry or Skip. Host restart reconciles owned processes and exposes interruption without replay; uncertain cleanup refuses a new execution.
+- Worktrees → Setup stays beside the task and can inspect its child checkouts. Existing worktrees keep their recorded recipe when Project actions change.
+
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Worktree setup](../architecture.md#security-and-authority).
 
 ## Remote access and pairing
 

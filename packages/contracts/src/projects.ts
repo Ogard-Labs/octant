@@ -303,10 +303,9 @@ export const ProjectActionDirectory = Schema.String.pipe(
 );
 
 /**
- * A named command the person runs in the Project's terminal: one line they
- * wrote or confirmed, and the folder under the root it runs in. It is typed
- * into the person's own shell, so it runs under the same confinement and
- * approval posture as anything else typed there.
+ * A named command the person runs in a dedicated process: one line they
+ * wrote or confirmed, and the relative folder under the host-resolved root.
+ * The host applies the chosen checkout's current execution authority.
  */
 export const ProjectAction = Schema.Struct({
   id: ProjectActionId,
@@ -318,6 +317,7 @@ export const ProjectAction = Schema.Struct({
     ),
   ),
   directory: ProjectActionDirectory,
+  preparesWorktrees: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ProjectAction = typeof ProjectAction.Type;
 
@@ -325,6 +325,7 @@ export const ProjectActions = Schema.Array(ProjectAction).pipe(
   Schema.filter(
     (actions) =>
       actions.length <= MAX_PROJECT_ACTIONS &&
+      actions.filter((action) => action.preparesWorktrees === true).length <= 1 &&
       new Set(actions.map((action) => String(action.id))).size === actions.length &&
       new Set(actions.map((action) => action.name.toLowerCase())).size === actions.length,
   ),

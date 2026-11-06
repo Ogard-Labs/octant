@@ -2059,10 +2059,33 @@ choice reads as off.
 Each Code child allocation is keyed by its parent and delegation request. Two
 sibling requests receive distinct managed worktrees; only the same request can
 reuse its verified receipt. The host checks the actual Git worktree inventory
-and records the starting commit. Children start from committed source only; the
-parent checkout's uncommitted edits are not copied into a child worktree, and
-there is no opt-in to seed one from the parent's working tree. A child that
-must see an edit starts after the parent commits it.
+and records the starting commit. Committed revision is the default source.
+The person can instead open the parent task's **Worktrees → Child source**,
+capture **Current edits snapshot**, inspect the included paths, then explicitly
+select it for children prepared from that task. Capturing alone does not enable
+it. Selecting **Committed revision** clears the selection. Existing children
+never change when this selection or the parent's files change.
+
+A current-edits source reuses Git checkpoints, with a separate worktree tree and
+index tree, without committing to or changing the parent's branch, files or
+staging. Capture enumerates tracked changes and eligible untracked files,
+including nested untracked files; ignored files are excluded. Protected changes,
+truncated or oversized manifests (over 256 paths), unreadable objects, and an
+unstable capture refuse rather than silently copying a subset. A capture has a
+thirty second bound and is checked against a second capture and observation.
+The selected snapshot is bound to the parent thread, checkout, binding and base
+revision; a stale selection must be replaced or explicitly cleared before a
+child can start.
+
+Each child records its committed base, snapshot identity and included paths in
+its managed receipt and admitted workspace. The parent's child details and the
+child's provider context identify the source. Copying preserves staging in that
+child's independent checkout. The host journals applying and completed copy
+states before admission; an incomplete, failed or interrupted copy refuses
+confirmation and execution. It is never automatically reapplied over a child's
+files, including after a lost reply or restart. Prepare a new child to recover
+an incomplete copy. The checkpoint anchors follow existing checkout retention.
+This source choice transfers files, not model attachments.
 
 Provider-owned child reports are read-only observations through the existing
 `child-agent-activity` SDK event. Chat attempts, Work turn updates, Code operation
@@ -3773,10 +3796,12 @@ Git start in the main folder. Built.
   change. A save there is
   journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
-  folder unless the person picks an extra folder, and a saved action runs
-  under the folder they pick (the action's own directory is relative to it).
-  The host accepts only the main folder or a folder the Project record lists,
-  compared as the exact path, and refuses any other. Every Project terminal
+  folder unless the person picks an extra folder. A saved action previews its
+  host-resolved active checkout by default in a Code thread; Project-level
+  actions use the main folder. The action's directory is relative to that
+  folder. Explicit picks accept only the main folder or an extra folder the
+  Project record lists, compared as the exact path. See the Project actions
+  rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
   header's action buttons and the start screen's quick tools offer the pick
@@ -11381,33 +11406,56 @@ access` agree); a thread's own change is journaled as
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
 - **Project actions.** A Work or Code Project keeps up to twelve named
-  actions (for example Run, Test, Dev) on its record: a name unique within the
-  Project, a one-line command, and a folder inside the bound root. The person
-  saves the whole list from the Project overview
-  (`project.code-actions-changed@1`, `project.work-actions-changed@1`); a
-  paired device is refused, because a saved line is later typed into the
-  person's own shell. An archived Project has none. A Work Project's actions
-  appear once its Developer tools are on (maintainer decision, 2026-10-31:
-  Work has the shell, so Project actions come to Work Projects too).
-  The host suggests
-  actions from the root `package.json` scripts (with the package manager the
-  lockfile names, leaving out install and publish hooks) and the root
-  `Makefile` targets; it reads them without running anything, and nothing is
-  saved until the person confirms. Running an action is the Project terminal's
-  `run-action` command: the caller names the action, never its text, and the
-  host reads the line from the Project record now, then types it into a
-  terminal the window already owns, entering the action's folder from the root
-  first, grouping the whole command behind that folder change so a folder that
-  has gone away stops every statement of it, and rechecking the window's
-  authority and binding after the root resolves. It therefore runs under that terminal's confinement and posture with
-  the same authority checks as any other write, and typing into a shell that is
-  running another program reaches that program. The header buttons (the first
-  three, with the rest in a menu) and the command palette's Actions group ask
-  the window to run one; the window reuses a Project terminal it already
-  pinned, otherwise opens and pins one, and shows it in Zen, the Project
-  terminal's only surface. A refusal means nothing was typed, so the window may try
-  another terminal; a lost reply leaves the outcome unknown, so it is reported
-  and never retried, since the command may not be safe to run twice.
+  actions on its record: a unique name, a one-line command and a relative
+  directory. The person saves the list from the Project overview through the
+  existing versioned Project events; paired devices cannot save or launch them.
+  Suggestions from package scripts and Makefile targets remain read-only until
+  confirmed. Running first previews the host-resolved folder and branch.
+  A Code thread defaults to its authorized active checkout; the Project folder
+  and approved extra folders remain explicit choices. A selected extra folder
+  is shared, not a child worktree. A Project-level run uses the Project folder.
+  Changed checkout identities, revisions, bindings, task authority or saved
+  commands refuse stale launch. Plan never starts an action. A task-bound run
+  stops when its task, checkout or execution authority is revoked.
+
+  `start-action` launches a fresh command process under the existing terminal
+  confinement and sanitized environment, not input into a running shell. The
+  request names a saved action and checkout identities, never executable text.
+  Its terminal start is journaled before launch; a repeated request identity,
+  including after host restart, never starts another process. The legacy
+  `run-action` command refuses rather than writing into an existing shell.
+  Output, completion, exit status and cancellation use the terminal lifecycle.
+  The action dialog stays beside the task without entering Zen; **Open terminal**
+  is the explicit handoff to that view. Closing the dialog leaves the run alone;
+  the window retains its run identity in session storage and reattaches on
+  reopening, with host authority checked again. A lost response is unknown,
+  never automatically retried. Preparing a new run is an explicit decision;
+  an interrupted run is never restarted by reopening or restarting the host.
+
+- **Worktree setup.** A Code Project may designate one saved action as its
+  optional worktree preparation recipe. The person reviews the command and
+  relative folder before enabling automatic use. Each new managed worktree
+  records the reviewed recipe separately from its Git readiness. The first
+  agent task waits for preparation; child runs use their admitted task access.
+  Plan and tasks without shell/write authority cannot execute setup. A child’s admitted network ceiling remains enforced. Enabling a recipe does not grant wider access.
+  The shared confined process runner owns the recipe's shell, bounded output,
+  ten minute timeout, cancellation and descendant cleanup; an existing task startup ceiling may end automatic child preparation earlier. Its environment is
+  allowlisted; no secret files, arbitrary credentials or parent environment are
+  copied. The recipe folder resolves inside the new checkout. A changed recipe
+  or revoked task authority refuses launch and cancels an active preparation.
+
+  Pending, running, succeeded, failed, cancelled, interrupted, skipped and
+  uncertain cleanup are separate recorded states. Running is journaled before
+  spawn. Retry carries a durable decision identity; replay never starts it again, even after another attempt or host restart. Failure needs an explicit Retry or Skip in **Worktrees → Setup**, beside
+  the task; child checkouts are selectable there. A skipped preparation stays
+  visible. Restart first reconciles owned processes, then exposes interrupted
+  setup without replaying it. Unconfirmed descendant cleanup blocks Retry and
+  Skip. Failed startup reconciliation leaves the host usable and refuses setup
+  launches and Skip until cleanup is confirmed and the host restarts.
+  Output is a bounded host-lifetime tail, not journal content, and is
+  unavailable after restart. The recipe’s ordinary action button opens this same lifecycle for a managed checkout, avoiding an independent second preparation. A new recipe does not retroactively alter an
+  existing worktree's recorded recipe.
+
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per

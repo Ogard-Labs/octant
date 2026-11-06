@@ -1018,6 +1018,24 @@ export class Journal {
     return row === undefined ? undefined : this.#decodeRow(row);
   }
 
+  hasEventIdentity(eventId: string): boolean {
+    return this.#selectEventIdentity.get(eventId) !== undefined;
+  }
+
+  latestAggregateEvent(input: {
+    readonly aggregateType: string;
+    readonly aggregateId: string;
+  }): EventEnvelope | undefined {
+    if (input.aggregateType.trim().length === 0 || input.aggregateId.trim().length === 0)
+      throw new JournalInputInvalid({ operation: "replay" });
+    const head = this.#selectHead.get(input.aggregateType, input.aggregateId) as
+      | AggregateHeadRow
+      | undefined;
+    return head === undefined
+      ? undefined
+      : this.replayAggregate({ ...input, afterVersion: head.aggregate_version - 1, limit: 1 })[0];
+  }
+
   replayAggregate(cursor: AggregateReplayCursor): ReadonlyArray<EventEnvelope> {
     if (
       cursor.aggregateType.trim().length === 0 ||

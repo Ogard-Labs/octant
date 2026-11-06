@@ -322,6 +322,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "providerDataDirectory"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
+    | "worktreePreparation"
   > &
   Pick<
     BrowserWiring,
@@ -422,6 +423,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     recordAppleEvidence,
     resolveSelectedExtensions,
     pinnedExtensionIds,
+    worktreePreparation,
     roots,
     runtimeOutsideContentMarks,
     selectCodeConversation,
@@ -576,6 +578,23 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        prepareWorktree: async (thread, root, current) => {
+          const checkout = persistence.readCodeCheckout(thread.checkoutId);
+          if (checkout?.kind !== "managed-worktree") return undefined;
+          const context = await worktreePreparation.context({
+            receiptId: String(checkout.ownershipReceiptId),
+            threadId: String(thread.id),
+            checkoutId: String(checkout.id),
+            projectId: String(thread.projectId),
+            root,
+            executionPolicy: thread.executionPolicy,
+            current: () =>
+              current() && persistence.readCodeThread(thread.id)?.lifecycle === "active",
+          });
+          return context === undefined
+            ? "Worktree setup ownership is unavailable."
+            : worktreePreparation.ensure(context);
+        },
         shield: hostShield,
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({

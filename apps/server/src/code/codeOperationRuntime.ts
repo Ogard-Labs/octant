@@ -286,6 +286,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 }
 
 export interface CodeOperationRuntimeOptions {
+  readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -1211,6 +1212,7 @@ export function createCodeOperationRuntime(
         );
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
+    ...(options.prepareWorktree === undefined ? {} : { prepareWorktree: options.prepareWorktree }),
     terminals: terminal,
     ...(options.terminalBrowserGrants === undefined
       ? {}
