@@ -5008,6 +5008,12 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
 }
+/* A Nightly client's Octant-only page: one quiet line, no controls. */
+.settings-managed-in-octant {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
 /* label left, control right, description under the label */
 .settings-item {
   display: grid;

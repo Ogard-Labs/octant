@@ -43,6 +43,35 @@ Test data label, startup on its own folder, port, logs and Keychain service
 names, and the host payload and worker runtime in packaged Nightly. A signed
 Nightly running its test host has not yet been exercised.
 
+Every desktop channel now has a class in Nightly's client mode, and Octant-only
+administration is absent from a Nightly client window
+([below](#what-a-nightly-client-window-offers)). The four maintainer decisions of
+2026-11-06 ([below](#maintainer-decisions-2026-11-06)) are recorded; apart from
+that classification they are not built.
+[Before Nightly publishes](#before-nightly-publishes) lists what the first
+Nightly publication still needs.
+
+## Maintainer decisions (2026-11-06)
+
+1. **Native operations through the host.** Nightly reaches the host's native
+   operations by the host trusting a distinct native-main token per Nightly
+   window, admitted only on a closed allowlist of routes and bound to that
+   window's native lease. The token is neither the renderer's window
+   capability nor Octant's administrative bridge secret, and it ends with the
+   lease. Administration stays with Octant and is hidden in Nightly: remote
+   access and the private listener, hub administration, device pairing and
+   paired computers, launch sessions, owner unlock and host identity.
+   Planned; the channel classification below is built.
+2. **Embedded Browser parity blocks publication.** Every gap in the embedded
+   Browser blocks the first Nightly publication, accessibility (VoiceOver in
+   the embedded page) included. A companion window stays rejected. Planned.
+3. **Linux Nightly stays in scope.** It needs its own Linux client trust design,
+   because Linux has no code-signature check or audit-token peer identity to
+   admit a Nightly main by. Designed, not built; the design comes first.
+4. **The signed feed names its app.** The signed update feed will name the app
+   it is for (Octant or Octant Nightly), and each app refuses a feed for the
+   other with a clear message, beside the existing ring check. Planned.
+
 ## Two apps, one set of data
 
 Octant ships as two apps that install side by side and can be open at the same
@@ -82,7 +111,9 @@ The data folder has one host, and it is Octant's.
   person when it ships in Octant. Nightly decodes host answers the forgiving
   way every client does, and a Nightly feature that needs a host command
   Octant does not have yet says "Needs a newer Octant" instead of failing
-  silently.
+  silently. That wording is kept for a host that lacks the feature; a channel
+  Nightly does not answer for another reason refuses by its class
+  ([below](#what-a-nightly-client-window-offers)).
 - The host keeps running while either app has a window open. Quitting one app
   leaves the other working; quitting the last one stops the host, as today.
   Updating Octant restarts the host, and Nightly reconnects when it is back.
@@ -438,6 +469,63 @@ accessibility,
 remaining native-popup parity, other native brokers and the remaining lifecycle behavior
 need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
 packaged coexistence, signed-in browsing, or native identity verification.
+
+## What a Nightly client window offers
+
+In client mode, Nightly's main gives every desktop channel one class from a
+closed table (`apps/desktop/src/nightlyClientChannels.ts`); a test fails when a
+channel is missing from it:
+
+| Class         | Meaning                                                                   | Refusal while unanswered                         |
+| ------------- | ------------------------------------------------------------------------- | ------------------------------------------------ |
+| `local`       | Nightly's own main answers it (window, menus, updates, Data, capture)     | "Not available in Octant Nightly yet."           |
+| `brokered`    | It needs the host (pickers, credentials, Code approvals, Canvas, tools)   | "Not available in Octant Nightly yet."           |
+| `octant-only` | Administration that stays with Octant (decision 1) and installing Nightly | "Managed in Octant. Open Octant to change this." |
+| `replaced`    | Nightly uses another mechanism: the Browser's human presentation          | Names the Browser presentation                   |
+
+- Nightly's main refuses to start if it answers a channel its table does not
+  mark `local`. An unlisted channel counts as Octant-only.
+- Brokered channels stay refused until the native-main token of decision 1
+  admits them; local ones still unanswered come with Nightly's own native
+  surfaces.
+- The preload of a Nightly client window omits every member that reaches an
+  Octant-only channel, so the shared renderer hides those screens as it does
+  for a remote client. Where Settings › Remote access would be, it shows one
+  quiet line: "Managed in Octant", naming what is set up there.
+- Nightly's test-host mode runs the full host-owning main, keeps every channel
+  and shows every screen.
+
+## Before Nightly publishes
+
+The first scheduled Nightly publication needs all of these, each with its own
+evidence; the preflight that replaces the early gate checks them:
+
+- [x] Every desktop channel classified; Octant-only administration hidden in
+      the Nightly client.
+- [ ] A synthetic Nightly client smoke that runs in CI, never packaged.
+- [ ] Nightly's local native surfaces: app menu without developer tools,
+      external links, notifications and badge, `octant-nightly://` links,
+      reset bounds, sidebar material, window capture and the Open in list.
+- [ ] Native-main token admission on the host's closed route allowlist, with
+      negative tests, and a host feature list in the window bootstrap.
+- [ ] Pickers and file handoffs, provider credentials and API keys, and Code
+      operation approvals through that admission.
+- [ ] "Needs a newer Octant" driven by the host's feature list.
+- [ ] Complete embedded Browser parity: select and other native popups,
+      dialogs, link and media menus, file chooser, `window.open`, password and
+      other secure input, nested frames, custom editors, multiline caret and
+      accessibility (decision 2).
+- [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
+      an unsigned packaged Nightly smoke.
+- [ ] The full `octant-nightly` command.
+- [ ] Roll-forward rollback, a published host feature list and the app named
+      in the signed feed (decision 4).
+- [ ] Linux client trust, designed and built (decision 3).
+- [ ] The usable-client preflight in place of the early gate, with no secrets,
+      checking compatibility against the published Octant features.
+- [ ] Maintainer checks: a signed pair, a signed install from Settings,
+      real-account sign-ins, physical IME and VoiceOver checks, and approval of
+      the first scheduled publication.
 
 ## Fixed packaged entry
 
