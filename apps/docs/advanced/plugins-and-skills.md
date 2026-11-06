@@ -523,6 +523,22 @@ store is unavailable, restore it before retrying. Application setup never
 replaces your account consent or expands what a task may do. GitHub continues
 to accept personal access tokens.
 
+Choose **HubSpot** in Library or Connectors. **Connect** opens **Client setup**
+before account consent. Follow the linked HubSpot guide to create an MCP
+connector in your account. Copy Octant's exact **Callback address** into that
+connector's redirect URLs. Enter its client ID, select POST authentication, and
+link its client secret from your linked secret store. Save setup, then choose
+**Sign in** and review the account and permissions in HubSpot. Consent may allow
+both reading and updating CRM data; it does not bypass task approvals.
+
+Available tools depend on your subscription, user permissions and account
+configuration. Sensitive Data settings can block activities and conversations.
+Ask an authorized task to run `get_user_details` to inspect reported access.
+New vendor scopes may require reconnecting and consenting again. If a grant
+expires or is revoked, restore the linked store or sign in again; check the
+outcome of any failed tool before explicitly retrying it. Octant never replays
+that call automatically.
+
 Choose **Slack** in Library or Connectors to add its local setup entry.
 **Connect** opens client setup first; saving your app identity does not start
 account consent. Follow the linked Slack setup guide with an eligible app you

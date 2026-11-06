@@ -9160,6 +9160,22 @@ preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
 
+**HubSpot setup.** The non-featured HubSpot entry uses the vendor's Streamable
+HTTP address `https://mcp.hubspot.com/` and opens the shared registered-client
+setup before separate account consent. A person creates a HubSpot MCP connector,
+registers the exact retained callback, and links its client secret through the
+existing broker. The public discovery checked on 2026-11-06 advertised resource
+and issuer `https://mcp.hubspot.com`, PKCE S256, `client_secret_post`, empty scope
+lists and no dynamic registration. No fixed scope list is invented: permissions
+are chosen in HubSpot consent and depend on the person's account. Consent can
+permit reads and writes; task activation and tool approvals still apply.
+Subscription, user permissions and Sensitive Data settings affect tool and object
+availability. Setup does not prove authenticated tool readiness. After consent,
+use `get_user_details` in an authorized task to inspect the reported access;
+expired or revoked grants follow existing refresh/reconnect without replaying a
+failed tool. No HubSpot-hosted registration service or shared app secret is added.
+Source: [HubSpot MCP setup](https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server).
+
 **Local Paper setup.** Paper is a local MCP server, separate from the hosted
 connector catalog. The Library includes one bundled setup entry that adds an
 ordinary generated user-added package at `http://127.0.0.1:29979/mcp`, with
