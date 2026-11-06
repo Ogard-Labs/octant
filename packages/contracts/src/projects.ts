@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ApprovedWorkingFolders } from "./workingDirectory";
 import { CanvasDesignBrand } from "./canvasBrand";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
@@ -200,6 +201,8 @@ export const ProjectExtraFolder = Schema.Struct({
   canonicalRoot: ProjectFolderPath,
   addedBy: ProjectActor,
   addedAt: UtcTimestamp,
+  /** Server-owned add identity; older records use their original timestamp. */
+  addedRevision: Schema.optional(AggregateVersion),
 }).annotations(strict);
 export type ProjectExtraFolder = typeof ProjectExtraFolder.Type;
 
@@ -424,6 +427,7 @@ const WorkProjectSummary = Schema.Struct({
   binding: CanonicalProjectBinding,
   /** Exact current binding revision the renderer must send on create/first turn. */
   bindingRevisionId: BindingRevisionId,
+  workingFolders: Schema.optional(ApprovedWorkingFolders),
   origin: Schema.optional(ProjectOrigin),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
   nativeProviders: Schema.optional(KeyProviderDriverKinds),
@@ -439,6 +443,7 @@ const CodeProjectSummary = Schema.Struct({
   type: Schema.Literal("code"),
   binding: CanonicalProjectBinding,
   bindingRevisionId: BindingRevisionId,
+  workingFolders: Schema.optional(ApprovedWorkingFolders),
   origin: Schema.optional(ProjectOrigin),
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),

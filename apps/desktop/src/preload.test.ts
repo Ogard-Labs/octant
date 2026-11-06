@@ -1,9 +1,14 @@
+import { webUtils } from "electron";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { NEEDS_NEWER_OCTANT, nightlyClientChannelClass } from "./nightlyClientChannels";
 
-vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
+vi.mock("electron", () => ({
+  contextBridge: {},
+  ipcRenderer: {},
+  webUtils: { getPathForFile: vi.fn(() => "") },
+}));
 
 import {
   HOST_BRIDGE_KEY,
@@ -747,6 +752,7 @@ describe("desktop preload bridge", () => {
       "forgetPairedComputer",
       "forgetRemoteServerPages",
       "getComputerUseStatus",
+      "getDroppedFilePath",
       "getHostCapabilities",
       "getManagedToolsStatus",
       "getPrivateListenerStatus",
@@ -1750,4 +1756,18 @@ describe("native menu bridge", () => {
     expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
     expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
   });
+});
+
+it("extracts native dropped paths through Electron and refuses synthetic or unavailable files", () => {
+  const ipc: IpcRendererPort = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
+  const bridge = createHostBridge(ipc, projectWindowCapability);
+  const file = new File([], "folder");
+  vi.mocked(webUtils.getPathForFile).mockReturnValueOnce("/project/日本語 folder");
+  expect(bridge.getDroppedFilePath?.(file)).toBe("/project/日本語 folder");
+  expect(bridge.getDroppedFilePath?.(file)).toBeUndefined();
+  vi.mocked(webUtils.getPathForFile).mockImplementationOnce(() => {
+    throw new Error("not a native file");
+  });
+  expect(bridge.getDroppedFilePath?.(file)).toBeUndefined();
+  expect(ipc.invoke).not.toHaveBeenCalled();
 });

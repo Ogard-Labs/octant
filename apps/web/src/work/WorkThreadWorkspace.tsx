@@ -1,3 +1,4 @@
+import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -1785,6 +1786,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             projectId,
             bindingRevisionId: thread.bindingRevisionId,
             workingDirectory: thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
             confinementPosture: "project-root-confined",
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
@@ -1935,6 +1939,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [completing, props.threadClient, thread]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope: { mode: "work", threadId: props.threadId },
+    draft: prompt,
+    onDraftChange: (text, caret) => rememberDraft(text, caret),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.hostId,
+    refused: serverWorkProject !== undefined || creating || completionLocked,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -1980,16 +1998,26 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
   );
   const projectLabel = project?.name ?? serverWorkProject?.name;
+  const chosenFolder =
+    project?.type === "work"
+      ? project.workingFolders?.find((folder) => folder.id === thread?.workingFolderId)
+      : undefined;
+  const folderUnavailable = thread?.workingFolderId !== undefined && chosenFolder === undefined;
   const folder = thread?.workingDirectory;
   // A server thread's folder is named where it is: `alias:folder` on its server.
   const root =
     serverWorkProject !== undefined
       ? serverWorkProject.location
       : project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
-        ? project.binding.canonicalRoot
+        ? chosenFolder?.kind === "extra"
+          ? chosenFolder.label
+          : folderUnavailable
+            ? undefined
+            : project.binding.canonicalRoot
         : undefined;
-  const path =
-    root === undefined
+  const path = folderUnavailable
+    ? "Working folder unavailable"
+    : root === undefined
       ? folder
       : folder === undefined || folder === "."
         ? root
@@ -2475,6 +2503,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
+        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2490,9 +2519,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               )}
               {path === undefined ? null : (
                 <span className="work-folder-bar__folder" title={path}>
-                  {folder === undefined || folder === "."
-                    ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
-                    : folder}
+                  {folderUnavailable
+                    ? "Working folder unavailable"
+                    : folder === undefined || folder === "."
+                      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+                      : folder}
                 </span>
               )}
             </div>
@@ -2583,6 +2614,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onKeyUp={(event) => {
                 rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                  event.preventDefault();
               }}
               onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
                 if ((creating && !preparingQueue.current) || completionLocked) return;

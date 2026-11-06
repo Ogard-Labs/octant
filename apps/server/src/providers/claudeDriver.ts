@@ -521,10 +521,15 @@ export function claudeFileToolSecretRefusal(
     // a search passes over a protected file the OS refuses to open.
     if (!searchesRunUnguarded) return undefined;
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    const searchRoot = rootedClaudeFilePath(
+      typeof input.path === "string" ? input.path : ".",
+      projectRoot,
+    );
     const roots = [
-      typeof input.path === "string" ? input.path : projectRoot,
-      // An absolute Glob pattern searches from its own fixed prefix.
-      ...(toolName === "Glob" && pattern.startsWith("/") ? [globFixedPrefix(pattern)] : []),
+      searchRoot,
+      // A relative Glob can leave its search folder through a fixed `..`
+      // prefix; check that resolved location as well as the named root.
+      ...(toolName === "Glob" ? [rootedClaudeFilePath(globFixedPrefix(pattern), searchRoot)] : []),
     ];
     for (const root of roots) {
       const refusal = secretGuardSearchRefusal(root, options);
@@ -536,7 +541,7 @@ export function claudeFileToolSecretRefusal(
   for (const key of ["file_path", "notebook_path", "path"] as const) {
     const value = input[key];
     if (typeof value !== "string") continue;
-    const refusal = secretGuardRefusal(value, options);
+    const refusal = secretGuardRefusal(rootedClaudeFilePath(value, projectRoot), options);
     if (refusal !== undefined) return refusal;
   }
   return undefined;
@@ -552,7 +557,12 @@ export function claudeSearchesRunUnguarded(policy: ProviderExecutionPolicy): boo
   return policy === "approval-gated" || policy === "auto-accept-edits" || policy === "full-access";
 }
 
-/** The folders of an absolute glob before its first wildcard. */
+/** Keep `..` until the guard can check the kernel's symlink interpretation too. */
+function rootedClaudeFilePath(path: string, root: string): string {
+  return isAbsolute(path) ? path : `${root}/${path}`;
+}
+
+/** The fixed prefix before a glob’s first wildcard, relative or absolute. */
 function globFixedPrefix(pattern: string): string {
   const segments: string[] = [];
   for (const segment of pattern.split("/")) {
@@ -560,7 +570,7 @@ function globFixedPrefix(pattern: string): string {
     segments.push(segment);
   }
   const prefix = segments.join("/");
-  return prefix === "" ? "/" : prefix;
+  return prefix === "" ? (pattern.startsWith("/") ? "/" : ".") : prefix;
 }
 
 /**

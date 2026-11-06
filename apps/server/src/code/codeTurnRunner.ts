@@ -173,6 +173,7 @@ export interface CodeTurnRunnerInput {
   readonly thread: CodeThread;
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
   readonly checkoutRoot: string;
+  readonly providerRoot?: string;
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
   readonly prompt: string;
@@ -364,7 +365,7 @@ export class CodeTurnRunner {
         .acquire({
           instanceId: input.thread.providerInstanceId,
           mode: "code",
-          projectRoot: input.checkoutRoot,
+          projectRoot: input.providerRoot ?? input.checkoutRoot,
           ...(input.extraFolders === undefined || input.extraFolders.length === 0
             ? {}
             : { extraFolders: input.extraFolders }),

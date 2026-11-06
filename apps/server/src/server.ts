@@ -825,6 +825,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      workThreadProjection,
       agentRunPersistence,
       worktreePreparation,
       childWorktreeSources,

@@ -1,3 +1,5 @@
+import { decodeThreadWorkingDirectory, type ThreadWorkingFolderChoice } from "@octant/contracts";
+import { ApprovedWorkingFolderControl } from "../environment/ApprovedWorkingFolderControl";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
@@ -196,6 +198,7 @@ export interface DraftThreadWorkspaceProps {
     permissionPersistence?: PermissionPersistence,
     modelOptionValues?: ProviderModelOptionValues,
     terminalSession?: TerminalSessionImportRequest,
+    workingFolder?: ThreadWorkingFolderChoice,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -330,6 +333,11 @@ const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
 ];
 
 export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
+  const [workingFolderValid, setWorkingFolderValid] = useState(true);
+  const [folderChoice, setFolderChoice] = useState<{
+    readonly projectId: string;
+    readonly choice: ThreadWorkingFolderChoice;
+  }>();
   const [localProjectId, setLocalProjectId] = useState<ProjectId | undefined>(props.projectId);
   // The shell owns a persisted selection when supplied; refused transitions
   // must keep its former Project without replacing the composer's draft.
@@ -507,24 +515,27 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     createFromSelection?.kind === "terminal" ? createFromSelection.request : undefined;
   // Every create path below names its arguments up to the ones it uses; a
   // terminal session rides after all of them, so it is added here once.
-  const createThread: DraftThreadWorkspaceProps["onCreateThread"] = (...args) =>
-    terminalSession === undefined
-      ? props.onCreateThread(...args)
-      : props.onCreateThread(
-          args[0],
-          args[1],
-          args[2],
-          args[3],
-          args[4],
-          args[5],
-          args[6],
-          args[7],
-          args[8],
-          args[9],
-          args[10],
-          args[11],
-          terminalSession,
-        );
+  const createThread: DraftThreadWorkspaceProps["onCreateThread"] = (...args) => {
+    if (!workingFolderValid) return false;
+    if (workingFolder === undefined && terminalSession === undefined)
+      return props.onCreateThread(...args);
+    return props.onCreateThread(
+      args[0],
+      args[1],
+      args[2],
+      args[3],
+      args[4],
+      args[5],
+      args[6],
+      args[7],
+      args[8],
+      args[9],
+      args[10],
+      args[11],
+      terminalSession ?? args[12],
+      ...(workingFolder === undefined ? ([] as const) : ([workingFolder] as const)),
+    );
+  };
   const [selectedProjectLabel, setSelectedProjectLabel] = useState(
     props.projectId === undefined ? undefined : props.projectName,
   );
@@ -616,6 +627,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           { kind: "add-folder" as const },
         ]),
   ];
+  const workingFolders =
+    selectedProject !== undefined && selectedProject.type !== "chat"
+      ? (selectedProject.workingFolders ?? [])
+      : [];
+  const workingFolder =
+    folderChoice?.projectId === String(selectedProjectId)
+      ? folderChoice.choice
+      : workingFolders[0] === undefined
+        ? undefined
+        : {
+            workingFolderId: workingFolders[0].id,
+            workingDirectory: decodeThreadWorkingDirectory("."),
+          };
   const selectedProjectName =
     selectedProjectId === undefined
       ? undefined
@@ -697,31 +721,43 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const folderControl =
     props.mode === "chat" || props.mode === "code" || props.mode === "work" ? (
-      <ComposerProjectSelector
-        {...(props.creating === undefined ? {} : { disabled: props.creating })}
-        entries={projectEntries}
-        onAddFolder={addFolder}
-        onSelect={(entry) => {
-          if (entry.kind === "saved-project" || entry.kind === "server-project") {
-            selectProject(entry.projectId);
-            setSelectedProjectLabel(entry.displayName);
-          } else if (entry.kind === "unfiled") {
-            selectUnfiled();
-          } else if (
-            entry.kind === "default-folder" &&
-            props.onEnsureDefaultProject !== undefined &&
-            (props.mode === "work" || props.mode === "code")
-          ) {
-            void props.onEnsureDefaultProject(props.mode).then((ensured) => {
-              if (ensured === undefined) return;
-              selectProject(ensured.projectId);
-              setSelectedProjectLabel(ensured.name);
-            });
-          }
-        }}
-        {...(projectSelection === undefined ? {} : { selection: projectSelection })}
-        {...(githubProjectSource === undefined ? {} : { github: githubProjectSource })}
-      />
+      <>
+        <ComposerProjectSelector
+          {...(props.creating === undefined ? {} : { disabled: props.creating })}
+          entries={projectEntries}
+          onAddFolder={addFolder}
+          onSelect={(entry) => {
+            if (entry.kind === "saved-project" || entry.kind === "server-project") {
+              selectProject(entry.projectId);
+              setSelectedProjectLabel(entry.displayName);
+            } else if (entry.kind === "unfiled") {
+              selectUnfiled();
+            } else if (
+              entry.kind === "default-folder" &&
+              props.onEnsureDefaultProject !== undefined &&
+              (props.mode === "work" || props.mode === "code")
+            ) {
+              void props.onEnsureDefaultProject(props.mode).then((ensured) => {
+                if (ensured === undefined) return;
+                selectProject(ensured.projectId);
+                setSelectedProjectLabel(ensured.name);
+              });
+            }
+          }}
+          {...(projectSelection === undefined ? {} : { selection: projectSelection })}
+          {...(githubProjectSource === undefined ? {} : { github: githubProjectSource })}
+        />
+        {workingFolder === undefined ? null : (
+          <ApprovedWorkingFolderControl
+            key={String(selectedProjectId)}
+            onValidityChange={setWorkingFolderValid}
+            folders={workingFolders}
+            value={workingFolder}
+            onChange={(choice) => setFolderChoice({ projectId: String(selectedProjectId), choice })}
+            code={props.mode === "code"}
+          />
+        )}
+      </>
     ) : null;
   const addFolderDialog =
     addFolderOpen && props.onCreateProject !== undefined ? (
@@ -900,6 +936,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         onCreateThread={(input) => {
+          if (!workingFolderValid) return false;
           const submitted = {
             ...input,
             ...(issueContext === undefined ? {} : { issueContext }),
@@ -907,7 +944,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ...(terminalSession === undefined ? {} : { terminalSession }),
           };
           if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
-            return props.onCreateCodeThread(submitted, selectedProjectId);
+            return props.onCreateCodeThread(
+              { ...submitted, ...(workingFolder === undefined ? {} : { workingFolder }) },
+              selectedProjectId,
+            );
           }
           // Carry the outcome the user confirmed in the composer, and the
           // access posture they submitted with, so the fallback path never

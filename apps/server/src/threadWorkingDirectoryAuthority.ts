@@ -1,3 +1,4 @@
+import { realpathSync, statSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import type { ThreadWorkingDirectory } from "@octant/contracts";
@@ -31,4 +32,32 @@ async function canonicalDirectory(path: string, label: string): Promise<string> 
 function isWithin(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot === "" || (pathFromRoot !== ".." && !pathFromRoot.startsWith("../"));
+}
+
+/** A selected physical directory cannot become a different folder while a turn runs. */
+export function threadWorkingDirectoryCurrent(root: string, directory: string): () => boolean {
+  const identity = (path: string) => {
+    if (realpathSync.native(path) !== path) return undefined;
+    const facts = statSync(path, { bigint: true });
+    return facts.isDirectory() ? `${facts.dev}:${facts.ino}` : undefined;
+  };
+  try {
+    const rootIdentity = identity(root);
+    const directoryIdentity = identity(directory);
+    return () => {
+      try {
+        return (
+          rootIdentity !== undefined &&
+          directoryIdentity !== undefined &&
+          identity(root) === rootIdentity &&
+          identity(directory) === directoryIdentity &&
+          isWithin(root, directory)
+        );
+      } catch {
+        return false;
+      }
+    };
+  } catch {
+    return () => false;
+  }
 }

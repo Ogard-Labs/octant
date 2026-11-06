@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import {
   decodeFileMentionCommand,
   decodeFileMentionCommandResult,
@@ -50,6 +51,11 @@ const fatalDecoder = new TextDecoder("utf-8", { fatal: true });
 const prefixDecoder = new TextDecoder("utf-8", { fatal: false });
 
 export interface FileMentionAuthority {
+  resolveDraftRoot?(
+    windowId: WindowId,
+    mode: "code-draft" | "work-draft",
+    projectId: string,
+  ): Promise<FileMentionRootResolution>;
   resolveCodeRoot(
     windowId: WindowId,
     threadId: string,
@@ -183,13 +189,69 @@ export class FileMentionService {
 
   async execute(
     commandInput: unknown,
-    context: { readonly windowId: WindowId },
+    context: { readonly windowId: WindowId; readonly localHost?: boolean },
   ): Promise<FileMentionCommandResult> {
     let command: FileMentionCommand;
     try {
       command = decodeFileMentionCommand(commandInput);
     } catch {
       return failed(unknownRequestId(commandInput), "invalid");
+    }
+    if (command.kind === "inspect-folder-mentions") {
+      if (context.localHost !== true) return failed(command.requestId, "unauthorized");
+      const scope = command.scope;
+      const root =
+        "projectId" in scope
+          ? await this.#authority.resolveDraftRoot?.(
+              context.windowId,
+              scope.mode,
+              String(scope.projectId),
+            )
+          : await this.#resolveRoot(context.windowId, scope);
+      if (root === undefined) return failed(command.requestId, "unavailable");
+      if (root.kind !== "ok") return failed(command.requestId, root.kind);
+      const folders: Array<{ path: string; hostId: "local" }> = [];
+      const unavailable: Array<UnavailableFileMention> = [];
+      for (const path of new Set(command.paths)) {
+        const roots = [root, ...(root.extraRoots ?? [])].sort(
+          (a, b) => b.rootPath.length - a.rootPath.length,
+        );
+        const permitted =
+          path.startsWith("/") &&
+          !Array.from(path).some(
+            (character) =>
+              character === "\\" || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+          ) &&
+          !path.split("/").includes("..")
+            ? roots.find(
+                (candidate) =>
+                  path === candidate.rootPath || path.startsWith(`${candidate.rootPath}/`),
+              )
+            : undefined;
+        if (permitted === undefined) {
+          unavailable.push({ path, reason: "out-of-root" });
+          continue;
+        }
+        const located = await this.#io.locate(
+          permitted.rootPath,
+          posix.relative(permitted.rootPath, path) || ".",
+          permitted.rootIdentity,
+        );
+        if (located.kind === "directory") {
+          if (!folders.some((folder) => folder.path === located.canonicalPath))
+            folders.push({ path: located.canonicalPath, hostId: "local" });
+        } else
+          unavailable.push({
+            path,
+            reason: located.kind === "escapes-root" ? "out-of-root" : "not-found",
+          });
+      }
+      return decodeFileMentionCommandResult({
+        kind: "folder-mentions-inspected",
+        requestId: command.requestId,
+        folders,
+        unavailable,
+      });
     }
     const root = await this.#resolveRoot(context.windowId, command.scope);
     if (root.kind !== "ok") return failed(command.requestId, root.kind);

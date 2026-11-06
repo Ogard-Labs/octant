@@ -1,5 +1,6 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   type ChatThread,
   type ChatThreadId,
@@ -249,7 +250,7 @@ export function wireChat(deps: ChatDependencies) {
       return {
         projectId: project.id,
         projectName: project.name,
-        canonicalRoot: project.binding.canonicalRoot,
+        canonicalRoot: approvedWorkingFolderRoot(project, thread.workingFolderId) ?? "",
         ...(thread.workingDirectory === undefined
           ? {}
           : { workingDirectory: String(thread.workingDirectory) }),

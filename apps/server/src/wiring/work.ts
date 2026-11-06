@@ -1,3 +1,4 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -602,7 +603,10 @@ export function wireWork(deps: WorkDependencies) {
       consumeIssueContextFramed: consumeCreateFromIssueFramed,
       projects: projectService,
       projection: workTurnProjection,
-      workingDirectories: { resolve: resolveThreadWorkingDirectory },
+      workingDirectories: {
+        resolve: resolveThreadWorkingDirectory,
+        current: threadWorkingDirectoryCurrent,
+      },
       resolveDriver: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined) return undefined;
@@ -663,6 +667,24 @@ export function wireWork(deps: WorkDependencies) {
     });
     const fileMentionService = new FileMentionService({
       authority: {
+        resolveDraftRoot: async (windowId, mode, projectId) => {
+          const bootstrap = await projectService.bootstrap(windowId);
+          const project = bootstrap.active.find((entry) => String(entry.id) === projectId);
+          if (
+            project === undefined ||
+            project.lifecycle !== "active" ||
+            project.type === "chat" ||
+            project.type !== (mode === "code-draft" ? "code" : "work")
+          )
+            return { kind: "unauthorized" };
+          const pinned = await pinFileMentionRoot(project.binding.canonicalRoot);
+          return pinned.kind === "ok"
+            ? {
+                ...pinned,
+                extraRoots: await pinFileMentionExtraRoots(projectExtraFolderRoots(project)),
+              }
+            : pinned;
+        },
         resolveCodeRoot: async (windowId, threadId, checkoutId) => {
           try {
             const view = await codeService.read(windowId, decodeCodeThreadId(threadId));

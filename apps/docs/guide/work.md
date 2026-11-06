@@ -11,6 +11,18 @@ conversation with no file access, and **In a folder** starts work in one folder
 you choose. Both kinds of thread show in the same sidebar list, and each keeps
 the kind it started as.
 
+## Choose the task's working folder
+
+Before creating a task, choose **Task working folder** and, if needed, a relative
+subfolder. The list contains folders already approved for this Project. Adding or
+naming a folder does not change its permissions. The provider, terminal defaults,
+saved actions and new Work artifacts use the recorded choice. Choose another root
+or subfolder in a new task; an existing native conversation keeps its original root.
+
+The composer and Environment show the choice. A removed or unavailable folder
+stops the task rather than sending output elsewhere. Work artifacts retain their
+own original destination through revision, rename, conversion, export and replay.
+
 ## Work Projects
 
 Create a Work Project from the sidebar:

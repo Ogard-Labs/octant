@@ -1,4 +1,5 @@
 import {
+  decodeProjectWorkingFolderId,
   decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderModelId,
@@ -1102,6 +1103,96 @@ describe("DraftThreadWorkspace", () => {
     );
   });
 
+  it("keeps the Code draft without creating a task while its visible working subfolder is invalid", async () => {
+    const user = userEvent.setup();
+    const onCreateCodeThread = vi.fn();
+    const onCreateThread = vi.fn();
+    const main = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const withFolders = projects.map((project) =>
+      project.type === "code"
+        ? {
+            ...project,
+            workingFolders: [{ id: main, label: "Main folder", kind: "main" as const }],
+          }
+        : project,
+    );
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projectId={codeProjectId}
+        projects={withFolders}
+        onCreateThread={onCreateThread}
+        onCreateCodeThread={onCreateCodeThread}
+      />,
+    );
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "Fix search without losing this draft");
+    const subfolder = screen.getByLabelText("Subfolder within working folder");
+    await user.clear(subfolder);
+    await user.type(subfolder, "src");
+    await user.clear(subfolder);
+    await user.type(subfolder, "../outside");
+    expect(screen.getByRole("alert")).toHaveTextContent("relative subfolder without ..");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeEnabled(),
+    );
+    expect(onCreateCodeThread).not.toHaveBeenCalled();
+    expect(onCreateThread).not.toHaveBeenCalled();
+    expect(draft).toHaveValue("Fix search without losing this draft");
+    expect(subfolder).toHaveValue("../outside");
+
+    await user.clear(subfolder);
+    await user.type(subfolder, "docs");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateCodeThread).toHaveBeenCalledOnce());
+    expect(onCreateCodeThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Fix search without losing this draft",
+        workingFolder: { workingFolderId: main, workingDirectory: "docs" },
+      }),
+      codeProjectId,
+    );
+  });
+
+  it("shows the approved working choice and submits its identity with the unchanged Work draft", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const main = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const extra = decodeProjectWorkingFolderId(`folder_${"b".repeat(64)}`);
+    const withFolders = projects.map((project) =>
+      project.type === "work"
+        ? {
+            ...project,
+            workingFolders: [
+              { id: main, label: "Main folder", kind: "main" as const },
+              { id: extra, label: "Shared notes 日本語", kind: "extra" as const },
+            ],
+          }
+        : project,
+    );
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="work"
+        projectId={workProjectId}
+        projects={withFolders}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Draft brief");
+    await user.click(screen.getByRole("combobox", { name: "Task working folder" }));
+    await user.click(await screen.findByRole("option", { name: "Shared notes 日本語" }));
+    await user.clear(screen.getByLabelText("Subfolder within working folder"));
+    await user.type(screen.getByLabelText("Subfolder within working folder"), "資料 folder");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread.mock.calls[0]?.[0]).toBe("Draft brief");
+    expect(onCreateThread.mock.calls[0]?.[13]).toEqual({
+      workingFolderId: extra,
+      workingDirectory: "資料 folder",
+    });
+  });
   it("submits the saved Project selected inline without opening a picker", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();

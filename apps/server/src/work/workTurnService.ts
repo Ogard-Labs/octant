@@ -1,5 +1,6 @@
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -312,6 +313,7 @@ export interface WorkTurnServiceDependencies {
   };
   readonly projection: WorkTurnProjection;
   readonly workingDirectories: {
+    readonly current?: (root: string, directory: string) => () => boolean;
     readonly resolve: (
       authoritativeRoot: string,
       workingDirectory: ThreadWorkingDirectory,
@@ -784,6 +786,9 @@ export class WorkTurnService {
         projectId: thread.projectId,
         bindingRevisionId: currentBinding?.revisionId ?? last.bindingRevisionId,
         workingDirectory: thread.workingDirectory ?? last.workingDirectory,
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       },
@@ -942,8 +947,13 @@ export class WorkTurnService {
       projectRoot = server.folder;
     } else {
       try {
+        const root =
+          project === undefined
+            ? undefined
+            : approvedWorkingFolderRoot(project, command.authority.workingFolderId);
+        if (root === undefined) throw new Error("Working folder is unavailable");
         projectRoot = await this.#workingDirectories.resolve(
-          project?.binding.canonicalRoot ?? "",
+          root,
           command.authority.workingDirectory,
         );
       } catch {
@@ -1351,6 +1361,35 @@ export class WorkTurnService {
 
     const controller = new AbortController();
     this.#controllers.set(String(command.requestId), controller);
+    const selectedRoot =
+      project === undefined
+        ? undefined
+        : approvedWorkingFolderRoot(project, command.authority.workingFolderId);
+    const physicalCurrent =
+      selectedRoot === undefined
+        ? undefined
+        : this.#workingDirectories.current?.(selectedRoot, projectRoot);
+    const folderCurrent = () => {
+      try {
+        if (command.authority.workingFolderId === undefined || project === undefined) return true;
+        const latest = this.#persistence.readProject(project.id);
+        return (
+          latest?.type === "work" &&
+          latest.lifecycle === "active" &&
+          approvedWorkingFolderRoot(latest, command.authority.workingFolderId) === selectedRoot &&
+          physicalCurrent?.() !== false
+        );
+      } catch {
+        return false;
+      }
+    };
+    const folderWatch =
+      command.authority.workingFolderId === undefined
+        ? undefined
+        : setInterval(() => {
+            if (!folderCurrent())
+              controller.abort("Working folder is unavailable; nothing is redirected.");
+          }, 250);
     const launch = this.#runTurn({
       command,
       ...(thread === undefined ? {} : { thread }),
@@ -1360,19 +1399,29 @@ export class WorkTurnService {
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       projectRoot,
       projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
-      extraFolders: project === undefined ? [] : projectExtraFolderRoots(project),
+      extraFolders:
+        project === undefined
+          ? []
+          : [
+              ...new Set([
+                ...(command.authority.workingFolderId !== undefined &&
+                projectRoot !== project.binding.canonicalRoot
+                  ? [project.binding.canonicalRoot]
+                  : []),
+                ...projectExtraFolderRoots(project),
+              ]),
+            ].filter((folder) => folder !== projectRoot),
       ...(server === undefined ? {} : { serverTools: server.tools }),
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
       sessionHolds,
-      ...(options?.admissionCurrent === undefined
-        ? {}
-        : { admissionCurrent: options.admissionCurrent }),
+      admissionCurrent: () => folderCurrent() && options?.admissionCurrent?.() !== false,
       ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       signal: controller.signal,
     }).finally(() => {
+      clearInterval(folderWatch);
       if (
         this.#runningAccess.get(String(command.threadId))?.requestId === String(command.requestId)
       ) {
@@ -2888,6 +2937,9 @@ function workTurnThreadFacts(
           thread.bindingRevisionId === undefined ? undefined : String(thread.bindingRevisionId),
         workingDirectory:
           thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
       };
 }
 

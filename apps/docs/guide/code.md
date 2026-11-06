@@ -6,6 +6,23 @@ description: Code mode binds one folder for engineering work with approval-gated
 
 Code is the repository workspace. Each Code Project binds exactly one folder chosen through the native picker; when that folder is a Git repository, worktrees, branches, and pull-request tools become available. Code is always available; disabling it in Settings never deletes existing Code data.
 
+## Choose the task's working folder
+
+Before creating a task, choose **Task working folder** and, if needed, a relative
+subfolder. The list contains folders already approved for this Project. Adding or
+naming a folder does not change its permissions. The provider, terminal defaults,
+saved actions and new Work artifacts use the recorded choice. Choose another root
+or subfolder in a new task; an existing native conversation keeps its original root.
+
+The composer and Environment show the choice. A removed or unavailable folder
+stops the task rather than sending output elsewhere. Work artifacts retain their
+own original destination through revision, rename, conversion, export and replay.
+
+An extra working folder is **shared**, including for a task with its own worktree.
+Git, pull requests, changed files and Review still cover the Code checkout only.
+Choosing **Restart in** from a terminal asks before stopping its shell and running
+commands. Cancel keeps the process; **New terminal** opens a separate shell.
+
 ## Code Projects
 
 Create a Code Project from the sidebar:
@@ -407,7 +424,7 @@ its folder. A card under it says whether the checkout has uncommitted changes
 (click it to open Review) and offers **Commit or push** and **Create pull
 request**. Below that, one list: local servers, subagents (opens the Agents
 tool), computer use, pull requests, what the thread delivers, the working folder
-(with **Change working folder**), and usage. Switching the active pane shows that pane's Environment instead of
+(with the chosen folder and the legacy **Change working folder** control for older tasks), and usage. Switching the active pane shows that pane's Environment instead of
 leaving the previous thread's facts in place.
 
 Local servers are compact rows grouped by process and port, with this checkout

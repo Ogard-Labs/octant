@@ -19,6 +19,7 @@ import {
   type AggregateVersion,
   type UtcTimestamp,
   decodeThreadWorkingDirectory,
+  decodeProjectExtraFolder,
   decodeWorkThread,
   decodeProviderModel,
   decodeWorkThreadBootstrap,
@@ -41,6 +42,7 @@ import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { TerminalSessionImportPort } from "../terminalSessions/terminalSessionImports";
 import { WorkThreadProjection } from "./workThreadProjection";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkThreadService,
@@ -1656,6 +1658,50 @@ describe("WorkThreadService", () => {
         ],
       }),
     );
+  });
+
+  it("creates a task in a server-issued approved folder and refuses a withdrawn choice", async () => {
+    const base = workProject();
+    if (base.type !== "work") throw new Error("Expected a Work Project");
+    const extra = decodeProjectExtraFolder({
+      canonicalRoot: "/approved/notes",
+      addedAt: now,
+      addedBy: base.bindingHistory[0]?.actor,
+    });
+    const project = { ...base, extraFolders: [extra] };
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw new Error("Missing approved folder");
+    const fixture = serviceFixture({ project, threads: [] });
+    const created = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Notes",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+      workingFolderId: choice.id,
+      workingDirectory: "drafts",
+    });
+    expect(created).toMatchObject({
+      kind: "thread-created",
+      thread: { workingFolderId: choice.id, workingDirectory: "drafts" },
+    });
+    expect(fixture.workingDirectories.resolve).toHaveBeenCalledWith("/approved/notes", "drafts");
+    const withdrawn = serviceFixture({
+      project: base,
+      threads: [thread({ workingFolderId: choice.id })],
+    });
+    await expect(
+      withdrawn.service.execute(ids.window, {
+        kind: "change-work-thread-working-directory",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        workingDirectory: ".",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(withdrawn.workingDirectories.resolve).not.toHaveBeenCalled();
   });
 
   it("persists a host-validated working directory and rejects unavailable paths", async () => {

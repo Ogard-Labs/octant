@@ -1,3 +1,4 @@
+import type { ProjectWorkingFolderId } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { Schema } from "effect";
 import {
@@ -76,6 +77,9 @@ const EXTERNAL_HANDOFF_EXPORT_FORMATS: ReadonlySet<WorkArtifactFormat> = new Set
 ]);
 
 export interface WorkMutationContext {
+  readonly workingFolderId?: ProjectWorkingFolderId;
+  /** Rechecks the current Project binding/add identity before reads, writes and journal commit. */
+  readonly isCurrent?: () => boolean;
   readonly binding: WorkRootBinding;
   readonly posture: WorkMutationPosture;
   readonly approved: boolean;
@@ -169,6 +173,16 @@ export class WorkMutationService {
     context: WorkMutationContext,
   ): Promise<WorkMutationReply> {
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
+    if (request.kind !== "create-artifact") {
+      const artifact = this.#projection.lookup(request.artifactId);
+      if (
+        artifact !== undefined &&
+        (String(artifact.projectId) !== String(request.projectId) ||
+          String(artifact.workingFolderId) !== String(context.workingFolderId))
+      )
+        return unauthorizedReply(request, "revoked-root", request.artifactId);
+    }
     switch (request.kind) {
       case "create-artifact":
         return this.#createArtifact(request, context);
@@ -203,6 +217,7 @@ export class WorkMutationService {
       return failedReply(request, "oversize");
     }
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const directory =
       context.directory === undefined || context.directory === "." ? undefined : context.directory;
@@ -221,6 +236,7 @@ export class WorkMutationService {
       return unauthorizedReply(request, resolution.status);
     }
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const authority = classifyMutationAuthority({
       posture: context.posture,
@@ -268,6 +284,10 @@ export class WorkMutationService {
       artifactRef,
       displayName: decodeDisplayName(request.displayName),
       ...placement(directory),
+      ...(context.workingFolderId === undefined
+        ? {}
+        : { workingFolderId: context.workingFolderId }),
+
       createdAt: occurredAt,
     };
     const version: WorkArtifactVersion = {
@@ -302,6 +322,7 @@ export class WorkMutationService {
         }),
       compensate: () => this.#filesystem.unlink(resolution.absolutePath),
       signal: context.signal,
+      isCurrent: context.isCurrent,
     });
   }
 
@@ -324,6 +345,7 @@ export class WorkMutationService {
     const budgetRejection = validateWorkInputBudget(request.content);
     if (budgetRejection !== undefined) return failedReply(request, "oversize");
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const resolution = await this.#resolution.resolve({
       binding: context.binding,
@@ -333,6 +355,7 @@ export class WorkMutationService {
     const resolutionFailure = mapResolutionFailure(request, resolution);
     if (resolutionFailure !== undefined) return resolutionFailure;
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
     const resolved = resolution as Extract<typeof resolution, { status: "resolved" }>;
 
     const authority = classifyMutationAuthority({
@@ -385,6 +408,7 @@ export class WorkMutationService {
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: decodeDisplayName(entry.displayName),
       ...placement(directoryOf(entry.relativePath)),
+      ...(entry.workingFolderId === undefined ? {} : { workingFolderId: entry.workingFolderId }),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -431,6 +455,7 @@ export class WorkMutationService {
           });
         },
         signal: context.signal,
+        isCurrent: context.isCurrent,
       },
     );
   }
@@ -495,6 +520,7 @@ export class WorkMutationService {
     }
     const capability = baseWorkCapabilityReport(entry.format);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const resolution = await this.#resolution.resolve({
       binding: context.binding,
@@ -504,6 +530,7 @@ export class WorkMutationService {
     const resolutionFailure = mapResolutionFailure(request, resolution);
     if (resolutionFailure !== undefined) return resolutionFailure;
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
     const resolved = resolution as Extract<typeof resolution, { status: "resolved" }>;
 
     const authority = classifyMutationAuthority({
@@ -536,6 +563,7 @@ export class WorkMutationService {
     const sourceBytes = await this.#readResolved(resolved.absolutePath, resolved.sourceIdentity);
     if (sourceBytes === undefined) return failedReply(request, "read-failed", request.artifactId);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     let targetBytes: Uint8Array | undefined;
     try {
@@ -551,6 +579,7 @@ export class WorkMutationService {
     const outputRejection = validateWorkOutputBudget(targetBytes.byteLength);
     if (outputRejection !== undefined) return failedReply(request, "oversize", request.artifactId);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const targetFormat = request.targetFormat;
     const isCrossFormat = targetFormat !== entry.format;
@@ -620,6 +649,7 @@ export class WorkMutationService {
       targetAbsolutePath = resolved.absolutePath;
     }
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const samePath = targetAbsolutePath === resolved.absolutePath;
     const persistTransform = async (): Promise<boolean> => {
@@ -654,6 +684,7 @@ export class WorkMutationService {
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: newDisplayName,
       ...placement(directoryOf(entry.relativePath)),
+      ...(entry.workingFolderId === undefined ? {} : { workingFolderId: entry.workingFolderId }),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -697,9 +728,10 @@ export class WorkMutationService {
           });
         },
         signal: context.signal,
+        isCurrent: context.isCurrent,
       },
     );
-    if (reply.outcome.kind !== "revised") return reply;
+    if (reply.outcome.kind !== "revised" || context.isCurrent?.() === false) return reply;
 
     // For a cross-format transform, remove the old source file now that the
     // new file and journal entry are committed. This is best-effort cleanup;
@@ -730,6 +762,7 @@ export class WorkMutationService {
     const budgetRejection = validateWorkDisplayNameBudget(request.displayName);
     if (budgetRejection !== undefined) return failedReply(request, "oversize");
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const resolution = await this.#resolution.resolve({
       binding: context.binding,
@@ -739,6 +772,7 @@ export class WorkMutationService {
     const resolutionFailure = mapResolutionFailure(request, resolution);
     if (resolutionFailure !== undefined) return resolutionFailure;
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
     const resolved = resolution as Extract<typeof resolution, { status: "resolved" }>;
 
     let newRelativePath: string;
@@ -792,6 +826,8 @@ export class WorkMutationService {
       }
       return true;
     };
+    if (context.isCurrent?.() === false)
+      return unauthorizedReply(request, "revoked-root", request.artifactId);
     const renamed = await persistRename();
     if (!renamed) return failedReply(request, "write-failed", request.artifactId);
     const bytes = await this.#readResolved(newResolution.absolutePath, resolved.sourceIdentity);
@@ -812,6 +848,7 @@ export class WorkMutationService {
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: decodeDisplayName(request.displayName),
       ...placement(directoryOf(entry.relativePath)),
+      ...(entry.workingFolderId === undefined ? {} : { workingFolderId: entry.workingFolderId }),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -844,6 +881,7 @@ export class WorkMutationService {
         compensate: () =>
           this.#filesystem.rename(newResolution.absolutePath, resolved.absolutePath),
         signal: context.signal,
+        isCurrent: context.isCurrent,
       },
     );
   }
@@ -861,6 +899,7 @@ export class WorkMutationService {
     }
     const capability = baseWorkCapabilityReport(entry.format);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const resolution = await this.#resolution.resolve({
       binding: context.binding,
@@ -870,6 +909,7 @@ export class WorkMutationService {
     const resolutionFailure = mapResolutionFailure(request, resolution);
     if (resolutionFailure !== undefined) return resolutionFailure;
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
     const resolved = resolution as Extract<typeof resolution, { status: "resolved" }>;
 
     const authority = classifyMutationAuthority({
@@ -921,7 +961,7 @@ export class WorkMutationService {
       outcome,
       capability,
     );
-    if (reply.outcome.kind !== "deleted") return reply;
+    if (reply.outcome.kind !== "deleted" || context.isCurrent?.() === false) return reply;
     try {
       await this.#filesystem.unlink(resolved.absolutePath);
     } catch {
@@ -943,6 +983,7 @@ export class WorkMutationService {
     }
     const capability = baseWorkCapabilityReport(entry.format);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const resolution = await this.#resolution.resolve({
       binding: context.binding,
@@ -952,6 +993,7 @@ export class WorkMutationService {
     const resolutionFailure = mapResolutionFailure(request, resolution);
     if (resolutionFailure !== undefined) return resolutionFailure;
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
     const resolved = resolution as Extract<typeof resolution, { status: "resolved" }>;
 
     const authority = classifyMutationAuthority({
@@ -979,6 +1021,7 @@ export class WorkMutationService {
     const bytes = await this.#readResolved(resolved.absolutePath, resolved.sourceIdentity);
     if (bytes === undefined) return failedReply(request, "read-failed", request.artifactId);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const sequence = entry.sequence + 1;
     const occurredAt = decodeTimestamp(this.#clock());
@@ -991,6 +1034,7 @@ export class WorkMutationService {
       artifactRef: decodeWorkArtifactRef(entry.artifactRef),
       displayName: decodeDisplayName(entry.displayName),
       ...placement(directoryOf(entry.relativePath)),
+      ...(entry.workingFolderId === undefined ? {} : { workingFolderId: entry.workingFolderId }),
       createdAt: decodeTimestamp(entry.currentSourceVersion.observedAt),
     };
     const version: WorkArtifactVersion = {
@@ -1038,6 +1082,7 @@ export class WorkMutationService {
     }
     const capability = baseWorkCapabilityReport(entry.format);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const resolution = await this.#resolution.resolve({
       binding: context.binding,
@@ -1047,6 +1092,7 @@ export class WorkMutationService {
     const resolutionFailure = mapResolutionFailure(request, resolution);
     if (resolutionFailure !== undefined) return resolutionFailure;
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
     const resolved = resolution as Extract<typeof resolution, { status: "resolved" }>;
 
     const authority = classifyMutationAuthority({
@@ -1075,6 +1121,7 @@ export class WorkMutationService {
     const sourceBytes = await this.#readResolved(resolved.absolutePath, resolved.sourceIdentity);
     if (sourceBytes === undefined) return failedReply(request, "read-failed", request.artifactId);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     let exportBytes: Uint8Array | undefined;
     try {
@@ -1090,6 +1137,7 @@ export class WorkMutationService {
     const outputRejection = validateWorkOutputBudget(exportBytes.byteLength);
     if (outputRejection !== undefined) return failedReply(request, "oversize", request.artifactId);
     if (context.signal?.aborted) return interruptedReply(request);
+    if (context.isCurrent?.() === false) return unauthorizedReply(request, "revoked-root");
 
     const occurredAt = decodeTimestamp(this.#clock());
     const exportFormat = request.exportFormat;
@@ -1219,6 +1267,7 @@ export class WorkMutationService {
           await this.#filesystem.unlink(exportResolution.absolutePath);
         },
         signal: context.signal,
+        isCurrent: context.isCurrent,
       },
     );
   }
@@ -1240,11 +1289,18 @@ export class WorkMutationService {
       readonly persist: () => Promise<boolean>;
       readonly compensate: () => Promise<void>;
       readonly signal: AbortSignal | undefined;
+      readonly isCurrent: (() => boolean) | undefined;
     },
   ): Promise<WorkMutationReply> {
     if (disk !== undefined) {
+      if (disk.isCurrent?.() === false)
+        return unauthorizedReply(request, "revoked-root", artifactId);
       const persisted = await disk.persist();
       if (!persisted) return failedReply(request, "write-failed", artifactId);
+      if (disk.isCurrent?.() === false) {
+        await this.#compensateDisk(disk.compensate);
+        return unauthorizedReply(request, "revoked-root", artifactId);
+      }
       if (disk.signal?.aborted) {
         await this.#compensateDisk(disk.compensate);
         return interruptedReply(request);

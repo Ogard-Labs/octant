@@ -5951,6 +5951,9 @@ function LaunchedShell(
           hostId: destinationHostId,
           projectId: project.id,
           bindingRevisionId,
+          ...(created.thread.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: created.thread.workingFolderId }),
           workingDirectory: created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           confinementPosture: "project-root-confined",
           providerInstanceId,
@@ -6340,6 +6343,7 @@ function LaunchedShell(
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
     terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
+    workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice,
   ): Promise<boolean | void> {
     const paneToReset =
       initiatingPaneId ??
@@ -6522,6 +6526,7 @@ function LaunchedShell(
           bindingRevisionId: prepared.bindingRevisionId,
           repositoryId: prepared.checkout.repositoryId,
           checkoutId: prepared.checkout.id,
+          ...(workingFolder ?? {}),
           title,
           lifecycle: "active",
           providerInstanceId,
@@ -6637,7 +6642,7 @@ function LaunchedShell(
           ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           hostId: destinationHostId,
           bindingRevisionId,
-          workingDirectory: decodeThreadWorkingDirectory("."),
+          ...(workingFolder ?? { workingDirectory: decodeThreadWorkingDirectory(".") }),
           ...(issueContext === undefined || onServer ? {} : { issueContext }),
           ...(linearIssueContext === undefined || onServer ? {} : { linearIssueContext }),
           ...(terminalSession === undefined || onServer ? {} : { terminalSession }),
@@ -6670,6 +6675,9 @@ function LaunchedShell(
               hostId: destinationHostId,
               projectId: project.id,
               bindingRevisionId,
+              ...(created.thread.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: created.thread.workingFolderId }),
               workingDirectory:
                 created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
               confinementPosture: "project-root-confined",
@@ -6769,6 +6777,14 @@ function LaunchedShell(
         terminalId,
         columns: 100,
         rows: 30,
+        ...(activeMode === "work" &&
+        activeWorkThreadId !== undefined &&
+        workNavigation.bootstrap?.threads.some(
+          (thread) =>
+            String(thread.id) === String(activeWorkThreadId) && thread.projectId === projectId,
+        )
+          ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
+          : {}),
         ...(folder === undefined ? {} : { folder }),
       });
     } catch {
@@ -6817,6 +6833,13 @@ function LaunchedShell(
       target: {
         projectId,
         actionId: action.id,
+        ...(activeMode === "work" &&
+        activeWorkThreadId !== undefined &&
+        workNavigation.bootstrap?.threads.some(
+          (thread) => thread.id === activeWorkThreadId && thread.projectId === projectId,
+        )
+          ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
+          : {}),
         ...(folder === undefined ? {} : { folder }),
         ...(activeMode !== "code" ||
         view === undefined ||

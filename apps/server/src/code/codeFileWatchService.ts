@@ -9,7 +9,11 @@ import {
 import { classifyPathContainment } from "@octant/domain";
 import { liveCodeDirectoryPort, type CodeDirectoryPort } from "./codeDirectoryPort";
 import { isAbsolutePosixPath } from "./codePathConfinement";
-import { liveCodeFileWatchPort, type CodeFileWatchPort } from "./codeFileWatchPort";
+import {
+  liveCodeFileWatchPort,
+  type CodeFileWatchPort,
+  type CodeFileWatchSubscription,
+} from "./codeFileWatchPort";
 
 /**
  * Directory names whose churn is never a source change. These are the same
@@ -57,6 +61,16 @@ export interface CodeFileWatchServiceOptions {
  * notice per inotify event would be a refresh storm.
  */
 export class CodeFileWatchService {
+  readonly #roots = new Map<
+    string,
+    {
+      readonly listeners: Set<{
+        readonly changed: (path: string | undefined) => void;
+        readonly failed: () => void;
+      }>;
+      subscription?: CodeFileWatchSubscription;
+    }
+  >();
   readonly #watchPort: CodeFileWatchPort;
   readonly #directory: CodeDirectoryPort;
   readonly #clock: () => string;
@@ -86,7 +100,7 @@ export class CodeFileWatchService {
       resume?.();
     };
 
-    const subscription = this.#watchPort.watch(
+    const subscription = this.#subscribe(
       canonicalRoot,
       (relativePath) => {
         if (relativePath === undefined) {
@@ -176,6 +190,41 @@ export class CodeFileWatchService {
       request.signal?.removeEventListener("abort", abort);
       subscription.close();
     }
+  }
+
+  #subscribe(
+    root: string,
+    changed: (path: string | undefined) => void,
+    failed: () => void,
+  ): CodeFileWatchSubscription {
+    const listener = { changed, failed };
+    let record = this.#roots.get(root);
+    if (record === undefined) {
+      record = { listeners: new Set([listener]) };
+      const owned = record;
+      this.#roots.set(root, owned);
+      owned.subscription = this.#watchPort.watch(
+        root,
+        (path) => {
+          for (const item of [...owned.listeners]) item.changed(path);
+        },
+        () => {
+          if (this.#roots.get(root) === owned) this.#roots.delete(root);
+          for (const item of [...owned.listeners]) item.failed();
+          owned.subscription?.close();
+        },
+      );
+      if (this.#roots.get(root) !== owned) owned.subscription.close();
+    } else record.listeners.add(listener);
+    const owned = record;
+    return {
+      close: () => {
+        owned.listeners.delete(listener);
+        if (owned.listeners.size !== 0) return;
+        if (this.#roots.get(root) === owned) this.#roots.delete(root);
+        owned.subscription?.close();
+      },
+    };
   }
 
   /**

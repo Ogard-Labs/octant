@@ -1,3 +1,4 @@
+import { decodeProjectWorkingFolderId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import { decodeWorkTurnAuthority } from "@octant/contracts/work-turns";
 import { decideWorkTurnAuthority } from "./workTurnPolicy";
@@ -47,6 +48,31 @@ describe("decideWorkTurnAuthority", () => {
     ).toEqual({ kind: "allow" });
   });
 
+  it("requires the exact working-folder identity recorded on the task", () => {
+    const selected = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const other = decodeProjectWorkingFolderId(`folder_${"b".repeat(64)}`);
+    expect(
+      decideWorkTurnAuthority({
+        authority: { ...authority, workingFolderId: selected },
+        expectedHostId: "local",
+        project,
+        thread: { ...thread, workingFolderId: selected },
+      }),
+    ).toEqual({ kind: "allow" });
+    for (const proposed of [undefined, other]) {
+      expect(
+        decideWorkTurnAuthority({
+          authority: {
+            ...authority,
+            ...(proposed === undefined ? {} : { workingFolderId: proposed }),
+          },
+          expectedHostId: "local",
+          project,
+          thread: { ...thread, workingFolderId: selected },
+        }),
+      ).toMatchObject({ kind: "deny", category: "stale" });
+    }
+  });
   it("denies a mismatched host", () => {
     expect(
       decideWorkTurnAuthority({

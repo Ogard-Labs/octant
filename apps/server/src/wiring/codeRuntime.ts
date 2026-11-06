@@ -1,3 +1,5 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
@@ -676,14 +678,32 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             return serverCodeCheckoutRoot(serverProjectStore, thread);
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
           if (root === undefined) return undefined;
-          const workingDirectory = await resolveThreadWorkingDirectory(
+          const project = persistence.readProject(thread.projectId);
+          if (project?.type !== "code") return undefined;
+          const selectedRoot = approvedWorkingFolderRoot(
+            project,
+            thread.workingFolderId,
             root.rootPath,
+          );
+          if (selectedRoot === undefined) return undefined;
+          const workingDirectory = await resolveThreadWorkingDirectory(
+            selectedRoot,
             thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           );
+          const directoryCurrent = threadWorkingDirectoryCurrent(selectedRoot, workingDirectory);
           return {
             checkoutRoot: root.rootPath,
             rootIdentity: root.rootIdentity,
-            ...(root.current === undefined ? {} : { rootCurrent: root.current }),
+            rootCurrent: () => {
+              const latest = persistence.readProject(thread.projectId);
+              return (
+                directoryCurrent() &&
+                root.current?.() !== false &&
+                latest?.type === "code" &&
+                approvedWorkingFolderRoot(latest, thread.workingFolderId, root.rootPath) ===
+                  selectedRoot
+              );
+            },
             workingDirectory,
             shell: defaultTerminalShell(),
             credentialReferences: [],

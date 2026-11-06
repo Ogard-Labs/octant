@@ -17,7 +17,7 @@ import type {
   OwnerUnlockKeyOutcome,
   OwnerUnlockRefusal,
 } from "./ownerUnlockKeychain";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 import type { PreviewHandoffRequest } from "@octant/contracts/previews";
@@ -198,6 +198,7 @@ export interface ContextBridgePort {
 }
 
 export interface OctantHostBridge {
+  readonly getDroppedFilePath?: (file: File) => string | undefined;
   readonly popupNativeMenu: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly setMenuBarOpenThread: (thread: MenuBarOpenThread | null) => Promise<void>;
   readonly subscribeMenuBarTask: (listener: (target: MenuBarOpenThread) => void) => () => void;
@@ -525,6 +526,13 @@ export function createHostBridge(
             threadId: initialProjectTarget.threadId,
           });
   return Object.freeze({
+    getDroppedFilePath: (file: File): string | undefined => {
+      try {
+        return webUtils.getPathForFile(file) || undefined;
+      } catch {
+        return undefined;
+      }
+    },
     popupNativeMenu: async (request: NativeMenuRequest): Promise<NativeMenuOutcome> => {
       try {
         const result: unknown = await ipc.invoke(IPC_CHANNELS.nativeMenu, request);
