@@ -183,3 +183,23 @@ it("names the newer-host prerequisite when the installed Stable lacks host-only 
   });
   expect(host).not.toHaveBeenCalled();
 });
+
+it("asks a Linux person to open Octant when no launch recorded it, and names the sandbox refusal", async () => {
+  const host = vi.fn(async () => undefined);
+  expect(
+    await launchDesktopApplication(desktopIdentity("nightly"), host, async () => ({
+      kind: "refused",
+      reason: "no-launcher-record",
+    })),
+  ).toEqual({ kind: "client-bridge-required", message: "Open Octant, then try again." });
+  expect(
+    await launchDesktopApplication(desktopIdentity("nightly"), host, async () => ({
+      kind: "refused",
+      reason: "unsandboxed-renderer",
+    })),
+  ).toMatchObject({
+    kind: "client-bridge-required",
+    message: expect.stringContaining("Chromium's sandbox"),
+  });
+  expect(host).not.toHaveBeenCalled();
+});
