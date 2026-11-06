@@ -1972,7 +1972,9 @@ async function copyRuntimeDirectory(source: string, destination: string): Promis
   });
 }
 
-async function collectPayloadEntries(root: string): Promise<ReadonlyArray<PackagedPayloadEntry>> {
+export async function collectPayloadEntries(
+  root: string,
+): Promise<ReadonlyArray<PackagedPayloadEntry>> {
   const entries: PackagedPayloadEntry[] = [];
   await collect(root, root, entries);
   return entries.sort((left, right) => left.path.localeCompare(right.path));
@@ -2026,7 +2028,7 @@ function isForbiddenPath(path: string): boolean {
  */
 export const NIGHTLY_CLIENT_HARNESS_MARKER = "octant-nightly-client-harness@1";
 
-function isNightlyClientHarness(entry: PackagedPayloadEntry): boolean {
+export function isNightlyClientHarness(entry: PackagedPayloadEntry): boolean {
   return (
     basename(entry.path).toLowerCase().startsWith("nightly-client-harness") ||
     entry.content?.includes(NIGHTLY_CLIENT_HARNESS_MARKER) === true

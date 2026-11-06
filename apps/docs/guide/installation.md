@@ -97,7 +97,7 @@ Nightly's full `octant-nightly` command runs with that runtime too (see
 [below](#the-octant-nightly-command)).
 
 Nightly's separate application identity and packaging foundation are available
-for development. It is not yet a usable second app. On macOS, ordinary Nightly
+for development. On macOS, ordinary Nightly
 startup first authenticates a status check with a compatible signed Octant in
 the same login session. Development/ad-hoc builds refuse this connection; a
 missing response can mean Octant is closed or too old. If it is closed, Nightly
@@ -139,10 +139,11 @@ names, values and states, the VoiceOver cursor follows the page's focus, and
 activating, focusing or adjusting a control acts on the page as your own click
 or key would. A password field is announced by name only, never its contents.
 While an agent is acting on the page, these actions wait for it to finish.
-VoiceOver on a physical Mac has not been checked yet. Other native brokers and
-full lifecycle acceptance remain unfinished, so this is not a usable Nightly
-release. Installation and
-publication remain pending.
+VoiceOver on a physical Mac has not been checked yet. Nightly is now usable as
+a second client. Each Nightly build is checked before it is published, against
+the newest published Octant among other things, but no Nightly has been
+published yet: the first publication waits for the maintainers' signed checks
+and approval.
 
 Nightly has its own application menu, with **Settings…** (⌘,) and the same
 press-twice ⌘Q as Octant. Sign-in and other web links open in your default
