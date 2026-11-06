@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { CredentialRequestReference } from "@octant/contracts/credential-request";
 import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -54,6 +56,7 @@ const TOKEN_HEADER = "x-octant-credential-broker-token";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ROUTES = new Set([
   "/v1/secret-stores/command-use",
+  "/v1/secret-stores/request-card-read",
   "/v1/credentials/has",
   "/v1/credentials/resolve",
   "/v1/credentials/set",
@@ -509,6 +512,26 @@ async function handleBrokerRequest(
     );
   }
 
+  if (url.pathname === "/v1/secret-stores/request-card-read") {
+    if (linked?.stores.commandLinkRevision === undefined)
+      return Response.json({ status: "unavailable" });
+    const body = await readJsonRecord(request);
+    if (body.kind !== "ok") return failure("invalid-request", 400);
+    try {
+      const reference = Schema.decodeUnknownSync(CredentialRequestReference)(body.value);
+      const revision = await linked.stores.commandLinkRevision();
+      if (revision === undefined) return Response.json({ status: "not-linked" });
+      const result = await linked.stores.read(reference.store, reference.reference);
+      // An unlink/relink during lookup must not revive the earlier consent.
+      if ((await linked.stores.commandLinkRevision()) !== revision)
+        return Response.json({ status: "changed" });
+      if (result.status === "read" && Buffer.byteLength(result.value) > 4096)
+        return Response.json({ status: "invalid-reference" });
+      return Response.json(result, { headers: { "cache-control": "no-store" } });
+    } catch {
+      return Response.json({ status: "unavailable" });
+    }
+  }
   if (url.pathname === "/v1/secret-stores/command-use") {
     if (linked?.stores.commandLinkRevision === undefined)
       return Response.json({ status: "unavailable" });

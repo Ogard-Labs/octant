@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { SecretStoreKind, SecretStoreItemReference } from "./secretStores";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const CredentialRequestState = Schema.Literal(
@@ -10,6 +11,29 @@ export const CredentialRequestState = Schema.Literal(
   "expired",
   "failed",
 );
+export const CredentialRequestFailure = Schema.Literal(
+  "locked",
+  "missing",
+  "unavailable",
+  "not-linked",
+  "invalid-reference",
+  "changed",
+);
+export type CredentialRequestFailure = typeof CredentialRequestFailure.Type;
+export const CredentialRequestReference = Schema.Struct({
+  store: SecretStoreKind,
+  reference: SecretStoreItemReference,
+}).annotations(strict);
+export type CredentialRequestReference = typeof CredentialRequestReference.Type;
+/** Broker-to-host only. Never a renderer response, tool result or journal record. */
+export const CredentialRequestResolution = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("read"),
+    value: Schema.String.pipe(Schema.maxLength(4096)),
+  }).annotations(strict),
+  Schema.Struct({ status: CredentialRequestFailure }).annotations(strict),
+);
+export type CredentialRequestResolution = typeof CredentialRequestResolution.Type;
 export const CredentialRequestCard = Schema.Struct({
   id: Schema.UUID,
   threadId: Schema.String,
@@ -19,6 +43,7 @@ export const CredentialRequestCard = Schema.Struct({
   destination: Schema.String,
   actionLabel: Schema.String,
   state: CredentialRequestState,
+  failure: Schema.optional(CredentialRequestFailure),
 }).annotations(strict);
 export type CredentialRequestCard = typeof CredentialRequestCard.Type;
 export const CredentialRequestView = Schema.Struct({
@@ -29,6 +54,11 @@ export type CredentialRequestView = typeof CredentialRequestView.Type;
 /** Private submission only. This schema must never be used as a journal event. */
 export const CredentialRequestAnswer = Schema.Union(
   Schema.Struct({ id: Schema.UUID, action: Schema.Literal("decline") }).annotations(strict),
+  Schema.Struct({
+    id: Schema.UUID,
+    action: Schema.Literal("allow-linked"),
+    ...CredentialRequestReference.fields,
+  }).annotations(strict),
   Schema.Struct({
     id: Schema.UUID,
     action: Schema.Literal("allow"),
