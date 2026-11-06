@@ -135,6 +135,10 @@ export const GithubIssueDetail = Schema.Struct({
   body: boundedBody(ISSUE_BODY_MAX_BYTES),
   bodyTruncated: Schema.Boolean,
   comments: Schema.Array(GithubIssueComment).pipe(Schema.maxItems(10)),
+  /** How many older comments `comments`, the newest ten, leaves out. */
+  commentsOmitted: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Present when the number is a pull request, read only when the request allowed one. */
+  pullRequest: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type GithubIssueDetail = typeof GithubIssueDetail.Type;
 
@@ -149,6 +153,18 @@ export const GithubPullRequestRow = Schema.Struct({
   headBranch: Schema.optional(branchName),
 }).annotations(strict);
 export type GithubPullRequestRow = typeof GithubPullRequestRow.Type;
+
+/** One issue or pull request a repository search found. */
+export const GithubSearchRow = Schema.Struct({
+  kind: Schema.Literal("issue", "pull-request"),
+  number: Schema.Int.pipe(Schema.positive()),
+  title: safeText(256),
+  state: Schema.Literal("open", "draft", "merged", "closed"),
+  author: safeText(128),
+  updatedAt: isoTimestamp,
+  url: githubUrl,
+}).annotations(strict);
+export type GithubSearchRow = typeof GithubSearchRow.Type;
 
 export const GithubProjectRow = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
@@ -185,6 +201,13 @@ export const GithubPullRequestPage = Schema.Struct({
   ...pageFields,
 }).annotations(strict);
 export type GithubPullRequestPage = typeof GithubPullRequestPage.Type;
+
+export const GithubSearchPage = Schema.Struct({
+  rows: Schema.Array(GithubSearchRow).pipe(Schema.maxItems(100)),
+  sort: Schema.Literal("updated-desc"),
+  ...pageFields,
+}).annotations(strict);
+export type GithubSearchPage = typeof GithubSearchPage.Type;
 
 export const GithubProjectPage = Schema.Struct({
   rows: Schema.Array(GithubProjectRow).pipe(Schema.maxItems(100)),
@@ -269,6 +292,25 @@ export const GithubCatalogueReadRequest = Schema.Union(
     owner: GithubRepositoryOwner,
     name: GithubRepositoryName,
     number: Schema.Int.pipe(Schema.positive()),
+    /**
+     * Reads the number even when it is a pull request. Absent, a pull request
+     * is unavailable, as an issue reference always was.
+     */
+    includePullRequest: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  /**
+   * Searches one repository's issues and pull requests together. The server
+   * composes the query: `repo:` is always its own, and qualifiers in `query`
+   * other than `author:` and `#number` are dropped.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("search"),
+    owner: GithubRepositoryOwner,
+    name: GithubRepositoryName,
+    query: safeText(160),
+    pageSize: GithubCataloguePageSize,
+    cursor: Schema.optional(GithubCatalogueCursor),
+    state: Schema.optional(GithubIssueStateFilter),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
@@ -339,6 +381,10 @@ export const GithubCatalogueReadResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
     page: GithubPullRequestPage,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("search"),
+    page: GithubSearchPage,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("projects"),

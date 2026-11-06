@@ -154,6 +154,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "transcript conversation composer width narrow medium wide centered",
         },
         {
+          id: settingId("reply-detail"),
+          label: "Reply detail",
+          scope: "app",
+          keywords:
+            "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
+        },
+        {
           id: settingId("thread-stats"),
           label: "Stats line under the composer",
           scope: "app",

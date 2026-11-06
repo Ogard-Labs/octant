@@ -87,6 +87,16 @@
   margin-inline-start: auto;
 }
 
+/* The thread's Reply detail choice sits just before Thread actions, so the
+   header's two controls stay together at its trailing edge. */
+.chat-workspace__reply-detail {
+  margin-inline-start: auto;
+}
+
+.chat-workspace__reply-detail ~ .chat-workspace__thread-actions {
+  margin-inline-start: 0;
+}
+
 .chat-workspace__canvas {
   margin-block: 8px 0;
 }

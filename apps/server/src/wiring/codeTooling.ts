@@ -418,14 +418,16 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const unsubscribeDebugAuthority = debugService.endOnAuthorityChanges(persistence.journal);
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeDebugAuthority));
     yield* Effect.addFinalizer(() => Effect.promise(() => debugService.close()));
-    // The same reads as app-managed tools on each Code turn whose provider
-    // carries them, Plan included (decision D5). Each call is checked at the
+    // The same reads as one app-managed tool on each Code turn whose provider
+    // carries them, Plan included (decision D5), where a server an agent may
+    // start covers a file of the checkout. Each call is checked at the
     // tool-call choke point, then by the service on the turn's window.
-    contributeCodeTools(({ windowId, thread, readThread }) =>
+    contributeCodeTools(({ windowId, thread, readThread, folders }) =>
       createCodeLanguageAgentTools({
         windowId,
         thread,
         readThread,
+        folders,
         authority: () => browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
         externalContentIngested: () =>
           readThreadExternalContentTaint(persistence.connection, String(thread.id))

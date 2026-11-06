@@ -429,6 +429,21 @@ export function useShellController(options: ShellControllerOptions) {
     return () => window.removeEventListener(SHELL_SETTINGS_WRITTEN, refresh);
   }, [load]);
 
+  // Settings another window saved (a thread's own Reply detail level, the
+  // default) reach this one when it comes back into focus; the host has no
+  // settings push. The re-read waits its turn behind queued edits, because a
+  // re-read that overtook a save would drop that save's answer.
+  useEffect(() => {
+    const refresh = () => {
+      mutationQueue.current = mutationQueue.current.then(
+        () => load("refresh"),
+        () => load("refresh"),
+      );
+    };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [load]);
+
   /**
    * Resolves to whether the mutation actually committed.
    *

@@ -1109,6 +1109,22 @@ export function wireRemote(deps: RemoteDependencies) {
     forgetWorkThread: (threadId) => {
       workThreadProjection.forget(threadId as never);
     },
+    // A purged thread's own Reply detail level goes with it. The purge has
+    // already happened; a settings write that loses a race is left to the
+    // 500-entry bound rather than failing the purge.
+    forgetThreadPresentation: (threads) => {
+      try {
+        shellService.forgetThreadReplyDetails(
+          threads.map((thread) => ({ mode: thread.mode, threadId: String(thread.threadId) })),
+        );
+      } catch (error) {
+        console.warn(
+          `Octant could not forget a purged thread's reply detail: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    },
     forgetCanvases: (canvasIds) => {
       persistence.canvasProjection.evict(canvasIds);
       persistence.replicaArtifactProjection.evict(canvasIds);

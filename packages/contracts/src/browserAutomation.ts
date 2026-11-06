@@ -149,6 +149,11 @@ export const BrowserActionKind = Schema.Literal(
   "tab-select",
   "tab-close",
   "resize",
+  "audit",
+  // Only the agent tool starts and stops a recording, around one call it
+  // asked to record; see the recording bounds below.
+  "record-start",
+  "record-stop",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -307,6 +312,170 @@ export type BrowserDownloadReport = typeof BrowserDownloadReport.Type;
 /** The longest page outline an observation carries, in characters. */
 export const MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS = 32 * 1024;
 
+/**
+ * Bounds for a page audit's answer. A page can fail one rule on every element
+ * it has, so findings are capped per rule and in total, and the counts say
+ * how many there were: evidence the agent can act on, not a listing of the page.
+ */
+export const MAX_BROWSER_AUDIT_FINDINGS = 25;
+export const MAX_BROWSER_AUDIT_FINDINGS_PER_RULE = 10;
+export const MAX_BROWSER_AUDIT_LARGEST_RESOURCES = 5;
+
+/** Which audit an `audit` reads: the page's accessibility, or its loading and responsiveness. */
+export const BrowserAuditKind = Schema.Literal("accessibility", "performance");
+export type BrowserAuditKind = typeof BrowserAuditKind.Type;
+
+/** The accessibility checks an audit runs; each is described in the Browser spec. */
+export const BrowserAccessibilityRule = Schema.Literal(
+  "image-alt",
+  "button-name",
+  "link-name",
+  "field-name",
+  "document-title",
+  "document-lang",
+  "heading-order",
+  "duplicate-id-aria",
+  "color-contrast",
+  "focusable-hidden",
+  "target-size",
+);
+export type BrowserAccessibilityRule = typeof BrowserAccessibilityRule.Type;
+
+const auditText = (maximum: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
+const auditCount = Schema.Int.pipe(Schema.nonNegative());
+
+/**
+ * One accessibility problem on the page. `ref` names the element when the
+ * latest snapshot gave it one; otherwise `selector` does. The message is the
+ * host's own words; `name` and `text` are what the snapshot would show.
+ */
+export const BrowserAccessibilityFinding = Schema.Struct({
+  rule: BrowserAccessibilityRule,
+  severity: Schema.Literal("serious", "moderate"),
+  message: auditText(300),
+  ref: Schema.optional(BrowserElementRef),
+  selector: Schema.optional(auditText(256)),
+  role: Schema.optional(auditText(64)),
+  name: Schema.optional(auditText(120)),
+  text: Schema.optional(auditText(80)),
+}).annotations(strict);
+export type BrowserAccessibilityFinding = typeof BrowserAccessibilityFinding.Type;
+
+export const BrowserAccessibilityAudit = Schema.Struct({
+  kind: Schema.Literal("accessibility"),
+  findings: Schema.Array(BrowserAccessibilityFinding).pipe(
+    Schema.maxItems(MAX_BROWSER_AUDIT_FINDINGS),
+  ),
+  /** How many each rule found, listed or not. A rule that found nothing is absent. */
+  found: Schema.Array(
+    Schema.Struct({
+      rule: BrowserAccessibilityRule,
+      count: Schema.Int.pipe(Schema.positive()),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(BrowserAccessibilityRule.literals.length)),
+  /** The rules that did not run on this page, and why. */
+  notRun: Schema.Array(
+    Schema.Struct({ rule: BrowserAccessibilityRule, reason: auditText(300) }).annotations(strict),
+  ).pipe(Schema.maxItems(BrowserAccessibilityRule.literals.length)),
+  /** Text whose contrast was not judged: over an image, a gradient, or a layered element. */
+  contrastNotMeasured: auditCount,
+  /** Frames on the page; an audit reads the top document and its open shadow roots only. */
+  framesNotAudited: auditCount,
+  /** More findings than were listed, or a page larger than one audit reads. */
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type BrowserAccessibilityAudit = typeof BrowserAccessibilityAudit.Type;
+
+/** The web vitals boundaries a measured value falls between. */
+export const BrowserAuditRating = Schema.Literal("good", "needs-improvement", "poor");
+export type BrowserAuditRating = typeof BrowserAuditRating.Type;
+
+export const BrowserPerformanceMetricName = Schema.Literal("ttfb", "fcp", "lcp", "cls", "tbt");
+export type BrowserPerformanceMetricName = typeof BrowserPerformanceMetricName.Type;
+
+export const BrowserResourceType = Schema.Literal(
+  "document",
+  "script",
+  "stylesheet",
+  "image",
+  "font",
+  "fetch",
+  "media",
+  "other",
+);
+export type BrowserResourceType = typeof BrowserResourceType.Type;
+
+export const BrowserPerformanceAudit = Schema.Struct({
+  kind: Schema.Literal("performance"),
+  /**
+   * How long ago this document began loading. Every timing is the browser's
+   * own record of that load; a fresh load needs a navigation first.
+   */
+  documentAgeMs: auditCount,
+  navigationType: Schema.optional(
+    Schema.Literal("navigate", "reload", "back_forward", "prerender"),
+  ),
+  domContentLoadedMs: Schema.optional(auditCount),
+  loadMs: Schema.optional(auditCount),
+  vitals: Schema.Array(
+    Schema.Struct({
+      metric: BrowserPerformanceMetricName,
+      /** Milliseconds, except `cls`, which is a unitless score. */
+      value: Schema.Number.pipe(Schema.nonNegative()),
+      rating: BrowserAuditRating,
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(BrowserPerformanceMetricName.literals.length)),
+  /** The element the largest contentful paint drew. */
+  lcpElement: Schema.optional(
+    Schema.Struct({
+      ref: Schema.optional(BrowserElementRef),
+      selector: Schema.optional(auditText(256)),
+      url: Schema.optional(auditText(1024)),
+    }).annotations(strict),
+  ),
+  longTasks: Schema.optional(
+    Schema.Struct({ count: auditCount, totalMs: auditCount, longestMs: auditCount }).annotations(
+      strict,
+    ),
+  ),
+  requests: Schema.Struct({
+    count: auditCount,
+    transferBytes: auditCount,
+    byType: Schema.Array(
+      Schema.Struct({
+        type: BrowserResourceType,
+        count: auditCount,
+        transferBytes: auditCount,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(BrowserResourceType.literals.length)),
+    /** The browser keeps a bounded list of requests; more may have loaded. */
+    listFull: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  largestResources: Schema.Array(
+    Schema.Struct({
+      url: auditText(1024),
+      type: BrowserResourceType,
+      transferBytes: auditCount,
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_BROWSER_AUDIT_LARGEST_RESOURCES)),
+  /** What the page holds now, from the browser's own counters. */
+  page: Schema.optional(
+    Schema.Struct({
+      domNodes: Schema.optional(auditCount),
+      jsHeapUsedBytes: Schema.optional(auditCount),
+      jsEventListeners: Schema.optional(auditCount),
+    }).annotations(strict),
+  ),
+  /** What this audit could not measure, and why. */
+  notMeasured: Schema.Array(
+    Schema.Struct({ metric: auditText(32), reason: auditText(300) }).annotations(strict),
+  ).pipe(Schema.maxItems(12)),
+}).annotations(strict);
+export type BrowserPerformanceAudit = typeof BrowserPerformanceAudit.Type;
+
+export const BrowserPageAudit = Schema.Union(BrowserAccessibilityAudit, BrowserPerformanceAudit);
+export type BrowserPageAudit = typeof BrowserPageAudit.Type;
+
 export const BrowserActionRequest = Schema.Struct({
   actionId: ToolActionId,
   contextId: BrowserContextId,
@@ -352,6 +521,8 @@ export const BrowserActionRequest = Schema.Struct({
   diagnosticsSince: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a diagnostics read: include console warnings. */
   diagnosticsWarnings: Schema.optional(Schema.Boolean),
+  /** Which audit an `audit` action reads. */
+  auditKind: Schema.optional(BrowserAuditKind),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
@@ -423,10 +594,51 @@ export const BrowserCaptureNotKeptReason = Schema.Literal(
 );
 export type BrowserCaptureNotKeptReason = typeof BrowserCaptureNotKeptReason.Type;
 
+/**
+ * The bounds of one Browser recording: a short moving picture of the agent's
+ * page while one call it asked to record runs. Frames are sampled at most
+ * every `BROWSER_RECORDING_FRAME_INTERVAL_MS`, scaled to fit
+ * `MAX_BROWSER_RECORDING_EDGE` on their longer side, and an animation stops
+ * taking frames at whichever bound it reaches first. The byte bound stays
+ * below a Canvas design asset's, so a recording can be drawn wherever a
+ * screenshot can.
+ */
+export const MAX_BROWSER_RECORDING_MS = 30_000;
+export const BROWSER_RECORDING_FRAME_INTERVAL_MS = 250;
+export const MAX_BROWSER_RECORDING_FRAMES =
+  MAX_BROWSER_RECORDING_MS / BROWSER_RECORDING_FRAME_INTERVAL_MS;
+export const MAX_BROWSER_RECORDING_EDGE = 800;
+export const MAX_BROWSER_RECORDING_BYTES = 2 * 1024 * 1024;
+
+/** Why a recording stopped taking frames before the call it covered ended. */
+export const BrowserRecordingTruncation = Schema.Literal(
+  "duration-limit",
+  "frame-limit",
+  "size-limit",
+  // The page's picture changed size mid-recording (a resize); an animation
+  // keeps one size, so it ends at the last frame of the old one.
+  "viewport-changed",
+  // Another tab came to the front: a recording belongs to the tab it started
+  // on, so it ends there rather than mixing two tabs' pictures.
+  "tab-changed",
+);
+export type BrowserRecordingTruncation = typeof BrowserRecordingTruncation.Type;
+
+/** What a kept recording holds, as the capture and the tool result report it. */
+export const BrowserRecordingFacts = Schema.Struct({
+  frames: Schema.Int.pipe(Schema.between(1, MAX_BROWSER_RECORDING_FRAMES)),
+  durationMs: Schema.Int.pipe(Schema.between(0, MAX_BROWSER_RECORDING_MS)),
+  truncated: Schema.optional(BrowserRecordingTruncation),
+}).annotations(strict);
+export type BrowserRecordingFacts = typeof BrowserRecordingFacts.Type;
+
 export const BrowserCaptureOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("kept"), captureId: BrowserCaptureId }).annotations(
-    strict,
-  ),
+  Schema.Struct({
+    status: Schema.Literal("kept"),
+    captureId: BrowserCaptureId,
+    /** Present when the capture is a recording rather than a screenshot. */
+    recording: Schema.optional(BrowserRecordingFacts),
+  }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("not-kept"),
     reason: BrowserCaptureNotKeptReason,
@@ -479,6 +691,8 @@ export const BrowserObservation = Schema.Struct({
   ),
   /** The last entry this read covers; the next read passes it as `since`. */
   diagnosticsCursor: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Only an `audit` action fills this: what the audit found or measured. */
+  audit: Schema.optional(BrowserPageAudit),
   screenshotDataUrl: Schema.optional(
     Schema.String.pipe(
       Schema.maxLength(MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS),
@@ -503,7 +717,10 @@ export const BrowserObservation = Schema.Struct({
       }).annotations(strict),
     ).pipe(Schema.maxItems(16)),
   ),
-  /** Present only on an explicit `screenshot` action that the host was asked to keep. */
+  /**
+   * Present only on an explicit `screenshot` action that the host was asked
+   * to keep, and on the `record-stop` that ends an agent's recording.
+   */
   capture: Schema.optional(BrowserCaptureOutcome),
   revision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   observedAt: UtcTimestamp,

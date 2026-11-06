@@ -19,6 +19,22 @@ import {
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
+import {
+  REPLY_DETAIL_DESCRIPTIONS,
+  REPLY_DETAIL_LABELS,
+  ReplyDetailContext,
+  ReplyDetailSourceContext,
+  type ReplyDetailSource,
+  type ReplyDetailThread,
+} from "./transcript/replyDetail";
+import {
+  effectiveReplyDetail,
+  nextReplyDetailLevel,
+  threadReplyDetailOverride,
+  withThreadReplyDetail,
+} from "@octant/domain/reply-detail-policy";
+import { useReplyDetailShortcut } from "./shell/useReplyDetailShortcut";
+import { replyDetailThreadInFront } from "./transcript/replyDetailTarget";
 import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -135,7 +151,12 @@ import type {
   RunningService,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
-import { decodeWorkspaceTabId, type PaneId, type WindowId } from "@octant/contracts/shell";
+import {
+  decodeWorkspaceTabId,
+  type PaneId,
+  type ReplyDetailLevel,
+  type WindowId,
+} from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -2177,6 +2198,82 @@ function LaunchedShell(
     });
   };
   useJumpToWaitingShortcut(jumpToNextWaiting);
+
+  // Reply detail: the default and each thread's own level live in this host's
+  // shell settings, so every window and paired device draws a thread alike.
+  const replyDetailSettings = controller.settings;
+  const updateShellSettings = controller.updateSettings;
+  const replyDetailSource = useMemo<ReplyDetailSource>(
+    () => ({
+      reading: {
+        defaultLevel: replyDetailSettings?.replyDetail ?? "low",
+        threads: replyDetailSettings?.threadReplyDetail ?? [],
+      },
+      ...(replyDetailSettings === undefined
+        ? {}
+        : {
+            setThreadLevel: (thread: ReplyDetailThread, level: ReplyDetailLevel | undefined) =>
+              void updateShellSettings({
+                threadReplyDetail: withThreadReplyDetail(
+                  replyDetailSettings.threadReplyDetail,
+                  thread,
+                  level,
+                ),
+              }),
+          }),
+    }),
+    [replyDetailSettings, updateShellSettings],
+  );
+  const automationCenterVisible =
+    automationCenterOpen && (activeMode === "code" || activeMode === "work");
+  const agentsCenterVisible = agentsCenterOpen;
+  const workspaceHidden =
+    projectsListOpen ||
+    railPlaceholder !== undefined ||
+    codeBoardOpen ||
+    codePullRequestsOpen ||
+    inboxOpen ||
+    reviewOpen ||
+    githubIssuesOpen ||
+    linearIssuesOpen ||
+    workBoardOpen ||
+    archiveOpen ||
+    automationCenterVisible ||
+    agentsCenterVisible ||
+    // These two cover the workspace like every page above, but
+    // were left out of this list, so the thread underneath
+    // stayed in the tab order and the page had two h1s.
+    artifactLibraryOpen ||
+    imageLibraryOpen;
+  // Only a thread on screen: Settings, Usage, Zen, and the pages that cover
+  // the workspace leave its active thread ids behind them.
+  const replyDetailThread = replyDetailThreadInFront({
+    activeMode,
+    chatThreadId: activeChatThreadId === undefined ? undefined : String(activeChatThreadId),
+    workThreadId: activeWorkThreadId === undefined ? undefined : String(activeWorkThreadId),
+    codeThreadId: activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId),
+    covered: workspaceHidden || controller.settingsOpen || usageOpen || zen.active,
+  });
+  const [replyDetailNotice, setReplyDetailNotice] = useState<ReplyDetailLevel>();
+  useEffect(() => {
+    if (replyDetailNotice === undefined) return;
+    const timer = setTimeout(() => setReplyDetailNotice(undefined), 4_000);
+    return () => clearTimeout(timer);
+  }, [replyDetailNotice]);
+  const setCurrentThreadReplyDetail = (level: ReplyDetailLevel | undefined): void => {
+    if (replyDetailThread === undefined) return;
+    replyDetailSource.setThreadLevel?.(replyDetailThread, level);
+  };
+  useReplyDetailShortcut(() => {
+    const setThreadLevel = replyDetailSource.setThreadLevel;
+    if (replyDetailThread === undefined || setThreadLevel === undefined) return false;
+    const next = nextReplyDetailLevel(
+      effectiveReplyDetail(replyDetailSource.reading, replyDetailThread),
+    );
+    setThreadLevel(replyDetailThread, next);
+    setReplyDetailNotice(next);
+    return true;
+  });
   useThreadAttentionNotifications({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     signals: attentionSignals,
@@ -5189,9 +5286,6 @@ function LaunchedShell(
         controller.workspace.activePaneIds[activeMode],
         navigationModel.liveThreadTitles,
       );
-  const automationCenterVisible =
-    automationCenterOpen && (activeMode === "code" || activeMode === "work");
-  const agentsCenterVisible = agentsCenterOpen;
   const visibleComputerUseSessions =
     controller.settingsOpen ||
     zen.active ||
@@ -6758,6 +6852,27 @@ function LaunchedShell(
     onNewThread: () => startNewThreadDraft(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    ...(controller.settings === undefined
+      ? {}
+      : {
+          replyDetail: {
+            defaultLevel: replyDetailSource.reading.defaultLevel,
+            onSetDefault: (replyDetail: ReplyDetailLevel) =>
+              void controller.updateSettings({ replyDetail }),
+            ...(replyDetailThread === undefined
+              ? {}
+              : {
+                  thread: {
+                    level: effectiveReplyDetail(replyDetailSource.reading, replyDetailThread),
+                    override: threadReplyDetailOverride(
+                      replyDetailSource.reading.threads,
+                      replyDetailThread,
+                    ),
+                    onSet: setCurrentThreadReplyDetail,
+                  },
+                }),
+          },
+        }),
     onOpenReview: openReview,
     ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
     onOpenZen: () => {
@@ -6839,24 +6954,6 @@ function LaunchedShell(
     dockToolReads(surface, "codeThreadView"),
   );
   const codeDiffLayout = codeController.bootstrap?.settings.defaultDiffLayout;
-  const workspaceHidden =
-    projectsListOpen ||
-    railPlaceholder !== undefined ||
-    codeBoardOpen ||
-    codePullRequestsOpen ||
-    inboxOpen ||
-    reviewOpen ||
-    githubIssuesOpen ||
-    linearIssuesOpen ||
-    workBoardOpen ||
-    archiveOpen ||
-    automationCenterVisible ||
-    agentsCenterVisible ||
-    // These two cover the workspace like every page above, but
-    // were left out of this list, so the thread underneath
-    // stayed in the tab order and the page had two h1s.
-    artifactLibraryOpen ||
-    imageLibraryOpen;
   const browserToolThreadId =
     dockThreadId === undefined || !(sharedBrowserInDock || sharedBrowserInBottomPanel)
       ? undefined
@@ -7445,6 +7542,7 @@ function LaunchedShell(
         />
       </ShellFrame>
       {threadExportNotice !== undefined ||
+      replyDetailNotice !== undefined ||
       updateReadyNotice ||
       quitHintVisible ||
       hostMemoryNotice !== undefined ? (
@@ -7480,6 +7578,13 @@ function LaunchedShell(
               title="Quit Octant?"
             />
           ) : null}
+          {replyDetailNotice === undefined ? null : (
+            <OctantToast
+              detail={`This thread: ${REPLY_DETAIL_DESCRIPTIONS[replyDetailNotice]}`}
+              onDismiss={() => setReplyDetailNotice(undefined)}
+              title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
+            />
+          )}
           {threadExportNotice === undefined ? null : (
             <OctantToast
               detail={threadExportNotice}
@@ -7529,6 +7634,7 @@ function LaunchedShell(
         the turn that thread is running. */}
                 <CodeThreadControllerSlots
                   client={codeClient}
+                  navigationBootstrap={codeController.bootstrap}
                   readCursorStore={codeReadCursorStore}
                   registry={codeThreadControllers}
                   threadIds={openCodeThreadIds}
@@ -7541,37 +7647,43 @@ function LaunchedShell(
                           <StreamRepliesContext.Provider
                             value={controller.settings?.streamReplies !== false}
                           >
-                            {/* The floor for every rendered link: panes that can host a
+                            <ReplyDetailSourceContext.Provider value={replyDetailSource}>
+                              <ReplyDetailContext.Provider
+                                value={replyDetailSource.reading.defaultLevel}
+                              >
+                                {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                            <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                              <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                <ModelToolVerificationContext.Provider
-                                  value={providerController.verifyModelTools}
-                                >
-                                  <HostFederationStackContext.Provider value={federation}>
-                                    <PlanUsageProvider
-                                      barStyle={controller.settings?.usageBars ?? "smooth"}
-                                      client={launchedClients.providerUsageLimitsClient}
+                                <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                                  <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                    <ModelToolVerificationContext.Provider
+                                      value={providerController.verifyModelTools}
                                     >
-                                      <HostPlatformContext.Provider value={hostPlatform}>
-                                        <ServerCodeProjectsContext.Provider
-                                          value={serverCodeProjects}
+                                      <HostFederationStackContext.Provider value={federation}>
+                                        <PlanUsageProvider
+                                          barStyle={controller.settings?.usageBars ?? "smooth"}
+                                          client={launchedClients.providerUsageLimitsClient}
                                         >
-                                          <CodeDebugWindowProvider
-                                            origin={new URL(props.launch.serverUrl).origin}
-                                            windowId={String(props.launch.windowId)}
-                                          >
-                                            {shell}
-                                          </CodeDebugWindowProvider>
-                                        </ServerCodeProjectsContext.Provider>
-                                      </HostPlatformContext.Provider>
-                                    </PlanUsageProvider>
-                                  </HostFederationStackContext.Provider>
-                                </ModelToolVerificationContext.Provider>
-                              </WorkKindChoiceContext.Provider>
-                            </MarkdownLinkActionsContext.Provider>
+                                          <HostPlatformContext.Provider value={hostPlatform}>
+                                            <ServerCodeProjectsContext.Provider
+                                              value={serverCodeProjects}
+                                            >
+                                              <CodeDebugWindowProvider
+                                                origin={new URL(props.launch.serverUrl).origin}
+                                                windowId={String(props.launch.windowId)}
+                                              >
+                                                {shell}
+                                              </CodeDebugWindowProvider>
+                                            </ServerCodeProjectsContext.Provider>
+                                          </HostPlatformContext.Provider>
+                                        </PlanUsageProvider>
+                                      </HostFederationStackContext.Provider>
+                                    </ModelToolVerificationContext.Provider>
+                                  </WorkKindChoiceContext.Provider>
+                                </MarkdownLinkActionsContext.Provider>
+                              </ReplyDetailContext.Provider>
+                            </ReplyDetailSourceContext.Provider>
                           </StreamRepliesContext.Provider>
                         </NewTaskDraftsContext.Provider>
                       </ProjectThreadsProvider>

@@ -34,7 +34,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
-| [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
+| [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
@@ -53,7 +53,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 9         | 9       | 0            | 0                   |
+| [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
@@ -66,7 +66,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **223**   | **189** | **31**       | **3**               |
+| **All areas**                                                                         | **226**   | **192** | **31**       | **3**               |
 
 ## Principles and hard lines
 
@@ -95,7 +95,7 @@ A short list of rules holds at every guardrail level, Full access included, and 
 - Providers report capabilities honestly and fail closed.
 - The journal records every lowered guardrail, every merge and every force-push, with who allowed it.
 - An agent never merges or force-pushes on its own initiative, never marks a thread Done, and never exceeds a spend ceiling the person set.
-- Plan mode is read-only by definition.
+- Plan mode is read-only by definition: an agent in Plan may look and propose and changes nothing in the workspace, on the host or in the outside world. It may read the page already open in its thread's Browser and propose what a person confirms (a side task, a routine); the one thing it writes is its thread's own Canvas (`create` and `revise`), while publishing, sharing, the artifact mirror and replica sync stay refused.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Overview and principles](../architecture.md#overview-and-principles).
 
@@ -413,7 +413,7 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 
 App-owned tools are capability families: one tool per object with an operation enum and an on-demand help operation. Every runtime receives the same definitions through the transport its adapter verified, and no transport edits a person's provider configuration.
 
-- A family whose grant or capability is off is omitted rather than advertised and refused; help never reaches the family's executor.
+- A family whose grant or capability is off is omitted rather than advertised and refused; help never reaches the family's executor. Where the runtime keeps its own tool list, omission is per session: a Claude Code session lists a tool from the first turn that offers it and refuses it in turns that do not, so the list only grows and the cached prefix changes only when a new tool arrives.
 - A runtime connection binds its tool catalogue before it sends its prompt and accepts only the expected in-process server and offered tool names. A catalogue change cannot overlap a running tool-enabled turn. _Here only._
 - Late, duplicate or cancelled tool answers are refused, and per-request cancellation reaches the executor even while it waits for approval. _Here only._
 - Browser read-page accepts an optional CSS selector or snapshot ref. Screenshots reach the provider through its image-result channel, not as encoded bytes in text, and origin approval and task authority apply before capture. _Here only._
@@ -425,13 +425,45 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 
 Browser and Computer are tools, not mentions. The host offers them on every eligible turn, and authority comes from the person's approval at the moment of action.
 
-- Browser is offered in Work and Code when the provider carries app-managed tools, never in Chat; Plan refuses every Code browser operation except stopping the thread's own browser.
+- Browser is offered in Work and Code when the provider carries app-managed tools, never in Chat; Plan admits only the operations that read the page already open in the thread's own Browser (snapshot, read-page, screenshot, diagnostics, audit, tab-list, wait, flow-list, help, a batch of those) and stop, under every other gate, and refuses the rest, a recording included; a recording already running when Plan begins is stopped and discarded. One table of operations, with the two the host issues for a recording, decides it, so a new operation takes a row before it compiles.
 - Computer is offered only when the plugin is enabled, a screen bridge or leased desktop exists, the tool is not constrained out and the turn is not in Plan.
 - The first Computer action on each application asks even under Full access, and once outside content has entered the thread every Computer action asks again.
 - Only the person at this Mac approves control of this Mac; a paired device may read session state but cannot approve or stop it.
 - "Always allow" remembers an origin only through the approval answer, covers Private pages only, and a Project or Personal profile remembers the (origin, profile) pair.
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+
+### GitHub reads for Code agents
+
+A Code thread's agent reads its Project's delivery repository through one read-only family, `octant_github`: lists of issues, pull requests and projects, one issue or pull request in detail, and a search of issues and pull requests.
+
+- The host fixes the repository to the thread's delivery target; no input names a repository, host, endpoint or flag, and a field an operation does not take is refused. A search keeps only `author:` and `#number` qualifiers and always carries the server's own `repo:`.
+- Every call re-checks the thread's binding, its tool constraints and the read's GitHub capability on a fresh snapshot, and changes nothing on GitHub.
+- Pages hold 1 to 30 rows; a size outside that is refused, not clamped. An issue's body is cut to 8 KB and each comment to 2 KB, only the newest ten comments come back, and every cut is stated (`bodyTruncated`, `truncated`, `commentsOmitted`).
+- A successful read is journaled as outside content before the model sees it, and withheld when it cannot be.
+
+Status: Built. Since: —. Detail: [Architecture: Reading GitHub](../architecture.md#modes-chat-work-and-code).
+
+### Zen assistant tool
+
+Zen's assistant arranges its window's Zen space through one family, `octant_zen`, offered only to the Chat thread bound as that space's assistant.
+
+- `get-space` returns the space's version and each element's id and layout, never element content, so a model can make its first change.
+- Every change names the version it applies to; an out-of-date one changes nothing and the conflict carries the current version.
+- `create-widget` offers only the kinds it creates (Notes, Checklist, Timer); a recipe widget exists only after the person confirms a preview.
+- Labels journaled under the seven tools it replaced (`octant_zen_*`) still read.
+
+Status: Built. Since: —. Detail: [Architecture: Zen assistant tool](../architecture.md#zen-assistant-tool).
+
+### One web search
+
+Octant has one web search definition, `web-search`, offered to every Chat provider while the thread's research is on and its route searches through SearXNG, and by the native harness in every mode where its research or network grant allows.
+
+- A harness Chat thread gets it once, from the harness; the turn adds no second copy.
+- A missing, empty or over-long query is invalid and searches nothing; no other text stands in for it.
+- A successful result marks the thread as having read outside content. The harness's tainted-query refusal applies to harness threads, as before, and not to a Chat thread on another provider.
+
+Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
 
 ## Canvas authority
 
@@ -440,6 +472,7 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 A Canvas belongs to its thread's Project, or for a Chat thread in no Project to the thread alone. Finished work comes in three tiers (typed blocks, static frames, running frames), and each new block kind is gated by a schema version.
 
 - A thread-owned Canvas holds no file, shell, Git or network authority, takes images only from its own thread, and is never mirrored, shared or published to a replica.
+- Plan keeps `create` and `revise`, because a Canvas changes only the thread's own document; the agent tool has no publish or share, and the mirror and replica sync write nothing for a Plan thread.
 - An older runtime refuses a document of a newer schema version rather than misreading it.
 - A person's change is journaled as a new head version with a host-stamped actor, and a renderer never authors as an agent.
 - `describe` reads no Project data and creates no artifact; `preview` renders with the network off and no server address or credential.
@@ -488,7 +521,8 @@ Status: Built. Since: —. Detail: [Architecture: Device transport and evidence]
 
 Input rides the workbench control channel with actor attribution. Agent device tools follow the thread's posture per operation rather than a Full-access gate on the whole tool.
 
-- Reads (discover, status, screenshot, opening an already booted destination) run under every posture, Plan included; every other operation is an effect that Plan refuses, Full access sends, and other postures ask for.
+- Reads (discover, status, screenshot, logs, Android's describe-ui, opening an already booted destination) run under every posture, Plan included; every other operation is an effect that Plan refuses, Full access sends, and other postures ask for.
+- An agent reads a device as text: Android describe-ui lists labelled on-screen elements with centres in tap pixels, an Android tap may name an element matched exactly by resource-id, then content-desc, then text (none or several matches are refused with the count), and both tools' logs return a bounded tail kept from the newest end, with crashes on request. The text returns in the tool result and is kept as a log artifact; evidence keeps only a note. iOS describe-ui and tap by element are not built: they need the native device helper. Checks on a real emulator and a real Mac are still owed.
 - Allow input opens a destination to input for fifteen minutes for that window, thread and destination, and only a delivered input renews it. _Here only._
 - The grant lives in host memory, so a restart asks again. It ends with the window's authority, a successful shutdown or a discovery that finds the destination no longer booted. It never covers boot, shutdown, Open URL or Rotate. _Here only._
 - Open URL and Rotate are effects confirmed on their own; an input whose delivery is unknown is reported interrupted, and an off-screen point is refused, never clamped.
@@ -614,6 +648,7 @@ Work never silently becomes Code. A promotion proposal is an offer, and only exp
 - A promotion moves focus and tooling, not authority; the new thread takes the level of its own Project, never one carried over from Work.
 - A thread never moves from Code to Work (maintainer decision, 2026-11-01): Code can do everything Work can, so a person forks the thread or starts a new one.
 - A Work Project may opt into a `STATUS.md` in its folder, off by default and refused for the default-folder Project.
+- A turn updates `STATUS.md` only when it changes where the work stands; a stale status makes a task take stock on its first turn unless the request is a greeting or unrelated to the work.
 - Octant never writes an agent brief into a user folder, and a Work turn does not read an existing one.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -670,8 +705,11 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Projects with several f
 
 ### Child agent runs
 
-A child run starts only when the thread's agent delegates through a harness delegate tool. Both harnesses use the same host admission, routing, workspace and lifecycle services.
+A child run starts only when the thread's agent delegates through `octant_agents`, the one child-run tool every runtime is offered, an Octant Harness lead included. Every child uses the same host admission, routing, workspace and lifecycle services.
 
+- `octant_agents` operations are `capabilities`, `delegate`, `status`, `wait`, `cancel` and `follow-up`; a thread is never offered a second child-run tool, and a Side Chat and a server Project thread are offered none.
+- Delegation is refused while subagents are off, the thread has read outside content, or its harness session is paused; a child's reply that `wait` hands back marks the parent first, as a delivered reply does.
+- The harness's retired `delegate` tool name stays readable in journaled turn records and approvals, so old journals replay.
 - Subagent creation is one setting with two values, Off and Automatic. Only the thread's agent starts a child, and the parent and child hierarchy is the only subagent surface. _Here only._
 - The host prepares the child's workspace (research-only for Chat, the Project root for Work, an isolated managed worktree for Code); no client supplies a path, and wider-than-parent grants are refused.
 - Children start from committed source only, and provider-owned hidden subagents stay disabled.
@@ -693,14 +731,17 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 ### Messaging and sibling threads
 
-Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are limited to Code threads of one Project.
+Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are operations of one tool, `octant_threads` (maintainer decision, 2026-11-05): Work and Code turns see the other open threads of their own Project, and only Code turns message them.
 
 - A refusal reveals nothing about whether another thread exists, and sending starts no turn, grants no authority and returns no reply.
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
-- A source turn may make at most three thread-message sends, and a target turn started by that tool is never offered the tool. _Here only._
-- `octant_threads` lists, reads and waits only; a read marks the caller, and a turn may make 8 reads and 4 waits.
-- The current recipient can explicitly report receipt of its exact delivered message; the host rechecks both Code threads and their same-Project authority. Sender status reads only its own metadata through the existing tool, and the person sees bounded recent receipts in Agents. Acknowledgement means reported receipt, never understanding or action; delivery and turn completion do not auto-acknowledge.
-- Plan still omits the messaging tool, excluded profiles and cancelled turns refuse every action, and receipt retries are idempotent for the same durable ID. Retrying a send creates a new message. Queued-message expiry has no recorded deadline and remains unimplemented; no receipt infers Expired from age.
+- A source turn may make at most three `octant_ask_thread` calls, and a target turn started by that tool is never offered the tool. _Here only._
+- Every operation names a thread by one reference, `<thread id>@<project id>`; a reference whose Project is not the caller's refuses like an unknown one, `send` included. A `send` with more than four recipients, a malformed reference, or one of another Project is refused whole; it never reaches a subset.
+- `list`, `read` and `wait` change nothing outside the caller's record and are offered in Plan; a `list` or `read` marks the caller, and a turn may make 8 reads and 4 waits. In Work they see only Work threads, and in Code only Code threads.
+- `send`, `acknowledge` and `receipts` are Code to Code only. Work threads neither send nor receive, because only Code turns carry messages; extending messaging to Work needs a rule for how a Work turn carries one.
+- The current recipient can explicitly report receipt of its exact delivered message; the host rechecks both Code threads and their same-Project authority. Sender `receipts` read only its own metadata, and the person sees bounded recent receipts in Agents. Acknowledgement means reported receipt, never understanding or action; delivery and turn completion do not auto-acknowledge.
+- Plan leaves the messaging operations out of the enum, excluded profiles and cancelled turns refuse every messaging call, and receipt retries are idempotent for the same durable ID. Retrying a send creates a new message. Queued-message expiry has no recorded deadline and remains unimplemented; no receipt infers Expired from age.
+- A non-empty profile allowlist names each operation group: `octant_threads` for the reads, `octant_threads.send` for messaging, `octant_threads.board` for the planner's board, so folding the former tools together widens no existing allowlist.
 
 Status: Built. Since: 2026-10-12. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -714,7 +755,7 @@ A `#thread` mention is a bounded, read-only view of a thread the sender can alre
 - A person may return one finished reply to its linked source’s editable unsent draft. Append preserves existing text/caret and busy work; it never sends, queues, steers or approves.
 - Typed reply/digest/source references persist with the draft and ordinary send, queue delivery, retry and resume revalidate them and inherit outside-content provenance before provider reads. Missing or corrupt provenance refuses admission; clearing the entire draft is explicit recovery.
 - New replies retain a bounded receipt of actual host source-read versions/context digest, independent read range and omissions; older replies honestly say the original snapshot was not recorded.
-- In Chat, an explicit mention also lets one bounded tool send one instruction to the mentioned Chat thread, one hop, failing closed.
+- In Chat, an explicit mention of a Chat thread also offers `octant_ask_thread`, which sends one instruction to the mentioned Chat thread and waits for its reply, one hop, failing closed. A turn whose mentions name no Chat thread is not offered it.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -735,9 +776,9 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A Code thread may push its own branch and open, update and stack pull requests from it. Every forge change goes through one journaled Octant pull-request tool.
 
 - Only the repository the Project binds is touched, and a thread never acts on another thread's branch.
-- Plan mode and revoked forge access refuse every action; force-with-lease on the thread's own branch is the default, and a plain force-push or any push to the default branch needs the person's approval for that one act, which Full access does not stand in for.
+- Plan mode and revoked forge access refuse every action; the tool's `help`, which returns its usage text and reaches no forge, is not an action. Force-with-lease on the thread's own branch is the default, and a plain force-push or any push to the default branch needs the person's approval for that one act, which Full access does not stand in for.
 - Each action journals the actor, repository, number and head SHA, and Octant stores no forge token.
-- Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request or on a stored Project or routine choice.
+- Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, an agent's merge on request or on a stored Project or routine choice, and a watch on its own pull request (approved for each watch at every level; see Merge when ready and Auto-fix).
 - The review pane carries the person's own label, comment, review-reply, approve, request-changes, close and reopen controls; the labels and review threads they name are read through a desktop-window-only query, and a label the repository lacks is never offered. A review is recorded on the head the person read and refused when it moved; no agent, routine or paired device reviews.
 - Built: every push, merge and pull-request change Octant reads in a shell command is journaled under the thread (`shield-forge-changes.observed@1`) with who ran it and what happened; at Full access an Octant Harness command that merges, force-pushes plainly, forces or deletes a branch other than the thread's own, or pushes to another thread's branch is refused before it runs, and a provider runtime's command, seen only as it starts, is recorded with the hard line it crossed. A target behind an expansion is recorded as unreadable.
 - At Guarded and Reviewed, recognizable pushes and pull-request writes are refused before Octant's Harness shell runs them, and before Octant answers a provider's pending approval call, with or without Shield. Generic shell consent does not bind repository, revision or checks; the agent uses the structured tools. Shield's forge hard lines use the same command reader and still ask the person.
@@ -761,14 +802,17 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and 
 
 ### Merge when ready and Auto-fix
 
-A Code thread's pull request review carries two switches the person turns on: Merge when ready, which turns on the forge's own auto-merge, and Auto-fix, which wakes one linked Code thread to fix failed required checks, unresolved review threads and base conflicts.
+A Code thread's pull request review carries two switches the person turns on: Merge when ready, which turns on the forge's own auto-merge, and Auto-fix, which wakes one linked Code thread to fix failed required checks, unresolved review threads and base conflicts. Beside them, a thread's agent may ask to watch its own pull request, so it is woken instead of polling (maintainer decision, 2026-11-05).
 
 - Only a local window turns Auto-fix on. A paired phone or web client may turn Merge when ready on with `confirmed: true` for the head it reviewed, and off without it; the forge still waits for the required checks and reviews. No provider, agent tool, plugin or routine reaches these routes.
+- A watch goes through the pull-request tool (`watch`, `unwatch`). The host resolves the thread's own open linked pull request; the person approves each watch at every level; Plan and a turn the host started on its own (`automation-recursion`) refuse it; stopping it never asks. Its enabled and disabled are journaled as the thread's agent. The Code runtime reaches it only through a watch port the composition root binds to the switch service, because GitHub is a separable integration.
+- A watch shares Auto-fix's pass, pauses, outside-content mark (label `pull-request-watch`) and wake path, but fixes nothing: it wakes the thread when checks on the head settle (passed or failed), the review decision changes, a new review or comment arrives, or a conflict appears, coalescing one pass into one turn, and never for what its journaled baseline already held.
+- A watch ends when the pull request merges or closes, the thread is gone, the Project loses the repository, the agent unwatches, after ten started wakes, or after three days. Its vouching window is not journaled, so after a restart it stays quiet until a window shows the pull request or the agent asks again.
 - Merge when ready uses the forge's auto-merge matched to the head the person saw, never a loop of Octant's own, and answers unsupported when the repository does not allow auto-merge.
 - Auto-fix wakes the thread with one turn through the routine follow-up path, under the thread's own level and approvals; it marks the thread as having read outside content first, and sends no turn if that mark is refused.
 - Auto-fix states Octant's rules to the agent first: never force-push, never rewrite pushed history, merge the base branch instead of rebasing.
 - At most three attempts per failure; Auto-fix stops when the pull request merges or closes, the thread is archived or gone, the Project loses the repository, or the person turns it off.
-- Every switch change and every wake is journaled.
+- Every switch change, every watch change and every wake is journaled.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes, Merge when ready and Auto-fix](../architecture.md#modes-chat-work-and-code).
 
@@ -787,7 +831,7 @@ Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Wor
 A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept in the Project overview.
 
 - Only a person confirms or declines a proposal; a proposal executes nothing and the planner has no creation authority of its own.
-- The planner tools are offered only to the designated thread and re-resolve the designation on every call.
+- The planner reads its board through `octant_threads` (`board`) and proposes through `octant_offer_side_task` (target `board`); both are offered only to the designated thread and re-resolve the designation on every call. The side-task schema states the proposal's bounds, and the planner service keeps its cap of ten waiting proposals.
 - The Code Project overview designates a same-Project thread and lists versioned proposals with approve/decline and resulting tasks. Phone and CLI mutation surfaces are not added.
 - Approval reviews ordinary provider, checkout and access controls with the proposal intent fixed; only confirmed creation proceeds to the normal first-message path. Stale, refused or uncertain decisions never start work or retry automatically.
 - The host journals one submitted creation identity before awaiting creation; cross-window and restarted attempts cannot replace it. The window retains that identity through reload. Missing task data never releases uncertainty; only confirmed creation or a newer host-proven precreation failure permits progress. Unknown/post-boundary failures remain reserved for inspection.
@@ -803,6 +847,9 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
 - An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
+- A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
+- Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
+- Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
 - A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
@@ -1125,7 +1172,12 @@ Status: Partly built. Since: —. Detail: [Architecture: Context and usage accou
 
 A provider that keeps its own conversation is sent standing context once, and resume is bound to a durable identity.
 
-- Standing blocks the session already holds are not resent. The record keeps provider session ids and digests, never text, and a compaction or failed restatement drops it.
+- Standing blocks the session already holds are not resent. The record keeps provider session ids and digests, never text, a compaction or failed restatement drops it, and a failed turn that sent a newer version of a keyed block drops that key.
+- Standing text never varies by turn: a one-turn instruction is its own block kind that is never held, and a re-read file is a keyed block whose newer version is appended without restating anything else.
+- A rule about an app tool names the tool, and a session that cannot call it never receives the rule; Codex keeps its thread's starting tools in the resume cursor for this.
+- An offered tool that replaces a runtime's own path (Simulator.app, an emulator window, a backgrounded shell, `gh`, native subagents) gets one short routing line, and only that.
+- Octant's instructions open with a fixed orientation per mode (inside Octant, rendered replies, the mode's purpose, self-describing tools, refusals reported, how reply blocks appear), then follow one order in every mode: orientation, reply formats, the mode's rules, tool notes, and the current turn's instructions.
+- Where the runtime offers a channel beside the message (Codex additional context, the Claude Code prompt hook), Octant's context goes there and the message is only what the person typed; context is never moved into a system prompt or tool list, so earlier turns keep their cached prefix. Octant's own instructions may take Codex's developer channel; skills and material keep user-level authority. A restatement always replaces the material entry, so context withdrawn and then selected again is delivered again. The Claude Code prompt hook carries context only where it is known to run, and a turn whose hook context was never confirmed delivered is not counted as holding it.
 - Resume refuses as stale-resume when its binding names another instance, session, Project root, mode or native id. At most one process owns a native session per instance.
 - A retained provider runtime after a settled turn is reused only for an identical task, instance, executable, home, root, mode, model, policy, auth mode and tool catalogue. Any mismatch closes it and cold-resumes. _Here only._
 - Resume of a native file needs a header matching session and root; a missing, ambiguous or cross-Project history refuses before input. _Here only._
@@ -1199,6 +1251,8 @@ One journaled session per thread is the only state, and every surface reads and 
 
 - After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it. Lost turns and dead approvals are journaled.
 - The lead's approvals and questions block until any surface answers, expire after ten minutes, and are capped at 32 waiting. A pending one marks the thread as needing the person.
+- Built: the provider-neutral app-owned `ask-user` tool can collect up to four related single-choice or multiple-choice questions inline in Chat, Work and Code, with selection limits, unselected recommendations, written alternatives and an optional comment. It creates no Canvas and grants no permissions.
+- The host validates the complete questionnaire response against the journaled ask before accepting it once. Another window's answer withdraws the pending card, and the originating thread retains an expandable submitted-answer summary after reopening. [Workspace: Inline questionnaires](workspace.md#inline-questionnaires) owns the presentation and answer contract.
 - A goal completes only on evidence from a criterion check or a person; a model saying it is done completes nothing.
 - A goal loop's budgets are its stopping condition. A loop that would exceed a token, time or turn ceiling does not start the next iteration and moves to budget-limited, which only a person resumes. _Here only._
 - An unattended iteration runs under a ceiling declared at loop start, clamped to the thread's authority, which can only narrow. An effect needing an approval no person can give suspends the loop and is never auto-approved. _Here only._
@@ -1212,6 +1266,7 @@ Follow-up suggestions and offered side tasks are journaled offers that grant not
 
 - A confirmed follow-up is created through the mode's ordinary creation command, and the prompt is never sent on the person's behalf.
 - Starting a side task is the person's confirmation, and its prompt is sent only on their click. A Code thread still starts approval-gated.
+- A Code Project's designated planner offers work to its board with the same tool and target `board`; that records a pending planner proposal, which only a person confirms.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
@@ -1619,6 +1674,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Projec
 A Side Chat may read its source thread's transcript, state and files but never inherits the source's Work or Code execution authority.
 
 - It gains only list, search and read file tools, re-checked per call against the sidecar link and the window's right to open the source.
+- The host tools an ordinary Chat is offered (side tasks, images, Canvas, past threads, Computer, the `#thread` dialogue and child agents) are withheld from it.
 - Paths are relative and confined, results are bounded and recorded as external content, and it has no write, shell, Git or network tool.
 - The `#thread` dialogue tool is refused for a sidecar in both directions.
 
@@ -1794,13 +1850,14 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Host-d
 
 ### One-use credential cards
 
-A local person can enter a token in a conversation card for one fixed integration operation without sending it to the model or saving a sign-in.
+A local person can enter a token or select a linked 1Password field reference in a conversation card for one fixed integration operation without sending it to the model or saving a sign-in.
 
 - Integrations register fixed operations through the public host port. The host supplies their purpose, destination and action; an agent cannot choose an arbitrary URL or command.
 - Submission consumes the request once, checks current thread and window authority, and sends no response content or raw error to the agent.
 - The compact card shows the destination and one-use scope, with masked input, an explicit reveal control and right-aligned actions. Accepted submissions stay disabled until the host settles them.
 - Expiry, decline, cancellation and restart prevent future use. The host cannot recall a token already transmitted.
-- The first card consumer is a read-only Linear account check in Code. Linked-store selection and administrator authentication remain separate work.
+- The first card consumer is a read-only Linear account check in Code. Linked-store selection resolves only the submitted reference, refuses a changed store link, and retains no reusable credential slot. Administrator authentication remains separate work.
+- Agents reach cards and saved commands through one Code tool, `octant_credential` (`help`, `list`, `request`, `run-saved`). Each operation keeps its own authority, approval, Plan and local-window rules; `list` returns names and descriptions only; the tool is offered only when a registered operation or a command saved for the Project exists when the turn's tools are composed. It is not a general command runner.
 - Separate named command bindings are built for normal local Code tasks: Settings fixes the Project, recipient/CLI digests, arguments, directory, account and immutable references; the person approves every run through the same service used by the provider tool. Ask for approvals and Auto-accept edits retain ordinary command approvals/Shield and confine the recipient while the credential tool authenticates outside. Plan refuses; Full access remains unrestricted.
 - Command approval IDs are one-use and never restored. Preparation replay is memory-scoped; a newly prepared request always needs fresh approval and cannot establish that an earlier process stopped. Below Full access the recipient's OS and per-command network rules remain enforced; vendor output concealment is not protection from disclosure to allowed destinations. See the owning linked-store rules for custody, invalidation and cancellation limits.
 
@@ -1975,6 +2032,23 @@ The Usage page reports what was measured and shows each provider with a bundled 
 
 Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DESIGN.md#usage-surface-ownership) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
 
+### Reply detail
+
+Reply detail chooses how much of a turn's thinking and tool calls the transcript shows open: Low, Medium or High. The Appearance setting is the default every thread starts at, Low unless changed; a thread may set its own level, which stays with it.
+
+- Low keeps thinking shut and folds a settled turn's tool calls behind "N tool calls"; Medium keeps thinking shut with its first line beside the name and leaves the tool calls listed; High opens thinking, the tool calls and each row's recorded summary, including while a reply streams.
+- It is presentation only: it never changes what a model is asked or what a client fetches, shows nothing the transcript does not already hold, and leaves Stream replies in charge of the partial answer.
+- A thread's own level wins over the default, survives a reload, and is drawn alike by every window, the phone and a paired browser; changing the default never moves a thread that chose. Use default returns a thread to following the default.
+- The default and the threads' own levels live in the host's shell settings, written only through the shell route from a window on the host, kept out of thread journals and host export. Settings saved without either field read as Low with no thread levels.
+- Purging a Chat, Work or Code thread, alone, with its Project or by retention, removes its own level in the same pass; the 500-entry bound (oldest dropped first) stays as a backstop.
+- Another open window picks up a changed level when it regains focus, re-reading shell settings behind any edit still being saved.
+- The phone and a paired browser read only these two fields through `GET /api/reply-detail`, a read-only, authenticated route classified `settings.read-non-secret`; neither can change a level, and both draw Low until the host answers.
+- The thread menu, the palette and the remappable `reply-detail-cycle` chord (Mod+Shift+D by default, chosen clear of every other default, the desktop menus and system chords) change the thread in front, and only one on screen: behind Settings, Review or another covering page the chord is left to the browser and the palette offers only the default's commands. The chord announces the new level in a status toast. Keybinding overrides saved before the action existed read unchanged.
+- A disclosure opened or closed by hand keeps that state while its turn stays mounted and the thread's level is unchanged; a change of that level resets every disclosure to the new level.
+- The thinking preview is hidden from assistive technology so it is never read twice, and every disclosure keeps `open` and `aria-expanded` in step.
+
+Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#transcript).
+
 ## Workspace
 
 ### Mode-first navigation and Projects
@@ -2022,6 +2096,7 @@ A thread can be put away (completed, manual only) or snoozed. Both are overlays 
 - Put away is refused while a turn runs or the thread waits on the person. A host sweep archives only put-away threads after a configurable delay (default seven days).
 - A running thread may be snoozed, a thread waiting on the person may not, and the wake time must be ahead. Putting a thread away drops its pin and any snooze. _Here only._
 - A snooze wakes early when the agent needs the person. A person sending a turn reopens the thread.
+- Answerable pending questions have a separate attention deferral in Home, Inbox and Review. The condensed row remains discoverable, can return early, and never changes the thread, draft, answer or execution authority. Approvals and find-only questions are excluded.
 
 Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion](workspace.md#thread-visibility-and-completion).
 
@@ -2077,6 +2152,7 @@ Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#too
 Agents may propose routines and delegate work, but only a person creates a routine, and only the thread's agent starts a subagent.
 
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
+- An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
 - The Agents dock shows and controls subagents without starting them. A provider-observed child is labelled observation-only and has no managed controls.
 
 Status: Built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) and [Subagents](workspace.md#subagents).
@@ -2187,6 +2263,7 @@ Diagram and flow boards are editable by a local person, and comments are journal
 
 - A drag or nudge is journaled as a new immutable version with the host's own actor; a stale drag is refused.
 - Only a window on this host edits boards or comments. A paired browser reads them.
+- Inline diagrams follow their drawing's proportions without gaining layout-editing authority; document workspaces keep the fixed board frame. Retry loops use visible return lanes with shape-aware ports and space before neighbouring automatic-layout nodes. [Canvas visuals: Inline diagram proportions and retry loops](canvas-visuals.md#inline-diagram-proportions-and-retry-loops) owns the layout rule.
 - Send to agent queues a turn under the thread's own authority and creates no new authority.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).
@@ -2299,12 +2376,14 @@ Status: Built. Since: —. Detail: [Artifact replica sync: Store selection](arti
 Only an explicit screenshot is kept, and it stays with the thread.
 
 - The agent's screenshot operation and the person's Screenshot control keep a capture. A paired device, the thread-less Project browser and a terminal CLI keep nothing.
+- The agent may also keep a recording: `record: true` on one `steps` or `flow-run` call keeps an animated PNG of its page while that call runs (at most 30 seconds, a frame every 250 ms, 120 frames, 800 pixels on the longer side, 2 MiB), taken from the page's own screencast in the desktop and the headless Browser and joined without decoding or a new dependency. It is admitted like a screenshot, except that Plan refuses it because the thread keeps it as an artifact (a recorded call in Plan answers `recording-refused` and runs nothing, and one already running when Plan begins is stopped and discarded), keeps no frame of a page that shows a credential field or cannot be checked, nor of a page off the thread's approved origins or with no web origin, ends with its call or when another tab comes to the front (kept under the recorded tab's address, `tab-changed`), and is kept, retained, listed, exported, and saved for a pull request as a capture; the strip shows it still with a play mark until the person opens it.
 - Bytes live under the data directory, never a Project. The journal records metadata and a hash, never bytes.
 - A thread keeps its newest 32 captures. Captures leave the host only in the local owner's thread or data export.
+- At most 8 of those captures are recordings: keeping a ninth drops the thread's oldest recording, never a screenshot. It is the same journal-derived rule as the 32 (no drop event; listing, reads, export and recovery all apply it, and purge erases everything as before), and it bounds a thread's recordings at about 16 MiB instead of about 64 MiB.
 - A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention) and [Proof](browser-captures.md#proof).
+Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
 
 ### Browser for agents
 
@@ -2317,7 +2396,7 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - The agent may hover, choose a list option, drag, press key chords, and open, list, switch and close tabs; a new tab reaches its page through the same origin admission as a navigation.
 - An upload sends files only from the thread's workspace (the Work Project folder or the Code checkout): relative paths, no symbolic link anywhere on the path, at most 5 files of 25 MB, and the person is asked every time at every access level. The answer is never remembered, and a terminal grant cannot upload.
 - Downloads are blocked unless the person turns on "Let agents download files" (off by default, set only from a local window, journaled with shell settings). Then a download an agent action starts is held outside the workspace (at most 25 MB, 5 per page), reported by name, size and sniffed type, and `download-save` asks the person every time, at every access level, before saving it as a new file in `downloads/` of the thread's workspace. Programs and installers are refused, a symbolic link is refused, and a paired device, a terminal grant and Plan cannot save. A person's own download in the pane stays blocked.
-- `steps` runs up to 10 operations in one call, each admitted by the server on its own, stopping at the first failure. A batch cannot nest, upload, download-save, sign in, run or save a flow, stop, or open a signed-in page.
+- `steps` runs up to 10 operations in one call, each admitted by the server on its own, stopping at the first failure. A batch cannot nest, upload, download-save, sign in, run or save a flow, stop, or open a signed-in page. `record: true` on `steps` or `flow-run` keeps an animated recording of that one call as a thread capture; the model gets its id and length, never the animation, and the runtime records nothing an agent did not ask for.
 - Waits take text, an address, a load state, or an element's state, all or any, with a hard limit of 30 seconds. Actions wait for the page to settle (load, then 250 ms unchanged, at most 2 seconds). A page's dialogs are answered by a fixed rule (alert and leave-page accepted, confirm and prompt dismissed) and reported. `resize` sets the agent's own page to a size (320-3840 by 320-2160) or one of four device presets (`phone`, `phone-landscape`, `tablet`, `desktop`, each with a pixel ratio and mobile flag), and can turn touch emulation and a light or dark color scheme on or off; with no field it restores all of them. It touches only the agent's own page, never the person's window or another context, and a page whose developer tools someone else attached keeps its touch and color scheme.
 - `sign-in` hands the page to the person: a card with Continue and Cancel, the Browser brought forward, every other agent Browser call held, and a fresh snapshot on Continue. A person leaving the page on an unapproved site is told so; no origin approval widens. It is never remembered and is refused on routine, subagent, terminal-grant and paired-device turns.
 - Off-origin refusals say stop then navigate for a new site's approval, or sign-in in the app for the person's SSO. Expired pages report context-expired and the former profile under the same window, thread, authority and model binding; the bounded hint keeps no page content and never reopens the page. Session deadlines are unchanged.
@@ -2329,9 +2408,10 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - No password saving. The separate bounded synchronous script operation is built for an existing local native Code page at Full access, with server authorization, native execution/result bounds, independent credential-custody exclusion and truthful possible-effect/cancellation receipts. Scripts have ordinary DOM/account authority and callbacks may persist; fixed-reader redaction does not promise arbitrary-script password non-observation. Page main-world CSP does not constrain isolated-world evaluation.
 - Not built yet: exact-source one-use script consent below Full access for an established non-signed-in Private page. Unknown session eligibility refuses; known signed-in pages require Full access even in Private. Work and other excluded callers do not gain this first implementation.
 - Diagnostics report console errors, failed requests, and 4xx and 5xx responses (address, method, status; never a body or header), console warnings on request, each numbered, read after a `since` cursor without clearing.
+- `audit` reads the open page and never navigates, reloads, or changes it, and is admitted exactly where `diagnostics` is (Plan admits both). `accessibility` runs fixed checks in the shared page reader (images without text alternatives, unnamed buttons, links and fields, missing title or lang, skipped heading levels, duplicate ids that labels or aria point at, WCAG AA text contrast over known solid backgrounds, focusable elements inside aria-hidden, and crowded touch targets under 24 by 24 pixels while touch is emulated), naming each finding by the latest snapshot's ref or a selector, at most 10 per rule and 25 in all with every rule's count. `performance` reads the browser's own record of the document's load (TTFB, FCP, LCP, CLS, TBT rated by the published boundaries, long tasks, requests by type, the largest resources with addresses redacted as diagnostics redact them, and the page's DOM nodes and heap) and lists what it could not measure; INP is never measured. Results stay on this computer.
 - Threads of a Project drive their own pages at the same time without waiting on each other. An agent's action reaches only its own thread's context, checked on the server by thread as well as authority. The Project browser dock lists each thread's live page by title or host, owner thread, and an "Agent active" mark, as names only: a selected page shows its thread's own picture read-only, and a paired device sees a stored-profile page by its existence alone.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Page audits](browser-agent-tool.md#page-audits), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
 
 ### Browser profiles and extensions
 
@@ -2375,6 +2455,7 @@ Status: Built. Since: —. Detail: [Terminal Browser grant: Current behavior](te
 
 On a tainted thread the harness refuses a web search query that looks like it carries data, before any request leaves.
 
+- It applies to every `web-search` call the harness's tool-call policy decides, a harness Chat thread's included, since that thread's only search is the harness's own.
 - Refused patterns include long text, URLs, email addresses, long hex runs, escaped bytes, base64 and high-entropy tokens.
 - It is a guard, not a privacy rule: the person lowers it with the outside-content gate by choosing Full access for a thread or a Project's new threads, so at Full access in Work and Code the query is not refused and the mark is only recorded.
 
@@ -2730,7 +2811,8 @@ A Code thread's editor gets diagnostics and go-to-definition from separately lau
 - The repository never chooses what runs; executable, arguments, environment and class come only from the enabled component.
 - The bundled native language server is on by default for Code, with a Settings switch; the Project's own copy of that language toolchain is not used.
 - Paired devices may read results; starting a `repo-tooling` server stays local-host only.
-- Agents get read-only diagnostics and definition tools, available in Plan, that never start or read through a `repo-tooling` server (real-provider smoke owed).
+- Agents get one read-only tool, `octant_code`, with `diagnostics`, `definition` and `references` operations, available in Plan and asking nothing, that never starts or reads through a `repo-tooling` server (real-provider smoke owed).
+- `octant_code` is offered on a Code turn only when an effective `static` server covers a file a bounded scan finds in the turn's checkout or extra folders; `references` returns at most 200 places, `references` and `diagnostics` stop before their list passes 48 KiB so a result fits the provider's tool result budget, and each says when it was cut.
 - Octant hosts no other editor's extension API.
 
 Status: Built. Since: 2026-10-26. Detail: [Language services: launch classes](language-services.md#launch-classes), [authority](language-services.md#authority) and [maintainer decisions](language-services.md#maintainer-decisions).

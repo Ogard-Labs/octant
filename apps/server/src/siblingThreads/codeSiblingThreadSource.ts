@@ -1,5 +1,7 @@
 import {
+  decodeCodeThreadId,
   decodeMentionableThreadId,
+  decodeSiblingThreadId,
   type CodeThread,
   type CodeThreadId,
   type SiblingThreadState,
@@ -11,7 +13,7 @@ import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import type { SiblingThreadSnapshot, SiblingThreadSource } from "./siblingThreadTools";
 
 /**
- * The host facts a Code turn's sibling-threads tool reads. Every one is the
+ * The host facts a Code turn's threads tool reads. Every one is the
  * host's own record, never a renderer value: the persisted Code threads, the
  * runtime work the board folds, the running turn's open approvals and
  * questions, the decision a finished turn closed with, and the `#thread`
@@ -43,7 +45,7 @@ export function codeSiblingThreadSource(
   windowId: WindowId,
 ): SiblingThreadSource {
   const snapshot = (thread: CodeThread): SiblingThreadSnapshot => ({
-    threadId: thread.id,
+    threadId: decodeSiblingThreadId(String(thread.id)),
     projectId: thread.projectId,
     mode: "code",
     closed: thread.lifecycle === "archived" || thread.completedAt !== undefined,
@@ -52,7 +54,7 @@ export function codeSiblingThreadSource(
   });
   return {
     thread: (threadId) => {
-      const thread = evidence.thread(threadId);
+      const thread = evidence.thread(decodeCodeThreadId(String(threadId)));
       return thread === undefined ? undefined : snapshot(thread);
     },
     projectThreads: (projectId) =>

@@ -1,3 +1,5 @@
+import { resolveSnoozePresets } from "@octant/domain";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { CirclePause } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -19,6 +21,7 @@ import {
 import "./pendingRequestRow.css";
 
 export interface PendingRequestRowProps {
+  readonly onDefer?: (request: PendingRequest, until: string | null) => Promise<boolean>;
   readonly request: PendingRequest;
   /** The clock the wait is read against; the shell advances it once a minute. */
   readonly now: number;
@@ -65,6 +68,13 @@ export interface PendingRequestRowProps {
  */
 export function PendingRequestRow(props: PendingRequestRowProps) {
   const { request } = props;
+  const deferred =
+    props.onDefer !== undefined &&
+    request.deferredUntil !== undefined &&
+    Date.parse(request.deferredUntil) > props.now;
+  const [presetId, setPresetId] = useState<string>();
+  const presets = resolveSnoozePresets(new Date(props.now));
+  const selectedPreset = presets.find((preset) => preset.id === presetId);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const mounted = useRef(true);
@@ -78,7 +88,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const open = props.settled !== true;
 
   async function answer(response: PendingRequestResponse) {
-    if (busy || !open) return;
+    if (busy || !open || deferred) return;
     setBusy(true);
     setNotice(undefined);
     const result = await props.onAnswer(request, response);
@@ -98,6 +108,22 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     if (choice === undefined) return;
     event.preventDefault();
     void answer({ kind: "choice", label: choice.label });
+  }
+
+  async function defer(until: string | null) {
+    if (busy || props.onDefer === undefined) return;
+    setBusy(true);
+    setNotice(undefined);
+    try {
+      if (await props.onDefer(request, until)) {
+        if (mounted.current) setPresetId(undefined);
+      } else
+        setNotice("This question changed or is no longer available. Refresh before trying again.");
+    } catch {
+      setNotice("The attention change could not be confirmed. Refresh before trying again.");
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
   }
 
   const embedded = props.embedded === true;
@@ -166,10 +192,58 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           Octant restarted while this was waiting, so it did not run.
         </p>
       )}
-      <p className="oct-row-detail pending-request__text" title={request.text}>
-        {request.text}
-      </p>
-      {open ? (
+      {deferred ? null : (
+        <p className="oct-row-detail pending-request__text" title={request.text}>
+          {request.text}
+        </p>
+      )}
+      {deferred ? (
+        <p className="oct-meta" role="status">
+          Deferred until {new Date(request.deferredUntil ?? "").toLocaleString()}. The question
+          remains unanswered.
+        </p>
+      ) : null}
+      {open &&
+      request.kind === "question" &&
+      request.deferralKey !== undefined &&
+      props.onDefer !== undefined ? (
+        <div className="pending-request__actions">
+          {deferred ? (
+            <OctantButton size="sm" disabled={busy} onClick={() => void defer(null)}>
+              Bring back now
+            </OctantButton>
+          ) : (
+            <>
+              <OctantSelectField
+                aria-label="Defer question until"
+                value={selectedPreset?.id ?? ""}
+                disabled={busy}
+                placeholder="Remind me…"
+                onValueChange={setPresetId}
+                options={presets.map((preset) => ({
+                  id: preset.id,
+                  label: preset.label,
+                }))}
+              />
+              <OctantButton
+                size="sm"
+                disabled={busy || selectedPreset === undefined}
+                onClick={() => {
+                  // Relative times start at submission, not when the menu was opened.
+                  const preset = resolveSnoozePresets(new Date(Date.now())).find(
+                    (candidate) => candidate.id === presetId,
+                  );
+                  if (preset === undefined) setPresetId(undefined);
+                  else void defer(preset.until);
+                }}
+              >
+                Defer question
+              </OctantButton>
+            </>
+          )}
+        </div>
+      ) : null}
+      {open && !deferred ? (
         <div className="pending-request__actions">
           {isFindOnlyPendingRequest(request) ? (
             <OctantButton

@@ -8,7 +8,7 @@ import {
   type MobileCodeConversation,
   type MobileTurnTargets,
 } from "@octant/client-runtime";
-import type { WorkTurnState } from "@octant/contracts";
+import type { ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
 import { MOBILE_COPY } from "../../copy";
 import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
@@ -29,6 +29,8 @@ export interface ThreadTranscriptProps {
   readonly turnActionsFor: (
     targets: MobileTurnTargets | undefined,
   ) => ReadonlyArray<MessageActionItem>;
+  /** The thread's Reply detail level, the host's per-thread choice or its default. */
+  readonly replyDetail: ReplyDetailLevel;
 }
 
 export function ThreadTranscript(props: ThreadTranscriptProps) {
@@ -80,6 +82,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
             workTurns.map((turn, index) => (
               <View key={String(turn.turnId)} style={styles.transcript}>
                 <MessageBubble
+                  replyDetail={props.replyDetail}
                   body={turn.prompt}
                   role="user"
                   showActions={false}
@@ -90,6 +93,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 />
                 {turn.response !== undefined && turn.response.length > 0 ? (
                   <MessageBubble
+                    replyDetail={props.replyDetail}
                     body={turn.response}
                     role="assistant"
                     testID={`mobile-work-reply-${String(turn.turnId)}`}
@@ -123,6 +127,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
               <View key={turn.operationId} style={styles.transcript}>
                 {turn.prompt.length === 0 ? null : (
                   <MessageBubble
+                    replyDetail={props.replyDetail}
                     body={turn.prompt}
                     role="user"
                     showActions={false}
@@ -134,6 +139,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 )}
                 {turn.assistant.map((part, index) => (
                   <MessageBubble
+                    replyDetail={props.replyDetail}
                     body={part}
                     key={`${turn.operationId}-${index}`}
                     role="assistant"
@@ -235,6 +241,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 props.allowProductMutations;
               return (
                 <MessageBubble
+                  replyDetail={props.replyDetail}
                   body={content.body}
                   key={content.contentId}
                   role={content.role}

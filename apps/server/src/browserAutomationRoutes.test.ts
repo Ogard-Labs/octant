@@ -533,6 +533,43 @@ describe("browser automation routes", () => {
     expect(service.act).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device that asks to record the host's page", async () => {
+    for (const kind of ["record-start", "record-stop"]) {
+      const request = new Request("http://127.0.0.1/api/browser/actions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          actionId: "70000000-0000-4000-8000-000000000001",
+          contextId,
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          kind,
+        }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+        }),
+        scopeId: windowId,
+      });
+      const response = await handler(request);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({
+        message: "Recording the host's browser is not a remote action.",
+      });
+    }
+    expect(service.act).not.toHaveBeenCalled();
+  });
+
   describe("taking the page over from the agent", () => {
     const headers = {
       "content-type": "application/json",

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildOctantCommands, type OctantCommandSources } from "./buildOctantCommands";
 import { keybindingActionForCommand } from "./commandKeybinding";
+import type { OctantCommand } from "./commandModel";
 
 function sources(overrides: Partial<OctantCommandSources> = {}): OctantCommandSources {
   return {
@@ -42,6 +43,66 @@ describe("the Apple workbench command", () => {
     expect(buildOctantCommands(sources()).some((command) => command.id.startsWith("apple:"))).toBe(
       false,
     );
+  });
+});
+
+describe("the Reply detail commands", () => {
+  function run(commands: ReadonlyArray<OctantCommand>, id: string): void {
+    const command = commands.find((candidate) => candidate.id === id);
+    if (command?.action.kind !== "run") throw new Error(`expected a run command ${id}`);
+    command.action.run();
+  }
+
+  it("acts on the thread in front: cycles, sets a level, and returns it to the default", () => {
+    const onSet = vi.fn();
+    const commands = buildOctantCommands(
+      sources({
+        replyDetail: {
+          defaultLevel: "low",
+          onSetDefault: vi.fn(),
+          thread: { level: "medium", override: "medium", onSet },
+        },
+      }),
+    );
+    expect(
+      commands
+        .filter((command) => command.id.startsWith("thread:reply-detail"))
+        .map((command) => command.title),
+    ).toEqual([
+      "Change reply detail in this thread",
+      "Show low reply detail in this thread",
+      "Show high reply detail in this thread",
+      "Use the default reply detail in this thread",
+    ]);
+    expect(keybindingActionForCommand("thread:reply-detail-cycle")).toBe("reply-detail-cycle");
+
+    run(commands, "thread:reply-detail-cycle");
+    expect(onSet).toHaveBeenLastCalledWith("high");
+    run(commands, "thread:reply-detail:low");
+    expect(onSet).toHaveBeenLastCalledWith("low");
+    run(commands, "thread:reply-detail:default");
+    expect(onSet).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("still changes the default, and offers no thread commands when no thread is in front", () => {
+    const onSetDefault = vi.fn();
+    const commands = buildOctantCommands(
+      sources({ replyDetail: { defaultLevel: "low", onSetDefault } }),
+    );
+    expect(commands.some((command) => command.id.startsWith("thread:reply-detail"))).toBe(false);
+    expect(
+      commands
+        .filter((command) => command.id.startsWith("settings:reply-detail:"))
+        .map((command) => command.title),
+    ).toEqual(["Set the default reply detail to Medium", "Set the default reply detail to High"]);
+    run(commands, "settings:reply-detail:high");
+    expect(onSetDefault).toHaveBeenCalledWith("high");
+  });
+
+  it("offers none while the window has no settings to change", () => {
+    expect(
+      buildOctantCommands(sources()).some((command) => command.id.includes("reply-detail")),
+    ).toBe(false);
   });
 });
 

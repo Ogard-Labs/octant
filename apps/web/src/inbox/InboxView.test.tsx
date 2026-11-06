@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   codeDecision,
+  codeQuestion,
   pendingIds,
   workChildApproval,
   workLeadApproval,
@@ -331,4 +332,47 @@ describe("InboxView", () => {
     await screen.getByRole("button", { name: "Open Linear" }).click();
     expect(onOpenLinearIssues).toHaveBeenCalledOnce();
   });
+});
+
+it("keeps a deferred question discoverable once and wakes it without answering", async () => {
+  const user = userEvent.setup();
+  const clients = decisionClients();
+  const question = {
+    ...codeQuestion(),
+    deferralKey: "a".repeat(64),
+    deferredUntil: codeQuestion().requestedAt,
+  };
+  const source = {
+    ...decisionSource(clients, [question]),
+    now: Date.parse(question.requestedAt) - 1000,
+  };
+  const defer = vi.fn(async () => true);
+  render(
+    <InboxView
+      attentionItems={[
+        {
+          signal: {
+            threadId: String(question.threadId),
+            reason: "question-asked",
+            title: question.threadTitle,
+            source: "code",
+            detail: "Duplicate attention",
+          },
+        },
+      ]}
+      decisions={{
+        ...source,
+        pendingRequestClient: {
+          list: async () => ({ requests: [question], truncated: false }),
+          defer,
+        },
+      }}
+      onClose={vi.fn()}
+      onOpenThread={vi.fn()}
+    />,
+  );
+  await user.click(await screen.findByRole("button", { name: "Bring back now" }));
+  expect(defer).toHaveBeenCalledExactlyOnceWith({ key: question.deferralKey, until: null });
+  expect(screen.queryByText("Duplicate attention")).not.toBeInTheDocument();
+  expect(clients.codeClient.executeOperation).not.toHaveBeenCalled();
 });
