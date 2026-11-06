@@ -751,7 +751,10 @@ change to it re-bills the whole conversation:
 - **Codex** takes its tools in `thread/start.dynamicTools`, which
   `thread/resume` does not accept, so a Codex thread keeps the tools it
   started with; one not offered in a later turn is refused by the host's tool
-  policy, and one first offered later does not reach that thread.
+  policy, and one first offered later does not reach that thread. The driver
+  records definition fingerprints with the starting names. New or changed
+  definitions require the person's explicit fresh-session text handoff choice;
+  the host never pretends a resume changed Codex's fixed catalogue.
 
 Each mode offers only its admitted tools, so every runtime receives the same
 definitions without a separate global tool installation or prompt catalogue,
@@ -6412,9 +6415,10 @@ prompt is therefore built to be appended, never rewritten:
   Codex needs this: a thread keeps the tools it started with for good, since
   `thread/resume` accepts other tools and ignores them, and nothing reports
   them back (0.164.0 against a local stand-in endpoint). The Codex driver
-  records the thread's starting tools in its resume cursor, so a resume after
-  a restart still knows them; a cursor written before that record keeps every
-  rule. Without it, a tool first offered later in a thread was described to a
+  records the thread's starting tool names and definition fingerprints in its
+  resume cursor, so a resume after a restart still knows them. A cursor written
+  before the name record keeps every rule; one without fingerprints requires
+  explicit text-handoff continuation before offering nonempty tools. Without it, a tool first offered later in a thread was described to a
   model that could not call it.
 - **Standing text stays fixed.** Anything that varies from turn to turn is a
   `turn-instructions` block or a keyed block, never a change to a standing
@@ -8889,9 +8893,20 @@ same. This holds in Chat, Work, and Code.
   the current mode, Project, thread, trust and enablement; another explicit
   invocation is needed to call a tool. Sibling sessions remain independent.
   Reconnecting the same tool catalog changes no task, transcript, draft or
-  provider session. A changed tool catalog on a provider that fixes its tools
-  at session start still needs separate provider continuation support; this
-  transport recovery does not claim that support is built.
+  provider session. When a provider fixes tools at session start, the driver
+  compares current definitions with its persisted starting fingerprints before
+  resume. Withdrawing tools keeps the native session and host refusal policy;
+  adding a tool or changing its definition refuses continuation. Chat and Work
+  refuse before accepting the draft. Code parks the recorded, unsent turn and
+  restores the draft. **Continue with updated tools** explicitly sends that
+  draft in a fresh session through the existing bounded, journaled conversation
+  text handoff. The previous native session and full task history remain
+  preserved; hidden reasoning and tool activity do not transfer, and omissions
+  are disclosed. The choice grants no tools or authority, never replays a failed
+  call, and is not made by routine dispatch. Drivers report this through the
+  provider SDK rather than vendor checks in the host. Legacy fixed-tool cursors
+  without definition fingerprints require the same choice before offering a
+  nonempty catalogue.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
@@ -9305,6 +9320,32 @@ preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
 
+**Atlassian and Airtable setup.** Both non-featured entries use the existing
+MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
+uses `https://mcp.atlassian.com/v2/mcp`; its path-scoped issuer, published DCR and
+S256 metadata were checked on 2026-11-06. A Cloud account and organization
+permission for the client are required; site restrictions and IP allowlists
+still apply. Do not switch a failed connection to a legacy SSE endpoint.
+Airtable uses `https://mcp.airtable.com/mcp`, with the exact origin resource
+`https://mcp.airtable.com` advertised by its protected-resource metadata. Only
+that exact transport has this resource alias; arbitrary sibling paths and
+queries retain exact resource matching. Its issuer advertises S256, public DCR
+and metadata-document identities. Shared Client setup also supports a manually
+registered public client and retained exact callback before separate consent.
+
+A separate Airtable personal-token entry sends a broker-held Bearer token at the
+same vendor endpoint. The person limits scopes and selected bases/workspaces in
+Airtable; OAuth selection and the vendor's third-party integrations page control
+OAuth base access. The catalog and Library do not invent a list of accessible
+bases from a credential: authorized task tools report accessible resources, and
+permission errors remain visible. Read-only tokens omit write scopes. Revoked
+OAuth credentials follow normal refresh/reconnect without tool replay; a missing
+or revoked PAT is replaced explicitly through the existing key flow. An admin
+may need to allowlist the integration. No vendor CLI or extra authority is
+required for either HTTP connector.
+Sources: [Atlassian setup](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/)
+and [Airtable setup](https://airtable.com/developers/agents/mcp/getting-started).
+
 **HubSpot setup.** The non-featured HubSpot entry uses the vendor's Streamable
 HTTP address `https://mcp.hubspot.com/` and opens the shared registered-client
 setup before separate account consent. A person creates a HubSpot MCP connector,
@@ -9444,8 +9485,9 @@ token endpoint is `https://slack.com/api/oauth.v2.user.access`. Configuration,
 discovery, broker descriptors and persisted grants retain and check the
 transport/issuer/resource/endpoints independently; the origin is never a
 wildcard for bearer delivery. The dedicated endpoints cannot fall back to a
-generic dialect for another transport or resource. Every other MCP server
-keeps exact transport/resource equality.
+generic dialect for another transport or resource. Apart from the exact Airtable
+transport-to-origin alias described above, other MCP servers keep exact
+transport/resource equality.
 
 The observed dedicated metadata advertises `client_secret_post`, not public
 `none`, Basic or dynamic registration. A supplied registered app therefore uses
@@ -9537,8 +9579,9 @@ store write, and only then deletes. Unavailable deletion retains retirement and
 the local sign-out owner for explicit retry; a caller timeout cannot claim
 success while a late write may resurrect a grant. Siblings remain usable.
 Runtime retirement is in memory; native failures and process loss do not imply
-a durable recovery engine. Changed-catalog continuation for a retained provider
-thread remains separate code work.
+a durable recovery engine. Changed fixed-tool catalogues use the explicit
+conversation continuation described under MCP HTTP session recovery; transport
+retirement itself never replaces a provider session.
 
 The authenticated broker also accepts cancellation of a retained MCP PKCE
 attempt only under the actor and descriptor recorded at Begin. It takes no

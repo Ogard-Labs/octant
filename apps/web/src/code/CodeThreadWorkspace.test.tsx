@@ -109,6 +109,32 @@ describe("Code plan proposals", () => {
   );
 });
 
+describe("updated native session tools", () => {
+  it("offers an explicit fresh-session send while retaining the refused Code draft", async () => {
+    const code = controller({
+      turnStatus: "waiting",
+      turnErrorCategory: "tools-changed",
+      turnError: "The saved session has different tools.",
+      pendingDraft: "Use updated tools",
+    });
+    render(<CodeThreadWorkspace controller={code} threadId={threadId} />);
+    const action = await screen.findByRole("button", { name: "Continue with updated tools" });
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
+    expect(code.sendFollowUp).not.toHaveBeenCalled();
+    fireEvent.drop(screen.getByLabelText("Follow-up message"), {
+      dataTransfer: nativeFolderTransfer(),
+    });
+    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
+    expect(action).toBeVisible();
+    expect(code.sendFollowUp).not.toHaveBeenCalled();
+    await userEvent.click(action);
+    await waitFor(() => expect(code.sendFollowUp).toHaveBeenCalledOnce());
+    expect(vi.mocked(code.sendFollowUp).mock.calls[0]?.[11]).toBe(true);
+    expect(vi.mocked(code.sendFollowUp).mock.calls[0]?.[0]).toBe("Use updated tools");
+  });
+});
+
 describe("Code host queue", () => {
   it.each(["mention resolution", "queue acknowledgment"] as const)(
     "allows a new submission after switching threads during %s",

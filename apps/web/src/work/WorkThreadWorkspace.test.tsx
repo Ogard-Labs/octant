@@ -4,6 +4,7 @@ import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import {
   decodeWorkThreadTranscript,
+  decodeWorkTurnState,
   decodeWorkThreadTranscriptWindow,
   decodeWorkAttachmentReference,
   type ThreadMessageQueueResult,
@@ -2503,6 +2504,57 @@ describe("WorkThreadWorkspace", () => {
     await user.keyboard("{Enter}");
     expect(startFirstTurn).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Work prompt")).toHaveValue("Quick turn");
+  });
+
+  it("keeps a refused draft until the person explicitly continues with updated tools", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi
+      .fn<WorkTurnClient["startFirstTurn"]>()
+      .mockRejectedValueOnce(
+        new WorkTurnClientFailure("The saved session has different tools.", 409, "tools-changed"),
+      )
+      .mockResolvedValueOnce({
+        kind: "accepted",
+        turn: decodeWorkTurnState(workTurn({ status: "completed" })),
+      });
+    const threadClient: WorkThreadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()], runtime: [] })),
+      execute: vi.fn(),
+      navigation: vi.fn(),
+      queryBoard: vi.fn(),
+    };
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [workTurn({ status: "completed" })] })),
+      startFirstTurn,
+      putAttachment: vi.fn(),
+      discardAttachment: vi.fn(async () => undefined),
+    };
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+    const composer = await screen.findByLabelText("Work prompt");
+    await user.type(composer, "Use the updated tools");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    const action = await screen.findByRole("button", { name: "Continue with updated tools" });
+    expect(composer).toHaveValue("Use the updated tools");
+    expect(startFirstTurn).toHaveBeenCalledTimes(1);
+    fireEvent.drop(composer, { dataTransfer: nativeFolderTransfer() });
+    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(composer).toHaveValue("Use the updated tools");
+    expect(action).toBeVisible();
+    expect(startFirstTurn).toHaveBeenCalledTimes(1);
+    await user.click(action);
+    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledTimes(2));
+    expect(startFirstTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ prompt: "Use the updated tools", toolCatalogHandoff: true }),
+    );
+    await waitFor(() => expect(composer).toHaveValue(""));
   });
 
   it("shows the host's reason when it refuses to start a Work turn", async () => {

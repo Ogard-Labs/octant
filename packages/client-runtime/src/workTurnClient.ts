@@ -1,6 +1,8 @@
 import {
   MAX_WORK_ATTACHMENT_BYTES,
   decodeCancelWorkTurnCommand,
+  decodeWorkTurnFailure,
+  type WorkTurnFailure,
   decodeRewindWorkThreadCommand,
   type RewindWorkThreadCommand,
   WorkThreadRewindResult,
@@ -75,11 +77,13 @@ export interface WorkTurnClient {
 
 export class WorkTurnClientFailure extends Error {
   readonly status: number;
+  readonly category: WorkTurnFailure["category"] | undefined;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, category?: WorkTurnFailure["category"]) {
     super(message);
     this.name = "WorkTurnClientFailure";
     this.status = status;
+    this.category = category;
   }
 }
 
@@ -406,7 +410,11 @@ async function postJson<T>(
   }
   const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new WorkTurnClientFailure(responseMessage(payload, failureMessage), response.status);
+    throw new WorkTurnClientFailure(
+      responseMessage(payload, failureMessage),
+      response.status,
+      responseCategory(payload),
+    );
   }
   try {
     return decode(payload);
@@ -435,12 +443,24 @@ async function getJson<T>(
   }
   const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new WorkTurnClientFailure(responseMessage(payload, failureMessage), response.status);
+    throw new WorkTurnClientFailure(
+      responseMessage(payload, failureMessage),
+      response.status,
+      responseCategory(payload),
+    );
   }
   try {
     return decode(payload);
   } catch {
     throw new WorkTurnClientFailure("Work turn service returned an invalid response.", 0);
+  }
+}
+
+function responseCategory(body: unknown): WorkTurnFailure["category"] | undefined {
+  try {
+    return decodeWorkTurnFailure(body).category;
+  } catch {
+    return undefined;
   }
 }
 

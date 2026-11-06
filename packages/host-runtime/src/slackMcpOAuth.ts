@@ -10,11 +10,12 @@ export const SLACK_MCP_USER_OAUTH = {
   tokenEndpoint: "https://slack.com/api/oauth.v2.user.access",
 } as const;
 
-/** This exact alias is host-owned; every other server keeps exact transport/resource equality. */
+/** Only verified, exact vendor transports may name a distinct OAuth resource. */
 export function mcpOAuthResourceForTransport(transportUrl: string): string {
-  return transportUrl === SLACK_MCP_USER_OAUTH.transportUrl
-    ? SLACK_MCP_USER_OAUTH.resource
-    : transportUrl;
+  if (transportUrl === SLACK_MCP_USER_OAUTH.transportUrl) return SLACK_MCP_USER_OAUTH.resource;
+  // Airtable's published metadata names its origin, while MCP uses /mcp.
+  if (transportUrl === "https://mcp.airtable.com/mcp") return "https://mcp.airtable.com";
+  return transportUrl;
 }
 
 interface GrantBinding {

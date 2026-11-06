@@ -55,6 +55,16 @@ describe("decideConversationSession", () => {
     ).toEqual({ kind: "continue-session" });
   });
 
+  it("starts a disclosed fresh session only when the person chooses the updated tool catalogue", () => {
+    const previous = { providerInstanceId: "claude", continuable: true, toolCatalogHandoff: true };
+    expect(decideConversationSession({ recipient: runtime, previous, handoff: "allowed" })).toEqual(
+      { kind: "new-session-with-handoff", reason: "provider-switch" },
+    );
+    expect(decideConversationSession({ recipient: runtime, previous, handoff: "refused" })).toEqual(
+      { kind: "refuse", reason: "handoff-unavailable" },
+    );
+  });
+
   it("refuses rather than hand over a conversation the same provider still holds", () => {
     expect(
       decideConversationSession({

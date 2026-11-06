@@ -235,6 +235,7 @@ export function changeChatResearch(thread: ChatThread, input: ChangeChatResearch
 }
 
 export interface BeginChatTurnInput {
+  readonly toolCatalogHandoff?: boolean;
   readonly turnId: ChatTurnId;
   readonly submissionId?: ChatTurn["submissionId"];
   readonly attemptId: ChatAttempt["id"];
@@ -292,6 +293,9 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     id: input.turnId,
     threadId: thread.id,
     ...(input.submissionId === undefined ? {} : { submissionId: input.submissionId }),
+    ...(input.toolCatalogHandoff === undefined
+      ? {}
+      : { toolCatalogHandoff: input.toolCatalogHandoff }),
     sequence: input.sequence,
     userMessageRef: input.userMessageRef,
     attachmentIds: input.attachmentIds ?? [],

@@ -147,6 +147,7 @@ export const WorkTurnFailure = Schema.Struct({
     "invalid",
     "unauthorized",
     "unavailable",
+    "tools-changed",
     "unsupported",
     "interrupted",
     "failed",
@@ -247,6 +248,7 @@ export const WorkExternalInputReceipt = Schema.Struct({
 export type WorkExternalInputReceipt = typeof WorkExternalInputReceipt.Type;
 
 export const WorkTurnState = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   externalInput: Schema.optional(WorkExternalInputReceipt),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
@@ -299,6 +301,8 @@ export type WorkTurnState = typeof WorkTurnState.Type;
 
 export const StartWorkThreadTurnCommand = Schema.Struct({
   kind: Schema.Literal("start-work-thread-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -494,6 +498,7 @@ export type WorkTurnStreamFrame = typeof WorkTurnStreamFrame.Type;
 export const WorkTurnAccepted = Schema.Struct({
   externalInput: Schema.optional(WorkExternalInputReceipt),
   kind: Schema.Literal("turn-accepted"),
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,

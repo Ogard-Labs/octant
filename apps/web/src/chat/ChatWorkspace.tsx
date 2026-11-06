@@ -1,3 +1,4 @@
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
@@ -859,7 +860,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }
   }
 
-  const submitTurn = async (draft: string): Promise<boolean> => {
+  const submitTurn = async (draft: string, toolCatalogHandoff = false): Promise<boolean> => {
     if (props.controller.draftSideChatReturnsInvalid) {
       setSendNotice(
         "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
@@ -922,6 +923,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         if (sendingDraftRevision !== undefined)
           args[7] = { composerDraft: "consume", draftRevision: sendingDraftRevision };
         if (sideChatReturns.length > 0) args[8] = sideChatReturns;
+        if (toolCatalogHandoff) args[9] = true;
         return { value: await props.controller.sendTurn(...args) };
       });
     } catch (error) {
@@ -962,6 +964,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {props.controller.errorMessage}
             </OctantAlert>
           )}
+          {props.controller.toolCatalogHandoffRequired === true ? (
+            <ToolCatalogContinuation
+              disabled={connectionLost || props.controller.pendingDraft.trim().length === 0}
+              onContinue={() => void submitTurn(props.controller.pendingDraft, true)}
+            />
+          ) : null}
           <div className="chat-workspace__conversation">
             <header className="chat-workspace__header">
               <h1 className="sr-only">{view.thread.title}</h1>

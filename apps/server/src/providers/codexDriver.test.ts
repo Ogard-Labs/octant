@@ -1260,6 +1260,7 @@ describe("Codex thread and turn lifecycle", () => {
       driverKind: "codex",
       value: "thread-1",
       tools: [],
+      toolDefinitions: [],
       binding: { instanceId, sessionId, projectRoot, mode: "code", modelId: "gpt-5.4" },
     });
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
@@ -1296,6 +1297,51 @@ describe("Codex thread and turn lifecycle", () => {
       method: "turn/interrupt",
       input: { threadId: "thread-1", turnId: "turn-1" },
     });
+    await acquired.close();
+  });
+
+  it("refuses a changed immutable tool catalogue before resuming the native conversation", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver(f.options());
+    const acquired = await acquireConnection(driver);
+    const handle = await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        tools: [BROWSER_TOOL_DEFINITION],
+      }),
+    );
+    if (handle.resumeCursor === undefined) throw new Error("Expected a saved native session.");
+    expect(
+      driver.toolCatalogContinuation?.({
+        resumeCursor: handle.resumeCursor,
+        tools: [BROWSER_TOOL_DEFINITION],
+      }),
+    ).toBe("unchanged");
+    expect(driver.toolCatalogContinuation?.({ resumeCursor: handle.resumeCursor, tools: [] })).toBe(
+      "unchanged",
+    );
+    expect(
+      driver.toolCatalogContinuation?.({
+        resumeCursor: handle.resumeCursor,
+        tools: [{ ...BROWSER_TOOL_DEFINITION, name: "new_tool" }],
+      }),
+    ).toBe("handoff-required");
+    const changed = [{ ...BROWSER_TOOL_DEFINITION, description: "Changed tool contract" }];
+    expect(
+      driver.toolCatalogContinuation?.({ resumeCursor: handle.resumeCursor, tools: changed }),
+    ).toBe("handoff-required");
+    const result = await Effect.runPromiseExit(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: handle.resumeCursor,
+        executionPolicy: "approval-gated",
+        tools: changed,
+      }),
+    );
+    expect(Exit.isFailure(result)).toBe(true);
+    expect(f.calls.some(({ method }) => method === "thread/resume")).toBe(false);
     await acquired.close();
   });
 
