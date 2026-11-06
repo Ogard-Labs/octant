@@ -23,6 +23,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, Menu } from "electron";
 import { desktopIdentity } from "@octant/host-runtime";
+import { NATIVE_MAIN_AUTHORITY_HEADER } from "@octant/contracts/nightly-browser";
 import { runNightlyClient } from "../apps/desktop/src/nightlyClient";
 
 export const NIGHTLY_CLIENT_HARNESS_MARKER = "octant-nightly-client-harness@1";
@@ -81,6 +82,46 @@ const ownerWatch = setInterval(() => {
 }, 1_000);
 ownerWatch.unref();
 setTimeout(() => app.exit(3), MAX_LIFETIME_MS).unref();
+
+// Nightly main reaches the host's Code approval routes with its own Node
+// fetch. The harness reports each call's route, status, challenge and which
+// authority it carried (header names only, never values), and after a
+// cancellation it asks the host once to confirm that same challenge: a host
+// that really dropped it refuses. That probe is the harness's, not the view's.
+const APPROVAL_ROUTE =
+  /^\/api\/desktop\/code-operation-approval-(challenges|confirmations|cancellations)$/;
+const shippedFetch = globalThis.fetch;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  const route = APPROVAL_ROUTE.exec(url.pathname)?.[1];
+  const response = await shippedFetch(input, init);
+  if (route === undefined) return response;
+  const headers = new Headers(init?.headers);
+  let challengeId: unknown;
+  try {
+    challengeId =
+      route === "challenges"
+        ? ((await response.clone().json()) as { challengeId?: unknown }).challengeId
+        : (JSON.parse(String(init?.body ?? "{}")) as { challengeId?: unknown }).challengeId;
+  } catch {
+    challengeId = undefined;
+  }
+  emit("approval-route", {
+    route,
+    status: response.status,
+    challengeId,
+    nativeMain: headers.has(NATIVE_MAIN_AUTHORITY_HEADER),
+    bridgeSecret: headers.has("x-octant-desktop-secret"),
+  });
+  if (route === "cancellations" && response.ok) {
+    const probe = await shippedFetch(
+      new URL("/api/desktop/code-operation-approval-confirmations", url.origin),
+      { method: "POST", headers, body: JSON.stringify({ challengeId }) },
+    );
+    emit("approval-probe", { status: probe.status, challengeId });
+  }
+  return response;
+}) as typeof globalThis.fetch;
 
 // Electron holds `ready` until a top-level await in an ESM main settles.
 async function main(): Promise<void> {

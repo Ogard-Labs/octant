@@ -697,8 +697,11 @@ shipped code.
 
 It checks, each timed: the renderer loads with the Nightly label; an API key
 added through Nightly main reaches a local OpenAI-compatible endpoint during a
-Chat turn; a Project folder pick, an API key list and a Code approval prepared
-and cancelled through native-main admission; an embedded Browser page that
+Chat turn; a Project folder pick and an API key list through native-main
+admission, and a real Code approval on a Code thread over a throwaway Git
+repository: the host prepares the challenge for Nightly main's native-main
+token (never a bridge secret), the owner-only view shows its prompt, and
+cancelling it leaves a challenge the host then refuses to confirm; an embedded Browser page that
 draws frames, receives typed text and answers a select list chosen from
 Nightly's native menu; lease loss that destroys the renderer before a fresh
 registration; a host restart after which Nightly reconnects on the same data;

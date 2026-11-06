@@ -625,6 +625,29 @@ try {
   const mains = await build(work);
   const pickFolder = join(work, "picked-project");
   await mkdir(pickFolder, { recursive: true });
+  // The folder the stubbed picker answers is a Git repository on `main` with
+  // one commit, so a Code Project can bind it and prepare a checkout.
+  for (const args of [
+    ["init", "-q", "-b", "main"],
+    [
+      "-c",
+      "user.name=Nightly smoke",
+      "-c",
+      "user.email=smoke@octant.invalid",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "Nightly smoke",
+    ],
+  ]) {
+    const git = Bun.spawnSync(["git", ...args], {
+      cwd: pickFolder,
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    if (git.exitCode !== 0) throw new Error(`git ${args[0]} failed: ${git.stderr.toString()}`);
+  }
   const stableA = await startStable({
     binary,
     main: mains.stable,
@@ -689,45 +712,117 @@ try {
       },
     ],
     [
-      "3. Brokered flows: folder pick, API key list, Code approval prepare and cancel",
+      "3. Brokered flows: folder pick, API key list, a real Code approval prepared, shown and cancelled",
       async () => {
         if (page === undefined) throw new Error("No window.");
+        const current = page;
         const mark = nightly.events.mark();
-        const picked = await page.evaluate(() =>
-          (
-            window as unknown as {
-              octantHost: { selectProjectRoot: (type: "work") => Promise<unknown> };
-            }
-          ).octantHost.selectProjectRoot("work"),
+        const picked = record(
+          await current.evaluate(() =>
+            (
+              window as unknown as {
+                octantHost: { selectProjectRoot: (type: "code") => Promise<unknown> };
+              }
+            ).octantHost.selectProjectRoot("code"),
+          ),
         );
-        if (record(picked).kind !== "selected") throw new Error(`Pick: ${JSON.stringify(picked)}`);
+        if (picked.kind !== "selected") throw new Error(`Pick: ${JSON.stringify(picked)}`);
         await nightly.events.next((event) => event.event === "open-dialog", mark, 5_000);
-        const keys = await page.evaluate(async (instance) => {
-          const host = (
-            window as unknown as {
-              octantHost: {
-                listProviderApiKeys: (id: string) => Promise<ReadonlyArray<unknown>>;
-              };
-            }
-          ).octantHost;
-          return host.listProviderApiKeys(instance);
-        }, providerInstanceId);
+        const keys = await current.evaluate(
+          (instance) =>
+            (
+              window as unknown as {
+                octantHost: {
+                  listProviderApiKeys: (id: string) => Promise<ReadonlyArray<unknown>>;
+                };
+              }
+            ).octantHost.listProviderApiKeys(instance),
+          providerInstanceId,
+        );
         if (!JSON.stringify(keys).includes("Smoke key"))
           throw new Error(`Keys: ${JSON.stringify(keys)}`);
-        const approval = await page.evaluate(async () => {
+        // A real Code thread: a Code Project on the picked Git repository,
+        // held by this window, with a prepared checkout.
+        const shell = record((await hostRequest(current, "/api/shell/bootstrap")).body);
+        const workspace = record(shell.workspace);
+        const hostId = record(record(workspace.contextByMode).chat).host;
+        const projectId = randomUUID();
+        const project = await hostRequest(current, "/api/projects/commands", {
+          kind: "create-code-project",
+          projectId,
+          expectedVersion: 0,
+          name: "Nightly smoke code",
+          receiptId: picked.receiptId,
+          hostId,
+        });
+        if (project.status !== 200) throw new Error(`Code Project: ${JSON.stringify(project)}`);
+        const held = await hostRequest(current, "/api/shell/commands", {
+          kind: "apply-workspace-operation",
+          windowId: workspace.windowId,
+          expectedVersion: shell.workspaceVersion,
+          operation: {
+            kind: "switch-project-surface",
+            mode: "code",
+            surface: { kind: "project", id: randomUUID(), projectId, mode: "code", title: "Smoke" },
+          },
+        });
+        if (held.status !== 200) throw new Error(`Open Code Project: ${JSON.stringify(held)}`);
+        const prepared = await waitFor("A prepared checkout", 20_000, async () => {
+          const answer = await hostRequest(current, "/api/code/commands", {
+            kind: "prepare-code-project-checkout",
+            projectId,
+          });
+          const body = answer.status === 200 ? record(answer.body) : undefined;
+          return body !== undefined && record(body.checkout).availability === "available"
+            ? body
+            : undefined;
+        });
+        const checkout = record(prepared.checkout);
+        const threadId = randomUUID();
+        const now = new Date().toISOString();
+        const thread = await hostRequest(current, "/api/code/commands", {
+          kind: "create-code-thread",
+          thread: {
+            id: threadId,
+            projectId,
+            bindingRevisionId: prepared.bindingRevisionId,
+            repositoryId: checkout.repositoryId,
+            checkoutId: checkout.id,
+            title: "Nightly smoke approval",
+            lifecycle: "active",
+            providerInstanceId,
+            modelId: FIXTURE_MODEL_ID,
+            executionPolicy: "approval-gated",
+            permissionPersistence: "current-session",
+            deliveryTarget: {
+              branchIntent: "main",
+              remoteName: "origin",
+              proposedBaseRepository: "local/smoke",
+              proposedBaseBranch: "main",
+              outcomeKind: "local-implementation",
+              confirmedAt: now,
+            },
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        if (record(thread.body).kind !== "thread-created")
+          throw new Error(`Code thread: ${JSON.stringify(thread)}`);
+        // Ask for the real elevation; the native view, not the renderer,
+        // would confirm it.
+        const approvalMark = nightly.events.mark();
+        await current.evaluate((id) => {
           const host = (
             window as unknown as {
-              octantHost: {
-                requestCodeOperationApproval: (request: unknown) => Promise<unknown>;
-                cancelCodeOperationApproval: () => Promise<void>;
-              };
+              octantHost: { requestCodeOperationApproval: (request: unknown) => Promise<unknown> };
             }
           ).octantHost;
-          const pending = host
+          (window as unknown as { smokeApproval: Promise<unknown> }).smokeApproval = host
             .requestCodeOperationApproval({
               effect: {
                 kind: "change-thread-full-access",
-                threadId: crypto.randomUUID(),
+                threadId: id,
                 expectedVersion: 1,
                 permissionPersistence: "current-session",
               },
@@ -736,13 +831,91 @@ try {
               (value) => ({ settled: "resolved", value: value ?? null }),
               (error: unknown) => ({ settled: "rejected", value: String(error) }),
             );
-          await new Promise((done) => setTimeout(done, 1_500));
-          await host.cancelCodeOperationApproval();
-          return pending;
+        }, threadId);
+        const challenge = await nightly.events.next(
+          (event) => event.event === "approval-route" && event.route === "challenges",
+          approvalMark,
+          15_000,
+        );
+        if (challenge.status !== 201 || typeof challenge.challengeId !== "string")
+          throw new Error(`The host did not prepare a challenge: ${JSON.stringify(challenge)}`);
+        if (challenge.nativeMain !== true || challenge.bridgeSecret !== false)
+          throw new Error(
+            `The prepare was not native-main admission: ${JSON.stringify(challenge)}`,
+          );
+        // The owner-only native view is attached to this window and shows
+        // the host's prompt.
+        const shown = await waitFor("The approval view to show its prompt", 15_000, async () => {
+          const texts = await nightly.app.evaluate(async ({ BrowserWindow }) =>
+            Promise.all(
+              BrowserWindow.getAllWindows().flatMap((window) =>
+                window.contentView.children.map((child) =>
+                  "webContents" in child
+                    ? (child as Electron.WebContentsView).webContents
+                        .executeJavaScript("document.body ? document.body.innerText : ''")
+                        .catch(() => "")
+                    : Promise.resolve(""),
+                ),
+              ),
+            ),
+          );
+          return texts.find((text) => String(text).includes("Elevate this Code thread"));
         });
-        if (record(approval).settled !== "resolved" || record(approval).value !== null)
-          throw new Error(`Approval: ${JSON.stringify(approval)}`);
-        return "folder receipt, 1 key listed, approval cancelled";
+        await current.evaluate(() =>
+          (
+            window as unknown as {
+              octantHost: { cancelCodeOperationApproval: () => Promise<void> };
+            }
+          ).octantHost.cancelCodeOperationApproval(),
+        );
+        const settled = record(
+          await current.evaluate(
+            () => (window as unknown as { smokeApproval: Promise<unknown> }).smokeApproval,
+          ),
+        );
+        if (settled.settled !== "resolved" || settled.value !== null)
+          throw new Error(`The cancelled approval answered ${JSON.stringify(settled)}.`);
+        const cancelled = await nightly.events.next(
+          (event) => event.event === "approval-route" && event.route === "cancellations",
+          approvalMark,
+          10_000,
+        );
+        if (
+          cancelled.status !== 204 ||
+          cancelled.challengeId !== challenge.challengeId ||
+          cancelled.nativeMain !== true ||
+          cancelled.bridgeSecret !== false
+        )
+          throw new Error(`The host did not cancel the challenge: ${JSON.stringify(cancelled)}`);
+        const probe = await nightly.events.next(
+          (event) => event.event === "approval-probe",
+          approvalMark,
+          10_000,
+        );
+        if (probe.status !== 403)
+          throw new Error(
+            `The cancelled challenge could still be confirmed (${String(probe.status)}).`,
+          );
+        const confirmations = nightly.events.count(
+          (event) => event.event === "approval-route" && event.route === "confirmations",
+          approvalMark,
+        );
+        if (confirmations !== 0) throw new Error("The approval view confirmed the challenge.");
+        await waitFor("The approval view to close", 10_000, async () =>
+          (await nightly.app.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows().reduce(
+              (count, window) => count + window.contentView.children.length,
+              0,
+            ),
+          )) === 0
+            ? true
+            : undefined,
+        );
+        return `folder receipt; 1 key listed; challenge prepared (201, native-main) and shown ("${
+          String(shown)
+            .split("\n")
+            .find((line) => line.includes("Elevate")) ?? ""
+        }"); cancelled (204), confirm afterwards refused (403), no view confirmation`;
       },
     ],
     [
