@@ -76,3 +76,15 @@ describe("createPendingRequestClient", () => {
     ).toThrow(PendingRequestClientFailure);
   });
 });
+
+it("sends only the deferral key and wake time with the local capability", async () => {
+  const fetch = vi.fn(async () => Response.json({ status: "accepted" }));
+  const client = createPendingRequestClient({ baseUrl, fetch, windowCapability: capability });
+  const change = { key: "a".repeat(64), until: null };
+  await expect(client.defer?.(change)).resolves.toBe(true);
+  expect(fetch).toHaveBeenCalledWith(`${baseUrl}/api/pending-requests/defer`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+    body: JSON.stringify(change),
+  });
+});

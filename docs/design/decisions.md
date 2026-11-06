@@ -2096,6 +2096,7 @@ A thread can be put away (completed, manual only) or snoozed. Both are overlays 
 - Put away is refused while a turn runs or the thread waits on the person. A host sweep archives only put-away threads after a configurable delay (default seven days).
 - A running thread may be snoozed, a thread waiting on the person may not, and the wake time must be ahead. Putting a thread away drops its pin and any snooze. _Here only._
 - A snooze wakes early when the agent needs the person. A person sending a turn reopens the thread.
+- Answerable pending questions have a separate attention deferral in Home, Inbox and Review. The condensed row remains discoverable, can return early, and never changes the thread, draft, answer or execution authority. Approvals and find-only questions are excluded.
 
 Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion](workspace.md#thread-visibility-and-completion).
 

@@ -173,6 +173,18 @@ see the origin chain and any direct forks and switch to one of them. If the
 origin has been archived or deleted, the lineage says the origin is no longer
 available rather than hiding that the thread is a fork.
 
+## Remind me about a question
+
+In Home, Inbox or Review, choose **Remind me…** on an answerable question,
+select a future time and click **Defer question**. The question stays in the
+list and its count as a smaller row below active requests. **Bring back now**
+restores its answers early; otherwise they return when the time arrives. You
+can still open the thread, and its questionnaire and draft stay intact.
+
+Deferring does not send an answer or let the agent continue. It also works for
+answerable Work and Code questions. Approval requests and questions that only
+offer **Review request** cannot be deferred.
+
 ## Put away and snooze threads
 
 A thread you are done with can be put away without archiving it. Choose

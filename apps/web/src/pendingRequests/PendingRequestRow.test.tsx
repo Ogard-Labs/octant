@@ -1,3 +1,4 @@
+import { decodePendingRequest } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -213,4 +214,51 @@ describe("an agent approval row", () => {
     await user.keyboard("1");
     expect(onAnswer).not.toHaveBeenCalled();
   });
+});
+
+it("brings a deferred question back without answering it and restores choices when its time passes", async () => {
+  const user = userEvent.setup();
+  const request = decodePendingRequest({
+    mode: "chat",
+    kind: "question",
+    threadId: "00000000-0000-4000-8000-000000000001",
+    threadTitle: "Plan",
+    text: "Which approach?",
+    options: [{ label: "First" }],
+    requestedAt: "2026-10-06T08:00:00.000Z",
+    deferralKey: "a".repeat(64),
+    deferredUntil: "2026-10-06T09:00:00.000Z",
+    answer: {
+      threadId: "00000000-0000-4000-8000-000000000001",
+      turnId: "00000000-0000-4000-8000-000000000002",
+      attemptId: "00000000-0000-4000-8000-000000000003",
+      requestId: "q-one",
+      expectedVersion: 1,
+    },
+  });
+  const answer = vi.fn();
+  const defer = vi.fn(async () => true);
+  const view = render(
+    <PendingRequestRow
+      request={request}
+      now={NOW}
+      onAnswer={answer}
+      onDefer={defer}
+      onOpenThread={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /First/ })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Bring back now" }));
+  expect(defer).toHaveBeenCalledExactlyOnceWith(request, null);
+  expect(answer).not.toHaveBeenCalled();
+  view.rerender(
+    <PendingRequestRow
+      request={request}
+      now={Date.parse("2026-10-06T10:00:00Z")}
+      onAnswer={answer}
+      onDefer={defer}
+      onOpenThread={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("button", { name: /First/ })).toBeInTheDocument();
 });
