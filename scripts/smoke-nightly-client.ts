@@ -483,17 +483,28 @@ async function createFixtureThread(
     { instance: input.providerInstanceId, key: FIXTURE_KEY },
   );
   if (record(added).label !== "Smoke key") throw new Error(`Key: ${JSON.stringify(added)}`);
-  const settings = await hostRequest(page, "/api/chat/commands", {
-    kind: "update-chat-settings",
-    expectedVersion: 0,
-    defaultProviderInstanceId: input.providerInstanceId,
-    defaultModelId: FIXTURE_MODEL_ID,
-    defaultResearchEnabled: false,
-    defaultResearchRouting: "automatic",
-    defaultPersonalityInstructions: "Stay local and concise.",
-  });
-  if (record(settings.body).kind !== "settings-updated")
+  // The renderer can configure fresh Chat defaults when this provider becomes
+  // eligible. Read this host's current version and retry only that stale write.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const bootstrap = await hostRequest(page, "/api/chat/bootstrap");
+    if (bootstrap.status !== 200) throw new Error(`Bootstrap: ${JSON.stringify(bootstrap)}`);
+    const version = record(record(bootstrap.body).settings).version;
+    if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 0)
+      throw new Error("Bootstrap returned an invalid Chat settings version.");
+    const settings = await hostRequest(page, "/api/chat/commands", {
+      kind: "update-chat-settings",
+      expectedVersion: version,
+      defaultProviderInstanceId: input.providerInstanceId,
+      defaultModelId: FIXTURE_MODEL_ID,
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Stay local and concise.",
+    });
+    if (settings.status === 200 && record(settings.body).kind === "settings-updated") break;
+    if (settings.status === 409 && record(settings.body).category === "stale" && attempt < 2)
+      continue;
     throw new Error(`Settings: ${JSON.stringify(settings)}`);
+  }
   const created = await hostRequest(page, "/api/chat/commands", {
     kind: "create-chat-thread",
     title: input.title,
