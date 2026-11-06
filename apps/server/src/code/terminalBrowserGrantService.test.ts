@@ -571,6 +571,32 @@ describe("terminal Browser grant", () => {
     expect(fixture.runtime.createContext).not.toHaveBeenCalled();
   });
 
+  it("reads the open page while the thread is in Plan, asking first when the model changed", async (context) => {
+    const fixture = harness();
+    const opening = await open(fixture);
+    if (opening.kind === "refused")
+      return void context.skip("loopback listeners are not permitted");
+    const { url, token } = environmentOf(fixture, opening);
+    const session = await connect(url, token);
+    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
+    await approveNext(fixture);
+    expect((await navigating).isError).toBe(false);
+    // A new model is not covered by the page's approval, so even a read asks;
+    // the person's yes in Plan answers exactly that read.
+    fixture.threads.set(
+      ids.threadA,
+      codeThread(ids.threadA, {
+        executionPolicy: "plan",
+        modelId: "model-b" as CodeThread["modelId"],
+      }),
+    );
+    const reading = session.call({ operation: "snapshot" });
+    await approveNext(fixture);
+    expect(await reading).toMatchObject({ isError: false });
+    const clicked = await session.call({ operation: "click", selector: "a" });
+    expect(clicked).toMatchObject({ isError: true, data: { error: "plan-mode-read-only" } });
+  });
+
   it("does not run an approval answered after the thread moved into Plan", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);

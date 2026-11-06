@@ -8,7 +8,6 @@ import {
   type AutomationMissedRunPolicy,
   type OctantMode,
   type AutomationScheduledTrigger,
-  type ProviderExecutionPolicy,
   type ProviderToolDefinition,
   type UtcTimestamp,
   type WindowId,
@@ -66,9 +65,11 @@ function refused(reason: string, message: string) {
  * The routine-proposal tool for one Work or Code thread's turn. It only asks:
  * the proposal waits for the person in the thread, and the routine, if any,
  * is created by their confirmation through the ordinary Automation create
- * path, never by this tool. Chat is never offered it, and a routine's own
- * unattended turn is refused it, because automation-origin execution cannot
- * author a routine.
+ * path, never by this tool. Plan mode may propose, as it may offer a side
+ * task: recording a proposal changes nothing, and the routine the person
+ * confirms takes none of the thread's posture. Chat is never offered it, and
+ * a routine's own unattended turn is refused it, because automation-origin
+ * execution cannot author a routine.
  */
 export function createRoutineProposalTools(input: {
   readonly windowId: WindowId;
@@ -77,11 +78,6 @@ export function createRoutineProposalTools(input: {
     readonly mode: OctantMode;
     readonly projectId: string;
   };
-  /**
-   * Code only: the turn's posture when a call runs. Plan is read-only, so it
-   * proposes nothing.
-   */
-  readonly readPosture?: () => ProviderExecutionPolicy | undefined;
   /**
    * Whether this turn runs as the host rather than for a person: a routine's
    * run, or a usage-limit resume the host replays. Nobody is there to confirm.
@@ -107,12 +103,6 @@ export function createRoutineProposalTools(input: {
         return refused(
           "automation-recursion",
           "A turn the host runs on its own, such as a routine's run, cannot create routines. Mention the idea in your reply instead.",
-        );
-      }
-      if (input.readPosture?.() === "plan") {
-        return refused(
-          "plan-read-only",
-          "Plan mode is read-only and cannot propose a routine. Describe it in the plan instead.",
         );
       }
       const parsed = parseInput(inputJson, input.now());

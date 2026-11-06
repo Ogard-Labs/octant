@@ -50,7 +50,7 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeCardDefiniti
 
 function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
   const { now, onOpenThread, onOpenInbox } = source;
-  const { rows, answer } = usePendingRequestRows(source);
+  const { rows, answer, defer } = usePendingRequestRows(source);
 
   // Before the first read the card says nothing rather than "Looking…": it
   // leaves the grid when nothing waits, so a loading line would flash on
@@ -67,6 +67,7 @@ function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
           {shown.map(({ request, unlisted }) => (
             <li key={pendingRequestKey(request)}>
               <PendingRequestRow
+                onDefer={defer}
                 now={now}
                 onAnswer={answer}
                 onOpenThread={onOpenThread}

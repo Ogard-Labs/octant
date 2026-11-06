@@ -59,6 +59,20 @@ integration or uncertain dependency impact needs full local `bun run verify`.
 Always run `git diff --check`. Existing tests may supply the required coverage;
 adding tests is justified by an uncovered behavior or concrete risk.
 
+To measure Code history reads against a temporary store with all migrations,
+run the opt-in evidence benchmark from the repository root:
+
+```sh
+OCTANT_RUN_CODE_HISTORY_BENCHMARK=1 bun run --cwd apps/server test:evidence -- src/code/codeOperationHistory.benchmark.test.ts
+```
+
+It compares advancing reads with unchanged reads through another store on the
+same journal at 1,000, 10,000 and 90,000 frames. It also checks that previously
+returned snapshots do not change. Timings include the journal head query,
+decoding and bookkeeping as well as array copying; they do not isolate the
+copy's cost or set a machine-dependent timing threshold. The benchmark creates
+and removes only its own temporary databases and does not read application data.
+
 A web UI test that passes locally but fails now and then in CI usually reads
 state that an async render has not produced yet. To make such reads fail far
 more often, run the web DOM tests from `apps/web` with

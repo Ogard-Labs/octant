@@ -2,7 +2,7 @@
 
 This topic specification owns the iOS Simulator and Android emulator device
 panes: pane states, discovery, screen capture, input delivery, keyboard layouts,
-and the managed streaming tools. Architecture owns the device authority rules,
+the agent's screen and log inspection, and the managed streaming tools. Architecture owns the device authority rules,
 including how `octant_apple` and `octant_android` follow the thread's turn
 posture and what **Allow input** grants
 ([Architecture: device transport and evidence](../architecture.md#device-transport-and-evidence)).
@@ -321,6 +321,80 @@ covers it. Stopping ends what a person already approved, so it never asks
 again. Serving a saved recording back to the pane is not specified yet; the
 pane reports a stopped recording as saved evidence only.
 
+## Screen and log inspection
+
+An agent reads a device as text as well as a picture. Every read below is a
+read under every posture, Plan included, and needs a booted destination. The
+text comes back in the tool result and is kept as the action's log artifact,
+owned by the thread and checkout like a screenshot; the evidence itself keeps
+only a one-line note and a `truncated` flag, so durable evidence never holds
+screen text or log lines.
+
+**Describe UI (Android).** `octant_android` `describe-ui` runs
+`uiautomator dump` into `/data/local/tmp/octant-ui-<actionId>.xml` (one file per
+action, so two reads of one emulator never share it), reads it back with
+`exec-out cat`, and removes it with `rm -f` whatever happened to the read.
+uiautomator waits for the screen to settle and gives up with "could not get
+idle state" while an animation or a busy app keeps changing it; that is
+reported as `failed` with `ui-not-idle` and the advice to try again, since it
+passes on its own. The dump becomes a flat list in document order: an element is
+kept when some part of it lies inside the screen (the extent of the dump's
+top-level windows) and it carries text, a content description, a resource-id,
+or a click. Layout containers with none of those outnumber the elements an agent
+can name or tap, so they are left out. Each element is one line with its class,
+`text`, `desc`, `id`, `center`, `bounds`, `clickable`, and `disabled`; bounds
+and centre are screen pixels in the current rotation, the space `input tap`
+takes, and the centre is the middle of the element's on-screen part. The list
+stops at 300 elements or 32 KiB, a label is cut at 256 characters in the
+listing, and a cut list is marked `truncated`.
+
+**Tap by element (Android).** A `tap` takes either a point or a `target`,
+never both. A target is matched exactly against the elements of a fresh dump:
+first resource-id, then content-desc, then text, and the first of those any
+element carries decides. One match taps that element's centre through the
+ordinary tap path (serve-avd when attached, `adb shell input tap` otherwise),
+under the same approval and Allow input grant as any tap. No match is refused
+`target-not-found` and several `target-ambiguous`, each naming the count, and
+nothing is tapped. The evidence note names the target and the point it landed on.
+
+**Logs (Android).** `logs` takes a `packageName`, an optional `sinceSeconds`
+(1 to 600), and an optional `includeCrashes`. It finds the app's process with
+`adb shell pidof -s <package>` and reads `adb logcat -d -v threadtime` with
+`--pid=<pid>`, the newest 500 lines (`-t 500`), or with `sinceSeconds` the lines
+since that many seconds before the emulator's own clock (`adb shell date +%s`,
+since the device's clock need not match the host's). `includeCrashes` adds the
+crash buffer, `adb logcat -d -b crash -v threadtime -t 200`, which also answers
+for an app that is no longer running; without it, an app with no process is
+refused `app-not-running`.
+
+**Logs (iOS Simulator).** `octant_apple` `logs` takes a `bundleIdentifier`,
+`sinceSeconds`, and `includeCrashes` the same way. The unified log's `process`
+is the executable's name, not the bundle identifier, so the host first reads
+`CFBundleExecutable` from `xcrun simctl appinfo <udid> <bundleId>` and then runs
+`simctl spawn <udid> log show --style compact --last <minutes>m` with the
+predicate `process == "<executable>" OR subsystem == "<bundleId>"`; an app whose
+executable cannot be read is matched by subsystem alone, and the note says so.
+The window is five minutes by default, `sinceSeconds` rounded up to whole
+minutes otherwise. Checkout and artifact paths in the output are replaced with
+`[PROJECT]` and `[ARTIFACT]`. `includeCrashes` adds the app's newest three
+crash reports: the server reads `~/Library/Logs/DiagnosticReports/*.ips`
+itself, giving no confined launch that folder. It looks at the 200 newest
+files by modification time, opens each without following a link and refuses
+anything that is not a regular file or is over 16 MiB, and keeps a report only
+when the JSON header on its first line names the app's `bundleID`; each kept
+report is its first 8 KiB.
+
+**Bounds.** A log is cut from its newest end: 500 lines or 32 KiB, with each
+line cut at 2,048 characters. With crashes asked for, the app's log keeps 250
+lines or 16 KiB, and the Android crash buffer 200 lines or 16 KiB; any cut marks
+the result `truncated`.
+
+**iOS describe UI and tap by element** are not built. Finding an element on a
+Simulator needs the native device helper to read the accessibility tree, which
+can only be built and verified on a Mac, so the helper still refuses a tap by
+`target` ("cannot find an element by name yet") and `octant_apple` offers no
+`describe-ui`; its help says both are Android-only for now.
+
 ## Managed device tools
 
 The iOS Simulator and Android emulator panes ride
@@ -548,7 +622,9 @@ non-Latin letters, or a new line is not verified.
 
 **Not yet verified on a device.** The packaged run on Xcode 27 that exercises
 these limits end to end, and any Android emulator run, are manual device checks
-still open (see Verification).
+still open (see Verification). The same holds for screen and log inspection:
+`uiautomator dump` and `logcat` on a running emulator, and `simctl appinfo`,
+`log show`, and the crash-report read on a Mac.
 
 ## Verification
 
@@ -558,4 +634,9 @@ still open (see Verification).
 - Desktop: `apps/desktop/src/simulatorDeviceHelper.test.ts`,
   `apps/desktop/src/serveAvdBroker.test.ts`, `managedToolRelease.test.ts`, and
   `managedToolService.test.ts`.
-- Rendered input on a real Simulator or emulator remains a manual device check.
+- Inspection: `describe-ui`, tap by element, and both `logs` reads are covered
+  by those two service suites with fake command results, the bounds by
+  `packages/domain/src/appleToolchainPolicy.test.ts`, and posture and parsing by
+  `apps/server/src/code/codeAppManagedTools.test.ts`.
+- Rendered input on a real Simulator or emulator remains a manual device check,
+  as do inspection reads against a real emulator and a real Simulator.

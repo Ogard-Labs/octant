@@ -185,7 +185,8 @@ describe("CodeOperationEventStore", () => {
     const store = createStore(fixture.journal);
     store.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
     store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("running") });
-    expect(store.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}, {}] });
+    const retained = store.historyForThread(threadId);
+    expect(retained).toMatchObject({ status: "ok", frames: [{}, {}] });
     const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
 
     // The board and the sidebar read every thread's history every few
@@ -199,6 +200,8 @@ describe("CodeOperationEventStore", () => {
       frames: [{ cursor: 1 }, { cursor: 2 }, { cursor: 3, event: { state: "completed" } }],
     });
     expect(replay.mock.calls.map(([cursor]) => cursor.afterSequence)).toEqual([2]);
+    // Readers may hold this snapshot while another reader extends the shared cache.
+    expect(retained).toMatchObject({ status: "ok", frames: [{ cursor: 1 }, { cursor: 2 }] });
     fixture.connection.close();
   });
 

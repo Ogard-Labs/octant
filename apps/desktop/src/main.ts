@@ -15,7 +15,11 @@ export {
   decorateTrustedRendererHeaders,
 } from "./desktopWindowBootstrap";
 export type { TrustedRendererRequestContext } from "./desktopWindowBootstrap";
-import { loadDesktopPeerStatus, ownDesktopPeerStatus } from "./desktopPeerStatus";
+import {
+  loadDesktopPeerStatus,
+  ownDesktopPeerStatus,
+  writeLinuxLauncherRecord,
+} from "./desktopPeerStatus";
 import {
   createDesktopHostLaunch,
   startDesktopHostServer,
@@ -46,10 +50,10 @@ import { grabWindowFrame } from "./windowFrameGrab";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -85,7 +89,6 @@ import {
   makeLinkedSecretStores,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
-  resolveHostRuntimePaths,
   ServicePolicyStore,
   addApiKey,
   ApiKeyPoolError,
@@ -276,6 +279,7 @@ import {
   DESKTOP_PRELOAD_FILENAME,
   EXTENSION_BRIDGE_PRELOAD_FILENAME,
   KEYCHAIN_HELPER_FILENAME,
+  resolveDesktopHostRuntimePaths,
   resolveDesktopNativeHelperPath,
   resolveManagedToolsDirectory,
   resolveTerminalLauncherDirectory,
@@ -1171,45 +1175,6 @@ export function resolveDesktopDataDirectory(
 ): string {
   return resolveDesktopHostRuntimePaths(configuredDirectory, appDataDirectory, platform, env)
     .dataDirectory;
-}
-
-function resolveDesktopHostRuntimePaths(
-  configuredDirectory: string | undefined,
-  appDataDirectory: string,
-  platform: NodeJS.Platform = process.platform,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): HostRuntimePaths {
-  if (platform !== "darwin" && platform !== "linux") {
-    throw new Error(`Octant desktop does not support host paths on ${platform}.`);
-  }
-  // Electron appData is ~/Library/Application Support on macOS and ~/.config on
-  // Linux; walk up to the home directory from that path so tests can inject a
-  // synthetic appData without depending on the process home.
-  const home =
-    platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(appDataDirectory, "..");
-  return resolveHostRuntimePaths({
-    env: {
-      OCTANT_DATA_DIR: configuredDirectory,
-      // Linux XDG overrides must reach the host-runtime resolver; otherwise a
-      // user with XDG_DATA_HOME set still lands under the default home path.
-      XDG_DATA_HOME: env.XDG_DATA_HOME,
-      XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
-      XDG_STATE_HOME: env.XDG_STATE_HOME,
-      OCTANT_LOGS_DIR: env.OCTANT_LOGS_DIR,
-    },
-    platform,
-    home,
-    temporaryDirectory: canonicalTemporaryDirectory(),
-    uid: process.getuid?.() ?? 0,
-  });
-}
-
-function canonicalTemporaryDirectory(): string {
-  try {
-    return realpathSync(tmpdir());
-  } catch {
-    return resolve(tmpdir());
-  }
 }
 
 async function writeBridgeSecretFile(paths: HostRuntimePaths, secret: string): Promise<void> {
@@ -3989,6 +3954,7 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
       version: app.getVersion() as AppVersion,
       platform: process.platform,
       arch: process.arch,
+      product: applicationIdentity.updateProduct,
     },
     ...(app.isPackaged
       ? { ring: packagedUpdateRing(), allowedRings: applicationIdentity.rings }
@@ -4618,6 +4584,23 @@ function acceptCodeDeepLink(value: string): void {
   }
 }
 
+/**
+ * Packaged Linux Octant listens in its private runtime folder, and each launch
+ * from an AppImage records that image so a Nightly can start this Octant's
+ * host later. A failure leaves Nightly refused, never Octant unable to start.
+ */
+async function prepareLinuxPeerEndpoint(): Promise<void> {
+  try {
+    await prepareHostRuntimePaths(desktopHostRuntimePaths);
+    await writeLinuxLauncherRecord({
+      recordPath: desktopHostRuntimePaths.launcherRecordPath,
+      appImage: process.env.APPIMAGE,
+    });
+  } catch (error) {
+    logQuitProblem(`Octant could not record its launcher for Octant Nightly: ${String(error)}`);
+  }
+}
+
 function startDesktopInstance(): void {
   const hasSingleInstanceLock = app.requestSingleInstanceLock();
   if (!hasSingleInstanceLock) {
@@ -4632,7 +4615,7 @@ function startDesktopInstance(): void {
   });
   const hostOnly = (args: ReadonlyArray<string>) =>
     app.isPackaged &&
-    process.platform === "darwin" &&
+    (process.platform === "darwin" || process.platform === "linux") &&
     resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
     // A concurrent Nightly launch joins this owner without opening its shell.
@@ -4653,10 +4636,21 @@ function startDesktopInstance(): void {
         waitForFirstNightlyWindow();
       }
       if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
+        const linux = app.isPackaged && process.platform === "linux";
+        if (linux) await prepareLinuxPeerEndpoint();
         const native = loadDesktopPeerStatus({
           packaged: app.isPackaged,
           platform: process.platform,
           resourcesPath: process.resourcesPath,
+          ...(linux
+            ? {
+                linux: {
+                  windowsSocketPath: desktopHostRuntimePaths.windowsSocketPath,
+                  launcherRecordPath: desktopHostRuntimePaths.launcherRecordPath,
+                  version: app.getVersion(),
+                },
+              }
+            : {}),
         });
         if (native !== undefined) {
           desktopPeerStatusOwner = ownDesktopPeerStatus(native);

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -27,6 +27,9 @@ import {
 } from "@octant/contracts";
 import {
   APPLE_HOST_RESTART_RECONCILIATION_NOTE,
+  boundedDeviceLogTail,
+  DEVICE_LOG_BUDGET,
+  DEVICE_LOG_BUDGET_BESIDE_CRASHES,
   deviceOpenUrlDiagnostic,
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
@@ -181,6 +184,7 @@ export interface AppleToolchainServiceOptions {
       readonly additionalWriteRoots?: ReadonlyArray<string>;
       readonly additionalReadRoots?: ReadonlyArray<string>;
       readonly isolatedRoots?: ReadonlyArray<string>;
+      readonly outputRetention?: "first" | "newest";
     },
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
@@ -229,6 +233,11 @@ export interface AppleToolchainServiceOptions {
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
+  /**
+   * Where macOS writes crash reports, a Simulator app's included. Tests point
+   * it at a temporary directory; production reads the person's own.
+   */
+  readonly diagnosticReportsDirectory?: string;
   readonly now: () => string;
   readonly newId: () => string;
   /** Override for tests; production uses `process.platform`. */
@@ -259,6 +268,17 @@ interface RecentEvidenceEntry {
 }
 
 const DISCOVERY_TIMEOUT_MS = 30_000;
+/** How far back a `logs` read looks when the caller names no window. */
+const DEFAULT_LOG_WINDOW_SECONDS = 300;
+/** A log artifact read back for a tool result; a `logs` read writes far less. */
+const MAX_LOG_ARTIFACT_BYTES = 256 * 1024;
+const MAX_CRASH_REPORTS = 3;
+/** The start of a report: its header, the exception, and the crashed thread's first frames. */
+const CRASH_REPORT_HEAD_BYTES = 8 * 1024;
+/** A crash report is tens to hundreds of kilobytes; a file far past that is not opened. */
+const MAX_CRASH_REPORT_BYTES = 16 * 1024 * 1024;
+/** Newest reports looked into for a match, so a full reports folder still answers quickly. */
+const MAX_CRASH_REPORTS_EXAMINED = 200;
 const MAX_DIAGNOSTICS = 64;
 const MAX_DIAGNOSTIC_LENGTH = 2_048;
 const MAX_RECENT_EVIDENCE = 64;
@@ -638,6 +658,28 @@ export class AppleToolchainService {
       };
     }
     return { kind: "found", bytes };
+  }
+
+  /**
+   * The text a `logs` action kept, for the tool result that asked for it. Like
+   * a screenshot, it is read only through evidence this thread and checkout
+   * already hold.
+   */
+  async readLogArtifact(
+    reference: string,
+    context: AppleExecutionContext,
+  ): Promise<string | undefined> {
+    const allowed = this.#recent.some(
+      (entry) =>
+        recentEvidenceMatches(entry, context) &&
+        entry.evidence.artifacts.some(
+          (artifact) => artifact.kind === "log" && artifact.reference === reference,
+        ),
+    );
+    if (!allowed) return undefined;
+    const bytes = await this.#options.readArtifact?.(reference);
+    if (bytes === undefined || bytes.byteLength > MAX_LOG_ARTIFACT_BYTES) return undefined;
+    return text(bytes);
   }
 
   /**
@@ -1119,26 +1161,26 @@ export class AppleToolchainService {
           [{ kind: "log", reference: logReference }],
           "not-required",
         );
-      } else if (request.kind === "logs") {
+      } else if (request.kind === "logs" && request.bundleIdentifier !== undefined) {
         this.#advance(active, "collecting-logs");
-        terminal = await this.#command(
-          [
-            "xcrun",
-            "simctl",
-            "spawn",
-            request.simulatorId,
-            "log",
-            "show",
-            "--style",
-            "json",
-            "--last",
-            "5m",
-            "--predicate",
-            `process == "${request.bundleIdentifier}"`,
-          ],
+        const collected = await this.#collectLogs(
+          request,
+          request.bundleIdentifier,
           context,
-          request.timeoutMs,
           signal,
+        );
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${collected.text}\n`)]);
+        this.#advance(active, "completed", "completed");
+        return evidence(
+          request,
+          collected.outcome,
+          startedAt,
+          this.#options.now(),
+          [{ severity: "note", message: collected.note }],
+          [{ kind: "log", reference: logReference }],
+          collected.cleanup,
+          collected.truncated,
         );
       } else if (request.kind === "start-recording") {
         this.#advance(active, "capturing-screen");
@@ -1429,6 +1471,115 @@ export class AppleToolchainService {
     }
   }
 
+  /**
+   * An app's unified-log lines from the Simulator, and its newest crash
+   * reports when asked for. The log's `process` is the executable's name, not
+   * the bundle identifier, so the executable is read from the installed app
+   * first; the app's own subsystem lines are matched either way.
+   */
+  async #collectLogs(
+    request: AppleSimulatorRequest,
+    bundleIdentifier: string,
+    context: AppleExecutionContext,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly outcome: AppleBuildEvidence["outcome"];
+    readonly text: string;
+    readonly note: string;
+    readonly cleanup: AppleBuildEvidence["cleanup"];
+    readonly truncated?: boolean;
+  }> {
+    const info = await this.#command(
+      ["xcrun", "simctl", "appinfo", request.simulatorId, bundleIdentifier],
+      context,
+      request.timeoutMs,
+      signal,
+    );
+    const executable = succeeded(info) ? simulatorAppExecutable(text(info.stdout)) : undefined;
+    const minutes = Math.ceil((request.sinceSeconds ?? DEFAULT_LOG_WINDOW_SECONDS) / 60);
+    const shown = await this.#command(
+      [
+        "xcrun",
+        "simctl",
+        "spawn",
+        request.simulatorId,
+        "log",
+        "show",
+        "--style",
+        "compact",
+        "--last",
+        `${minutes}m`,
+        "--predicate",
+        simulatorAppLogPredicate(bundleIdentifier, executable),
+      ],
+      context,
+      request.timeoutMs,
+      signal,
+      undefined,
+      // `log show` has no tail bound of its own, and the window can hold more
+      // than the capture keeps; the newest lines are the ones asked about.
+      "newest",
+    );
+    const cleanup = info.cleanupUncertain || shown.cleanupUncertain ? "uncertain" : "complete";
+    if (!succeeded(shown)) {
+      const said = sanitizedOutput([shown.stderr, shown.stdout], context);
+      const reason =
+        said
+          .split(/\r?\n/)
+          .find((line) => line.trim().length > 0)
+          ?.trim() ?? "";
+      const outcome = outcomeFor(shown);
+      return {
+        outcome,
+        text: said,
+        note: `logs ${outcome}${reason === "" ? "" : `: ${reason}`}`.slice(
+          0,
+          MAX_DIAGNOSTIC_LENGTH,
+        ),
+        cleanup,
+      };
+    }
+    const includeCrashes = request.includeCrashes === true;
+    const log = boundedDeviceLogTail(
+      sanitizedOutput([shown.stdout], context),
+      includeCrashes ? DEVICE_LOG_BUDGET_BESIDE_CRASHES : DEVICE_LOG_BUDGET,
+    );
+    const sections = [
+      `--- ${bundleIdentifier} (${executable ?? "executable unknown"}, last ${minutes} min) ---`,
+      log.text || "(no lines)",
+    ];
+    const notes = [
+      `logs returned ${log.lines} ${log.lines === 1 ? "line" : "lines"} from ${bundleIdentifier}`,
+    ];
+    if (executable === undefined) {
+      notes.push(
+        "the installed app's executable could not be read, so only its subsystem's lines are shown",
+      );
+    }
+    let truncated = log.truncated;
+    if (includeCrashes) {
+      const reports = await readAppleCrashReports(
+        this.#options.diagnosticReportsDirectory ??
+          join(homedir(), "Library", "Logs", "DiagnosticReports"),
+        bundleIdentifier,
+      );
+      sections.push("--- crash reports ---");
+      if (reports.length === 0) sections.push(`(no crash reports for ${bundleIdentifier})`);
+      for (const report of reports) {
+        sections.push(`--- ${report.name} (${report.modifiedAt}) ---`, report.text);
+        truncated ||= report.truncated;
+      }
+      notes[0] = `${notes[0]} and ${reports.length} crash reports`;
+    }
+    return {
+      outcome: "succeeded",
+      text: sections.join("\n"),
+      note: notes.join("; "),
+      cleanup,
+      truncated,
+    };
+  }
+
   async #startRecording(
     request: AppleSimulatorRequest,
     context: AppleExecutionContext,
@@ -1561,6 +1712,7 @@ export class AppleToolchainService {
     timeoutMs: number,
     signal?: AbortSignal,
     grants?: AppleLaunchGrants,
+    outputRetention?: "newest",
   ): Promise<AppleProcessResult> {
     return await this.#options.execute(
       {
@@ -1574,6 +1726,7 @@ export class AppleToolchainService {
         // same directory as an additional write root.
         isolatedRoots: [this.#captureDirectory, ...(this.#options.isolatedRoots ?? [])],
         ...(grants === undefined ? {} : grants),
+        ...(outputRetention === undefined ? {} : { outputRetention }),
       },
       signal,
     );
@@ -2271,6 +2424,7 @@ function evidence(
   diagnostics: AppleBuildEvidence["diagnostics"],
   artifacts: AppleBuildEvidence["artifacts"],
   cleanup: AppleBuildEvidence["cleanup"],
+  truncated?: boolean,
 ): AppleBuildEvidence {
   const requestedBy =
     !isBuildRequest(request) && request.requestedBy !== undefined ? request.requestedBy : undefined;
@@ -2285,6 +2439,7 @@ function evidence(
     diagnostics,
     artifacts,
     cleanup,
+    ...(truncated === undefined ? {} : { truncated }),
     durationMs: elapsed(startedAt, completedAt),
     completedAt,
   });
@@ -2357,6 +2512,151 @@ function diagnosticsFor(
     }
   }
   return diagnostics;
+}
+
+function sanitizedOutput(
+  outputs: ReadonlyArray<Uint8Array>,
+  context: AppleExecutionContext,
+): string {
+  return outputs
+    .map(text)
+    .join("\n")
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]");
+}
+
+/**
+ * The executable an installed Simulator app runs as, from `simctl appinfo`'s
+ * property list (`CFBundleExecutable = Name;`, quoted when the name needs it).
+ */
+export function simulatorAppExecutable(appinfo: string): string | undefined {
+  const match = /^\s*CFBundleExecutable\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]+))\s*;/m.exec(appinfo);
+  const quoted = match?.[1];
+  const name = quoted === undefined ? match?.[2] : quoted.replace(/\\(.)/g, "$1");
+  return name === undefined || name.length === 0 ? undefined : name;
+}
+
+/**
+ * Which unified-log lines are the app's: its process, by the executable's
+ * name, or its own subsystem, which is the bundle identifier by convention.
+ * The name is quoted for the predicate, since an executable may contain spaces
+ * or quotes; the bundle identifier's contract already admits neither.
+ */
+export function simulatorAppLogPredicate(
+  bundleIdentifier: string,
+  executable: string | undefined,
+): string {
+  const subsystem = `subsystem == "${bundleIdentifier}"`;
+  if (executable === undefined) return subsystem;
+  const name = executable.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return `process == "${name}" OR ${subsystem}`;
+}
+
+/**
+ * The newest crash reports macOS wrote for one app. The host reads them
+ * itself; no confined launch is given the reports folder. Each `.ips` file
+ * starts with a one-line JSON header naming the app's `bundleID`, so only that
+ * line decides a match. Links are not followed, a file too large to be a
+ * report is not opened, and only the start of each report is kept.
+ */
+export async function readAppleCrashReports(
+  directory: string,
+  bundleIdentifier: string,
+): Promise<
+  ReadonlyArray<{
+    readonly name: string;
+    readonly modifiedAt: string;
+    readonly text: string;
+    readonly truncated: boolean;
+  }>
+> {
+  let names: ReadonlyArray<string>;
+  try {
+    names = (await readdir(directory, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ips"))
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+  const candidates: Array<{ readonly name: string; readonly modifiedMs: number }> = [];
+  for (const name of names) {
+    try {
+      const info = await lstat(join(directory, name));
+      if (info.isFile()) candidates.push({ name, modifiedMs: info.mtimeMs });
+    } catch {
+      // Removed while listing; nothing to read.
+    }
+  }
+  candidates.sort((left, right) => right.modifiedMs - left.modifiedMs);
+  const reports: Array<{
+    readonly name: string;
+    readonly modifiedAt: string;
+    readonly text: string;
+    readonly truncated: boolean;
+  }> = [];
+  for (const candidate of candidates.slice(0, MAX_CRASH_REPORTS_EXAMINED)) {
+    const head = await readCrashReportHead(join(directory, candidate.name));
+    if (head === undefined) continue;
+    const newline = head.text.indexOf("\n");
+    let header: unknown;
+    try {
+      header = JSON.parse(newline === -1 ? head.text : head.text.slice(0, newline));
+    } catch {
+      continue;
+    }
+    if (
+      typeof header !== "object" ||
+      header === null ||
+      !("bundleID" in header) ||
+      header.bundleID !== bundleIdentifier
+    ) {
+      continue;
+    }
+    reports.push({
+      name: candidate.name,
+      modifiedAt: new Date(candidate.modifiedMs).toISOString(),
+      ...head,
+    });
+    if (reports.length >= MAX_CRASH_REPORTS) break;
+  }
+  return reports;
+}
+
+async function readCrashReportHead(
+  path: string,
+): Promise<{ readonly text: string; readonly truncated: boolean } | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    // Non-blocking, so a pipe named like a report cannot hold the read open.
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0),
+    );
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_CRASH_REPORT_BYTES) return undefined;
+    const buffer = new Uint8Array(Math.min(info.size, CRASH_REPORT_HEAD_BYTES));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, 0);
+    const truncated = info.size > bytesRead;
+    const head = buffer.subarray(0, bytesRead);
+    // The fatal decoder turns a character split by the cut into an empty
+    // report, whose header then names no app; end the head before it instead.
+    return { text: text(truncated ? withoutSplitCharacter(head) : head), truncated };
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+/** The bytes before a UTF-8 character the end of `bytes` cuts short. */
+function withoutSplitCharacter(bytes: Uint8Array): Uint8Array {
+  for (let back = 1; back <= Math.min(4, bytes.byteLength); back += 1) {
+    const byte = bytes[bytes.byteLength - back] ?? 0;
+    if ((byte & 0xc0) === 0x80) continue;
+    const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    return length > back ? bytes.subarray(0, bytes.byteLength - back) : bytes;
+  }
+  return bytes;
 }
 
 function safeReason(reason: string): string {

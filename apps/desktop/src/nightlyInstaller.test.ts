@@ -28,6 +28,7 @@ const trust = {
 
 const archiveBytes = Buffer.from("octant-nightly-0.3.0-preview-arm64.zip");
 const nightlyRelease = {
+  product: "octant-nightly",
   version: "0.3.0-preview.20261105.2",
   platform: "darwin",
   arch: "arm64",
@@ -84,7 +85,7 @@ function installer(
         init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
       });
     }
-    if (input.includes("/preview/darwin-arm64.preview-key.json")) {
+    if (input.includes("/preview/darwin-arm64.octant-nightly.json")) {
       return Response.json(options.document ?? signedBy(previewKeys));
     }
     if (input.startsWith(nightlyRelease.url)) {
@@ -125,7 +126,9 @@ function installer(
     feedBaseUrl: "https://updates.example.test",
     app: { version: "0.2.0-candidate.20261101.1" as AppVersion, platform: "darwin", arch: "arm64" },
     temporaryDirectory: join(root, "tmp"),
-    downloadDeadlineMs: 50,
+    // Only the stalled-download test needs a short deadline; a slow CI runner
+    // took longer than 50 ms to serve and hash an ordinary fake download.
+    downloadDeadlineMs: options.stallDownloads === true ? 50 : 10_000,
     native: () => native,
     trash,
     verifier: createFeedVerifier(trust),
@@ -214,7 +217,7 @@ describe("installing Octant Nightly", () => {
     expect(checked).not.toBe(nightlyPath);
     expect(checked.endsWith("/Octant Nightly.app")).toBe(true);
     expect(vi.mocked(fetchImpl).mock.calls[0]?.[0]).toContain(
-      "https://updates.example.test/preview/darwin-arm64.preview-key.json",
+      "https://updates.example.test/preview/darwin-arm64.octant-nightly.json",
     );
     // No download or staging folder is left behind.
     expect(await readdir(join(root, "tmp"))).toEqual([]);
@@ -271,6 +274,18 @@ describe("installing Octant Nightly", () => {
     expect(extract).not.toHaveBeenCalled();
   });
 
+  it("refuses an Octant build published on the preview ring", async () => {
+    const { subject, extract } = installer({
+      document: signedBy(previewKeys, { product: "octant" }),
+    });
+
+    expect(await subject.install()).toMatchObject({
+      status: "not-installed",
+      refusal: "wrong-app",
+    });
+    expect(extract).not.toHaveBeenCalled();
+  });
+
   it("refuses a feed signed by a key the preview ring does not trust", async () => {
     const { subject, extract } = installer({ document: signedBy(strangerKeys) });
 
@@ -314,7 +329,9 @@ describe("installing Octant Nightly", () => {
     expect(second.status === "installed" || second.status === "not-installed").toBe(true);
     expect(second.refusal).toBeUndefined();
     expect(
-      vi.mocked(fetchImpl).mock.calls.filter(([url]) => String(url).includes("preview-key")),
+      vi
+        .mocked(fetchImpl)
+        .mock.calls.filter(([url]) => String(url).includes("octant-nightly.json")),
     ).toHaveLength(1);
   });
 

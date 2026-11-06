@@ -1,9 +1,93 @@
+import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   desktopPeerPreflight,
+  encodeLinuxLauncherRecord,
   ensureNightlyHostReady,
+  linuxRendererSandboxDisabled,
+  loadDesktopPeerStatus,
   ownDesktopPeerStatus,
+  writeLinuxLauncherRecord,
 } from "./desktopPeerStatus";
+
+describe("Linux client trust in desktop main", () => {
+  it("treats any unsandboxed renderer switch or variable as no sandbox", () => {
+    const none = { hasSwitch: () => false, argv: ["/opt/Octant Nightly"], env: {} };
+    expect(linuxRendererSandboxDisabled(none)).toBe(false);
+    expect(
+      linuxRendererSandboxDisabled({ ...none, hasSwitch: (name) => name === "no-sandbox" }),
+    ).toBe(true);
+    expect(
+      linuxRendererSandboxDisabled({
+        ...none,
+        hasSwitch: (name) => name === "disable-setuid-sandbox",
+      }),
+    ).toBe(true);
+    expect(linuxRendererSandboxDisabled({ ...none, argv: ["x", "--no-sandbox"] })).toBe(true);
+    expect(linuxRendererSandboxDisabled({ ...none, env: { ELECTRON_DISABLE_SANDBOX: "1" } })).toBe(
+      true,
+    );
+  });
+
+  it("never loads the Linux binding for a development build or without Octant's endpoint", () => {
+    const endpoint = {
+      windowsSocketPath: "/tmp/octant-1000/a.windows.v1.sock",
+      launcherRecordPath: "/tmp/octant-1000/a.launcher.json",
+      version: "1.0.0",
+    };
+    expect(
+      loadDesktopPeerStatus({
+        packaged: false,
+        platform: "linux",
+        resourcesPath: "/r",
+        linux: endpoint,
+      }),
+    ).toBeUndefined();
+    expect(
+      loadDesktopPeerStatus({ packaged: true, platform: "linux", resourcesPath: "/r" }),
+    ).toBeUndefined();
+    expect(
+      loadDesktopPeerStatus({
+        packaged: true,
+        platform: "win32",
+        resourcesPath: "/r",
+        linux: endpoint,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("records the AppImage Octant launched from, and nothing for a non-image launch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-launcher-record-"));
+    try {
+      const image = join(directory, 'Octant "x".AppImage');
+      await writeFile(image, "image", { mode: 0o755 });
+      const record = join(directory, "a.launcher.json");
+      await expect(writeLinuxLauncherRecord({ recordPath: record, appImage: image })).resolves.toBe(
+        "written",
+      );
+      const metadata = await lstat(image, { bigint: true });
+      expect(await readFile(record, "utf8")).toBe(
+        encodeLinuxLauncherRecord({ appImage: image, device: metadata.dev, inode: metadata.ino }),
+      );
+      expect((await lstat(record)).mode & 0o777).toBe(0o600);
+      expect(encodeLinuxLauncherRecord({ appImage: "/a", device: 1n, inode: 2n })).toBe(
+        '{"schemaVersion":1,"appImage":"/a","device":"1","inode":"2"}\n',
+      );
+      const linked = join(directory, "linked.AppImage");
+      await symlink(image, linked);
+      const other = join(directory, "b.launcher.json");
+      for (const appImage of [undefined, "relative.AppImage", linked, join(directory, "missing")])
+        await expect(writeLinuxLauncherRecord({ recordPath: other, appImage })).resolves.toBe(
+          "skipped",
+        );
+      await expect(lstat(other)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("the packaged desktop status preflight", () => {
   it("refuses an unknown native receipt rather than treating it as a compatible host", async () => {

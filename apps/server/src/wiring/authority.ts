@@ -43,6 +43,7 @@ import { PersonMemoryStore } from "../personMemory/personMemoryStore";
 import { ProtectedFilesService } from "../protectedFilesService";
 import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
+import { AutomationEventStore } from "../automation/automationEventStore";
 import { RoutineProposalService } from "../automation/routineProposalService";
 import {
   chatThreadStandsInProject,
@@ -192,6 +193,14 @@ export function wireAuthority(deps: AuthorityDependencies) {
     now: Date.now,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
+  // One Automation event store for the host: the Automation area writes
+  // definitions and runs through it, and a Work or Code run's own turn
+  // reports its result through it, so both share one append path.
+  const automationEventStore = new AutomationEventStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const codeSessionAuthority = new CodeSessionAuthorityStore();
   const agentRunExecutionWindows = new Map<
     AgentRun["requestId"],
@@ -299,6 +308,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     agentRunParentAuthority,
     agentRunPersistence,
     androidInputGrants,
+    automationEventStore,
     bindingReceiptStore,
     browserCaptureStore,
     browserCaptures,

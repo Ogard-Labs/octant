@@ -4,7 +4,10 @@
  *
  * A model offers one through the app-managed `octant_offer_side_task` tool,
  * on any provider that runs app-managed tools, in any mode. The offer is a
- * card the person reads; it carries no authority. Starting it is the
+ * card the person reads; it carries no authority. A Code Project's designated
+ * planner may also offer one to the Project board (target `board`), which
+ * records a pending planner proposal the person confirms in the planner
+ * instead of a card (see `codePlanner.ts`). Starting it is the
  * person's confirmation: the host creates the thread through the mode's
  * ordinary creation command and sends the offer's prompt as its first
  * message, under the new thread's own authority.
@@ -19,6 +22,13 @@ import { ProjectId } from "./projects";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const SIDE_TASK_TOOL_NAME = "octant_offer_side_task";
+/**
+ * The profile allowlist entry for the planner's `board` target. A non-empty
+ * allowlist must name it for the designated planner to offer tasks to the
+ * Project board; proposing was a separate tool a profile could leave out, and
+ * folding it into side tasks must not hand an existing allowlist that power.
+ */
+export const SIDE_TASK_BOARD_ALLOWLIST_ENTRY = "octant_offer_side_task.board";
 export const MAX_SIDE_TASK_TITLE_LENGTH = 80;
 export const MAX_SIDE_TASK_REASON_LENGTH = 280;
 export const MAX_SIDE_TASK_PROMPT_LENGTH = 8_192;

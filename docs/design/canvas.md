@@ -96,7 +96,8 @@ thread with the new Canvas attached as whole-canvas context, so the agent
 revises it with its own tools under the thread's existing authority.
 
 Every Chat thread is offered `octant_canvas`, as people expect of an
-assistant that makes documents. A Chat thread in a Chat Project writes into
+assistant that makes documents. A Side Chat is not: it only reads (see
+[Architecture: Side Chat reads](../architecture.md#security-and-authority)). A Chat thread in a Chat Project writes into
 that Project, through the window's active Chat Project as before. A Chat
 thread in no Chat Project owns its Canvas itself: the Canvas's provenance
 names the thread and no Project (`projectId: null`, Canvas schema version 20,
@@ -149,6 +150,20 @@ and is not deleted or deleting; otherwise the pane shows the welcome surface,
 because a tab restored past that rule opened to a refusal once the thread was
 deleted but not yet purged.
 
+A turn in Plan keeps the whole tool, `create` and `revise` included. Plan may
+look and propose but changes nothing in the workspace, on the host, or in the
+outside world ([Architecture: principles](../architecture.md#overview-and-principles)),
+and a Canvas changes none of those: it is the thread's own document, holding
+no file, shell, Git, or network authority, and the plan a Plan turn writes is
+exactly the kind of document the delivery rule below asks for. What would
+carry a Plan thread's Canvas beyond the thread stays refused: the tool offers
+no publish, share, or export (a person's share, link, and export are their
+own routes), the artifact mirror writes no file for a version a Plan thread
+authored, and replica sync makes no store call for it
+([Artifact replica sync](artifact-replica-sync.md)).
+`codeOperationRuntime.test.ts` shows a Plan turn creating and revising its
+Canvas and the tool refusing a publish or a share.
+
 The delivery rule also reaches the model as an instruction, not only as the
 tool description. Every turn that offers `octant_canvas` (Work, Code, and
 every Chat thread) carries one short, provider-neutral,
@@ -158,9 +173,9 @@ Canvas with `octant_canvas`, not as a file written with the runtime's own file
 tools and not as a long reply, unless the person asks for a file or for plain
 text. The entry grants no tools or authority, is attributed as Octant policy
 like the Work artifact instruction, and is absent from every turn that does
-not offer the tool. Work's artifact instruction defers to it: a document goes
-in the task folder when the person asked for a file or no Canvas tool is
-offered. The rule moved into required context because, in a live Work turn, a
+not offer the tool. Work's file instruction makes no delivery choice of its
+own: it says only that files the agent writes go in the task folder, so the
+model never reconciles two blocks that restate the same rule. The rule moved into required context because, in a live Work turn, a
 runtime with its own file tools read the tool description and still wrote the
 memo as a Markdown file, then pasted it into the reply after the write was
 denied.

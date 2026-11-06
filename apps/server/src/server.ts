@@ -3,7 +3,7 @@ import { commandCredentialPostureAllowed } from "@octant/domain/command-credenti
 import { CommandCredentialBindings } from "./secretStores/commandCredentialBindings";
 import { commandCredentialContext } from "./secretStores/commandCredentialContext";
 import { commandCredentialRoutes } from "./secretStores/commandCredentialRoutes";
-import { commandCredentialTools } from "./secretStores/commandCredentialTools";
+import { savedCredentialCommands } from "./secretStores/commandCredentialTools";
 import {
   createCommandCredentialExecution,
   commandCredentialRecipientPin,
@@ -17,7 +17,9 @@ import { decodeProjectId, decodeWindowId } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
-import { createCredentialRequestTools } from "./credentials/credentialRequestTools";
+import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
+import { createCredentialTool } from "./credentials/credentialTool";
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import {
   startupFailedOutput,
   UNCLASSIFIED_STARTUP_FAILURE,
@@ -200,6 +202,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       androidInputGrants,
+      automationEventStore,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -249,7 +252,6 @@ export function startOctantServer(
     const {
       agentRunAdmission,
       agentRunChildWorktree,
-      agentRunEligibleTargets,
       agentRunLiveConversations,
       agentRunOrchestration,
       agentRunProcessSupervisor,
@@ -263,7 +265,6 @@ export function startOctantServer(
       managedWorktreeReceipts,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
-      remoteDelegation,
       remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
@@ -390,6 +391,7 @@ export function startOctantServer(
       projectBindingRoutes,
       projectRootPort,
       projectService,
+      replyDetailRoutes,
       shellRoutes,
       shellService,
       shipRoutes,
@@ -525,14 +527,9 @@ export function startOctantServer(
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
-      agentRunAdmission,
-      agentRunEligibleTargets,
-      agentRunOrchestration,
       agentRunParentAuthority,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
-      remoteDelegation,
-      agentRunPersistence,
       codeBoardEventStore,
       codeParentActiveTurn,
       codeSessionAuthority,
@@ -937,6 +934,7 @@ export function startOctantServer(
       agentRunPersistence,
       agentsManagedToolsFor,
       authorizeWorkThreadForWindow,
+      automationEventStore,
       browserAuthority,
       browserCaptures,
       browserModelBindings,
@@ -983,6 +981,7 @@ export function startOctantServer(
       routineProposalService,
       sideTaskFirstMessage,
       sideTasks,
+      siblingThreadsService,
       spendCeiling,
       threadMentionService,
       threadOutsideContentMarks,
@@ -1102,6 +1101,7 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      automationEventStore,
       agentRunOrchestration,
       externalContentIngestionStore,
       readHarnessProcessReceipts,
@@ -1243,75 +1243,85 @@ export function startOctantServer(
       windowAuthorityStore,
       options.allowedRendererHttpOrigin,
     );
-    contributeCodeTools(({ windowId, thread, readThread }) => {
-      const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
-      return commandCredentialTools({
-        service: commands,
-        windowId: String(windowId),
-        threadId: String(thread.id),
-        projectId: String(thread.projectId),
-        current: () => {
-          try {
-            const current = readThread();
-            return (
-              current !== undefined &&
-              providerVersion !== undefined &&
-              persistence.readProviderInstance(current.providerInstanceId)?.enabled === true &&
-              persistence.readProviderInstance(current.providerInstanceId)?.version ===
-                providerVersion &&
-              isCodeProviderModelAllowed(current) &&
-              windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)) &&
-              isToolAllowedByAllowlist(current.toolConstraints ?? [], "octant_command") &&
-              JSON.stringify([
-                current.checkoutId,
-                current.bindingRevisionId,
-                current.providerInstanceId,
-                current.modelId,
-                current.profileId,
-                current.toolConstraints,
-              ]) ===
-                JSON.stringify([
-                  thread.checkoutId,
-                  thread.bindingRevisionId,
-                  thread.providerInstanceId,
-                  thread.modelId,
-                  thread.profileId,
-                  thread.toolConstraints,
-                ]) &&
-              current.lifecycle === "active" &&
-              commandCredentialPostureAllowed(
-                (
-                  codeOperationRuntime?.threadWithActiveTurnPosture?.(
-                    codeSessionAuthority.effectiveThread(windowId, current),
-                  ) ?? codeSessionAuthority.effectiveThread(windowId, current)
-                ).executionPolicy,
-              ) &&
-              canAccessCodeProject(windowId, current.projectId) &&
-              String(current.projectId) === String(thread.projectId)
-            );
-          } catch {
-            return false;
-          }
-        },
-      });
-    });
-    const credentialRequests = new CredentialRequests();
+    const credentialRequests = new CredentialRequests(
+      commandBroker?.requestCardRead === undefined
+        ? {}
+        : { resolveLinked: commandBroker.requestCardRead },
+    );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
     const credentialRequestRoutes = createCredentialRequestRoutes(
       credentialRequests,
       windowAuthorityStore,
     );
-    contributeCodeTools(({ windowId, thread, readThread }) =>
-      createCredentialRequestTools({
-        service: credentialRequests,
-        windowId: String(windowId),
-        thread,
-        readThread,
-        operations: credentialOperations,
-        windowCurrent: () =>
-          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
-      }),
-    );
+    // One credential tool, composed from two sides that each keep their own
+    // authority check: registered integration operations and saved commands.
+    contributeCodeTools(({ windowId, thread, readThread }) => {
+      const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
+      const windowCurrent = () =>
+        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId));
+      return createCredentialTool({
+        registered: registeredCredentialOperations({
+          service: credentialRequests,
+          windowId: String(windowId),
+          thread,
+          readThread,
+          operations: credentialOperations,
+          windowCurrent,
+        }),
+        saved: savedCredentialCommands({
+          service: commands,
+          windowId: String(windowId),
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+          current: () => {
+            try {
+              const current = readThread();
+              return (
+                current !== undefined &&
+                providerVersion !== undefined &&
+                persistence.readProviderInstance(current.providerInstanceId)?.enabled === true &&
+                persistence.readProviderInstance(current.providerInstanceId)?.version ===
+                  providerVersion &&
+                isCodeProviderModelAllowed(current) &&
+                windowCurrent() &&
+                isToolAllowedByAllowlist(
+                  current.toolConstraints ?? [],
+                  OCTANT_CREDENTIAL_TOOL.name,
+                ) &&
+                JSON.stringify([
+                  current.checkoutId,
+                  current.bindingRevisionId,
+                  current.providerInstanceId,
+                  current.modelId,
+                  current.profileId,
+                  current.toolConstraints,
+                ]) ===
+                  JSON.stringify([
+                    thread.checkoutId,
+                    thread.bindingRevisionId,
+                    thread.providerInstanceId,
+                    thread.modelId,
+                    thread.profileId,
+                    thread.toolConstraints,
+                  ]) &&
+                current.lifecycle === "active" &&
+                commandCredentialPostureAllowed(
+                  (
+                    codeOperationRuntime?.threadWithActiveTurnPosture?.(
+                      codeSessionAuthority.effectiveThread(windowId, current),
+                    ) ?? codeSessionAuthority.effectiveThread(windowId, current)
+                  ).executionPolicy,
+                ) &&
+                canAccessCodeProject(windowId, current.projectId) &&
+                String(current.projectId) === String(thread.projectId)
+              );
+            } catch {
+              return false;
+            }
+          },
+        }),
+      });
+    });
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
       credentialRequestRoutes,
       agentMessageRoutes,
@@ -1379,6 +1389,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       replicaSyncStatusRoutes,
       scaffoldRoutes,
+      replyDetailRoutes,
       shellRoutes,
       shipRoutes,
       sidebarBackgroundRoutes,

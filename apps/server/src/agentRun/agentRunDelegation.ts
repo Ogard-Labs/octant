@@ -26,6 +26,10 @@ import {
   nativeHarnessJobForRole,
   redactDiagnosticText,
 } from "@octant/domain";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 import type { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import {
   admitAgentRunControlRequest,
@@ -730,12 +734,44 @@ export function agentRunStopReason(run: AgentRun): string | undefined {
     : `${redacted.slice(0, MAX_AGENT_RUN_STOP_REASON_CHARACTERS - 1).trimEnd()}…`;
 }
 
-/** Do not settle a reply that a provider would replace with a lossy preview. */
+/**
+ * Journals that a child's reply is about to enter its parent, which marks the
+ * parent as having read outside content. The reference names the result
+ * generation, so a reply that reaches the parent both as a delivered turn and
+ * through its agent's `wait` is recorded once. False when nothing was recorded.
+ */
+export function recordAgentRunResultIngestion(
+  record: (input: RecordExternalContentIngestionInput) => ExternalContentIngestionResult,
+  run: AgentRun,
+  uuid: () => string,
+): boolean {
+  try {
+    return (
+      record({
+        threadId: String(run.parentThreadId),
+        provenance: { origin: "tool-result", sourceLabel: "subagent-result" },
+        contentReference: `agent-run-result-${String(run.id)}-${run.generation ?? 1}`,
+        correlationId: uuid(),
+        authorized: true,
+      }).kind !== "refused"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hands a finished child's reply to its parent's agent. A reply a provider
+ * would replace with a lossy preview is not settled. One that fits marks the
+ * parent first, as a delivered reply does, because the child may relay what
+ * it fetched; a mark that cannot be recorded keeps the reply owed.
+ */
 export function collectAgentRunResult(
   persistence: Pick<AgentRunPersistenceService, "getById"> &
     Partial<Pick<AgentRunPersistenceService, "applyCommand">>,
   run: AgentRun,
   text: string,
+  recordResultIngestion: (run: AgentRun) => boolean,
 ):
   | {
       readonly status: "completed";
@@ -769,6 +805,12 @@ export function collectAgentRunResult(
       reason: "result-too-large",
       message:
         "This result exceeds the tool response budget. It remains owed; wait for delivery to the parent before following up.",
+    };
+  if (!recordResultIngestion(run))
+    return {
+      status: "refused",
+      reason: "result-delivery-unavailable",
+      message: "The result could not be recorded as received by the parent.",
     };
   const consumed = recordAgentRunResultConsumption(persistence, run);
   if (consumed.status === "refused")

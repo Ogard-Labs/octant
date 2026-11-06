@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   ownNightlyWindowLeases,
@@ -9,7 +10,7 @@ const clientHandle = "00000000-0000-4000-8000-000000000593";
 const peer = "a".repeat(64);
 const hostFeatures = ["project-root-receipts", "a-feature-from-a-newer-host"];
 
-function fixture(onCount?: (count: number) => void, nativeMain = true) {
+function fixture(onCount?: (count: number) => void, nativeMain = true, peerKey = peer) {
   let receive: (event: unknown) => void = () => {};
   let elapsed = 0;
   let expire = () => {};
@@ -60,7 +61,14 @@ function fixture(onCount?: (count: number) => void, nativeMain = true) {
       responses.set(requestId, resolve);
       receive({
         kind: "request",
-        request: { requestId, peer, windowId: clientHandle, generation: 1, operation, nativeMain },
+        request: {
+          requestId,
+          peer: peerKey,
+          windowId: clientHandle,
+          generation: 1,
+          operation,
+          nativeMain,
+        },
       } satisfies NativeWindowEvent);
     });
   return {
@@ -70,7 +78,7 @@ function fixture(onCount?: (count: number) => void, nativeMain = true) {
     requests,
     closeContexts,
     replies,
-    exitPeer: () => receive({ kind: "peer-exited", peer }),
+    exitPeer: () => receive({ kind: "peer-exited", peer: peerKey }),
     expire: () => {
       elapsed = 15_000;
       expire();
@@ -80,6 +88,37 @@ function fixture(onCount?: (count: number) => void, nativeMain = true) {
     },
   };
 }
+
+// The key the Linux binding derives for boot 00000000-0000-4000-8000-000000000001,
+// pid 4242, start time 98765. desktopPeerLinux.test.cpp checks the binding's
+// policy produces exactly this value, so a key shape the owner drops cannot
+// pass both suites.
+const LINUX_PEER_KEY_FIXTURE = "4be26660a400e0f5562c36dbe1d8253f815932426a83dde813a3cd721315422b";
+
+describe("a Linux peer's window registration", () => {
+  it("is the binding's SHA-256 key, and the lease owner registers and revokes by it", async () => {
+    expect(
+      createHash("sha256")
+        .update("octant.linux-peer.v1\0")
+        .update("00000000-0000-4000-8000-000000000001\0")
+        .update("4242\0")
+        .update("98765")
+        .digest("hex"),
+    ).toBe(LINUX_PEER_KEY_FIXTURE);
+    const counts: number[] = [];
+    const f = fixture((count) => counts.push(count), true, LINUX_PEER_KEY_FIXTURE);
+    try {
+      const reply = await f.send(1, "register");
+      expect(reply.kind).toBe("registered");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      expect(f.owner.hasWindow(reply.windowId)).toBe(true);
+      f.exitPeer();
+      await vi.waitFor(() => expect(f.owner.hasWindow(reply.windowId)).toBe(false));
+    } finally {
+      await f.owner.close();
+    }
+  });
+});
 
 describe("Nightly native window lease ownership", () => {
   it("issues a fresh server window ID and returns only its scoped bootstrap", async () => {

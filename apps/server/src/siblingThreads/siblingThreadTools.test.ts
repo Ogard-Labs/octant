@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   EventActor,
   GlobalSequence,
-  MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS,
+  MAX_SIBLING_THREAD_WAIT_MS,
   MAX_SIBLING_THREAD_READS_PER_TURN,
   MAX_SIBLING_THREAD_WAITS_PER_TURN,
   MAX_THREAD_MENTION_TRANSCRIPT_CHARACTERS,
@@ -15,12 +15,13 @@ import {
   SIBLING_THREADS_TOOL_NAME,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
-  decodeCodeThreadId,
   decodeProjectId,
+  decodeSiblingThreadId,
   decodeSiblingThreadObserved,
   decodeThreadRetentionThreadId,
-  type CodeThreadId,
+  type SiblingThreadId,
   type ThreadMentionTranscriptEntry,
+  type WindowId,
 } from "@octant/contracts";
 import { SIBLING_THREAD_UNREACHABLE } from "@octant/domain";
 import { Schema } from "effect";
@@ -33,9 +34,10 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { erasePurgedThread } from "../persistence/threadPurge";
 import { openSqlite } from "../persistence/sqlitePort";
+import type { CodePlannerToolPort } from "../code/codePlannerTools";
 import {
   SiblingThreadsService,
-  createSiblingThreadTools,
+  createThreadsTools,
   type SiblingThreadSnapshot,
   type SiblingThreadSource,
 } from "./siblingThreadTools";
@@ -65,16 +67,16 @@ const ids = {
   childRun: thread("c0000000-0000-4000-8000-000000000008"),
 };
 
-function thread(value: string): CodeThreadId {
-  return decodeCodeThreadId(value);
+function thread(value: string): SiblingThreadId {
+  return decodeSiblingThreadId(value);
 }
 
-function referenceTo(threadId: CodeThreadId, projectId = projectA): string {
+function referenceTo(threadId: SiblingThreadId, projectId = projectA): string {
   return `${String(threadId)}@${String(projectId)}`;
 }
 
 function snapshot(
-  threadId: CodeThreadId,
+  threadId: SiblingThreadId,
   overrides: Partial<SiblingThreadSnapshot> = {},
 ): SiblingThreadSnapshot {
   return {
@@ -100,6 +102,8 @@ function transcriptOf(count: number, characters: number): ThreadMentionTranscrip
 interface HarnessOptions {
   readonly markFails?: boolean;
   readonly toolConstraints?: ReadonlyArray<string>;
+  readonly mode?: "work" | "code";
+  readonly planner?: CodePlannerToolPort;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -176,12 +180,17 @@ function harness(options: HarnessOptions = {}) {
     },
   });
   const newTurn = () =>
-    createSiblingThreadTools({
+    createThreadsTools({
+      mode: options.mode ?? "code",
+      windowId: "f0000000-0000-4000-8000-0000000000ff" as WindowId,
       service,
       source,
       callerThreadId: String(ids.caller),
       toolConstraints: options.toolConstraints ?? [],
       profileDisplayName: "Reviewer",
+      ...(options.planner === undefined ? {} : { planner: options.planner }),
+      recordExternalContentIngestion: (input) => ingestion.record(input),
+      uuid: randomUUID,
     });
   const tools = newTurn();
   const call = async (input: unknown, signal?: AbortSignal, turn = tools) =>
@@ -256,7 +265,7 @@ describe("the sibling threads tool", () => {
       }),
     );
 
-    const { result, isError } = await call({ action: "list" });
+    const { result, isError } = await call({ operation: "list" });
 
     expect(isError).toBe(false);
     const answer = unframe(result);
@@ -280,8 +289,8 @@ describe("the sibling threads tool", () => {
 
   it("marks the caller for every list, and withholds the titles when the mark cannot be recorded", async () => {
     const marked = harness();
-    await marked.call({ action: "list" });
-    await marked.call({ action: "list" });
+    await marked.call({ operation: "list" });
+    await marked.call({ operation: "list" });
     expect(marked.marks()).toHaveLength(2);
     expect(readThreadExternalContentTaint(marked.connection, String(ids.caller))).toEqual({
       externalContentIngested: true,
@@ -289,7 +298,7 @@ describe("the sibling threads tool", () => {
     });
 
     const unmarked = harness({ markFails: true });
-    const { result, isError } = await unmarked.call({ action: "list" });
+    const { result, isError } = await unmarked.call({ operation: "list" });
     expect(isError).toBe(true);
     expect(result).toEqual({
       status: "refused",
@@ -316,7 +325,11 @@ describe("the sibling threads tool", () => {
     for (const reference of outside) {
       for (const action of ["read", "wait"] as const) {
         // A fresh turn per call keeps the per-turn bounds out of this case.
-        const { result, isError } = await call({ action, reference }, undefined, newTurn());
+        const { result, isError } = await call(
+          { operation: action, reference },
+          undefined,
+          newTurn(),
+        );
         expect(isError).toBe(true);
         expect(result).toEqual({
           status: "refused",
@@ -334,7 +347,7 @@ describe("the sibling threads tool", () => {
     const { call, marks } = harness();
 
     const { result, isError } = await call({
-      action: "read",
+      operation: "read",
       reference: referenceTo(ids.waiting),
     });
 
@@ -356,14 +369,14 @@ describe("the sibling threads tool", () => {
     // The newest entries survive, the way a mention keeps them.
     expect(transcript.at(-1)?.text.startsWith("019 ")).toBe(true);
 
-    await call({ action: "read", reference: referenceTo(ids.waiting) });
+    await call({ operation: "read", reference: referenceTo(ids.waiting) });
     expect(marks()).toHaveLength(2);
   });
 
   it("returns nothing from a read it cannot mark, and journals no observation", async () => {
     const { call, observations } = harness({ markFails: true });
 
-    const { result, isError } = await call({ action: "read", reference: referenceTo(ids.idle) });
+    const { result, isError } = await call({ operation: "read", reference: referenceTo(ids.idle) });
 
     expect(isError).toBe(true);
     expect(result).toMatchObject({ status: "refused", reason: "unavailable" });
@@ -380,7 +393,7 @@ describe("the sibling threads tool", () => {
     });
 
     const { result, isError } = await call({
-      action: "wait",
+      operation: "wait",
       reference: referenceTo(ids.working),
       timeoutMs: 10_000,
     });
@@ -398,7 +411,7 @@ describe("the sibling threads tool", () => {
   it("stops waiting at the child-run bound and says the thread is still working", async () => {
     const { call, slept } = harness();
 
-    const defaulted = await call({ action: "wait", reference: referenceTo(ids.working) });
+    const defaulted = await call({ operation: "wait", reference: referenceTo(ids.working) });
     expect(defaulted.result).toEqual({
       status: "waited",
       reference: referenceTo(ids.working),
@@ -408,23 +421,23 @@ describe("the sibling threads tool", () => {
 
     slept.length = 0;
     await call({
-      action: "wait",
+      operation: "wait",
       reference: referenceTo(ids.working),
-      timeoutMs: MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS,
+      timeoutMs: MAX_SIBLING_THREAD_WAIT_MS,
     });
-    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS);
+    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(MAX_SIBLING_THREAD_WAIT_MS);
 
     const beyond = await call({
-      action: "wait",
+      operation: "wait",
       reference: referenceTo(ids.working),
-      timeoutMs: MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS + 1,
+      timeoutMs: MAX_SIBLING_THREAD_WAIT_MS + 1,
     });
     expect(beyond.result).toMatchObject({ status: "refused", reason: "policy" });
   });
 
   it("refuses a listed thread once it is completed, archived, deleted, or moved", async () => {
     const { call, threads, newTurn } = harness();
-    const listed = unframe((await call({ action: "list" })).result);
+    const listed = unframe((await call({ operation: "list" })).result);
     const reference = (listed.threads as ReadonlyArray<{ reference: string }>)[0]?.reference;
     expect(reference).toBe(referenceTo(ids.working));
 
@@ -434,15 +447,15 @@ describe("the sibling threads tool", () => {
       message: SIBLING_THREAD_UNREACHABLE,
     };
     threads.set(String(ids.working), snapshot(ids.working, { closed: true }));
-    expect((await call({ action: "read", reference }, undefined, newTurn())).result).toEqual(
+    expect((await call({ operation: "read", reference }, undefined, newTurn())).result).toEqual(
       unreachable,
     );
     threads.set(String(ids.working), snapshot(ids.working, { projectId: projectB }));
-    expect((await call({ action: "read", reference }, undefined, newTurn())).result).toEqual(
+    expect((await call({ operation: "read", reference }, undefined, newTurn())).result).toEqual(
       unreachable,
     );
     threads.delete(String(ids.working));
-    expect((await call({ action: "wait", reference }, undefined, newTurn())).result).toEqual(
+    expect((await call({ operation: "wait", reference }, undefined, newTurn())).result).toEqual(
       unreachable,
     );
   });
@@ -452,7 +465,7 @@ describe("the sibling threads tool", () => {
     const reference = referenceTo(ids.idle);
     transcripts.set(String(ids.idle), transcriptOf(2, 20));
     const turn = newTurn();
-    const reading = call({ action: "read", reference }, undefined, turn);
+    const reading = call({ operation: "read", reference }, undefined, turn);
     threads.set(String(ids.idle), snapshot(ids.idle, { closed: true }));
     expect((await reading).result).toMatchObject({ reason: "unauthorized" });
     expect(marks()).toEqual([]);
@@ -461,7 +474,7 @@ describe("the sibling threads tool", () => {
       threads.set(String(ids.working), snapshot(ids.working, { closed: true }));
     });
     expect(
-      (await call({ action: "wait", reference: referenceTo(ids.working) }, undefined, newTurn()))
+      (await call({ operation: "wait", reference: referenceTo(ids.working) }, undefined, newTurn()))
         .result,
     ).toMatchObject({ reason: "unauthorized" });
   });
@@ -474,7 +487,11 @@ describe("the sibling threads tool", () => {
       message: "This thread cannot see other threads.",
     };
 
-    const moving = call({ action: "read", reference: referenceTo(ids.idle) }, undefined, newTurn());
+    const moving = call(
+      { operation: "read", reference: referenceTo(ids.idle) },
+      undefined,
+      newTurn(),
+    );
     threads.set(String(ids.caller), snapshot(ids.caller, { projectId: projectB }));
     // A caller that moved away no longer shares a Project with its target.
     expect((await moving).result).toEqual({
@@ -488,15 +505,15 @@ describe("the sibling threads tool", () => {
       threads.set(String(ids.caller), snapshot(ids.caller, { closed: true }));
     });
     expect(
-      (await call({ action: "wait", reference: referenceTo(ids.working) }, undefined, newTurn()))
+      (await call({ operation: "wait", reference: referenceTo(ids.working) }, undefined, newTurn()))
         .result,
     ).toEqual(callerRefusal);
-    expect((await call({ action: "list" }, undefined, newTurn())).result).toEqual(callerRefusal);
+    expect((await call({ operation: "list" }, undefined, newTurn())).result).toEqual(callerRefusal);
 
     threads.set(String(ids.caller), snapshot(ids.caller));
     const turn = new AbortController();
     const cancelled = call(
-      { action: "read", reference: referenceTo(ids.idle) },
+      { operation: "read", reference: referenceTo(ids.idle) },
       turn.signal,
       newTurn(),
     );
@@ -513,8 +530,8 @@ describe("the sibling threads tool", () => {
   it("journals every answered read and wait on the reader, without the text, and replays it", async () => {
     const { call, observations } = harness();
 
-    const read = await call({ action: "read", reference: referenceTo(ids.idle) });
-    await call({ action: "wait", reference: referenceTo(ids.idle) });
+    const read = await call({ operation: "read", reference: referenceTo(ids.idle) });
+    await call({ operation: "wait", reference: referenceTo(ids.idle) });
 
     const replayed = observations();
     expect(replayed.map((entry) => entry.eventName)).toEqual([
@@ -544,7 +561,7 @@ describe("the sibling threads tool", () => {
 
   it("takes a reader's observations with it when the reader is purged", async () => {
     const { call, observations, connection } = harness();
-    await call({ action: "read", reference: referenceTo(ids.idle) });
+    await call({ operation: "read", reference: referenceTo(ids.idle) });
     expect(observations(String(ids.caller))).toHaveLength(1);
 
     erasePurgedThread({
@@ -562,24 +579,26 @@ describe("the sibling threads tool", () => {
     const reference = referenceTo(ids.idle);
 
     for (let index = 0; index < MAX_SIBLING_THREAD_READS_PER_TURN; index += 1) {
-      expect((await call({ action: "read", reference }, undefined, turn)).isError).toBe(false);
+      expect((await call({ operation: "read", reference }, undefined, turn)).isError).toBe(false);
     }
-    expect((await call({ action: "read", reference }, undefined, turn)).result).toEqual({
+    expect((await call({ operation: "read", reference }, undefined, turn)).result).toEqual({
       status: "refused",
       reason: "rate-limited",
       message: `This turn has already read ${String(MAX_SIBLING_THREAD_READS_PER_TURN)} threads.`,
     });
     for (let index = 0; index < MAX_SIBLING_THREAD_WAITS_PER_TURN; index += 1) {
       // Probing an unreachable reference spends the bound like a real wait.
-      await call({ action: "wait", reference: referenceTo(ids.completed) }, undefined, turn);
+      await call({ operation: "wait", reference: referenceTo(ids.completed) }, undefined, turn);
     }
-    expect((await call({ action: "wait", reference }, undefined, turn)).result).toMatchObject({
+    expect((await call({ operation: "wait", reference }, undefined, turn)).result).toMatchObject({
       reason: "rate-limited",
     });
     for (let index = 0; index < 10; index += 1) {
-      expect((await call({ action: "list" }, undefined, turn)).isError).toBe(false);
+      expect((await call({ operation: "list" }, undefined, turn)).isError).toBe(false);
     }
-    expect((await call({ action: "read", reference }, undefined, newTurn())).isError).toBe(false);
+    expect((await call({ operation: "read", reference }, undefined, newTurn())).isError).toBe(
+      false,
+    );
   });
 
   it("is offered in every posture and changes nothing outside the caller's own record", async () => {
@@ -588,9 +607,9 @@ describe("the sibling threads tool", () => {
       SIBLING_THREADS_TOOL_NAME,
     ]);
 
-    await call({ action: "list" });
-    await call({ action: "read", reference: referenceTo(ids.working) });
-    await call({ action: "wait", reference: referenceTo(ids.idle) });
+    await call({ operation: "list" });
+    await call({ operation: "read", reference: referenceTo(ids.working) });
+    await call({ operation: "wait", reference: referenceTo(ids.idle) });
 
     const appended = events();
     expect(appended.length).toBeGreaterThan(0);
@@ -603,10 +622,10 @@ describe("the sibling threads tool", () => {
   });
 
   it("is omitted from a profile that leaves it out, and refuses a call made anyway", async () => {
-    const { tools, call } = harness({ toolConstraints: ["octant_agent_message"] });
+    const { tools, call } = harness({ toolConstraints: ["octant_terminal"] });
 
     expect(tools.definitions).toEqual([]);
-    expect((await call({ action: "list" })).result).toEqual({
+    expect((await call({ operation: "list" })).result).toEqual({
       status: "refused",
       reason: "policy",
       message: `Profile "Reviewer" does not permit "${SIBLING_THREADS_TOOL_NAME}".`,
@@ -618,16 +637,193 @@ describe("the sibling threads tool", () => {
     const cancelled = new AbortController();
     cancelled.abort();
 
-    expect((await call({ action: "list" }, cancelled.signal)).result).toMatchObject({
+    expect((await call({ operation: "list" }, cancelled.signal)).result).toMatchObject({
       reason: "policy",
       message: "The turn was cancelled.",
     });
-    expect((await call({ action: "list", projectId: String(projectB) })).result).toMatchObject({
+    expect((await call({ operation: "list", projectId: String(projectB) })).result).toMatchObject({
       reason: "policy",
       message: "The tool input is invalid.",
     });
     expect(
-      (await call({ action: "read", reference: referenceTo(ids.idle), path: "/etc" })).result,
+      (await call({ operation: "read", reference: referenceTo(ids.idle), path: "/etc" })).result,
     ).toMatchObject({ reason: "policy" });
+  });
+
+  it("lets a Work turn list, read, and wait on the other open Work threads of its own Project", async () => {
+    const { tools, call, threads } = harness({ mode: "work" });
+    // The same Project, now a Work Project: every thread in it is a Work thread.
+    for (const [key, entry] of threads) threads.set(key, { ...entry, mode: "work" });
+    const schema = tools.definitions[0]?.inputSchema as {
+      readonly properties: Record<string, { readonly enum?: ReadonlyArray<string> }>;
+    };
+
+    expect(schema.properties.operation?.enum).toEqual(["help", "list", "read", "wait"]);
+    expect(Object.keys(schema.properties)).not.toContain("recipients");
+    const listed = unframe((await call({ operation: "list" })).result) as {
+      readonly threads: ReadonlyArray<{ readonly reference: string }>;
+    };
+    // Closed and other-Project threads stay out, as they do in Code.
+    expect(listed.threads.map((row) => row.reference)).toEqual([
+      referenceTo(ids.working),
+      referenceTo(ids.waiting),
+      referenceTo(ids.idle),
+      referenceTo(ids.work),
+    ]);
+    expect((await call({ operation: "read", reference: referenceTo(ids.idle) })).isError).toBe(
+      false,
+    );
+    for (let read = 1; read < MAX_SIBLING_THREAD_READS_PER_TURN; read += 1) {
+      await call({ operation: "read", reference: referenceTo(ids.idle) });
+    }
+    expect(
+      (await call({ operation: "read", reference: referenceTo(ids.idle) })).result,
+    ).toMatchObject({ status: "refused", reason: "rate-limited" });
+  });
+
+  it("never lets a Work turn see a Code thread, nor a Code turn a Work thread", async () => {
+    const work = harness({ mode: "work" });
+    work.threads.set(String(ids.caller), snapshot(ids.caller, { mode: "work" }));
+
+    const listed = unframe((await work.call({ operation: "list" })).result) as {
+      readonly threads: ReadonlyArray<{ readonly reference: string }>;
+    };
+    // Of this mixed Project only its one Work thread is the Work caller's sibling.
+    expect(listed.threads.map((row) => row.reference)).toEqual([referenceTo(ids.work)]);
+    expect(
+      (await work.call({ operation: "read", reference: referenceTo(ids.idle) })).result,
+    ).toEqual({ status: "refused", reason: "unauthorized", message: SIBLING_THREAD_UNREACHABLE });
+
+    const code = harness();
+    expect(
+      (await code.call({ operation: "read", reference: referenceTo(ids.work) })).result,
+    ).toEqual({ status: "refused", reason: "unauthorized", message: SIBLING_THREAD_UNREACHABLE });
+  });
+
+  it("refuses board to a thread with no planner designation and keeps it out of the enum", async () => {
+    const { tools, call } = harness();
+    const schema = tools.definitions[0]?.inputSchema as {
+      readonly properties: { readonly operation: { readonly enum: ReadonlyArray<string> } };
+    };
+
+    expect(schema.properties.operation.enum).not.toContain("board");
+    expect((await call({ operation: "board" })).result).toMatchObject({
+      status: "refused",
+      reason: "policy",
+    });
+  });
+
+  it("answers help with the usage of exactly the operations this turn is offered", async () => {
+    const { tools, call } = harness({ mode: "work" });
+
+    const help = (await call({ operation: "help" })).result as { readonly help: string };
+
+    expect(help.help).toContain("list names");
+    expect(help.help).not.toContain("send takes");
+    expect(help.help).not.toContain("board reads");
+    expect(tools.definitions[0]?.description).toMatch(
+      /^See this Project's other open threads\. Every operation names a thread by the reference list returns, <thread id>@<project id>/,
+    );
+  });
+});
+
+describe("the planner's board in the threads tool", () => {
+  function boardCard(index: number) {
+    return {
+      threadId: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      title: `Card ${String(index)}`,
+      status: "ready",
+      statusReason: "idle",
+      outcomeKind: "opened-pr",
+      deliverySatisfaction: "pending",
+      executing: false,
+      changedFiles: { kind: "none" },
+      linkedPullRequest: { kind: "none" },
+      checks: { state: "unknown" },
+      reviewState: { state: "none" },
+      childAgents: { active: 0 },
+      planProgress: { kind: "none" },
+      followUp: false,
+      lastMeaningfulActivityAt: null,
+    };
+  }
+  function planner(
+    cards: number,
+    designated: { current: boolean } = { current: true },
+  ): CodePlannerToolPort {
+    return {
+      isPlannerThread: () => designated.current,
+      board: async () =>
+        designated.current
+          ? {
+              status: "ok",
+              board: {
+                version: 1,
+                query: { version: 1 },
+                cards: Array.from({ length: cards }, (_unused, index) => boardCard(index)),
+                generatedAt: "2026-10-14T08:00:00.000Z",
+              } as never,
+            }
+          : {
+              status: "refused",
+              reason: "not-the-planner-thread",
+              message: "Only the Project's designated planner thread may read the board.",
+            },
+      propose: async () => {
+        throw new Error("The threads tool never proposes.");
+      },
+    };
+  }
+  const operationsOf = (tools: { readonly definitions: ReadonlyArray<{ inputSchema: unknown }> }) =>
+    (
+      tools.definitions[0]?.inputSchema as {
+        readonly properties: { readonly operation: { readonly enum: ReadonlyArray<string> } };
+      }
+    ).properties.operation.enum;
+
+  it("offers board only to the designated planner, and reads at most 100 cards with truncation stated", async () => {
+    const { tools, call, marks } = harness({ planner: planner(150) });
+
+    expect(operationsOf(tools)).toContain("board");
+    const { result, isError } = await call({ operation: "board" });
+
+    expect(isError).toBe(false);
+    const board = result as { readonly cards: ReadonlyArray<unknown>; readonly truncated?: true };
+    expect(board.cards).toHaveLength(100);
+    expect(board.truncated).toBe(true);
+    // Card titles are text agents wrote, so the planner is marked.
+    expect(marks()).toHaveLength(1);
+    expect(operationsOf(harness({ planner: planner(0, { current: false }) }).tools)).not.toContain(
+      "board",
+    );
+  });
+
+  it("refuses the board once the thread is no longer the planner, mid-turn", async () => {
+    const designated = { current: true };
+    const { call, marks } = harness({ planner: planner(2, designated) });
+    designated.current = false;
+
+    expect((await call({ operation: "board" })).result).toEqual({
+      status: "refused",
+      reason: "not-the-planner-thread",
+      message: "Only the Project's designated planner thread may read the board.",
+    });
+    expect(marks()).toEqual([]);
+  });
+
+  it("follows its own profile entry, so an allowlist that named only the reads gets no board", async () => {
+    const readsOnly = harness({
+      planner: planner(1),
+      toolConstraints: [SIBLING_THREADS_TOOL_NAME],
+    });
+    expect(operationsOf(readsOnly.tools)).not.toContain("board");
+    expect((await readsOnly.call({ operation: "board" })).result).toMatchObject({
+      status: "refused",
+      reason: "policy",
+    });
+
+    const named = harness({ planner: planner(1), toolConstraints: ["octant_threads.board"] });
+    expect(operationsOf(named.tools)).toEqual(["help", "board"]);
+    expect((await named.call({ operation: "board" })).isError).toBe(false);
   });
 });

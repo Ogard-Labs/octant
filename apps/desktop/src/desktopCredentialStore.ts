@@ -3,6 +3,7 @@ import {
   makeWindowsCredentialStore,
   type CredentialPurgeStore,
   type CredentialStore,
+  type SecretServiceNamespace,
 } from "@octant/host-runtime";
 import {
   makeKeychainCredentialPurgeStore,
@@ -130,26 +131,20 @@ export async function resolveDesktopCredentialBackend(options: {
     };
   }
   if (options.platform === "linux") {
+    // Nightly's test host names its own `service` values; Octant's are unchanged.
+    const family = options.serviceFamily ?? "octant";
+    const store = (namespace: SecretServiceNamespace) =>
+      makeSecretServiceCredentialStore({ namespace, family });
     return {
       kind: "secret-service",
-      store: makeSecretServiceCredentialStore(),
-      replicaDeviceKeys: makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
-      replicaStoreCredentials: makeSecretServiceCredentialStore({
-        namespace: "replica-store-credential",
-      }),
-      canvasPublicShareSecrets: makeSecretServiceCredentialStore({
-        namespace: "canvas-public-share-secret",
-      }),
-      mcpServerCredentials: makeSecretServiceCredentialStore({
-        namespace: "mcp-server-credential",
-      }),
-      desktopProviderCredentials: makeSecretServiceCredentialStore({
-        namespace: "desktop-provider-credential",
-      }),
-      pushPlatformCredentials: makeSecretServiceCredentialStore({
-        namespace: "push-platform-credential",
-      }),
-      sshKeys: makeSecretServiceCredentialStore({ namespace: "ssh-key" }),
+      store: store("provider"),
+      replicaDeviceKeys: store("replica-device-key"),
+      replicaStoreCredentials: store("replica-store-credential"),
+      canvasPublicShareSecrets: store("canvas-public-share-secret"),
+      mcpServerCredentials: store("mcp-server-credential"),
+      desktopProviderCredentials: store("desktop-provider-credential"),
+      pushPlatformCredentials: store("push-platform-credential"),
+      sshKeys: store("ssh-key"),
     };
   }
   if (options.platform === "win32") {

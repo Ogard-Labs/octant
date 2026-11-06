@@ -31,3 +31,17 @@ describe("private credential wire boundaries", () => {
     ).toThrow();
   });
 });
+
+it("accepts a reference-only consent and refuses mixed material or extra destinations", () => {
+  const decode = Schema.decodeUnknownSync(CredentialRequestAnswer);
+  const input = {
+    id: "00000000-0000-4000-8000-000000000001",
+    action: "allow-linked",
+    store: "onepassword",
+    reference: "op://Private/Linear/credential",
+  };
+  expect(decode(input)).toEqual(input);
+  expect(() => decode({ ...input, secret: "private-token" })).toThrow();
+  expect(() => decode({ ...input, url: "https://evil.test" })).toThrow();
+  expect(() => decode({ ...input, store: "unknown" })).toThrow();
+});

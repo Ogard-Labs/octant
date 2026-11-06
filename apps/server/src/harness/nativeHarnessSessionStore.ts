@@ -40,7 +40,7 @@ import {
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
-import { addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
+import { validateQuestionnaireAnswer, addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
@@ -558,12 +558,18 @@ export class NativeHarnessSessionStore {
       readonly status: Exclude<NativeHarnessQuestionStatus, "pending">;
       readonly answer?: string;
     },
-  ): NativeHarnessQuestion | "question-not-found" | "already-settled" {
+  ): NativeHarnessQuestion | "question-not-found" | "already-settled" | "invalid-answer" {
     const record = this.#records.get(threadId);
     const index = record?.questions.findIndex((entry) => entry.id === questionId) ?? -1;
     if (record === undefined || index === -1) return "question-not-found";
     const current = record.questions[index]!;
     if (current.status !== "pending") return "already-settled";
+    if (
+      outcome.status === "answered" &&
+      current.questionnaire !== undefined &&
+      validateQuestionnaireAnswer(current.questionnaire, outcome.answer ?? "").status === "invalid"
+    )
+      return "invalid-answer";
     const settledAt = decodeUtcTimestamp(this.#clock());
     const settled = decodeNativeHarnessQuestion({
       ...current,

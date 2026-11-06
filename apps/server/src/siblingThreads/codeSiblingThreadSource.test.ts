@@ -1,7 +1,7 @@
 import {
   decodeCodeThread,
-  decodeCodeThreadId,
   decodeProjectId,
+  decodeSiblingThreadId,
   type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
@@ -198,8 +198,8 @@ describe("Code sibling-thread source", () => {
       [String(archived.id), true],
       [String(snoozed.id), false],
     ]);
-    expect(source.thread(open.id)).toMatchObject({
-      threadId: open.id,
+    expect(source.thread(decodeSiblingThreadId(String(open.id)))).toMatchObject({
+      threadId: String(open.id),
       projectId: projectA,
       mode: "code",
       closed: false,
@@ -214,7 +214,7 @@ describe("Code sibling-thread source", () => {
       windowId,
     );
 
-    expect(source.thread(decodeCodeThreadId("a1000000-0000-4000-8000-000000000042"))).toBe(
+    expect(source.thread(decodeSiblingThreadId("a1000000-0000-4000-8000-000000000042"))).toBe(
       undefined,
     );
   });
@@ -224,7 +224,7 @@ describe("Code sibling-thread source", () => {
     const evidence = evidenceFor({ threads: [target] });
     const source = codeSiblingThreadSource(evidence, windowId);
 
-    await expect(source.readTranscript(target.id)).resolves.toEqual([
+    await expect(source.readTranscript(decodeSiblingThreadId(String(target.id)))).resolves.toEqual([
       { role: "user", text: "Ship it.", occurredAt: created },
     ]);
     expect(evidence.readTranscript).toHaveBeenCalledExactlyOnceWith(windowId, String(target.id));

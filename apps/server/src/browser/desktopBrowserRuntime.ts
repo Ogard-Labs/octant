@@ -25,6 +25,7 @@ import type { WindowId } from "@octant/contracts/shell";
 import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserProfileStorePort,
@@ -303,6 +304,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.diagnosticsWarnings === undefined
             ? {}
             : { diagnosticsWarnings: request.diagnosticsWarnings }),
+          ...(request.auditKind === undefined ? {} : { auditKind: request.auditKind }),
           ...(request.downloads === undefined ? {} : { downloads: request.downloads }),
         },
       },
@@ -423,6 +425,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
       if (refused?.error === "navigation-blocked" && refused.url !== undefined) {
         throw new BrowserNavigationBlockedError(refused.url);
       }
+      if (refused?.error === "recording-unavailable") throw new BrowserRecordingUnavailableError();
     }
     if (!response.ok) throw new Error("Octant desktop Browser broker rejected the request.");
     return (await response.json()) as T;

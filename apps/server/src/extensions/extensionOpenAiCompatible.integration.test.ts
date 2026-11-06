@@ -133,7 +133,7 @@ describe("structured extensions on the Generic OpenAI-compatible provider", () =
         ...(entry.id === instructionCapabilityId
           ? {
               context: {
-                kind: "instructions" as const,
+                kind: "skill-instructions" as const,
                 text: "Use the selected Generic OpenAI-compatible build guidance.",
               },
             }

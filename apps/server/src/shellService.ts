@@ -1,6 +1,7 @@
 import {
   ActorId,
   type CodeThread,
+  type OctantMode,
   AggregateVersion,
   CorrelationId,
   type AppReleaseRing,
@@ -40,6 +41,7 @@ import {
   workspaceWelcomeSurface,
   type WorkspaceContextResolves,
 } from "@octant/domain";
+import { withoutThreadReplyDetails } from "@octant/domain/reply-detail-policy";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
@@ -244,6 +246,34 @@ export class ShellService implements ShellServiceApi {
         events: [this.#pendingEvent("shell.settings-replaced", { settings })],
       });
       return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * Drops the Reply detail level of threads that were erased, so no choice
+   * outlives its thread. Host-owned like the release ring: a purge has no
+   * window to name. Nothing is journaled when none of them had chosen one.
+   */
+  forgetThreadReplyDetails(
+    threads: ReadonlyArray<{ readonly mode: OctantMode; readonly threadId: string }>,
+  ): void {
+    this.#assertReady();
+    try {
+      const stored = this.#persistence.readShellSettings();
+      const current = stored?.settings ?? defaultShellSettings();
+      const kept = withoutThreadReplyDetails(current.threadReplyDetail, threads);
+      if (kept.length === current.threadReplyDetail.length) return;
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+        expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+        events: [
+          this.#pendingEvent("shell.settings-replaced", {
+            settings: { ...current, threadReplyDetail: kept },
+          }),
+        ],
+      });
     } catch (error) {
       throw this.#mapFailure(error);
     }

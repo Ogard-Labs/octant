@@ -161,6 +161,16 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Reply detail in the thread in front
+
+The `reply-detail-cycle` keybinding (Mod+Shift+D by default) and the palette's
+Reply detail commands act on the thread in the active pane, setting that
+thread's own level, and only while that thread is on screen: a page or Settings
+covering the workspace leaves no thread in front. The palette also sets the
+default. The levels, the thread
+menu, and where the levels are kept are owned by
+[DESIGN.md: Transcript](../../DESIGN.md#transcript).
+
 ### Jump to the next waiting thread
 
 The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
@@ -272,6 +282,23 @@ who parked the thread: absent means a person's ordinary snooze, `usage-limit`
 means the host's. The choice is independent of the durable resume opt-in —
 hiding authorizes no provider turn, and a dispatched recovery lifts only the
 snooze the host set, never one the person set.
+
+### Deferring a pending question
+
+Home, Inbox and Review let a person defer an answerable Chat, Work or Code
+question using the existing future-time presets. The condensed row stays in
+the attention list and its count, after active requests, with **Bring back now**
+and a link to the thread. The shell clock restores its answers when the time
+arrives. Thread visibility, the original questionnaire and draft answers do not
+change. Deferring never answers a question, grants approval or resumes a turn.
+
+The local host rechecks window access and the current pending request before
+journaling an opaque request key and wake time. The key binds the exact request,
+choices and authority context; a changed, answered or cancelled request does
+not transfer its deferral to another question. Preferences replay after restart
+and invalidate navigation reads in other windows. Execution approvals, decisions
+and find-only lead/subagent questions cannot be deferred. Find-only questions
+need a stable answer identity before this control can apply to them.
 
 ## Panes and content navigation
 
@@ -725,6 +752,8 @@ page's picture with the thread, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a
 thread with Browser steps also shows a folded _Browser proof_ panel there: the
 agent's steps as a numbered list with each capture under the step that took it.
+An agent's recording sits in the strip and the panel like a screenshot, still,
+with a play mark and its length, and plays when the person opens it.
 The rules are in [Browser captures](browser-captures.md) and
 [Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
@@ -816,6 +845,16 @@ follow-up sends is shown in the transcript under a "Scheduled follow-up" line
 with only its prompt, so a reader can tell it was scheduled and not typed. The
 sidebar row shows no mark for a pending follow-up: no existing row mark fits a
 scheduled turn, and the Environment row is where it is managed.
+
+An agent's request to pause or archive one of its thread's routines waits in
+the same place, labelled "Pause routine · asked by the agent" or "Archive
+routine · asked by the agent" ("Cancel follow-up" for a follow-up). It states
+the routine's name, what the change does, and the agent's reason in its own
+words. Its one action does it as the person; dismissing it leaves the routine
+as it was and the agent is told so. In Automation Center's run
+history, a run whose agent reported a result shows "Agent reported:" with the
+outcome and summary beside the run's own status, in the warning colour for
+Needs attention and Did not succeed; the latest-run line carries the outcome.
 
 ### Subagents
 
@@ -1118,3 +1157,37 @@ kinds, labelling the leftover; it adds no authority of its own.
 - Render changed interactions at the affected window sizes, including keyboard
   navigation and unavailable states. A documentation-only consolidation needs
   consistency and link checks; it is not evidence of fresh rendered QA.
+
+## Inline questionnaires
+
+An agent can ask for related decisions through the app-owned `ask-user` tool
+in Chat, Work, and Code. A questionnaire belongs in its originating thread,
+with one compact card containing up to four questions. It creates no Canvas.
+Each question offers one choice or several choices, optional descriptions,
+and an optional written alternative. Recommendations are labelled and never
+preselected. A person can add a comment alongside their choices.
+
+Choosing an option only edits the draft. **Send answers** submits the complete
+set once; the host validates question and option identities, required answers,
+and selection limits before settling the request. Empty selection is allowed
+only when the question explicitly permits zero choices. A submitted answer
+from another window settles the same request; a stale or duplicate answer
+cannot replace it. Validation and delivery failures keep the draft available.
+
+Submitted questionnaires collapse into an expandable, readable summary of
+the questions, selected labels, written answers, and comment. The journal
+keeps the definition and response so the summary survives reopening. Expired,
+cancelled, and recovered requests cannot resume a dead provider session.
+Answers convey preferences within existing thread authority and never grant
+permissions. Credentials continue through the credential request mechanism.
+
+The tool carries a bounded typed `questionnaire` alongside its existing prompt.
+For example, `{ "prompt": "Choose the exports", "questionnaire": { "questions":
+[{ "id": "formats", "prompt": "Which formats?", "selection": "multiple",
+"options": [{ "id": "pdf", "label": "PDF" }, { "id": "md", "label": "Markdown" }] }] } }`.
+The existing answer channel carries a versioned JSON response with question
+IDs, selected option IDs, optional written alternatives, and a comment. The
+tool returns the decoded response to the model. This keeps the existing
+authenticated, thread-scoped answer routes and one-use request identity.
+Provider-native question formats keep their existing adapter contracts; the
+questionnaire capability uses the provider-neutral app tool boundary.

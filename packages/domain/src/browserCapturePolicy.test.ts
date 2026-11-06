@@ -5,6 +5,7 @@ import {
   browserCaptureRetention,
   browserCapturePageOrigin,
   browserCaptureTaker,
+  browserRetainedCaptures,
 } from "./browserCapturePolicy";
 
 describe("browserCaptureTaker", () => {
@@ -33,6 +34,13 @@ describe("browserCaptureTaker", () => {
   it("keeps nothing when the caller does not say who asked", () => {
     expect(browserCaptureTaker("screenshot", undefined)).toBeUndefined();
   });
+
+  it("keeps a recording only when the agent's own call ends one", () => {
+    expect(browserCaptureTaker("record-stop", "agent")).toBe("agent");
+    expect(browserCaptureTaker("record-stop", "person")).toBeUndefined();
+    expect(browserCaptureTaker("record-stop", undefined)).toBeUndefined();
+    expect(browserCaptureTaker("record-start", "agent")).toBeUndefined();
+  });
 });
 
 describe("browserCapturePageOrigin", () => {
@@ -60,6 +68,56 @@ describe("browserCaptureRetention", () => {
 
   it("keeps the newest few when the allowance is smaller", () => {
     expect(browserCaptureRetention(10, 3)).toEqual({ firstRetainedVersion: 8 });
+  });
+});
+
+describe("browserRetainedCaptures", () => {
+  const shot = (index: number): BrowserCapture =>
+    decodeBrowserCapture({
+      captureId: `b1000000-0000-4000-8000-0000000000${String(index).padStart(2, "0")}`,
+      threadId: "b0000000-0000-4000-8000-000000000002",
+      origin: "https://example.com",
+      url: "https://example.com/",
+      hash: "a".repeat(64),
+      size: 10,
+      mime: "image/png",
+      capturedAt: "2026-10-12T09:00:00.000Z",
+    });
+  const recording = (index: number): BrowserCapture =>
+    decodeBrowserCapture({ ...shot(index), recording: { frames: 2, durationMs: 500 } });
+  const ids = (captures: ReadonlyArray<BrowserCapture>) =>
+    captures.map((capture) => capture.captureId.slice(-2));
+
+  it("keeps the newest eight recordings and drops older ones, newest first", () => {
+    // Newest first, as the journal window is listed: recordings 10 down to 1.
+    const window = Array.from({ length: 10 }, (_, index) => recording(10 - index));
+    expect(ids(browserRetainedCaptures(window))).toEqual([
+      "10",
+      "09",
+      "08",
+      "07",
+      "06",
+      "05",
+      "04",
+      "03",
+    ]);
+  });
+
+  it("never drops a screenshot to make room for a recording", () => {
+    const window = [
+      recording(20),
+      shot(19),
+      ...Array.from({ length: 8 }, (_, index) => recording(18 - index)),
+      shot(10),
+    ];
+    const retained = browserRetainedCaptures(window);
+    expect(ids(retained)).toEqual(["20", "19", "18", "17", "16", "15", "14", "13", "12", "10"]);
+    expect(retained.filter((capture) => capture.recording === undefined)).toHaveLength(2);
+  });
+
+  it("leaves a window of screenshots as it is", () => {
+    const window = Array.from({ length: 32 }, (_, index) => shot(32 - index));
+    expect(browserRetainedCaptures(window)).toEqual(window);
   });
 });
 

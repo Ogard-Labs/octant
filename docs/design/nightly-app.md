@@ -68,10 +68,13 @@ Nightly publication still needs.
    the embedded page) included. A companion window stays rejected. Planned.
 3. **Linux Nightly stays in scope.** It needs its own Linux client trust design,
    because Linux has no code-signature check or audit-token peer identity to
-   admit a Nightly main by. Designed, not built; the design comes first.
-4. **The signed feed names its app.** The signed update feed will name the app
-   it is for (Octant or Octant Nightly), and each app refuses a feed for the
-   other with a clear message, beside the existing ring check. Planned.
+   admit a Nightly main by. Designed and built; see
+   [Linux client trust](#linux-client-trust). A packaged pair on a real Linux
+   desktop has not been exercised.
+4. **The signed feed names its app.** The signed update feed names the app it
+   is for (Octant or Octant Nightly), and each app refuses a feed for the
+   other with a clear message, beside the existing ring check. Built; see
+   [Which build is which](#which-build-is-which).
 
 ## Two apps, one set of data
 
@@ -168,17 +171,25 @@ never Octant's:
   `{"data":"test-data"}` selects test data; a missing, oversized, linked or
   malformed file means Octant's data. The main process reads it once at launch
   and no renderer request changes the running role.
-- Separate test data is macOS only for now. Linux Secret Service items carry no
-  store scope, so a Linux test host would share Octant's credentials; Nightly
-  does not offer the choice there, and a stored choice refuses with a message
-  instead of starting a host.
+- On Linux, Secret Service items carry no store scope, so the test host names
+  its own `service` values instead: `octant-nightly-test-data.<namespace>`
+  (`provider`, `replica-device-key`, `ssh-key` and the rest) in place of
+  Octant's. Every lookup, store and clear names `service`, so an item of one
+  family never matches the other's. The Linux test folder is
+  `$XDG_DATA_HOME/octant-nightly/test-data` (by default
+  `~/.local/share/octant-nightly/test-data`), its service log
+  `$XDG_STATE_HOME/octant-nightly/logs/service.log`, and its port `13774`.
+  Remove test data also clears every test-data Secret Service item; when the
+  keyring refuses, the folder stays and Remove reports the failure, so it can
+  be retried.
 - Nightly refuses to start its test host when its folder is, or lies inside,
   Octant's data folder, or contains it, unless `OCTANT_DATA_DIR` set the folder
   explicitly. A Nightly process that reaches the host-owning desktop without a
   test-host role (its choice changed or became unreadable during launch)
   refuses and quits; it never falls back to Octant's folder or port `13773`.
-- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`,
-  passed to its host as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
+- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`
+  (on Linux, under `$XDG_STATE_HOME/octant-nightly/logs`), passed to its host
+  as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
 - Its default folder is `~/Octant Nightly` rather than `~/Octant`, passed as
   `OCTANT_DEFAULT_FOLDER`, so Work and Code without a Project, the artifact
   mirror and managed repository clones never touch Octant's files. Its Keychain
@@ -843,7 +854,8 @@ evidence; the preflight that replaces the early gate checks them:
 
 - [x] Every desktop channel classified; Octant-only administration hidden in
       the Nightly client.
-- [ ] A synthetic Nightly client smoke that runs in CI, never packaged.
+- [x] A synthetic Nightly client smoke that runs in CI, never packaged (see
+      [synthetic client smoke](#synthetic-client-smoke)).
 - [x] Nightly's local native surfaces: app menu without developer tools,
       external links, notifications and badge, `octant-nightly://` links,
       reset bounds, sidebar material, window capture and the Open in list.
@@ -862,17 +874,64 @@ evidence; the preflight that replaces the early gate checks them:
 - [x] Embedded Browser accessibility (decision 2): a bounded mirror of the
       page's accessibility tree that VoiceOver reads and operates (see
       [accessibility](#accessibility)).
-- [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
-      an unsigned packaged Nightly smoke.
+- [x] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
+      an unsigned packaged Nightly smoke, run locally rather than in CI. The
+      signed pair's own run stays with the maintainer checks below.
 - [ ] The full `octant-nightly` command.
-- [ ] Roll-forward rollback, a published host feature list and the app named
+- [x] Roll-forward rollback, a published host feature list and the app named
       in the signed feed (decision 4).
-- [ ] Linux client trust, designed and built (decision 3).
+- [x] Linux client trust, designed and built (decision 3).
 - [ ] The usable-client preflight in place of the early gate, with no secrets,
       checking compatibility against the published Octant features.
 - [ ] Maintainer checks: a signed pair, a signed install from Settings,
       real-account sign-ins, physical IME and VoiceOver checks, and approval of
       the first scheduled publication.
+
+### Synthetic client smoke
+
+`scripts/smoke-nightly-client.ts` runs on every pull request in the macOS
+desktop CI job and needs no secret. It runs the ordinary Nightly client entry,
+`runNightlyClient` with the Nightly identity, in the Electron the desktop app
+pins, against a development host on a throwaway 0700 data folder and a free
+port. A synthetic Stable process owns that host and its bridge secret, the real
+Browser surface host and runtime broker, an in-memory credential broker, and
+Stable's real lease owner and client lifetime. Only the signed native window
+binding is stood in for: one private local socket per Nightly process carries
+register, renew and revoke, and its close is the peer's exit. The host's
+admission, leases, native-main token routes and Browser presentation are the
+shipped code.
+
+It checks, each timed: the renderer loads with the Nightly label; an API key
+added through Nightly main reaches a local OpenAI-compatible endpoint during a
+Chat turn; a Project folder pick and an API key list through native-main
+admission, and a real Code approval on a Code thread over a throwaway Git
+repository: the host prepares the challenge for Nightly main's native-main
+token (never a bridge secret), the owner-only view shows its prompt, and
+cancelling it leaves a challenge the host then refuses to confirm; an embedded Browser page that
+draws frames, receives typed text and answers a select list chosen from
+Nightly's native menu; lease loss that destroys the renderer before a fresh
+registration; a host restart after which Nightly reconnects on the same data;
+two hosts on separate folders and ports that each refuse the other's thread;
+and quit-one (the host stays) and quit-last (Stable's UI quit retains the host
+until the last Nightly leaves, then stops it).
+
+The harness answers what no unattended run can: the folder picker returns the
+smoke's folder, a native menu chooses the named item instead of running its
+own event loop, and the harness's windows count as focused so the desktop is
+never taken from whoever is using it. It does not establish the signed native
+binding's audit-token admission, a real Keychain, the signed launch of a closed
+Stable, or physical input and VoiceOver; those stay with the maintainer
+checks. Packaging refuses any payload with a harness entry or its marker.
+
+`scripts/smoke-packaged-nightly-unsigned.ts` is run locally: it packages
+Nightly with a dated preview version and no signing identity, checks the
+bundle's identity and version, that an ordinary launch refuses as a
+development build, and that the packaged bundle starts its own test host on a
+throwaway home's test data, then deletes what it built and unregisters the
+staged copy from Launch Services. It reads the refusal through System Events,
+so without Accessibility access it reports that check unverified (on
+2026-11-06 the alert was read with another accessibility client instead). It
+is not part of CI.
 
 ## Fixed packaged entry
 
@@ -893,7 +952,23 @@ makes it its own test host, because only the host-owning desktop starts that chi
 The host-only role cannot be combined with a Code link or another role. It
 refuses unknown positional entries, loader options and
 Chromium remote-debugging options before importing host or client-registration
-code. Refusal in JavaScript alone does not establish that Chromium exposed no
+code.
+
+Packaged Linux Octant and Nightly apply the same check, and beside any role
+also accept a closed list of display flags a desktop entry may add, each at
+most once and with its value checked (maintainer decision, 2026-11-06):
+`--ozone-platform=` and `--ozone-platform-hint=` (`wayland`, `x11`, `auto`),
+`--enable-features=` and `--disable-features=` naming only
+`UseOzonePlatform`, `WaylandWindowDecorations`, `WaylandTextInputV3`,
+`WaylandFractionalScaleV1` and `VaapiVideoDecoder`, `--enable-wayland-ime`,
+`--wayland-text-input-version=` (`1`, `3`), `--disable-gpu`,
+`--disable-gpu-compositing` and `--force-device-scale-factor=` (above 0, at
+most 4). The list lives in one place in the desktop launch module. Sandbox
+switches (`--no-sandbox`, `--disable-seccomp-filter-sandbox`,
+`--disable-setuid-sandbox`), inspector and remote-debugging options,
+`--js-flags`, loader and script options and every unknown flag still refuse.
+`--use-gl` is not listed: current Chromium chooses GL through ANGLE, and its
+values were not confirmed for the pinned Electron. Refusal in JavaScript alone does not establish that Chromium exposed no
 debugging endpoint during startup; native startup checks cover that separately.
 
 Nightly's bundled `octant mcp` and help entry remains a fixed role, without
@@ -1110,6 +1185,94 @@ process exit and full-payload renderer/native acceptance still need their
 evidence. The retained-client policy has separate focused and synthetic evidence;
 full signed lifecycle acceptance remains unrun. The functional publication gate stays in force.
 
+## Linux client trust
+
+Linux has no code signature or kernel audit token to admit a Nightly main by.
+Packaged Linux Octant and Nightly instead admit each other by what the kernel
+attests about the process on the other end of a path socket in the person's
+private runtime folder. The status and window protocols, their sizes and
+deadlines, the 15-second lease, the native-main token and its admission are
+the same as on macOS; only the transport and the peer check differ.
+
+- **The endpoint.** Packaged Octant listens on a `SOCK_SEQPACKET` path socket,
+  `<identity>.windows.v1.sock`, mode `0600`, beside its control socket in the
+  per-user runtime folder (`/tmp/octant-<uid>`, which the host runtime keeps
+  `0700` and owned by the person). It is never an abstract socket and never
+  TCP. One socket carries both status and window requests as fixed-size
+  messages. Octant takes a lock beside the socket before it listens and
+  unlinks a socket left by an exited Octant only while holding that lock; a
+  file that is not a socket refuses.
+- **The peer check, both directions.** On the first message of a connection
+  each side reads `SO_PEERCRED` and requires the person's own user id. It
+  holds a pidfd for that process: `SO_PEERPIDFD` where the kernel has it
+  (Linux 6.5), otherwise `pidfd_open` for the credential's pid (Linux 5.3 or
+  later), and checks through `/proc/self/fdinfo` that the pidfd names that
+  pid. Through `/proc/<pid>` it requires the same mount, user and PID
+  namespaces and the same root as its own, and reads the process start time.
+  Those reads count only while the pidfd shows the process alive, so a reused
+  pid cannot answer for an exited one. A peer in a container, Flatpak, snap
+  or Bubblewrap sandbox, or under `chroot`, is refused.
+- **Every message.** Both sockets set `SO_PASSCRED`, and every message must
+  carry the kernel's credential naming the validated pid. A descriptor handed
+  to another process therefore cannot speak for its creator, and a message
+  that itself carries a descriptor (`SCM_RIGHTS`) closes the connection.
+- **Leases.** A peer is keyed by a SHA-256 of the boot id, its pid and its
+  kernel start time: 64 lowercase hex characters, the same shape as the macOS
+  audit-token key that the lease owner and host require. The pidfd
+  becoming readable (the process exited) or EOF on the connection that carried
+  its window requests revokes that peer's leases, as process exit does on
+  macOS. Nightly keeps that one connection open for its window operations.
+- **What grants nothing.** The executable path, a hash of it, `$APPIMAGE` and
+  the command line are never trust inputs. The binding is packaged-only: a
+  development build never loads it and reports the window protocol
+  unavailable (`native-unavailable`).
+- **Launch arguments.** Packaged Linux Octant applies the same fixed
+  launch-argument check as packaged macOS (ordinary startup, one Code link,
+  the fixed terminal, Canvas and host-only roles) before it imports any host
+  code, so it accepts `--octant-host-only` and refuses anything else,
+  `--no-sandbox` included, apart from the closed Linux display flags in
+  [Fixed packaged entry](#fixed-packaged-entry). Chromium can rewrite a Linux process's command
+  line, so the native binding does not re-read it; the JavaScript entry check
+  is the gate.
+- **The renderer sandbox.** Nightly registers no window, and never starts
+  Octant's host, while its renderers would run without Chromium's sandbox:
+  `--no-sandbox`, `--disable-setuid-sandbox` or `ELECTRON_DISABLE_SANDBOX`
+  refuse with a message naming them.
+
+### Starting a closed Octant on Linux
+
+Each packaged Octant launch from an AppImage writes `<identity>.launcher.json`,
+mode `0600`, in the same runtime folder: the AppImage path (`$APPIMAGE`), its
+device and its inode. When status says Octant is not running, Nightly reads
+that record, refuses unless it is a regular private file the person owns, and
+opens the named image without following a link. The image must still be a
+regular file the person owns, not writable by group or others, with the
+recorded device and inode: a moved, replaced, loosened or linked image
+refuses. Nightly then starts it by descriptor (`execveat`) with only
+`--octant-host-only` and a minimal environment: the session's home, user,
+locale, display, D-Bus and XDG variables, `OCTANT_DATA_DIR` and
+`APPIMAGE_EXTRACT_AND_RUN`; never loader, Electron, Node or AppImage
+variables. With no record Nightly says "Open Octant, then try again." As on
+macOS, a launch receipt grants nothing: fresh authenticated status still
+precedes window registration.
+
+### The accepted limit
+
+Any code running unconfined as the same person, in the same namespaces, can
+pass this check, just as it can already read Octant's administrative bridge
+secret from the data folder. Linux client trust therefore keeps confined and
+other-user code out; it does not tell an Octant main from other same-user
+code. Maintainers accepted this limit on 2026-11-06. Not done now: a Linux
+security-module label check, and moving the bridge secret into the runtime
+folder (a separate change).
+
+Evidence: the policy, real-socket and launcher tests run on Ubuntu 24.04 in
+CI (same user admitted under both pidfd paths; a Bubblewrap
+`--unshare-all` peer, another user and a handed-over descriptor refused;
+pidfd exit and EOF revoke; stale-socket and launcher-record tampering), and
+a real keyring test shows test-data and Octant items never cross. A packaged
+AppImage pair on a real Linux desktop has not been exercised.
+
 ## Identity
 
 The apps differ only in what macOS and Linux need to keep two apps apart:
@@ -1152,7 +1315,9 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
   "Install Octant Nightly" downloads the newest Nightly (`preview` ring) build
   and places it beside Octant after three checks:
   - The feed signature, against the preview ring's trust set (the preview key
-    and the stable key). This installer is the only part of Octant that reads
+    and the stable key), and a signed release that names Octant Nightly as its
+    app; an Octant build on the preview ring refuses as the wrong app. This
+    installer is the only part of Octant that reads
     a `preview` feed; Octant's own updater checks only `stable` or
     `candidate`.
   - The artifact hash inside that signed feed.
@@ -1246,12 +1411,67 @@ Synthetic updater/feed tests establish ordering and preference separation, not
 a signed installed update, OS replacement, rollback or publication. Those
 remain separate packaged acceptance.
 
+**Rollback is a roll-forward.** Every updater accepts only a strictly newer
+version, so a bad Nightly cannot be withdrawn by republishing an older one:
+installs that took it would call the older one not newer and stay. A
+maintainer instead dispatches `Release (preview)` from `main` with
+`rollback_ref` set to a known-good Nightly tag. The run builds that tag as
+Octant Nightly on `preview` under a new version made from the dispatching
+workflow's declared version, today's date and the run number, so it is newer
+than every earlier Nightly, and signs and publishes it with the workflow's
+current scripts. The tag must already read the app-named Nightly feed; an older
+one would decode it as malformed and never update again, so the run refuses it.
+The run passes the same publication gate as a scheduled one.
+
+Building runs the source's own code (install scripts, build, packaging) in the
+job that holds the Developer ID and notary credentials, so the rollback source
+must be code that was reviewed and shipped: a published `v*-preview.*` release
+tag whose commit is on `main`. Scheduled Nightly tags are built from `main`;
+candidate tags are refused because a candidate may be built from any ref. A
+branch or bare commit is refused before anything is checked out. The feed key
+is never in that job: a separate `feed` job checks out the workflow's own
+commit, downloads the uploaded archive, hashes it into the signature and
+publishes, without running any of the built source's code.
+
+The code rolls back; test data does not. A Nightly running its own host on
+separate test data may have migrated that data, and the host of the older
+build it is rolled forward to refuses to open data a newer schema wrote, as
+every host refuses a downgrade. The way out is **Remove test data** in
+Nightly's Settings › Updates, which moves it to the Trash so the next start
+begins clean.
+Octant's own data is never migrated by Nightly, so a rollback never touches
+it.
+
+**Octant publishes what its host offers Nightly.** Each Octant release, stable
+and candidate, carries `octant-host-features.json` beside its archives:
+
+```json
+{
+  "schemaVersion": 1,
+  "octantVersion": "0.1.0-candidate.20261106.81",
+  "nativeClientProtocol": 1,
+  "hostFeatures": ["project-root-receipts", "…"]
+}
+```
+
+`scripts/write-host-features.ts` writes it from the contracts the host
+advertises from (`NIGHTLY_NATIVE_CLIENT_PROTOCOL`, `NIGHTLY_HOST_FEATURES`), and
+decodes it with `OctantHostFeaturesDocument`. The Nightly preflight compares a
+Nightly build's needs with the published Octant's document before publishing.
+The document reads whatever protocol a newer Octant names, and
+`readPublishedHostFeatures` reports a different protocol as a mismatch rather
+than an unreadable file. It is advisory: the asset is unsigned and rides on a
+release any repository writer can change, so it must be signed or hash-pinned
+before it is ever used as a release gate outside CI.
+
 ## Which build is which
 
 - A build's flavor follows its ring: a `stable` or `candidate` release
   packages as Octant; a `preview` release packages as Octant Nightly. The
   release workflows pass the flavor with the version: the scheduled run builds
-  Nightly on `preview`, and a dispatched run builds Octant on `candidate`.
+  Nightly on `preview`, a dispatched run builds Octant on `candidate`, and a
+  dispatched run with `rollback_ref` rebuilds a known-good Nightly on
+  `preview` ([rollback](#nightlys-own-updates)).
   Packaging refuses a stable or candidate version under the Nightly identity,
   and a preview version under Octant's.
 - A local `bun run package:desktop` builds Octant unless
@@ -1261,12 +1481,36 @@ remain separate packaged acceptance.
   `candidate` and `preview` trust the preview key and the stable key. Octant
   on Preview therefore accepts a preview-key signature only for a release
   signed for `candidate`, never for `stable`. An update for one app can never
-  install the other: the signed ring
-  must equal a ring the app follows, and on macOS the platform updater's
-  code-signature check also requires the running app's bundle id. An update
-  check or download that finishes after its ring was changed or refused cannot
-  restore the older offer, failure or native download result.
-- Nothing has shipped on any ring, so no install needs moving between apps.
+  install the other: the signed release names its app (`product`: `octant` or
+  `octant-nightly`, set by `scripts/sign-update-feed.ts` from the build's
+  flavor, which must own the ring), and an app refuses the other's release as
+  the wrong app ("This update is for Octant Nightly, not Octant."). The signed
+  ring must also equal a ring the app follows, and on macOS the platform
+  updater's code-signature check also requires the running app's bundle id. An
+  update check or download that finishes after its ring was changed or refused
+  cannot restore the older offer, failure or native download result.
+- The field is required from its first release: every signer emits it, and a
+  feed without it is malformed. Builds made before it decode a feed strictly
+  and call a document carrying it malformed, so current feeds live at new
+  names: `candidate/<platform>-<arch>.octant.json` and
+  `preview/<platform>-<arch>.octant-nightly.json` (`stable` keeps its name; it
+  has published nothing).
+- Octant builds were published on `preview` up to `0.1.0-preview.20261104.71`,
+  before Nightly took the ring. Those installs read
+  `preview/<platform>-<arch>.preview-key.json` (or the bare `.json` before the
+  preview key), and cannot read the app name. On macOS the platform updater's
+  bundle-id check would refuse Nightly, but a Linux AppImage replacement has
+  no such check. So nothing writes those names again: they keep the last
+  Octant preview build, those installs see no update, and they move on by
+  choosing Preview in **Settings › Updates** (the `candidate` ring). A
+  product-bearing document placed there by mistake would still be refused as
+  malformed. Candidate installs made before the field read
+  `candidate/<platform>-<arch>.preview-key.json`; each candidate run writes an
+  old-shape document there (no `product`, signed over the old encoding)
+  offering the same build, which then reads the new name. That is safe because
+  `candidate` is Octant's alone. The stable-signed bridge at
+  `candidate/<platform>-<arch>.json` keeps the old shape and accepts only
+  candidate tags.
 - **Release order.** A person's first install is Octant, so it has a host.
   Octant on Preview may publish before the first stable release. Octant
   Nightly is published only once an Octant build (Stable or Preview) exists
@@ -1322,6 +1566,9 @@ remain separate packaged acceptance.
 - With separate test data, Nightly's host runs beside Octant's, each on its own
   folder and port; Octant's data, Keychain items and host are untouched, and
   switching back to Octant's data after a relaunch reconnects as a client.
+- The [synthetic client smoke](#synthetic-client-smoke) passes on every pull
+  request, standing in only for the signed native binding; the signed pair's
+  own quit-one, quit-last and reconnect run is a maintainer check.
 
 ## Rationale: whose host owns the data
 
