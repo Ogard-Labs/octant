@@ -1,3 +1,4 @@
+import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
 import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
 import {
@@ -755,6 +756,12 @@ export interface CodeServiceOptions {
     readonly modelId: ProviderModelId;
   }) => boolean;
   readonly workingDirectories: {
+    readonly validateChoice?: (
+      windowId: WindowId,
+      projectId: ProjectId,
+      folderId: CodeThread["workingFolderId"],
+      directory: ThreadWorkingDirectory | undefined,
+    ) => Promise<boolean>;
     readonly resolve: (
       authenticatedWindowId: WindowId,
       thread: CodeThread,
@@ -1406,6 +1413,19 @@ export class CodeService {
           throw this.#failure("conflict", "Code thread already exists.");
         }
         this.#assertThreadIdFree(command.threadId);
+        if (
+          command.workingFolderId !== undefined &&
+          (await this.#workingDirectories.validateChoice?.(
+            authenticatedWindowId,
+            command.projectId,
+            command.workingFolderId,
+            command.workingDirectory,
+          )) !== true
+        )
+          throw this.#failure(
+            "invalid",
+            "The selected working folder is unavailable. Choose a current Project folder.",
+          );
         const inheritedMark =
           this.#requireForkOrigin(command.projectId, command.threadId, command.forkedFrom) ??
           executionContext?.inheritedMark;
@@ -1487,6 +1507,12 @@ export class CodeService {
             bindingRevisionId: command.bindingRevisionId,
             repositoryId: preparation.repositoryId,
             checkoutId: preparation.checkoutId,
+            ...(command.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: command.workingFolderId }),
+            ...(command.workingDirectory === undefined
+              ? {}
+              : { workingDirectory: command.workingDirectory }),
             title: command.title,
             lifecycle: "active",
             providerInstanceId: command.providerInstanceId,
@@ -1873,6 +1899,16 @@ export class CodeService {
             "This provider or model is not allowed by this Code Project's provider policy.",
           );
         }
+        if (
+          (thread.workingFolderId !== undefined || thread.workingDirectory !== undefined) &&
+          (await this.#workingDirectories.resolve(
+            authenticatedWindowId,
+            thread,
+            checkout,
+            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          )) === undefined
+        )
+          throw this.#failure("invalid", "The selected working folder is unavailable.");
         executionContext?.onCreationBoundary?.();
         this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
@@ -2033,6 +2069,14 @@ export class CodeService {
         };
       }
       if (command.kind === "change-code-thread-working-directory") {
+        if (
+          command.workingFolderId !== undefined &&
+          command.workingFolderId !== current.workingFolderId
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose a different approved working folder in a new task; this conversation keeps its original provider session.",
+          );
         const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
         if (
           checkout === undefined ||
@@ -2045,7 +2089,12 @@ export class CodeService {
         try {
           resolved = await this.#workingDirectories.resolve(
             authenticatedWindowId,
-            current,
+            {
+              ...current,
+              ...(command.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: command.workingFolderId }),
+            },
             checkout,
             command.workingDirectory,
           );
@@ -2294,6 +2343,9 @@ export class CodeService {
                                   }
                                 : {
                                     ...current,
+                                    ...(command.workingFolderId === undefined
+                                      ? {}
+                                      : { workingFolderId: command.workingFolderId }),
                                     workingDirectory: command.workingDirectory,
                                     version: command.expectedVersion + 1,
                                     updatedAt,

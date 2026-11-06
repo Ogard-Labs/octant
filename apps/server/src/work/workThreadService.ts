@@ -910,6 +910,14 @@ export class WorkThreadService {
           command.modelOptionValues,
         );
       } else if (command.kind === "change-work-thread-working-directory") {
+        if (
+          command.workingFolderId !== undefined &&
+          command.workingFolderId !== current.workingFolderId
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose a different approved working folder in a new task; this conversation keeps its original provider session.",
+          );
         if (project === undefined)
           throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
         try {

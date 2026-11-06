@@ -219,6 +219,7 @@ export interface CodeComposerSuggestion {
 }
 
 export interface CodeComposerSubmitInput {
+  readonly workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice;
   readonly modelOptionValues?: ProviderModelOptionValues;
   readonly computerUseSelection?: ExtensionSelection;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;

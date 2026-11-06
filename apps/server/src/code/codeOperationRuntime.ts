@@ -2425,6 +2425,7 @@ interface ActiveTurn {
   readonly operationId: CodeOperationId;
   readonly sessionId: string;
   readonly requestedSessionId: string;
+  readonly providerRoot: string;
   readonly checkoutRoot: string;
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
@@ -3107,10 +3108,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ? previous.sessionId
           : input.sessionId,
       requestedSessionId: input.sessionId,
+      providerRoot: input.providerRoot ?? input.checkoutRoot,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
-      extraFolders: this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? [],
+      extraFolders: [
+        ...new Set([
+          ...(this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? []),
+          ...(input.providerRoot !== undefined && input.providerRoot !== input.checkoutRoot
+            ? [input.checkoutRoot]
+            : []),
+        ]),
+      ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
       driver,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
@@ -4496,7 +4505,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           windowId: active.windowId,
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
-          folders: [active.checkoutRoot, ...active.extraFolders],
+          folders: [active.providerRoot, ...active.extraFolders],
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
         }),
         this.#options.sideTasks?.({
@@ -4508,7 +4517,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
-          checkoutRoot: active.checkoutRoot,
+          checkoutRoot: active.providerRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
@@ -4523,7 +4532,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           readExecutionPolicy: () =>
             this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
             active.thread.executionPolicy,
-          checkoutRoot: active.checkoutRoot,
+          checkoutRoot: active.providerRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           uuid: this.#options.uuid,
           pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
@@ -4745,6 +4754,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
             }),
           checkoutRoot: active.checkoutRoot,
+          providerRoot: active.providerRoot,
           extraFolders: active.extraFolders,
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
@@ -4801,7 +4811,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           provider: {
             acquire: (acquireInput) => {
               if (
-                acquireInput.projectRoot !== active.checkoutRoot ||
+                acquireInput.projectRoot !== active.providerRoot ||
                 JSON.stringify(acquireInput.extraFolders ?? []) !==
                   JSON.stringify(active.extraFolders) ||
                 acquireInput.permissionPersistence !== active.thread.permissionPersistence
@@ -5180,6 +5190,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         accessCurrent(active.windowId, active.thread.projectId) &&
         root?.rootCurrent?.() !== false &&
         root?.checkoutRoot === active.checkoutRoot &&
+        (active.thread.workingFolderId === undefined ||
+          root.workingDirectory === active.providerRoot) &&
         (active.rootIdentity === undefined ||
           (root.rootIdentity?.device === active.rootIdentity.device &&
             root.rootIdentity.inode === active.rootIdentity.inode)) &&

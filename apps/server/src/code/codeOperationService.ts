@@ -970,6 +970,7 @@ export interface CodeOperationTurnPort {
      */
     readonly operationId: CodeOperationId;
     readonly sessionId: string;
+    readonly providerRoot?: string;
     readonly checkoutRoot: string;
     readonly rootIdentity?: { readonly device: string; readonly inode: string };
     readonly prompt: string;
@@ -1969,6 +1970,7 @@ export class CodeOperationService {
         () => !held.cancelled && admissionCurrent?.() !== false,
         root.rootIdentity,
         routineRun,
+        thread.workingFolderId === undefined ? undefined : root.workingDirectory,
       );
       // Stopped before the runtime took it on: whatever the preparation then
       // answered (the admission refusal, or a failure of its own), the start
@@ -4057,6 +4059,7 @@ export class CodeOperationService {
           admissionCurrent,
           root.rootIdentity,
           routineRun,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
         );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
@@ -5508,6 +5511,7 @@ export class CodeOperationService {
     admissionCurrent?: () => boolean,
     rootIdentity?: { readonly device: string; readonly inode: string },
     routineRun?: AutomationRunReference,
+    providerRoot?: string,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -5701,6 +5705,7 @@ export class CodeOperationService {
       thread,
       operationId: command.operationId,
       sessionId: command.sessionId,
+      ...(providerRoot === undefined ? {} : { providerRoot }),
       checkoutRoot,
       ...(rootIdentity === undefined ? {} : { rootIdentity }),
       prompt,

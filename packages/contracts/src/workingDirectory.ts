@@ -43,3 +43,9 @@ export const ApprovedWorkingFolders = Schema.Array(ApprovedWorkingFolder).pipe(
   Schema.minItems(1),
   Schema.maxItems(17),
 );
+
+export const ThreadWorkingFolderChoice = Schema.Struct({
+  workingFolderId: ProjectWorkingFolderId,
+  workingDirectory: ThreadWorkingDirectory,
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type ThreadWorkingFolderChoice = typeof ThreadWorkingFolderChoice.Type;
