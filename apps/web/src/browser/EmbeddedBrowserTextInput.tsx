@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type {
   HumanBrowserComposition,
   HumanBrowserEditor,
@@ -78,7 +78,10 @@ export function EmbeddedBrowserTextInput(props: {
     const element = input.current;
     if (clear && element !== null) element.replaceChildren();
   };
-  useEffect(() => {
+  // Focus moves in the same commit that hides or disables the previous input.
+  // A passive effect runs too late: Chromium has already blurred the hidden
+  // input to the body, and the Browser group reads that as leaving the page.
+  useLayoutEffect(() => {
     retire();
     const element = isSecure ? secure.current : input.current,
       other = isSecure ? input.current : secure.current,
@@ -98,7 +101,7 @@ export function EmbeddedBrowserTextInput(props: {
     }
     return () => retire();
   }, [props.editor?.id, isSecure]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = isSecure ? secure.current : input.current,
       group = props.group.current;
     if (
@@ -150,6 +153,7 @@ export function EmbeddedBrowserTextInput(props: {
   };
   return (
     <>
+      {/* ui-boundary-exception: native-platform-control */}
       <input
         ref={secure}
         type="password"
