@@ -1,3 +1,8 @@
+import {
+  ConversationInputReceipt,
+  ConversationInputPolicy,
+  ConversationInputReference,
+} from "./conversationInputs";
 import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
@@ -280,6 +285,7 @@ export const ChatBranchConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type ChatBranchConversationHandoff = typeof ChatBranchConversationHandoff.Type;
 
@@ -302,6 +308,7 @@ export const ChatAttempt = Schema.Struct({
   providerSessionId: ProviderSessionId,
   modelId: ProviderModelId,
   contextManifestId: ContextManifestId,
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   sideChatSourceReceipt: Schema.optional(SideChatSourceReceipt),
   outcome: ChatAttemptOutcome,
   responseRefs: Schema.Array(ChatContentReference),
@@ -393,6 +400,9 @@ export const ChatTurn = Schema.Struct({
   userMessageRef: ChatContentReference,
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   attachmentIds: Schema.Array(ChatAttachmentId),
+  originalInputs: Schema.optional(
+    Schema.Array(ConversationInputReference).pipe(Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+  ),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   attempts: Schema.Array(ChatAttempt),
   /**
@@ -639,6 +649,7 @@ export const SendChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("send-chat-turn"),
   /** Explicit consent to a fresh native session with a bounded conversation handoff. */
   toolCatalogHandoff: Schema.optional(Schema.Boolean),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   prompt: PromptText,
   /** Optional for older clients; new clients preserve it across retry after an unknown outcome. */
@@ -705,6 +716,7 @@ export const BranchChatThreadCommand = Schema.Struct({
 
 export const RetryChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("retry-chat-turn"),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
@@ -712,6 +724,7 @@ export const RetryChatTurnCommand = Schema.Struct({
 
 export const ResumeChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("resume-chat-turn"),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,

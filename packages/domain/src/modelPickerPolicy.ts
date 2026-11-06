@@ -251,6 +251,7 @@ export interface PickerGroup {
    * another of its models. Absent when the instance was never probed.
    */
   readonly modelSwitch?: ProviderCapabilitySupport;
+  readonly forceStop?: ProviderCapabilitySupport;
   /**
    * Whether this account's threads may choose the runtime's own artifact tool
    * instead of a Canvas, per mode. Absent when the instance was never probed
@@ -438,6 +439,9 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       executionHost: input.hostId ?? localExecutionHost,
       sections,
       appManagedTools: observed.capabilities.appManagedTools,
+      ...(observed.capabilities.forceStop === undefined
+        ? {}
+        : { forceStop: observed.capabilities.forceStop }),
       ...(observed.capabilities.modelSwitch === undefined
         ? {}
         : { modelSwitch: observed.capabilities.modelSwitch }),
@@ -615,7 +619,14 @@ function maybeAppendUnavailableCurrent(
     endpointHost: endpointHostOf(instance),
     executionHost: input.hostId ?? localExecutionHost,
     sections: [],
-    ...(observed === undefined ? {} : { appManagedTools: observed.capabilities.appManagedTools }),
+    ...(observed === undefined
+      ? {}
+      : {
+          appManagedTools: observed.capabilities.appManagedTools,
+          ...(observed.capabilities.forceStop === undefined
+            ? {}
+            : { forceStop: observed.capabilities.forceStop }),
+        }),
     ...(observed?.capabilities.modelSwitch === undefined
       ? {}
       : { modelSwitch: observed.capabilities.modelSwitch }),

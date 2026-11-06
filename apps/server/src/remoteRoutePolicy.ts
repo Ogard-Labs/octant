@@ -665,6 +665,15 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 4_096,
   },
+  {
+    id: "conversation-inputs",
+    match: { kind: "exact", path: "/api/conversation-inputs" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxResponseBytes: 128 * 1_024,
+  },
   // Reply detail: the presentation level a paired device draws a thread at.
   // Read only; changing it stays with a window on the host.
   {

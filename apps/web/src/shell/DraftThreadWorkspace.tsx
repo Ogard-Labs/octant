@@ -462,7 +462,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         onSelectTerminal={(session) => {
           setCreateFromSelection({
             kind: "terminal",
-            request: { provider: session.provider, sessionId: session.sessionId },
+            request: {
+              provider: session.provider,
+              sessionId: session.sessionId,
+              continuation: "text-handoff",
+            },
             label: `${TERMINAL_SESSION_TOOL_NAMES[session.provider]}: ${session.title}`,
           });
           fillPromptRequest("Continue where this session left off.");

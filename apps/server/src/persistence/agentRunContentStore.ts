@@ -1,4 +1,8 @@
 import {
+  decodeConversationInputManifest,
+  type ConversationInputManifest,
+} from "@octant/contracts/conversation-inputs";
+import {
   decodeAgentRunAdmittedContext,
   decodeAgentRunResultEvidence,
   decodeAgentRunReviewSnapshot,
@@ -146,6 +150,7 @@ export function writeAgentRunAdmittedContext(
   input: {
     readonly run: AgentRun;
     readonly blocks: AgentRunAdmittedContext;
+    readonly inputs?: ConversationInputManifest;
     readonly createdAt: string;
   },
 ): void {
@@ -154,7 +159,15 @@ export function writeAgentRunAdmittedContext(
     runId: String(input.run.id),
     subject: agentRunContentSubject(input.run),
     contentKind: ADMITTED_CONTEXT_KIND,
-    bodyText: JSON.stringify(decodeAgentRunAdmittedContext(input.blocks)),
+    bodyText: JSON.stringify(
+      input.inputs === undefined
+        ? decodeAgentRunAdmittedContext(input.blocks)
+        : {
+            version: 1,
+            blocks: decodeAgentRunAdmittedContext(input.blocks),
+            inputs: decodeConversationInputManifest(input.inputs),
+          },
+    ),
     createdAt: input.createdAt,
   });
 }
@@ -181,7 +194,41 @@ export function readAgentRunAdmittedContext(
     ADMITTED_CONTEXT_KIND,
   );
   if (bodyText === undefined) return undefined;
-  return decodeAgentRunAdmittedContext(JSON.parse(bodyText));
+  const decoded: unknown = JSON.parse(bodyText);
+  return decodeAgentRunAdmittedContext(
+    decoded !== null &&
+      typeof decoded === "object" &&
+      "version" in decoded &&
+      decoded.version === 1 &&
+      "blocks" in decoded
+      ? decoded.blocks
+      : decoded,
+  );
+}
+
+/** Input provenance shares the atomic, purgeable parent selection record. */
+export function readAgentRunAdmittedInputs(
+  connection: SqliteConnection,
+  input: {
+    readonly runId: AgentRunId;
+    readonly contextSnapshotId: AgentRunContextSnapshotId;
+  },
+): ConversationInputManifest | undefined {
+  const body = read(
+    connection,
+    String(input.contextSnapshotId),
+    String(input.runId),
+    ADMITTED_CONTEXT_KIND,
+  );
+  if (body === undefined) return undefined;
+  const decoded: unknown = JSON.parse(body);
+  return decoded !== null &&
+    typeof decoded === "object" &&
+    "version" in decoded &&
+    decoded.version === 1 &&
+    "inputs" in decoded
+    ? decodeConversationInputManifest(decoded.inputs)
+    : undefined;
 }
 
 /**

@@ -570,6 +570,7 @@ export class WorkThreadService {
           const prepared = await this.#terminalSessions.prepare(
             command.terminalSession,
             project.binding.canonicalRoot,
+            project.id,
           );
           if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
           terminalSession = prepared.prepared;
@@ -1648,6 +1649,19 @@ export class WorkThreadService {
         providerSessionId: decodeProviderSessionId(this.#uuid()),
         carriedFrom: { threadId: source.id, requestId: turn.requestId },
         prompt: turn.prompt,
+        ...(turn.attachments === undefined
+          ? {}
+          : {
+              attachments: turn.attachments.map((attachment) => ({
+                ...attachment,
+                source: attachment.source ?? {
+                  mode: "work" as const,
+                  threadId: String(turn.threadId),
+                  attachmentId: String(attachment.attachmentId),
+                  projectId: String(turn.projectId),
+                },
+              })),
+            }),
         capabilities: turn.capabilities,
         acceptedAt: turn.acceptedAt,
       };

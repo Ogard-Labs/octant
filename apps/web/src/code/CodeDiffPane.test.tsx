@@ -1,3 +1,4 @@
+import { createWorkspaceViewStore, WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import {
@@ -33,6 +34,33 @@ async function chooseSideBySide() {
 }
 
 describe("CodeDiffPane", () => {
+  it("restores the selected review file from the same captured diff without performing a Git effect", async () => {
+    const namespace = `review-view-${crypto.randomUUID()}`;
+    const store = createWorkspaceViewStore(namespace);
+    const code = client();
+    const first = render(
+      <WorkspaceViewStateContext.Provider value={store}>
+        <CodeDiffPane client={code} diff={available()} loadRuntime={runtime().loadRuntime} />
+      </WorkspaceViewStateContext.Provider>,
+    );
+    await chooseSideBySide();
+    await userEvent.setup().click(await screen.findByRole("button", { name: /README.md/ }));
+    first.unmount();
+    store.flush();
+    const restored = createWorkspaceViewStore(namespace);
+    render(
+      <WorkspaceViewStateContext.Provider value={restored}>
+        <CodeDiffPane client={code} diff={available()} loadRuntime={runtime().loadRuntime} />
+      </WorkspaceViewStateContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /README.md/ }).getAttribute("aria-current")).toBe(
+        "true",
+      ),
+    );
+    expect(code.executeOperation).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     sessionStorage.clear();
   });

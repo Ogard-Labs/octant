@@ -1,3 +1,8 @@
+import type {
+  ConversationInputPolicy,
+  ConversationInputReceipt,
+} from "@octant/contracts/conversation-inputs";
+import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import {
   MAX_CODE_FORK_MERGE_BACKS_PER_TURN,
   decodeAgentRunAdmittedContext,
@@ -50,6 +55,7 @@ export type CodeForkMergeBackReader = (input: {
 }) => AgentRunParentContextSelection;
 
 export interface CodeForkMergeBackPorts {
+  readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   readonly read: CodeForkMergeBackReader | undefined;
   readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly canAccessProject: (
@@ -57,7 +63,9 @@ export interface CodeForkMergeBackPorts {
     projectId: CodeThread["projectId"],
   ) => Promise<boolean> | boolean;
   /** The fork's own turns, to check the named one finished. */
-  readonly forkTurns: (threadId: CodeThreadId) => ReadonlyArray<CodeConversationTurn> | undefined;
+  readonly forkTurns: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<Pick<CodeConversationTurn, "operationId" | "status">> | undefined;
   readonly events: Pick<CodeOperationEventStore, "append" | "forkContextMerges">;
   readonly putEvidence: (content: string) => CodeEvidenceReference;
   readonly recordExternalContentIngestion?: (
@@ -99,9 +107,11 @@ export async function mergeForkConversation(
     readonly windowId: WindowId;
     readonly forkThreadId: CodeThreadId;
     readonly throughOperationId: string;
+    readonly contextInputPolicy?: ConversationInputPolicy;
   },
 ): Promise<CodeForkMergeBackOutcome> {
-  const refused = (reason: CodeForkMergeBackRefusal) => ({ status: "refused", reason }) as const;
+  const refused = (reason: CodeForkMergeBackRefusal, message?: string) =>
+    ({ status: "refused", reason, ...(message === undefined ? {} : { message }) }) as const;
   if (ports.read === undefined) return refused("unsupported");
   let fork: CodeThread | undefined;
   let source: CodeThread | undefined;
@@ -128,7 +138,8 @@ export async function mergeForkConversation(
   if (!(await authorized(source.projectId))) return refused("source-unauthorized");
   if (String(source.projectId) !== String(fork.projectId)) return refused("foreign-project");
 
-  // Synchronous from here: the duplicate check and the append cannot interleave.
+  // Capture duplicate state before any original-input file reads; after those
+  // yield, both grants and this exact sequence are rechecked before append.
   const merges = ports.events.forkContextMerges(source.id);
   if (merges === undefined) return refused("source-unavailable");
   const previous = merges.merges.findLast(
@@ -170,6 +181,44 @@ export async function mergeForkConversation(
     selection.source.projectId !== String(fork.projectId)
   )
     return refused("fork-unreadable");
+  const mergeSequence = merges.merges.map((item) => String(item.operationId)).join(",");
+  const deliveredThrough = merges.lastDeliveredOperationId;
+  let inputReceipt: ConversationInputReceipt | undefined;
+  if ((selection.inputs?.length ?? 0) > 0 || selection.inputUnavailable === true) {
+    if (ports.conversationInputTransfer === undefined)
+      return refused(
+        "fork-unreadable",
+        "Original fork inputs cannot be transferred on this host. Nothing was merged.",
+      );
+    const prepared = await ports.conversationInputTransfer.prepare({
+      owner: { mode: "code", threadId: String(source.id), projectId: String(source.projectId) },
+      purpose: "fork-merge-back",
+      selection,
+      ...(input.contextInputPolicy === undefined ? {} : { policy: input.contextInputPolicy }),
+      target: {
+        providerInstanceId: String(source.providerInstanceId),
+        modelId: String(source.modelId),
+      },
+      current: () =>
+        ports.readThread(fork.id)?.version === fork.version &&
+        ports.readThread(source.id)?.version === source.version,
+    });
+    if (prepared.status === "refused") return refused("fork-unreadable", prepared.message);
+    inputReceipt = prepared.receipt;
+    // File preparation yields. Recheck both grants and then the exact source
+    // versions and merge sequence before the synchronous duplicate check/append.
+    if (!(await authorized(fork.projectId)) || !(await authorized(source.projectId)))
+      return refused("source-unauthorized");
+    const currentMerges = ports.events.forkContextMerges(source.id);
+    if (
+      ports.readThread(fork.id)?.version !== fork.version ||
+      ports.readThread(source.id)?.version !== source.version ||
+      currentMerges === undefined ||
+      currentMerges.lastDeliveredOperationId !== deliveredThrough ||
+      currentMerges.merges.map((item) => String(item.operationId)).join(",") !== mergeSequence
+    )
+      return refused("source-unavailable");
+  }
   const tainted = selection.source.externalContentIngested;
   let content: CodeEvidenceReference;
   let operationId: CodeOperationId;
@@ -205,7 +254,11 @@ export async function mergeForkConversation(
     ...(previous === undefined ? {} : { afterOperationId: previous.throughOperationId }),
     throughOperationId: decodeCodeOperationId(input.throughOperationId),
     messages,
-    omissions: selection.omissions,
+    omissions: {
+      ...selection.omissions,
+      attachments: Math.max(0, selection.omissions.attachments - (inputReceipt?.included ?? 0)),
+    },
+    ...(inputReceipt === undefined ? {} : { inputReceipt }),
     externalContentIngested: tainted,
     content,
     nativeSessionTransferred: false,
@@ -226,6 +279,7 @@ function summary(event: ForkContextMerged | ForkContextDelivered): CodeForkMerge
     throughOperationId: event.throughOperationId,
     messages: event.messages,
     omissions: event.omissions,
+    ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
     externalContentIngested: event.externalContentIngested,
   };
 }
@@ -254,6 +308,10 @@ export async function forkMergeDelivery(
       readonly status: "ready";
       readonly blocks: ReadonlyArray<ProviderContextBlock>;
       readonly records: ReadonlyArray<ForkContextDelivered>;
+      readonly inputReceipts?: ReadonlyArray<{
+        readonly mergeOperationId: CodeOperationId;
+        readonly receipt: ConversationInputReceipt;
+      }>;
     }
   | { readonly status: "refused" }
 > {
@@ -299,6 +357,16 @@ export async function forkMergeDelivery(
   return {
     status: "ready",
     blocks,
+    ...(chosen.some((merge) => merge.event.inputReceipt !== undefined)
+      ? {
+          inputReceipts: chosen.flatMap((merge) => {
+            const receipt =
+              journaled.find((item) => item.mergeOperationId === merge.operationId)?.inputReceipt ??
+              merge.event.inputReceipt;
+            return receipt === undefined ? [] : [{ mergeOperationId: merge.operationId, receipt }];
+          }),
+        }
+      : {}),
     records:
       journaled.length > 0
         ? []

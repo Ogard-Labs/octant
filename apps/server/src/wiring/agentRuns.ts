@@ -1,3 +1,5 @@
+import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
+import { prepareConversationInputs } from "../attachments/conversationInputs";
 import { observedChildren } from "../agentRun/agentObservedChildren";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -11,6 +13,7 @@ import {
   decodeCodeThreadId,
   decodeMultiModelRoutingVendorId,
   decodeProjectId,
+  decodeProviderInstanceId,
   decodeWorkThreadId,
   decodeUtcTimestamp,
   effectiveAgentRunConcurrency,
@@ -40,14 +43,20 @@ import {
 } from "../context/contextRuntime";
 import { createAgentRunReviewCapture } from "../agentRun/agentRunReviewCapture";
 import type { PersistenceService } from "../persistence/persistenceService";
-import { readAgentRunAdmittedContext } from "../persistence/agentRunContentStore";
+import {
+  readAgentRunAdmittedContext,
+  readAgentRunAdmittedInputs,
+} from "../persistence/agentRunContentStore";
 import {
   AgentRunOrchestrationService,
   createInMemoryCapacityPort,
 } from "../agentRun/agentRunOrchestrationService";
 import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
-import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
+import {
+  admittedParentWorkContext,
+  admittedChatConversationContext,
+} from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import {
   agentRunEligibleTargets as eligibleAgentRunTargets,
@@ -525,6 +534,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
+  const inputSource = conversationInputSource(deps.persistence, deps.workThreadProjection);
   const {
     agentRunInteractions,
     agentRunPersistence,
@@ -814,8 +824,31 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       context: createRecordedAgentRunContextSnapshotPort({
         getById: (childRunId) => agentRunPersistence.getById(childRunId),
         readAdmittedContext: (input) => readAgentRunAdmittedContext(persistence.connection, input),
+        readAdmittedInputs: (input) => readAgentRunAdmittedInputs(persistence.connection, input),
         readResultText: (dependencyId) => agentRunPersistence.resultText(dependencyId),
       }),
+      prepareInputs: async ({ run, manifest, signal }) => {
+        const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+        const observed = providerRuntimeRegistry.observedState(target.providerInstanceId);
+        const prepared = await prepareConversationInputs({
+          purpose: "child-delegation",
+          sourceMetadataUnavailable: manifest.sourceMetadataUnavailable === true,
+          inputs: manifest.items.map((item) => item.input),
+          policy: run.routingReceipt.contextInputPolicy ?? "preserve",
+          supports: (mediaType) =>
+            supportsConversationInput(observed, String(target.modelId), mediaType),
+          current: () =>
+            !signal.aborted &&
+            (run.routingReceipt.contextInputPolicy === "text-only" ||
+              manifest.items.every((item) => inputSource.current(item.input))),
+          read: inputSource.read,
+        });
+        return prepared.status === "ready" ? prepared.attachments : undefined;
+      },
+      inputsCurrent: (manifest) =>
+        manifest.items.every(
+          (item) => item.status === "omitted" || inputSource.current(item.input),
+        ),
       uuid: randomUUID,
       scratchRoot: (run) => {
         const root = join(persistence.dataDirectory, "agent-run-scratch", String(run.id));
@@ -929,6 +962,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     orchestration: agentRunOrchestration,
     settings: agentRunSettingsStore,
     providerReadiness: {
+      supportsInput: ({ providerInstanceId, modelId, mediaType }) =>
+        supportsConversationInput(
+          providerRuntimeRegistry.observedState(decodeProviderInstanceId(providerInstanceId)),
+          modelId,
+          mediaType,
+        ),
       isReady: ({ providerInstanceId, modelId }) => {
         const instance = persistence.readProviderInstance(providerInstanceId as never);
         if (instance === undefined || !instance.enabled) return false;
@@ -1013,10 +1052,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     parentContext: {
       resolve: ({ parentThreadId, mode }) => {
         try {
-          if (mode === "chat")
-            return admittedParentChatContext(
-              readChatThreadView(persistence, decodeChatThreadId(String(parentThreadId))),
-            );
+          if (mode === "chat") {
+            const selected = admittedChatConversationContext({
+              threadId: decodeChatThreadId(String(parentThreadId)),
+              purpose: "child-delegation",
+              externalContentIngested: readThreadExternalContentTaint(
+                persistence.connection,
+                String(parentThreadId),
+              ).externalContentIngested,
+              readThread: (id) => persistence.readChatThread(id),
+              readView: (id) => readChatThreadView(persistence, id),
+            });
+            return selected.status === "available" ? selected : { unavailable: selected.reason };
+          }
           const externalContentIngested = readThreadExternalContentTaint(
             persistence.connection,
             String(parentThreadId),
@@ -1030,9 +1078,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
                   readTurns: (id) => workTurnProjection.listForThread(id),
                 })
               : selectCodeConversation(decodeCodeThreadId(String(parentThreadId)));
-          return selection.status === "available"
-            ? selection.blocks
-            : { unavailable: selection.reason };
+          return selection.status === "available" ? selection : { unavailable: selection.reason };
         } catch {
           return undefined;
         }
@@ -1210,6 +1256,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     windowAuthorityStore,
     persistence: agentRunPersistence,
     liveConversations: agentRunLiveConversations,
+    readInputManifest: (run) =>
+      readAgentRunAdmittedInputs(persistence.connection, {
+        runId: run.id,
+        contextSnapshotId: run.routingReceipt.contextSnapshotId,
+      }),
     orchestration: agentRunOrchestration,
     authorizeCreation: agentRunAdmission.authorizeCreation,
     authorizeCancellation: ({ run, windowId }) =>

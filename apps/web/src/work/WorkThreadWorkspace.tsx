@@ -1,5 +1,8 @@
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
+import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
+import { ConversationInputs } from "../continuity/ConversationInputs";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -84,6 +87,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -306,6 +310,8 @@ function withNewestWorkTurns(
  * the failure's words; the notice is the provider-reported fact about why.
  */
 function WorkTurnHeader(props: {
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
@@ -331,6 +337,16 @@ function WorkTurnHeader(props: {
         {...(workedFor === undefined ? {} : { workedFor })}
         {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
       />
+      {props.turn.inputReceipt === undefined ? null : (
+        <ConversationInputs
+          mode="work"
+          threadId={String(props.turn.threadId)}
+          admissionId={String(props.turn.requestId)}
+          receipt={props.turn.inputReceipt}
+          serverUrl={props.serverUrl}
+          windowCapability={props.windowCapability}
+        />
+      )}
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -736,6 +752,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const serverWorkProject = serverCodeProjectFor(useServerCodeProjects().workProjects, projectId);
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
+  const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -1043,7 +1060,29 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     String(runningTurn.threadId) === String(props.threadId)
       ? runningTurn
       : undefined;
+  const forceStop = useDelayedForceStop(
+    stoppableTurn === undefined ? undefined : String(stoppableTurn.requestId),
+    (props.providerGroups ?? []).find(
+      (group) => String(group.instance.id) === String(stoppableTurn?.authority.providerInstanceId),
+    )?.forceStop === "supported",
+  );
+  const onForceStop = async () => {
+    if (props.turnClient === undefined || stoppableTurn === undefined) return;
+    try {
+      await props.turnClient.cancelFirstTurn({
+        kind: "force-stop-work-turn",
+        requestId: stoppableTurn.requestId,
+        threadId: stoppableTurn.threadId,
+        turnId: stoppableTurn.turnId,
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "The owned attempt could not be force-stopped.",
+      );
+    }
+  };
   const onStop = useCallback(async () => {
+    forceStop.requestStop();
     const turnClient = props.turnClient;
     const turn = stoppableTurn;
     if (turnClient === undefined || turn === undefined) return;
@@ -1063,7 +1102,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           : "The Work turn could not be stopped. Try again.",
       );
     }
-  }, [props.threadId, props.turnClient, stoppableTurn]);
+  }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
     async (
       request: WorkRequest,
@@ -1759,6 +1798,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           const result = await messageQueue.enqueue(
             {
               mode: "work",
+              ...(continuation.policy === "text-only"
+                ? { contextInputPolicy: continuation.policy }
+                : {}),
               prompt: promptText,
               attachmentIds,
               threadMentionIds,
@@ -1767,6 +1809,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               extensionSelections,
             },
             () => {
+              continuation.reset();
               if (currentThreadKeyRef.current !== sendingThreadId) return;
               images.consume(staged);
               if (composerDraft.revisionFor(sendingThreadId) === draftRevision) {
@@ -1784,6 +1827,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
           ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+          ...(continuation.policy === "text-only"
+            ? { contextInputPolicy: continuation.policy }
+            : {}),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
@@ -1812,6 +1858,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           return false;
         }
         {
+          continuation.reset();
           images.consume(staged);
           threadMentions.clear();
           fileMentions.clear();
@@ -1845,6 +1892,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
     },
     [
+      continuation.policy,
       composerDraft,
       fileMentions,
       images,
@@ -2211,6 +2259,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       {row.head === undefined ? null : (
                         <>
                           <WorkTurnHeader
+                            serverUrl={props.serverUrl}
+                            windowCapability={props.windowCapability}
                             copyValue={row.entry.text}
                             onRestorePrompt={composerDraft.setDraft}
                             onCancelResume={cancelUsageResume}
@@ -2251,6 +2301,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 return (
                   <div className="turn-agent">
                     <WorkTurnHeader
+                      serverUrl={props.serverUrl}
+                      windowCapability={props.windowCapability}
                       onCancelResume={cancelUsageResume}
                       onRestorePrompt={composerDraft.setDraft}
                       onScheduleResume={scheduleUsageResume}
@@ -2517,6 +2569,25 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           />
         )}
         {folderDrops.notice}
+        {thread === undefined ? null : (
+          <ContinueElsewhere
+            mode="work"
+            threadId={String(thread.id)}
+            groups={
+              turns.length > 0
+                ? startedConversationPickerGroups(props.providerGroups ?? [], {
+                    providerInstanceId: thread.providerInstanceId,
+                    modelId: thread.modelId,
+                  })
+                : (props.providerGroups ?? [])
+            }
+            selected={thread}
+            policy={continuation.policy}
+            onPolicyChange={continuation.change}
+            onProviderChange={changeProvider}
+            disabled={providerChanging || creating || completionLocked || turnRunning}
+          />
+        )}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2845,6 +2916,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ? { disabledReason: "Stopping is available once the turn has started." }
                   : {}),
                 onStop: () => void onStop(),
+                ...(forceStop.offered
+                  ? { forceStop: { onForceStop: () => void onForceStop() } }
+                  : {}),
               },
             },
           }}

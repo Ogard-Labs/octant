@@ -45,6 +45,38 @@ settlement, duplicate requests, authority refusals, and dead approvals/questions
 Rendered checks at 1000px and 390px confirm the notice, actionable refusal,
 single-click continuation, and preservation of the composer draft.
 
+## Continue elsewhere
+
+An existing Chat, Work or Code conversation offers **Continue elsewhere** beside
+its composer. Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
+the source provider and the authoritative current destination. Choosing another
+provider uses the same provider/model command as its composer picker and sends
+nothing. Task state, the checkout and pending feedback remain on the execution
+host. The next turn uses the ordinary handoff and original-input checks described
+in the [architecture](../architecture.md#stop-reasons).
+
+The person may explicitly choose **Text only: omit files and images** for the
+next continuation. The choice is scoped to this endpoint and task, survives a
+reload with its unsent draft, travels in a queued message and resets after
+admission. Missing or unsupported originals refuse a preserving send; a text-only
+send records its omissions. A receiving thread's **Original inputs** disclosure
+reads the manifest admitted for that exact turn, attempt or operation, separately
+from the task briefing and agent reports. Unavailable or purged manifests remain
+unavailable; the renderer never substitutes a later input.
+
+A local window can read its existing paired-screen inventory and configured,
+browser-verifiable private listener. Copying a task link for a paired screen
+carries only mode and thread identity. After normal paired authentication, that
+screen selects the same host's existing task through ordinary read paths; it
+creates no thread, session, checkout or writer and sends no message. The receipt
+states that unsent drafts and local view state stay on their source screen,
+while host-held inputs, task state and pending feedback stay with the task. A
+paired browser can copy its already authenticated origin's task link. A missing
+browser-verifiable listener offers the existing paired app's task selection
+instead; opening the flow never pairs a device or enables a listener. Moving
+execution to another host remains subject to the existing supported host paths
+and is not implied by changing screens.
+
 ## Navigation and Projects
 
 The window is mode-first: a persistent left sidebar with the Work and Code
@@ -304,15 +336,30 @@ need a stable answer identity before this control can apply to them.
 
 The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome. A pane retains renderer-session
-navigation tabs for conversations, files, previews, and canvases; selecting a
+overview, a utility surface, or a mode welcome. A pane retains navigation references for conversations, files, previews, and canvases; selecting a
 tab reopens that surface through the authoritative command path. Image creation
 and revision occupy pane-owned tabs whose drafts remain mounted while switching
 back to the conversation. Opening the same content selects its existing entry; closing active content
 selects its neighbor. A refused host open does not activate a successful tab.
-References are cleared when the pane or its authority context changes; reload
-restores only the authoritative visible surface. Closing image creation stops
-observation, while only Cancel job cancels generation on the host. Editor drafts
+Kept references and their order are saved in device-local storage per execution
+endpoint and client window, with exact host/mode/Project/root context and pane
+identity. Reload restores those references only when the current authorized
+workspace has the same context and pane. The authoritative workspace alone
+chooses the visible surface and selected tab; restoring references never opens
+another surface, starts a process, sends a draft or reapplies an approval.
+Temporary single-click thread previews are omitted, closed references stay
+closed, and selecting a missing or revoked reference shows the ordinary host
+refusal without opening a substitute. A pane/context change drops old references.
+Storage is bounded to 128 references per pane, 64 panes and 512 KiB on read;
+malformed or unavailable storage falls back to the current visible surface. Closing image creation stops
+observation, while only Cancel job cancels generation on the host. Editor cursor/scroll state is restored only for the same thread, checkout, file
+identity and digest. Review retains its selected file and scroll for the exact
+captured diff; an absent selected file stays explicit rather than retargeting.
+Transcript offsets require the same first loaded row and viewport width. These
+presentation references share the endpoint/window/context boundary, retain at
+most 64 entries and 128 KiB, and write no document text, native process identity,
+approval or authority. They never take focus or perform a host operation during
+restore. Composer drafts retain their existing durable storage. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
@@ -1036,20 +1083,28 @@ journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
 Refusal fails creation visibly. No Linear write-back path exists.
 
 Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
-Project, for a local window. It lists the newest sessions the Claude Code and
-Codex command-line tools kept on this Mac for the Project's bound folder, with
-their title and last activity. Selecting one attaches only
-`{ provider, sessionId }`. At creation the server reads the session again,
-refuses one started in another folder, keeps the person's and the assistant's
-words (no tool calls, results, thinking, or text the tool injected), bounds
-them to the recent part of the conversation, marks the thread with outside
-content before it exists, and journals the history on the thread
-([details](host-reads-and-commands.md#terminal-sessions)). The thread shows it
-folded and read-only above its own turns. Its first admitted turn hands the
-history to the model once, framed as outside data. The provider's native
-session is not resumed: a resumed session would hold the earlier conversation
-unframed, and the Claude runtime refuses a session id Octant did not record.
-Nothing is uploaded or written back to the tool's files.
+Project, for a local window. It lists the newest Claude Code and Codex sessions
+in the Project's canonical bound root and its subfolders. A Code Project also
+includes available managed worktrees whose ready ownership receipt matches its
+current binding, thread, repository and checkout. Clients supply no source
+folder: the server resolves eligible scopes and verifies the session's own
+canonical working directory at listing and again at creation. Symlink escapes
+and foreign scopes are refused; the picker and imported history name the exact
+original working directory.
+
+Selecting a session explicitly chooses a **text handoff**. The server rereads
+bounded visible user/assistant words, excludes original inputs, tool activity,
+hidden reasoning and injected tool text, marks the new thread with outside
+content before it exists, and journals the framed read-only history on that
+thread ([details](host-reads-and-commands.md#terminal-sessions)). Its first
+admitted turn reads this snapshot once. The receipt and UI distinguish that new
+session from native adoption. Native adoption is refused while the adapter
+cannot prove historical account binding, runtime compatibility and exclusive
+session ownership: a folder, filename or current provider login is not proof of
+the account that created an external session. The current adapters cannot
+supply that proof and offer only the labeled text handoff. They never resume
+an unverified native session or clone its writer. Nothing is uploaded or written
+back to the command-line tool's files.
 
 ## Context and usage
 

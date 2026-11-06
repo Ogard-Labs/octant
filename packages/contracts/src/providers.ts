@@ -209,7 +209,7 @@ const MAX_PROVIDER_JSON_ENTRIES = 256;
 const MAX_PROVIDER_JSON_KEY_LENGTH = 128;
 const MAX_PROVIDER_JSON_STRING_LENGTH = 4_096;
 const MAX_PROVIDER_ATTACHMENT_BYTES = 26_214_400;
-const MAX_PROVIDER_ATTACHMENTS = 16;
+export const MAX_PROVIDER_ATTACHMENTS = 16;
 export const MAX_PROVIDER_CONTEXT_BLOCKS = 256;
 // The native harness offers twelve tools beside research and extension tools;
 // the wire protocols this bound guards accept far more than that.

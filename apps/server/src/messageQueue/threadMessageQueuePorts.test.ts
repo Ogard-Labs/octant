@@ -651,6 +651,7 @@ describe("queued turn admission", () => {
         payload: {
           mode: "chat",
           prompt: "Continue with the next part.",
+          contextInputPolicy: "text-only",
           threadMentionIds: [threadId],
         },
         signal: new AbortController().signal,
@@ -661,6 +662,7 @@ describe("queued turn admission", () => {
         kind: "send-chat-turn",
         submissionId: messageId,
         prompt: "Continue with the next part.",
+        contextInputPolicy: "text-only",
         threadMentionIds: [threadId],
         expectedVersion: thread.version,
       }),

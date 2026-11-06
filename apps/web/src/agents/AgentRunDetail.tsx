@@ -150,6 +150,37 @@ export function AgentRunDetail(props: {
           <span className="agent-run-detail__label">Brief</span>
           <p>{row.task}</p>
         </div>
+        {props.conversation?.inputManifest === undefined ? null : (
+          <div className="agent-run-detail__brief" aria-label="Original inputs">
+            <span className="agent-run-detail__label">Original inputs</span>
+            <p>Source inputs selected for this child, separate from its brief and report.</p>
+            {props.conversation.inputManifest.sourceMetadataUnavailable === true ? (
+              <p>
+                Some original input details were unavailable and explicitly omitted; their names and
+                number are unknown.
+              </p>
+            ) : null}
+            {props.conversation.inputManifest.omittedUnlistedInputs === undefined ? null : (
+              <p>
+                {props.conversation.inputManifest.omittedUnlistedInputs} additional original inputs
+                were explicitly omitted without retaining their individual details.
+              </p>
+            )}
+            <ul className="agent-run-detail__inputs">
+              {props.conversation.inputManifest.items.map((item) => (
+                <li
+                  key={`${item.input.source.mode}:${item.input.source.threadId}:${item.input.source.attachmentId}`}
+                >
+                  {item.input.displayName} · {item.input.mediaType} ·{" "}
+                  {item.input.byteLength.toLocaleString()} bytes ·{" "}
+                  {item.status === "included"
+                    ? "Included"
+                    : `Omitted: ${item.reason === "person-excluded" ? "text-only choice" : item.reason}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <AgentRunResults
           packets={row.resultPackets}
           truncated={row.resultsTruncated === true}

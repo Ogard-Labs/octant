@@ -1,3 +1,6 @@
+import { readContinuationLink } from "../continuity/continuationLink";
+import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
+import { ConversationInputClientContext } from "../continuity/ConversationInputs";
 import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
 import type { CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -42,11 +45,13 @@ export interface RemoteWorkspaceProps {
 export function RemoteWorkspace(props: RemoteWorkspaceProps) {
   const replyDetail = useRemoteReplyDetail(props.clients.replyDetail, props.mode);
   return (
-    <ReplyDetailSourceContext.Provider value={replyDetail}>
-      <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
-        <RemoteModeSurface {...props} />
-      </ReplyDetailContext.Provider>
-    </ReplyDetailSourceContext.Provider>
+    <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
+      <ReplyDetailSourceContext.Provider value={replyDetail}>
+        <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
+          <RemoteModeSurface {...props} />
+        </ReplyDetailContext.Provider>
+      </ReplyDetailSourceContext.Provider>
+    </ConversationInputClientContext.Provider>
   );
 }
 
@@ -135,7 +140,10 @@ interface RemoteSurfaceProps {
 function RemoteChatSurface(
   props: RemoteSurfaceProps & { readonly providerSnapshot?: ProviderRegistrySnapshot },
 ) {
-  const [activeThreadId, setActiveThreadId] = useState<ChatThreadId>();
+  const [activeThreadId, setActiveThreadId] = useState<ChatThreadId | undefined>(() => {
+    const link = readContinuationLink(globalThis.location?.href ?? "");
+    return link?.mode === "chat" ? decodeChatThreadId(link.threadId) : undefined;
+  });
   const [chatProjectId, setChatProjectId] = useState<ProjectId>();
   const [createError, setCreateError] = useState<string>();
   const controller = useChatController({
@@ -212,7 +220,10 @@ function RemoteChatSurface(
 }
 
 function RemoteWorkSurface(props: RemoteSurfaceProps) {
-  const [activeThreadId, setActiveThreadId] = useState<WorkThread["id"]>();
+  const [activeThreadId, setActiveThreadId] = useState<WorkThread["id"] | undefined>(() => {
+    const link = readContinuationLink(globalThis.location?.href ?? "");
+    return link?.mode === "work" ? decodeWorkThreadId(link.threadId) : undefined;
+  });
   const workNavigation = useWorkThreadNavigation(props.clients.workThread, {
     navigationRefreshMs: 5_000,
   });
@@ -256,7 +267,10 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
 }
 
 function RemoteCodeSurface(props: RemoteSurfaceProps) {
-  const [activeThreadId, setActiveThreadId] = useState<CodeThreadId>();
+  const [activeThreadId, setActiveThreadId] = useState<CodeThreadId | undefined>(() => {
+    const link = readContinuationLink(globalThis.location?.href ?? "");
+    return link?.mode === "code" ? decodeCodeThreadId(link.threadId) : undefined;
+  });
   const controller = useCodeController({
     client: props.clients.code,
     ...(activeThreadId === undefined ? {} : { activeThreadId }),

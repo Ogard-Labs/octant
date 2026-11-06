@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -2150,6 +2151,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const beginProviderTurn = useCallback(
     async (input: {
+      readonly contextInputPolicy?: ConversationInputPolicy;
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
       readonly prompt: string;
@@ -2188,6 +2190,9 @@ export function useCodeController(options: CodeControllerOptions) {
       const started = await client.executeOperation({
         kind: "start-provider-turn",
         ...(input.toolCatalogHandoff === true ? { toolCatalogHandoff: true } : {}),
+        ...(input.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: input.contextInputPolicy }),
         operationId,
         threadId: input.threadId,
         checkoutId: input.checkoutId,
@@ -2360,11 +2365,15 @@ export function useCodeController(options: CodeControllerOptions) {
     async (input: {
       readonly threadId: CodeThreadId;
       readonly throughOperationId: string;
+      readonly contextInputPolicy?: ConversationInputPolicy;
     }): Promise<CodeForkMergeBackOutcome | undefined> => {
       const result = await execute({
         kind: "merge-code-fork-context",
         threadId: input.threadId,
         throughOperationId: input.throughOperationId,
+        ...(input.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: input.contextInputPolicy }),
       });
       return result?.kind === "fork-context-merge" ? result.outcome : undefined;
     },
@@ -2618,6 +2627,7 @@ export function useCodeController(options: CodeControllerOptions) {
       expectedDraftRevision?: number,
       reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>,
       toolCatalogHandoff = false,
+      contextInputPolicy?: ConversationInputPolicy,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2681,6 +2691,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
       try {
         const { operationId, started } = await beginProviderTurn({
+          ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
           threadId: view.thread.id,
           checkoutId: view.checkout.id,
           prompt: trimmed,
@@ -3028,6 +3039,34 @@ export function useCodeController(options: CodeControllerOptions) {
     [activeView, client],
   );
 
+  const forceStopTurn = useCallback(async (): Promise<boolean> => {
+    const view = activeView;
+    if (view === undefined || latestProviderTurnOperationId === undefined) return false;
+    const owner = String(view.thread.id);
+    try {
+      const result = await client.executeOperation({
+        kind: "force-stop-provider-turn",
+        operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+        threadId: view.thread.id,
+        checkoutId: view.checkout.id,
+        turnOperationId: latestProviderTurnOperationId,
+      });
+      if (result.kind === "provider-turn-state" && result.state === "interrupted") return true;
+      if (mounted.current && String(activeThreadId.current) === owner)
+        setTurnError(
+          result.kind === "operation-failed"
+            ? result.failure.message
+            : result.kind === "provider-turn-state"
+              ? (result.failure?.message ?? "The attempt could not be force-stopped.")
+              : "The host refused Force stop.",
+        );
+    } catch (error) {
+      if (mounted.current && String(activeThreadId.current) === owner)
+        setTurnError(codeFailure(error).message);
+    }
+    return false;
+  }, [activeView, client, latestProviderTurnOperationId]);
+
   const cancelTurn = useCallback(async (): Promise<boolean> => {
     const view = activeView;
     if (view === undefined || turnStatus !== "running") {
@@ -3108,6 +3147,7 @@ export function useCodeController(options: CodeControllerOptions) {
     announceFirstPrompt,
     answerProviderRequest,
     cancelTurn,
+    forceStopTurn,
     archiveThread,
     completeThread,
     reopenThread,

@@ -254,6 +254,9 @@ export function buildControlCreationRequest(input: {
     workspace: input.workspace,
     ...(input.control.pool === undefined ? {} : { pool: input.control.pool }),
     ...(input.control.includeParentContext === true ? { includeParentContext: true } : {}),
+    ...(input.control.contextInputPolicy === undefined
+      ? {}
+      : { contextInputPolicy: input.control.contextInputPolicy }),
   };
 }
 

@@ -1,3 +1,4 @@
+import { decodeConversationInputManifest } from "@octant/contracts/conversation-inputs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,7 @@ import { EventActor } from "@octant/contracts/events";
 import {
   writeAgentRunResultEvidence,
   readAgentRunAdmittedContext,
+  readAgentRunAdmittedInputs,
 } from "../persistence/agentRunContentStore";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { purgeThreadContent } from "../persistence/chatProjection";
@@ -901,11 +903,28 @@ describe("AgentRunPersistenceService", () => {
     const harness = createHarness();
     const parentWords = "Which service paged first, and who acknowledged the page?";
     const childReply = "The ingest worker paged at 02:14 and Dana acknowledged it.";
+    const manifest = decodeConversationInputManifest({
+      version: 1,
+      purpose: "child-delegation",
+      items: [
+        {
+          status: "included",
+          input: {
+            source: { mode: "chat", threadId: ids.thread, attachmentId: ids.request },
+            displayName: "Private report.pdf",
+            mediaType: "application/pdf",
+            byteLength: 4,
+            digest: "a".repeat(64),
+          },
+        },
+      ],
+    });
     const accepted = harness.service.requestRun({
       command: {
         ...requestCommand(),
-        routingReceipt: { ...routingReceipt, admittedContextBlocks: 1 },
+        routingReceipt: { ...routingReceipt, admittedContextBlocks: 1, admittedInputCount: 1 },
         admittedContext: [{ kind: "user-message", text: parentWords }],
+        admittedInputs: manifest,
       },
       parentAuthority,
       confirmed: true,
@@ -947,6 +966,7 @@ describe("AgentRunPersistenceService", () => {
 
     // Neither piece was ever journaled: the admission carries the snapshot id
     // and the block count, the completion carries the reply's reference.
+    expect(journalMatches("Private report.pdf")).toBe(0);
     expect(journalMatches("Which service paged first")).toBe(0);
     expect(journalMatches("ingest worker paged at 02:14")).toBe(0);
     expect(
@@ -955,6 +975,12 @@ describe("AgentRunPersistenceService", () => {
         contextSnapshotId: accepted.run.routingReceipt.contextSnapshotId,
       }),
     ).toEqual([{ kind: "user-message", text: parentWords }]);
+    expect(
+      readAgentRunAdmittedInputs(harness.connection, {
+        runId: accepted.run.id,
+        contextSnapshotId: accepted.run.routingReceipt.contextSnapshotId,
+      }),
+    ).toEqual(manifest);
     expect(harness.service.resultText(accepted.run.id)).toBe(childReply);
 
     // Permanently deleting the parent Chat thread is what the chat purge runs,
@@ -962,10 +988,17 @@ describe("AgentRunPersistenceService", () => {
     // the parent's words nor the child's reply are recoverable anywhere.
     purgeThreadContent(harness.connection, String(ids.thread));
 
+    expect(journalMatches("Private report.pdf")).toBe(0);
     expect(journalMatches("Which service paged first")).toBe(0);
     expect(journalMatches("ingest worker paged at 02:14")).toBe(0);
     expect(
       readAgentRunAdmittedContext(harness.connection, {
+        runId: accepted.run.id,
+        contextSnapshotId: accepted.run.routingReceipt.contextSnapshotId,
+      }),
+    ).toBeUndefined();
+    expect(
+      readAgentRunAdmittedInputs(harness.connection, {
         runId: accepted.run.id,
         contextSnapshotId: accepted.run.routingReceipt.contextSnapshotId,
       }),

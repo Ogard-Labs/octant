@@ -70,11 +70,19 @@ Turn on **Developer tools** in the Work Project's overview (under Access and lim
 
 ## Continue a terminal session
 
-A new Work task can start from a Claude Code or Codex session you had in a
-terminal in the same folder. Choose **Create from…**, then **Terminal**, and
-pick the session. The task shows that conversation as folded, read-only
-history, and the assistant reads it once at the start. The session stays on
-this Mac, and the task is marked as holding outside content.
+In a new Work task with a Project, choose **Create from…**, then **Terminal**.
+The picker lists Claude Code and Codex sessions from the Project folder and
+its subfolders; a Code Project also includes its verified managed worktrees.
+Each session names its original working directory.
+
+Choosing one is a **text handoff into a new session**. The assistant reads the
+bounded visible conversation once as outside content; it also appears above
+the thread as folded, read-only history. Original inputs, tool activity,
+hidden reasoning and the provider's native session are omitted. The current
+adapters cannot prove the source account binding and exclusive native session
+ownership, so native adoption is unavailable. Octant never resumes that
+unverified session or changes its files. This step is available only from an
+Octant window on this computer.
 
 ## Work settings
 
@@ -406,3 +414,18 @@ Nothing is sent until you send it.
 - [Promotions](/guide/promotions) for escalating Work work to a Code thread
 - [Projects](/guide/projects) for managing Work Projects
 - [Code](/guide/code) for repository engineering
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

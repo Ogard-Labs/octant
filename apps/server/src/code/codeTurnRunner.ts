@@ -243,6 +243,7 @@ export interface CodeTurnRunnerInput {
    * whatever the context carried is known not to have reached a provider.
    */
   readonly onPromptSent?: () => void;
+  readonly inputsCurrent?: () => boolean;
   /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
@@ -693,6 +694,13 @@ export class CodeTurnRunner {
           if (input.signal?.aborted) {
             yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
             return yield* fail("interrupted", "Code turn was cancelled before provider send.");
+          }
+          if (input.inputsCurrent?.() === false) {
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            return yield* fail(
+              "failed",
+              "The original continuation inputs are no longer available. No prompt was sent.",
+            );
           }
           timing = startTurnMetrics(clock());
           yield* connection

@@ -28,6 +28,17 @@ definition across files from a confined language server; see
 highlighting and editing fundamentals only; deeper tooling is handled through
 external-editor handoff.
 
+Kept conversation, file, preview and Canvas tabs return after restarting this
+window, in their prior order. The saved workspace chooses the selected tab;
+restoration does not restart a command or send a draft. Temporary sidebar
+previews are not kept. A missing or unavailable tab shows the host's explanation
+when selected. References stay separate for each host, Project, mode and window.
+
+For a supported provider, **Force stop** appears ten seconds after **Stop turn**
+if the turn has not ended. It stops only that attempt's owned runtime process.
+Shared runtimes do not offer it. Queued messages and conversation history stay
+in place, and a failure is reported instead of killing another process.
+
 File states are **dirty**, **saving**, **saved**, **conflicted**,
 **unavailable**, and **closed**.
 

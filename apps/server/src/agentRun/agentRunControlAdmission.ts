@@ -24,6 +24,7 @@ import {
   type AgentRunPoolRoutingContext,
   type ProviderReadinessPort,
   resolveParentContextSelection,
+  assertParentInputAdmission,
 } from "./agentRunCreationService";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -141,6 +142,12 @@ export async function admitAgentRunControlRequest(
       const selection = resolveParentContextSelection(dependencies.parentContext, {
         parentThreadId: controlRequest.parentThreadId,
         mode: creationAuthority.parentMode,
+      });
+      assertParentInputAdmission({
+        selection,
+        policy: controlRequest.contextInputPolicy ?? "preserve",
+        readiness: dependencies.providerReadiness,
+        ...(controlRequest.pool === undefined ? { target: creationAuthority.parentRoute } : {}),
       });
       parentContext = { resolve: () => selection };
     } catch (error) {
@@ -275,6 +282,8 @@ function matchesIdempotentControlRequest(
     matchesIdempotentPool(existing.routingReceipt.poolRoute?.decision.request.pool, request.pool) &&
     (existing.routingReceipt.admittedContextBlocks !== undefined) ===
       (request.includeParentContext === true) &&
+    (existing.routingReceipt.contextInputPolicy ?? "preserve") ===
+      (request.contextInputPolicy ?? "preserve") &&
     authorityIsWithin(existing.authority, parent.parentAuthority) &&
     authorityIsWithin(existing.authority, parent.liveAuthority)
   );

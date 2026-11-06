@@ -1,3 +1,4 @@
+import { decodeConversationInputManifest } from "@octant/contracts/conversation-inputs";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -985,6 +986,69 @@ describe("createAgentRunSessionRuntime", () => {
     await settled(handle);
 
     expect(provider.turns[0]?.context).toEqual(admitted);
+  });
+
+  it("delivers admitted original inputs and refuses provider startup after their source is revoked", async () => {
+    const original = agentRun();
+    const run = {
+      ...original,
+      routingReceipt: {
+        ...original.routingReceipt,
+        admittedInputCount: 1,
+        contextInputPolicy: "preserve" as const,
+      },
+    };
+    const manifest = decodeConversationInputManifest({
+      version: 1,
+      purpose: "child-delegation",
+      items: [
+        {
+          status: "included",
+          input: {
+            source: {
+              mode: "chat",
+              threadId: "33333333-3333-4333-8333-333333333333",
+              attachmentId: "77777777-7777-4777-8777-777777777777",
+            },
+            displayName: "Original report.pdf",
+            mediaType: "application/pdf",
+            byteLength: 4,
+            digest: "a".repeat(64),
+          },
+        },
+      ],
+    });
+    const attachments = [
+      {
+        attachmentId: "source-report",
+        displayName: "Original report.pdf",
+        mediaType: "application/pdf",
+        bytes: new Uint8Array([1, 2, 3, 4]),
+      },
+    ];
+    let available = true;
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "text-delta", sessionId, text: "Read the original report." }).then(() =>
+          emit({ kind: "completed", sessionId }),
+        );
+      },
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        context: { resolve: () => context, inputs: () => (available ? manifest : undefined) },
+        inputsCurrent: () => available,
+        prepareInputs: async () => attachments,
+      }),
+    );
+    const firstOutcome = await settled(runtime.start(run));
+    expect(firstOutcome).toMatchObject({ kind: "completed" });
+    expect(provider.turns[0]?.attachments).toEqual(attachments);
+    available = false;
+    const refused = await settled(runtime.start(run));
+    expect(refused.kind).toBe("failed");
+    expect(provider.starts).toHaveLength(1);
+    expect(provider.turns).toHaveLength(1);
   });
 
   it("declines provider approvals instead of consenting on the user's behalf", async () => {

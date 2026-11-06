@@ -717,6 +717,7 @@ A child run starts only when the thread's agent delegates through `octant_agents
 - Subagent creation is one setting with two values, Off and Automatic. Only the thread's agent starts a child, and the parent and child hierarchy is the only subagent surface. _Here only._
 - The host prepares the child's workspace (research-only for Chat, the Project root for Work, an isolated managed worktree for Code); no client supplies a path, and wider-than-parent grants are refused.
 - Children default to committed revision. The person may explicitly review and select a stable current-edits checkpoint for children from a parent task; each child records its base/snapshot and preserves staging independently. Incomplete or stale snapshots refuse before admission; copies are never silently reapplied. Provider-owned hidden subagents stay disabled.
+- Opt-in parent context preserves up to eight original user inputs (32 MiB total) through a purgeable immutable manifest. Unsupported, missing, changed or revoked inputs refuse delivery; explicit text-only context records omissions, including bounded counts for unlisted originals and an honest unavailable-metadata marker. The child can inspect its source input manifest separately from its brief and report.
 - Concurrency is the person's setting (defaults 4 per thread and 8 per host, at most 16); a turn defaults to 30 working minutes, person-selectable from 1–240 before the next attempt. Retry/Resume start fresh; approval and answer waits pause the clock, and independent two-minute acquisition/startup bounds remain. Recorded attempt and cumulative working time use the existing result evidence and label gaps.
 - Cancelling a child tree proceeds leaves-up and completes only after each process is confirmed stopped; an ambiguous outcome becomes waiting, failed or interrupted, never completed. _Here only._
 
@@ -906,7 +907,7 @@ A turn stopped by an explicit provider usage-limit signal carries a provider-neu
 - The reset timer is an in-process host timer that continues through the ordinary turn-admission path, with no cloud wake and no billing automation.
 - A stale recovery settles as invalidated rather than firing against newer state.
 - Chat, Work and Code each cut a turn off after five minutes without a provider event, because a long tool call can leave a provider silent. _Here only._
-- A provider whose sessions each own a process offers Force stop in Chat ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude; Work and Code turns not built yet).
+- A provider whose sessions each own a process offers Force stop in Chat, Work and Code ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude). Work requires the exact stopped request/thread/turn; Code requires the original stopped turn operation. Neither accepts a PID or kills a replacement attempt.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1199,8 +1200,10 @@ Status: Built. Since: —. Detail: [Architecture: Held standing context](../arch
 When a conversation moves to a new session, the new provider gets a bounded, disclosed text handoff. It never resumes the old session.
 
 - The handoff is journaled before the prompt is sent, with counts, taint and omissions. Hidden reasoning, tool activity and the previous native session never transfer.
-- A Chat or Work turn needs a handoff only when the destination provider keeps its own session, and Chat gains no filesystem or shell authority from it.
+- A Chat or Work turn needs a text handoff only when the destination provider keeps its own session. Original user inputs are preserved separately on provider changes, rewind, supported forks or branches and Code fork merge-back, including host-rebuilt conversation. Exact source bytes, current scope and target modality are checked; an explicit text-only choice records omissions. Chat gains no filesystem or shell authority.
+- Purgeable destination-owned manifests freeze the admitted input identity across retries and restart. A missing, changed, unsupported or revoked original refuses the send; native fork/rewind state is not duplicated as attachment inputs.
 - A switch that cannot hand over refuses before the provider starts, with a named reason.
+- Continue elsewhere reuses provider changes and existing paired-screen transport, identifies execution host separately from controlling screen, and discloses retained state and omissions. A task link selects the same existing task after authentication and never clones a writer or sends a draft. The explicit next-continuation text-only choice survives reload/queueing; the receiving thread can read its exact admitted input manifest.
 - Merging a fork's conversation back is explicit and approval-free and adds context only. File changes reach the source only through Git review, and outside content the fork took in taints the source.
 
 Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons).
@@ -2122,7 +2125,7 @@ Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion]
 The central workspace is one recursive split tree with one surface per leaf, and all layout operations are server-authoritative.
 
 - One visible tree belongs to one authority context. A cross-Project, cross-mode or cross-host placement is refused or offered in a new window.
-- Tabs add no persisted layout or authority. Dropping a sidebar thread on a composer attaches it as bounded context; nothing is sent and the source is not moved.
+- Kept content references and order persist locally per endpoint/window/pane and exact authority context; temporary thread previews are omitted. Restoration reuses the authoritative selected surface and performs no open or side effect; every later activation is authorized by the host. Tabs add no persisted layout or authority. Dropping a sidebar thread on a composer attaches it as bounded context; nothing is sent and the source is not moved.
 - Layout persists per client window, mode and Project context and restores after restart. A mode preset applies only when no saved layout exists or the person restores it. _Here only._
 - File and artifact previews are host-authorized and read-only. The renderer never receives a host path, every open is re-authorized, scripts, remote resources, macros and formulas are disabled, and a missing source restores as a placeholder, never another file. _Here only._
 
@@ -2189,7 +2192,7 @@ Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspac
 A thread or Project can start from a forge issue, a tracker issue or a cloned repository, without write-back.
 
 - Creating from an issue attaches only its identity. The server reauthorizes, frames redacted text as external content and journals the ingestion. There is no write-back.
-- A local window may start a Work or Code thread from a Claude Code or Codex terminal session of the Project's own folder. Creating attaches only the provider and session id; the server rereads the session, refuses another folder, keeps only the person's and the assistant's words within a fixed bound, marks the thread with outside content before it exists, and journals the history with the thread so purging erases it. The first admitted turn hands the history to the model once, framed as outside data. A paired device cannot start one, and a thread starts from an issue or a session, never both. The provider's session is not resumed, nothing is uploaded, and nothing is written back.
+- A local window may start a Work or Code thread with a labeled text handoff from a Claude Code or Codex session in its Project's canonical root, subfolders or verified managed Code worktrees. The server resolves scopes, rechecks canonical provenance and refuses foreign folders and symlink escapes; clients supply no paths. It retains only bounded visible user/assistant words, marks outside content before creation and shows the exact original folder and explicit omissions. Native adoption is refused while historical account binding, runtime compatibility and exclusive ownership cannot be proved; the current adapters cannot supply that proof. The new thread never clones the unverified native writer. A paired device cannot start one, and an issue and session cannot be combined. Nothing is written back to the tool's files.
 - Cloning verifies identity and origin before materializing, promotes atomically without overwriting, and issues a one-time binding receipt.
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).

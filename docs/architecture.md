@@ -1218,14 +1218,21 @@ person with its time, and replays like any other thread update.
 Stop asks the runtime to end a turn. When the runtime does not end it, a
 provider whose sessions each own a process (reported as the `forceStop`
 capability, Claude today) lets the person **Force stop** the turn ten seconds
-after pressing Stop in Chat. The server's `force-stop-chat-turn` command kills
+after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
 `forceStop` unsupported: the command is refused, the UI never offers it, and
 Stop settles the attempt at once as before. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
-did not take stays visible. Work and Code do not offer Force stop yet.
+did not take stays visible. Work returns `stop-requested` while its exact
+request-owned supported runtime is still ending. Its force command requires the
+same request/thread/turn and an already-aborted owned controller. Code's force
+command additionally names the original turn operation, rejects replacement
+operations and requires that Stop already reached that controller. Neither path
+accepts a PID or kills a shared runtime; the provider owns process verification.
+The normal turn lifecycle records completion/cancellation, preserving queued
+messages and history. A kill failure leaves an explicit recovery error.
 
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for
@@ -1888,8 +1895,10 @@ now also move back in place. Chat's differences are under **Chat** below.
   marked when its source is, and leaves the source untouched. The carried turns
   are copied into the fork's own journal in the same unit that creates it,
   each naming the source turn it came from, so every later read is of the
-  fork's own turns; attachments, tool steps, and changed-file records stay with
-  the source. Its first turn on a provider that keeps its own session starts a
+  fork's own turns. Original attachment references retain their source identity;
+  bytes are read only for an admitted continuation, as described under
+  **Original inputs in continuations** below. Tool steps and changed-file
+  records stay with the source. Its first turn on a provider that keeps its own session starts a
   new session with the carried turns as a disclosed text handoff; a host that
   rebuilds the conversation reads them from the copies.
 - **Rewind to here** on a person's message removes that turn and every later
@@ -2208,6 +2217,23 @@ unfinished reply is disclosed as omitted. The selection is read before a child
 workspace is allocated, so a refusal names the reason (for example, no readable
 messages yet or a conversation that changed during the read) and leaves no
 worktree behind.
+
+When parent context includes original user attachments, admission captures at
+most eight immutable input references (32 MiB in all), including source mode,
+thread and attachment identity, media type, name, length and digest. These
+references share the purgeable context snapshot; the journal records only the
+input count and preserve/text-only policy. The destination's observed native
+attachment capability and model modality must support every selected input.
+Missing source metadata or unsupported input refuses creation; the caller can
+choose another model or explicitly request text-only context. A waiting pool
+route checks the eventual target before provider startup. Execution re-reads
+exact bytes, verifies their digest and source lifecycle, and refuses the whole
+send if any required input changed, disappeared or was revoked. Restart uses
+the same recorded selection. A native follow-up verifies the selection without
+appending duplicate original inputs to the retained session. A separate input
+receipt distinguishes original user inputs from the coordinator's brief and
+report, both in provider context and the child's conversation view. Deleting
+the parent destroys its manifest together with its derived conversation.
 
 Finished siblings currently owing a result to the same parent can be delivered
 in one ordinary parent turn, capped at 16 members and 32,768 prompt characters.
@@ -6547,6 +6573,38 @@ Work thread's model picker offers its own provider's models only where its
 next turn will accept them, and every other provider. A Chat or Work thread
 whose own provider is gone is offered every provider.
 
+**Original inputs in continuations.** Child delegation, provider/model switches,
+rewind, Work and Code forks, Chat branches and Code fork merge-back preserve
+original user inputs separately from the selected conversation text. Only the
+modes that support each action may supply inputs. A source reference names the
+original thread, Project where known, attachment identity, display name, media
+type, length and digest. Repeated matching references select one original before
+input bounds; conflicting metadata for the same identity refuses the selection.
+A nested fork or branch retains that identity instead
+of pretending the receiving thread owns the original bytes. Each destination
+reopens the existing attachment store, checks current source and destination
+scope, verifies exact bytes and observes the target model's attachment support.
+It refuses a missing, changed, unsupported or revoked input before provider send;
+no description, transcript excerpt or model summary substitutes for the original.
+Only an explicit text-only choice may omit original inputs, and its receipt names
+those omissions. A text-only selection retains at most eight individual input
+references and counts additional omitted inputs within the bounded 384-input
+source selection; unavailable original metadata is marked unknown rather than
+inventing filenames or a count. Those unlisted or unknown originals cannot be
+restored by upgrading the same admission: a fresh handoff must select them
+explicitly. New-turn inputs and retained product feedback share the provider's
+attachment bound; an oversized pending feedback batch stays pending.
+
+The bounded manifest lives in the receiving thread's existing purgeable attachment
+scope. The journal stores its identity, digest, purpose, policy and counts, without
+filenames or bodies. A recovered admitted turn reopens that manifest rather than
+selecting replacement originals. Source deletion or Project movement refuses later
+preserving sends; destination purge removes its manifests. A successful native
+fork or rewind keeps the runtime's own input state and does not duplicate those
+attachments in a text handoff. Ordinary follow-ups in an existing native session
+keep their existing turn-only attachment behavior. These references grant no
+filesystem, Project, execution or native-writer authority.
+
 **Provider-switch handoff (Code).** A Code turn whose last recorded session
 belongs to another provider instance on the same checkout starts a new session
 on the thread's current provider; it never resumes or names the previous
@@ -6560,7 +6618,8 @@ so a switch to a small-context model does not overflow its window, each
 attributed to its provider and model, with
 the thread's taint and every omission counted (earlier messages, purged or
 oversized bodies, empty bodies, unfinished replies, attachments, truncation).
-Reasoning, tool bodies and attachments are never read. The switching turn's
+Reasoning and tool bodies are never read. Original user inputs are admitted
+separately under **Original inputs in continuations** below. The switching turn's
 own prompt is excluded from the selection because it is sent as the prompt.
 The host checks that what the selector returned is this thread's in this
 Project before using it.
@@ -6735,8 +6794,10 @@ conversation, at most 24 blocks of 4,000 characters including the summary,
 each message attributed to its provider and model, with the thread's taint and
 every omission counted (earlier messages, purged or oversized or empty bodies,
 unfinished replies, attachments, truncation). Superseded turns, reasoning, tool
-activity, research and attachment bodies, `#thread` mention and preview
-context, and Project memory are never part of it; the host adds the ordinary
+activity, research, `#thread` mention and preview
+context, and Project memory are never part of the text selection; original
+user inputs are admitted separately under **Original inputs in continuations**
+below; the host adds the ordinary
 per-turn context beside it as it does for any turn. Chat has no filesystem or
 shell authority and gains none: the handoff is text the thread already
 holds. The turn being sent is not in the thread yet, so it is never part of

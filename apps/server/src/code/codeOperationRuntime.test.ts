@@ -1,3 +1,4 @@
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
 import { withCodeOperationRuntime } from "../wiring/codeRuntime";
 import { createCodeRouteHandler } from "../codeRoutes";
@@ -64,7 +65,7 @@ import {
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
-import { Effect, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
   ProviderConnection,
   ProviderDriver,
@@ -3127,6 +3128,63 @@ describe("CodeOperationRuntime", () => {
       await fixture.runtime.close();
       fixture.close();
     });
+  });
+
+  it("force-stops only the stopped exact provider attempt and refuses a replaced attempt", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+      forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(710),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      const stopping = fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(711),
+        threadId,
+        checkoutId,
+      });
+      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(712),
+          turnOperationId: operationId(709),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.forceStop).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(713),
+          turnOperationId: operationId(710),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      await stopping;
+      expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
@@ -6736,8 +6794,87 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it.each([true, false])(
+    "carries original screenshot input on a Code provider switch only when supported: %s",
+    async (supports) => {
+      const drivers = twoHarnesses();
+      const bytes = new Uint8Array([137, 80, 78]);
+      const reference = {
+        source: {
+          mode: "code" as const,
+          threadId: String(threadId),
+          attachmentId: "30000000-0000-4000-8000-000000000001",
+          projectId: String(thread().projectId),
+        },
+        displayName: "Original.png",
+        mediaType: "image/png",
+        byteLength: bytes.length,
+        digest: createHash("sha256").update(bytes).digest("hex"),
+      };
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        inputTransfer: (directory) =>
+          new ConversationInputTransfer({
+            dataDirectory: directory,
+            ownerCurrent: () => true,
+            sourceCurrent: () => true,
+            read: async () => bytes,
+            supports: () => supports,
+          }),
+        providerSwitchContext: (input) => {
+          const selected = selectThreadConversation(fixture, input);
+          return selected.status === "available" ? { ...selected, inputs: [reference] } : selected;
+        },
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+        const result = await sendAfterSwitch(fixture);
+        if (!supports) {
+          expect(result).toMatchObject({
+            state: "failed",
+            failure: { message: expect.stringContaining("Original.png (unsupported)") },
+          });
+          expect(drivers.harness.start).not.toHaveBeenCalled();
+          expect(drivers.harness.send).not.toHaveBeenCalled();
+          return;
+        }
+        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+        expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+          expect.objectContaining({ displayName: "Original.png", bytes }),
+        ]);
+        expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+          inputReceipt: { purpose: "provider-switch", included: 1, omitted: 0 },
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("reads a journaled handoff back after a restart instead of choosing it again", async () => {
     const drivers = twoHarnesses();
+    const bytes = new Uint8Array([137, 80, 78]);
+    const originalInput = {
+      source: {
+        mode: "code" as const,
+        threadId: String(threadId),
+        attachmentId: "30000000-0000-4000-8000-000000000001",
+      },
+      displayName: "Original.png",
+      mediaType: "image/png",
+      byteLength: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const inputTransfer = (directory: string) =>
+      new ConversationInputTransfer({
+        dataDirectory: directory,
+        ownerCurrent: () => true,
+        sourceCurrent: () => true,
+        read: async () => bytes,
+        supports: () => true,
+      });
     // The new session opens and the handoff is journaled, but the prompt never
     // goes out and nothing streams back: what a host exit at that moment leaves.
     const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -6754,7 +6891,13 @@ describe("provider switch handoff", () => {
         String(current.providerInstanceId) === String(harnessInstance)
           ? stalled
           : drivers.resolveProviderDriver(current),
-      providerSwitchContext: (input) => firstSelection(input),
+      inputTransfer,
+      providerSwitchContext: (input) => {
+        const selection = firstSelection(input);
+        return selection.status === "available"
+          ? { ...selection, inputs: [originalInput] }
+          : selection;
+      },
     });
     const restartedDrivers = twoHarnesses();
     const restartedSelection = vi.fn(() => ({
@@ -6776,6 +6919,7 @@ describe("provider switch handoff", () => {
       restarted = runtimeFixture({
         resolveProviderDriver: restartedDrivers.resolveProviderDriver,
         providerSwitchContext: restartedSelection,
+        inputTransfer,
         restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
       });
       restarted.setThread(onProvider(harnessInstance, "harness-model", 2));
@@ -6785,6 +6929,9 @@ describe("provider switch handoff", () => {
       // The recovered start sends the handoff first disclosed, without reading
       // the conversation again, and journals no second handoff.
       expect(restartedSelection).not.toHaveBeenCalled();
+      expect(vi.mocked(restartedDrivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+        expect.objectContaining({ displayName: "Original.png", bytes }),
+      ]);
       const context = vi.mocked(restartedDrivers.harness.send).mock.calls[0]![0].context ?? [];
       expect(context.slice(0, journaled.blocks.length)).toEqual(journaled.blocks);
       const frames = await restarted.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
@@ -7446,6 +7593,102 @@ describe("provider switch handoff", () => {
       });
     });
 
+    it.each(["current", "folder-revoked", "source-revoked"] as const)(
+      "keeps a fork’s selected provider folder and original screenshot together (%s)",
+      async (admission) => {
+        const drivers = twoHarnesses();
+        let folderCurrent = true;
+        let sourceCurrent = true;
+        const acquired: Array<{
+          readonly projectRoot: string;
+          readonly extraFolders?: ReadonlyArray<string>;
+        }> = [];
+        const bytes = new Uint8Array([137, 80, 78]);
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(threadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Original.png",
+          mediaType: "image/png",
+          byteLength: bytes.length,
+          digest: createHash("sha256").update(bytes).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: async (current) => {
+            const driver = await drivers.resolveProviderDriver(current);
+            return {
+              ...driver,
+              acquire: (input) => {
+                acquired.push(input);
+                return driver.acquire(input);
+              },
+            };
+          },
+          resolveCheckoutRoot: async () => ({
+            checkoutRoot: "/private/exact",
+            workingDirectory: "/approved/notes",
+            rootCurrent: () => folderCurrent,
+            shell: "/bin/zsh",
+            credentialReferences: [],
+            environment: {},
+          }),
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => sourceCurrent,
+              read: async () => {
+                await Promise.resolve();
+                if (admission === "folder-revoked") folderCurrent = false;
+                if (admission === "source-revoked") sourceCurrent = false;
+                return bytes;
+              },
+              supports: () => true,
+            }),
+          forkContext: (input) => {
+            const selected = fixture.selectForkConversation(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
+        });
+        try {
+          await finishFirstTurn(fixture, drivers, providerInstance);
+          fixture.setOtherThread(
+            decodeCodeThread({
+              ...forkOn(harnessInstance, "harness-model"),
+              workingFolderId: `folder_${"a".repeat(64)}`,
+            }),
+          );
+          const result = await sendOnFork(fixture);
+          if (admission !== "current") {
+            expect(result).toMatchObject({ state: "failed" });
+            expect(acquired).toHaveLength(1);
+            expect(drivers.harness.send).not.toHaveBeenCalled();
+            return;
+          }
+          expect(acquired.at(-1)).toMatchObject({
+            projectRoot: "/approved/notes",
+            extraFolders: expect.arrayContaining(["/private/exact"]),
+          });
+          await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+          expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+            expect.objectContaining({ displayName: "Original.png", bytes }),
+          ]);
+          expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toMatchObject({
+            reason: "fork",
+            inputReceipt: { purpose: "fork", included: 1 },
+          });
+          expect(drivers.harness.resume).not.toHaveBeenCalled();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
     describe("merging a fork's conversation back into its source", () => {
       const sourceSession = sessionId;
 
@@ -7499,6 +7742,96 @@ describe("provider switch handoff", () => {
       async function sourceFrames(fixture: ReturnType<typeof runtimeFixture>, n = 85) {
         return fixture.runtime.subscribe(windowId, threadId, operationId(n), 0, 50);
       }
+
+      it("retains merge-back inputs and pending feedback until the exact original screenshot can be delivered", async () => {
+        const drivers = twoHarnesses();
+        const original = new Uint8Array([137, 80, 78]);
+        let bytes = original;
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(forkThreadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Fork original.png",
+          mediaType: "image/png",
+          byteLength: original.length,
+          digest: createHash("sha256").update(original).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => true,
+              read: async () => bytes,
+              supports: () => true,
+            }),
+          forkMergeBackContext: (input) => {
+            const selected = fixture.selectForkMergeBack(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
+        });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          expect(
+            await fixture.runtime.mergeForkContext?.(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toMatchObject({ status: "merged" });
+          await fixture.feedback.execute(windowId, {
+            kind: "capture-product-feedback",
+            threadId,
+            mode: "code",
+            contextId: operationId(40),
+            point: { x: 0.3, y: 0.5 },
+            comment: "Keep this feedback pending on a refused handoff.",
+          });
+          bytes = new Uint8Array([0, 1]);
+          expect(await sendOnSource(fixture)).toMatchObject({
+            state: "failed",
+            failure: { message: expect.stringContaining("Fork original.png (changed)") },
+          });
+          expect(drivers.provider.send).toHaveBeenCalledTimes(1);
+          expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+            { lifecycle: "pending" },
+          ]);
+          bytes = original;
+          await sendOnSource(fixture, 86);
+          await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+          expect(vi.mocked(drivers.provider.send).mock.calls[1]?.[0].attachments).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ displayName: "Fork original.png", bytes: original }),
+            ]),
+          );
+          expect(await sourceFrames(fixture, 86)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                event: expect.objectContaining({
+                  kind: "fork-context-delivered",
+                  inputReceipt: expect.objectContaining({
+                    purpose: "fork-merge-back",
+                    included: 1,
+                  }),
+                }),
+              }),
+            ]),
+          );
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
 
       it.each([
         {
@@ -7787,6 +8120,7 @@ function selectThreadConversation(
 }
 
 function runtimeFixture(options: {
+  inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   browserProfiles?: Parameters<typeof createCodeOperationRuntime>[0]["browserProfiles"];
@@ -8115,6 +8449,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.inputTransfer === undefined
+      ? {}
+      : { conversationInputTransfer: options.inputTransfer(directory) }),
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),

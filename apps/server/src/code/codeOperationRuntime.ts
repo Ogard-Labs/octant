@@ -1,3 +1,12 @@
+import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import type {
+  ConversationInputReceipt,
+  ConversationInputPurpose,
+  ConversationInputPolicy,
+} from "@octant/contracts/conversation-inputs";
+import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
+import type { ProviderAttachmentInput } from "@octant/contracts";
 import { type Questionnaire } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler";
@@ -367,6 +376,7 @@ export interface CodeOperationRuntimeOptions {
   readonly evidence: CodeOperationEvidencePort;
   /** The images Code threads have staged for their next turn. */
   readonly attachments?: CodeAttachmentStore;
+  readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   readonly approvalValidator?: CodeApprovalValidationPort;
   readonly approvalStore?: CodeOperationApprovalStore;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
@@ -806,6 +816,7 @@ export interface CodeOperationRuntime {
     windowId: WindowId,
     forkThreadId: CodeThreadId,
     throughOperationId: string,
+    contextInputPolicy?: ConversationInputPolicy,
   ): Promise<CodeForkMergeBackOutcome>;
   /** The files a fork of `source` at `throughOperationId` starts from. */
   forkPoint(
@@ -1845,9 +1856,12 @@ export function createCodeOperationRuntime(
         providerInstanceId: thread.providerInstanceId,
       });
     },
-    mergeForkContext: (windowId, forkThreadId, throughOperationId) =>
+    mergeForkContext: (windowId, forkThreadId, throughOperationId, contextInputPolicy) =>
       mergeForkConversation(
         {
+          ...(options.conversationInputTransfer === undefined
+            ? {}
+            : { conversationInputTransfer: options.conversationInputTransfer }),
           read: options.forkMergeBackContext,
           readThread: (id) => options.persistence.readCodeThread(id),
           canAccessProject: (id, projectId) => options.windowAccess.canAccessProject(id, projectId),
@@ -1859,7 +1873,12 @@ export function createCodeOperationRuntime(
             : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
           uuid: options.uuid,
         },
-        { windowId, forkThreadId, throughOperationId },
+        {
+          windowId,
+          forkThreadId,
+          throughOperationId,
+          ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
+        },
       ),
     forkPoint: async (windowId, source, throughOperationId) => {
       if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
@@ -2394,6 +2413,7 @@ export function threadOfActiveSession(
 }
 
 interface ActiveTurn {
+  readonly inputsCurrent?: () => boolean;
   /**
    * A provider-switch or fork handoff this turn selected and has not
    * journaled yet. It is journaled when the new session is ready, before the
@@ -2996,6 +3016,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       | {
           readonly blocks: ReadonlyArray<ProviderContextBlock>;
           readonly record?: PendingHandoffRecord;
+          readonly inputSelection?: Extract<
+            AgentRunParentContextSelection,
+            { readonly status: "available" }
+          >;
+          readonly inputReceipt?: ConversationInputReceipt;
         }
       | undefined;
     if (forkOrigin !== undefined && switchHandoff === undefined) {
@@ -3029,10 +3054,99 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(CODE_FORK_HANDOFF_REFUSALS["handoff-unreadable"]);
     }
+    const transferredAttachments: ProviderAttachmentInput[] = [];
+    const inputGuards: Array<() => boolean> = [];
+    const inputContext: ProviderContextBlock[] = [];
+    for (const handoff of [switchHandoff, forkHandoff]) {
+      if (
+        handoff === undefined ||
+        handoff.record?.reason === "fork-native-session" ||
+        handoff.record?.reason === "rewind-native-session" ||
+        ("journaled" in handoff && handoff.journaled === "native-session")
+      )
+        continue;
+      const selection = handoff.inputSelection;
+      const receipt = handoff.inputReceipt;
+      if (
+        (selection?.inputs?.length ?? 0) === 0 &&
+        selection?.inputUnavailable !== true &&
+        receipt === undefined
+      )
+        continue;
+      const transfer = this.#options.conversationInputTransfer;
+      if (transfer === undefined) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "Original source inputs cannot be transferred on this host. Nothing was sent.",
+        );
+      }
+      if (
+        receipt !== undefined &&
+        command.contextInputPolicy !== undefined &&
+        command.contextInputPolicy !== receipt.policy
+      ) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "This admitted turn keeps its original input choice. Start a new turn to choose different inputs.",
+        );
+      }
+      const purpose: ConversationInputPurpose =
+        receipt?.purpose ??
+        (handoff.record?.reason === "fork"
+          ? "fork"
+          : handoff.record?.reason === "rewind"
+            ? "rewind"
+            : "provider-switch");
+      const prepared = await transfer.prepare({
+        owner: {
+          mode: "code",
+          threadId: String(input.thread.id),
+          projectId: String(input.thread.projectId),
+        },
+        purpose,
+        ...(selection === undefined ? {} : { selection }),
+        ...(receipt === undefined ? {} : { previous: receipt }),
+        ...(command.contextInputPolicy === undefined ? {} : { policy: command.contextInputPolicy }),
+        target: {
+          providerInstanceId: String(input.thread.providerInstanceId),
+          modelId: String(input.thread.modelId),
+        },
+        current: () => input.admissionCurrent?.() !== false,
+      });
+      if (prepared.status === "refused") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(prepared.message);
+      }
+      if (prepared.inputsCurrent !== undefined) inputGuards.push(prepared.inputsCurrent);
+      transferredAttachments.push(...prepared.attachments);
+      if (prepared.receipt !== undefined) {
+        inputContext.push(conversationInputReceiptBlock(prepared.manifest));
+        if (handoff.record !== undefined) {
+          const record = {
+            ...handoff.record,
+            inputReceipt: prepared.receipt,
+            ...("omissions" in handoff.record
+              ? {
+                  omissions: {
+                    ...handoff.record.omissions,
+                    attachments: Math.max(
+                      0,
+                      handoff.record.omissions.attachments - prepared.receipt.included,
+                    ),
+                  },
+                }
+              : {}),
+          };
+          if (handoff === switchHandoff) switchHandoff = { ...switchHandoff, record };
+          else forkHandoff = { ...forkHandoff, blocks: handoff.blocks, record };
+        }
+      }
+    }
     // Conversation a person merged back from a fork of this thread goes with
     // its next turn, disclosed and journaled before the prompt is sent. A turn
     // that cannot read it refuses rather than dropping it silently.
     let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
+    let recoveredMergeInputs = false;
     try {
       const replay = this.#events.replay({
         threadId: input.thread.id,
@@ -3040,6 +3154,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         afterCursor: 0,
         limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
       });
+      recoveredMergeInputs =
+        replay.status === "ok" &&
+        replay.frames.some((frame) => frame.event.kind === "fork-context-delivered");
       forkMerges =
         replay.status === "ok"
           ? await forkMergeDelivery(
@@ -3053,6 +3170,77 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (forkMerges.status === "refused") {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
+    }
+    for (const entry of forkMerges.inputReceipts ?? []) {
+      if (
+        recoveredMergeInputs &&
+        command.contextInputPolicy !== undefined &&
+        command.contextInputPolicy !== entry.receipt.policy
+      ) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "This admitted turn keeps its original merge-back input choice. Start a new turn to choose different inputs.",
+        );
+      }
+      const transfer = this.#options.conversationInputTransfer;
+      if (transfer === undefined) {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(
+          "Merged original inputs are unavailable on this host. Pending feedback was retained.",
+        );
+      }
+      const prepared = await transfer.prepare({
+        owner: {
+          mode: "code",
+          threadId: String(input.thread.id),
+          projectId: String(input.thread.projectId),
+        },
+        purpose: "fork-merge-back",
+        previous: entry.receipt,
+        ...(command.contextInputPolicy === undefined ? {} : { policy: command.contextInputPolicy }),
+        target: {
+          providerInstanceId: String(input.thread.providerInstanceId),
+          modelId: String(input.thread.modelId),
+        },
+        current: () => input.admissionCurrent?.() !== false,
+      });
+      if (prepared.status === "refused") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(prepared.message);
+      }
+      if (prepared.inputsCurrent !== undefined) inputGuards.push(prepared.inputsCurrent);
+      transferredAttachments.push(...prepared.attachments);
+      inputContext.push(conversationInputReceiptBlock(prepared.manifest));
+      const deliveredReceipt = prepared.receipt;
+      if (deliveredReceipt !== undefined)
+        forkMerges = {
+          ...forkMerges,
+          records: forkMerges.records.map((record) =>
+            record.mergeOperationId === entry.mergeOperationId
+              ? {
+                  ...record,
+                  inputReceipt: deliveredReceipt,
+                  omissions: {
+                    ...record.omissions,
+                    attachments:
+                      record.omissions.attachments +
+                      Math.max(
+                        0,
+                        (record.inputReceipt?.included ?? entry.receipt.included) -
+                          deliveredReceipt.included,
+                      ),
+                  },
+                }
+              : record,
+          ),
+        };
+    }
+    const originalInputCount = (input.attachments?.length ?? 0) + transferredAttachments.length;
+    if (originalInputCount > MAX_PROVIDER_ATTACHMENTS) {
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return failStart(
+        "Current and continuation inputs exceed the provider's attachment limit. Remove an input or explicitly choose text-only continuation. Pending feedback was retained.",
+      );
     }
     // A server thread's tools are bound last, before anything launches, so
     // no refusal after this point leaves them behind. The provider is
@@ -3073,7 +3261,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
     }
     // Driver, credentials, and fork preparation may outlive the host's admission.
-    if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false) {
+    if (
+      input.folderCurrent?.() === false ||
+      input.admissionCurrent?.() === false ||
+      inputGuards.some((current) => !current())
+    ) {
       await serverTools?.close?.().catch(() => undefined);
       return refuseRevokedAdmission();
     }
@@ -3081,7 +3273,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // here does not yield between the final admission check and owning the turn.
     let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
     try {
-      feedback = input.takeProductFeedback?.();
+      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
     } catch {
       // A feedback read failure must not prevent the person's message from running.
     }
@@ -3089,13 +3281,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(switchHandoff?.blocks ?? []),
       ...(forkHandoff?.blocks ?? []),
       ...forkMerges.blocks,
+      ...inputContext,
       ...(input.context ?? []),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
         : [{ kind: "user-message", text: feedback.context } as const]),
     ];
-    const attachments = [...(input.attachments ?? []), ...(feedback?.attachments ?? [])];
+    const attachments = [
+      ...(input.attachments ?? []),
+      ...transferredAttachments,
+      ...(feedback?.attachments ?? []),
+    ];
     const active: ActiveTurn = {
+      ...(inputGuards.length === 0
+        ? {}
+        : { inputsCurrent: () => inputGuards.every((current) => current()) }),
       ...(switchHandoff?.record !== undefined
         ? { pendingHandoff: { blocks: switchHandoff.blocks, record: switchHandoff.record } }
         : forkHandoff?.record !== undefined
@@ -3214,6 +3414,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         readonly record?: PendingHandoffRecord;
         /** What an already journaled record carried, when this read it back. */
         readonly journaled?: "text" | "native-session";
+        readonly inputSelection?: Extract<
+          AgentRunParentContextSelection,
+          { readonly status: "available" }
+        >;
+        readonly inputReceipt?: ConversationInputReceipt;
       }
     | { readonly status: "refused"; readonly refusal: HandoffRefusal }
     | undefined
@@ -3277,6 +3482,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         return {
           status: "ready",
           blocks: decodeAgentRunAdmittedContext(JSON.parse(text)),
+          ...(journaled.inputReceipt === undefined ? {} : { inputReceipt: journaled.inputReceipt }),
           journaled: "text",
         };
       } catch {
@@ -3344,6 +3550,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return {
       status: "ready",
       blocks: selection.blocks,
+      inputSelection: selection,
       record: {
         kind: "context-handoff-attached",
         reason,
@@ -3420,6 +3627,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         readonly status: "ready";
         readonly blocks: ReadonlyArray<ProviderContextBlock>;
         readonly record: PendingHandoffRecord;
+        readonly inputSelection: Extract<
+          AgentRunParentContextSelection,
+          { readonly status: "available" }
+        >;
       }
     | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
   > {
@@ -3447,6 +3658,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return {
       status: "ready",
       blocks: selection.blocks,
+      inputSelection: selection,
       record: {
         kind: "context-handoff-attached",
         reason: "fork",
@@ -4256,6 +4468,41 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  async forceStop(input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
+  }) {
+    const active = this.#owned(input.thread, input.checkoutRoot);
+    if (
+      active === undefined ||
+      String(active.operationId) !== String(input.turnOperationId) ||
+      !active.abort.signal.aborted ||
+      active.connection?.forceStop === undefined
+    )
+      return turnState("failed", {
+        category: "failed",
+        message:
+          "Only this host's exact stopped attempt on a supported runtime can be force-stopped.",
+      });
+    const connection = active.connection;
+    const kill = connection.forceStop;
+    if (kill === undefined) return turnState("failed");
+    try {
+      await Effect.runPromise(kill(decodeProviderSessionId(active.sessionId)));
+    } catch {
+      return turnState("failed", {
+        category: "failed",
+        message: "The owned runtime process could not be force-stopped.",
+      });
+    }
+    if (this.#owned(input.thread, input.checkoutRoot) !== active) return turnState("interrupted");
+    active.interruptMessage = "The provider attempt was stopped by force.";
+    active.state = "interrupted";
+    this.#persistRuntimeWork(active, "interrupted");
+    return turnState("interrupted");
+  }
+
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
@@ -4710,6 +4957,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       Effect.scoped(
         this.#runner.run({
           thread: active.thread,
+          ...(active.inputsCurrent === undefined ? {} : { inputsCurrent: active.inputsCurrent }),
           sessionId: active.sessionId as never,
           ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),
           onSessionReady: (handle) =>

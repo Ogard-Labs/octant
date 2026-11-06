@@ -1,5 +1,10 @@
 import { ChildWorktreeSnapshot } from "./childWorktreeSources";
 import { Schema } from "effect";
+import {
+  ConversationInputManifest,
+  ConversationInputPolicy,
+  MAX_CONVERSATION_INPUT_SELECTIONS,
+} from "./conversationInputs";
 import { CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
@@ -238,6 +243,10 @@ export const AgentRunRoutingReceipt = Schema.Struct({
       Schema.lessThanOrEqualTo(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
     ),
   ),
+  admittedInputCount: Schema.optional(
+    Schema.Int.pipe(Schema.between(0, MAX_CONVERSATION_INPUT_SELECTIONS)),
+  ),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   effectiveAuthorityDigest: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   capacityReservationId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   usageQuality: AgentRunUsageQuality,
@@ -547,6 +556,7 @@ export const AgentRunCommand = Schema.Union(
      * exactly when the receipt records `admittedContextBlocks`.
      */
     admittedContext: Schema.optional(AgentRunAdmittedContext),
+    admittedInputs: Schema.optional(ConversationInputManifest),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("confirm-agent-run"),
@@ -840,6 +850,7 @@ const AgentRunConversationFields = {
   modelId: ProviderModelId,
   lifecycleStatus: AgentRunLifecycleStatus,
   status: AgentRunConversationReadStatus,
+  inputManifest: Schema.optional(ConversationInputManifest),
   entries: Schema.Array(AgentRunConversationEntry).pipe(
     Schema.maxItems(MAX_AGENT_RUN_CONVERSATION_ENTRIES),
   ),

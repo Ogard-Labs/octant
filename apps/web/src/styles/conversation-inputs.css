@@ -1,0 +1,63 @@
+.conversation-inputs {
+  margin-block: var(--oct-space-2);
+  min-width: 0;
+}
+.conversation-inputs__details {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+  padding: var(--oct-space-2) var(--oct-space-3);
+}
+.conversation-inputs__details p {
+  margin-block: var(--oct-space-2);
+}
+.conversation-inputs__details ul {
+  padding-inline-start: var(--oct-space-4);
+}
+.conversation-inputs__details li {
+  margin-block: var(--oct-space-2);
+}
+.conversation-inputs__details small {
+  display: block;
+  font-size: inherit;
+}
+.continuation-dialog {
+  width: min(40rem, calc(100vw - var(--oct-space-6)));
+  max-height: calc(100dvh - var(--oct-space-6));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: var(--oct-space-5);
+}
+.continuation-dialog h2,
+.continuation-dialog h3 {
+  margin-block: var(--oct-space-3);
+}
+.continuation-dialog h2 {
+  font-size: var(--oct-text-lg);
+}
+.continuation-dialog h3 {
+  font-size: var(--oct-text-base);
+}
+.continuation-dialog dl {
+  display: grid;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+.continuation-dialog dd {
+  margin: 0;
+}
+.continuation-dialog__link {
+  display: block;
+  margin-block: var(--oct-space-3);
+}
+
+.continuation-dialog__input-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+.continuation-dialog__input-choice button {
+  white-space: normal;
+  height: auto;
+  min-height: var(--oct-space-8);
+}

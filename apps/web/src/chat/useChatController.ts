@@ -1,3 +1,4 @@
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   ChatClientFailure,
   createChatClient,
@@ -1396,6 +1397,7 @@ export function useChatController(options: ChatControllerOptions) {
        */
       sendOptions: {
         readonly composerDraft: "consume" | "keep";
+        readonly contextInputPolicy?: ConversationInputPolicy;
         readonly draftRevision?: number;
       } = { composerDraft: "consume" },
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
@@ -1437,6 +1439,9 @@ export function useChatController(options: ChatControllerOptions) {
       const result = await execute({
         kind: "send-chat-turn",
         ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+        ...(sendOptions.contextInputPolicy === undefined
+          ? {}
+          : { contextInputPolicy: sendOptions.contextInputPolicy }),
         threadId: activeView.thread.id,
         expectedVersion: expectedVersion ?? activeView.thread.version,
         prompt,

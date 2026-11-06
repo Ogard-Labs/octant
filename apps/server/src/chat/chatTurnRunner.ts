@@ -229,6 +229,7 @@ interface OpenChatQuestion {
 }
 
 export interface ChatTurnRunnerInput {
+  readonly inputsCurrent?: () => boolean;
   readonly thread: ChatThread;
   readonly attempt: ChatAttempt;
   readonly prompt: string;
@@ -1588,6 +1589,16 @@ export class ChatTurnRunner {
             yield* cancelOwnedSession();
             return yield* Effect.fail(
               decodeChatFailure({ category: "interrupted", message: "Chat turn was cancelled." }),
+            );
+          }
+          if (input.inputsCurrent?.() === false) {
+            yield* cancelOwnedSession();
+            return yield* Effect.fail(
+              decodeChatFailure({
+                category: "unavailable",
+                message:
+                  "The original continuation inputs are no longer available. No prompt was sent.",
+              }),
             );
           }
           timing = startTurnMetrics(clock());

@@ -260,7 +260,14 @@ sending it again.
 
 When the lead includes parent context, the child receives a bounded, attributed
 selection of accepted prompts and completed replies. Missing or omitted text
-is identified; private reasoning and tool bodies are excluded.
+is identified; private reasoning and tool bodies are excluded. Original images
+and documents are included when the selected model supports them, up to eight
+inputs and 32 MiB. Their names, types and inclusion or omission appear under
+**Original inputs** in the child's conversation. An unavailable or unsupported
+input stops the handoff; choose a capable model or explicitly ask for text-only
+parent context. The text-only receipt records what was omitted. Original inputs
+remain separate from the lead's brief and the child's report, and deleting the
+source thread revokes them.
 
 Child results must be **acknowledged** by the parent. On a terminal parent
 turn, unacknowledged, failed, interrupted, waiting, or unfinished descendants

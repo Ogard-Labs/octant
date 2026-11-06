@@ -1,3 +1,4 @@
+import type { ConversationInputManifest } from "@octant/contracts/conversation-inputs";
 import { agentRunResultReference } from "@octant/domain/agent-run-policy";
 import type { AgentRunResultEvidence } from "@octant/contracts";
 import {
@@ -172,7 +173,11 @@ export class AgentRunEventStore {
    * destroy it. Writing it here commits the selection and the receipt that
    * names it together or not at all.
    */
-  appendRequested(runInput: AgentRun, admittedContext?: AgentRunAdmittedContext): EventEnvelope {
+  appendRequested(
+    runInput: AgentRun,
+    admittedContext?: AgentRunAdmittedContext,
+    admittedInputs?: ConversationInputManifest,
+  ): EventEnvelope {
     let run: AgentRun;
     let aggregateId: typeof AggregateId.Type;
     let eventId: typeof EventId.Type;
@@ -211,12 +216,14 @@ export class AgentRunEventStore {
         admittedContext === undefined
           ? {}
           : {
-              beforeEvents: (connection) =>
+              beforeEvents: (connection) => {
                 writeAgentRunAdmittedContext(connection, {
                   run: admissionRun,
                   blocks: admittedContext,
+                  ...(admittedInputs === undefined ? {} : { inputs: admittedInputs }),
                   createdAt: admissionRun.createdAt,
-                }),
+                });
+              },
             },
       );
     } catch (error) {

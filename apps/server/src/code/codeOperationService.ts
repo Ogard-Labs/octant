@@ -1002,7 +1002,7 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: () => {
+    readonly takeProductFeedback?: (maxAttachments?: number) => {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };
@@ -1023,6 +1023,11 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
+  }) => Promise<CodeOperationTurnResult>;
+  readonly forceStop?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
@@ -1280,6 +1285,7 @@ export interface CodeOperationServiceOptions {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
     readonly supportsImages: boolean;
+    readonly maxAttachments?: number;
   }) => {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
@@ -4079,6 +4085,23 @@ export class CodeOperationService {
             decision: command.decision,
           }),
         );
+      case "force-stop-provider-turn":
+        return this.#providerResult(
+          command.operationId,
+          this.#options.turns.forceStop === undefined
+            ? {
+                state: "failed",
+                failure: {
+                  category: "failed",
+                  message: "This runtime does not support force-stopping an owned attempt.",
+                },
+              }
+            : await this.#options.turns.forceStop({
+                thread,
+                checkoutRoot: root.checkoutRoot,
+                turnOperationId: command.turnOperationId,
+              }),
+        );
       case "cancel-provider-turn": {
         // A turn still preparing is not the runtime's yet, so the runtime
         // cannot stop it; releasing it here is what lets a refused restore
@@ -5742,11 +5765,12 @@ export class CodeOperationService {
       ...(takeProductFeedback === undefined
         ? {}
         : {
-            takeProductFeedback: () =>
+            takeProductFeedback: (maxAttachments) =>
               takeProductFeedback({
                 threadId: command.threadId,
                 operationId: command.operationId,
                 supportsImages,
+                ...(maxAttachments === undefined ? {} : { maxAttachments }),
               }),
           }),
     });
@@ -6316,6 +6340,7 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "answer-provider-input":
     case "answer-provider-approval":
     case "cancel-provider-turn":
+    case "force-stop-provider-turn":
     case "attach-terminal":
       return "read";
     case "start-terminal":

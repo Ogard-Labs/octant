@@ -283,3 +283,18 @@ In Settings → Chat, turn off **Stream replies** to wait for the finished
 answer in Chat, Work, and Code. Reasoning remains expandable during the turn;
 approval requests and provider questions remain available immediately. Streaming
 is enabled by default. This preference changes presentation, not provider execution.
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

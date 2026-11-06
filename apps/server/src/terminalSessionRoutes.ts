@@ -97,7 +97,7 @@ export function createTerminalSessionRouteHandler(
     if (project === undefined || project.type === "chat" || project.lifecycle !== "active")
       return failure("That Project has no folder.", 404, origin);
     try {
-      const sessions = await dependencies.imports.list(project.binding.canonicalRoot);
+      const sessions = await dependencies.imports.list(project.binding.canonicalRoot, projectId);
       return json(decodeTerminalSessionListResponse({ sessions }), origin);
     } catch {
       return failure("Terminal sessions are unavailable.", 503, origin);

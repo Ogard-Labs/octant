@@ -350,6 +350,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     readonly threadMentionService: () => ThreadMentionService;
   } & Pick<
     FoundationsWiring,
+    | "conversationInputTransfer"
     | "browserAuthority"
     | "codeBoardEventStore"
     | "codeEvidence"
@@ -359,6 +360,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
+    conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
     agentRunPersistence,
@@ -597,6 +599,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "Worktree setup ownership is unavailable."
             : worktreePreparation.ensure(context);
         },
+        conversationInputTransfer,
         shield: hostShield,
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({
