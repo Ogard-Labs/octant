@@ -89,7 +89,7 @@ export function WorktreePreparationDialog(props: {
     try {
       const result = await props.client.execute({
         kind: "worktree-preparation",
-        ...props.target,
+        ...target,
         action,
         ...(action === "retry" ? { attemptId: decodeCodeOperationId(crypto.randomUUID()) } : {}),
       });
