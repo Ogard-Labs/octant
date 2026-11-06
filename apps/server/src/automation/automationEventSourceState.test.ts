@@ -56,6 +56,23 @@ describe("routine integration observations", () => {
     });
     expect(observe(state(next), [event("run:1:attempt:2")]).kind).toBe("checkpoint");
   });
+  it("detects loss of a full source window before conclusion filters hide its unseen entries", () => {
+    const baseline = state(
+      observe(initial, [], { window: { ids: ["old-success"], atLimit: false } }),
+    );
+    const ids = Array.from({ length: 100 }, (_, index) => `run-${index}`);
+    const lost = observe(baseline, [event("run-0")], { window: { ids, atLimit: true } });
+    expect(lost).toMatchObject({
+      kind: "checkpoint",
+      checkpoint: { phase: "needs-rearm", reason: "source-limit", automaticStarts: 0 },
+    });
+    expect(
+      observe(baseline, [event("run-0")], {
+        window: { ids: [...ids.slice(0, 99), "old-success"], atLimit: true },
+      }).kind,
+    ).toBe("claim");
+  });
+
   it("observes assignment transitions rather than ordinary updates of an assigned issue", () => {
     const baseline = state(observe(initial, [event("issue:1")], { semantics: "assignment-set" }));
     expect(observe(baseline, [event("issue:1")], { semantics: "assignment-set" }).kind).toBe(

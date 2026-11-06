@@ -31,12 +31,12 @@ export interface IntegrationEventSource {
   /** Assignment sets detect absent-to-present transitions; append sources retain seen event ids. */
   readonly semantics: "assignment-set" | "append";
   readonly current: () => boolean;
-  readonly read: (
-    signal: AbortSignal,
-  ) => Promise<
+  readonly read: (signal: AbortSignal) => Promise<
     | {
         readonly kind: "complete";
         readonly events: ReadonlyArray<import("@octant/contracts").AutomationIntegrationEvent>;
+        /** The complete bounded observation before event filters are applied. */
+        readonly window?: import("@octant/contracts").AutomationEventSourceWindow;
       }
     | {
         readonly kind: "unavailable";

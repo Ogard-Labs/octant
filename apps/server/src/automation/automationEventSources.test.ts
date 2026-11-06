@@ -8,6 +8,7 @@ import {
   EventActor,
   decodeAutomationCommand,
   type AutomationIntegrationEvent,
+  type AutomationEventSourceWindow,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
@@ -42,7 +43,7 @@ const event = (id: string): AutomationIntegrationEvent => ({
   routineOutput: false,
 });
 
-async function fixture() {
+async function fixture(missedRunPolicy: "skip" | "run-once" = "skip") {
   const directory = mkdtempSync(join(tmpdir(), "octant-routine-events-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -89,8 +90,10 @@ async function fixture() {
     now,
   });
   let events: ReadonlyArray<AutomationIntegrationEvent> = [];
+  let window: AutomationEventSourceWindow | undefined;
   let allowed = true;
   let observation: (() => Promise<void>) | undefined;
+  let readFailure: "unavailable" | "throw" | undefined;
   const provider: IntegrationEventSourceProvider = {
     choices: async () => [],
     bind: async () => ({
@@ -100,11 +103,15 @@ async function fixture() {
       current: () => allowed,
       read: async () => {
         await observation?.();
-        return { kind: "complete", events };
+        if (readFailure === "throw") throw new Error("Source unavailable");
+        if (readFailure === "unavailable")
+          return { kind: "unavailable", reason: "source-unavailable" };
+        return { kind: "complete", events, ...(window === undefined ? {} : { window }) };
       },
     }),
   };
   const draft = automationDefinitionDraftFixture({
+    missedRunPolicy,
     trigger: {
       kind: "integration-event",
       integrationId: "fixture",
@@ -155,6 +162,15 @@ async function fixture() {
     commands,
     offers,
     definition: created.automation,
+    window: (next: AutomationEventSourceWindow) => {
+      window = next;
+    },
+    advance: (milliseconds: number) => {
+      elapsed += milliseconds;
+    },
+    failure: (next: "unavailable" | "throw" | undefined) => {
+      readFailure = next;
+    },
     failLedger: () => {
       failLedger = true;
     },
@@ -201,6 +217,57 @@ describe("durable routine integration polling", () => {
     });
     f.sources.stop();
   });
+  it.each([
+    ["unavailable", "skip"],
+    ["throw", "skip"],
+    ["unavailable", "run-once"],
+    ["throw", "run-once"],
+  ] as const)(
+    "keeps complete coverage across a %s poll and applies %s after the gap",
+    async (failure, policy) => {
+      const f = await fixture(policy);
+      await f.poll([event("old")]);
+      const before = f.projection.getEventSource(f.definition.id)?.observedAt;
+      f.advance(5 * 60_000);
+      f.failure(failure);
+      await f.poll([event("old"), event("missed-1"), event("missed-2")]);
+      expect(f.projection.getEventSource(f.definition.id)?.observedAt).toBe(before);
+      f.failure(undefined);
+      await f.poll([event("old"), event("missed-1"), event("missed-2")]);
+      expect(f.projection.getEventSource(f.definition.id)).toMatchObject({
+        coverageGap: true,
+        pending: [],
+      });
+      if (policy === "skip") expect(f.offers).not.toHaveBeenCalled();
+      else {
+        expect(f.offers).toHaveBeenCalledOnce();
+        const occurrence = f.projection.listRuns({ automationId: f.definition.id, limit: 10 })
+          .runs[0]?.occurrence;
+        expect(occurrence?.kind).toBe("integration-event");
+        if (occurrence?.kind === "integration-event")
+          expect(occurrence.source.event.id).toBe("missed-2");
+      }
+      f.sources.stop();
+    },
+  );
+
+  it("preserves unfiltered window coverage across replay and refuses an unseen full page", async () => {
+    const f = await fixture();
+    f.window({ ids: ["old-success"], atLimit: false });
+    await f.poll([]);
+    expect(hydrateAutomationProjection({ store: f.store, projection: f.projection })).toBe("ok");
+    expect(f.projection.getEventSource(f.definition.id)?.observedWindow).toEqual(["old-success"]);
+    f.window({ ids: Array.from({ length: 100 }, (_, index) => `run-${index}`), atLimit: true });
+    await f.poll([event("run-0")]);
+    expect(f.projection.getEventSource(f.definition.id)).toMatchObject({
+      phase: "needs-rearm",
+      reason: "source-limit",
+      automaticStarts: 0,
+    });
+    expect(f.offers).not.toHaveBeenCalled();
+    f.sources.stop();
+  });
+
   it("repairs a run-first crash without a second run or automatic allowance debit", async () => {
     const f = await fixture();
     await f.poll([]);

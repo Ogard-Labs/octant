@@ -129,7 +129,14 @@ export function githubRoutineEventSources(
             });
           }
           if (events.length > 256) return { kind: "unavailable", reason: "source-limit" };
-          return { kind: "complete", events };
+          return {
+            kind: "complete",
+            events,
+            window: {
+              ids: result.runs.map((run) => `${source.repository.id}:${run.id}:${run.attempt}`),
+              atLimit: result.runs.length >= 100 || result.nextPage !== undefined,
+            },
+          };
         },
       };
     },

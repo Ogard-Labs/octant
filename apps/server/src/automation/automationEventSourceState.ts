@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import {
   AutomationEventSourceCheckpoint,
   type AutomationIntegrationEvent,
+  type AutomationEventSourceWindow,
   type AutomationIntegrationEventReceipt,
   type AutomationIntegrationEventTrigger,
   type UtcTimestamp,
@@ -33,6 +34,7 @@ export function reconcileAutomationEventObservation(input: {
   readonly previous: AutomationEventSourceCheckpoint;
   readonly trigger: AutomationIntegrationEventTrigger;
   readonly events: ReadonlyArray<AutomationIntegrationEvent>;
+  readonly window?: AutomationEventSourceWindow;
   readonly semantics: "assignment-set" | "append";
   readonly observedAt: UtcTimestamp;
   readonly coverageGap: boolean;
@@ -47,6 +49,7 @@ export function reconcileAutomationEventObservation(input: {
       ...updates,
       observationRevision: previous.observationRevision + 1,
       observedAt: input.observedAt,
+      ...(input.window === undefined ? {} : { observedWindow: input.window.ids }),
       coverageGap: previous.coverageGap || input.coverageGap,
     });
   };
@@ -61,11 +64,17 @@ export function reconcileAutomationEventObservation(input: {
     return checkpoint({ phase: "needs-rearm", reason: "source-limit" });
   const seenBefore = new Set(previous.seen);
   const fresh = input.events.filter((event) => !seenBefore.has(event.id));
+  const windowIds = input.window?.ids ?? input.events.map((event) => event.id);
+  const previousWindow = new Set(previous.observedWindow ?? previous.seen);
+  const currentWindow = new Set(windowIds);
+  if (input.window !== undefined && input.events.some((event) => !currentWindow.has(event.id)))
+    return checkpoint({ phase: "needs-rearm", reason: "source-limit" });
   if (
     input.semantics === "append" &&
     previous.baselineReady &&
-    input.events.length >= 100 &&
-    fresh.length === input.events.length
+    (input.window?.atLimit ?? input.events.length >= 100) &&
+    windowIds.length > 0 &&
+    windowIds.every((id) => !previousWindow.has(id))
   )
     return checkpoint({ phase: "needs-rearm", reason: "source-limit" });
   const seen =

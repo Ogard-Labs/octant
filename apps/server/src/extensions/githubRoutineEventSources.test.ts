@@ -55,6 +55,46 @@ describe("completed CI event contribution", () => {
     current = false;
     expect(source?.current()).toBe(false);
   });
+  it("retains the unfiltered bounded CI window even when only one conclusion matches", async () => {
+    const repository = { id: 123, nodeId: "R_123", owner: "example", name: "project" };
+    const runs: GithubActionsSource["runs"] = vi.fn<GithubActionsSource["runs"]>(async () => ({
+      kind: "page",
+      accountId: "42",
+      repository,
+      totalCount: 1000,
+      nextPage: 2,
+      runs: Array.from({ length: 100 }, (_, index) => ({
+        id: 500 + index,
+        attempt: 1,
+        workflowId: 9,
+        headSha: "a".repeat(40),
+        branch: "main",
+        conclusion: index === 0 ? "failure" : "success",
+        createdAt: "2026-11-06T12:00:00.000Z",
+        updatedAt: "2026-11-06T12:01:00.000Z",
+        url: `https://github.com/example/project/actions/runs/${500 + index}`,
+      })),
+    }));
+    const provider = githubRoutineEventSources(() => ({
+      bindGithubActionsSource: async () => ({
+        current: () => true,
+        accountId: "42",
+        repository,
+        runs,
+      }),
+      githubActionsConnections: async () => [],
+    }));
+    const source = await provider.bind(selection, new AbortController().signal);
+    const observed = await source?.read(new AbortController().signal);
+    expect(observed).toMatchObject({
+      kind: "complete",
+      events: [{ id: "123:500:1" }],
+      window: { atLimit: true },
+    });
+    if (observed?.kind !== "complete") throw new Error("Expected complete source window");
+    expect(observed.window?.ids).toHaveLength(100);
+  });
+
   it("refuses invalid source filters before a credential-owned reader is selected", async () => {
     const bind = vi.fn();
     const provider = githubRoutineEventSources(() => ({

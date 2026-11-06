@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   AutomationIntegrationEvent,
+  AutomationEventSourceWindow,
   type AutomationDefinition,
   type AutomationDefinitionDraft,
   type AutomationEventSourceCheckpoint,
@@ -149,7 +150,6 @@ export class AutomationEventSources {
             observationRevision: previous.observationRevision + 1,
             phase: "unavailable",
             reason: "source-unavailable",
-            observedAt: this.#options.now(),
           },
         },
       });
@@ -193,7 +193,6 @@ export class AutomationEventSources {
           checkpoint: {
             ...previous,
             observationRevision: previous.observationRevision + 1,
-            observedAt: this.#options.now(),
             phase: reason === "source-changed" ? "needs-rearm" : "unavailable",
             reason,
           },
@@ -213,11 +212,17 @@ export class AutomationEventSources {
         );
       return;
     }
-    let events;
+    let observed;
     try {
-      events = Schema.decodeUnknownSync(
-        Schema.Array(AutomationIntegrationEvent).pipe(Schema.maxItems(256)),
-      )(result.events);
+      observed = Schema.decodeUnknownSync(
+        Schema.Struct({
+          events: Schema.Array(AutomationIntegrationEvent).pipe(Schema.maxItems(256)),
+          window: Schema.optional(AutomationEventSourceWindow),
+        }),
+      )({
+        events: result.events,
+        ...(result.window === undefined ? {} : { window: result.window }),
+      });
     } catch {
       unavailable("source-limit");
       return;
@@ -244,7 +249,8 @@ export class AutomationEventSources {
         : reconcileAutomationEventObservation({
             previous,
             trigger,
-            events,
+            events: observed.events,
+            ...(observed.window === undefined ? {} : { window: observed.window }),
             semantics: source.semantics,
             observedAt: this.#options.now(),
             coverageGap: gap,

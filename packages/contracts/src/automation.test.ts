@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { AutomationEventSourceWindow } from "./automationEvents";
 import { describe, expect, it } from "vitest";
 import {
   AutomationDefinition,
@@ -1371,5 +1373,18 @@ describe("what a thread's agent asks about routines and reports from a run", () 
     expect(() => decodeRoutineChangeRequest({ ...request, change: "resume" })).toThrow();
     expect(() => decodeRoutineChangeRequest({ ...request, mode: "chat" })).toThrow();
     expect(() => decodeRoutineChangeRequest({ ...request, principal: {} })).toThrow();
+  });
+});
+
+describe("integration source coverage receipts", () => {
+  it("accepts bounded unique window identities and refuses ambiguous coverage", () => {
+    const decode = Schema.decodeUnknownSync(AutomationEventSourceWindow);
+    expect(decode({ ids: ["matching", "unmatched"], atLimit: true }).ids).toHaveLength(2);
+    for (const window of [
+      { ids: ["duplicate", "duplicate"], atLimit: true },
+      { ids: [], atLimit: true },
+      { ids: Array.from({ length: 257 }, (_, index) => `run-${index}`), atLimit: false },
+    ])
+      expect(() => decode(window)).toThrow();
   });
 });

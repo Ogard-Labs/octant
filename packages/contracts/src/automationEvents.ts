@@ -31,6 +31,21 @@ export const AutomationIntegrationEvent = Schema.Struct({
 }).annotations(strict);
 export type AutomationIntegrationEvent = typeof AutomationIntegrationEvent.Type;
 
+/** Coverage receipt before a source applies event filters; identifiers carry no event bodies. */
+export const AutomationEventSourceWindow = Schema.Struct({
+  ids: Schema.Array(text(256)).pipe(Schema.maxItems(256)),
+  atLimit: Schema.Boolean,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (window) =>
+        new Set(window.ids).size === window.ids.length &&
+        (!window.atLimit || window.ids.length > 0),
+    ),
+  );
+export type AutomationEventSourceWindow = typeof AutomationEventSourceWindow.Type;
+
 export const AutomationEventSourceCheckpoint = Schema.Struct({
   sourceIdentity: digest,
   observationRevision: count,
@@ -38,7 +53,9 @@ export const AutomationEventSourceCheckpoint = Schema.Struct({
   baselineReady: Schema.Boolean,
   seen: Schema.Array(text(256)).pipe(Schema.maxItems(256)),
   pending: Schema.Array(AutomationIntegrationEvent).pipe(Schema.maxItems(32)),
+  /** Last complete source observation; failed attempts do not advance coverage. */
   observedAt: UtcTimestamp,
+  observedWindow: Schema.optional(Schema.Array(text(256)).pipe(Schema.maxItems(256))),
   phase: Schema.Literal("arming", "watching", "held", "unavailable", "needs-rearm"),
   reason: Schema.optional(
     Schema.Literal(
@@ -58,7 +75,8 @@ export const AutomationEventSourceCheckpoint = Schema.Struct({
     Schema.filter(
       (checkpoint) =>
         new Set(checkpoint.seen).size === checkpoint.seen.length &&
-        new Set(checkpoint.pending.map((event) => event.id)).size === checkpoint.pending.length,
+        new Set(checkpoint.pending.map((event) => event.id)).size === checkpoint.pending.length &&
+        new Set(checkpoint.observedWindow ?? []).size === (checkpoint.observedWindow?.length ?? 0),
     ),
   );
 export type AutomationEventSourceCheckpoint = typeof AutomationEventSourceCheckpoint.Type;

@@ -2999,7 +2999,13 @@ the thread it came from.
   replace the baseline. The first complete observation is a quiet baseline.
   The journal retains at most 256 seen identities and 32 pending events. Loss
   of the entire full CI window requires explicit review, rather than assuming
-  every visible old run is new. Exhausted cursor bounds also require review.
+  every visible old run is new. The source supplies bounded window identities
+  before conclusion filtering, so an unmatched run can prove overlap and a
+  filtered subset cannot hide a lost full window. The journal retains that
+  coverage receipt independently from matching-event deduplication. Failed
+  observations preserve the last complete observation time, so recovery still
+  applies the selected offline policy to the whole gap. Exhausted cursor bounds
+  also require review.
   Each automatic claim first commits its deterministic ordinary run, then its
   source/occurrence ledger; recovery completes the same claim and allowance
   debit. The finite allowance is 1–32 starts per explicit arm, default 8.

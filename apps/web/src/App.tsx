@@ -4949,7 +4949,7 @@ function LaunchedShell(
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   const homeStart = useHomeStart({
     routineClient: launchedClients.automationClient,
-    onOpenRoutine: openRoutine,
+    onOpenRoutine: actions.openRoutine,
     actions,
     activeMode,
     activePaneId,
