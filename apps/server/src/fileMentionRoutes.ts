@@ -3,7 +3,7 @@ import {
   type FileMentionCommandResult,
   type WindowId,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -16,7 +16,7 @@ export interface FileMentionRouteDependencies {
   readonly service: {
     execute(
       command: unknown,
-      context: { readonly windowId: WindowId },
+      context: { readonly windowId: WindowId; readonly localHost?: boolean },
     ): Promise<FileMentionCommandResult>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -80,7 +80,18 @@ export function createFileMentionRouteHandler(dependencies: FileMentionRouteDepe
 
     let result: FileMentionCommandResult;
     try {
-      result = await dependencies.service.execute(body, { windowId });
+      const localHost =
+        (readPrincipalRouteContext(request)?.principal.kind ?? "local-window") === "local-window";
+      if (
+        typeof body === "object" &&
+        body !== null &&
+        "kind" in body &&
+        body.kind === "inspect-folder-mentions" &&
+        !localHost
+      ) {
+        return failure("Folder drops require a local desktop window.", 403, origin);
+      }
+      result = await dependencies.service.execute(body, { windowId, localHost });
     } catch {
       return failure("File mention command is invalid.", 400, origin);
     }

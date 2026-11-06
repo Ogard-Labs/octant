@@ -3349,7 +3349,18 @@ mentions name no Chat thread is not offered the tool, and a Work or Code
 thread named in a call refuses. In Work and Code, an `@file`
 mention completes a path inside the thread's bound root; the host refuses a path
 outside that root before reading it. Chat Projects have no filesystem authority,
-so `@file` is absent there. Unknown `@` text stays ordinary text. `@` is the one composer
+so `@file` is absent there. In local desktop Work and Code composers (drafts and
+existing threads), dropping a native folder or local `file:` URI inserts an editable
+absolute `@folder/` reference after the host validates the current Project or
+checkout roots, extra folders, and pinned filesystem identity. The window names
+this computer and the canonical folder. Validation reads metadata only: no
+recursive listing, attachment contents, turn, grant, or working-directory change.
+Remote client paths, inaccessible/deleted directories, and escaping symlinks refuse
+with an explanation. A draft targeting a future managed checkout refuses until
+that thread exists; it never remaps a dropped Project path into another checkout.
+Names retain spaces and Unicode; duplicate canonical references are inserted once.
+Draft edits and ordinary image attachments survive validation and refusal.
+Unknown `@` text stays ordinary text. `@` is the one composer
 picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), plus the thread's files in Work and Code. Choosing a

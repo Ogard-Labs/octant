@@ -1,3 +1,4 @@
+import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
@@ -622,6 +623,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     pathMentions.sync(value, caret);
   }
 
+  const folderDrops = useDroppedFolderMentions({
+    scope:
+      view === undefined
+        ? undefined
+        : { mode: "code", threadId: props.threadId, checkoutId: view.checkout.id },
+    draft,
+    onDraftChange: (text, caret) => {
+      setDraft(text);
+      props.controller.setPendingDraft?.(text, caret);
+    },
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.hostId,
+    refused: serverCheckout || props.pairedDevice === true,
+    onFiles: (files) => {
+      if (boundModelReadsImages(providerGroups, thread) === false)
+        attachments.refuse("Choose a vision model to attach images.");
+      else void attachments.attach(files);
+    },
+  });
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -2128,6 +2150,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={busy}
         />
+        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2310,11 +2333,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onDragOver={(event) => {
-                if (props.attachmentClient === undefined) return;
                 event.preventDefault();
               }}
               onDrop={(event) => {
-                if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+                if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                  event.preventDefault();
               }}
               onKeyDown={onKeyDown}
               onKeyUp={(event) => {

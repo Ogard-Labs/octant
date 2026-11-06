@@ -357,6 +357,7 @@ export interface OctantHostBridge
   readonly subscribeRemoteServerPageSigning?: (
     signer: (request: unknown) => Promise<unknown>,
   ) => () => void;
+  readonly getDroppedFilePath?: (file: File) => string | undefined;
   readonly popupNativeMenu?: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;

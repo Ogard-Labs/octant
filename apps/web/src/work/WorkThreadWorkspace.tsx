@@ -1,3 +1,4 @@
+import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -1938,6 +1939,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [completing, props.threadClient, thread]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope: { mode: "work", threadId: props.threadId },
+    draft: prompt,
+    onDraftChange: (text, caret) => rememberDraft(text, caret),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.hostId,
+    refused: serverWorkProject !== undefined || creating || completionLocked,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -2488,6 +2503,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
+        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2598,6 +2614,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onKeyUp={(event) => {
                 rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                  event.preventDefault();
               }}
               onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
                 if ((creating && !preparingQueue.current) || completionLocked) return;

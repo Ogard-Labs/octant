@@ -1,3 +1,4 @@
+import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
@@ -3946,3 +3947,15 @@ it.each(["legacy", "rebound", "source-thread"] as const)(
     expect(open).not.toHaveBeenCalled();
   },
 );
+
+it("refuses a native folder as an attachment when the desktop extraction bridge is unavailable", async () => {
+  render(
+    <CodeThreadWorkspace
+      controller={controller({ pendingDraft: "keep text" })}
+      threadId={threadId}
+    />,
+  );
+  const input = screen.getByRole("textbox", { name: "Follow-up message" });
+  fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
+  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+});

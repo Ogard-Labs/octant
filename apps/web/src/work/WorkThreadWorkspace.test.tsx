@@ -1,3 +1,4 @@
+import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
@@ -3107,3 +3108,23 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
   });
   return { promise, resolve };
 }
+
+it("refuses a native folder as an attachment when the desktop extraction bridge is unavailable", async () => {
+  render(
+    <WorkThreadWorkspace
+      initialThread={workThread()}
+      threadId={threadId}
+      title="Draft brief"
+      projects={[]}
+      threadClient={{
+        bootstrap: vi.fn(),
+        navigation: vi.fn(),
+        execute: vi.fn(),
+        queryBoard: vi.fn(),
+      }}
+    />,
+  );
+  const input = screen.getByRole("textbox", { name: "Work prompt" });
+  fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
+  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+});
