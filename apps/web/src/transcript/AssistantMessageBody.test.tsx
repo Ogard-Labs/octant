@@ -1,6 +1,8 @@
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import { AssistantMessageBody, StreamRepliesContext } from "./AssistantMessageBody";
+import { ReplyDetailContext } from "./replyDetail";
 
 afterEach(() => vi.useRealTimers());
 
@@ -34,6 +36,59 @@ it("includes the tool status in its accessible name", () => {
   expect(screen.getByText("Tool · search").closest("summary")).toHaveAccessibleName(
     "Tool · search · running",
   );
+});
+
+describe("inline thinking and tool parts at each Reply detail level", () => {
+  const body =
+    "<think>Compare the two fixtures.\nThe second one is stale.</think>" +
+    "```tool name=search status=completed\nThree sources found\n```\nThe answer.";
+
+  function renderAt(level: ReplyDetailLevel) {
+    return render(
+      <ReplyDetailContext.Provider value={level}>
+        <AssistantMessageBody body={body} />
+      </ReplyDetailContext.Provider>,
+    );
+  }
+
+  function details(name: string): HTMLDetailsElement {
+    const element = screen.getByText(name).closest("details");
+    if (!(element instanceof HTMLDetailsElement)) throw new Error(`No disclosure named ${name}`);
+    return element;
+  }
+
+  it("keeps both shut at low, with no thinking preview", () => {
+    renderAt("low");
+    expect(details("Thinking").open).toBe(false);
+    expect(details("Tool · search").open).toBe(false);
+    expect(details("Thinking").querySelector("summary")?.textContent).toBe("Thinking");
+    expect(screen.getByText(/Compare the two fixtures/)).not.toBeVisible();
+  });
+
+  it("previews the first line of shut thinking at medium without adding it to the name", () => {
+    renderAt("medium");
+    const summary = details("Thinking").querySelector("summary");
+    expect(summary).toHaveAccessibleName("Thinking");
+    expect(details("Thinking").open).toBe(false);
+    const preview = screen
+      .getAllByText("Compare the two fixtures.")
+      .find((element) => summary?.contains(element));
+    expect(preview).toBeVisible();
+    expect(preview).toHaveAttribute("aria-hidden", "true");
+    expect(details("Tool · search").open).toBe(false);
+  });
+
+  it("opens thinking and the tool's recorded summary at high, and lets the person close one", () => {
+    renderAt("high");
+    expect(details("Thinking").open).toBe(true);
+    expect(screen.getByText("The second one is stale.", { exact: false })).toBeVisible();
+    expect(details("Tool · search").open).toBe(true);
+    expect(screen.getByText("Three sources found")).toBeVisible();
+
+    fireEvent.click(screen.getByText("Thinking"));
+    expect(details("Thinking").open).toBe(false);
+    expect(details("Tool · search").open).toBe(true);
+  });
 });
 
 describe("streaming display beats", () => {

@@ -86,6 +86,7 @@ const fixture = {
     isPackaged: true,
     setAsDefaultProtocolClient: vi.fn(),
     dock: { setBadge: vi.fn() },
+    commandLine: { hasSwitch: vi.fn((_name: string) => false) },
   }),
   menus: [] as unknown[],
   openExternal: vi.fn(async (_url: string) => {}),
@@ -350,4 +351,34 @@ it("centres the window again when its bounds are reset", async () => {
   await invoke(DESKTOP_IPC_CHANNELS.resetBounds, f.event);
   expect(f.window.maximized).toBe(false);
   expect(f.window.bounds).toEqual({ x: 280, y: 150, width: 1440, height: 900 });
+});
+
+it("registers no Linux window while its renderers would run without Chromium's sandbox", async () => {
+  const original = process.platform;
+  Object.defineProperty(process, "platform", { value: "linux" });
+  fixture.app.commandLine.hasSwitch.mockImplementation((name) => name === "no-sandbox");
+  const openWindow = vi.fn();
+  try {
+    const { runNightlyClient } = await import("./nightlyClient");
+    const result = await runNightlyClient(
+      desktopIdentity("nightly"),
+      {
+        listenWindows: async () => ({ kind: "started" }),
+        replyWindow: () => false,
+        stopWindows: async () => ({ kind: "closed" }),
+        openWindow,
+        renewWindow: async () => ({ kind: "renewed", leaseMs: 15_000 }),
+        revokeWindow: async () => ({ kind: "revoked" }),
+      },
+      createNightlyLaunchLinks("octant-nightly"),
+    );
+    expect(result).toEqual({
+      kind: "refused",
+      message: expect.stringContaining("Chromium's sandbox"),
+    });
+    expect(openWindow).not.toHaveBeenCalled();
+  } finally {
+    fixture.app.commandLine.hasSwitch.mockImplementation(() => false);
+    Object.defineProperty(process, "platform", { value: original });
+  }
 });

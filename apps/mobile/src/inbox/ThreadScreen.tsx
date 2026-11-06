@@ -32,6 +32,7 @@ import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { appendTranscript } from "../voice/voiceDictation";
 import { createSelectedThreadGuard } from "./thread/selectedThreadGuard";
 import { ThreadTranscript } from "./thread/ThreadTranscript";
+import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
 import { useChatThread } from "./thread/useChatThread";
 import { useCodeThread } from "./thread/useCodeThread";
@@ -224,6 +225,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     [],
   );
   const voice = useVoiceDictation({ transport, editable: composerEditable, appendToDraft });
+  const replyDetail = useThreadReplyDetail({ transport, mode, threadId });
 
   const styles = useMemo(
     () =>
@@ -385,6 +387,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               allowProductMutations={staleGate.allowProductMutations}
               chat={chat}
               codeConversation={code.conversation}
+              replyDetail={replyDetail}
               turnActionsFor={turnActions.actionsFor}
               workTurns={work.turns}
             />

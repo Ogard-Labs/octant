@@ -2211,6 +2211,12 @@
   cursor: grab;
 }
 
+/* A conversation reads a flow from top to bottom. Match the diagram's
+   proportions so a tall flow is not reduced into a widescreen thumbnail. */
+.canvas-view--thread .canvas-board__svg {
+  aspect-ratio: var(--octant-diagram-aspect-ratio);
+}
+
 .canvas-board[data-editable="true"] .canvas-board__node {
   cursor: move;
 }

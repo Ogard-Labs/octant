@@ -53,6 +53,7 @@ import {
   automationMissedRunPolicyLabel,
   automationModeLabel,
   automationNextRunLabel,
+  automationRunResultLabel,
   automationRunStatusLabel,
   automationRunThreadTarget,
   automationTriggerSummary,
@@ -1081,6 +1082,9 @@ function AutomationDetail(props: {
                 latestRun.claimedAt,
                 props.format,
               )}`}
+              {latestRun.reportedResult === undefined
+                ? null
+                : ` · ${automationRunResultLabel(latestRun.reportedResult.outcome)}`}
               <ThreadLink
                 automationName={automation.displayName}
                 {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
@@ -1226,6 +1230,14 @@ function AutomationHistoryBody(props: {
               </span>
               {run.failure === undefined ? null : (
                 <span className="automation-history__failure">{run.failure.message}</span>
+              )}
+              {run.reportedResult === undefined ? null : (
+                <span
+                  className="automation-history__result"
+                  data-run-result={run.reportedResult.outcome}
+                >
+                  {`${automationRunResultLabel(run.reportedResult.outcome)}. ${run.reportedResult.summary}`}
+                </span>
               )}
               {delivery === undefined ? null : (
                 <span

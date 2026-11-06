@@ -1411,7 +1411,20 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 }
 
 .turn-activity__disclosure--thinking > summary .turn-activity__name {
+  flex: none;
   color: var(--oct-muted);
+}
+
+/* Reply detail at medium: a shut Thinking row carries its first line in the
+   muted ink, clipped to the row, so the person can tell what it is about. */
+.turn-activity__preview {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .turn-activity__outcome {

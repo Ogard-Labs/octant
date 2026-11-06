@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
@@ -137,6 +138,9 @@ export function DiagramBoard(props: DiagramBoardProps) {
   const viewWidth = committedLayout.width + FIT_MARGIN * 2;
   const viewHeight = committedLayout.height + FIT_MARGIN * 2;
   const viewBox = `${viewport.x} ${viewport.y} ${viewWidth / viewport.zoom} ${viewHeight / viewport.zoom}`;
+  const diagramStyle: CSSProperties & { readonly "--octant-diagram-aspect-ratio": string } = {
+    "--octant-diagram-aspect-ratio": `${viewWidth} / ${viewHeight}`,
+  };
   const editable = props.layoutRuntime !== undefined && !pending;
 
   const scale = (): number => {
@@ -344,6 +348,7 @@ export function DiagramBoard(props: DiagramBoardProps) {
         onPointerUp={onPointerUp}
         ref={svgRef}
         viewBox={viewBox}
+        style={diagramStyle}
       >
         {arrowTones.length === 0 ? null : (
           <defs>

@@ -466,6 +466,7 @@ describe("desktop packaging boundary", () => {
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
+      "native/octant-desktop-peer-linux.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
@@ -508,8 +509,15 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant-linux-x64/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      "Octant-linux-x64/resources/native/octant-desktop-peer-linux.node",
     ];
     expect(() => validateLinuxNativePayloadAllowlist(allowed)).not.toThrow();
+    expect(() =>
+      validateLinuxNativePayloadAllowlist([
+        ...allowed,
+        "Octant-linux-x64/resources/app/apps/desktop/dist/native/octant-desktop-peer-linux.node",
+      ]),
+    ).toThrow(/unexpected native payload/);
     expect(() =>
       validateLinuxNativePayloadAllowlist([
         ...allowed,

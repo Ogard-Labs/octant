@@ -66,7 +66,11 @@ import { ThreadHandOffService } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
+import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
+import { workSiblingThreadSource } from "../siblingThreads/workSiblingThreadSource";
 import { createRoutineProposalTools } from "../automation/routineProposalTools";
+import { createRoutineTools } from "../automation/routineTools";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
   defaultShellSettings,
@@ -105,6 +109,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
     | "agentRunPersistence"
+    | "automationEventStore"
     | "browserCaptures"
     | "browserModelBindings"
     | "codeSessionAuthority"
@@ -138,6 +143,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "githubIssueContextService"
     | "linearIssueContextService"
     | "peekCreateFromIssueFramed"
+    | "siblingThreadsService"
     | "terminalSessionImports"
     | "threadOutsideContentMarks"
   > &
@@ -204,6 +210,7 @@ export function wireWork(deps: WorkDependencies) {
     agentRunPersistence,
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
+    automationEventStore,
     browserAuthority,
     browserAutomationService,
     browserCaptures,
@@ -260,6 +267,7 @@ export function wireWork(deps: WorkDependencies) {
     sideTaskFirstMessage,
     routineProposalService,
     sideTasks,
+    siblingThreadsService,
     spendCeiling,
     threadAwaitsHarnessApproval,
     threadAwaitsHarnessQuestion,
@@ -361,6 +369,17 @@ export function wireWork(deps: WorkDependencies) {
     const onWorkTurnCancelled = (listener: (threadId: WorkThreadId) => void): void => {
       turnCancelledListeners.add(listener);
     };
+    // The Work `#thread` mention read, which a Work turn's threads tool reads
+    // through, so an agent reads exactly what its window could mention. The
+    // turn service is declared just below; the directory only calls it per
+    // request, never at construction.
+    const workThreadMentions = createWorkThreadMentionDirectory({
+      bootstrap: (windowId) => workThreadService.bootstrap(windowId),
+      transcript: async (windowId, threadId) => ({
+        turns: await workTurnService.turns(windowId, threadId),
+      }),
+      projectLabel: (projectId) => persistence.readProject(projectId as ProjectId)?.name,
+    });
     const workTurnService = new WorkTurnService({
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
@@ -462,19 +481,56 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        const routineTurn = {
+          windowId: input.windowId,
+          thread: {
+            id: String(input.thread.id),
+            mode: "work" as const,
+            projectId: String(input.thread.projectId),
+          },
+          isAutomationOrigin: isRoutineHostScope(input.windowId),
+          now: Date.now,
+        };
+        // The other open Work threads of this Project, read-only: Work turns
+        // carry no agent messages, so a Work thread is offered no `send`.
+        const threadsTools = !browserSupported
+          ? undefined
+          : createThreadsTools({
+              mode: "work",
+              windowId: input.windowId,
+              service: siblingThreadsService,
+              source: workSiblingThreadSource(
+                {
+                  threads: () => workThreadProjection.list(),
+                  thread: (threadId) => workThreadProjection.read(threadId),
+                  activity: observeWorkThreadRuntime,
+                  turnUpdates: (threadId) => workTurnProjection.listForThread(threadId),
+                  mentions: workThreadMentions,
+                },
+                input.windowId,
+              ),
+              callerThreadId: String(input.thread.id),
+              toolConstraints: [],
+              profileDisplayName: "the bound profile",
+            });
         const routineTools = !browserSupported
           ? undefined
-          : createRoutineProposalTools({
-              windowId: input.windowId,
-              thread: {
-                id: String(input.thread.id),
-                mode: "work",
-                projectId: String(input.thread.projectId),
-              },
-              isAutomationOrigin: isRoutineHostScope(input.windowId),
-              proposals: routineProposalService,
-              now: Date.now,
-            });
+          : combineAppManagedToolSets(
+              createRoutineProposalTools({ ...routineTurn, proposals: routineProposalService }),
+              createRoutineTools({
+                ...routineTurn,
+                ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
+                routines: {
+                  hostId: LOCAL_HOST_ID,
+                  projection: persistence.automationProjection,
+                  store: automationEventStore,
+                  changes: routineProposalService,
+                },
+                recordExternalContentIngestion: (mark) =>
+                  externalContentIngestionStore.record(mark),
+                uuid: randomUUID,
+              }),
+            );
         const agentsTools = !browserSupported
           ? undefined
           : agentsManagedToolsFor({
@@ -519,6 +575,7 @@ export function wireWork(deps: WorkDependencies) {
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
+          threadsTools === undefined &&
           routineTools === undefined &&
           agentsTools === undefined &&
           computer === undefined &&
@@ -530,6 +587,7 @@ export function wireWork(deps: WorkDependencies) {
           browser,
           computer,
           sideTaskTools,
+          threadsTools,
           routineTools,
           agentsTools,
           canvasTools,

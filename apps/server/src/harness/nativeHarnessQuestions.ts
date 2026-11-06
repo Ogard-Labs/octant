@@ -1,8 +1,10 @@
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import {
   decodeNativeHarnessQuestion,
   decodeNativeHarnessQuestionId,
   decodeUtcTimestamp,
   type NativeHarnessQuestion,
+  type Questionnaire,
   type NativeHarnessQuestionId,
   type OctantMode,
   type ProjectId,
@@ -34,6 +36,7 @@ export type NativeHarnessQuestionOutcome = SettledQuestionOutcome | RefusedQuest
 
 interface Waiter {
   readonly threadId: string;
+  readonly questionnaire?: Questionnaire;
   readonly expiresAt: number;
   readonly resolve: (outcome: SettledQuestionOutcome) => void;
   readonly timer: ReturnType<typeof setTimeout>;
@@ -42,7 +45,10 @@ interface Waiter {
 }
 
 export interface NativeHarnessQuestionStoreOptions {
-  readonly sessions: Pick<NativeHarnessSessionStore, "ensure" | "askQuestion" | "settleQuestion">;
+  readonly sessions: Pick<
+    NativeHarnessSessionStore,
+    "ensure" | "askQuestion" | "settleQuestion" | "read"
+  >;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly timeoutMs?: number;
@@ -83,6 +89,7 @@ export class NativeHarnessQuestionStore {
     readonly lead: NativeHarnessSlotCandidate;
     readonly source?: NativeHarnessInteractionSource;
     readonly prompt: string;
+    readonly questionnaire?: Questionnaire;
     readonly options: ReadonlyArray<string>;
     readonly signal?: AbortSignal | undefined;
   }): Promise<
@@ -107,6 +114,7 @@ export class NativeHarnessQuestionStore {
       id: questionId,
       ...(input.source === undefined ? {} : { source: input.source }),
       prompt: input.prompt,
+      ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
       options: input.options,
       status: "pending",
       askedAt,
@@ -134,6 +142,7 @@ export class NativeHarnessQuestionStore {
       };
       const waiter: Waiter = {
         threadId: input.threadId,
+        ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
         expiresAt: Date.parse(askedAt) + timeoutMs,
         resolve: settle,
         timer: setTimeout(() => settle({ status: "expired" }), timeoutMs),
@@ -171,10 +180,15 @@ export class NativeHarnessQuestionStore {
     threadId: string,
     questionId: string,
     answer: string,
-  ): "answered" | "question-not-found" | "already-settled" {
+  ): "answered" | "question-not-found" | "already-settled" | "invalid-answer" {
     this.#expire();
     const waiter = this.#waiters.get(questionId);
     if (waiter === undefined || waiter.threadId !== threadId) {
+      const stored = this.#options.sessions
+        .read(threadId)
+        ?.questions.find((question) => String(question.id) === questionId);
+      if (stored?.questionnaire !== undefined && stored.status === "pending")
+        return "question-not-found";
       // No turn is waiting (a restart, say); the journaled question can still
       // take the answer, and that is an answer, not a refusal.
       const settled = this.#options.sessions.settleQuestion(threadId, questionId as never, {
@@ -183,6 +197,11 @@ export class NativeHarnessQuestionStore {
       });
       return typeof settled === "string" ? settled : "answered";
     }
+    if (
+      waiter.questionnaire !== undefined &&
+      validateQuestionnaireAnswer(waiter.questionnaire, answer).status === "invalid"
+    )
+      return "invalid-answer";
     waiter.resolve({ status: "answered", answer });
     return "answered";
   }

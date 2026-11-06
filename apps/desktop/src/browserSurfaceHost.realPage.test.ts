@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { inflateSync } from "node:zlib";
 import { chromium, type Browser, type CDPSession, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -106,6 +107,95 @@ const pages: Record<string, string> = {
     <iframe title="Sign-in" src="{{other}}/remote-login"></iframe>`,
   "/remote-login": `<!doctype html><title>Remote sign-in</title>
     <label for="code">Password</label><input id="code" type="password" value="hunter2">`,
+  "/audit": `<!doctype html><html><head><title>Audit</title>
+    <style>.faint { color: #aaaaaa; background: #ffffff } .hero { background: linear-gradient(#000, #333); color: #fff }</style></head>
+    <body><h1>Shop</h1><h3>Deals</h3>
+    <img id="bare" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E">
+    <img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E">
+    <button id="icon"><svg aria-hidden="true" width="20" height="20"></svg></button>
+    <button><img alt="Search" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'/%3E"></button>
+    <button aria-label="Close">×</button>
+    <button id="ghost"><span hidden>Save</span><span style="display:none">Save</span></button>
+    <button id="muted"><span aria-hidden="true">Mute</span></button>
+    <div inert><h2>Inactive panel</h2><h5>Skipped level</h5><button id="asleep"></button><a href="/form"></a><input></div>
+    <span id="draft-label" hidden>Save draft</span><button aria-labelledby="draft-label"></button>
+    <p>See <a id="empty" href="/form"></a> and our <a href="/form">deals</a> today.</p>
+    <input id="unlabelled"><label for="mail">Email</label><input id="mail"><input placeholder="Search">
+    <p class="faint">Faint words</p><p>Plain words</p><div class="hero">Over a gradient</div>
+    <div style="opacity:0.1"><p style="color:#000;background:#fff">Ghost words</p></div>
+    <div aria-hidden="true"><a href="/form">Hidden link</a><a href="/form" tabindex="-1">Skipped</a></div>
+    <span id="hint">Hint</span><span id="hint">Again</span><input aria-describedby="hint" aria-label="Code">
+    <div><button id="tiny-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="tiny-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div>
+    <iframe title="Ad" srcdoc="<p>Ad</p>"></iframe></body></html>`,
+  // Typed text in a rich editor, and text a shadow root's slot draws over its own backdrop.
+  "/audit-private": `<!doctype html><html lang="en"><title>Private</title><body style="background:#fff">
+    <h1>Notes</h1><div contenteditable aria-label="Password"><span style="color:#999;background:#fff">secret</span><h3>Typed heading</h3><span id="typed">typed name</span></div>
+    <div aria-hidden="true"><a href="/form" aria-labelledby="typed">Hidden link</a></div>
+    <slot-card id="dark"><span style="color:#555">Slotted words</span></slot-card>
+    <slot-card id="faded"><span style="color:#000">Faded words</span></slot-card>
+    <script>
+      document.getElementById("dark").attachShadow({ mode: "open" }).innerHTML = '<div style="background:#000"><slot></slot></div>';
+      document.getElementById("faded").attachShadow({ mode: "open" }).innerHTML = '<div style="opacity:0.5"><slot></slot></div>';
+    </script></body></html>`,
+  // A shadow root that draws its host's heading before its own, and its host's text over its backdrop.
+  "/audit-slots": `<!doctype html><html lang="en"><title>Slots</title><body style="background:#fff">
+    <h1>Shop</h1>
+    <slot-panel id="panel"><h2>Summary</h2></slot-panel>
+    <slot-card id="words">Host words</slot-card>
+    <script>
+      document.getElementById("panel").attachShadow({ mode: "open" }).innerHTML = '<slot></slot><h3>Details</h3>';
+      document.getElementById("words").attachShadow({ mode: "open" }).innerHTML = '<div style="background:#000;color:#555"><slot></slot></div>';
+    </script></body></html>`,
+  // More touch targets than any one slice, with the only crowded pair last.
+  "/audit-targets": `<!doctype html><html lang="en"><title>Targets</title><body>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${'<button style="width:32px;height:32px">x</button>'.repeat(1_100)}</div>
+    <div><button id="late-a" style="width:16px;height:16px;padding:0;border:0">A</button><button id="late-b" style="width:16px;height:16px;padding:0;border:0;margin-left:2px">B</button></div></body></html>`,
+  // Every native control the audit names, named and unnamed, to hold against the browser's own names.
+  "/audit-names": `<!doctype html><html lang="en"><title>Names</title><body>
+    <input data-control id="sub" type="submit"><input data-control id="sube" type="submit" value=""><input data-control id="subs" type="submit" value=" ">
+    <input data-control id="res" type="reset"><input data-control id="rese" type="reset" value="">
+    <input data-control id="btn" type="button"><input data-control id="btnt" type="button" title="Tip">
+    <button data-control id="b"></button><label for="bl">Labelled</label><button data-control id="bl"></button><button data-control id="bt" title="Tip"></button>
+    <details><summary data-control id="sum"></summary>More</details><details><summary data-control id="sumt">Open</summary>More</details>
+    <input data-control id="img" type="image" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <input data-control id="imgv" type="image" value="Go" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <img data-control id="im" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <img data-control id="imt" title="Tip" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <input data-control id="file" type="file"><label>Upload <input data-control id="filel" type="file"></label>
+    <select data-control id="sel"><option>One</option></select><select data-control id="selp" placeholder="Pick"><option>One</option></select><select data-control id="selt" title="Tip"><option>One</option></select>
+    <textarea data-control id="ta"></textarea><textarea data-control id="tap" placeholder="Write"></textarea>
+    <input data-control id="txt"><input data-control id="txtp" placeholder="Search"><input data-control id="txtt" title="Tip">
+    <input data-control id="lb" aria-labelledby="missing"><input data-control id="al" aria-label="  "><input data-control id="chk" type="checkbox">
+    <a data-control id="a" href="/form"></a><a data-control id="at" href="/form" title="Tip"></a></body></html>`,
+  // Text over backgrounds the browser does not paint, and over ones it paints in ways a colour cannot say.
+  "/audit-paint": `<!doctype html><html lang="en"><head><title>Paint</title>
+    <style>.overlay::before { content: ""; position: absolute; inset: 0; background: #000; z-index: -1 }</style></head>
+    <body style="background:#fff">
+    <p style="color:#000;background:#fff"><span style="display:contents;background:#000">Readable contents</span></p>
+    <div style="visibility:hidden;background:#000"><p style="visibility:visible;color:#000">Readable visible</p></div>
+    <p style="color:#fff;background:linear-gradient(#000, #000)">Gradient</p>
+    <p style="color:transparent;background:#fff;background-clip:text;-webkit-background-clip:text">Clipped</p>
+    <p class="overlay" style="position:relative;color:#fff">Pseudo backdrop</p>
+    <div style="backdrop-filter:invert(1)"><p style="color:#eee">Backdrop filtered</p></div>
+    <div style="-webkit-mask-image:linear-gradient(#000, transparent);mask-image:linear-gradient(#000, transparent)"><p style="color:#000">Masked</p></div>
+    <p style="mix-blend-mode:difference;color:#fff">Blended</p>
+    <p style="filter:invert(1);color:#fff">Filtered</p></body></html>`,
+  // More elements than the audit reads, with a referenced duplicate id past the end.
+  "/audit-large": `<!doctype html><html lang="en"><title>Large</title><body>
+    ${"<div></div>".repeat(6_100)}
+    <span id="far">Far</span><span id="far">Again</span><input aria-describedby="far" aria-label="Late"></body></html>`,
+  "/perf": `<!doctype html><html lang="en"><title>Perf</title>
+    <div id="above"></div>
+    <h1 style="font-size:64px">Fast enough</h1>
+    <img src="/pixel.svg?token=s3cret" width="300" height="200" alt="Pixel">
+    <script>
+      addEventListener("load", () => setTimeout(() => {
+        document.getElementById("above").style.height = "120px";
+        const start = performance.now(); while (performance.now() - start < 150) {}
+      }, 100));
+    </script></html>`,
+  "/red": `<!doctype html><title>Red</title><style>html, body { margin: 0; height: 100%; background: rgb(220, 30, 30); }</style><p>Approved</p>`,
+  "/blue": `<!doctype html><title>Blue</title><style>html, body { margin: 0; height: 100%; background: rgb(30, 30, 220); }</style><p>Elsewhere</p>`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
@@ -133,6 +223,13 @@ beforeAll(async () => {
         "content-disposition": `attachment; filename="${attachment.name}"`,
       });
       response.end(attachment.body);
+      return;
+    }
+    if (path === "/pixel.svg") {
+      response.writeHead(200, { "content-type": "image/svg+xml" });
+      response.end(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='200'><rect width='300' height='200'/></svg>",
+      );
       return;
     }
     // A frame on the server's other name is on another site, in its own process.
@@ -196,6 +293,7 @@ async function pageView(): Promise<{
       "Page.javascriptDialogOpening",
       "Page.javascriptDialogClosed",
       "Page.fileChooserOpened",
+      "Page.screencastFrame",
     ] as const)
       opened.on(method, (params) => {
         for (const listener of messageListeners) listener({}, method, params);
@@ -458,6 +556,30 @@ async function twoThreads(firstPath: string, secondPath: string) {
   const firstPage = pool[0]?.page;
   if (firstPage === undefined) throw new Error("No page.");
   return { host, first, second, firstOwner, secondOwner, firstPage, close };
+}
+
+/**
+ * The colour of each animation frame's top-left pixel. Whatever filter a row
+ * uses, the first pixel of the first row is stored as it is, so inflating a
+ * frame's data is enough to read it.
+ */
+function apngCorners(dataUrl: string): ReadonlyArray<readonly [number, number, number]> {
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  const frames: Buffer[][] = [];
+  let offset = 8;
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "fcTL") frames.push([]);
+    if (type === "IDAT") frames.at(-1)?.push(data);
+    if (type === "fdAT") frames.at(-1)?.push(data.subarray(4));
+    offset += 12 + length;
+  }
+  return frames.map((parts) => {
+    const pixels = inflateSync(Buffer.concat(parts));
+    return [pixels[1] ?? 0, pixels[2] ?? 0, pixels[3] ?? 0] as const;
+  });
 }
 
 function entry(
@@ -1096,6 +1218,100 @@ describe.skipIf(chrome === undefined)(
       await page.close();
     });
 
+    it("records the agent's actions as an animated PNG and lets the debugger go when the recording ends", async () => {
+      const { host, contextId, page, view } = await surface("/controls");
+      await host.act(contextId, { kind: "record-start" });
+      // The recording holds the attachment between actions, as an emulation does.
+      expect(view.webContents.debugger.isAttached()).toBe(true);
+      await host.act(contextId, { kind: "select", target: "#size", value: "l" });
+      await host.act(contextId, { kind: "hover", target: "#menu" });
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      expect(recording.frames).toBeGreaterThanOrEqual(1);
+      const bytes = Buffer.from(recording.dataUrl.split(",")[1] ?? "", "base64");
+      const actl = bytes.indexOf("acTL");
+      expect(actl).toBeGreaterThan(0);
+      expect(bytes.readUInt32BE(actl + 4)).toBe(recording.frames);
+      expect(Math.max(bytes.readUInt32BE(16), bytes.readUInt32BE(20))).toBeLessThanOrEqual(800);
+      // A stop with nothing running is empty, not an error.
+      expect((await host.act(contextId, { kind: "record-stop" })).recording).toEqual({
+        status: "empty",
+      });
+      await page.close();
+    });
+
+    it("keeps no frame of a page the person took to a site the thread did not approve", async () => {
+      const { host, contextId, page } = await surface("/red");
+      const other = `http://localhost:${String((server.address() as AddressInfo).port)}`;
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      // The person takes the agent's own view to another site and back.
+      await page.goto(`${other}/blue`);
+      await page.waitForTimeout(900);
+      await page.goto(`${origin}/red`);
+      await page.waitForTimeout(600);
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      const corners = apngCorners(recording.dataUrl);
+      expect(corners.length).toBe(recording.frames);
+      expect(corners.some(([red, , blue]) => red > 180 && blue < 80)).toBe(true);
+      expect(corners.filter(([red, , blue]) => blue > 180 && red < 80)).toEqual([]);
+      await page.close();
+    });
+
+    it("ends a recording when another tab comes to the front, under the recorded tab's address", async () => {
+      const { host, contextId, page, view } = await surface("/red", 2);
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "tab-open", target: `${origin}/blue` });
+      await page.waitForTimeout(600);
+      const stopped = await host.act(contextId, { kind: "record-stop", include: ["text"] });
+      // The observation is of the tab in front; the recording is of the one it started on.
+      expect(stopped.url).toBe(`${origin}/blue`);
+      const recording = stopped.recording;
+      if (recording?.status !== "recorded") throw new Error(`not recorded: ${recording?.status}`);
+      expect(recording).toMatchObject({
+        truncated: "tab-changed",
+        url: `${origin}/red`,
+        title: "Red",
+      });
+      const corners = apngCorners(recording.dataUrl);
+      expect(corners.filter(([red, , blue]) => blue > 180 && red < 80)).toEqual([]);
+      expect(view.webContents.debugger.isAttached()).toBe(false);
+      await page.close();
+    });
+
+    it("keeps a recording a resize cut short under the page it showed, not the one the tab moved to", async () => {
+      const { host, contextId, page } = await surface("/red");
+      await host.act(contextId, { kind: "record-start" });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "resize", viewport: { width: 390, height: 844 } });
+      await page.waitForTimeout(600);
+      await host.act(contextId, { kind: "navigate", target: `${origin}/blue` });
+      await page.waitForTimeout(300);
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(stopped.url).toBe(`${origin}/blue`);
+      expect(stopped.recording).toMatchObject({
+        status: "recorded",
+        truncated: "viewport-changed",
+        url: `${origin}/red`,
+        title: "Red",
+      });
+      await page.close();
+    });
+
+    it("withholds a recording of a page that holds a credential field", async () => {
+      const { host, contextId, page } = await surface("/login");
+      await host.act(contextId, { kind: "record-start" });
+      await host.act(contextId, { kind: "hover", target: "button" });
+      const stopped = await host.act(contextId, { kind: "record-stop" });
+      expect(stopped.recording).toEqual({ status: "withheld" });
+      await page.close();
+    });
+
     it("emulates a phone, touch, and a color scheme on the agent's view and restores all three", async () => {
       const { host, contextId, page } = await surface("/device");
       // The page's color scheme follows the machine, so it is read, not assumed.
@@ -1139,6 +1355,243 @@ describe.skipIf(chrome === undefined)(
       const restored = await host.act(contextId, { kind: "resize" });
       expect(restored.emulation).toEqual(baseline);
       expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
+      await page.close();
+    });
+
+    it("audits a page's accessibility with the fixed reader, finding each planted problem and no clean element", async () => {
+      const { host, contextId, page } = await surface("/audit");
+      const read = async () => {
+        const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+        if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+        return { observed, reading: observed.audit.reading };
+      };
+      const { observed, reading } = await read();
+      expect(observed.url).toBe(`${origin}/audit`);
+      const count = (rule: string) => reading.found.find((entry) => entry.rule === rule)?.count;
+      expect(Object.fromEntries(reading.found.map((entry) => [entry.rule, entry.count]))).toEqual({
+        "image-alt": 1,
+        "button-name": 3,
+        "link-name": 1,
+        "field-name": 1,
+        "heading-order": 1,
+        "document-lang": 1,
+        "duplicate-id-aria": 1,
+        "focusable-hidden": 1,
+        "color-contrast": 1,
+      });
+      const finding = (rule: string) => reading.findings.find((each) => each.rule === rule);
+      expect(finding("image-alt")?.selector).toBe("#bare");
+      // Text hidden inside a button names nothing; a hidden labelledby target does.
+      expect(
+        reading.findings.filter((each) => each.rule === "button-name").map((each) => each.selector),
+      ).toEqual(["#icon", "#ghost", "#muted"]);
+      expect(finding("link-name")?.selector).toBe("#empty");
+      expect(finding("field-name")?.selector).toBe("#unlabelled");
+      expect(finding("heading-order")?.detail).toEqual({ level: 3, previousLevel: 1 });
+      expect(finding("duplicate-id-aria")?.detail).toEqual({ id: "hint", count: 2 });
+      expect(finding("focusable-hidden")?.name).toBe("Hidden link");
+      expect(finding("color-contrast")).toMatchObject({
+        text: "Faint words",
+        detail: { ratio: 2.32, required: 4.5, foreground: "#aaaaaa", background: "#ffffff" },
+      });
+      // The gradient, and the text inside a nearly transparent container.
+      expect(reading.contrastNotMeasured).toBe(2);
+      expect(reading.frames).toBe(1);
+      expect(reading.touch).toBe(false);
+      expect(count("target-size")).toBeUndefined();
+      // On a touch device the crowded small buttons are found as well.
+      await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        mobile: true,
+        touch: true,
+      });
+      const touched = await read();
+      expect(touched.reading.touch).toBe(true);
+      expect(
+        touched.reading.findings
+          .filter((each) => each.rule === "target-size")
+          .map((each) => each.selector),
+      ).toEqual(expect.arrayContaining(["#tiny-a", "#tiny-b"]));
+      await host.act(contextId, { kind: "resize" });
+      await page.close();
+    });
+
+    it("withholds the text typed into an editable field from findings, and judges slotted text against the slot's backdrop", async () => {
+      const { host, contextId, page } = await surface("/audit-private");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      const written = JSON.stringify(reading.findings);
+      expect(written).not.toContain("secret");
+      expect(written).not.toContain("Typed heading");
+      expect(written).not.toContain("typed name");
+      expect(
+        reading.findings.filter((each) => each.rule === "color-contrast").map((each) => each.text),
+      ).toEqual([undefined, "Slotted words"]);
+      expect(reading.findings.find((each) => each.text === "Slotted words")?.detail).toMatchObject({
+        foreground: "#555555",
+        background: "#000000",
+      });
+      // A label taken from typed text is skipped; the link's own text names it.
+      expect(reading.findings.find((each) => each.rule === "focusable-hidden")?.name).toBe(
+        "Hidden link",
+      );
+      expect(reading.findings.find((each) => each.rule === "heading-order")).toMatchObject({
+        role: "heading",
+        detail: { level: 3, previousLevel: 1 },
+      });
+      // The text drawn through the half-transparent slot.
+      expect(reading.contrastNotMeasured).toBe(1);
+      await page.close();
+    });
+
+    it("reads a shadow root's slotted heading where the slot draws it, and judges a host's text in the slot's colours", async () => {
+      const { host, contextId, page } = await surface("/audit-slots");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      // h1, then the slotted h2, then the shadow root's h3: no level is skipped.
+      expect(reading.findings.filter((each) => each.rule === "heading-order")).toEqual([]);
+      expect(reading.findings.filter((each) => each.rule === "color-contrast")).toEqual([
+        expect.objectContaining({
+          text: "Host words",
+          detail: expect.objectContaining({ foreground: "#555555", background: "#000000" }),
+        }),
+      ]);
+      expect(reading.truncated).toBe(false);
+      await page.close();
+    });
+
+    it("checks the spacing of every touch target the audit reads, past the first thousand", async () => {
+      const { host, contextId, page } = await surface("/audit-targets");
+      await host.act(contextId, {
+        kind: "resize",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        mobile: true,
+        touch: true,
+      });
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      expect(reading.touch).toBe(true);
+      expect(reading.truncated).toBe(false);
+      expect(
+        reading.findings.filter((each) => each.rule === "target-size").map((each) => each.selector),
+      ).toEqual(["#late-a", "#late-b"]);
+      await host.act(contextId, { kind: "resize" });
+      await page.close();
+    });
+
+    it("finds an unnamed control exactly where the browser computes no accessible name", async () => {
+      const { host, contextId, page } = await surface("/audit-names");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const naming = new Set(["button-name", "link-name", "field-name", "image-alt"]);
+      const flagged = observed.audit.reading.findings
+        .filter((each) => naming.has(each.rule))
+        .map((each) => each.selector.replace(/^#/, ""));
+      const cdp = await page.context().newCDPSession(page);
+      const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+      const { nodeIds } = await cdp.send("DOM.querySelectorAll", {
+        nodeId: root.nodeId,
+        selector: "[data-control]",
+      });
+      const unnamed: string[] = [];
+      for (const nodeId of nodeIds) {
+        const { node } = await cdp.send("DOM.describeNode", { nodeId });
+        const id = node.attributes?.[(node.attributes?.indexOf("id") ?? 0) + 1] ?? "";
+        const { nodes } = await cdp.send("Accessibility.getPartialAXTree", {
+          nodeId,
+          fetchRelatives: false,
+        });
+        const name: unknown = nodes[0]?.name?.value;
+        if (typeof name !== "string" || name.trim() === "") unnamed.push(id);
+      }
+      await cdp.detach();
+      // The browser's own "Submit" for an image button and "Choose File" for a
+      // file field name the action, not the image or the field, so the audit
+      // still asks the author for one.
+      expect(flagged.toSorted()).toEqual([...unnamed, "img", "file"].toSorted());
+      expect(unnamed.toSorted()).toEqual(
+        [
+          "sube",
+          "subs",
+          "rese",
+          "btn",
+          "b",
+          "sum",
+          "im",
+          "sel",
+          "selp",
+          "ta",
+          "txt",
+          "lb",
+          "al",
+          "chk",
+          "a",
+        ].toSorted(),
+      );
+      await page.close();
+    });
+
+    it("measures text only against a background the browser paints, and counts the rest as not measured", async () => {
+      const { host, contextId, page } = await surface("/audit-paint");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      const { reading } = observed.audit;
+      // A `display: contents` or hidden wrapper paints nothing behind the readable text.
+      expect(reading.findings.filter((each) => each.rule === "color-contrast")).toEqual([]);
+      // The gradient, the clipped, pseudo-element, backdrop-filtered, masked,
+      // blended, and filtered text.
+      expect(reading.contrastNotMeasured).toBe(7);
+      await page.close();
+    });
+
+    it("audits only the elements it reads on a page larger than its bound", async () => {
+      const { host, contextId, page } = await surface("/audit-large");
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "accessibility" });
+      if (observed.audit?.kind !== "accessibility") throw new Error("No accessibility audit.");
+      expect(observed.audit.reading.truncated).toBe(true);
+      expect(observed.audit.reading.found).toEqual([]);
+      await page.close();
+    });
+
+    it("audits a page's load from the browser's own record without reloading it", async () => {
+      const { host, contextId, page, view } = await surface("/perf");
+      await page.waitForFunction(() => document.getElementById("above")?.style.height === "120px");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const marker = await page.evaluate(() => {
+        Reflect.set(window, "auditMarker", "kept");
+        return performance.timeOrigin;
+      });
+      const observed = await host.act(contextId, { kind: "audit", auditKind: "performance" });
+      if (observed.audit?.kind !== "performance") throw new Error("No performance audit.");
+      const { reading, counters } = observed.audit;
+      expect(reading.navigation?.responseStart).toBeGreaterThan(0);
+      expect(reading.firstContentfulPaint).toBeGreaterThan(0);
+      expect(reading.largestContentfulPaint?.startTime).toBeGreaterThan(0);
+      expect(reading.longTasks?.some((task) => task.duration >= 150)).toBe(true);
+      expect(reading.layoutShifts?.some((shift) => shift.value > 0)).toBe(true);
+      expect(reading.resources.map((resource) => resource.url)).toContain(
+        `${origin}/pixel.svg?token=s3cret`,
+      );
+      expect(counters).toMatchObject({ status: "read", domNodes: expect.any(Number) });
+      // The same document: nothing navigated or reloaded it.
+      expect(
+        await page.evaluate(() => [Reflect.get(window, "auditMarker"), performance.timeOrigin]),
+      ).toEqual(["kept", marker]);
+      // Someone else's developer tools: the timeline is still read, the counters are not.
+      view.webContents.debugger.attach("1.3");
+      const held = await host.act(contextId, { kind: "audit", auditKind: "performance" });
+      expect(held.audit).toMatchObject({
+        kind: "performance",
+        counters: { status: "unavailable" },
+        reading: { firstContentfulPaint: expect.any(Number) },
+      });
+      expect(view.webContents.debugger.isAttached()).toBe(true);
       await page.close();
     });
 

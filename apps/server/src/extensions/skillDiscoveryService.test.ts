@@ -170,17 +170,24 @@ describe("bounded standalone skill discovery", () => {
     const root = await mkdtemp(join(tmpdir(), "octant-skill-root-watch-"));
     directories.push(root);
     const added = join(root, "later", "skills");
+    let resolutions = 0;
     const service = new SkillDiscoveryService({
       roots: {
-        resolve: async () => [
-          {
-            workingDirectory: root,
-            projectRoot: root,
-            projectRef: "fixture",
-            userGlobalSkillsRoot: join(root, "global"),
-            extraSkillRoots: [{ sourceRef: "folder:fixture", path: added }],
-          },
-        ],
+        resolve: async () => {
+          resolutions += 1;
+          // Slow every watch-driven refresh, as a loaded host does, so an edit made right after
+          // a refresh lands while the watchers are being rebuilt rather than only by chance.
+          if (resolutions > 2) await new Promise((settle) => setTimeout(settle, 50));
+          return [
+            {
+              workingDirectory: root,
+              projectRoot: root,
+              projectRef: "fixture",
+              userGlobalSkillsRoot: join(root, "global"),
+              extraSkillRoots: [{ sourceRef: "folder:fixture", path: added }],
+            },
+          ];
+        },
       },
     });
     try {

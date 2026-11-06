@@ -124,7 +124,13 @@ slide deck, dashboard, web page, design, or prototype, or any reply long enough
 to need headings, tables, or charts), the agent builds it as a Canvas and
 replies with a short pointer; brief answers, one-off snippets, and questions
 stay in the conversation. When it could go either way, the agent makes the
-Canvas; ask for plain text if you would rather read it in the thread. A follow-up such as "add
+Canvas; ask for plain text if you would rather read it in the thread. Inline diagrams keep the proportions of their drawing, so a tall flow reads
+down the conversation instead of shrinking into a widescreen frame. You can
+zoom, pan, or expand the Canvas in place. To rearrange nodes, open its Canvas
+pane. Retry arrows visibly loop back to the same step; dashed alternatives,
+node icons, and subtitles stay part of the structured diagram.
+
+A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. The tool's always-visible description stays short; its read-only

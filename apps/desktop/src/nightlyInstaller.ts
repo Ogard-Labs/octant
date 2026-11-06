@@ -480,6 +480,8 @@ function refusalMessage(refusal: NightlyInstallRefusal): string {
       return "That Nightly build is not built for this computer.";
     case "wrong-ring":
       return "The Nightly feed held a build signed for another ring, so it was refused.";
+    case "wrong-app":
+      return "The Nightly feed held a build of Octant, not Octant Nightly, so it was refused.";
     case "corrupt-artifact":
       return "The download did not match the hash in the signed feed, so it was discarded.";
     case "no-release":

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  clearSecretServiceTestData,
   makeSecretServiceCredentialStore,
+  SECRET_SERVICE_NAMESPACES,
+  SECRET_SERVICE_TEST_DATA_PREFIX,
   probeSecretService,
   SECRET_SERVICE_ATTRIBUTE,
   SECRET_SERVICE_BUSCTL_PATH,
@@ -22,6 +25,58 @@ function result(overrides: Partial<SecretToolCommandResult> = {}): SecretToolCom
 }
 
 describe("Secret Service credential store", () => {
+  it("names only test-data service values for every namespace of Nightly's test host", async () => {
+    const commands: Array<{ readonly args: readonly string[] }> = [];
+    const execute: SecretToolCommandExecutor = async (spec) => {
+      commands.push(spec);
+      return result({ stdout: spec.args[0] === "lookup" ? "test-secret" : "" });
+    };
+    for (const namespace of SECRET_SERVICE_NAMESPACES) {
+      const store = makeSecretServiceCredentialStore({
+        execute,
+        namespace,
+        family: "octant-nightly-test-data",
+      });
+      await store.set(providerInstanceId, "test-secret");
+      await store.has(providerInstanceId);
+      await store.resolve(providerInstanceId);
+      await store.delete(providerInstanceId);
+    }
+    await clearSecretServiceTestData({ execute });
+    expect(commands).toHaveLength(SECRET_SERVICE_NAMESPACES.length * 5);
+    for (const command of commands) {
+      const service = command.args[command.args.indexOf("service") + 1] ?? "";
+      expect(command.args.indexOf("service")).toBeGreaterThan(0);
+      expect(service.startsWith(SECRET_SERVICE_TEST_DATA_PREFIX)).toBe(true);
+    }
+  });
+
+  it("keeps clearing test data from naming an account, so it never needs Octant's ids", async () => {
+    const commands: Array<{ readonly args: readonly string[] }> = [];
+    await clearSecretServiceTestData({
+      execute: async (spec) => {
+        commands.push(spec);
+        return result({ exitCode: 1, stderr: "No matching secret" });
+      },
+    });
+    expect(commands.map((command) => command.args)).toEqual(
+      SECRET_SERVICE_NAMESPACES.map((namespace) => [
+        "clear",
+        "service",
+        `${SECRET_SERVICE_TEST_DATA_PREFIX}${namespace}`,
+      ]),
+    );
+  });
+
+  it("reports a keyring that refuses to clear test data", async () => {
+    await expect(
+      clearSecretServiceTestData({
+        execute: async () =>
+          result({ exitCode: 1, stderr: "Cannot create an item in a locked collection" }),
+      }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+  });
+
   it("files replica device keys under their own service attribute", async () => {
     const commands: Array<{ readonly args: readonly string[] }> = [];
     const execute: SecretToolCommandExecutor = async (spec) => {

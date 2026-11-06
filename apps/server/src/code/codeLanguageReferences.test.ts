@@ -347,4 +347,47 @@ describe("current document references through real companion and controlled stdi
     expect(await f.service.read(f.caller, request)).toEqual({ status: "stale" });
     expect(f.received.some((message) => message.method === "textDocument/references")).toBe(false);
   });
+  it("answers an agent's references read for the saved file of a Plan thread, with no editor open", async () => {
+    const f = fixture();
+    expect(f.state.thread.executionPolicy).toBe("plan");
+    const read = () =>
+      f.service.readForAgent(f.caller.scopeId, {
+        kind: "references",
+        threadId: f.state.thread.id,
+        checkoutId: f.state.checkout.id,
+        path: "b.ts" as never,
+        position: { line: 1, character: 13 },
+        includeDeclaration: true,
+      });
+    expect(await read()).toMatchObject({
+      status: "references",
+      truncated: false,
+      targets: [
+        { kind: "checkout-location", path: "a.ts" },
+        { kind: "checkout-location", path: "b.ts" },
+        { kind: "outside-checkout", label: "elsewhere" },
+      ],
+    });
+    expect(
+      f.received.find((message) => message.method === "textDocument/references")?.params,
+    ).toMatchObject({
+      position: { line: 1, character: 13 },
+      context: { includeDeclaration: true },
+    });
+    // A server that does not report references is refused, never asked.
+    const unsupported = fixture({ capability: false });
+    expect(
+      await unsupported.service.readForAgent(unsupported.caller.scopeId, {
+        kind: "references",
+        threadId: unsupported.state.thread.id,
+        checkoutId: unsupported.state.checkout.id,
+        path: "b.ts" as never,
+        position: { line: 1, character: 13 },
+        includeDeclaration: false,
+      }),
+    ).toEqual({ status: "unsupported", capability: "references", support: "unsupported" });
+    expect(
+      unsupported.received.some((message) => message.method === "textDocument/references"),
+    ).toBe(false);
+  });
 });

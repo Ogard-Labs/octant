@@ -18,6 +18,7 @@ const ready: AppUpdateState = {
 
 function offeredRelease(notes: string): NonNullable<AppUpdateState["available"]> {
   return {
+    product: "octant",
     version: "0.2.0" as AppUpdateState["currentVersion"],
     platform: "darwin",
     arch: "arm64",

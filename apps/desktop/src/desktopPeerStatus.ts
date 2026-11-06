@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { lstat, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
-import { DESKTOP_PEER_STATUS_FILENAME } from "./runtimePaths";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { DESKTOP_PEER_LINUX_FILENAME, DESKTOP_PEER_STATUS_FILENAME } from "./runtimePaths";
 
 export type DesktopPeerRefusal =
   | "unsigned-build"
@@ -12,7 +14,11 @@ export type DesktopPeerRefusal =
   | "incompatible-host"
   | "deadline-exceeded"
   | "native-unavailable"
-  | "invalid-receipt";
+  | "invalid-receipt"
+  /** Linux: no packaged Octant launch has recorded the AppImage to start. */
+  | "no-launcher-record"
+  /** Linux: Nightly's renderers would run without Chromium's sandbox. */
+  | "unsandboxed-renderer";
 
 export type DesktopPeerPreflight =
   | { readonly kind: "ready"; readonly protocol: 1; readonly version: string }
@@ -51,6 +57,8 @@ function refusal(value: unknown): DesktopPeerRefusal | undefined {
     case "deadline-exceeded":
     case "native-unavailable":
     case "invalid-receipt":
+    case "no-launcher-record":
+    case "unsandboxed-renderer":
       return value;
     default:
       return undefined;
@@ -172,16 +180,53 @@ export async function closeDesktopPeerStatus(
   return { kind: "failed", reason: "native-unavailable" };
 }
 
-/** Only desktop main imports this fixed signed bundle resource. */
+/**
+ * Linux only: where the binding listens or connects and the version a status
+ * reply names. Both come from Octant's own host paths and package manifest,
+ * never from a renderer or an environment variable.
+ */
+export interface LinuxDesktopPeerEndpoint {
+  readonly windowsSocketPath: string;
+  readonly launcherRecordPath: string;
+  readonly version: string;
+}
+
+/**
+ * Chromium's renderer sandbox is part of Linux client trust: a Nightly whose
+ * renderers run unsandboxed registers no window with Octant.
+ */
+export function linuxRendererSandboxDisabled(input: {
+  readonly hasSwitch: (name: string) => boolean;
+  readonly argv: ReadonlyArray<string>;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}): boolean {
+  return (
+    input.hasSwitch("no-sandbox") ||
+    input.hasSwitch("disable-setuid-sandbox") ||
+    input.argv.some((argument) => argument === "--no-sandbox") ||
+    // Presence alone counts, empty included: refusing is the safe reading.
+    input.env.ELECTRON_DISABLE_SANDBOX !== undefined
+  );
+}
+
+/** Only desktop main imports this fixed bundle resource. */
 export function loadDesktopPeerStatus(input: {
   readonly packaged: boolean;
   readonly platform: NodeJS.Platform;
   readonly resourcesPath: string;
+  /** Required on Linux; a Linux load without it is unavailable. */
+  readonly linux?: LinuxDesktopPeerEndpoint;
 }): NativeDesktopPeerStatus | undefined {
-  if (!input.packaged || input.platform !== "darwin") return undefined;
+  if (!input.packaged) return undefined;
+  if (input.platform !== "darwin" && (input.platform !== "linux" || input.linux === undefined))
+    return undefined;
   try {
     const candidate: unknown = createRequire(import.meta.url)(
-      resolve(input.resourcesPath, "native", DESKTOP_PEER_STATUS_FILENAME),
+      resolve(
+        input.resourcesPath,
+        "native",
+        input.platform === "darwin" ? DESKTOP_PEER_STATUS_FILENAME : DESKTOP_PEER_LINUX_FILENAME,
+      ),
     );
     if (
       typeof candidate !== "object" ||
@@ -198,8 +243,64 @@ export function loadDesktopPeerStatus(input: {
       typeof candidate.close !== "function"
     )
       return undefined;
+    if (input.platform === "linux") {
+      const endpoint = input.linux;
+      // The binding accepts one endpoint per process and refuses a path
+      // outside a private folder the person owns.
+      if (
+        endpoint === undefined ||
+        !("bindEndpoint" in candidate) ||
+        typeof candidate.bindEndpoint !== "function" ||
+        candidate.bindEndpoint(
+          endpoint.windowsSocketPath,
+          endpoint.launcherRecordPath,
+          endpoint.version,
+        ) !== true
+      )
+        return undefined;
+    }
     return candidate as NativeDesktopPeerStatus;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * The one line a Linux Nightly reads to start a closed Octant: the AppImage
+ * this packaged Octant launched from, with the device and inode it had. The
+ * native binding refuses any other shape, so the field order is fixed.
+ */
+export function encodeLinuxLauncherRecord(input: {
+  readonly appImage: string;
+  readonly device: bigint;
+  readonly inode: bigint;
+}): string {
+  return `{"schemaVersion":1,"appImage":${JSON.stringify(input.appImage)},"device":"${input.device}","inode":"${input.inode}"}\n`;
+}
+
+/**
+ * Writes the launcher record for a packaged Linux Octant started from an
+ * AppImage. Only an absolute path to a regular file is recorded; anything
+ * else leaves no record, and Nightly then asks the person to open Octant.
+ */
+export async function writeLinuxLauncherRecord(input: {
+  readonly recordPath: string;
+  readonly appImage: string | undefined;
+}): Promise<"written" | "skipped"> {
+  const appImage = input.appImage;
+  if (appImage === undefined || !isAbsolute(appImage) || appImage.includes("\0")) return "skipped";
+  const metadata = await lstat(appImage, { bigint: true }).catch(() => undefined);
+  if (metadata === undefined || !metadata.isFile()) return "skipped";
+  const temporary = join(dirname(input.recordPath), `.launcher-${randomUUID()}.json`);
+  try {
+    await writeFile(
+      temporary,
+      encodeLinuxLauncherRecord({ appImage, device: metadata.dev, inode: metadata.ino }),
+      { mode: 0o600, flag: "wx" },
+    );
+    await rename(temporary, input.recordPath);
+    return "written";
+  } finally {
+    await rm(temporary, { force: true });
   }
 }
