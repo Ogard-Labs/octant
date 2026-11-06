@@ -83,6 +83,23 @@ import {
 } from "./App.test-fixtures";
 import { compactionStateFixture, contextFixture } from "./context/contextFixtures";
 
+// Observe the real pane boundary without replacing its rendered behavior.
+const paneBoundary = vi.hoisted(() => ({
+  observing: false,
+  latest: undefined as import("./app/ThreadPaneContainer").ThreadPaneContainerProps | undefined,
+}));
+vi.mock("./app/ThreadPaneContainer", async (original) => {
+  const actual = await original<typeof import("./app/ThreadPaneContainer")>();
+  const { createElement } = await import("react");
+  return {
+    ...actual,
+    ThreadPaneContainer: (props: import("./app/ThreadPaneContainer").ThreadPaneContainerProps) => {
+      if (paneBoundary.observing) paneBoundary.latest = props;
+      return createElement(actual.ThreadPaneContainer, props);
+    },
+  };
+});
+
 const automationGate = vi.hoisted(() => ({ enabled: false }));
 vi.mock("./automation/automationCenterGate", () => ({
   get AUTOMATION_CENTER_NAVIGATION_ENABLED() {
@@ -201,6 +218,43 @@ function navigatorAssistantClient(
 }
 
 describe("App", () => {
+  it("keeps thread-pane inputs stable when only its parent renders again", async () => {
+    paneBoundary.observing = true;
+    try {
+      const props = {
+        shellClient: client(bootstrap()),
+        chatClient: chats(),
+        codeClient: codes(),
+        contextClient: contextClient(),
+        projectClient: projects(),
+        providerClient: providers(),
+        hostClient: hostClient() as never,
+        isNarrow: false,
+        launch: { serverUrl: "http://127.0.0.1:13773", windowId },
+        projectWindowCapability,
+      };
+      const view = render(<App {...props} />);
+      await waitFor(() => {
+        expect(paneBoundary.latest?.chatController.status).toBe("ready");
+        expect(paneBoundary.latest?.codeController.status).toBe("ready");
+      });
+      const previous = paneBoundary.latest;
+      if (previous === undefined) throw new Error("The pane must be mounted");
+      for (let index = 0; index < 10; index += 1) {
+        view.rerender(<App {...props} />);
+        const current = paneBoundary.latest;
+        if (current === undefined) throw new Error("The pane must stay mounted");
+        expect(Object.keys(current)).toEqual(Object.keys(previous));
+        for (const key of Object.keys(previous)) {
+          expect(Reflect.get(current, key), key).toBe(Reflect.get(previous, key));
+        }
+      }
+    } finally {
+      paneBoundary.observing = false;
+      paneBoundary.latest = undefined;
+    }
+  });
+
   it("opens a created Code task while the first provider turn is still starting", async () => {
     const user = userEvent.setup();
     const base = codes();
