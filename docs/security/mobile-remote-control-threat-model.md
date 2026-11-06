@@ -3,7 +3,7 @@
 - Date: 2026-08-05
 - Threat model id: `mobile-remote-control-v1`
 - Scope: Expo iOS/Android remote clients paired to Octant hosts
-- Track: Mobile D hardening (post-preview)
+- Track: Mobile D hardening (first preview)
 - Design: `docs/architecture.md`, "Security and authority" (remote clients)
 
 ## Assets

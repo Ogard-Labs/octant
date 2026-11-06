@@ -17,9 +17,9 @@ the person's other machine are built and, like E2B, offered for leasing (see
 [Built in Cua sub-slice 1](#built-in-cua-sub-slice-1),
 [Built in Cua sub-slice 2](#built-in-cua-sub-slice-2), and
 [Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)). The maintainer
-authorized this scope as post-preview work and accepted the
+authorized this scope on 2026-10-26, brought it into the first preview on 2026-11-06, and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
-two cloud providers on 2026-10-27; it is not part of the first release, and the
+two cloud providers on 2026-10-27; it is in scope for the first preview, and the
 [Current Release Boundary](../architecture.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,

@@ -37,7 +37,7 @@ compile for the Simulator. A build carries them only when made with the push
 capability on, so the device passes on both platforms, a test gateway, and the
 accounts they need wait on the gates in [Phone rules](#phone-rules). Slices 8
 and 9 are not started. The
-maintainer authorized this scope as post-preview work and accepted the
+maintainer authorized this scope on 2026-10-26, brought it into the first preview on 2026-11-06, and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
 no new account, spend, hosted service, store submission, or widened authority;
@@ -833,8 +833,9 @@ that reaches it.
 
 ## Phase E: public store distribution
 
-Post-preview, and only after the release-boundary change lands and Phases B to
-D have been dogfooded so that store presence is the remaining gap.
+In scope for the first preview (maintainer decision, 2026-11-06). Build it
+after Phases B to D have been dogfooded so that store presence is the remaining
+gap; submission stays a separate maintainer action.
 
 - The listed app is the same remote client. It requires no Octant account; it
   is useful only with the person's own computer.
