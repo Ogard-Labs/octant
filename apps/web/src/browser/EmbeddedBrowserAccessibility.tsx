@@ -108,6 +108,7 @@ export function EmbeddedBrowserAccessibility(props: {
     if (presentationId === undefined) return;
     let disposed = false;
     let held: Mirror | undefined;
+    let refusals = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const pause = (ms: number) =>
       new Promise<void>((done) => {
@@ -119,6 +120,7 @@ export function EmbeddedBrowserAccessibility(props: {
           .execute({ kind: "accessibility", presentationId, revision: held?.revision ?? 0 })
           .catch((): HumanBrowserResult => ({ status: "refused" }));
         if (disposed) return;
+        if (result.status !== "refused") refusals = 0;
         if (result.status === "accessibility") {
           const next = applyBrowserAccessibilityUpdate(held, result.update);
           if (next === undefined) {
@@ -140,8 +142,12 @@ export function EmbeddedBrowserAccessibility(props: {
         } else if (result.status === "idle") continue;
         else {
           // No assistive technology, a hidden view or a retired presentation.
-          held = undefined;
-          setMirror(undefined);
+          // One slow read keeps the mirror, so VoiceOver's place is not lost.
+          refusals += 1;
+          if (refusals >= 3) {
+            held = undefined;
+            setMirror(undefined);
+          }
           await pause(1_000);
         }
       }
@@ -295,6 +301,12 @@ export function EmbeddedBrowserAccessibility(props: {
         onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
           if (!(event.nativeEvent as InputEvent).isComposing)
             act(node.id, { action: "set-value", value: event.currentTarget.value.slice(0, 1_024) });
+        },
+        // A finished composition's last input may still say it is composing.
+        onCompositionEnd: (
+          event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>,
+        ) => {
+          act(node.id, { action: "set-value", value: event.currentTarget.value.slice(0, 1_024) });
         },
       };
       return node.multiline === true ? (

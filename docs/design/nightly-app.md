@@ -661,17 +661,21 @@ window is not a fallback.
   accessibility events on at the first ask and off again after 5 seconds
   without one.
 - **What travels.** Each node carries a mirror identity (its document's ordinal
-  and the page's node number), one of a closed list of ARIA roles (anything
+  and the page's node number; a frame keeps its ordinal for as long as the top
+  document stands, so an identity Nightly holds never comes to name another
+  frame's node), one of a closed list of ARIA roles (anything
   else is `generic`), its name and description (each at most 512 UTF16 units),
-  its value (at most 1,024), its states (checked, pressed, expanded, selected,
+  its value exactly as the field holds it (at most 1,024), its states (checked, pressed, expanded, selected,
   disabled, focusable, required, invalid, read-only, multiline, heading level,
   range values, live politeness), its border box in the top page's
   coordinates, and its children in page order. A password field carries its
   role, name and states with a `secure` flag and never a value: Stable checks
-  each text field's element type, treats one it cannot check as a password
-  field, and also withholds a value Chromium shows as mask characters. Link
+  the element of every text, search, combo box and spin button node for the
+  password type, whatever role the page gave it, treats one it cannot check as
+  a password field, and also withholds a value Chromium shows as mask
+  characters. Link
   addresses and other page addresses never travel. Ignored and unnamed generic
-  nodes give their children to their parent, a control named by its own
+  nodes give their children to their parent, except an unnamed live region, a control named by its own
   content (button, link, heading, field, option and the like) travels without
   its descendants, and line boxes are dropped.
 - **Bounds.** At most 1,500 nodes, 64 levels and 512 children per node; past
@@ -685,15 +689,20 @@ window is not a fallback.
   parent's session by its frame identity, and the same renderer already
   reports its boxes in the top page's coordinates; a frame on another site is
   its own target, found by the attachment's automatic frame attachment, and
-  its boxes are moved by its frame element's content box.
+  its boxes are moved by its frame element's content box, measured again
+  before a press, as the page may have scrolled since the read.
 - **Updates.** Nightly's ask names the revision it holds and is held open for
-  up to 1 second while nothing changes. Stable rebuilds at most every 250 ms,
-  on the page's accessibility, document and frame events and otherwise once a
-  second, and answers with nothing when the tree is the same, a patch against
+  up to half a second while nothing changes. Stable rebuilds at most every
+  250 ms, on the page's accessibility, document and frame events and otherwise
+  every half second, keeps the revision when a rebuild finds the same tree,
+  and answers with nothing when the tree is the same, a patch against
   exactly the held revision when few nodes changed, or the full tree. A new
   document starts again from a full tree. One ask per presentation is in
   flight, outside the ordered input queue, so the person's typing never waits
-  behind it. A read that takes longer than 1.5 seconds is refused.
+  behind it. A read that takes longer than 1 second is dropped, and no new read
+  starts while it still runs, so an ask stays inside the route's 2-second
+  bound. Nightly keeps the mirror it holds through one or two refused asks and
+  drops it after the third, so a slow read does not cost VoiceOver its place.
 - **Mirror.** Nightly renders each node with its ARIA role, name and states at
   its scaled bounds; the subtree takes no pointer events, so the person's
   clicks still reach the image. Text fields are local fields showing the
@@ -705,8 +714,10 @@ window is not a fallback.
   regions when their text changes after the first read; the mirrored live
   nodes themselves stay quiet so nothing is said twice.
 - **Actions.** A mirrored node can be pressed, focused, scrolled into view,
-  stepped up or down (sliders and spin buttons) and, for an editable text
-  field that is not a password field, given a value. Each action names the
+  stepped up or down (sliders and spin buttons) and, for a native `input` or
+  `textarea` text field whose whole value travelled and that is not a password
+  field, given a value; a rich text editor or a field cut at the value bound
+  takes none, as replacing it would rewrite text Nightly never held. Each action names the
   node and a revision of the current document, travels on the ordered input
   queue under the same focus, visibility, popup and menu rules as a press, and
   in Stable runs on the person's input lane: a press is a click at the node's
@@ -727,7 +738,10 @@ selectors and name nothing outside the current document.
 Evidence: contract and preload tests for the bounds, the tree rule, password
 values and the closed actions; Stable tests for reduction (roles, names,
 password withholding, flattening, node, depth, child and text bounds, frame
-grafting), updates and revisions, and the action rules; a real-page test in
+grafting, an unnamed live region, exact field values), updates and revisions
+(nothing sent for an unchanged rebuild, a frame's ordinal kept when an earlier
+frame appears), and the action rules (a value only for a whole native field, a
+frame measured again before a press); a real-page test in
 Chromium that a fixture's heading, link, navigation, fields, slider and the
 buttons of a same-site and a cross-site frame appear with their names, values
 and page-coordinate bounds, that the password value never travels, that
@@ -740,7 +754,8 @@ and renderer tests of the mirror's roles, names, values, bounds, focus, live
 announcements, actions and patch refusal. Known limits: the maintainers'
 physical VoiceOver check is outstanding; the Chromium harness has no native
 view, so whether VoiceOver's own cursor and rotor behave over the transparent
-subtree rests on that check; a frame with a transform is offset by its content
+subtree rests on that check; whether a composition in a mirrored field
+commits on a physical input method rests on it too; a frame with a transform is offset by its content
 box but not scaled; while a mirrored text field has focus, input methods commit
 through a new value rather than through the page's own composition; and a
 truncated tree leaves the page's later content unreachable from the mirror.

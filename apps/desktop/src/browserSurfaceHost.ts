@@ -1591,21 +1591,20 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     };
     let generation = scriptGenerations.get(view);
     const watch = new BrowserAccessibilityWatch({
-      read: () =>
-        accessibilityDeadline(
-          readBrowserAccessibility({
-            send,
-            targets,
-            enable: async (sessionId) => {
-              const key = sessionId ?? "";
-              if (enabled.has(key) || enabled.size >= 64) return;
-              enabled.set(key, sessionId);
-              await send("Accessibility.enable", undefined, sessionId).catch(() => {
-                enabled.delete(key);
-              });
-            },
-          }),
-        ),
+      read: (ordinal) =>
+        readBrowserAccessibility({
+          send,
+          targets,
+          ordinal,
+          enable: async (sessionId) => {
+            const key = sessionId ?? "";
+            if (enabled.has(key) || enabled.size >= 64) return;
+            enabled.set(key, sessionId);
+            await send("Accessibility.enable", undefined, sessionId).catch(() => {
+              enabled.delete(key);
+            });
+          },
+        }),
       idle: disable,
     });
     const listener: SurfaceProtocolListener = (_event, method) => {
@@ -2977,17 +2976,6 @@ export type ReturnTypeOfBrowserSurfaceHost = ReturnType<typeof createBrowserSurf
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw signal.reason ?? new Error("Browser action was interrupted.");
-}
-
-/** One read of the page's accessibility tree; a page that stops answering refuses it. */
-function accessibilityDeadline<T>(work: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    work,
-    new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error("Browser accessibility did not answer.")), 1_500);
-    }),
-  ]).finally(() => clearTimeout(timer));
 }
 
 async function queueSurfaceAction<T>(

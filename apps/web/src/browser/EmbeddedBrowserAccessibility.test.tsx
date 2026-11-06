@@ -182,18 +182,26 @@ describe("Nightly's Browser accessibility mirror", () => {
     view.unmount();
   });
 
-  it("drops the mirror when Stable refuses it and asks again for the full tree", async () => {
+  it("keeps the mirror through one refusal and drops it after repeated refusals", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const { view, asked } = mirrored([
         { status: "accessibility", update: full },
         { status: "refused" },
+        { status: "refused" },
+        { status: "refused" },
         { status: "accessibility", update: full },
       ]);
+      expect(await screen.findByRole("button", { name: "Save" })).toBeTruthy();
       await waitFor(() => expect(asked.length).toBeGreaterThanOrEqual(2));
       await vi.advanceTimersByTimeAsync(1_100);
       await waitFor(() => expect(asked.length).toBeGreaterThanOrEqual(3));
-      expect(asked[2]).toMatchObject({ kind: "accessibility", revision: 0 });
+      // One refusal keeps the mirror and its revision.
+      expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+      expect(asked[2]).toMatchObject({ kind: "accessibility", revision: 1 });
+      await vi.advanceTimersByTimeAsync(2_200);
+      await waitFor(() => expect(asked.length).toBeGreaterThanOrEqual(5));
+      expect(asked[4]).toMatchObject({ kind: "accessibility", revision: 0 });
       view.unmount();
     } finally {
       vi.useRealTimers();

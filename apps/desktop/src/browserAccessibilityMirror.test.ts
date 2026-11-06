@@ -10,6 +10,7 @@ import {
   BrowserAccessibilityWatch,
   browserAccessibilityUpdate,
   reduceBrowserAccessibility,
+  type AccessibilityDocument,
   type AccessibilityFrameTree,
   type AccessibilityTree,
   type ProtocolAccessibilityNode,
@@ -173,6 +174,40 @@ describe("the Browser accessibility mirror's tree", () => {
     expect(reduced.nodes[2]?.children).toEqual([]);
   });
 
+  it("keeps an unnamed live region and a field's value exactly, and marks only a whole native value replaceable", () => {
+    const nodes = root(
+      tree("RootWebArea", {
+        kids: [
+          tree("generic", {
+            properties: { live: "polite" },
+            kids: [ax("StaticText", { name: "Saved" })],
+          }),
+          ax("textbox", {
+            name: "Notes",
+            value: "line1\n  line2",
+            backend: 501,
+            properties: { multiline: true },
+          }),
+          ax("textbox", { name: "Long", value: "y".repeat(2_000), backend: 502 }),
+          ax("textbox", {
+            name: "Rich",
+            value: "hello",
+            backend: 503,
+            properties: { editable: "richtext" },
+          }),
+        ],
+      }),
+    );
+    const reduced = reduceBrowserAccessibility(frame(nodes, { fields: new Set([501, 502]) }));
+    expect(reduced.nodes.find((node) => node.live === "polite")?.role).toBe("generic");
+    const by = (name: string) => reduced.nodes.find((node) => node.name === name);
+    expect(by("Notes")?.value).toBe("line1\n  line2");
+    expect(reduced.addresses.get(by("Notes")?.id ?? "")?.replaceable).toBe(true);
+    expect(reduced.addresses.get(by("Long")?.id ?? "")?.replaceable).toBe(false);
+    expect(reduced.addresses.get(by("Rich")?.id ?? "")?.replaceable).toBe(false);
+    expect(asResult(reduced)).toMatchObject({ status: "accessibility" });
+  });
+
   it("cuts the tree at the node, depth and text bounds and marks it truncated", () => {
     const many = root(
       tree("RootWebArea", {
@@ -261,6 +296,7 @@ describe("the Browser accessibility mirror's revisions", () => {
       frame(
         root(
           tree("RootWebArea", {
+            backend: 1,
             kids: [
               ax("button", { name, backend: 9 }),
               ...Array.from({ length: 6 }, (_, index) =>
@@ -292,13 +328,41 @@ describe("the Browser accessibility mirror's revisions", () => {
       expect(second).toMatchObject({ kind: "patch", base: 1, revision: 2 });
       const started = Date.now();
       expect(await watch.next(2, undefined, () => true)).toBe("idle");
-      expect(Date.now() - started).toBeGreaterThanOrEqual(900);
-      expect(reads).toBeLessThanOrEqual(4);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+      // A later ask that rebuilds the same tree still sends nothing.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(await watch.next(2, undefined, () => true)).toBe("idle");
+      expect(reads).toBeLessThanOrEqual(5);
       // An unknown revision gets the current tree in full.
       expect(await watch.next(1, undefined, () => true)).toMatchObject({
         kind: "full",
         revision: 2,
       });
+    } finally {
+      watch.close();
+    }
+  });
+
+  it("keeps a frame's ordinal across reads, so a held identity never names another frame's node", async () => {
+    const seen: Array<ReadonlyArray<number | undefined>> = [];
+    let frames = ["far"];
+    const watch = new BrowserAccessibilityWatch({
+      read: async (ordinal) => {
+        seen.push([ordinal(""), ...frames.map(ordinal)]);
+        return { tree: reduced(String(seen.length)), documents };
+      },
+      idle: () => undefined,
+    });
+    try {
+      await watch.next(0, undefined, () => true);
+      // An earlier frame is inserted before the one Nightly knows.
+      frames = ["ad", "far"];
+      watch.changed();
+      await watch.next(1, undefined, () => true);
+      expect(seen).toEqual([
+        [0, 1],
+        [0, 2, 1],
+      ]);
     } finally {
       watch.close();
     }
@@ -335,7 +399,14 @@ describe("the Browser accessibility mirror's revisions", () => {
 });
 
 describe("actions from the Browser accessibility mirror", () => {
-  const document = { ordinal: 1, sessionId: "frame-1", offset: { x: 30, y: 40 } };
+  const top = { ordinal: 0, sessionId: undefined, offset: { x: 0, y: 0 } };
+  // A frame on another site, read when its element sat further down the page.
+  const document = {
+    ordinal: 1,
+    sessionId: "frame-1",
+    offset: { x: 30, y: 900 },
+    owner: { parent: 0, backendNodeId: 7, ownSession: true },
+  };
   const address = (role: string, extra: Record<string, boolean> = {}) => ({
     ordinal: 1,
     backendNodeId: 12,
@@ -344,6 +415,7 @@ describe("actions from the Browser accessibility mirror", () => {
     disabled: false,
     editable: false,
     readonly: false,
+    replaceable: true,
     ...extra,
   });
   const input = () => {
@@ -360,7 +432,9 @@ describe("actions from the Browser accessibility mirror", () => {
         send: async (method: string, parameters?: Record<string, unknown>, sessionId?: string) => {
           sent.push([method, parameters, sessionId]);
           if (method === "DOM.getBoxModel")
-            return { model: { border: [10, 10, 50, 10, 50, 30, 10, 30] } };
+            return parameters?.backendNodeId === 7
+              ? { model: { content: [30, 40, 330, 40, 330, 120, 30, 120] } }
+              : { model: { border: [10, 10, 50, 10, 50, 30, 10, 30] } };
           if (method === "DOM.resolveNode") return { object: { objectId: "field" } };
           return {};
         },
@@ -380,12 +454,19 @@ describe("actions from the Browser accessibility mirror", () => {
     };
   };
 
-  it("presses a node at its centre in the top page, through the person's input", async () => {
+  it("presses a node at its centre in the top page, measuring its frame again, through the person's input", async () => {
     const seen = input();
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("button"), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("button"),
+          document,
+        },
         { action: "press" },
         () => true,
       ),
@@ -394,7 +475,28 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(seen.sent.map(([method, , session]) => [method, session])).toEqual([
       ["DOM.scrollIntoViewIfNeeded", "frame-1"],
       ["DOM.getBoxModel", "frame-1"],
+      ["DOM.getBoxModel", undefined],
     ]);
+  });
+
+  it("refuses a value for a field the mirror cannot replace whole", async () => {
+    const seen = input();
+    expect(
+      await actOnBrowserAccessibilityNode(
+        seen.port,
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("textbox", { replaceable: false }),
+          document,
+        },
+        { action: "set-value", value: "Ada" },
+        () => true,
+      ),
+    ).toBe(false);
+    expect(seen.sent).toEqual([]);
   });
 
   it("never sets a password field's value and leaves a disabled control alone", async () => {
@@ -402,7 +504,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("textbox", { secure: true }), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("textbox", { secure: true }),
+          document,
+        },
         { action: "set-value", value: "hunter2" },
         () => true,
       ),
@@ -410,7 +519,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("button", { disabled: true }), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("button", { disabled: true }),
+          document,
+        },
         { action: "press" },
         () => true,
       ),
@@ -420,7 +536,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("button", { disabled: true }), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("button", { disabled: true }),
+          document,
+        },
         { action: "focus" },
         () => true,
       ),
@@ -432,7 +555,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("textbox"), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("textbox"),
+          document,
+        },
         { action: "set-value", value: "Ada" },
         () => true,
       ),
@@ -442,7 +572,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("slider"), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("slider"),
+          document,
+        },
         { action: "increment" },
         () => true,
       ),
@@ -450,7 +587,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         seen.port,
-        { address: address("button"), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("button"),
+          document,
+        },
         { action: "increment" },
         () => true,
       ),
@@ -472,7 +616,14 @@ describe("actions from the Browser accessibility mirror", () => {
     expect(
       await actOnBrowserAccessibilityNode(
         port,
-        { address: address("button"), document },
+        {
+          documents: new Map<number, AccessibilityDocument>([
+            [0, top],
+            [1, document],
+          ]),
+          address: address("button"),
+          document,
+        },
         { action: "press" },
         () => live,
       ),

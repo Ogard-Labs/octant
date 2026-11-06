@@ -61,6 +61,8 @@ export interface AccessibilityFrameTree {
   readonly nodes: ReadonlyArray<ProtocolAccessibilityNode>;
   /** Password fields, by their page node; their values never travel. */
   readonly secure: ReadonlySet<number>;
+  /** Native `input` and `textarea` text fields, by their page node: the only ones given a value. */
+  readonly fields?: ReadonlySet<number>;
   /** Each node's border box in the top page's coordinates. */
   readonly bounds: ReadonlyMap<number, AccessibilityRect>;
   /** The documents of frame elements, by the frame element's page node. */
@@ -76,6 +78,8 @@ export interface AccessibilityAddress {
   readonly disabled: boolean;
   readonly editable: boolean;
   readonly readonly: boolean;
+  /** A native text field whose whole value travelled, so a new value can replace it. */
+  readonly replaceable: boolean;
 }
 
 export interface AccessibilityTree {
@@ -190,6 +194,13 @@ function text(value: unknown, maximum: number): string | undefined {
   return collapsed.slice(0, end).toWellFormed();
 }
 
+/** A value as the page holds it, cut at the bound without splitting a surrogate pair. */
+function exact(value: string, maximum: number): string {
+  if (value.length <= maximum) return value.toWellFormed();
+  const end = /[\uD800-\uDBFF]/u.test(value[maximum - 1] ?? "") ? maximum - 1 : maximum;
+  return value.slice(0, end).toWellFormed();
+}
+
 function roleOf(raw: unknown): BrowserAccessibilityRole | "dropped" {
   if (typeof raw !== "string" || DROPPED.has(raw)) return "dropped";
   const mapped = CHROMIUM_ROLES[raw];
@@ -282,7 +293,12 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
       !nested &&
       (ignored ||
         typeof backend !== "number" ||
-        (role === "generic" && name === undefined && property(raw, "focusable") !== true) ||
+        // An unnamed live region still announces, so it keeps its own node.
+        (role === "generic" &&
+          name === undefined &&
+          property(raw, "focusable") !== true &&
+          property(raw, "live") !== "polite" &&
+          property(raw, "live") !== "assertive") ||
         (role === "text" && name === undefined))
     )
       return role === "text" ? [] : childrenOf(depth);
@@ -298,7 +314,7 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
     if (addresses.has(id)) return [];
     const valueText = raw.value?.value;
     const masked = typeof valueText === "string" && MASKED.test(valueText);
-    const secure = frame.secure.has(backend) || (role === "textbox" && masked);
+    const secure = frame.secure.has(backend) || (VALUED.has(role) && masked);
     const disabled = property(raw, "disabled") === true;
     const editable = typeof property(raw, "editable") === "string";
     const node: { -readonly [K in keyof BrowserAccessibilityNode]: BrowserAccessibilityNode[K] } = {
@@ -309,10 +325,14 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
     if (name !== undefined) node.name = name;
     const description = text(raw.description?.value, MAX_BROWSER_ACCESSIBILITY_TEXT);
     if (description !== undefined && description !== name) node.description = description;
+    // A field's value travels exactly, line breaks and spacing included, so
+    // a new value from the mirror never rewrites the rest of the text.
+    let wholeValue = false;
     if (secure) node.secure = true;
-    else if (VALUED.has(role) && !RANGED.has(role)) {
-      const value = text(valueText, MAX_BROWSER_ACCESSIBILITY_VALUE);
-      if (value !== undefined) node.value = value;
+    else if (VALUED.has(role) && !RANGED.has(role) && typeof valueText === "string") {
+      const value = exact(valueText, MAX_BROWSER_ACCESSIBILITY_VALUE);
+      wholeValue = value.length === valueText.length;
+      if (value !== "") node.value = value;
     }
     if (RANGED.has(role)) {
       const now = finite(valueText);
@@ -356,6 +376,7 @@ export function reduceBrowserAccessibility(top: AccessibilityFrameTree): Accessi
       disabled,
       editable,
       readonly: node.readonly === true,
+      replaceable: !secure && wholeValue && frame.fields?.has(backend) === true,
     });
     let children: string[];
     if (nested !== undefined)
@@ -496,6 +517,38 @@ export interface AccessibilityDocument {
   readonly ordinal: number;
   readonly sessionId: string | undefined;
   readonly offset: AccessibilityOffset;
+  /**
+   * The frame element that holds this document, in its parent document. A
+   * document in another session is measured again from it before a press, as
+   * the page may have scrolled since it was read.
+   */
+  readonly owner?: {
+    readonly parent: number;
+    readonly backendNodeId: number;
+    readonly ownSession: boolean;
+  };
+}
+
+/** Where a document's content sits in the top page now, measured from its frame elements. */
+export async function currentAccessibilityOffset(
+  send: SurfaceProtocolSend,
+  documents: ReadonlyMap<number, AccessibilityDocument>,
+  document: AccessibilityDocument,
+  depth = 0,
+): Promise<AccessibilityOffset | undefined> {
+  const owner = document.owner;
+  if (owner === undefined) return { x: 0, y: 0 };
+  const parent = documents.get(owner.parent);
+  if (parent === undefined || depth > MAX_FRAME_DEPTH) return undefined;
+  const base = await currentAccessibilityOffset(send, documents, parent, depth + 1);
+  if (base === undefined || !owner.ownSession) return base;
+  const box = (await send(
+    "DOM.getBoxModel",
+    { backendNodeId: owner.backendNodeId },
+    parent.sessionId,
+  )) as ProtocolBoxModel;
+  const content = quadRect(box.model?.content);
+  return content === undefined ? undefined : { x: base.x + content.x, y: base.y + content.y };
 }
 
 /** At most this many documents of one page are read: the top page and its frames. */
@@ -503,6 +556,8 @@ const MAX_FRAMES = 16;
 const MAX_FRAME_DEPTH = 8;
 /** Text fields checked for the password type; past this a field's value is withheld. */
 const MAX_CHECKED_FIELDS = 128;
+/** Input types whose value is plain text a new value may replace. */
+const TEXT_INPUTS = new Set(["text", "search", "url", "tel", "email", ""]);
 
 /** An attribute's lowercased value from the protocol's flat name, value list. */
 function attributeOf(attributes: ReadonlyArray<unknown>, name: string): string | undefined {
@@ -528,6 +583,12 @@ export async function readBrowserAccessibility(options: {
   readonly targets: SurfaceFrameTargets;
   /** Each session's accessibility events, enabled once per session. */
   readonly enable: (sessionId: string | undefined) => Promise<void>;
+  /**
+   * A frame's ordinal, the same for that frame across reads of one document so
+   * a node identity Nightly holds never comes to name another frame's node;
+   * undefined when no ordinal is left.
+   */
+  readonly ordinal: (frameKey: string) => number | undefined;
 }): Promise<{
   readonly tree: AccessibilityTree;
   readonly documents: ReadonlyMap<number, AccessibilityDocument>;
@@ -539,10 +600,18 @@ export async function readBrowserAccessibility(options: {
     frameId: string | undefined,
     offset: AccessibilityOffset,
     depth: number,
+    owner: AccessibilityDocument["owner"],
+    frameKey: string,
   ): Promise<AccessibilityFrameTree | undefined> => {
     if (documents.size >= MAX_FRAMES) return undefined;
-    const ordinal = documents.size;
-    documents.set(ordinal, { ordinal, sessionId, offset });
+    const ordinal = options.ordinal(frameKey);
+    if (ordinal === undefined || documents.has(ordinal)) return undefined;
+    documents.set(ordinal, {
+      ordinal,
+      sessionId,
+      offset,
+      ...(owner === undefined ? {} : { owner }),
+    });
     await options.enable(sessionId);
     const answer = await send(
       "Accessibility.getFullAXTree",
@@ -560,10 +629,16 @@ export async function readBrowserAccessibility(options: {
       typeof node.backendDOMNodeId === "number" && node.ignored !== true
         ? node.backendDOMNodeId
         : undefined;
-    // A text field is a password field when its element says so; one that
-    // cannot be checked is treated as one, so no value travels by mistake.
+    // A field is a password field when its element says so, whatever role the
+    // page gave it; one that cannot be checked is treated as one, so no value
+    // travels by mistake. Only a native input or textarea may take a new value.
     const secure = new Set<number>();
-    const fields = nodes.filter((node) => node.role?.value === "textbox");
+    const native = new Set<number>();
+    const fields = nodes.filter((node) =>
+      ["textbox", "searchbox", "combobox", "spinbutton", "SearchBox", "PopUpButton"].includes(
+        String(node.role?.value),
+      ),
+    );
     await Promise.all(
       fields.map(async (node, index) => {
         const backend = backendOf(node);
@@ -578,8 +653,12 @@ export async function readBrowserAccessibility(options: {
           record(described) && record(described.node) && Array.isArray(described.node.attributes)
             ? (described.node.attributes as ReadonlyArray<unknown>)
             : undefined;
-        if (attributes === undefined || attributeOf(attributes, "type") === "password")
-          secure.add(backend);
+        const type = attributes === undefined ? undefined : attributeOf(attributes, "type");
+        if (attributes === undefined || type === "password") return void secure.add(backend);
+        const element =
+          record(described) && record(described.node) ? String(described.node.nodeName) : "";
+        if (element === "TEXTAREA" || (element === "INPUT" && TEXT_INPUTS.has(type ?? "text")))
+          native.add(backend);
       }),
     );
     const bounds = new Map<number, AccessibilityRect>();
@@ -624,7 +703,14 @@ export async function readBrowserAccessibility(options: {
         let child: AccessibilityFrameTree | undefined;
         if (findFrame(tree.frameTree, childId) !== undefined) {
           // The same renderer reports a nested document's boxes in the top page's coordinates.
-          child = await readDocument(sessionId, childId, offset, depth + 1).catch(() => undefined);
+          child = await readDocument(
+            sessionId,
+            childId,
+            offset,
+            depth + 1,
+            { parent: ordinal, backendNodeId: backend, ownSession: false },
+            childId,
+          ).catch(() => undefined);
         } else {
           const attached = (await autoAttachSurfaceFrames(send, options.targets, sessionId)).get(
             childId,
@@ -639,14 +725,16 @@ export async function readBrowserAccessibility(options: {
               undefined,
               { x: offset.x + content.x, y: offset.y + content.y },
               depth + 1,
+              { parent: ordinal, backendNodeId: backend, ownSession: true },
+              childId,
             ).catch(() => undefined);
         }
         if (child !== undefined) frames.set(backend, child);
       }
     }
-    return { ordinal, nodes, secure, bounds, frames };
+    return { ordinal, nodes, secure, fields: native, bounds, frames };
   };
-  const top = await readDocument(undefined, undefined, { x: 0, y: 0 }, 0);
+  const top = await readDocument(undefined, undefined, { x: 0, y: 0 }, 0, undefined, "");
   if (top === undefined) throw new Error("Browser accessibility could not be read.");
   return { tree: reduceBrowserAccessibility(top), documents };
 }
@@ -654,11 +742,20 @@ export async function readBrowserAccessibility(options: {
 /** The fastest the mirror rebuilds; changes in between wait for the next build. */
 export const BROWSER_ACCESSIBILITY_BUILD_MS = 250;
 /** How long one ask for the mirror is held open when nothing changed. */
-export const BROWSER_ACCESSIBILITY_WAIT_MS = 1_000;
+export const BROWSER_ACCESSIBILITY_WAIT_MS = 500;
+/**
+ * The longest one read of the tree may take. With the wait and the build
+ * spacing it keeps an ask under the presentation route's 2-second bound.
+ */
+export const BROWSER_ACCESSIBILITY_READ_MS = 1_000;
+/** Frames given an ordinal in one document; a later frame is left out. */
+const MAX_ORDINALS = 64;
 /** With no ask for this long, the page's accessibility events are turned off again. */
 export const BROWSER_ACCESSIBILITY_IDLE_MS = 5_000;
 
-export type BrowserAccessibilityRead = () => Promise<{
+export type BrowserAccessibilityRead = (
+  ordinal: (frameKey: string) => number | undefined,
+) => Promise<{
   readonly tree: AccessibilityTree;
   readonly documents: ReadonlyMap<number, AccessibilityDocument>;
 }>;
@@ -684,6 +781,9 @@ export class BrowserAccessibilityWatch {
       }
     | undefined;
   #building: Promise<void> | undefined;
+  /** A read that outlived its deadline; no new read starts beside it. */
+  #reading: Promise<unknown> | undefined;
+  readonly #ordinals = new Map<string, number>();
   #lastBuild = 0;
   #dirty = true;
   #waiters = new Set<() => void>();
@@ -710,6 +810,7 @@ export class BrowserAccessibilityWatch {
   /** A new document: its nodes share nothing with the last one's. */
   replaced(): void {
     this.#latest = undefined;
+    this.#ordinals.clear();
     this.#documentRevision = this.#revision + 1;
     this.changed();
   }
@@ -719,14 +820,20 @@ export class BrowserAccessibilityWatch {
     revision: number,
     nodeId: string,
   ):
-    | { readonly address: AccessibilityAddress; readonly document: AccessibilityDocument }
+    | {
+        readonly address: AccessibilityAddress;
+        readonly document: AccessibilityDocument;
+        readonly documents: ReadonlyMap<number, AccessibilityDocument>;
+      }
     | undefined {
     const latest = this.#latest;
     if (latest === undefined || revision < this.#documentRevision || revision > latest.revision)
       return undefined;
     const address = latest.tree.addresses.get(nodeId);
     const document = address === undefined ? undefined : latest.documents.get(address.ordinal);
-    return address === undefined || document === undefined ? undefined : { address, document };
+    return address === undefined || document === undefined
+      ? undefined
+      : { address, document, documents: latest.documents };
   }
 
   async next(
@@ -754,7 +861,8 @@ export class BrowserAccessibilityWatch {
         await this.#build();
         const after = this.#latest;
         if (after === undefined) return "refused";
-        if (after !== before || known !== after.revision) {
+        // A rebuild that found the same tree keeps its revision: nothing to send.
+        if (after.revision !== before?.revision || known !== after.revision) {
           const base = before !== undefined && known === before.revision ? before : undefined;
           return (
             browserAccessibilityUpdate(base, after.tree, after.revision) ??
@@ -796,7 +904,33 @@ export class BrowserAccessibilityWatch {
       this.#dirty = false;
       const generation = this.#documentRevision;
       try {
-        const read = await this.#read();
+        if (this.#reading !== undefined) {
+          this.#dirty = true;
+          return;
+        }
+        const ordinal = (frameKey: string) => {
+          const known = this.#ordinals.get(frameKey);
+          if (known !== undefined || this.#ordinals.size >= MAX_ORDINALS) return known;
+          this.#ordinals.set(frameKey, this.#ordinals.size);
+          return this.#ordinals.size - 1;
+        };
+        const reading = this.#read(ordinal);
+        this.#reading = reading;
+        void reading
+          .catch(() => undefined)
+          .finally(() => {
+            if (this.#reading === reading) this.#reading = undefined;
+          });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const read = await Promise.race([
+          reading,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Browser accessibility did not answer.")),
+              BROWSER_ACCESSIBILITY_READ_MS,
+            );
+          }),
+        ]).finally(() => clearTimeout(timer));
         if (this.#closed || generation !== this.#documentRevision) return;
         const previous = this.#latest;
         if (
@@ -857,7 +991,11 @@ const STEPPED = new Set<BrowserAccessibilityRole>(["slider", "spinbutton"]);
  */
 export async function actOnBrowserAccessibilityNode(
   input: BrowserAccessibilityInput,
-  found: { readonly address: AccessibilityAddress; readonly document: AccessibilityDocument },
+  found: {
+    readonly address: AccessibilityAddress;
+    readonly document: AccessibilityDocument;
+    readonly documents: ReadonlyMap<number, AccessibilityDocument>;
+  },
   action: BrowserAccessibilityAction,
   current: () => boolean,
 ): Promise<boolean> {
@@ -866,15 +1004,13 @@ export async function actOnBrowserAccessibilityNode(
   const session = document.sessionId;
   if (address.disabled && action.action !== "focus" && action.action !== "scroll-into-view")
     return false;
-  if (action.action === "set-value") {
-    if (
-      address.secure ||
-      address.readonly ||
-      !TEXT_ROLES.has(address.role) ||
-      (address.role === "combobox" && !address.editable)
-    )
-      return false;
-  }
+  // Only a native text field whose whole value Nightly holds can take a new
+  // one; a rich editor or a cut value would have the rest of its text rewritten.
+  if (
+    action.action === "set-value" &&
+    (address.secure || address.readonly || !address.replaceable || !TEXT_ROLES.has(address.role))
+  )
+    return false;
   if (
     (action.action === "increment" || action.action === "decrement") &&
     !STEPPED.has(address.role)
@@ -891,9 +1027,12 @@ export async function actOnBrowserAccessibilityNode(
       const box = (await input.send("DOM.getBoxModel", node, session)) as ProtocolBoxModel;
       const rect = quadRect(box.model?.border);
       if (rect === undefined || rect.width <= 0 || rect.height <= 0 || !current()) return false;
+      // Scrolling may have moved a frame's document since the tree was read.
+      const offset = await currentAccessibilityOffset(input.send, found.documents, document);
+      if (offset === undefined || !current()) return false;
       return input.press({
-        x: Math.floor(document.offset.x + rect.x + rect.width / 2),
-        y: Math.floor(document.offset.y + rect.y + rect.height / 2),
+        x: Math.floor(offset.x + rect.x + rect.width / 2),
+        y: Math.floor(offset.y + rect.y + rect.height / 2),
       });
     }
     await input.send("DOM.focus", node, session);
