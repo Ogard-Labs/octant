@@ -28,11 +28,12 @@ controls. For that on-device store:
 
 A data processing agreement with Ogard Labs is therefore **not** the ordinary
 document for single-machine use of the technical preview. This template
-exists for the narrower case where Ogard Labs would process personal data
+exists for the narrower case where Ogard Labs processes personal data
 **on behalf of** a customer in connection with an Octant-operated hosted
-component that actually ships. Hosted relay is outside the current release
-boundary. Until such a component exists and counsel confirms the processing
-relationship, leave this draft unused as a live contract.
+component. The public Canvas share service (below) is that component and is
+in the current release boundary, so this DPA is its instrument from launch;
+hosted relay remains outside the release boundary. Until counsel signs it,
+this page remains a draft, not a live contract.
 
 A later shared-host design would still place controllership with the team
 that runs the host, not with Ogard Labs by default. That design is not the
@@ -53,10 +54,13 @@ until a person turns Public links on and approves a publish. When it does:
   to draw the page and link previews — so for that published content Ogard
   Labs is the **processor** acting on the publisher's documented
   instruction (the approved publish card), and this DPA is the instrument
-  for it. Complete Annex A for the service before it takes traffic.
-- The hosting region decides the transfer tool; see the
-  [SCC position](/advanced/scc-position). The region is not named yet —
-  it is one of the open items in `docs/legal/README.md`.
+  for it. Annex A below carries the service's current values; counsel
+  confirms them at sign-off.
+- The service is hosted in **Norway (EEA)** on Gigahost AS, with encrypted
+  offsite backups on Hetzner in Finland (EU), so no transfer tool is needed
+  while it stays EEA-hosted; see the [SCC position](/advanced/scc-position).
+  Moving it outside the EEA/UK requires the controller-to-processor SCC
+  module before that traffic starts.
 - The service writes no IP or user-agent logs and keeps an aggregate view
   count; revoke, expiry, or deleting the Canvas deletes the content, with a
   content-free tombstone kept 90 days. See

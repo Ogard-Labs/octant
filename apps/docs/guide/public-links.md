@@ -167,13 +167,8 @@ address. The operator can take a link down. A removed link answers "removed".
 
 The abuse contact shown on link pages is `hello@octant.sh` (Ogard Labs,
 organisation number 996 198 510, Stavanger, Norway). The service is hosted in
-Norway (EEA) on Ogard Labs' own infrastructure.
-
-::: warning Draft
-Counsel confirms the final legal wording for takedown before the service
-launches; the abuse contact and operator facts above are the maintainer's
-current values.
-:::
+Norway (EEA) on Ogard Labs' own infrastructure (Gigahost AS), with encrypted
+offsite backups in Finland (Hetzner, EU).
 
 ## Run your own service
 

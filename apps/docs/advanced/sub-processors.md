@@ -103,9 +103,13 @@ makes on its own, or because you asked, are different relationships:
   outside the EEA/UK would require the SCC module named in the
   [SCC position](/advanced/scc-position).
 
-Whether any of those parties is a processor, a sub-processor, or neither
-is a legal question this draft does not close. The product fact is that
-they are not on the BYO inference path.
+For the public Canvas share service this draft does close the question:
+Ogard Labs is the **processor** of published Canvases under the
+[DPA template](/advanced/dpa-template), with Gigahost AS and Hetzner Online
+GmbH as its hosting sub-processors. For the other parties above, whether each
+is a processor, a sub-processor, or neither is a legal question this draft
+does not close. The product fact is that none of them is on the BYO inference
+path.
 
 ## Shared hosts
 

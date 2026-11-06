@@ -67,12 +67,7 @@ store lives. See [Sub-processors](/advanced/sub-processors).
 A Canvas you publish as a public link is stored by the public Canvas share
 service: **Norway (EEA)**, on Ogard Labs' own servers (Gigahost AS), with
 encrypted offsite backups in Finland (Hetzner, EU). Self-hosting keeps links
-wherever you run the service.
-
-::: warning Draft
-Counsel confirms the published wording when the service launches; the region
-above is the maintainer's current hosting fact.
-:::
+wherever you run the service.:
 
 An update check or marketplace fetch is processed where the feed or
 registry you contacted is hosted. Those requests do not relocate the

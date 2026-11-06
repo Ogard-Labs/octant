@@ -244,13 +244,7 @@ address. See [Share a Canvas with a public link](/guide/public-links).
 
 The abuse contact shown on link pages is `hello@octant.sh`. The operator can
 take a link down; a removed link answers "removed". Reports are stored without
-the reporter's address.
-
-::: warning Draft
-Counsel confirms the final wording of this disclosure before the service
-launches; the operator, hosting, and contact facts above are the maintainer's
-current values.
-:::
+the reporter's address.:
 
 ### Provider update checks
 
