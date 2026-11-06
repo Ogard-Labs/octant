@@ -577,21 +577,40 @@ In client mode, Nightly's main gives every desktop channel one class from a
 closed table (`apps/desktop/src/nightlyClientChannels.ts`); a test fails when a
 channel is missing from it:
 
-| Class         | Meaning                                                                   | Refusal while unanswered                         |
-| ------------- | ------------------------------------------------------------------------- | ------------------------------------------------ |
-| `local`       | Nightly's own main answers it (window, menus, updates, Data, capture)     | "Not available in Octant Nightly yet."           |
-| `brokered`    | It needs the host (pickers, credentials, Code approvals, Canvas, tools)   | "Not available in Octant Nightly yet."           |
-| `octant-only` | Administration that stays with Octant (decision 1) and installing Nightly | "Managed in Octant. Open Octant to change this." |
-| `replaced`    | Nightly uses another mechanism: the Browser's human presentation          | Names the Browser presentation                   |
+| Class         | Meaning                                                                   | Refusal while unanswered                          |
+| ------------- | ------------------------------------------------------------------------- | ------------------------------------------------- |
+| `local`       | Nightly's own main answers it, itself or through native-main admission    | "Needs a newer Octant" for a missing host feature |
+| `brokered`    | It needs the host and has no Nightly broker yet (Canvas, tools, windows)  | "Not available in Octant Nightly yet."            |
+| `octant-only` | Administration that stays with Octant (decision 1) and installing Nightly | "Managed in Octant. Open Octant to change this."  |
+| `replaced`    | Nightly uses another mechanism: the Browser's human presentation          | Names the Browser presentation                    |
 
 - Nightly's main refuses to start if it answers a channel its table does not
   mark `local`, or leaves a `local` channel unanswered. The exceptions are the
   channels it only sends to the renderer (menu commands, Code links, the
   resolved sidebar material) and the Data channels where Nightly does not offer
   Data. An unlisted channel counts as Octant-only.
-- Brokered channels stay refused until the native-main token of decision 1
-  admits them. Opening a Project in a new window is brokered: a second window
-  needs its own lease from the host.
+- Brokered channels stay refused until Nightly has a broker for them. Opening
+  a Project in a new window is brokered: a second window needs its own lease
+  from the host.
+- Nightly's main answers these through the window's
+  [native-main admission](#native-main-admission), over its own Node
+  transport, once the host's feature list names them:
+  - the Project, plugin, skill and runtime-binary pickers and the support
+    bundle save (`project-root-receipts`, `local-folder-receipts`,
+    `runtime-binary-receipts`, `support-bundle-save`);
+  - opening a Code file in the external editor, a checkout in one of the
+    Open in apps, and a preview handoff (`code-external-editor-target`,
+    `code-checkout-open-target`, `preview-handoff`);
+  - provider key status, set and clear (`provider-credentials`) and the API
+    key pool: list, add, rename, replace, remove, set active and move
+    (`provider-api-keys`). The keys stay in the host app's credential store;
+  - Code operation approvals in the owner-only native approval view Octant
+    uses (`code-operation-approval`).
+
+  Where the host's feature list lacks the flow, or the window has no
+  main-only token, Nightly refuses it with "Needs a newer Octant" before any
+  dialog opens or any host route is called.
+
 - Nightly's own main, without the host, answers the native surfaces a window
   needs:
   - An application menu named Octant Nightly, with **Settings…** (⌘,) and the
@@ -602,8 +621,11 @@ channel is missing from it:
     credentials leave the app.
   - Attention notifications and the Dock badge, summed across Nightly's
     windows.
-  - `octant-nightly://` Code links. Nightly claims the scheme, holds a link
-    until a window has loaded, and drops any link Octant would drop.
+  - `octant-nightly://` Code links. Nightly claims the scheme. Its entry
+    holds the newest eight links from its first step, because macOS delivers
+    a launch link while Nightly is still checking Octant's host and the link
+    is not in the launch arguments. The client keeps each link until a window
+    has loaded, and drops any link Octant would drop.
   - Resetting the window's bounds, and the sidebar material and vibrancy Octant
     uses, from the same window presentation.
   - Window capture for the composer, under Nightly's own Screen Recording
@@ -611,8 +633,6 @@ channel is missing from it:
     person picks.
   - The menu-bar open-thread report is accepted and dropped: Nightly has no
     menu-bar item, and Octant's lists the host's threads.
-    Opening a checkout in one of the listed apps still needs the host, so it
-    stays brokered.
 - The preload of a Nightly client window omits every member that reaches an
   Octant-only channel, so the shared renderer hides those screens as it does
   for a remote client. Where Settings › Remote access would be, it shows one
@@ -633,7 +653,7 @@ evidence; the preflight that replaces the early gate checks them:
       reset bounds, sidebar material, window capture and the Open in list.
 - [x] Native-main token admission on the host's closed route allowlist, with
       negative tests, and a host feature list in the window bootstrap.
-- [ ] Pickers and file handoffs, provider credentials and API keys, and Code
+- [x] Pickers and file handoffs, provider credentials and API keys, and Code
       operation approvals through that admission.
 - [ ] "Needs a newer Octant" driven by the host's feature list.
 - [x] Embedded Browser page popups: select lists, page dialogs, link and
@@ -835,6 +855,7 @@ that pins it:
 - support bundle save
 - Code operation approval prepare, confirm and cancel
 - provider key status, set and clear
+- the API key pool: list, add, rename, replace, remove, set active and move
 
 Expiry, revocation and lease loss end the token with the lease. An ordinary
 local window has no token, and a request forwarded from the remote listener is
@@ -861,9 +882,14 @@ accepts. Neither direction of version skew refuses a window.
 Two rules bind the brokered flows built on this admission:
 
 - **A person confirms an approval in Nightly's main.** Nightly confirms a Code
-  operation approval only from a native dialog its main shows, after the
-  person's own gesture, exactly as Octant does. A renderer message alone never
-  reaches the confirm route.
+  operation approval only from the owner-only native approval view its main
+  shows, the one Octant uses, after the person's own click, exactly as Octant
+  does. Only a decision from that view's own web contents with its one-time
+  token reaches the confirm route; a renderer message alone never does.
+- **A linked key is never overwritten.** The host's provider key routes refuse
+  to set, clear or edit the pool of a key that points into a linked secret
+  store, as Octant's own Settings does; the link is removed in Settings first.
+  Each key change is journaled before and after the store is touched.
 - **Brokered calls bypass the renderer session.** Nightly main sends them over
   its own Node transport, never `net.fetch` on the default session, whose
   request-header decoration strips the token.

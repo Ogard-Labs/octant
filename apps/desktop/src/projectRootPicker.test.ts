@@ -133,7 +133,7 @@ describe("createProjectRootPicker", () => {
         Response.json({ receiptId, projectType: "work", expiresAt: 61_000 }, { status: 201 }),
       );
     const picker = createProjectRootPicker({
-      desktopBridgeSecret,
+      brokerHeaders: () => ({ "x-octant-desktop-secret": desktopBridgeSecret }),
       dialog,
       fetch,
       resolveOwnedWindow: (candidate) => (candidate === sender ? ownedWindow : undefined),

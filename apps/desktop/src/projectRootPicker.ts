@@ -61,7 +61,8 @@ interface FetchPort {
 }
 
 interface ProjectRootPickerOptions<TWindow extends OwnedWindowPort> {
-  readonly desktopBridgeSecret: string;
+  /** Stable's bridge secret, or a native Nightly main's own window authority. */
+  readonly brokerHeaders: () => Readonly<Record<string, string>>;
   readonly dialog: DialogPort<TWindow>;
   readonly fetch?: FetchPort;
   readonly resolveOwnedWindow: (sender: unknown) => TWindow | undefined;
@@ -98,7 +99,7 @@ export function createProjectRootPicker<TWindow extends OwnedWindowPort>(
 
     const response = await safeFetch(fetch, receiptUrl(options.serverUrl), {
       method: "POST",
-      headers: desktopHeaders(options.desktopBridgeSecret),
+      headers: { "content-type": "application/json", ...options.brokerHeaders() },
       body: JSON.stringify({ windowId: options.windowId, projectType, path }),
     });
     if (await isRejectedProjectRoot(response)) {

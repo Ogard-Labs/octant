@@ -14,6 +14,7 @@ import {
   loadDesktopPeerStatus,
 } from "./desktopPeerStatus";
 import { resolveStartupHostRole } from "./nightlyTestData";
+import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
 
 // Identity and launch-role checks precede imports of the host-owning desktop.
 const identity = app.isPackaged
@@ -21,6 +22,7 @@ const identity = app.isPackaged
       JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")),
     )
   : desktopIdentity("stable");
+const launchLinks = createNightlyLaunchLinks(identity.scheme);
 
 if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "darwin")) {
   const role = resolvePackagedDesktopLaunch(
@@ -55,6 +57,13 @@ if (identity.flavor === "nightly" || (app.isPackaged && process.platform === "da
     });
     app.exit(code);
   } else if (identity.flavor === "nightly") {
+    // Registered before any await: a link that launched Nightly arrives while
+    // the entry still checks Octant's host, and is not in argv to read later.
+    app.on("open-url", (event, url) => {
+      event.preventDefault();
+      launchLinks.receive(url);
+    });
+    for (const argument of process.argv) launchLinks.receive(argument);
     // Electron waits for ESM evaluation before ready. The signed client path
     // needs ready to create its window, so it must not hold this module open.
     void launchDesktop().catch((error: unknown) => {
@@ -96,6 +105,8 @@ async function launchDesktop(): Promise<void> {
       env: process.env,
     });
     if (role.kind === "test-host") {
+      // The test host's own main claims its links.
+      launchLinks.stop();
       try {
         await import(new URL("./main.mjs", import.meta.url).href);
       } catch (error) {
@@ -134,7 +145,7 @@ async function launchDesktop(): Promise<void> {
     },
     async () => {
       const { runNightlyClient } = await import("./nightlyClient");
-      return runNightlyClient(identity, native);
+      return runNightlyClient(identity, native, launchLinks);
     },
   );
   if (outcome.kind === "client-bridge-required") {

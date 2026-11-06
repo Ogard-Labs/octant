@@ -15,7 +15,7 @@ describe("createRuntimeBinaryPicker", () => {
       filePaths: ["/Users/demo/tools/codex"],
     });
     const picker = createRuntimeBinaryPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: { showOpenDialog },
       fetch,
       resolveOwnedWindow: () => ({ isDestroyed: () => false }),
@@ -43,7 +43,7 @@ describe("createRuntimeBinaryPicker", () => {
   it("asks the host for nothing when the picker is dismissed or the window is not its own", async () => {
     const fetch = vi.fn();
     const dismissed = createRuntimeBinaryPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: { showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }) },
       fetch,
       resolveOwnedWindow: () => ({ isDestroyed: () => false }),
@@ -53,7 +53,7 @@ describe("createRuntimeBinaryPicker", () => {
     await expect(dismissed({ sender: {} })).resolves.toEqual({ kind: "cancelled" });
 
     const foreign = createRuntimeBinaryPicker({
-      desktopBridgeSecret: "desktop-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "desktop-secret" }),
       dialog: { showOpenDialog: vi.fn() },
       fetch,
       resolveOwnedWindow: () => undefined,

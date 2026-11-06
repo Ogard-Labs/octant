@@ -137,8 +137,17 @@ press-twice ⌘Q as Octant. Sign-in and other web links open in your default
 browser, attention notifications and the Dock badge work, and
 `octant-nightly://` links open in Nightly. Reset window size, the sidebar
 material, window capture for the composer (under Nightly's own Screen Recording
-permission) and saving Browser screenshots also work. Opening a Project in a new
-window or a checkout in another app is not available in Nightly yet.
+permission) and saving Browser screenshots also work.
+
+Through Octant, Nightly also chooses Project, plugin and skill folders and a
+runtime binary, saves a support bundle (to a new file only), opens a Code file
+in your editor, a checkout in another app and a preview in Quick Look or
+Finder, and stores provider keys, including several API keys for one
+provider. The keys stay in Octant's credential store. Code approvals appear in
+the same approval panel as in Octant, and only your click on **Allow** there
+approves one. When your Octant is too old to do one of these for Nightly,
+Nightly says "Needs a newer Octant" instead. Opening a Project in a new window
+is not available in Nightly yet.
 
 ### Separate test data in Nightly
 

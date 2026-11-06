@@ -9313,7 +9313,8 @@ mechanisms are:
   routes in place of the secret, for that window alone: Project, plugin, skill
   and runtime-binary picker receipts, the Code external editor and checkout
   open targets, preview handoff, support bundle save, Code operation approval
-  prepare, confirm and cancel, and provider key status, set and clear. The
+  prepare, confirm and cancel, provider key status, set and clear, and the
+  API key pool's list, add, rename, replace, remove, set active and move. The
   host keeps the list in one place and advertises its features in the window
   bootstrap. The token is valid only while that window's native lease lives:
   expiry, revocation and lease loss end it. A request with a renderer origin,
@@ -11549,7 +11550,11 @@ access` agree); a thread's own change is journaled as
     `secret-tool` on standard input. It is never in a process argument, the
     environment, the journal, logs, diagnostics, a provider child, or a
     response; the routes answer only `stored`, `missing`, `removed`, or a
-    typed refusal.
+    typed refusal. They refuse to set or clear a key that points into a
+    linked secret store; that pointer changes only through the secret-store
+    routes. Key-pool routes under `keys/` (list, add, rename, replace,
+    remove, set active, move) serve Octant Nightly's Settings the same way
+    and answer only labels; the command line does not use them yet.
   - **Not the browser.** The loopback browser client cannot save a key, even
     on the host itself. The host cannot tell who is behind a loopback
     connection: the local session (`/api/shell/local-session`) is granted to

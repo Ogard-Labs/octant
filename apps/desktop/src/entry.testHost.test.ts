@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("electron", () => ({
   app: {
     isPackaged: true,
+    on: vi.fn(),
     getAppPath: () => "/fixture",
     getPath: () => "/fixture/Library/Application Support",
     setName: vi.fn(),

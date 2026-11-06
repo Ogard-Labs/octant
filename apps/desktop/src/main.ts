@@ -120,7 +120,6 @@ import {
 import type {
   CodeCheckoutOpenRequest,
   CodeExternalEditorRequest,
-  CodeOperationApprovalAnchor,
   HostCapabilities,
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
@@ -183,9 +182,13 @@ import {
 } from "./codeOperationApproval";
 import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
+  codeApprovalBoundsForAnchor,
+  codeApprovalFallbackBounds,
   createCodeOperationApprovalViewController,
+  decodeCodeOperationApprovalAnchor,
   decodeCodeOperationApprovalPalette,
-  type CodeOperationApprovalBounds,
+  decodeCodeOperationApprovalPresentation,
+  decodeCodeOperationApprovalViewDecision,
   type CodeOperationApprovalPalette,
 } from "./codeOperationApprovalView";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
@@ -1320,6 +1323,10 @@ let nightlyInstallerInstance: ReturnType<typeof createNightlyInstaller> | undefi
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
   readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
+/** Stable's brokered host calls carry the bridge secret it holds now. */
+const desktopBrokerHeaders = (): Readonly<Record<string, string>> => ({
+  "x-octant-desktop-secret": desktopBridgeSecret,
+});
 let serverInstanceId: string | undefined;
 let mainWindow: BrowserWindow | undefined;
 let nativeStateStore: NativeWindowStateStore | undefined;
@@ -1359,55 +1366,8 @@ let codeOperationApprovalViews:
 // decoder accepted; a window that reported none keeps the system palette.
 const approvalPalettesByWindow = new Map<string, CodeOperationApprovalPalette>();
 
-function codeApprovalBoundsForAnchor(
-  window: BrowserWindow,
-  anchor: CodeOperationApprovalAnchor,
-  pendingCount: number,
-): CodeOperationApprovalBounds | undefined {
-  if (window.isDestroyed()) return undefined;
-  const content = window.getContentBounds();
-  const bounds = anchor.bounds;
-  if (
-    ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
-    bounds.width < 1 ||
-    bounds.height < 1 ||
-    bounds.x < 0 ||
-    bounds.y < 36 ||
-    bounds.x + bounds.width > content.width ||
-    bounds.y + bounds.height > content.height
-  ) {
-    return undefined;
-  }
-  const width = Math.min(560, Math.max(320, Math.floor(bounds.width)), content.width - 24);
-  const maxHeight = pendingCount > 1 ? 260 : 216;
-  const height = Math.min(maxHeight, Math.max(180, Math.floor(bounds.y - 44)));
-  if (width < 320 || height < 180) return undefined;
-  const x = Math.min(Math.max(12, Math.floor(bounds.x)), content.width - width - 12);
-  const y = Math.floor(bounds.y - height - 8);
-  if (y < 36) return undefined;
-  return { x, y, width, height };
-}
-
-function codeApprovalFallbackBounds(
-  window: BrowserWindow,
-  pendingCount: number,
-): CodeOperationApprovalBounds | undefined {
-  if (window.isDestroyed()) return undefined;
-  const content = window.getContentBounds();
-  const width = Math.min(560, content.width - 24);
-  const maxHeight = pendingCount > 1 ? 260 : 216;
-  const height = Math.min(maxHeight, content.height - 44);
-  if (width < 320 || height < 180) return undefined;
-  return {
-    x: content.width - width - 12,
-    y: Math.max(36, content.height - height - 12),
-    width,
-    height,
-  };
-}
-
 function installCodeOperationApprovalViews(): void {
-  codeOperationApprovalViews ??= createCodeOperationApprovalViewController({
+  codeOperationApprovalViews ??= createCodeOperationApprovalViewController<BrowserWindow>({
     host: {
       ...createNativeCodeApprovalViewHost(
         resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
@@ -1422,8 +1382,10 @@ function installCodeOperationApprovalViews(): void {
       if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
       return prepareCodeOperationApprovalChallengeFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability,
+        brokerHeaders: {
+          ...desktopBrokerHeaders(),
+          "x-octant-window-capability": windowCapability,
+        },
         request,
         fetch: globalThis.fetch,
       });
@@ -1432,8 +1394,10 @@ function installCodeOperationApprovalViews(): void {
       if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
       return confirmCodeOperationApprovalFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability,
+        brokerHeaders: {
+          ...desktopBrokerHeaders(),
+          "x-octant-window-capability": windowCapability,
+        },
         challengeId,
         fetch: globalThis.fetch,
       });
@@ -1442,8 +1406,10 @@ function installCodeOperationApprovalViews(): void {
       if (activeServerUrl === undefined) return Promise.resolve();
       return cancelCodeOperationApprovalFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability,
+        brokerHeaders: {
+          ...desktopBrokerHeaders(),
+          "x-octant-window-capability": windowCapability,
+        },
         challengeId,
         fetch: globalThis.fetch,
       });
@@ -2270,7 +2236,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       mainWindow = window;
       if (state.maximized) window.maximize();
       projectRootPicker = createProjectRootPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2283,7 +2249,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         windowId: state.windowId,
       });
       const localPluginFolderPicker = createLocalPluginFolderPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2296,7 +2262,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         windowId: state.windowId,
       });
       const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2310,7 +2276,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       });
 
       const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showSaveDialog: async (owner, options) => {
             const chosen = await dialog.showSaveDialog(owner, {
@@ -2565,7 +2531,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           throw new Error("Octant Project window capability is unavailable.");
         }
         const picker = createProjectRootPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2578,7 +2544,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const localPluginFolderPicker = createLocalPluginFolderPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2591,7 +2557,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2604,7 +2570,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showSaveDialog: async (owner, options) => {
               const chosen = await dialog.showSaveDialog(owner, {
@@ -3323,7 +3289,7 @@ function installIpcHandlers(): void {
     }
     await openCodeExternalEditorFromServer({
       serverUrl: activeServerUrl,
-      desktopBridgeSecret,
+      brokerHeaders: desktopBrokerHeaders,
       windowId: context.windowId,
       request: editorRequest,
       fetch: globalThis.fetch,
@@ -3351,7 +3317,7 @@ function installIpcHandlers(): void {
     }
     await openCodeCheckoutInApplicationFromServer({
       serverUrl: activeServerUrl,
-      desktopBridgeSecret,
+      brokerHeaders: desktopBrokerHeaders,
       windowId: context.windowId,
       request: openRequest,
       fetch: globalThis.fetch,
@@ -3398,7 +3364,7 @@ function installIpcHandlers(): void {
     try {
       await openPreviewHandoffFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         windowId: context.windowId,
         request: {
           target: {
@@ -4097,103 +4063,6 @@ function isStrictRecord(value: unknown, keys: readonly string[]): value is Recor
       .sort()
       .join("\0") === [...keys].sort().join("\0")
   );
-}
-
-function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprovalAnchor {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    !("kind" in value) ||
-    (value.kind !== "thread" && value.kind !== "draft")
-  ) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  const record = value as Record<string, unknown>;
-  const expectedKeys =
-    record.kind === "thread"
-      ? ["bounds", "kind", "projectId", "threadId"]
-      : ["bounds", "composerId", "kind", "projectId"];
-  if (!isStrictRecord(record, expectedKeys)) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  const bounds = record.bounds;
-  if (!isStrictRecord(bounds, ["height", "width", "x", "y"])) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  const { x, y, width, height } = bounds;
-  if (
-    typeof x !== "number" ||
-    typeof y !== "number" ||
-    typeof width !== "number" ||
-    typeof height !== "number" ||
-    ![x, y, width, height].every(Number.isFinite) ||
-    [x, y, width, height].some((entry) => entry < 0 || entry > 32_768) ||
-    typeof record.projectId !== "string" ||
-    !UUID_PATTERN.test(record.projectId) ||
-    (record.kind === "thread" &&
-      (typeof record.threadId !== "string" || !UUID_PATTERN.test(record.threadId))) ||
-    (record.kind === "draft" &&
-      (typeof record.composerId !== "string" || !UUID_PATTERN.test(record.composerId)))
-  ) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  return {
-    projectId: record.projectId,
-    ...(record.kind === "thread"
-      ? { kind: "thread" as const, threadId: record.threadId as string }
-      : { kind: "draft" as const, composerId: record.composerId as string }),
-    bounds: {
-      x,
-      y,
-      width,
-      height,
-    },
-  };
-}
-
-function decodeCodeOperationApprovalViewDecision(value: unknown): {
-  readonly token: string;
-  readonly challengeId: string;
-  readonly decision: "approve" | "cancel" | "next" | "previous";
-} {
-  if (!isStrictRecord(value, ["challengeId", "decision", "token"])) {
-    throw new Error("Octant rejected invalid Code approval decision.");
-  }
-  if (
-    typeof value.token !== "string" ||
-    value.token.length < 32 ||
-    value.token.length > 128 ||
-    typeof value.challengeId !== "string" ||
-    !UUID_PATTERN.test(value.challengeId) ||
-    (value.decision !== "approve" &&
-      value.decision !== "cancel" &&
-      value.decision !== "next" &&
-      value.decision !== "previous")
-  ) {
-    throw new Error("Octant rejected invalid Code approval decision.");
-  }
-  return {
-    token: value.token,
-    challengeId: value.challengeId,
-    decision: value.decision,
-  };
-}
-
-function decodeCodeOperationApprovalPresentation(value: unknown): {
-  readonly projectId: string;
-  readonly composerId: string;
-} {
-  if (
-    !isStrictRecord(value, ["composerId", "projectId"]) ||
-    typeof value.projectId !== "string" ||
-    !UUID_PATTERN.test(value.projectId) ||
-    typeof value.composerId !== "string" ||
-    !UUID_PATTERN.test(value.composerId)
-  ) {
-    throw new Error("Octant rejected invalid Code approval presentation.");
-  }
-  return { projectId: value.projectId, composerId: value.composerId };
 }
 
 function ownedWindow(event: IpcMainInvokeEvent): BrowserWindow {

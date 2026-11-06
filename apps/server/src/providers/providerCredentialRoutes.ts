@@ -13,8 +13,12 @@
 // behind a loopback connection, and the secret binds the caller to the host's
 // OS user.
 //
+// A native Octant Nightly main reaches the status, set, remove and key-pool
+// routes with its own window's capability and main-only token instead of the
+// secret (see desktopBrokerAdmission). Removing a provider stays secret-only.
+//
 // The key is never logged, journaled, or returned. The routes answer only
-// `stored`, `missing`, `removed`, or a typed refusal. Each change to the store
+// `stored`, `missing`, `removed`, a pool's labels, or a typed refusal. Each change to the store
 // is journaled as a request before the store is touched and as an outcome
 // after (never the key); a host that stops in between settles the request at
 // its next start (see providerKeyJournal).
@@ -22,14 +26,21 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { ProviderInstance, ProviderInstanceId, WindowId } from "@octant/contracts";
 import {
+  addApiKey,
+  ApiKeyPoolError,
   credentialStoreFailureCauseOf,
   listApiKeys,
+  moveApiKey,
+  removeApiKey,
+  renameApiKey,
+  replaceApiKeySecret,
+  setActiveApiKey,
   type CredentialStoreFailureCause,
 } from "@octant/host-runtime";
 import { admitDesktopBroker, admitsWindow } from "../desktopBrokerAdmission";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import type { ProviderCredentialStore } from "./credentialBrokerClient";
+import type { ProviderCredentialStore, ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyChangeRecorder, ProviderKeyJournal } from "./providerKeyJournal";
 
 const ROUTES = {
@@ -37,7 +48,25 @@ const ROUTES = {
   set: "/api/desktop/provider-credentials/set",
   remove: "/api/desktop/provider-credentials/remove",
   removeProvider: "/api/desktop/provider-credentials/remove-provider",
+  keysList: "/api/desktop/provider-credentials/keys/list",
+  keysAdd: "/api/desktop/provider-credentials/keys/add",
+  keysRename: "/api/desktop/provider-credentials/keys/rename",
+  keysReplace: "/api/desktop/provider-credentials/keys/replace",
+  keysRemove: "/api/desktop/provider-credentials/keys/remove",
+  keysSetActive: "/api/desktop/provider-credentials/keys/set-active",
+  keysMove: "/api/desktop/provider-credentials/keys/move",
 } as const;
+
+/** The key-pool routes Settings uses to edit several keys for one provider. */
+export const PROVIDER_API_KEY_ROUTES: ReadonlyArray<string> = [
+  ROUTES.keysList,
+  ROUTES.keysAdd,
+  ROUTES.keysRename,
+  ROUTES.keysReplace,
+  ROUTES.keysRemove,
+  ROUTES.keysSetActive,
+  ROUTES.keysMove,
+];
 
 type Route = (typeof ROUTES)[keyof typeof ROUTES];
 
@@ -59,6 +88,7 @@ export type ProviderCredentialRefusal =
   | "provider-refused"
   | "provider-removed-key-kept"
   | "journal-unavailable"
+  | "linked-secret"
   | "credential-store-unavailable";
 
 const REFUSAL_STATUS: Readonly<Record<ProviderCredentialRefusal, number>> = {
@@ -74,6 +104,7 @@ const REFUSAL_STATUS: Readonly<Record<ProviderCredentialRefusal, number>> = {
   "provider-refused": 409,
   "provider-removed-key-kept": 503,
   "journal-unavailable": 503,
+  "linked-secret": 409,
   "credential-store-unavailable": 503,
 };
 
@@ -96,6 +127,12 @@ export interface ProviderCredentialRouteOptions {
       }
     | undefined;
   readonly journal: ProviderKeyJournal;
+  /**
+   * Whether the instance's stored key is a pointer into a linked secret store.
+   * A pointer changes only through the journaled secret-store routes, so these
+   * routes never overwrite or clear one. Without it, nothing is linked.
+   */
+  readonly readKeyReference?: (providerInstanceId: string) => Promise<ProviderKeyReference>;
   /**
    * Checks the provider again after its key changed. The observed state is
    * cached from the last check, so without this a key stored from the command
@@ -163,6 +200,14 @@ export function createProviderCredentialRouteHandler(
     }
     const body = await readJson(request);
     if (body.kind !== "ok") return refuse(body.kind);
+    const credentialsForPool = options.credentials;
+    if (PROVIDER_API_KEY_ROUTES.includes(route)) {
+      const keyRequest = decodeKeyRequest(route, body.value);
+      if (keyRequest === undefined) return refuse("invalid");
+      if (keyRequest === "too-large") return refuse("too-large");
+      if (credentialsForPool === undefined) return refuse("credential-store-unavailable");
+      return serialized(() => changeApiKeys(keyRequest, windowId, credentialsForPool, options));
+    }
     const decoded = decodeRequest(route, body.value);
     if (decoded === undefined) return refuse("invalid");
     if (decoded.kind === "too-large") return refuse("too-large");
@@ -188,6 +233,12 @@ export function createProviderCredentialRouteHandler(
         );
       }
       const { id } = target;
+      if (route === ROUTES.set || (route === ROUTES.remove && target.kind === "existing")) {
+        const reference = await readKeyReference(options, id);
+        if (reference.status === "linked") return refuse("linked-secret");
+        if (reference.status === "unavailable")
+          return refuse("credential-store-unavailable", reference.cause);
+      }
       const begin = (
         action: "set" | "remove" | "remove-with-provider",
       ): ProviderKeyChangeRecorder | undefined => {
@@ -408,6 +459,8 @@ const REFUSAL_MESSAGE: Readonly<Record<ProviderCredentialRefusal, string>> = {
   "provider-removed-key-kept":
     "The provider was removed, but its stored key could not be cleared yet.",
   "journal-unavailable": "The change could not be recorded, so nothing was changed.",
+  "linked-secret":
+    "This provider's key comes from a linked secret store. Remove the link in Settings first.",
   "credential-store-unavailable": "The host credential store is unavailable.",
 };
 
@@ -426,6 +479,206 @@ function refuse(
     { category, message: REFUSAL_MESSAGE[category], ...(cause === undefined ? {} : { cause }) },
     { status: REFUSAL_STATUS[category] },
   );
+}
+
+async function readKeyReference(
+  options: Pick<ProviderCredentialRouteOptions, "readKeyReference">,
+  id: string,
+): Promise<ProviderKeyReference> {
+  if (options.readKeyReference === undefined) return { status: "none" };
+  try {
+    return await options.readKeyReference(id);
+  } catch (error) {
+    const cause = storeCauseOf(error);
+    return cause === undefined ? { status: "unavailable" } : { status: "unavailable", cause };
+  }
+}
+
+type KeyRequest =
+  | { readonly kind: "list"; readonly instance: string }
+  | {
+      readonly kind: "add";
+      readonly instance: string;
+      readonly credential: string;
+      readonly label: string | undefined;
+    }
+  | {
+      readonly kind: "rename";
+      readonly instance: string;
+      readonly keyId: string;
+      readonly label: string;
+    }
+  | {
+      readonly kind: "replace";
+      readonly instance: string;
+      readonly keyId: string;
+      readonly credential: string;
+    }
+  | { readonly kind: "remove" | "set-active"; readonly instance: string; readonly keyId: string }
+  | {
+      readonly kind: "move";
+      readonly instance: string;
+      readonly keyId: string;
+      readonly direction: "up" | "down";
+    };
+
+const KEY_ID = /^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+function decodeKeyRequest(route: Route, value: unknown): KeyRequest | "too-large" | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort().join(",");
+  const { instance, keyId, label, credential, direction } = record;
+  if (
+    typeof instance !== "string" ||
+    instance.length === 0 ||
+    instance.length > MAX_INSTANCE_REFERENCE_LENGTH
+  )
+    return undefined;
+  // As for `set`, a key over the broker's bound is refused as too large.
+  if (
+    (route === ROUTES.keysAdd || route === ROUTES.keysReplace) &&
+    typeof credential === "string" &&
+    Buffer.byteLength(credential, "utf8") > MAX_PROVIDER_KEY_BYTES
+  )
+    return "too-large";
+  const validKeyId = typeof keyId === "string" && KEY_ID.test(keyId) ? keyId : undefined;
+  const validCredential =
+    typeof credential === "string" &&
+    credential.trim().length > 0 &&
+    Buffer.byteLength(credential, "utf8") <= MAX_PROVIDER_KEY_BYTES
+      ? credential
+      : undefined;
+  switch (route) {
+    case ROUTES.keysList:
+      return keys === "instance" ? { kind: "list", instance } : undefined;
+    case ROUTES.keysAdd:
+      if (validCredential === undefined) return undefined;
+      if (keys === "credential,instance")
+        return { kind: "add", instance, credential: validCredential, label: undefined };
+      return keys === "credential,instance,label" && typeof label === "string"
+        ? { kind: "add", instance, credential: validCredential, label }
+        : undefined;
+    case ROUTES.keysRename:
+      return keys === "instance,keyId,label" &&
+        validKeyId !== undefined &&
+        typeof label === "string"
+        ? { kind: "rename", instance, keyId: validKeyId, label }
+        : undefined;
+    case ROUTES.keysReplace:
+      return keys === "credential,instance,keyId" &&
+        validKeyId !== undefined &&
+        validCredential !== undefined
+        ? { kind: "replace", instance, keyId: validKeyId, credential: validCredential }
+        : undefined;
+    case ROUTES.keysRemove:
+    case ROUTES.keysSetActive:
+      return keys === "instance,keyId" && validKeyId !== undefined
+        ? {
+            kind: route === ROUTES.keysRemove ? "remove" : "set-active",
+            instance,
+            keyId: validKeyId,
+          }
+        : undefined;
+    case ROUTES.keysMove:
+      return keys === "direction,instance,keyId" &&
+        validKeyId !== undefined &&
+        (direction === "up" || direction === "down")
+        ? { kind: "move", instance, keyId: validKeyId, direction }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * One change to a provider's key pool, as Octant's Settings makes it against
+ * its own credential store: a list answers labels only, and a change answers
+ * nothing but the new key's label. Each write is journaled before the store is
+ * touched, a linked pointer is never replaced, and a key that arrived while the
+ * provider was reconfigured is cleared again.
+ */
+async function changeApiKeys(
+  request: KeyRequest,
+  windowId: WindowId,
+  credentials: NonNullable<ProviderCredentialRouteOptions["credentials"]>,
+  options: ProviderCredentialRouteOptions,
+): Promise<Response> {
+  const target = resolveInstance(request.instance, options.readProviderInstances(), []);
+  if (target.kind !== "existing")
+    return refuse(target.kind === "ambiguous" ? "ambiguous" : "not-found");
+  if (!usesStoredKey(target.instance)) return refuse("no-stored-key-authentication");
+  const { id } = target;
+  try {
+    // Decided before the stored value is read: reading a linked key follows
+    // the pointer into the linked store, which may ask the person to unlock it.
+    const reference = await readKeyReference(options, id);
+    if (reference.status === "unavailable")
+      return refuse("credential-store-unavailable", reference.cause);
+    if (reference.status === "linked")
+      return request.kind === "list" ? Response.json({ keys: [] }) : refuse("linked-secret");
+    const stored = (await credentials.store.has(id)) ? await credentials.readStored(id) : undefined;
+    if (request.kind === "list") {
+      return Response.json({ keys: stored === undefined ? [] : listApiKeys(stored) });
+    }
+    let next: string | undefined;
+    let added: ReturnType<typeof addApiKey>["key"] | undefined;
+    if (request.kind === "add") {
+      const result = addApiKey(stored, { secret: request.credential, label: request.label });
+      next = result.stored;
+      added = result.key;
+    } else {
+      if (stored === undefined) throw new ApiKeyPoolError("unknown-key");
+      next =
+        request.kind === "rename"
+          ? renameApiKey(stored, request.keyId, request.label)
+          : request.kind === "replace"
+            ? replaceApiKeySecret(stored, request.keyId, request.credential)
+            : request.kind === "set-active"
+              ? setActiveApiKey(stored, request.keyId)
+              : request.kind === "move"
+                ? moveApiKey(stored, request.keyId, request.direction)
+                : removeApiKey(stored, request.keyId);
+    }
+    let recorder: ProviderKeyChangeRecorder;
+    try {
+      recorder = options.journal.request({
+        instanceId: id as ProviderInstanceId,
+        action: next === undefined ? "remove" : "set",
+        instanceVersion: target.instance.version,
+        windowId,
+      });
+    } catch {
+      return refuse("journal-unavailable");
+    }
+    if (next === undefined) {
+      await credentials.store.delete(id);
+      recorder.complete("removed");
+    } else {
+      await credentials.store.set(id, next);
+      // As for `set`: a key entered for the old endpoint never stays with a
+      // provider that was removed or reconfigured while it was written.
+      const current = options
+        .readProviderInstances()
+        .find((instance) => String(instance.id) === id);
+      if (current === undefined || current.version !== target.instance.version) {
+        await credentials.store.delete(id);
+        recorder.complete("cleared-after-change");
+        return refuse(current === undefined ? "not-found" : "changed");
+      }
+      recorder.complete("stored");
+    }
+    void options.reprobe(windowId, target.instance).catch(() => undefined);
+    return Response.json(added === undefined ? { outcome: "changed" } : { key: added });
+  } catch (error) {
+    if (error instanceof ApiKeyPoolError) {
+      return Response.json(
+        { category: "api-key-pool", reason: error.reason, message: error.message },
+        { status: 409 },
+      );
+    }
+    return refuse("credential-store-unavailable", storeCauseOf(error));
+  }
 }
 
 async function readJson(
