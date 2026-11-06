@@ -142,7 +142,11 @@ import {
   waitForReplacedProcessExit,
 } from "./portableImageUpdate";
 import { createQuitShortcutGuard } from "./quitShortcutGuard";
-import { buildApplicationMenuTemplate } from "./applicationMenu";
+import {
+  buildApplicationMenuTemplate,
+  buildStableMenuTemplate,
+  developerToolsAllowed,
+} from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
   acknowledgeWhatsNew,
@@ -4557,12 +4561,21 @@ function requestInteractiveQuit(): void {
 }
 
 function installApplicationMenu(): void {
-  if (process.platform !== "darwin") return;
+  const developerTools = developerToolsAllowed({
+    packaged: app.isPackaged,
+    version: app.getVersion(),
+  });
+  if (process.platform !== "darwin") {
+    // Electron's default menu carries Toggle Developer Tools and its shortcut;
+    // replace it with the same menu minus those items, not with no menu.
+    if (!developerTools) Menu.setApplicationMenu(Menu.buildFromTemplate(buildStableMenuTemplate()));
+    return;
+  }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate({
         appName: app.name,
-        developerTools: true,
+        developerTools,
         onQuit: (request) => quitShortcutGuard.request(request),
         onOpenSettings: () => {
           const window = BrowserWindow.getFocusedWindow() ?? mainWindow;

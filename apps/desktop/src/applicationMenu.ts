@@ -1,4 +1,19 @@
+import { ringForVersion } from "@octant/domain";
+import type { AppVersion } from "@octant/contracts/app-updates";
 import type { MenuItemConstructorOptions } from "electron";
+
+/**
+ * Whether Octant keeps Chromium's developer tools: in development builds and
+ * in Preview and candidate builds, but not in a packaged stable release (a
+ * version with no prerelease tag). Their shortcut lives only on the menu, so
+ * one decision covers both.
+ */
+export function developerToolsAllowed(build: {
+  readonly packaged: boolean;
+  readonly version: string;
+}): boolean {
+  return !build.packaged || ringForVersion(build.version as AppVersion) !== "stable";
+}
 
 export interface ApplicationMenuOptions {
   readonly appName: string;
@@ -62,4 +77,19 @@ export function buildApplicationMenuTemplate(
         },
     { role: "windowMenu" },
   ];
+}
+
+/**
+ * The Windows and Linux menu bar of a packaged stable release: the standard
+ * File, Edit, View and Window menus without the macOS application menu and
+ * without Reload or Toggle Developer Tools. Removing the menu outright would
+ * also take away zoom, fullscreen and the Edit roles' clipboard shortcuts.
+ */
+export function buildStableMenuTemplate(): MenuItemConstructorOptions[] {
+  return buildApplicationMenuTemplate({
+    appName: "Octant",
+    onOpenSettings: () => {},
+    onQuit: () => {},
+    developerTools: false,
+  }).slice(1);
 }

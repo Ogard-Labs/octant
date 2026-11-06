@@ -921,6 +921,12 @@ requests. Titles never enter the public health response or redacted
 diagnostics. Separately managed hosts retain their existing lifecycle
 restrictions. Nothing here writes provider MCP or hook configuration.
 
+Chromium's developer tools (View › Toggle Developer Tools and Reload, and their
+shortcut) stay in development builds and in packaged Preview and candidate
+builds, and are hidden in a packaged stable release, decided by the build's
+version (maintainer decision, 2026-11-06). Octant Nightly hides them whenever
+it is packaged.
+
 ### Desktop context menus
 
 Trusted top-level desktop windows may contribute a bounded native context menu
