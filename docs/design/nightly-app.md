@@ -61,7 +61,8 @@ Nightly publication still needs.
    lease. Administration stays with Octant and is hidden in Nightly: remote
    access and the private listener, hub administration, device pairing and
    paired computers, launch sessions, owner unlock and host identity.
-   Planned; the channel classification below is built.
+   The channel classification below and the host's token admission are
+   built; the brokered flows that use it are planned.
 2. **Embedded Browser parity blocks publication.** Every gap in the embedded
    Browser blocks the first Nightly publication, accessibility (VoiceOver in
    the embedded page) included. A companion window stays rejected. Planned.
@@ -536,7 +537,7 @@ evidence; the preflight that replaces the early gate checks them:
 - [x] Nightly's local native surfaces: app menu without developer tools,
       external links, notifications and badge, `octant-nightly://` links,
       reset bounds, sidebar material, window capture and the Open in list.
-- [ ] Native-main token admission on the host's closed route allowlist, with
+- [x] Native-main token admission on the host's closed route allowlist, with
       negative tests, and a host feature list in the window bootstrap.
 - [ ] Pickers and file handoffs, provider credentials and API keys, and Code
       operation approvals through that admission.
@@ -680,7 +681,9 @@ Ordinary Nightly uses a separate mutually authenticated window protocol after
 status. Its main process creates an opaque client handle for its real window.
 Stable issues a fresh server window ID, capability and renderer identity; the
 client cannot choose another window's server identity. The reply includes only
-that scope, the validated literal-loopback host origin and current host instance.
+that scope, the validated literal-loopback host origin and current host instance,
+and, for a client that accepts them, the window's native-main token and the
+host's brokered features (below).
 Stable's administrative bridge secret stays in Stable. Runtime, helper, terminal
 and Canvas roles cannot register these windows.
 
@@ -714,6 +717,60 @@ failure remains observable. Current acknowledged leases feed the retained-client
 lifetime above. Host replacement uses the bounded fresh-registration
 [reconnect rules](#reconnecting-after-host-loss); full signed acceptance remains
 unrun.
+
+### Native-main admission
+
+Each native registration also carries a main-only token that Stable's main
+mints beside the window capability and renderer identity, distinct from both.
+The host binds it to that window's native lease record. Only the registration
+reply returns it, to the registered Nightly main. The renderer never receives
+it: ordinary renderer request headers strip `x-octant-native-main-authority`
+and never add it, and Nightly main keeps it in memory only.
+
+With its window capability and that token, Nightly main may call a closed list
+of brokered host routes in place of Octant's bridge secret, as a POST with no
+query string and no origin, for its own window only. A body that names a
+window must name that window. The list lives in one host module with a test
+that pins it:
+
+- Project, plugin, skill and runtime-binary picker receipts
+- Code external editor target and Code checkout open target
+- preview handoff
+- support bundle save
+- Code operation approval prepare, confirm and cancel
+- provider key status, set and clear
+
+Expiry, revocation and lease loss end the token with the lease. An ordinary
+local window has no token, and a request forwarded from the remote listener is
+refused. The administration of decision 1 stays secret-only, as do window
+registration, provider sign-in and provider removal.
+
+A support bundle save names no window and no save dialog the host can see, so
+for a native main it only creates a new file and refuses a path that already
+exists. Octant's own save dialog confirms a replacement, so its bridge-secret
+save still replaces.
+
+The registration reply names the host's brokered features from a closed
+contracts vocabulary. A client ignores names it does not know. When the token
+or a feature is absent, Nightly offers that flow as needing a newer Octant
+instead of calling the route.
+
+The reply's new fields reach only a client that asks for them. A current
+client names `native-main-v1` after the leading NUL of its request payload. The
+first window server checked only that first byte, so it still answers such a
+client with its original reply, and the client then brokers nothing. An older
+client sends nothing and gets that original reply, which its strict decoder
+accepts. Neither direction of version skew refuses a window.
+
+Two rules bind the brokered flows built on this admission:
+
+- **A person confirms an approval in Nightly's main.** Nightly confirms a Code
+  operation approval only from a native dialog its main shows, after the
+  person's own gesture, exactly as Octant does. A renderer message alone never
+  reaches the confirm route.
+- **Brokered calls bypass the renderer session.** Nightly main sends them over
+  its own Node transport, never `net.fetch` on the default session, whose
+  request-header decoration strips the token.
 
 Nightly sets its separate window storage before Electron is ready, loads its
 own existing renderer/preload and installs the trusted renderer-header registry
