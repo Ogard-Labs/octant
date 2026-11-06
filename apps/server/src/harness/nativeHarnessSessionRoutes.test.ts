@@ -411,7 +411,12 @@ describe("a paired device answering its own managed child's request", () => {
       windowAuthorityStore: new WindowAuthorityStore(),
       store: {
         read: () => ({
-          session: { status: "running" },
+          session: { status: "running", detail: "private-parent-state" },
+          turns: [{ result: "private-tool-result" }],
+          tasks: [{ title: "private-parent-task" }],
+          steering: [{ text: "private-steering" }],
+          activeTools: [{ result: "private-live-result" }],
+          followUps: { prompt: "private-follow-up" },
           approvals: [approval, { id: "lead", status: "pending" }],
           questions: [question],
         }),
@@ -454,6 +459,9 @@ describe("a paired device answering its own managed child's request", () => {
     expect(await (await send())?.json()).toMatchObject({
       view: { approvals: [{ id: approvalId }], questions: [{ id: questionId }] },
     });
+    const payload = await (await send())?.json();
+    expect(Object.keys(payload.view).sort()).toEqual(["approvals", "kind", "questions"]);
+    expect(JSON.stringify(payload)).not.toContain("private-");
     expect((await send("approvals", { approvalId, decision: "approve" }))?.status).toBe(200);
     expect(decideApproval).toHaveBeenCalledWith(
       expect.objectContaining({

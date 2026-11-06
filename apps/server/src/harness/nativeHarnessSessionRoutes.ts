@@ -3,6 +3,7 @@ import {
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
+  type NativeHarnessChildRequestsView,
   type NativeHarnessSessionView,
   type NativeHarnessSteeringNote,
   type SteerNativeHarnessSession,
@@ -180,14 +181,11 @@ export function createNativeHarnessSessionRouteHandler(
           parentThreadId: threadId,
           deviceId: person.deviceId,
         }) === true);
-    const view =
-      rawView === undefined || person.kind !== "remote-device"
-        ? rawView
-        : {
-            ...rawView,
-            approvals: rawView.approvals?.filter(eligibleChild),
-            questions: rawView.questions.filter(eligibleChild),
-          };
+    const approvals =
+      person.kind === "remote-device" ? (rawView?.approvals ?? []).filter(eligibleChild) : [];
+    const questions =
+      person.kind === "remote-device" ? (rawView?.questions ?? []).filter(eligibleChild) : [];
+    const view = rawView;
     if (
       person.kind === "remote-device" &&
       action !== "" &&
@@ -197,14 +195,16 @@ export function createNativeHarnessSessionRouteHandler(
       return failure("A paired device may answer only its own child requests here.", 403, origin);
 
     if (request.method === "GET" && action === "") {
-      if (
-        person.kind === "remote-device" &&
-        !(
-          view?.approvals?.some((item) => item.status === "pending") ||
-          view?.questions.some((item) => item.status === "pending")
-        )
-      )
-        return json({ view: null }, 200, origin);
+      if (person.kind === "remote-device") {
+        const pending =
+          approvals.some((item) => item.status === "pending") ||
+          questions.some((item) => item.status === "pending");
+        const childView: NativeHarnessChildRequestsView | null =
+          !pending || rawView === undefined
+            ? null
+            : { kind: "child-requests", approvals, questions };
+        return json({ view: childView }, 200, origin);
+      }
       return view === undefined ? json({ view: null }, 200, origin) : json({ view }, 200, origin);
     }
     if (request.method !== "POST") return failure("Method not allowed.", 405, origin);
@@ -312,7 +312,7 @@ export function createNativeHarnessSessionRouteHandler(
       if (
         person.kind === "remote-device" &&
         (decision.decision === "approve-always" ||
-          !view?.approvals?.some(
+          !approvals.some(
             (item) => String(item.id) === String(decision.approvalId) && item.status === "pending",
           ))
       )
@@ -396,7 +396,7 @@ export function createNativeHarnessSessionRouteHandler(
       }
       if (
         person.kind === "remote-device" &&
-        !view?.questions.some(
+        !questions.some(
           (item) => String(item.id) === String(answer.questionId) && item.status === "pending",
         )
       )

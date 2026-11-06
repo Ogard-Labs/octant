@@ -1381,6 +1381,23 @@ export const NativeHarnessSessionView = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessSessionView = typeof NativeHarnessSessionView.Type;
 
+/** A paired caller receives only requests its own child runs may answer. */
+export const NativeHarnessChildRequestsView = Schema.Struct({
+  kind: Schema.Literal("child-requests"),
+  approvals: Schema.Array(NativeHarnessApproval).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+  questions: Schema.Array(NativeHarnessQuestion).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+}).annotations(strict);
+export type NativeHarnessChildRequestsView = typeof NativeHarnessChildRequestsView.Type;
+export const NativeHarnessSessionReadView = Schema.Union(
+  NativeHarnessSessionView,
+  NativeHarnessChildRequestsView,
+);
+export type NativeHarnessSessionReadView = typeof NativeHarnessSessionReadView.Type;
+
 export const NATIVE_HARNESS_SESSION_AGGREGATE_TYPE = "native-harness-session";
 export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   started: "native-harness-session-started@1",

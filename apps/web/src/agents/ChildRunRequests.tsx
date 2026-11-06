@@ -1,4 +1,4 @@
-import type { NativeHarnessSessionView } from "@octant/contracts";
+import type { NativeHarnessSessionReadView } from "@octant/contracts";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -14,7 +14,8 @@ import {
 export type ChildRunInteractionsClient = Pick<
   NativeHarnessClient,
   "session" | "decideApproval" | "answerQuestion"
->;
+> &
+  Partial<Pick<NativeHarnessClient, "childRequests">>;
 
 /** Reads the same requests answered in Agents; the parent never owns a second grant. */
 export function ChildRunRequests(props: {
@@ -26,7 +27,7 @@ export function ChildRunRequests(props: {
 }) {
   const [read, setRead] = useState<{
     readonly threadId: string;
-    readonly view: NativeHarnessSessionView | null;
+    readonly view: NativeHarnessSessionReadView | null;
   }>();
   const [stale, setStale] = useState(false);
   const [selected, setSelected] = useState<string>();
@@ -40,7 +41,10 @@ export function ChildRunRequests(props: {
     reading.current = props.threadId;
     const mine = ++generation.current;
     try {
-      const view = await props.client.session(props.threadId);
+      const view =
+        props.client.childRequests === undefined
+          ? await props.client.session(props.threadId)
+          : await props.client.childRequests(props.threadId);
       if (mine === generation.current) {
         setRead({ threadId: props.threadId, view });
         setStale(false);
@@ -75,8 +79,13 @@ export function ChildRunRequests(props: {
   if (request === undefined || request.source === undefined) return null;
   const source = request.source;
   const entry = props.entries.find((item) => item.runId === String(source.runId));
-  const disabled =
-    busy || stale || props.disconnected || view?.session.status === "recovery-required";
+  const recovering =
+    view === undefined || view === null
+      ? false
+      : "session" in view
+        ? view.session.status === "recovery-required"
+        : false;
+  const disabled = busy || stale || props.disconnected || recovering;
   const respond = async (
     send: () => Promise<{ readonly kind: string; readonly message?: string }>,
   ) => {

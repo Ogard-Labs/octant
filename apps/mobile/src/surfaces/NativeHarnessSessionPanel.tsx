@@ -18,7 +18,7 @@ import {
   previewMobileNativeHarnessFollowUp,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
-import type { NativeHarnessFollowUpPreview, NativeHarnessSessionView } from "@octant/contracts";
+import type { NativeHarnessFollowUpPreview } from "@octant/contracts";
 import { GlassChip, useTheme } from "../../design-system";
 import { ApprovalDecisionButtons } from "../approvals/ApprovalDecisionButtons";
 import { MOBILE_COPY } from "../copy";
@@ -80,7 +80,14 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
     intervalMs: props.refreshIntervalMs ?? (fast ? 1_000 : 8_000),
   });
   const view = resource.value;
-  const running = view?.session.status === "running";
+  const sessionView =
+    view === undefined || view === null || !("session" in view) ? undefined : view;
+  const running =
+    sessionView?.session.status === "running" ||
+    (view !== undefined &&
+      view !== null &&
+      !("session" in view) &&
+      (view.approvals.length > 0 || view.questions.length > 0));
   useEffect(() => setFast(running), [running]);
 
   // Every host action goes through here: one at a time, a failure becomes a
@@ -101,10 +108,10 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   };
 
   useEffect(() => {
-    if (view?.retrying === undefined) return;
+    if (sessionView?.retrying === undefined) return;
     const timer = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [view?.retrying]);
+  }, [sessionView?.retrying]);
 
   if (view === undefined || view === null) return null;
   const questions = view.questions.filter((question) => question.status === "pending");
@@ -173,67 +180,75 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
     });
   };
   // The same words the desktop composer and the terminal footer use, read-only.
-  const stats = threadStatsLine(sessionStatsInputOf(view));
-  const lastRoute = view.routes.at(-1);
-  const lastIntervention = view.interventions.at(-1);
+  const stats = sessionView === undefined ? "" : threadStatsLine(sessionStatsInputOf(sessionView));
+  const lastRoute = sessionView?.routes.at(-1);
+  const lastIntervention = sessionView?.interventions.at(-1);
 
   return (
     <View style={[styles.card, { borderColor: colors.border }]} testID="mobile-native-harness">
-      <View style={styles.row}>
+      {sessionView === undefined ? (
         <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
-          Native harness
+          Child requests
         </Text>
-        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          {nativeHarnessStatusLabel(view.session.status)}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy}
-          hitSlop={12}
-          onPress={() => {
-            const paused = nativeHarnessSessionHeld(view.session.status);
-            void run(async () => {
-              const result = await commandMobileNativeHarnessSession({
-                transport: props.transport,
-                threadId: props.threadId,
-                kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
-                sessionId: String(view.session.id),
-                expectedVersion: view.session.version,
-              });
-              return result.ok ? undefined : (result.message ?? "The host refused that.");
-            });
-          }}
-          testID="mobile-native-harness-pause"
-        >
-          <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>
-            {nativeHarnessSessionHeld(view.session.status) ? "Resume" : "Pause"}
+      ) : (
+        <>
+          <View style={styles.row}>
+            <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
+              Native harness
+            </Text>
+            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+              {nativeHarnessStatusLabel(sessionView.session.status)}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              hitSlop={12}
+              onPress={() => {
+                const paused = nativeHarnessSessionHeld(sessionView.session.status);
+                void run(async () => {
+                  const result = await commandMobileNativeHarnessSession({
+                    transport: props.transport,
+                    threadId: props.threadId,
+                    kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
+                    sessionId: String(sessionView.session.id),
+                    expectedVersion: sessionView.session.version,
+                  });
+                  return result.ok ? undefined : (result.message ?? "The host refused that.");
+                });
+              }}
+              testID="mobile-native-harness-pause"
+            >
+              <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>
+                {nativeHarnessSessionHeld(sessionView.session.status) ? "Resume" : "Pause"}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+            {String(sessionView.session.lead.modelId)} · {sessionView.session.turnsRun} turns ·{" "}
+            {sessionView.session.cutovers} context cuts
           </Text>
-        </Pressable>
-      </View>
-      <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-        {String(view.session.lead.modelId)} · {view.session.turnsRun} turns ·{" "}
-        {view.session.cutovers} context cuts
-      </Text>
-      {stats.length === 0 ? null : (
-        <Text
-          style={[mobileTypography.caption, { color: colors.textSecondary }]}
-          testID="mobile-native-harness-stats"
-        >
-          {stats}
-        </Text>
-      )}
-      {view.session.detail === undefined ? null : (
-        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          {view.session.detail}
-        </Text>
-      )}
-      {view.retrying === undefined ? null : (
-        <Text
-          style={[mobileTypography.caption, { color: colors.textSecondary }]}
-          testID="mobile-native-harness-retry"
-        >
-          {harnessRetryStatusText(view.retrying, nowMs)}
-        </Text>
+          {stats.length === 0 ? null : (
+            <Text
+              style={[mobileTypography.caption, { color: colors.textSecondary }]}
+              testID="mobile-native-harness-stats"
+            >
+              {stats}
+            </Text>
+          )}
+          {sessionView.session.detail === undefined ? null : (
+            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+              {sessionView.session.detail}
+            </Text>
+          )}
+          {sessionView.retrying === undefined ? null : (
+            <Text
+              style={[mobileTypography.caption, { color: colors.textSecondary }]}
+              testID="mobile-native-harness-retry"
+            >
+              {harnessRetryStatusText(sessionView.retrying, nowMs)}
+            </Text>
+          )}
+        </>
       )}
       {approvals.length < 2 ? null : (
         <View style={styles.chips}>
@@ -377,118 +392,127 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           </View>
         </View>
       )}
-      {(view.tasks ?? []).map((task, index) => (
-        <Text
-          key={index}
-          style={[mobileTypography.caption, { color: colors.textSecondary }]}
-          testID="mobile-native-harness-task"
-        >
-          {nativeHarnessTaskLabel(task.status)}: {task.title}
-        </Text>
-      ))}
-      {lastRoute === undefined ? null : (
-        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          {lastRoute.job} →{" "}
-          {lastRoute.kind === "inherited-parent" ? "parent" : String(lastRoute.slotId)}:{" "}
-          {lastRoute.kind}
-        </Text>
-      )}
-      {lastIntervention === undefined ? null : (
-        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          advisor {lastIntervention.kind}:{" "}
-          {lastIntervention.kind === "redirect"
-            ? lastIntervention.instruction
-            : lastIntervention.kind === "second-opinion"
-              ? lastIntervention.answer
-              : lastIntervention.reason}
-        </Text>
-      )}
-      {view.followUps === undefined || view.followUps.suggestions.length === 0 ? null : (
-        <View style={styles.chips}>
-          {view.followUps.suggestions.map((suggestion) => (
-            <GlassChip
-              active={view.activatedFollowUpIds.includes(suggestion.id)}
-              key={String(suggestion.id)}
-              label={suggestion.title}
-              onPress={() => {
-                void run(async () => {
-                  const result = await previewMobileNativeHarnessFollowUp({
-                    transport: props.transport,
-                    threadId: props.threadId,
-                    suggestionId: String(suggestion.id),
-                  });
-                  setPreview(result);
-                  return result === undefined
-                    ? "The host could not preview this follow-up."
-                    : undefined;
-                });
-              }}
-              testID={`mobile-native-harness-follow-up-${String(suggestion.id)}`}
-            />
+      {sessionView === undefined ? null : (
+        <>
+          {(sessionView.tasks ?? []).map((task, index) => (
+            <Text
+              key={index}
+              style={[mobileTypography.caption, { color: colors.textSecondary }]}
+              testID="mobile-native-harness-task"
+            >
+              {nativeHarnessTaskLabel(task.status)}: {task.title}
+            </Text>
           ))}
-        </View>
-      )}
-      {preview === undefined ? null : (
-        <View style={styles.preview} testID="mobile-native-harness-preview">
-          <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
-            {preview.suggestion.title}
-          </Text>
-          <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-            {preview.wouldCreate.kind === "same-thread"
-              ? "Continues in this thread."
-              : preview.wouldCreate.kind === "new-thread"
-                ? `Starts a new ${preview.wouldCreate.mode} thread.`
-                : "Starts a new Code thread on its own worktree."}
-          </Text>
-          <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
-            {preview.suggestion.prompt}
-          </Text>
-          <View style={styles.row}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy}
-              hitSlop={8}
-              onPress={() => {
-                if (view.followUps === undefined) return;
-                const followUps = view.followUps;
-                void run(async () => {
-                  const result = await activateMobileNativeHarnessFollowUp({
-                    transport: props.transport,
-                    threadId: props.threadId,
-                    turnId: String(followUps.turnId),
-                    suggestionId: String(preview.suggestion.id),
-                  });
-                  if (result?.kind !== "follow-up-activated") {
-                    return result?.message ?? "The host did not activate this follow-up.";
-                  }
-                  // No composer to seed from here: the prompt rides the clipboard.
-                  void Clipboard.setStringAsync(preview.suggestion.prompt).catch(() => undefined);
-                  const created = result.created;
-                  setPreview(undefined);
-                  return created.kind === "same-thread"
-                    ? "Activated. The prompt is on your clipboard for this thread."
-                    : created.threadId === undefined
-                      ? "Activated."
-                      : `Created "${created.title}". The prompt is on your clipboard; paste it there.`;
-                });
-              }}
-              style={[styles.button, { backgroundColor: colors.send }]}
-              testID="mobile-native-harness-confirm"
-            >
-              <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>Confirm</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              hitSlop={8}
-              onPress={() => setPreview(undefined)}
-              style={styles.button}
-            >
-              <Text style={[mobileTypography.section, { color: colors.textSecondary }]}>
-                Cancel
+          {lastRoute === undefined ? null : (
+            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+              {lastRoute.job} →{" "}
+              {lastRoute.kind === "inherited-parent" ? "parent" : String(lastRoute.slotId)}:{" "}
+              {lastRoute.kind}
+            </Text>
+          )}
+          {lastIntervention === undefined ? null : (
+            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+              advisor {lastIntervention.kind}:{" "}
+              {lastIntervention.kind === "redirect"
+                ? lastIntervention.instruction
+                : lastIntervention.kind === "second-opinion"
+                  ? lastIntervention.answer
+                  : lastIntervention.reason}
+            </Text>
+          )}
+          {sessionView.followUps === undefined ||
+          sessionView.followUps.suggestions.length === 0 ? null : (
+            <View style={styles.chips}>
+              {sessionView.followUps.suggestions.map((suggestion) => (
+                <GlassChip
+                  active={sessionView.activatedFollowUpIds.includes(suggestion.id)}
+                  key={String(suggestion.id)}
+                  label={suggestion.title}
+                  onPress={() => {
+                    void run(async () => {
+                      const result = await previewMobileNativeHarnessFollowUp({
+                        transport: props.transport,
+                        threadId: props.threadId,
+                        suggestionId: String(suggestion.id),
+                      });
+                      setPreview(result);
+                      return result === undefined
+                        ? "The host could not preview this follow-up."
+                        : undefined;
+                    });
+                  }}
+                  testID={`mobile-native-harness-follow-up-${String(suggestion.id)}`}
+                />
+              ))}
+            </View>
+          )}
+          {preview === undefined ? null : (
+            <View style={styles.preview} testID="mobile-native-harness-preview">
+              <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
+                {preview.suggestion.title}
               </Text>
-            </Pressable>
-          </View>
-        </View>
+              <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+                {preview.wouldCreate.kind === "same-thread"
+                  ? "Continues in this thread."
+                  : preview.wouldCreate.kind === "new-thread"
+                    ? `Starts a new ${preview.wouldCreate.mode} thread.`
+                    : "Starts a new Code thread on its own worktree."}
+              </Text>
+              <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
+                {preview.suggestion.prompt}
+              </Text>
+              <View style={styles.row}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  hitSlop={8}
+                  onPress={() => {
+                    if (sessionView.followUps === undefined) return;
+                    const followUps = sessionView.followUps;
+                    void run(async () => {
+                      const result = await activateMobileNativeHarnessFollowUp({
+                        transport: props.transport,
+                        threadId: props.threadId,
+                        turnId: String(followUps.turnId),
+                        suggestionId: String(preview.suggestion.id),
+                      });
+                      if (result?.kind !== "follow-up-activated") {
+                        return result?.message ?? "The host did not activate this follow-up.";
+                      }
+                      // No composer to seed from here: the prompt rides the clipboard.
+                      void Clipboard.setStringAsync(preview.suggestion.prompt).catch(
+                        () => undefined,
+                      );
+                      const created = result.created;
+                      setPreview(undefined);
+                      return created.kind === "same-thread"
+                        ? "Activated. The prompt is on your clipboard for this thread."
+                        : created.threadId === undefined
+                          ? "Activated."
+                          : `Created "${created.title}". The prompt is on your clipboard; paste it there.`;
+                    });
+                  }}
+                  style={[styles.button, { backgroundColor: colors.send }]}
+                  testID="mobile-native-harness-confirm"
+                >
+                  <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>
+                    Confirm
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => setPreview(undefined)}
+                  style={styles.button}
+                >
+                  <Text style={[mobileTypography.section, { color: colors.textSecondary }]}>
+                    Cancel
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </>
       )}
       {resource.error === undefined ? null : (
         <Text

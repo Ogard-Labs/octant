@@ -61,6 +61,30 @@ function client() {
 }
 
 describe("answering a child beside its parent", () => {
+  it("uses the restricted child request read without requesting the parent session", async () => {
+    const api = client();
+    const childRequests = vi.fn(
+      async () =>
+        ({
+          kind: "child-requests",
+
+          approvals: [approval],
+          questions: [question],
+        }) as never,
+    );
+    render(
+      <ChildRunRequests
+        client={{ ...api, childRequests }}
+        threadId={threadId}
+        entries={entries}
+        disconnected={false}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Allow" })).toBeEnabled();
+    expect(childRequests).toHaveBeenCalledWith(threadId);
+    expect(api.session).not.toHaveBeenCalled();
+  });
+
   it("answers only the selected authoritative child request through the existing route", async () => {
     const api = client();
     render(
