@@ -3987,6 +3987,7 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
       version: app.getVersion() as AppVersion,
       platform: process.platform,
       arch: process.arch,
+      product: applicationIdentity.updateProduct,
     },
     ...(app.isPackaged
       ? { ring: packagedUpdateRing(), allowedRings: applicationIdentity.rings }

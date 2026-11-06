@@ -2379,6 +2379,7 @@ function decodeNightlyInstallState(value: unknown): NightlyInstallState {
 function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
   if (
     !isRecord(value) ||
+    (value.product !== "octant" && value.product !== "octant-nightly") ||
     typeof value.version !== "string" ||
     typeof value.platform !== "string" ||
     typeof value.arch !== "string" ||
@@ -2392,6 +2393,7 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     throw new TypeError("Invalid update release.");
   }
   return Object.freeze({
+    product: value.product,
     // The guards above proved the strings; the brands and platform literals
     // are what the strict contract type carries and no runtime can check here.
     version: value.version as AppVersion,

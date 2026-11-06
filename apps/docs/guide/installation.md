@@ -70,7 +70,7 @@ Produces:
 - `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
 - `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
 
-The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed `<ring>/linux-x64.json` feed, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed feed for its ring, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
 
 It will not update a package or an unpacked archive, and it will not update an image it cannot write. The reason appears in **Settings → General → Updates**. It also will not relaunch while an agent is still working or while Octant cannot confirm what is running — the same rule as on macOS. A provider that is not installed or not signed in, or one you switched off, does not hold the update back, because stopping Octant interrupts nothing for it. A launch that is not the portable image does not contact the update service.
 
@@ -199,7 +199,15 @@ It cannot start or migrate that host data.
 
 Packaged Octant follows the stable ring or, when you choose Preview or Nightly, the
 candidate ring, and refuses a feed signed for preview. The Nightly identity
-follows only preview and refuses stable and candidate feeds. Development runs
+follows only preview and refuses stable and candidate feeds. Each signed update
+also names the app it is for, so Octant refuses an Octant Nightly build ("This
+update is for Octant Nightly, not Octant.") and Nightly refuses an Octant
+build, on Linux as on macOS.
+
+If you installed an Octant build from the preview stream before Octant Nightly
+took it over (up to `0.1.0-preview.20261104.71`), that copy is never offered
+Nightly and sees no further update there. Choose Preview in Settings › Updates
+to keep getting new Octant builds. Development runs
 keep their existing behavior. The stable-host connection, full Nightly command
 and coexistence remain required before Nightly can be offered as a usable
 download.
@@ -222,8 +230,9 @@ remove it; the row asks you to if it is still open. After you switch to Stable o
 stays while Nightly is installed. Octant on Linux does not install Nightly;
 download it from octant.sh instead. The release workflow's scheduled Nightly run
 has an explicit preflight stop until that functional client is implemented and
-verified. Its dispatched run builds Octant on the candidate ring and is not
-held by that stop; stable releases and local packaging have no such stop
+verified, and so does a dispatched rollback, which rebuilds a known-good
+Nightly under a newer version because updates only move forward. Its other
+dispatched run builds Octant on the candidate ring and is not held by that stop; stable releases and local packaging have no such stop
 either.
 
 Nightly identifies its local window with a neutral "Nightly" label beside
