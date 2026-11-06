@@ -6,6 +6,7 @@ import type { UtcTimestamp } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
+import type { AppUpdateChannel } from "@octant/contracts/shell";
 import type { AppUpdateState, OctantHostBridge } from "../shell/hostBridge";
 
 const ready: AppUpdateState = {
@@ -62,19 +63,24 @@ function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
   } as unknown as OctantHostBridge;
 }
 
-function view(overrides: Partial<OctantHostBridge> = {}, automaticChecks = true) {
+function view(
+  overrides: Partial<OctantHostBridge> = {},
+  automaticChecks = true,
+  updateChannel?: AppUpdateChannel,
+) {
   const onAutomaticChecksChange = vi.fn();
-  const onReleaseRingChange = vi.fn();
+  const onUpdateChannelChange = vi.fn();
   const host = bridge(overrides);
   render(
     <AppUpdateSettings
       automaticChecks={automaticChecks}
       hostBridge={host}
       onAutomaticChecksChange={onAutomaticChecksChange}
-      onReleaseRingChange={onReleaseRingChange}
+      onUpdateChannelChange={onUpdateChannelChange}
+      updateChannel={updateChannel}
     />,
   );
-  return { host, onAutomaticChecksChange, onReleaseRingChange };
+  return { host, onAutomaticChecksChange, onUpdateChannelChange };
 }
 
 describe("AppUpdateSettings", () => {
@@ -97,7 +103,13 @@ describe("AppUpdateSettings", () => {
         .getByRole("switch", { name: "Check for updates automatically" })
         .getAttribute("aria-checked"),
     ).toBe("false");
-    expect(screen.queryByRole("group", { name: "Release ring" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Update channel" })).toBeNull();
+    for (const name of ["What's new", "Check for updates"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
+    expect(screen.getByText("What a check sends")).toBeTruthy();
+    expect(screen.getByText(/gets a new build of what is being built every night/)).toBeTruthy();
+    expect(screen.queryByText("Install Octant Nightly")).toBeNull();
     for (const name of ["Stable", "Preview", "Nightly"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
@@ -107,7 +119,7 @@ describe("AppUpdateSettings", () => {
     expect(f.onAutomaticChecksChange).not.toHaveBeenCalled();
   });
 
-  it("lets Octant choose Stable or Preview and never offers Nightly's ring", () => {
+  it("lets Octant choose Stable, Preview or Nightly and never follows the preview ring", () => {
     const octant: AppUpdateState = {
       ...ready,
       ring: "stable",
@@ -119,20 +131,28 @@ describe("AppUpdateSettings", () => {
         return () => {};
       },
     });
-    const rings = screen.getByRole("group", { name: "Release ring" });
+    const rings = screen.getByRole("group", { name: "Update channel" });
     expect(within(rings).getByRole("button", { name: "Stable" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(within(rings).queryByRole("button", { name: "Nightly" })).toBeNull();
+    expect(
+      within(rings)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Stable", "Preview", "Nightly"]);
     fireEvent.click(within(rings).getByRole("button", { name: "Preview" }));
-    expect(f.onReleaseRingChange).toHaveBeenCalledWith("candidate");
+    expect(f.onUpdateChannelChange).toHaveBeenCalledWith("preview", "candidate");
     expect(f.host.setAppUpdateRing).toHaveBeenCalledWith("candidate");
+    fireEvent.click(within(rings).getByRole("button", { name: "Nightly" }));
+    expect(f.onUpdateChannelChange).toHaveBeenLastCalledWith("nightly", "candidate");
+    expect(f.host.setAppUpdateRing).toHaveBeenLastCalledWith("candidate");
+    expect(f.host.setAppUpdateRing).not.toHaveBeenCalledWith("preview");
   });
 
   it("offers no ring switch until the host has said which rings this app follows", () => {
     const f = view({ subscribeAppUpdateState: () => () => {} });
-    expect(screen.queryByRole("group", { name: "Release ring" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Update channel" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Nightly" })).toBeNull();
     expect(f.host.setAppUpdateRing).not.toHaveBeenCalled();
   });
@@ -252,23 +272,6 @@ describe("AppUpdateSettings", () => {
     );
   });
 
-  it("moves to the Nightly ring and tells the host, not only the settings store", () => {
-    // Both matter: the store is what survives a relaunch, and the host is what
-    // the next check actually reads a feed from.
-    const { host, onReleaseRingChange } = view();
-
-    const rings = screen.getByRole("group", { name: "Release ring" });
-    expect(within(rings).getByRole("button", { name: "Stable" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-
-    fireEvent.click(within(rings).getByRole("button", { name: "Nightly" }));
-
-    expect(onReleaseRingChange).toHaveBeenCalledWith("preview");
-    expect(host.setAppUpdateRing).toHaveBeenCalledWith("preview");
-  });
-
   it("says plainly that a non-desktop client does not update itself", () => {
     const readBundledWhatsNew = vi.fn();
     render(
@@ -276,7 +279,7 @@ describe("AppUpdateSettings", () => {
         automaticChecks
         hostBridge={{ close: vi.fn(), readBundledWhatsNew } as unknown as OctantHostBridge}
         onAutomaticChecksChange={vi.fn()}
-        onReleaseRingChange={vi.fn()}
+        onUpdateChannelChange={vi.fn()}
       />,
     );
 
@@ -414,7 +417,7 @@ describe("AppUpdateSettings", () => {
     it("offers to install Nightly while Octant follows Preview, and only on a click", async () => {
       const installNightly = vi.fn(async () => ({ status: "installed" as const }));
       const readNightlyInstall = vi.fn(async () => ({ status: "not-installed" as const }));
-      view({ ...onRing("candidate"), readNightlyInstall, installNightly });
+      view({ ...onRing("candidate"), readNightlyInstall, installNightly }, true, "nightly");
 
       const install = await screen.findByRole("button", { name: "Install Octant Nightly" });
       expect(installNightly).not.toHaveBeenCalled();
@@ -423,16 +426,81 @@ describe("AppUpdateSettings", () => {
       expect(installNightly).toHaveBeenCalledWith();
     });
 
-    it("names the check that refused an install", async () => {
+    it("shows Nightly on the candidate ring, with the row, and downloads nothing until Install", async () => {
+      const installNightly = vi.fn(async () => ({ status: "installed" as const }));
+      const f = view(
+        {
+          ...onRing("candidate"),
+          readNightlyInstall: vi.fn(async () => ({ status: "not-installed" as const })),
+          installNightly,
+        },
+        true,
+        "nightly",
+      );
+      const rings = screen.getByRole("group", { name: "Update channel" });
+      expect(within(rings).getByRole("button", { name: "Nightly" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(await screen.findByRole("button", { name: "Install Octant Nightly" })).toBeTruthy();
+      expect(installNightly).not.toHaveBeenCalled();
+      expect(f.host.setAppUpdateRing).not.toHaveBeenCalled();
+    });
+
+    it("derives Preview from the candidate ring when no channel was stored", async () => {
       view({
         ...onRing("candidate"),
         readNightlyInstall: vi.fn(async () => ({ status: "not-installed" as const })),
-        installNightly: vi.fn(async () => ({
-          status: "not-installed" as const,
-          refusal: "code-signature" as const,
-          message: "The downloaded app is not Octant Nightly signed by Octant's own developer.",
-        })),
       });
+      const rings = screen.getByRole("group", { name: "Update channel" });
+      expect(within(rings).getByRole("button", { name: "Preview" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.queryByRole("button", { name: "Install Octant Nightly" })).toBeNull();
+    });
+
+    it("hides the row on Preview and again on Stable when Nightly is not installed", async () => {
+      const readNightlyInstall = vi.fn(async () => ({ status: "not-installed" as const }));
+      view({ ...onRing("candidate"), readNightlyInstall }, true, "preview");
+      await waitFor(() => expect(readNightlyInstall).toHaveBeenCalled());
+      expect(screen.queryByText("Octant Nightly")).toBeNull();
+    });
+
+    it("shows the row for a Nightly choice and follows candidate when the next click is Stable", async () => {
+      const f = view(
+        {
+          ...onRing("candidate"),
+          readNightlyInstall: vi.fn(async () => ({ status: "not-installed" as const })),
+        },
+        true,
+        "nightly",
+      );
+      fireEvent.click(
+        within(screen.getByRole("group", { name: "Update channel" })).getByRole("button", {
+          name: "Stable",
+        }),
+      );
+      expect(f.onUpdateChannelChange).toHaveBeenCalledWith("stable", "stable");
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Install Octant Nightly" })).toBeNull(),
+      );
+    });
+
+    it("names the check that refused an install", async () => {
+      view(
+        {
+          ...onRing("candidate"),
+          readNightlyInstall: vi.fn(async () => ({ status: "not-installed" as const })),
+          installNightly: vi.fn(async () => ({
+            status: "not-installed" as const,
+            refusal: "code-signature" as const,
+            message: "The downloaded app is not Octant Nightly signed by Octant's own developer.",
+          })),
+        },
+        true,
+        "nightly",
+      );
 
       fireEvent.click(await screen.findByRole("button", { name: "Install Octant Nightly" }));
       expect(

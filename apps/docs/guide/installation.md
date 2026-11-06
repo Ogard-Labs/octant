@@ -180,15 +180,19 @@ its original icon. Nightly keeps its
 window storage under `Octant Nightly`, separate from Octant's shared host data.
 It cannot start or migrate that host data.
 
-Packaged Octant follows the stable ring or, when you choose Preview, the
+Packaged Octant follows the stable ring or, when you choose Preview or Nightly, the
 candidate ring, and refuses a feed signed for preview. The Nightly identity
 follows only preview and refuses stable and candidate feeds. Development runs
 keep their existing behavior. The stable-host connection, full Nightly command
 and coexistence remain required before Nightly can be offered as a usable
 download.
 
-While packaged Octant on macOS follows Preview, Settings › Updates shows an
-Octant Nightly row below the release ring. Octant downloads Nightly only when
+Settings › Updates has an update channel switch with Stable, Preview and
+Nightly. Stable is the released build, Preview tests the next release, and
+Nightly adds Octant Nightly, a separate app. Octant itself never follows the
+Nightly stream; Nightly and Preview both keep it on the Preview stream. While
+packaged Octant on macOS is on Nightly, an Octant Nightly row appears below the
+switch. Octant downloads Nightly only when
 you choose Install Octant Nightly. Before placing it beside Octant as
 `Octant Nightly.app`, it checks the Nightly feed's signature, the download's
 hash, and that the app is Octant Nightly signed by Octant's own developer. If
@@ -197,7 +201,7 @@ replaces another app with that name. Once Nightly is installed, the row offers
 Open Octant Nightly and Remove Octant Nightly. Remove moves the app to the
 Trash and leaves your data alone. Installing a newer Nightly over an installed
 one moves the old copy to the Trash. Quit Octant Nightly before you replace or
-remove it; the row asks you to if it is still open. After you switch back to Stable, the row
+remove it; the row asks you to if it is still open. After you switch to Stable or Preview, the row
 stays while Nightly is installed. Octant on Linux does not install Nightly;
 download it from octant.sh instead. The release workflow's scheduled Nightly run
 has an explicit preflight stop until that functional client is implemented and
@@ -367,8 +371,8 @@ different update service does not lower the bar an update has to clear.
 ### Release rings
 
 Octant publishes three streams. Octant itself follows one of the first two,
-which you pick in **Settings → General → Updates**; the third is the separate
-Octant Nightly app:
+which you pick in **Settings → General → Updates** (choosing Nightly there keeps
+Octant on Preview and offers the separate Octant Nightly app):
 
 - **Stable** — the released build. This is where a normal install stays.
 - **Preview** — a pre-release of the next stable version, built by hand from
