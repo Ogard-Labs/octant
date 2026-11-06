@@ -1579,11 +1579,11 @@ describe("the octant-nightly command Octant Nightly ships", () => {
       );
       await symlink(resolve(root, "b"), resolve(root, "a"));
       await symlink(resolve(root, "a"), resolve(root, "b"));
-      // $0 is the looping link, as a PATH lookup through it would give; the
-      // launcher's path travels as $1 rather than inside the command text.
+      // $0 is the looping link, as a PATH lookup through it would give. The
+      // command and its arguments are constants; only the working folder varies.
       let stderr = "";
       try {
-        execFileSync("/bin/sh", ["-c", '. "$1"', resolve(root, "a"), script], { stdio: "pipe" });
+        execFileSync("/bin/sh", ["-c", ". ./launcher", "./a"], { cwd: root, stdio: "pipe" });
       } catch (error) {
         stderr = String((error as { readonly stderr?: unknown }).stderr);
       }
