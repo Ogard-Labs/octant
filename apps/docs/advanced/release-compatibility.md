@@ -57,15 +57,23 @@ and the signed feed verifies.
   for how an update is verified and what a check sends (provisional until
   signed self-updating releases are final).
 
+## In scope but not built yet
+
+These are part of the first preview, but are not finished:
+
+- A full language-server, debugger and extension-host companion (Monaco and
+  external-editor handoff work today)
+- Signed Windows packaging (Windows Work and Code stay unavailable until a
+  Windows confinement design is approved) and native mobile store
+  distribution
+
 ## What is excluded from the preview
 
-- Full IDE/LSP/debugger/extension-host scope (Monaco and external-editor
-  handoff are primary)
 - Hosted relay, Octant cloud account, and cross-host command routing (a
   paired client can register several hosts, but every command runs on the
   one host that owns the thread)
-- Signed Intel and Windows packaging, an operating-system code signature on
-  the Linux image, and native mobile store distribution
+- Signed Intel packaging and an operating-system code signature on the Linux
+  image
 - Pull-request review mutation (approve, comment, request changes, close)
   and any merge an agent or paired device starts; you can merge a pull request
   yourself from its review on the desktop after confirming, or turn on Merge
@@ -75,7 +83,7 @@ and the signed feed verifies.
 - Connector/OAuth marketplace and data migration from current Octant
 
 These are tracked on the roadmap; nothing on this page is a
-commitment that a deferred capability will ship.
+commitment that an unfinished capability will ship by a given date.
 
 ## Next steps
 
