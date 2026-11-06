@@ -332,26 +332,32 @@ describe("MCP servers added by hand", () => {
     expect(launch).toMatchObject({ headers: { Authorization: "Bearer synthetic-private-pat" } });
   });
 
-  it("adds the exact registered Slack connector without inline credentials and refuses catalog binding forgeries", async () => {
-    const { store: servers, registry } = await store();
-    const { source } = await servers.add({
-      name: "Slack",
-      connectorId: "slack",
-      server: { type: "streamable-http", url: "https://mcp.slack.com/mcp", headers: [] },
-    });
-    expect(registry.get(source.sourceRef)).toBeDefined();
-    for (const server of [
-      { type: "streamable-http", url: "https://mcp.slack.com/other", headers: [] },
-      {
-        type: "streamable-http",
-        url: "https://mcp.slack.com/mcp",
-        headers: [{ name: "Authorization", value: "synthetic-key", secret: false }],
-      },
-    ] as const)
-      await expect(
-        servers.add({ name: "Other Slack", connectorId: "slack", server }),
-      ).rejects.toMatchObject({ category: "invalid" });
-  });
+  it.each([
+    { id: "slack", name: "Slack", url: "https://mcp.slack.com/mcp" },
+    { id: "hubspot", name: "HubSpot", url: "https://mcp.hubspot.com/" },
+  ])(
+    "adds the exact registered $name connector and refuses catalog binding forgeries",
+    async ({ id, name, url }) => {
+      const { store: servers, registry } = await store();
+      const { source } = await servers.add({
+        name,
+        connectorId: id,
+        server: { type: "streamable-http", url, headers: [] },
+      });
+      expect(registry.get(source.sourceRef)).toBeDefined();
+      for (const server of [
+        { type: "streamable-http", url: `${url}other`, headers: [] },
+        {
+          type: "streamable-http",
+          url,
+          headers: [{ name: "Authorization", value: "synthetic-key", secret: false }],
+        },
+      ] as const)
+        await expect(
+          servers.add({ name: `Other ${name}`, connectorId: id, server }),
+        ).rejects.toMatchObject({ category: "invalid" });
+    },
+  );
 
   it("writes a package whose secret value is only a reference, and fills it in at launch", async () => {
     const secrets = secretsStore();

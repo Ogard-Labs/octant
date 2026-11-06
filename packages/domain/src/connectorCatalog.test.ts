@@ -2,6 +2,21 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("requires owned confidential client setup for HubSpot without inventing fixed scopes", () => {
+    expect(connectorCatalog().find((entry) => entry.id === "hubspot")).toMatchObject({
+      displayName: "HubSpot",
+      url: "https://mcp.hubspot.com/",
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        permissionNotice: expect.stringContaining("read and write"),
+      },
+    });
+    const entry = connectorCatalog().find((entry) => entry.id === "hubspot");
+    expect(entry?.auth).not.toHaveProperty("requestedScopes");
+    expect(featuredConnectors().map((entry) => entry.id)).not.toContain("hubspot");
+  });
+
   it("requires separate public-client setup and read-only consent for each Google preview service", () => {
     const google = connectorCatalog().filter((entry) => entry.id.startsWith("google-"));
     expect(google).toHaveLength(3);
