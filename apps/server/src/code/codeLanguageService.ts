@@ -1769,28 +1769,54 @@ export class CodeLanguageService {
 
   #watch(record: ServerRecord, connection: LanguageServerConnection, generation: number): void {
     const watcher = this.#watcher;
-    if (watcher === undefined || record.extraFolder) return;
+    if (watcher === undefined) return;
     const controller = new AbortController();
     record.watch = controller;
+    const notify = (paths: ReadonlyArray<CodeRelativePath>) => {
+      if (connection.registered("workspace/didChangeWatchedFiles"))
+        connection.notify("workspace/didChangeWatchedFiles", {
+          changes: paths.map((path) => ({
+            uri: pathToFileURL(join(record.rootPath, path)).href,
+            type: 2,
+          })),
+        });
+    };
     void (async () => {
-      try {
-        for await (const notice of watcher.watch({
-          threadId: record.watchThreadId,
-          checkoutId: record.checkoutId,
-          rootPath: record.rootPath,
-          signal: controller.signal,
-        })) {
-          if (record.generation !== generation || controller.signal.aborted) return;
-          if (!connection.registered("workspace/didChangeWatchedFiles")) continue;
-          connection.notify("workspace/didChangeWatchedFiles", {
-            changes: notice.paths.map((path) => ({
-              uri: pathToFileURL(join(record.rootPath, path)).href,
-              type: 2,
-            })),
-          });
+      while (record.generation === generation && !controller.signal.aborted) {
+        try {
+          for await (const notice of watcher.watch({
+            threadId: record.watchThreadId,
+            checkoutId: record.checkoutId,
+            rootPath: record.rootPath,
+            signal: controller.signal,
+          })) {
+            if (record.generation !== generation || controller.signal.aborted) return;
+            notify(
+              notice.truncated
+                ? [
+                    ...new Set([
+                      ...notice.paths,
+                      ...[...record.documents.values()].map((document) => document.path),
+                    ]),
+                  ]
+                : notice.paths,
+            );
+          }
+        } catch {
+          // A dropped watcher reconciles open documents before reconnecting.
         }
-      } catch {
-        // A watch that fails leaves the server reading files as it finds them.
+        if (record.generation !== generation || controller.signal.aborted) return;
+        notify([...record.documents.values()].map((document) => document.path));
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            clearTimeout(timer);
+            controller.signal.removeEventListener("abort", finish);
+            resolve();
+          };
+          const timer = setTimeout(finish, 2000);
+          controller.signal.addEventListener("abort", finish, { once: true });
+          if (controller.signal.aborted) finish();
+        });
       }
     })();
   }

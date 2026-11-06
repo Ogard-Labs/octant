@@ -1,5 +1,6 @@
 import {
   decodeLeasableDesktopProvider,
+  decodeProjectExtraFolder,
   decodeMemoryEntryId,
   decodeProjectId,
   decodeWindowId,
@@ -20,6 +21,7 @@ import {
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import { ProjectService } from "./projectService";
 import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
+import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "./approvedWorkingFolders";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000601");
 const chatId = decodeProjectId("00000000-0000-4000-8000-000000000602");
@@ -28,6 +30,40 @@ const entryId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000610");
 const successorId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000611");
 const transferId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000612");
 const now = "2026-07-14T10:00:00.000Z";
+
+it("issues stable folder choices and refuses removed or relinked choices without changing checkout identity", () => {
+  const original = codeProject();
+  const extraFolder = decodeProjectExtraFolder({
+    canonicalRoot: "/approved/extra",
+    addedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    addedAt: now,
+  });
+  const project = { ...original, extraFolders: [extraFolder] };
+  const choices = approvedWorkingFolderChoices(project);
+  const extra = choices.find((folder) => folder.kind === "extra");
+  const main = choices.find((folder) => folder.kind === "main");
+  if (extra === undefined || main === undefined) throw new Error("Missing folder choices");
+  expect(approvedWorkingFolderChoices(project)).toEqual(choices);
+  expect(approvedWorkingFolderRoot(project, undefined, "/checkout/child")).toBe("/checkout/child");
+  expect(approvedWorkingFolderRoot(project, main.id, "/checkout/child")).toBe("/checkout/child");
+  expect(approvedWorkingFolderRoot(project, extra.id, "/checkout/child")).toBe("/approved/extra");
+  expect(approvedWorkingFolderRoot({ ...project, extraFolders: [] }, extra.id)).toBeUndefined();
+  expect(
+    approvedWorkingFolderRoot(
+      {
+        ...project,
+        extraFolders: [
+          decodeProjectExtraFolder({
+            ...extraFolder,
+            canonicalRoot: "/approved/replaced",
+            addedAt: "2026-11-06T12:00:00.000Z",
+          }),
+        ],
+      },
+      extra.id,
+    ),
+  ).toBeUndefined();
+});
 
 describe("a thread started without a Project", () => {
   const defaultProjectId = decodeProjectId("00000000-0000-4000-8000-000000000620");
@@ -1114,6 +1150,7 @@ describe("ProjectService", () => {
     expect(event?.actor).toEqual({ kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID });
     expect(event?.payload.folder).toEqual({
       canonicalRoot: "/canonical/notes",
+      addedRevision: 2,
       addedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       addedAt: now,
     });
@@ -1225,6 +1262,7 @@ describe("ProjectService", () => {
       expect(project?.type === "work" ? project.extraFolders : undefined).toEqual([
         {
           canonicalRoot: "/Volumes/Specs",
+          addedRevision: 3,
           addedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           addedAt: now,
         },

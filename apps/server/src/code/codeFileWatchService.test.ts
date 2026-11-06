@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
 import type { CodeDirectoryPort } from "./codeDirectoryPort";
 import { CodeFileWatchService } from "./codeFileWatchService";
 import type { CodeFileWatchPort } from "./codeFileWatchPort";
+import { liveCodeFileWatchPort } from "./codeFileWatchPort";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const threadId = "11111111-1111-4111-8111-111111111111" as CodeThreadId;
 const checkoutId = "22222222-2222-4222-8222-222222222222" as CodeCheckoutId;
@@ -75,6 +79,67 @@ function service(port: CodeFileWatchPort, directory = directoryPort()): CodeFile
 }
 
 describe("CodeFileWatchService", () => {
+  it("observes creation, rename, edit and deletion at the supported seventeen-root limit", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-visible-folders-")));
+    const roots = Array.from({ length: 17 }, (_, index) => join(root, String(index)));
+    roots.forEach((path) => mkdirSync(path));
+    const abort = new AbortController();
+    const deadline = setTimeout(() => abort.abort(), 15000);
+    const watch = vi.fn(liveCodeFileWatchPort.watch);
+    const shared = new CodeFileWatchService({ watchPort: { watch }, quietPeriodMs: 30 });
+    const streams = roots.map((rootPath) =>
+      shared.watch({ threadId, checkoutId, rootPath, signal: abort.signal }),
+    );
+    const next = () => streams.map((stream) => stream.next());
+    const settle = async (pending: ReturnType<typeof next>) => {
+      const frames = await Promise.all(pending);
+      expect(frames.every((frame) => !frame.done && frame.value.paths.length > 0)).toBe(true);
+    };
+    try {
+      let pending = next();
+      await vi.waitFor(() => expect(watch).toHaveBeenCalledTimes(17));
+      roots.forEach((path) => writeFileSync(join(path, "first.txt"), "created"));
+      await settle(pending);
+      pending = next();
+      roots.forEach((path) => renameSync(join(path, "first.txt"), join(path, "second.txt")));
+      await settle(pending);
+      pending = next();
+      roots.forEach((path) => writeFileSync(join(path, "second.txt"), "edited"));
+      await settle(pending);
+      pending = next();
+      roots.forEach((path) => rmSync(join(path, "second.txt")));
+      await settle(pending);
+    } finally {
+      clearTimeout(deadline);
+      abort.abort();
+      await Promise.allSettled(streams.map((stream) => stream.return(undefined)));
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it("shares one host subscription across readers and keeps the remaining reader live", async () => {
+    const port = emitter();
+    const watch = vi.spyOn(port, "watch");
+    const shared = service(port);
+    const firstAbort = new AbortController(),
+      secondAbort = new AbortController();
+    const first = shared.watch({ threadId, checkoutId, rootPath, signal: firstAbort.signal });
+    const second = shared.watch({ threadId, checkoutId, rootPath, signal: secondAbort.signal });
+    const a = first.next(),
+      b = second.next();
+    await vi.waitFor(() => expect(watch).toHaveBeenCalledOnce());
+    port.change("one.txt");
+    expect((await a).value?.paths).toEqual(["one.txt"]);
+    expect((await b).value?.paths).toEqual(["one.txt"]);
+    firstAbort.abort();
+    await first.return(undefined);
+    expect(port.closed()).toBe(false);
+    const next = second.next();
+    port.change("two.txt");
+    expect((await next).value?.paths).toEqual(["two.txt"]);
+    secondAbort.abort();
+    await second.return(undefined);
+    expect(port.closed()).toBe(true);
+  });
   it("coalesces a burst of changes into one notice of relative paths", async () => {
     const port = emitter();
     const stream = service(port).watch({ threadId, checkoutId, rootPath });

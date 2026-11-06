@@ -1,5 +1,6 @@
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -784,6 +785,9 @@ export class WorkTurnService {
         projectId: thread.projectId,
         bindingRevisionId: currentBinding?.revisionId ?? last.bindingRevisionId,
         workingDirectory: thread.workingDirectory ?? last.workingDirectory,
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       },
@@ -942,8 +946,13 @@ export class WorkTurnService {
       projectRoot = server.folder;
     } else {
       try {
+        const root =
+          project === undefined
+            ? undefined
+            : approvedWorkingFolderRoot(project, command.authority.workingFolderId);
+        if (root === undefined) throw new Error("Working folder is unavailable");
         projectRoot = await this.#workingDirectories.resolve(
-          project?.binding.canonicalRoot ?? "",
+          root,
           command.authority.workingDirectory,
         );
       } catch {
@@ -1360,7 +1369,19 @@ export class WorkTurnService {
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       projectRoot,
       projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
-      extraFolders: project === undefined ? [] : projectExtraFolderRoots(project),
+      extraFolders:
+        project === undefined
+          ? []
+          : [
+              ...new Set([
+                ...(command.authority.workingFolderId !== undefined &&
+                approvedWorkingFolderRoot(project, command.authority.workingFolderId) !==
+                  project.binding.canonicalRoot
+                  ? [project.binding.canonicalRoot]
+                  : []),
+                ...projectExtraFolderRoots(project),
+              ]),
+            ].filter((folder) => folder !== projectRoot),
       ...(server === undefined ? {} : { serverTools: server.tools }),
       driver,
       attachments: attachmentInputs,
@@ -2888,6 +2909,9 @@ function workTurnThreadFacts(
           thread.bindingRevisionId === undefined ? undefined : String(thread.bindingRevisionId),
         workingDirectory:
           thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
       };
 }
 

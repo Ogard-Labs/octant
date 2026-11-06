@@ -123,6 +123,7 @@ import {
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WorkThreadProjection } from "./workThreadProjection";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
@@ -503,7 +504,9 @@ export class WorkThreadService {
         }
         const workingDirectory = command.workingDirectory ?? ("." as ThreadWorkingDirectory);
         try {
-          await this.#workingDirectories.resolve(project.binding.canonicalRoot, workingDirectory);
+          const root = approvedWorkingFolderRoot(project, command.workingFolderId);
+          if (root === undefined) throw new Error("Working folder is unavailable");
+          await this.#workingDirectories.resolve(root, workingDirectory);
         } catch {
           throw this.#failure("invalid", "Work working directory is unavailable.");
         }
@@ -583,6 +586,9 @@ export class WorkThreadService {
             : { modelOptionValues: command.modelOptionValues }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
+          ...(command.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: command.workingFolderId }),
           // The host decides the access from its Project's override, else its
           // own settings; nothing the renderer sends can raise it.
           access:
@@ -907,10 +913,12 @@ export class WorkThreadService {
         if (project === undefined)
           throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
         try {
-          await this.#workingDirectories.resolve(
-            project.binding.canonicalRoot,
-            command.workingDirectory,
+          const root = approvedWorkingFolderRoot(
+            project,
+            command.workingFolderId ?? current.workingFolderId,
           );
+          if (root === undefined) throw new Error("Working folder is unavailable");
+          await this.#workingDirectories.resolve(root, command.workingDirectory);
         } catch {
           throw this.#failure("invalid", "Work working directory is unavailable.");
         }
@@ -1044,6 +1052,9 @@ export class WorkThreadService {
                     : {
                         ...current,
                         workingDirectory: command.workingDirectory,
+                        ...(command.workingFolderId === undefined
+                          ? {}
+                          : { workingFolderId: command.workingFolderId }),
                         bindingRevisionId: bindingRevision?.revisionId,
                         version: command.expectedVersion + 1,
                         updatedAt,
@@ -1588,6 +1599,7 @@ export class WorkThreadService {
         : { modelOptionValues: source.modelOptionValues }),
       bindingRevisionId: latestBinding.revisionId,
       workingDirectory: source.workingDirectory ?? ("." as ThreadWorkingDirectory),
+      ...(source.workingFolderId === undefined ? {} : { workingFolderId: source.workingFolderId }),
       access: DEFAULT_WORK_ACCESS,
       forkedFrom: {
         threadId: source.id,

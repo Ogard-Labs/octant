@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { workExternalInputReceipt } from "./workExternalInput";
 import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import {
@@ -19,6 +20,7 @@ import {
   AutomationId,
   UtcTimestamp,
   WORK_TURN_CAPABILITIES,
+  decodeProjectExtraFolder,
   decodeContextCompactionId,
   decodeContextSubjectRef,
   decodeProviderRuntimeEvent,
@@ -121,6 +123,41 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it("launches in the selected approved folder and refuses revocation without falling back", async () => {
+    const base = workProject();
+    const project = workProject({
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/approved/notes",
+          addedAt: now,
+          addedBy: base.bindingHistory[0]?.actor,
+        }),
+      ],
+    });
+    const choice = approvedWorkingFolderChoices(project).find((folder) => folder.kind === "extra");
+    if (choice === undefined) throw new Error("Missing approved choice");
+    const fixture = serviceFixture({ project });
+    const thread = { ...(await fixture.threads.read()), workingFolderId: choice.id };
+    fixture.threads.read.mockResolvedValue(thread);
+    fixture.threads.bootstrap.mockResolvedValue({ threads: [thread] });
+    const command = startCommand();
+    await fixture.service.startFirstTurn(ids.window, {
+      ...command,
+      authority: { ...command.authority, workingFolderId: choice.id },
+    });
+    await fixture.waitForIdle();
+    expect(fixture.acquireInputs[0]).toMatchObject({ projectRoot: "/approved/notes" });
+    fixture.persistence.readProject.mockReturnValue(base);
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...command,
+        requestId: randomUUID(),
+        turnId: randomUUID(),
+        authority: { ...command.authority, workingFolderId: choice.id },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.acquireInputs).toHaveLength(1);
+  });
   it("journals the exact accepted framed input and keeps it through projection replay and an identical retry", async () => {
     const run = vi.fn(async () => ({ kind: "completed" as const, response: "Done" }));
     const fixture = serviceFixture({ turnRuntime: { run } });

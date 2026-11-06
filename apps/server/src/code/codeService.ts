@@ -883,6 +883,7 @@ export interface CodeWatchFilesInput {
    * the checkout. The root authority places it or the watch is refused.
    */
   readonly folder?: CodeRelativePath | undefined;
+  readonly folders?: ReadonlyArray<CodeRelativePath | ".">;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -2916,6 +2917,39 @@ export class CodeService {
     authenticatedWindowId: WindowId,
     input: CodeWatchFilesInput,
   ): Promise<AsyncIterable<CodeFileChangeNotice>> {
+    if (input.folders !== undefined) {
+      if (
+        input.folder !== undefined ||
+        input.folders.length < 1 ||
+        input.folders.length > 17 ||
+        new Set(input.folders).size !== input.folders.length
+      )
+        throw this.#failure("invalid", "Code file watch folders are invalid.");
+      const abort = new AbortController();
+      const signal =
+        input.signal === undefined ? abort.signal : AbortSignal.any([input.signal, abort.signal]);
+      const streams: Array<{
+        readonly folder?: CodeRelativePath;
+        readonly stream: AsyncIterable<CodeFileChangeNotice>;
+      }> = [];
+      try {
+        for (const folder of input.folders) {
+          if (folder !== "." && !folder.startsWith("/"))
+            throw this.#failure("invalid", "Code file watch folders are invalid.");
+          const stream = await this.watchFiles(authenticatedWindowId, {
+            threadId: input.threadId,
+            checkoutId: input.checkoutId,
+            signal,
+            ...(folder === "." ? {} : { folder }),
+          });
+          streams.push({ stream, ...(folder === "." ? {} : { folder }) });
+        }
+        return multiplexFileChanges(streams, signal, () => abort.abort());
+      } catch (error) {
+        abort.abort();
+        throw error;
+      }
+    }
     const authorized = await this.#authorizeCheckoutRead(
       authenticatedWindowId,
       input.threadId,
@@ -2952,14 +2986,34 @@ export class CodeService {
     });
     const openWatches = this.#openWatches;
     const windowKey = String(authenticatedWindowId);
-    return (async function* () {
+    const current = () => {
       try {
-        yield* notices;
+        return root.current?.() !== false;
+      } catch {
+        return false;
+      }
+    };
+    const release = () => {
+      input.signal?.removeEventListener("abort", abort);
+      const remaining = openWatches.get(windowKey);
+      remaining?.delete(revocation);
+      if (remaining?.size === 0) openWatches.delete(windowKey);
+    };
+    revocation.signal.addEventListener("abort", release, { once: true });
+    if (revocation.signal.aborted) release();
+    return (async function* () {
+      const authority = setInterval(() => {
+        if (!current()) revocation.abort();
+      }, 250);
+      try {
+        for await (const notice of notices) {
+          if (revocation.signal.aborted || !current()) return;
+          yield { ...notice, ...(input.folder === undefined ? {} : { folder: input.folder }) };
+        }
       } finally {
-        input.signal?.removeEventListener("abort", abort);
-        const remaining = openWatches.get(windowKey);
-        remaining?.delete(revocation);
-        if (remaining?.size === 0) openWatches.delete(windowKey);
+        clearInterval(authority);
+        revocation.signal.removeEventListener("abort", release);
+        release();
       }
     })();
   }
@@ -4162,3 +4216,60 @@ const FORK_REFUSALS: Readonly<
   "no-commits": "This repository has no commits yet, so a fork has nowhere to start.",
   unavailable: "The thread's checkout is unavailable right now, so it cannot be forked.",
 };
+
+/** One pending invalidation per root bounds slow readers without losing staleness. */
+async function* multiplexFileChanges(
+  sources: ReadonlyArray<{
+    readonly folder?: CodeRelativePath;
+    readonly stream: AsyncIterable<CodeFileChangeNotice>;
+  }>,
+  signal: AbortSignal,
+  stop: () => void,
+): AsyncGenerator<CodeFileChangeNotice> {
+  const pending = new Map<string, CodeFileChangeNotice>();
+  let ended = signal.aborted;
+  let wake: (() => void) | undefined;
+  const changed = () => {
+    const resume = wake;
+    wake = undefined;
+    resume?.();
+  };
+  const end = () => {
+    ended = true;
+    if (signal.aborted) pending.clear();
+    changed();
+  };
+  signal.addEventListener("abort", end, { once: true });
+  const readers = sources.map(async ({ folder, stream }) => {
+    try {
+      for await (const notice of stream) {
+        if (ended) break;
+        const key = folder ?? ".";
+        pending.set(key, pending.has(key) ? { ...notice, paths: [], truncated: true } : notice);
+        changed();
+      }
+    } catch {
+      // An ended constituent invalidates this connection; readers reconnect and reconcile.
+    } finally {
+      end();
+      stop();
+    }
+  });
+  try {
+    while (!ended || pending.size > 0) {
+      const first = pending.entries().next().value;
+      if (signal.aborted) return;
+      if (first !== undefined) {
+        pending.delete(first[0]);
+        yield first[1];
+      } else
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+    }
+  } finally {
+    signal.removeEventListener("abort", end);
+    stop();
+    await Promise.allSettled(readers);
+  }
+}

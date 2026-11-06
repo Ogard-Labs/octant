@@ -9,6 +9,7 @@ import {
   decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
+import { followCodeFileChanges } from "./codeFileWatchConnection";
 
 export interface CodeFileListingClientOptions {
   readonly baseUrl: string;
@@ -141,18 +142,35 @@ export function createCodeFileListingClient(
     },
 
     watch(query, signal) {
-      const url = new URL("/api/code/files/watch", options.baseUrl);
-      url.searchParams.set("threadId", String(query.threadId));
-      url.searchParams.set("checkoutId", String(query.checkoutId));
-      if (query.folder !== undefined) url.searchParams.set("folder", query.folder);
-      return readNoticeStream(
-        fetch(url.toString(), {
-          method: "GET",
-          headers: { "x-octant-window-capability": options.windowCapability },
-          signal,
-        }),
+      return followCodeFileChanges({
+        fetch: options.fetch,
+        key: JSON.stringify([
+          options.baseUrl,
+          options.windowCapability,
+          query.threadId,
+          query.checkoutId,
+        ]),
+        query,
         signal,
-      );
+        open: (target, folders, active, ready) => {
+          const url = new URL("/api/code/files/watch", options.baseUrl);
+          url.searchParams.set("threadId", String(target.threadId));
+          url.searchParams.set("checkoutId", String(target.checkoutId));
+          if (folders.length === 1) {
+            if (folders[0] !== ".") url.searchParams.set("folder", folders[0] ?? ".");
+          } else url.searchParams.set("folders", JSON.stringify(folders));
+          return readNoticeStream(
+            fetch(url.toString(), {
+              method: "GET",
+              headers: { "x-octant-window-capability": options.windowCapability },
+              signal: active,
+            }),
+            active,
+            ready,
+            folders.length === 1 ? folders[0] : undefined,
+          );
+        },
+      });
     },
   };
 }
@@ -171,6 +189,8 @@ export function createCodeFileListingClient(
 async function* readNoticeStream(
   responsePromise: Promise<Response>,
   signal: AbortSignal,
+  ready: () => void,
+  folder?: string,
 ): AsyncGenerator<CodeFileChangeNotice> {
   let response: Response;
   try {
@@ -189,9 +209,15 @@ async function* readNoticeStream(
   }
   if (response.body === null) return;
   const reader = response.body.getReader();
+  const abort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
   const decoder = new TextDecoder();
   let buffer = "";
   try {
+    ready();
     for (;;) {
       if (signal.aborted) return;
       const next = await reader.read();
@@ -204,7 +230,11 @@ async function* readNoticeStream(
         if (line.trim().length > 0) {
           let notice: CodeFileChangeNotice;
           try {
-            notice = decodeHostAnswer(CodeFileChangeNotice)(JSON.parse(line));
+            const decoded = decodeHostAnswer(CodeFileChangeNotice)(JSON.parse(line));
+            notice =
+              folder === undefined || folder === "."
+                ? decoded
+                : decodeHostAnswer(CodeFileChangeNotice)({ ...decoded, folder });
           } catch {
             return;
           }
@@ -216,6 +246,7 @@ async function* readNoticeStream(
   } catch {
     // A dropped connection is an ordinary end of a live stream.
   } finally {
+    signal.removeEventListener("abort", abort);
     try {
       await reader.cancel();
     } catch {

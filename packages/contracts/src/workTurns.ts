@@ -22,7 +22,7 @@ import {
   ProviderResumeCursor,
   ProviderUsageLimit,
 } from "./providers";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
@@ -100,6 +100,7 @@ export const WorkTurnAuthority = Schema.Struct({
   projectId: ProjectId,
   bindingRevisionId: BindingRevisionId,
   workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   confinementPosture: Schema.Literal("project-root-confined"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,

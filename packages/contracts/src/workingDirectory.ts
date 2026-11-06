@@ -26,3 +26,20 @@ export const ThreadWorkingDirectory = Schema.String.pipe(
 export type ThreadWorkingDirectory = typeof ThreadWorkingDirectory.Type;
 
 export const decodeThreadWorkingDirectory = Schema.decodeUnknownSync(ThreadWorkingDirectory);
+
+export const ProjectWorkingFolderId = Schema.String.pipe(
+  Schema.pattern(/^folder_[a-f0-9]{64}$/),
+  Schema.brand("ProjectWorkingFolderId"),
+);
+export type ProjectWorkingFolderId = typeof ProjectWorkingFolderId.Type;
+export const decodeProjectWorkingFolderId = Schema.decodeUnknownSync(ProjectWorkingFolderId);
+export const ApprovedWorkingFolder = Schema.Struct({
+  id: ProjectWorkingFolderId,
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  kind: Schema.Literal("main", "extra"),
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type ApprovedWorkingFolder = typeof ApprovedWorkingFolder.Type;
+export const ApprovedWorkingFolders = Schema.Array(ApprovedWorkingFolder).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(17),
+);

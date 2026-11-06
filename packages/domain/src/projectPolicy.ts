@@ -924,6 +924,7 @@ export function addProjectExtraFolder(
     canonicalRoot: input.canonicalRoot,
     addedBy: input.actor,
     addedAt: input.addedAt,
+    addedRevision: nextVersion(project),
   };
   return {
     project: {

@@ -1039,44 +1039,54 @@ describe("Code language service against a hostile server", () => {
     });
   });
 
-  it("tells a server that registered for file changes which checkout files changed", async () => {
-    const paths = workspace();
-    const log = join(paths.root, "server.log");
-    let release = () => {};
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const test = harness({
-      ...paths,
-      component: fakeComponent("normal", log),
-      confinement: passthrough,
-      watcher: {
-        watch: async function* (request) {
-          // The first notice waits until the server has registered.
-          await released;
-          yield decodeCodeFileChangeNotice({
-            kind: "code-file-change",
-            threadId: request.threadId,
-            checkoutId: request.checkoutId,
-            paths: ["a.ts"],
-            truncated: false,
-            observedAt: now,
-          });
+  it.each([false, true])(
+    "tells a server about changed files in its own root, including an extra folder: %s",
+    async (extraFolder) => {
+      const paths = workspace();
+      const log = join(paths.root, "server.log");
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const test = harness({
+        ...paths,
+        component: fakeComponent("normal", log),
+        confinement: passthrough,
+        watcher: {
+          watch: async function* (request) {
+            // The first notice waits until the server has registered.
+            await released;
+            yield decodeCodeFileChangeNotice({
+              kind: "code-file-change",
+              threadId: request.threadId,
+              checkoutId: request.checkoutId,
+              paths: ["a.ts"],
+              truncated: false,
+              observedAt: now,
+            });
+          },
         },
-      },
-    });
-    syncedFileId(await test.open("b.ts"));
-    await eventually(() =>
-      logged(log).some((entry) => entry.event === "answer" && entry.id === 1000),
-    );
-    release();
-    await eventually(() =>
-      logged(log).some((entry) => entry.method === "workspace/didChangeWatchedFiles"),
-    );
-    expect(
-      logged(log).find((entry) => entry.method === "workspace/didChangeWatchedFiles")?.params,
-    ).toEqual({ changes: [{ uri: pathToFileURL(join(paths.checkout, "a.ts")).href, type: 2 }] });
-  });
+      });
+      const folder = extraFolder ? join(paths.root, "extra") : paths.checkout;
+      if (extraFolder) {
+        mkdirSync(folder);
+        writeFileSync(join(folder, "b.ts"), "export const b = 1;\n");
+        test.state.extraFolders = [folder];
+      }
+      if (extraFolder) expect((await test.agent(join(folder, "b.ts"))).status).toBe("diagnostics");
+      else syncedFileId(await test.open("b.ts"));
+      await eventually(() =>
+        logged(log).some((entry) => entry.event === "answer" && entry.id === 1000),
+      );
+      release();
+      await eventually(() =>
+        logged(log).some((entry) => entry.method === "workspace/didChangeWatchedFiles"),
+      );
+      expect(
+        logged(log).find((entry) => entry.method === "workspace/didChangeWatchedFiles")?.params,
+      ).toEqual({ changes: [{ uri: pathToFileURL(join(folder, "a.ts")).href, type: 2 }] });
+    },
+  );
 
   it("answers too-large for a document whose escaped text would not fit a frame, and does not send it", async () => {
     const { test, log } = fake("normal");

@@ -1,3 +1,4 @@
+import { approvedWorkingFolderChoices } from "./approvedWorkingFolders";
 import {
   ActorId,
   AggregateVersion,
@@ -1238,5 +1239,5 @@ function toSummary(project: Project): ProjectSummary {
   if (bindingRevisionId === undefined) {
     throw new Error("Bound Project is missing a binding revision.");
   }
-  return { ...summary, bindingRevisionId };
+  return { ...summary, bindingRevisionId, workingFolders: approvedWorkingFolderChoices(project) };
 }
