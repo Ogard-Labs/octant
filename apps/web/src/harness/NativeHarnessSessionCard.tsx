@@ -1,3 +1,4 @@
+import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { QuestionnaireCard, QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessRouteDecision, NativeHarnessSessionView } from "@octant/contracts";
@@ -88,7 +89,24 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     [],
   );
 
-  const pendingQuestion = view?.questions.find((question) => question.status === "pending");
+  const draftScope = `harness:${props.threadId}`;
+  useRetainQuestionnaireDrafts(
+    draftScope,
+    view === undefined || (view !== null && String(view.session.threadId) !== props.threadId)
+      ? undefined
+      : view === null || view.session.status === "recovery-required"
+        ? []
+        : view.questions
+            .filter((entry) => entry.status === "pending")
+            .map((entry) => String(entry.id)),
+  );
+  const pendingQuestion =
+    view === null ||
+    view === undefined ||
+    view.session.status === "recovery-required" ||
+    String(view.session.threadId) !== props.threadId
+      ? undefined
+      : view.questions.find((question) => question.status === "pending");
   const pendingApproval = view?.approvals?.find((approval) => approval.status === "pending");
   useEffect(() => {
     let inFlight = false;
@@ -260,6 +278,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       {pendingQuestion === undefined ? null : pendingQuestion.questionnaire !== undefined ? (
         <QuestionnaireCard
           key={String(pendingQuestion.id)}
+          draftIdentity={{ scope: draftScope, requestId: String(pendingQuestion.id) }}
           prompt={pendingQuestion.prompt}
           questionnaire={pendingQuestion.questionnaire}
           onAnswer={answerQuestion}

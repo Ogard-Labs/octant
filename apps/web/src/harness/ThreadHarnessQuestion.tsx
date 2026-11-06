@@ -1,3 +1,4 @@
+import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessSessionView } from "@octant/contracts";
@@ -37,6 +38,18 @@ export function ThreadHarnessQuestion(props: ThreadHarnessQuestionProps) {
   const answering = useRef(false);
 
   const question = threadLeadQuestion(view);
+  const draftScope = `harness:${threadId}`;
+  useRetainQuestionnaireDrafts(
+    draftScope,
+    view === undefined
+      ? undefined
+      : view === null || view.session.status === "recovery-required"
+        ? []
+        : view.questions
+            .filter((entry) => entry.status === "pending")
+            .map((entry) => String(entry.id)),
+  );
+
   useEffect(() => setNotice(undefined), [threadId, question?.id]);
 
   const answer = useCallback(
@@ -87,6 +100,7 @@ export function ThreadHarnessQuestion(props: ThreadHarnessQuestionProps) {
       {question === undefined ? null : (
         <ProviderQuestionCard
           key={String(question.id)}
+          draftIdentity={{ scope: draftScope, requestId: String(question.id) }}
           questionnaire={question.questionnaire}
           onAnswer={answer}
           options={question.options.map((label) => ({ label }))}

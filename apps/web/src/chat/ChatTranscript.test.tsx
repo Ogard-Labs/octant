@@ -1,3 +1,5 @@
+import { QuestionnaireDraftsProvider } from "../transcript/questionnaireDrafts";
+import type { ReactNode } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProviderInstance } from "@octant/contracts";
@@ -1145,6 +1147,68 @@ describe("ChatTranscript", () => {
     expect(onAnswerQuestion).not.toHaveBeenCalled();
   });
 
+  it("keeps a questionnaire draft across navigation and discards it after settlement or a new attempt", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+    const turn = viewFixture().turns[0];
+    const attempt = turn?.attempts[1];
+    if (turn === undefined || attempt === undefined)
+      throw new Error("The fixture needs one attempt");
+    const questionnaire = {
+      questions: [
+        {
+          id: "format",
+          prompt: "Which format?",
+          selection: "single",
+          options: [{ id: "pdf", label: "PDF" }],
+        },
+      ],
+    };
+    const pending = (attemptId: string) =>
+      viewFixture({
+        turns: [
+          {
+            ...turn,
+            attempts: [
+              {
+                ...attempt,
+                id: attemptId,
+                outcome: "waiting",
+                pendingQuestion: {
+                  requestId: "same-provider-request",
+                  prompt: "Export",
+                  options: [],
+                  questionnaire,
+                },
+              },
+            ],
+          },
+        ],
+      });
+    const wrap = (content: ReactNode) => (
+      <QuestionnaireDraftsProvider serverUrl="local" windowId="window">
+        {content}
+      </QuestionnaireDraftsProvider>
+    );
+    const card = <ChatTranscript onAnswerQuestion={submit} view={pending(ids.secondAttempt)} />;
+    const { rerender } = render(wrap(card));
+    await user.click(screen.getByRole("radio", { name: "PDF" }));
+    await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Local note");
+    rerender(wrap(<p>Inbox</p>));
+    rerender(wrap(card));
+    expect(screen.getByRole("radio", { name: "PDF" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("Local note");
+    rerender(wrap(<ChatTranscript onAnswerQuestion={submit} view={pending(ids.firstAttempt)} />));
+    expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
+    rerender(wrap(card));
+    expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
+    await user.click(screen.getByRole("radio", { name: "PDF" }));
+    rerender(wrap(<ChatTranscript onAnswerQuestion={submit} view={viewFixture()} />));
+    rerender(wrap(card));
+    expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
+    expect(submit).not.toHaveBeenCalled();
+  });
   it("keeps an unanswered question read-only when the host serves no answer route", () => {
     const view = viewFixture({
       turns: [

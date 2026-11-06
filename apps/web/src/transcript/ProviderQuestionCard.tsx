@@ -1,3 +1,4 @@
+import type { QuestionnaireDraftIdentity } from "./questionnaireDrafts";
 import type { Questionnaire } from "@octant/contracts";
 import { QuestionnaireCard } from "./QuestionnaireCard";
 import { useState } from "react";
@@ -7,6 +8,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 export interface ProviderQuestionCardProps {
+  readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
   readonly questionnaire?: Questionnaire | undefined;
   readonly prompt: string;
   readonly options: ReadonlyArray<{

@@ -1,3 +1,5 @@
+import { QuestionnaireDraftsProvider } from "../transcript/questionnaireDrafts";
+import { ThreadHarnessQuestion } from "./ThreadHarnessQuestion";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -309,3 +311,47 @@ it("withdraws a Code questionnaire when another window submits it", async () => 
   expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument();
   expect(client.answerQuestion).not.toHaveBeenCalled();
 });
+
+it.each(["answered", "cancelled", "expired", "recovery-required"] as const)(
+  "discards an unsent questionnaire draft after an authoritative %s view",
+  async (status) => {
+    const user = userEvent.setup();
+    const questionnaire = {
+      questions: [
+        {
+          id: "formats",
+          prompt: "Which formats?",
+          selection: "multiple",
+          options: [{ id: "pdf", label: "PDF" }],
+        },
+      ],
+    };
+    const pending = view({ mode: "code", questions: [{ ...question, questionnaire }] });
+    const client = clientFor(async () => pending);
+    const show = (current: NativeHarnessSessionView) => (
+      <QuestionnaireDraftsProvider serverUrl="local" windowId="window">
+        <ThreadHarnessQuestion
+          client={client as never}
+          threadId={threadId}
+          reload={async () => undefined}
+          view={current}
+        />
+      </QuestionnaireDraftsProvider>
+    );
+    const { rerender } = render(show(pending));
+    await user.click(screen.getByRole("checkbox", { name: "PDF" }));
+    await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Unsent note");
+    rerender(
+      show(
+        status === "recovery-required"
+          ? view({ mode: "code", status, questions: [{ ...question, questionnaire }] })
+          : view({ mode: "code", questions: [{ ...question, questionnaire, status }] }),
+      ),
+    );
+    expect(screen.queryByRole("form", { name: "Questionnaire" })).not.toBeInTheDocument();
+    rerender(show(pending));
+    expect(screen.getByRole("checkbox", { name: "PDF" })).not.toBeChecked();
+    expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
+    expect(client.answerQuestion).not.toHaveBeenCalled();
+  },
+);
