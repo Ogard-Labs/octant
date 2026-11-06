@@ -24,26 +24,40 @@ full lifecycle acceptance, shared sign-in operations, the complete
 and the functional release preflight. Coexistence and rollback
 still need their remaining implementation and packaged evidence. Bounded native
 lease reconnect is implemented; full signed lifecycle acceptance remains separate. The
-preview/candidate workflow now selects the Nightly flavor and matching artifact
-and payload-smoke paths, but an explicit early gate stops that workflow before
-build, signing or publication. The functional client change must replace the
-gate with lifecycle, credential and native-surface parity evidence. Stable
+preview workflow selects each run's flavor, artifact and payload-smoke paths
+from its ring. An explicit early gate stops only the scheduled Nightly run
+before build, signing or publication; a dispatched run builds Octant on
+`candidate` and is not held by it. The functional client change must replace
+the gate with lifecycle, credential and native-surface parity evidence. Stable
 release and local packaging are unaffected by that gate.
 Nothing in this foundation authorizes installation or publication.
+
+The two-binary channel split below (2026-11-05) is built: Octant follows
+`stable` or `candidate`, Nightly follows only `preview`, packaging and the
+release workflow stamp the flavor from the ring, and the scheduled Nightly run
+alone is held by the functional-client preflight. The install row is not yet
+offered from Preview, and Nightly cannot yet run its own test-data host.
 
 ## Two apps, one set of data
 
 Octant ships as two apps that install side by side and can be open at the same
-time:
+time (maintainer decision, 2026-11-05):
 
-- **Octant** follows the `stable` ring. It is the app a person works in.
-- **Octant Nightly** follows the `preview` ring (scheduled builds of `main`) and
-  can follow `candidate` (one-off builds of a chosen ref). It shows what is
-  next.
+- **Octant** is the app a person works in. It follows Stable (the `stable`
+  ring) or, when the person chooses it in Settings › Updates, Preview (the
+  `candidate` ring): pre-release builds of the next stable version, cut from
+  the ref a maintainer chooses. One binary serves both channels; the channel is
+  an in-app choice, not a second download.
+- **Octant Nightly** follows Nightly (the `preview` ring): scheduled builds of
+  `main`. It shows what is next. It has no channel choice.
+
+Ring ids stay as they are because feed paths and the version tags installed
+builds follow carry them; Settings shows the names Stable, Preview and Nightly.
 
 Both apps work on the same threads, Projects, settings, sign-ins, and history.
 A thread started in one is live in the other, as it is in two windows of one
-app.
+app. For development and testing, Nightly can instead run its own host on
+separate test data ([below](#nightlys-own-host-for-development-and-testing)).
 
 ## One host serves both
 
@@ -69,6 +83,42 @@ The data folder has one host, and it is Octant's.
   Updating Octant restarts the host, and Nightly reconnects when it is back.
 - The credential broker and Keychain items stay with the host's app, so a sign-in
   made from either window is stored once.
+- Octant on Preview runs a newer host on the person's real data. That is the
+  person's choice of channel, and the forward-only rule still holds: after a
+  Preview host migrates the data, switching back to Stable offers nothing until
+  a stable release at least as new exists, so an older host never opens it.
+
+## Nightly's own host for development and testing
+
+Nightly can run a host of its own, for development and testing, on data that is
+never Octant's:
+
+- It is opt-in. Nightly's Settings offers **Data: Octant's data** (the default)
+  or **Separate test data**. The choice is stored in Nightly's window storage
+  and applies on the next launch; Nightly says so and offers to relaunch.
+- With separate test data, Nightly starts its own host on
+  `~/Library/Application Support/Octant Nightly/Test Data` (or its platform
+  equivalent) and its own loopback port, `13774`. It never reads, writes,
+  locks or migrates Octant's data folder, never connects to Octant's host, and
+  never asks Octant to start one. Octant and Nightly can both run, each with
+  its own host.
+- Credentials stay apart: the test host's credential broker stores its items
+  under Nightly's own Keychain service names, so a sign-in made for test data
+  never replaces or reads one of Octant's. A person signs in again for test
+  data.
+- New host behavior (agents, providers, tools, persistence) from `main` runs
+  here, which the client mode cannot test. The test data is disposable:
+  Nightly's Settings can remove it (moved to the Trash) when its host is
+  stopped.
+- The window shows a quiet "Test data" label beside the Nightly label, so a
+  person never mistakes it for their real work.
+- Packaged Nightly therefore carries the host payload and its worker runtime,
+  as Octant does. The host role starts only from this stored choice; the
+  [fixed entry](#fixed-packaged-entry) still refuses caller-selected roles,
+  scripts and data folders.
+- `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` still override either app, as for
+  a development build. Pointing Nightly's own host at Octant's folder that way
+  is the developer's explicit choice and is not a supported configuration.
 
 ## Starting a closed Stable host
 
@@ -522,17 +572,17 @@ full signed lifecycle acceptance remains unrun. The functional publication gate 
 
 The apps differ only in what macOS and Linux need to keep two apps apart:
 
-| Value                       | Octant                                 | Octant Nightly                                 |
-| --------------------------- | -------------------------------------- | ---------------------------------------------- |
-| Product name and menu title | Octant                                 | Octant Nightly                                 |
-| Bundle id                   | `app.octant.desktop`                   | `app.octant.desktop.nightly`                   |
-| Host data folder            | `~/Library/Application Support/Octant` | The same folder, through Octant's host         |
-| Window storage (macOS)      | Inside the data folder, as today       | `~/Library/Application Support/Octant Nightly` |
-| Host port                   | `13773`                                | None of its own; it uses Octant's host         |
-| Link scheme                 | `octant://`                            | `octant-nightly://`                            |
-| Command-line tool           | `octant`                               | `octant-nightly`                               |
-| Rings                       | `stable`                               | `preview` (default), `candidate`               |
-| Icon                        | The Octant icon                        | The Octant icon with its colours inverted      |
+| Value                       | Octant                                 | Octant Nightly                                                                     |
+| --------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------- |
+| Product name and menu title | Octant                                 | Octant Nightly                                                                     |
+| Bundle id                   | `app.octant.desktop`                   | `app.octant.desktop.nightly`                                                       |
+| Host data folder            | `~/Library/Application Support/Octant` | The same folder, through Octant's host; with test data, `Octant Nightly/Test Data` |
+| Window storage (macOS)      | Inside the data folder, as today       | `~/Library/Application Support/Octant Nightly`                                     |
+| Host port                   | `13773`                                | None of its own; with test data, `13774`                                           |
+| Link scheme                 | `octant://`                            | `octant-nightly://`                                                                |
+| Command-line tool           | `octant`                               | `octant-nightly`                                                                   |
+| Rings                       | `stable` (default), `candidate`        | `preview`                                                                          |
+| Icon                        | The Octant icon                        | The Octant icon with its colours inverted                                          |
 
 - Window storage is the desktop process's own browser storage (window
   positions, local storage, cookies of the app's renderer) and the
@@ -553,12 +603,14 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 
 ## Getting Octant Nightly
 
-- **From Octant.** Settings › Updates replaces the ring switch with an Octant
-  Nightly row: "Install Octant Nightly" downloads the newest preview build and
-  places it beside Octant after three checks:
+- **From Octant on Preview.** Nightly is opt-in. When Octant follows Preview,
+  Settings › Updates shows an Octant Nightly row below the channel switch:
+  "Install Octant Nightly" downloads the newest Nightly (`preview` ring) build
+  and places it beside Octant after three checks:
   - The feed signature, against the preview ring's trust set (the preview key
     and the stable key). This installer is the only part of Octant that reads
-    a preview feed; Octant's own updater still trusts and checks only `stable`.
+    a `preview` feed; Octant's own updater checks only `stable` or
+    `candidate`.
   - The artifact hash inside that signed feed.
   - On macOS, a code-signature requirement written for Nightly: bundle id
     `app.octant.desktop.nightly`, signed by Octant's own Developer ID team. It
@@ -571,8 +623,10 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
     itself.
 - **From the website.** octant.sh offers both downloads. The Nightly download
   says it works with Octant and needs it installed.
-- Nightly then updates itself on its own rings. Octant's updater only ever
-  checks `stable`.
+- Switching Octant back to Stable leaves an installed Nightly in place; the
+  row stays while Nightly is installed so it can still be opened or removed.
+- Nightly then updates itself on its own ring. Octant's updater only ever
+  checks `stable` or `candidate`.
 
 ## Nightly's own updates
 
@@ -586,8 +640,9 @@ update authority, and Nightly never asks Stable to replace either application.
 Nightly persists its ring and automatic-check choice in its own window-storage
 directory. Its bundled preload marks these preferences as local: the renderer
 neither synchronizes shared host update settings into Nightly nor writes a
-Nightly choice back to those shared settings. Only preview and candidate are
-offered; Stable's running identity still permits only stable. Automatic checks
+Nightly choice back to those shared settings. Nightly follows only `preview`
+and shows no channel switch; Octant's running identity permits `stable` and
+`candidate`. Automatic checks
 start off until Nightly's own stored choice is read. Invalid or redirected
 preference files leave them off. What's new and its acknowledgement also stay
 in Nightly's own bundled resources and window storage.
@@ -609,25 +664,30 @@ remain separate packaged acceptance.
 
 ## Which build is which
 
-- A build's flavor follows its ring: a `stable` release packages as Octant; a
-  `preview` or `candidate` release packages as Octant Nightly. The release
-  workflows pass the flavor with the version, and packaging refuses a stable
-  version under the Nightly identity or a prerelease under Octant's.
+- A build's flavor follows its ring: a `stable` or `candidate` release
+  packages as Octant; a `preview` release packages as Octant Nightly. The
+  release workflows pass the flavor with the version: the scheduled run builds
+  Nightly on `preview`, and a dispatched run builds Octant on `candidate`.
+  Packaging refuses a stable or candidate version under the Nightly identity,
+  and a preview version under Octant's.
 - A local `bun run package:desktop` builds Octant unless
   `OCTANT_PACKAGE_FLAVOR=nightly` is set, so a maintainer's own packaged build
   keeps opening their existing data.
-- Feed keys are unchanged: Octant trusts the stable key; Octant Nightly trusts
-  the preview key and the stable key, as the preview and candidate rings do
-  today. An update for one app can never install the other: the signed ring
+- Feed keys are unchanged per ring: `stable` trusts only the stable key;
+  `candidate` and `preview` trust the preview key and the stable key. Octant
+  on Preview therefore accepts a preview-key signature only for a release
+  signed for `candidate`, never for `stable`. An update for one app can never
+  install the other: the signed ring
   must equal a ring the app follows, and on macOS the platform updater's
   code-signature check also requires the running app's bundle id. An update
   check or download that finishes after its ring was changed or refused cannot
   restore the older offer, failure or native download result.
 - Nothing has shipped on any ring, so no install needs moving between apps.
-- **Release order.** The first technical preview ships as Octant on the
-  `stable` ring, so a person's first install has a host. Octant Nightly is
-  published only once a stable Octant exists for it to attach to; "technical
-  preview" names the product's stage, not the ring.
+- **Release order.** A person's first install is Octant, so it has a host.
+  Octant on Preview may publish before the first stable release. Octant
+  Nightly is published only once an Octant build (Stable or Preview) exists
+  for it to attach to; "technical preview" names the product's stage, not the
+  ring.
 
 ## Presentation
 
@@ -665,21 +725,27 @@ remain separate packaged acceptance.
 - An `octant://` link opens Octant, and an `octant-nightly://` link opens
   Nightly.
 - `octant` and `octant-nightly` both reach the one running host.
-- Install from Settings refuses a build whose signature, hash, or code
-  signature does not verify. Remove leaves the data untouched.
+- Install from Settings is offered only while Octant follows Preview, and
+  refuses a build whose signature, hash, or code signature does not verify.
+  Remove leaves the data untouched.
 - Preview and candidate builds are versioned `<base>-<ring>.<YYYYMMDD>.<run>`
   by one workflow, so the updater orders them by date and then run, ignoring
-  the ring label. A candidate newer than the installed preview is offered after
-  a ring switch; switching back offers nothing until a preview build is newer
+  the ring label. Octant switched from Stable to Preview is offered a newer
+  candidate; switching back offers nothing until a stable release is newer
   than the installed candidate. Equal or older builds are never offered.
-- Octant offers only stable updates. Nightly offers preview and candidate, and
-  refuses a feed signed for `stable`.
+- Octant offers stable and candidate updates and refuses a feed signed for
+  `preview`. Nightly offers only preview and refuses `stable` and `candidate`.
+- With separate test data, Nightly's host runs beside Octant's, each on its own
+  folder and port; Octant's data, Keychain items and host are untouched, and
+  switching back to Octant's data after a relaunch reconnects as a client.
 
 ## Rationale: whose host owns the data
 
 Octant's host owns the data, so a nightly can never upgrade it out from under
 the app a person works in. The cost is that Nightly tests new screens, while
 host changes (agents, providers, tools) run only once they ship in Octant.
+The separate test-data host closes that gap for development and testing
+without touching a person's real data.
 Rejected: the newest installed host owns the data and serves both apps.
 Nightly would then test everything, but once it migrated the data Octant
 alone could not open it until Octant updated (the host keeps a backup before

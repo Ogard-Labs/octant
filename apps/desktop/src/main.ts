@@ -185,7 +185,7 @@ import {
   resolveDesktopCredentialBackend,
   type DesktopCredentialBackend,
 } from "./desktopCredentialStore";
-import { browserProfilePartition } from "@octant/domain";
+import { browserProfilePartition, ringForVersion } from "@octant/domain";
 import { keyringAdvice } from "@octant/domain/keyring-advice";
 import {
   HostIdentitySigningFailure,
@@ -3884,6 +3884,19 @@ function bundledWhatsNewOptions(): {
   };
 }
 
+/**
+ * The ring a packaged build follows before the person's choice arrives: the
+ * one its version was built on. An Octant installed from a candidate build
+ * would otherwise start on Stable and see nothing until the next stable
+ * release; a version outside this app's rings falls back to its default.
+ */
+function packagedUpdateRing(): (typeof applicationIdentity.rings)[number] {
+  const built = ringForVersion(app.getVersion() as AppVersion);
+  return (
+    applicationIdentity.rings.find((ring) => ring === built) ?? applicationIdentity.defaultRing
+  );
+}
+
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,
@@ -3895,7 +3908,7 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
       arch: process.arch,
     },
     ...(app.isPackaged
-      ? { ring: applicationIdentity.defaultRing, allowedRings: applicationIdentity.rings }
+      ? { ring: packagedUpdateRing(), allowedRings: applicationIdentity.rings }
       : {}),
     // Starts off, and stays off until the renderer reports the persisted
     // preference. A default of "on" would mean a host that had been told not to

@@ -139,9 +139,9 @@ An already retained current Nightly client receives bounded recovery grace durin
 an app-managed host restart. This does not yet prove full signed coexistence or
 reconnect acceptance.
 
-Nightly's update controls follow only Nightly and Preview, with automatic checks
-and the chosen channel saved separately from Octant. Changing them does not
-change Octant's stable channel. An update relaunch waits while host work is active
+Nightly's update controls follow only the Nightly channel and show no channel
+switch. Its automatic-check choice is saved separately from Octant, and
+changing it does not change Octant's channel. An update relaunch waits while host work is active
 or cannot be confirmed, and closes Nightly's own window resources before asking
 the platform updater to apply it. Failed cleanup or apply leaves a fresh Nightly
 window available; an unconfirmed cleanup requires quitting and reopening Nightly
@@ -149,21 +149,25 @@ before retrying. This client wiring does not establish signed installed-update
 or rollback acceptance.
 
 A local desktop package defaults to Octant. An explicitly selected
-`OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview or candidate
-`OCTANT_RELEASE_VERSION` for the repository's existing base version. Packaging
+`OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview
+`OCTANT_RELEASE_VERSION` for the repository's existing base version; Octant
+accepts a stable version or a dated candidate one. Packaging
 stamps the flavor, product name, bundle id and link scheme, and selects the
 inverted Nightly icon on macOS and for the Linux desktop launcher. Stable keeps
 its original icon. Nightly keeps its
 window storage under `Octant Nightly`, separate from Octant's shared host data.
 It cannot start or migrate that host data.
 
-Packaged Octant follows only the stable update ring. The Nightly identity
-follows preview or candidate and refuses a stable feed. Development runs keep
-their existing behavior. The stable-host connection, full Nightly command,
+Packaged Octant follows the stable ring or, when you choose Preview, the
+candidate ring, and refuses a feed signed for preview. The Nightly identity
+follows only preview and refuses stable and candidate feeds. Development runs
+keep their existing behavior. The stable-host connection, full Nightly command,
 installer, Nightly labels and coexistence remain required before Nightly can
-be offered as a usable download. The preview/candidate release workflow has an
-explicit preflight stop until that functional client is implemented and
-verified. Stable releases and local packaging have no such temporary stop.
+be offered as a usable download. The release workflow's scheduled Nightly run
+has an explicit preflight stop until that functional client is implemented and
+verified. Its dispatched run builds Octant on the candidate ring and is not
+held by that stop; stable releases and local packaging have no such stop
+either.
 
 Nightly identifies its local window with a neutral "Nightly" label beside
 "Octant" below the sidebar's native controls. Collapsing the sidebar moves the
@@ -326,26 +330,26 @@ different update service does not lower the bar an update has to clear.
 
 ### Release rings
 
-Octant publishes three streams, and you pick one in
-**Settings → General → Updates**:
+Octant publishes three streams. Octant itself follows one of the first two,
+which you pick in **Settings → General → Updates**; the third is the separate
+Octant Nightly app:
 
 - **Stable** — the released build. This is where a normal install stays.
-- **Preview** — a one-off build produced by hand from a chosen ref, signed
-  and notarized exactly as a nightly is. It has no schedule and no followers:
-  its feed changes only when someone runs that build, so a branch can be
-  update-tested through the real feed path — signature, hash and wrong-ring
-  refusals included — without offering that branch to everyone on Nightly.
+- **Preview** — a pre-release of the next stable version, built by hand from
+  a chosen ref and signed and notarized exactly as a nightly is. It has no
+  schedule: its feed changes only when someone runs that build. The same
+  Octant app follows it; switching is a setting, not a second download.
 - **Nightly** — a scheduled build of whatever has been merged. Newer, less
-  settled, and a separate download.
+  settled, and a separate app, Octant Nightly, which follows only this stream
+  and has no channel switch.
 
 Version numbers still carry the rings' internal names. A Nightly version
 reads like `0.2.0-preview.20260828.4` and a Preview like
 `0.2.0-candidate.20260828.12`. Each sorts _below_ the `0.2.0` it leads to.
-That is what makes the handover work without any special case: a Nightly
-install moves onto stable the day stable catches up, and Octant never offers
-you an older version than the one you are running. So switching from Nightly
-back to Stable leaves you where you are until the next stable release passes
-you.
+That is what makes the handover work without any special case: Octant never
+offers you an older version than the one you are running. So switching from
+Preview back to Stable leaves you where you are until the next stable release
+passes you.
 
 Each ring is its own signed feed, and the ring is inside the signature. A
 preview release published at the stable address is refused, not installed.

@@ -78,12 +78,12 @@ function view(overrides: Partial<OctantHostBridge> = {}, automaticChecks = true)
 }
 
 describe("AppUpdateSettings", () => {
-  it("keeps Nightly update preferences local and offers only its own release rings", () => {
+  it("keeps Nightly update preferences local and shows Nightly no ring switch", () => {
     const local: AppUpdateState = {
       ...ready,
       automaticChecks: false,
       ring: "preview",
-      allowedRings: ["preview", "candidate"],
+      allowedRings: ["preview"],
     };
     const f = view({
       appUpdatePreferenceScope: "local",
@@ -97,14 +97,46 @@ describe("AppUpdateSettings", () => {
         .getByRole("switch", { name: "Check for updates automatically" })
         .getAttribute("aria-checked"),
     ).toBe("false");
-    expect(screen.queryByRole("button", { name: "Stable" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    expect(f.host.setAppUpdateRing).toHaveBeenCalledWith("candidate");
-    expect(f.onReleaseRingChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Release ring" })).toBeNull();
+    for (const name of ["Stable", "Preview", "Nightly"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(f.host.setAppUpdateRing).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("switch", { name: "Check for updates automatically" }));
     expect(f.host.setAutomaticAppUpdateChecks).toHaveBeenCalledWith(true);
     expect(f.onAutomaticChecksChange).not.toHaveBeenCalled();
   });
+
+  it("lets Octant choose Stable or Preview and never offers Nightly's ring", () => {
+    const octant: AppUpdateState = {
+      ...ready,
+      ring: "stable",
+      allowedRings: ["stable", "candidate"],
+    };
+    const f = view({
+      subscribeAppUpdateState: (listener) => {
+        listener(octant);
+        return () => {};
+      },
+    });
+    const rings = screen.getByRole("group", { name: "Release ring" });
+    expect(within(rings).getByRole("button", { name: "Stable" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(rings).queryByRole("button", { name: "Nightly" })).toBeNull();
+    fireEvent.click(within(rings).getByRole("button", { name: "Preview" }));
+    expect(f.onReleaseRingChange).toHaveBeenCalledWith("candidate");
+    expect(f.host.setAppUpdateRing).toHaveBeenCalledWith("candidate");
+  });
+
+  it("offers no ring switch until the host has said which rings this app follows", () => {
+    const f = view({ subscribeAppUpdateState: () => () => {} });
+    expect(screen.queryByRole("group", { name: "Release ring" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Nightly" })).toBeNull();
+    expect(f.host.setAppUpdateRing).not.toHaveBeenCalled();
+  });
+
   it("says what an update check sends, beside the switch that turns it off", () => {
     // The person deciding whether to leave checks on is the person who should
     // be able to read what those checks disclose.

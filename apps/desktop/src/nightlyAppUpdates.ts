@@ -10,7 +10,7 @@ import { createAppUpdateService, type AppUpdateServiceOptions } from "./appUpdat
 import { probeLocalHost } from "./localHostProbe";
 
 const NIGHTLY_RINGS = DESKTOP_FLAVOR_IDENTITIES.nightly.rings;
-type Preferences = { readonly ring: "preview" | "candidate"; readonly automaticChecks: boolean };
+type Preferences = { readonly ring: "preview"; readonly automaticChecks: boolean };
 const defaults: Preferences = {
   ring: DESKTOP_FLAVOR_IDENTITIES.nightly.defaultRing,
   automaticChecks: false,
@@ -38,7 +38,10 @@ async function readPreferences(path: string): Promise<Preferences> {
       typeof value.automaticChecks !== "boolean"
     )
       return defaults;
-    return { ring: value.ring, automaticChecks: value.automaticChecks };
+    // Nightly once also offered `candidate`; that ring now belongs to Octant's
+    // Preview channel, so a choice stored then keeps its automatic-check
+    // setting but follows Nightly's one ring.
+    return { ring: "preview", automaticChecks: value.automaticChecks };
   } catch {
     return defaults;
   }
@@ -102,7 +105,7 @@ export async function createNightlyAppUpdates(options: {
     },
     setRing: (value: unknown): Promise<AppUpdateState> => {
       const ring = decodeAppReleaseRing(value);
-      if (ring === "stable") return Promise.resolve(updates.setRing(ring));
+      if (ring !== "preview") return Promise.resolve(updates.setRing(ring));
       return persist({ ring });
     },
     setAutomatic: (value: unknown): Promise<AppUpdateState> => {

@@ -117,7 +117,12 @@ jobs:
           set -euo pipefail
           downloads="${RUNNER_TEMP}/assets"
           mkdir -p "$downloads"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Octant-*${ASSET_SUFFIX}" --dir "$downloads"
+          # The flavor follows the ring: candidate builds publish as
+          # `Octant-<version>…` and preview builds as `Octant-Nightly-<version>…`,
+          # the exact space-free names `release-preview.yml` uploads.
+          prefix="Octant"
+          if [ "$RING" = "preview" ]; then prefix="Octant-Nightly"; fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${prefix}-${VERSION}${ASSET_SUFFIX}" --dir "$downloads"
           archive=$(ls "$downloads"/*"${ASSET_SUFFIX}")
           # The bare `${TARGET}.json` name on purpose: it is the name installs
           # that predate the preview key ask for.

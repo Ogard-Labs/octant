@@ -11,7 +11,7 @@ export const DESKTOP_FLAVOR_IDENTITIES = {
     commandName: "octant",
     windowStorageName: "Octant",
     mayStartHost: true,
-    rings: ["stable"],
+    rings: ["stable", "candidate"],
     defaultRing: "stable",
   },
   nightly: {
@@ -22,7 +22,7 @@ export const DESKTOP_FLAVOR_IDENTITIES = {
     commandName: "octant-nightly",
     windowStorageName: "Octant Nightly",
     mayStartHost: false,
-    rings: ["preview", "candidate"],
+    rings: ["preview"],
     defaultRing: "preview",
   },
 } as const;
@@ -72,10 +72,10 @@ export function resolveDesktopPackageFlavor(
   ) {
     throw new TypeError("This Octant package has no valid release version.");
   }
-  const prerelease = version.includes("-");
-  if ((flavor === "nightly") !== prerelease) {
+  const nightlyVersion = version.includes("-preview.");
+  if ((flavor === "nightly") !== nightlyVersion) {
     throw new TypeError(
-      "Stable versions require Octant; prerelease versions require Octant Nightly.",
+      "Stable and candidate versions require Octant; preview versions require Octant Nightly.",
     );
   }
   return identity.flavor;

@@ -1,13 +1,17 @@
 # Nightly preview ring and on-demand candidate ring.
 #
-# Scheduled runs build what is on `main`, sign and notarize darwin-arm64,
-# package the linux-x64 AppImage dogfood artifact, and publish signed feeds at
+# Scheduled runs build what is on `main` as Octant Nightly on the `preview`
+# ring, sign and notarize darwin-arm64, package the linux-x64 AppImage dogfood
+# artifact, and publish signed feeds at
 # `<base>/preview/<platform>-<arch>.preview-key.json` when feed signing
 # material is present. Signed with the preview key only; the old
 # `<platform>-<arch>.json` name belongs to the stable-signed bridge that
-# `release-preview-bridge.yml` publishes for installs predating that key. A manual run does the same for whatever ref it was started on and
-# publishes to `<base>/candidate/…` instead, so a test install can follow the
-# candidate ring without the live preview feed being disturbed.
+# `release-preview-bridge.yml` publishes for installs predating that key. A
+# manual run builds whatever ref it was started on as Octant (the stable
+# flavor) on the `candidate` ring, which Octant offers as its Preview channel,
+# and publishes to `<base>/candidate/…` instead, so the live Nightly feed is
+# not disturbed. The flavor follows the ring
+# (`docs/design/nightly-app.md`, "Which build is which").
 # An updater fed by unsigned builds is an unauthenticated code-delivery
 # channel (`docs/architecture.md`, "Current Release Boundary"), so a ring either
 # publishes a signed feed or refuses — never an unsigned document at the live
@@ -44,6 +48,9 @@ jobs:
       build: ${{ steps.decide.outputs.build }}
       version: ${{ steps.decide.outputs.version }}
       ring: ${{ steps.decide.outputs.ring }}
+      flavor: ${{ steps.decide.outputs.flavor }}
+      product: ${{ steps.decide.outputs.product }}
+      asset_prefix: ${{ steps.decide.outputs.asset_prefix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,10 +60,13 @@ jobs:
           fetch-tags: true
       # Identity foundations can be reviewed separately, but publishing them
       # would deliver a client that cannot use the stable host. The functional
-      # client change must replace this gate with its parity preflight.
-      - name: Require the functional Nightly desktop client before preview or candidate delivery
+      # client change must replace this gate with its parity preflight. Only the
+      # scheduled run builds Nightly; a dispatched run builds Octant itself on
+      # the candidate ring and is not held by this gate.
+      - name: Require the functional Nightly desktop client before Nightly delivery
+        if: github.event_name == 'schedule'
         run: |
-          echo "::error::Nightly desktop client support is pending. Complete the typed stable-host lifecycle, credential and native-surface connection before preview or candidate publication."
+          echo "::error::Nightly desktop client support is pending. Complete the typed stable-host lifecycle, credential and native-surface connection before Nightly publication."
           exit 1
       - uses: oven-sh/setup-bun@v2
         with:
@@ -72,8 +82,24 @@ jobs:
           set -euo pipefail
           declared=$(grep -oE 'version: "[^"]+"' scripts/package-desktop.ts | head -1 | cut -d'"' -f2)
           ring="preview"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then ring="candidate"; fi
-          echo "ring=${ring}" >> "$GITHUB_OUTPUT"
+          flavor="nightly"
+          product="Octant Nightly"
+          # Release asset names carry no space: GitHub renames an uploaded
+          # asset with one, and the feed URL and the bridge both need the
+          # exact published name.
+          asset_prefix="Octant-Nightly"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            ring="candidate"
+            flavor="stable"
+            product="Octant"
+            asset_prefix="Octant"
+          fi
+          {
+            echo "ring=${ring}"
+            echo "flavor=${flavor}"
+            echo "product=${product}"
+            echo "asset_prefix=${asset_prefix}"
+          } >> "$GITHUB_OUTPUT"
           # The date and the run number both go in: the date is for whoever
           # reads the version, and the run number keeps two builds on one day
           # distinct. Both are numeric, so they order the way the updater
@@ -104,13 +130,13 @@ jobs:
             platform: darwin
             arch: arm64
             apple_signing: true
-            artifact_glob: "out/Octant Nightly-*-darwin-arm64.zip"
+            artifact_suffix: "-darwin-arm64.zip"
           - target: linux-x64
             runner: ubuntu-24.04
             platform: linux
             arch: x64
             apple_signing: false
-            artifact_glob: "out/Octant Nightly-*-linux-x64.AppImage"
+            artifact_suffix: "-linux-x64.AppImage"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
@@ -155,7 +181,7 @@ jobs:
         if: matrix.apple_signing
         env:
           OCTANT_RELEASE_BUILD: "1"
-          OCTANT_PACKAGE_FLAVOR: nightly
+          OCTANT_PACKAGE_FLAVOR: ${{ needs.decide.outputs.flavor }}
           OCTANT_RELEASE_VERSION: ${{ needs.decide.outputs.version }}
           OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           OCTANT_SIGNING_IDENTITY: ${{ vars.OCTANT_SIGNING_IDENTITY }}
@@ -166,7 +192,7 @@ jobs:
       - name: Package Linux AppImage (unsigned dogfood)
         if: ${{ !matrix.apple_signing }}
         env:
-          OCTANT_PACKAGE_FLAVOR: nightly
+          OCTANT_PACKAGE_FLAVOR: ${{ needs.decide.outputs.flavor }}
           OCTANT_RELEASE_VERSION: ${{ needs.decide.outputs.version }}
           OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
@@ -179,7 +205,7 @@ jobs:
       - name: Refuse to publish if the packaged server cannot start
         if: matrix.apple_signing
         env:
-          OCTANT_PACKAGE_FLAVOR: nightly
+          OCTANT_PACKAGE_FLAVOR: ${{ needs.decide.outputs.flavor }}
         run: bun scripts/assert-packaged-server-starts.ts
 
       - name: Publish the release archive
@@ -188,11 +214,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.decide.outputs.version }}
           RING: ${{ needs.decide.outputs.ring }}
-          ARTIFACT_GLOB: ${{ matrix.artifact_glob }}
+          PRODUCT: ${{ needs.decide.outputs.product }}
+          ASSET_PREFIX: ${{ needs.decide.outputs.asset_prefix }}
+          ARTIFACT_SUFFIX: ${{ matrix.artifact_suffix }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          archive=$(python3 -c 'import glob, os; artifacts = glob.glob(os.environ["ARTIFACT_GLOB"]); assert len(artifacts) == 1, "Expected one Nightly release artifact"; print(artifacts[0])')
+          # `Octant-*` cannot match `Octant Nightly-*`, so the glob names one
+          # flavor's artifact and a stray build of the other is not published.
+          built=$(python3 -c 'import glob, os; artifacts = glob.glob(os.path.join("out", glob.escape(os.environ["PRODUCT"]) + "-*" + os.environ["ARTIFACT_SUFFIX"])); assert len(artifacts) == 1, "Expected one " + os.environ["PRODUCT"] + " release artifact"; print(artifacts[0])')
+          # Copied to the exact space-free name the release and feed use, so
+          # the bytes uploaded are the bytes the feed step hashes and signs.
+          mkdir -p "${RUNNER_TEMP}/release"
+          archive="${RUNNER_TEMP}/release/${ASSET_PREFIX}-${VERSION}${ARTIFACT_SUFFIX}"
+          cp "$built" "$archive"
           tag="v${VERSION}"
           # Matrix rows share one tag. The first arch creates the release;
           # later arches attach their artifact without racing a second create.
@@ -202,7 +237,7 @@ jobs:
             gh release create "$tag" "$archive" \
               --prerelease \
               --target "${GITHUB_SHA}" \
-              --title "Octant Nightly ${VERSION} (${RING})" \
+              --title "${PRODUCT} ${VERSION} (${RING})" \
               --notes "${RING} build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Not a stable release." \
               || gh release upload "$tag" "$archive" --clobber
           fi

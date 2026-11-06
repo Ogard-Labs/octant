@@ -92,8 +92,16 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   }
 
   const status = state?.status ?? "idle";
-  const allowedRings =
-    state?.allowedRings ?? (localPreferences ? ["preview", "candidate"] : undefined);
+  // Nightly follows its one ring and Octant chooses between Stable and
+  // Preview. The switch waits for the host's first state: before it, a
+  // packaged Octant would offer Nightly's ring and a click would store a ring
+  // its host refuses on every launch. Only a development build, whose state
+  // names no rings, offers all three.
+  const allowedRings = state?.allowedRings;
+  const offersRingChoice =
+    state !== undefined &&
+    !localPreferences &&
+    (allowedRings === undefined || allowedRings.length > 1);
   const offeredNotes =
     status === "available" && state?.available?.notes !== undefined && state.available.notes !== ""
       ? state.available.notes
@@ -199,43 +207,43 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         </p>
       )}
 
-      <SettingRow
-        description={
-          localPreferences
-            ? "Nightly follows scheduled builds; Preview is a one-off build. These choices only affect Octant Nightly."
-            : allowedRings?.length === 1
-              ? "Octant follows stable releases. Octant Nightly updates separately."
-              : "Stable is the released build; Preview is a one-off build run by hand; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
-        }
-        label="Release ring"
-        scope="app"
-        settingId="app-update-ring"
-      >
-        <OctantToggleGroup<AppReleaseRing>
-          aria-label="Release ring"
-          onValueChange={(value) => {
-            const selected = value[0];
-            if (selected === undefined) return;
-            if (!localPreferences) props.onReleaseRingChange(selected);
-            if (setRing !== undefined) void run(() => setRing(selected));
-          }}
-          value={[state?.ring ?? "stable"]}
+      {offersRingChoice ? (
+        <SettingRow
+          description={
+            allowedRings === undefined
+              ? "Stable is the released build; Preview is a pre-release of the next stable version; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
+              : "Stable is the released build; Preview is a pre-release of the next stable version. Switching takes effect at the next check, and going back to Stable waits for a stable release newer than this one."
+          }
+          label="Release ring"
+          scope="app"
+          settingId="app-update-ring"
         >
-          {allowedRings?.includes("stable") !== false ? (
-            <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
-          ) : null}
-          {/* The labels are not the ring ids: the scheduled `preview` ring reads
-              as Nightly and the hand-run `candidate` ring as Preview. The ids
-              stay, because they name the update feed paths and version tags
-              that installed builds already follow. */}
-          {allowedRings?.includes("candidate") !== false ? (
-            <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
-          ) : null}
-          {allowedRings?.includes("preview") !== false ? (
-            <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
-          ) : null}
-        </OctantToggleGroup>
-      </SettingRow>
+          <OctantToggleGroup<AppReleaseRing>
+            aria-label="Release ring"
+            onValueChange={(value) => {
+              const selected = value[0];
+              if (selected === undefined) return;
+              if (!localPreferences) props.onReleaseRingChange(selected);
+              if (setRing !== undefined) void run(() => setRing(selected));
+            }}
+            value={[state?.ring ?? "stable"]}
+          >
+            {allowedRings?.includes("stable") !== false ? (
+              <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
+            ) : null}
+            {/* The labels are not the ring ids: the scheduled `preview` ring reads
+                as Nightly and the hand-run `candidate` ring as Preview. The ids
+                stay, because they name the update feed paths and version tags
+                that installed builds already follow. */}
+            {allowedRings?.includes("candidate") !== false ? (
+              <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
+            ) : null}
+            {allowedRings?.includes("preview") !== false ? (
+              <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
+            ) : null}
+          </OctantToggleGroup>
+        </SettingRow>
+      ) : null}
 
       <SettingRow
         description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}

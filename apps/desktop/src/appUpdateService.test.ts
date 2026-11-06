@@ -7,7 +7,7 @@ import {
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes } from "@octant/domain";
-import { RELEASE_TRUSTED_KEYS } from "@octant/host-runtime";
+import { DESKTOP_FLAVOR_IDENTITIES, RELEASE_TRUSTED_KEYS } from "@octant/host-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
@@ -92,7 +92,7 @@ function service(
     readonly trust?: RingKeys;
     readonly currentVersion?: string;
     readonly feedBaseUrl?: string;
-    readonly ring?: "stable" | "preview";
+    readonly ring?: AppReleaseRing;
     readonly allowedRings?: ReadonlyArray<AppReleaseRing>;
     /** What the artifact host actually serves, when it disagrees with the signed hash. */
     readonly serves?: Buffer;
@@ -433,6 +433,65 @@ describe("per-ring signing keys", () => {
     expect(await updates.check()).toMatchObject({ status: "available" });
   });
 
+  const candidateRelease = { version: "0.3.0-candidate.20261105.1", ring: "candidate" };
+  const octantRings = DESKTOP_FLAVOR_IDENTITIES.stable.rings;
+
+  it("lets Octant on Preview read the candidate feed signed by the preview key", async () => {
+    const { fetchImpl, updates } = service({
+      trust,
+      ring: "candidate",
+      allowedRings: octantRings,
+      document: signedBy(previewKeys, candidateRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "available", ring: "candidate" });
+    const [requested] = vi.mocked(fetchImpl).mock.calls[0] as [string];
+    expect(requested).toContain("/candidate/darwin-arm64.preview-key.json");
+  });
+
+  it("never accepts a preview-key signature for a stable release, even while Octant follows Preview", async () => {
+    const forged = signedBy(previewKeys);
+    const onStable = service({ trust, allowedRings: octantRings, document: forged });
+    const onPreview = service({
+      trust,
+      ring: "candidate",
+      allowedRings: octantRings,
+      document: forged,
+    });
+
+    expect(await onStable.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+    expect(await onPreview.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+  });
+
+  it("refuses a Nightly build in Octant's Preview feed", async () => {
+    const { updates } = service({
+      trust,
+      ring: "candidate",
+      allowedRings: octantRings,
+      document: signedBy(previewKeys, previewRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+  });
+
+  it("refuses a candidate build in Nightly's feed", async () => {
+    const { updates } = service({
+      trust,
+      ring: "preview",
+      allowedRings: DESKTOP_FLAVOR_IDENTITIES.nightly.rings,
+      currentVersion: "0.2.0-preview.20261101.1",
+      document: signedBy(previewKeys, candidateRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+  });
+
   it("refuses everything on a ring that has no usable key", async () => {
     const { updates } = service({
       trust: { ...trust, preview: [""] },
@@ -466,24 +525,62 @@ describe("release rings", () => {
     expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
   });
 
-  it("keeps stable and Nightly on their own update rings", async () => {
-    const stable = service({ allowedRings: ["stable"] }).updates;
-    expect(stable.setRing("preview")).toMatchObject({
+  it("lets Octant choose Stable or Preview and keeps Nightly on its one ring", async () => {
+    const octant = service({ allowedRings: DESKTOP_FLAVOR_IDENTITIES.stable.rings }).updates;
+    expect(octant.setRing("preview")).toMatchObject({
       ring: "stable",
       status: "refused",
       refusal: "wrong-ring",
     });
+    expect(octant.setRing("candidate")).toMatchObject({ ring: "candidate", status: "idle" });
+    expect(octant.setRing("stable")).toMatchObject({ ring: "stable", status: "idle" });
     const nightly = service({
       ring: "preview",
-      allowedRings: ["preview", "candidate"],
+      allowedRings: DESKTOP_FLAVOR_IDENTITIES.nightly.rings,
       currentVersion: "0.1.0-preview.20261103.1",
     }).updates;
-    expect(nightly.setRing("stable")).toMatchObject({
-      ring: "preview",
-      status: "refused",
-      refusal: "wrong-ring",
+    for (const other of ["stable", "candidate"] as const) {
+      expect(nightly.setRing(other)).toMatchObject({
+        ring: "preview",
+        status: "refused",
+        refusal: "wrong-ring",
+      });
+    }
+  });
+
+  it("refuses to start Octant on the Nightly ring or Nightly on an Octant ring", () => {
+    expect(() =>
+      service({ ring: "preview", allowedRings: DESKTOP_FLAVOR_IDENTITIES.stable.rings }),
+    ).toThrow();
+    expect(() =>
+      service({ ring: "candidate", allowedRings: DESKTOP_FLAVOR_IDENTITIES.nightly.rings }),
+    ).toThrow();
+  });
+
+  it("does not resurrect Stable's offer when its check finishes after Octant switched to Preview", async () => {
+    let answer: (response: Response) => void = () => {
+      throw new Error("No pending feed");
+    };
+    const response = new Promise<Response>((resolve) => {
+      answer = resolve;
     });
-    expect(nightly.setRing("candidate")).toMatchObject({ ring: "candidate", status: "idle" });
+    const fetchImpl = vi.fn(async () => response);
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
+      automaticChecks: false,
+      ring: "stable",
+      allowedRings: DESKTOP_FLAVOR_IDENTITIES.stable.rings,
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+    });
+    const pending = updates.check();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    updates.setRing("candidate");
+    answer(new Response(JSON.stringify(signedFeed())));
+    expect(await pending).toMatchObject({ ring: "candidate", status: "idle" });
+    expect(updates.state().available).toBeUndefined();
   });
 
   it("does not resurrect an old ring's offer when its pending check finishes", async () => {
