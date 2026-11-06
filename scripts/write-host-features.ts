@@ -41,6 +41,40 @@ export function hostFeaturesDocument(version: string): OctantHostFeaturesDocumen
   });
 }
 
+export type PublishedHostFeatures =
+  | { readonly status: "compatible"; readonly document: OctantHostFeaturesDocument }
+  | {
+      readonly status: "protocol-mismatch";
+      readonly published: number;
+      readonly expected: number;
+    }
+  | { readonly status: "unreadable" };
+
+/**
+ * Read a published `octant-host-features.json` against this checkout's native
+ * client protocol. A newer or older protocol is reported, not treated as an
+ * unreadable document, so a check can say which Octant it needs.
+ *
+ * Advisory only: the asset is unsigned, so nothing outside CI may gate a
+ * release on it until it is signed or hash-pinned.
+ */
+export function readPublishedHostFeatures(value: unknown): PublishedHostFeatures {
+  let document: OctantHostFeaturesDocument;
+  try {
+    document = decodeOctantHostFeaturesDocument(value);
+  } catch {
+    return { status: "unreadable" };
+  }
+  if (document.nativeClientProtocol !== NIGHTLY_NATIVE_CLIENT_PROTOCOL) {
+    return {
+      status: "protocol-mismatch",
+      published: document.nativeClientProtocol,
+      expected: NIGHTLY_NATIVE_CLIENT_PROTOCOL,
+    };
+  }
+  return { status: "compatible", document };
+}
+
 export function parseHostFeaturesCommand(argv: ReadonlyArray<string>): {
   readonly version: string;
   readonly out: string;

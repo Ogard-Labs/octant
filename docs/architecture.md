@@ -13415,13 +13415,18 @@ macOS-only.
   preserve authenticated registration and the functional publication gate.
 - Rollback is a roll-forward. The updater accepts only a strictly newer
   version, so a bad Nightly is replaced by dispatching the preview workflow
-  with `rollback_ref`: it rebuilds that known-good ref as Nightly under a new
-  version from the workflow's own date and run number, and signs and
-  publishes with the workflow's current scripts. Each published Octant release
+  from `main` with `rollback_ref`: it rebuilds a published `v*-preview.*` tag
+  whose commit is on `main` as Nightly under a new version from the workflow's
+  own date and run number. Any other ref is refused before checkout, because
+  the build runs the source's own code beside the Apple credentials. The feed
+  key lives only in a separate `feed` job that runs the workflow's own commit
+  against the uploaded archive. Each published Octant release
   (stable and candidate) also carries `octant-host-features.json`: the native
   client protocol and the brokered features its host offers a Nightly window
   (`NIGHTLY_HOST_FEATURES`), for the Nightly preflight's compatibility check
-  ([Octant Nightly](design/nightly-app.md#nightlys-own-updates)).
+  ([Octant Nightly](design/nightly-app.md#nightlys-own-updates)). It is
+  unsigned and advisory; it must be signed or hash-pinned before it gates a
+  release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.

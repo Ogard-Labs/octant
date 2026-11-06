@@ -3,7 +3,11 @@ import {
   NIGHTLY_HOST_FEATURES,
 } from "@octant/contracts/nightly-browser";
 import { describe, expect, it } from "vitest";
-import { hostFeaturesDocument, parseHostFeaturesCommand } from "./write-host-features";
+import {
+  hostFeaturesDocument,
+  parseHostFeaturesCommand,
+  readPublishedHostFeatures,
+} from "./write-host-features";
 
 describe("the host features an Octant release publishes", () => {
   it("lists the native client protocol and every brokered feature the host advertises", () => {
@@ -18,6 +22,25 @@ describe("the host features an Octant release publishes", () => {
     expect(decodeOctantHostFeaturesDocument(JSON.parse(JSON.stringify(document)))).toEqual(
       document,
     );
+  });
+
+  it("reports a newer Octant's protocol as a mismatch rather than an unreadable document", () => {
+    const current = hostFeaturesDocument("0.2.0-candidate.20261106.81");
+    expect(readPublishedHostFeatures(JSON.parse(JSON.stringify(current)))).toEqual({
+      status: "compatible",
+      document: current,
+    });
+    expect(
+      readPublishedHostFeatures({
+        ...current,
+        nativeClientProtocol: 2,
+        hostFeatures: [...current.hostFeatures, "a-feature-from-later"],
+      }),
+    ).toEqual({ status: "protocol-mismatch", published: 2, expected: 1 });
+    expect(readPublishedHostFeatures({ ...current, nativeClientProtocol: 0 })).toEqual({
+      status: "unreadable",
+    });
+    expect(readPublishedHostFeatures("not a document")).toEqual({ status: "unreadable" });
   });
 
   it("is published for stable and candidate Octant only", () => {

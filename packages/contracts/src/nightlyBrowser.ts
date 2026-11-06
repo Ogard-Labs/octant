@@ -70,12 +70,17 @@ export const decodeAdvertisedHostFeatures = Schema.decodeUnknownSync(AdvertisedH
  * `octant-host-features.json`, attached to each published Octant release: the
  * native client protocol and brokered features that build's host offers a
  * Nightly window, so a Nightly build can be checked against the Octant it
- * will attach to before it is published.
+ * will attach to before it is published. Advisory: the asset is unsigned, so
+ * it must be signed or hash-pinned before anything outside CI gates on it.
  */
 export const OctantHostFeaturesDocument = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   octantVersion: AppVersion,
-  nativeClientProtocol: Schema.Literal(NIGHTLY_NATIVE_CLIENT_PROTOCOL),
+  /**
+   * Any protocol, not only this build's: a newer Octant's document must still
+   * read so the reader can report the mismatch rather than call it unreadable.
+   */
+  nativeClientProtocol: Schema.Int.pipe(Schema.positive()),
   hostFeatures: AdvertisedHostFeatures,
 }).annotations(strict);
 export type OctantHostFeaturesDocument = typeof OctantHostFeaturesDocument.Type;

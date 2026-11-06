@@ -12,9 +12,11 @@
 # its Preview channel, and publishes to `<base>/candidate/….octant.json`, plus
 # an old-shape document at `….preview-key.json` for candidate installs built
 # before the release named its app. A manual run with `rollback_ref` instead
-# rebuilds that known-good ref as Octant Nightly on `preview` under a new,
-# strictly newer version: the updater only moves forward, so a rollback is a
-# roll-forward. The flavor follows the ring
+# rebuilds a published Nightly tag on `main` as Octant Nightly on `preview`
+# under a new, strictly newer version: the updater only moves forward, so a
+# rollback is a roll-forward. Building runs the source's own code beside the
+# Apple credentials, so the feed key lives only in the separate `feed` job,
+# which runs this workflow's code against the uploaded archive. The flavor follows the ring
 # (`docs/design/nightly-app.md`, "Which build is which").
 # An updater fed by unsigned builds is an unauthenticated code-delivery
 # channel (`docs/architecture.md`, "Current Release Boundary"), so a ring either
@@ -35,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       rollback_ref:
-        description: "Known-good ref to rebuild as Octant Nightly on preview with a new version. Leave empty to build this ref as an Octant candidate."
+        description: "Published Nightly tag (v<version>-preview.<date>.<run>, on main) to rebuild on preview with a new version. Leave empty to build this ref as an Octant candidate."
         required: false
         default: ""
         type: string
@@ -106,10 +108,37 @@ jobs:
           asset_prefix="Octant-Nightly"
           source_commit=""
           if [ -n "${ROLLBACK_REF:-}" ]; then
-            source_commit=$(git rev-parse --verify --quiet "${ROLLBACK_REF}^{commit}") || {
-              echo "::error::${ROLLBACK_REF} does not name a commit in this repository."
+            # The rollback source runs in a job that holds the Developer ID and
+            # notary credentials, so it must be code that was already reviewed
+            # and shipped: a published Nightly tag (`v*-preview.*`, built on
+            # schedule from `main`) whose commit is on `main`. A branch, a
+            # candidate tag (built from any ref) or a bare commit is refused
+            # before anything is checked out or built. The workflow itself must
+            # also run from `main`, so the scripts that sign are main's.
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              echo "::error::A rollback runs only from main."
+              exit 1
+            fi
+            case "${ROLLBACK_REF}" in
+              v[0-9]*.[0-9]*.[0-9]*-preview.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::${ROLLBACK_REF} is not a published Nightly tag (v<version>-preview.<date>.<run>)."
+                exit 1
+                ;;
+            esac
+            if ! gh release view "${ROLLBACK_REF}" --json tagName >/dev/null 2>&1; then
+              echo "::error::${ROLLBACK_REF} is not a published release."
+              exit 1
+            fi
+            source_commit=$(git rev-parse --verify --quiet "refs/tags/${ROLLBACK_REF}^{commit}") || {
+              echo "::error::${ROLLBACK_REF} does not name a tag in this repository."
               exit 1
             }
+            git fetch --quiet origin main
+            if ! git merge-base --is-ancestor "${source_commit}" origin/main; then
+              echo "::error::${ROLLBACK_REF} (${source_commit}) is not on main."
+              exit 1
+            fi
             # The rebuilt Nightly must refuse Octant's builds and read the feed
             # name this workflow publishes; an older ref would decode the new
             # feed as malformed and never update again.
@@ -146,11 +175,11 @@ jobs:
     name: Build and publish (${{ matrix.target }})
     needs: decide
     if: needs.decide.outputs.build == 'true'
-    # Holds the Developer ID, the notary profile, the preview feed signing key
-    # (never the stable one: unreviewed main runs here and could read it).
+    # Holds the Developer ID and the notary profile, which packaging needs.
     # Scoping them to an environment keeps them off every other workflow in the
-    # repository. The feed is published with the job's own token, so no
-    # separate publish credential lives here.
+    # repository. This job runs the built source's own code (install scripts,
+    # build, packaging), so the feed signing key is never in it: the `feed` job
+    # signs from the uploaded archive alone.
     environment: preview
     strategy:
       fail-fast: false
@@ -173,9 +202,9 @@ jobs:
     permissions:
       contents: write
     env:
-      # A rollback builds the known-good ref in its own checkout; the feed is
-      # still signed and published by this workflow's scripts, so it carries
-      # the fields and names current installs require.
+      # A rollback builds the published Nightly tag in its own checkout; the
+      # `feed` job still signs and publishes with this workflow's scripts, so
+      # the feed carries the fields and names current installs require.
       SOURCE_DIR: ${{ needs.decide.outputs.source_commit != '' && 'release-source' || '.' }}
       SOURCE_COMMIT: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
     steps:
@@ -294,12 +323,6 @@ jobs:
               --notes "${RING} build of ${ROLLBACK_REF:-${GITHUB_REF_NAME}} at ${SOURCE_COMMIT}. Not a stable release." \
               || gh release upload "$tag" "$archive" --clobber
           fi
-          # Constructed rather than read back from the API: the download URL of
-          # a release asset is determined by the tag and the file name, and
-          # deriving it means the feed cannot end up pointing at whichever
-          # asset a list query happened to return first.
-          asset=$(python3 -c 'import os, sys, urllib.parse; print(urllib.parse.quote(os.path.basename(sys.argv[1]), safe=""))' "$archive")
-          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${asset}" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
       # What this Octant candidate's host offers an Octant Nightly window, so
@@ -318,6 +341,55 @@ jobs:
           bun scripts/write-host-features.ts --version "$VERSION" --out "$out"
           gh release upload "v${VERSION}" "$out" --clobber
 
+      # The exact bytes uploaded to the release, for the job that signs them.
+      - name: Hand the archive to the feed job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ steps.release.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Signs and publishes the feed without running any of the built source's
+  # code: it checks out this workflow's own commit, downloads the archive the
+  # build job uploaded, hashes it into the signature and publishes. Only this
+  # job reads the preview feed key (never the stable one: unreviewed main runs
+  # in the preview workflow and could read it).
+  feed:
+    name: Sign and publish the feed (${{ matrix.target }})
+    needs: [decide, publish]
+    # A target whose build failed has no archive and fails here; the other
+    # target's feed still publishes, as when each build signed its own.
+    if: ${{ !cancelled() && needs.decide.outputs.build == 'true' }}
+    environment: preview
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            platform: darwin
+            arch: arm64
+            apple_signing: true
+          - target: linux-x64
+            platform: linux
+            arch: x64
+            apple_signing: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Writes the feed files to the ring's mailbox release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ runner.temp }}/release
+
       - name: Sign the feed (or dry-run when unsigned)
         id: feed
         env:
@@ -325,13 +397,24 @@ jobs:
           VERSION: ${{ needs.decide.outputs.version }}
           RING: ${{ needs.decide.outputs.ring }}
           FLAVOR: ${{ needs.decide.outputs.flavor }}
-          ARTIFACT_URL: ${{ steps.release.outputs.url }}
-          ARCHIVE: ${{ steps.release.outputs.archive }}
           PLATFORM: ${{ matrix.platform }}
           ARCH: ${{ matrix.arch }}
           APPLE_SIGNING: ${{ matrix.apple_signing }}
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          archives=("${RUNNER_TEMP}"/release/*)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "Expected one release archive, found ${#archives[@]}." >&2
+            exit 1
+          fi
+          archive="${archives[0]}"
+          # Constructed rather than read back from the API: the download URL of
+          # a release asset is determined by the tag and the file name, and
+          # deriving it means the feed cannot end up pointing at whichever
+          # asset a list query happened to return first.
+          asset=$(python3 -c 'import os, sys, urllib.parse; print(urllib.parse.quote(os.path.basename(sys.argv[1]), safe=""))' "$archive")
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${asset}"
           machine=(--ring "$RING" --platform "$PLATFORM" --arch "$ARCH")
           # The names `updateFeedRelativePath` gives this ring, never the older
           # preview names: Octant builds published on preview read those, and
@@ -341,8 +424,8 @@ jobs:
             --version "$VERSION"
             "${machine[@]}"
             --flavor "$FLAVOR"
-            --url "$ARTIFACT_URL"
-            --artifact "$ARCHIVE"
+            --url "$url"
+            --artifact "$archive"
             --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           )
           if [ -z "${OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY:-}" ]; then
@@ -378,7 +461,6 @@ jobs:
           RING: ${{ needs.decide.outputs.ring }}
         run: |
           set -euo pipefail
-          # A read loop rather than `mapfile`, which the macOS runner's bash lacks.
           files=()
           while IFS= read -r file; do files+=("$file"); done < "${RUNNER_TEMP}/feed-files"
           scripts/publish-update-feed.sh "$RING" "${files[@]}"
