@@ -15,6 +15,7 @@ function observer(
   session?: { status: string; detail?: string },
   goal?: Record<string, unknown>,
   serverContext?: (projectId: string | undefined) => string | undefined,
+  clock: () => string = () => "2026-09-05T12:00:00.000Z",
 ) {
   const recorded: { turns: unknown[]; interventions: unknown[]; settled: number; started: number } =
     {
@@ -58,7 +59,7 @@ function observer(
     ...(goal === undefined ? {} : { readGoal: () => goal as never }),
     ...(serverContext === undefined ? {} : { serverContext }),
     uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
-    clock: () => "2026-09-05T12:00:00.000Z",
+    clock,
   });
   return { subject, recorded };
 }
@@ -157,6 +158,24 @@ describe("native harness turn observer", () => {
     expect(asked).toEqual(["p1"]);
     const harness = observer(true, undefined, undefined, notes).subject;
     expect(harness.runtimeServerNotes({ ...scope, mode: "work" })).toEqual([]);
+  });
+
+  it("tells a harness turn today's date for that turn alone, leaving its standing instructions the same every day", () => {
+    const on = (day: string) =>
+      observer(
+        true,
+        undefined,
+        undefined,
+        undefined,
+        () => `${day}T12:00:00.000Z`,
+      ).subject.contextFor(scope);
+    const first = on("2026-09-05");
+    const next = on("2026-09-06");
+    expect(first).toContainEqual({ kind: "turn-instructions", text: "Today is 2026-09-05 (UTC)." });
+    expect(next).toContainEqual({ kind: "turn-instructions", text: "Today is 2026-09-06 (UTC)." });
+    const standing = (context: typeof first) =>
+      context.filter((block) => block.kind === "instructions");
+    expect(standing(next)).toEqual(standing(first));
   });
 
   it("hands a pending advisor redirect to exactly the next turn", async () => {

@@ -1,7 +1,10 @@
 import {
+  decodeRoutineChangeRequest,
   decodeRoutineProposal,
   decodeRoutineProposalId,
   type AutomationId,
+  type RoutineAgentRequest,
+  type RoutineChangeRequest,
   type RoutineProposal,
   type RoutineProposalId,
   type WindowId,
@@ -10,18 +13,23 @@ import {
 const DEFAULT_TTL_MS = 10 * 60_000;
 
 /**
- * Host-wide cap on waiting proposals, as the tool-approval services cap theirs.
- * A proposal past it is refused at once and never shown.
+ * Host-wide cap on waiting proposals and change requests together, as the
+ * tool-approval services cap theirs. One past it is refused at once and never
+ * shown.
  */
 export const MAX_PENDING_ROUTINE_PROPOSALS = 32;
 
-/** What the proposing tool call learns. Only `confirmed` means a routine exists. */
+/**
+ * What the asking tool call learns. Only `confirmed` means something changed:
+ * for a proposal the routine exists, for a change request it is paused or
+ * archived.
+ */
 export type RoutineProposalOutcome =
   | { readonly status: "confirmed"; readonly automationId: AutomationId }
   | { readonly status: "declined" }
   | { readonly status: "expired" }
   | { readonly status: "cancelled" }
-  /** The person confirmed, and the host's create refused it; nothing was created. */
+  /** The person confirmed, and the host's command refused it; nothing changed. */
   | { readonly status: "not-created"; readonly message: string }
   | { readonly status: "too-many-waiting" };
 
@@ -34,18 +42,19 @@ export interface RoutineProposalServiceOptions {
 }
 
 interface PendingProposal {
-  readonly view: RoutineProposal;
+  readonly view: RoutineAgentRequest;
   readonly windowId: WindowId;
   readonly settle: (outcome: RoutineProposalOutcome) => void;
 }
 
 /**
- * Routines a thread's agent proposed, held until the person answers. A
- * proposal creates nothing: it waits here, visible only to the window whose
- * turn raised it, until that window confirms or declines it, the turn stops,
- * the window goes away, or ten minutes pass. Only a confirm reaches the
- * Automation create path, and that path, not this service, decides whether a
- * routine is created.
+ * What a thread's agent asked the person about routines, held until the
+ * person answers: a routine it proposed, or a pause or archive of one it may
+ * ask about. A request changes nothing: it waits here, visible only to the
+ * window whose turn raised it, until that window confirms or declines it, the
+ * turn stops, the window goes away, or ten minutes pass. Only a confirm
+ * reaches the Automation command path, as the confirming window, and that
+ * path, not this service, decides whether anything changes.
  */
 export class RoutineProposalService {
   readonly #pending = new Map<string, PendingProposal>();
@@ -62,12 +71,35 @@ export class RoutineProposalService {
     readonly proposal: Omit<RoutineProposal, "proposalId" | "requestedAt">;
     readonly signal?: AbortSignal;
   }): Promise<RoutineProposalOutcome> {
-    if (input.signal?.aborted) return Promise.resolve({ status: "cancelled" });
+    return this.#hold(input.windowId, input.signal, (stamp) =>
+      decodeRoutineProposal({ ...input.proposal, ...stamp }),
+    );
+  }
+
+  /** Ask the person to pause or archive one routine; nothing changes until they confirm. */
+  requestChange(input: {
+    readonly windowId: WindowId;
+    readonly request: Omit<RoutineChangeRequest, "kind" | "proposalId" | "requestedAt">;
+    readonly signal?: AbortSignal;
+  }): Promise<RoutineProposalOutcome> {
+    return this.#hold(input.windowId, input.signal, (stamp) =>
+      decodeRoutineChangeRequest({ ...input.request, kind: "routine-change-request", ...stamp }),
+    );
+  }
+
+  #hold(
+    windowId: WindowId,
+    signal: AbortSignal | undefined,
+    build: (stamp: {
+      readonly proposalId: RoutineProposalId;
+      readonly requestedAt: string;
+    }) => RoutineAgentRequest,
+  ): Promise<RoutineProposalOutcome> {
+    if (signal?.aborted) return Promise.resolve({ status: "cancelled" });
     if (this.#pending.size >= MAX_PENDING_ROUTINE_PROPOSALS) {
       return Promise.resolve({ status: "too-many-waiting" });
     }
-    const view = decodeRoutineProposal({
-      ...input.proposal,
+    const view = build({
       proposalId: decodeRoutineProposalId(this.#options.uuid()),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
@@ -81,25 +113,25 @@ export class RoutineProposalService {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        input.signal?.removeEventListener("abort", onAbort);
+        signal?.removeEventListener("abort", onAbort);
         if (this.#pending.delete(key)) this.#options.onChanged?.();
         resolve(outcome);
       };
-      this.#pending.set(key, { view, windowId: input.windowId, settle });
+      this.#pending.set(key, { view, windowId, settle });
       this.#options.onChanged?.();
-      input.signal?.addEventListener("abort", onAbort, { once: true });
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
-  /** The proposals this window may answer, oldest first. */
-  list(windowId: WindowId): ReadonlyArray<RoutineProposal> {
+  /** The proposals and change requests this window may answer, oldest first. */
+  list(windowId: WindowId): ReadonlyArray<RoutineAgentRequest> {
     return [...this.#pending.values()]
       .filter((pending) => String(pending.windowId) === String(windowId))
       .map((pending) => pending.view);
   }
 
   /**
-   * Take one waiting proposal out of the list so exactly one answer acts on
+   * Take one waiting request out of the list so exactly one answer acts on
    * it. The caller settles it with what happened; a second claim, from a
    * retry or another tab of the same window, finds nothing.
    */
@@ -108,7 +140,7 @@ export class RoutineProposalService {
     proposalId: RoutineProposalId,
   ):
     | {
-        readonly proposal: RoutineProposal;
+        readonly proposal: RoutineAgentRequest;
         readonly settle: (outcome: RoutineProposalOutcome) => void;
       }
     | undefined {

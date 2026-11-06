@@ -60,7 +60,13 @@ export function evaluateAndroidEmulatorRequest(
   sdk: AndroidSdkDiscovery,
 ): AndroidToolchainPolicyDecision {
   // Stopping a recording ends what a person already approved starting.
-  const readOnly = request.kind === "screenshot" || request.kind === "stop-recording";
+  // Describing the screen and reading an app's log change nothing on the
+  // device, so, like a screenshot, they stay available under every posture.
+  const readOnly =
+    request.kind === "screenshot" ||
+    request.kind === "stop-recording" ||
+    request.kind === "describe-ui" ||
+    request.kind === "logs";
   const sideEffect = !readOnly;
   const coveredByGrant = isAndroidEmulatorInputKind(request.kind) && scope.inputGranted === true;
   if (request.authority.extension.kind !== "core") {
@@ -125,6 +131,8 @@ export function evaluateAndroidEmulatorRequest(
   if (
     (request.kind === "shutdown" ||
       request.kind === "screenshot" ||
+      request.kind === "describe-ui" ||
+      request.kind === "logs" ||
       request.kind === "install" ||
       request.kind === "launch" ||
       request.kind === "open-url" ||
@@ -140,7 +148,7 @@ export function evaluateAndroidEmulatorRequest(
 }
 
 export function redactedAndroidInputDiagnostic(
-  request: Pick<AndroidEmulatorRequest, "kind" | "text" | "key" | "point" | "toPoint">,
+  request: Pick<AndroidEmulatorRequest, "kind" | "text" | "key" | "point" | "toPoint" | "target">,
 ): { readonly severity: "note"; readonly message: string } {
   if (request.kind === "open-input") {
     return { severity: "note", message: "Input is allowed to this emulator." };
@@ -161,9 +169,10 @@ export function redactedAndroidInputDiagnostic(
     return { severity: "note", message: `key-press completed (key=${request.key ?? "unknown"})` };
   }
   if (request.point !== undefined) {
+    const target = request.target === undefined ? "" : `target=${request.target}, `;
     return {
       severity: "note",
-      message: `tap completed (x=${request.point.x}, y=${request.point.y})`,
+      message: `tap completed (${target}x=${request.point.x}, y=${request.point.y})`,
     };
   }
   return { severity: "note", message: `${request.kind} completed` };

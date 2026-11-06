@@ -23,6 +23,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { ChatTurnRunner } from "./chatTurnRunner";
+import { createWebSearchTools } from "./research/webSearchTools";
 
 const now = "2026-07-19T22:00:00.000Z";
 const providerInstanceId = decodeProviderInstanceId("82000000-0000-4000-8000-000000000003");
@@ -204,7 +205,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -273,7 +273,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -349,7 +348,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -430,7 +428,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -475,14 +472,14 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "tool-1",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "Octant" }),
           } as never);
           yield* Queue.offer(queue, {
             kind: "tool-request",
             sessionId,
             requestId: "tool-2",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "Octant architecture" }),
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
@@ -536,13 +533,13 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: {
             kind: "ready",
             backend: "searxng",
             attribution: "SearXNG",
             execute: executeResearch,
           },
+          appManagedTools: createWebSearchTools(executeResearch),
           attachments: [],
           signal: controller.signal,
           persistAttempt: () => Effect.void,
@@ -604,7 +601,7 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "tool-1",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "Octant" }),
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
@@ -641,7 +638,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           onHarnessRetry: () => seen.push("retrying"),
@@ -709,7 +705,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             appManagedTools: {
@@ -795,7 +790,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           appManagedTools: {
@@ -880,7 +874,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             appManagedTools: {
@@ -962,7 +955,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             signal: controller.signal,
@@ -1044,7 +1036,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -1121,7 +1112,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1183,7 +1173,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1255,7 +1244,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1329,7 +1317,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -1393,7 +1380,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
@@ -1463,7 +1449,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             signal: controller.signal,
@@ -1546,7 +1531,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
@@ -1633,7 +1617,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           ...(record === undefined
@@ -1783,7 +1766,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           signal: controller.signal,
@@ -1869,7 +1851,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -1969,7 +1950,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
@@ -2035,142 +2015,165 @@ describe("ChatTurnRunner", () => {
     });
   });
 
-  it("parks a turn on the harness ask-user tool call and answers the tool with the reply", async () => {
-    const updates: ChatAttempt[] = [];
-    const toolAnswers: Array<{ readonly requestId: string; readonly resultJson: string }> = [];
-    const queue = Effect.runSync(Queue.unbounded<never>());
-    const connection = {
-      subscribe: Effect.succeed(Stream.fromQueue(queue)),
-      start: () => Effect.succeed({ sessionId }),
-      send: () =>
-        Effect.gen(function* () {
-          yield* Queue.offer(queue, {
-            kind: "text-delta",
-            sessionId,
-            text: "Let me check.",
-          } as never);
-          yield* Queue.offer(queue, {
-            kind: "tool-request",
-            sessionId,
-            requestId: "tool-ask-1",
-            toolName: "ask-user",
-            inputJson: JSON.stringify({
-              prompt: "How should I proceed?",
-              options: ["Dequeue, push, re-queue", "Let it merge"],
-            }),
-          } as never);
-        }),
-      answerTool: (input: { readonly requestId: string; readonly resultJson: string }) =>
-        Effect.gen(function* () {
-          toolAnswers.push(input);
-          yield* Queue.offer(queue, {
-            kind: "text-delta",
-            sessionId,
-            text: " Continuing.",
-          } as never);
-          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
-        }),
-      interrupt: () => Effect.void,
-      stop: () => Effect.void,
-      answerApproval: () => Effect.void,
-      answerUserInput: () => Effect.void,
-    };
-    const { scheduler, reservation } = makeScheduler();
-    const runner = new ChatTurnRunner({
-      capacityScheduler: scheduler,
-      contextHarness: makeHarness(),
-      researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
-        providerNativeExecute: async () => ({
-          query: "x",
-          backend: "provider-native",
-          results: [],
-        }),
-      }),
-    });
-
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fiber = yield* Effect.fork(
-            runner.run({
-              thread: thread(),
-              attempt: attempt(),
-              prompt: "hello",
-              scratchRoot: "/tmp/octant-scratch/thread",
-              driver: { acquire: () => Effect.succeed(connection) } as never,
-              providerInstanceId,
-              serviceLimits: serviceLimits(),
-              contextSubject: subject,
-              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
-              requestShape: "chat-turn",
-              varianceReserve: 20,
-              reservationId: reservation,
-              estimatedTokens: 100,
-              researchEnabled: false,
-              researchRoute: researchRoute({ kind: "disabled" }),
-              attachments: [],
-              appManagedTools: {
-                definitions: [{ name: "ask-user" } as never],
-                execute: () => {
-                  throw new Error("The ask-user tool never reaches the tool set.");
-                },
-                close: async () => undefined,
-              },
-              persistAttempt: (next) => {
-                updates.push(next);
-                return Effect.void;
-              },
-              persistAppendedResponse: (next) => {
-                updates.push(next);
-                return Effect.void;
-              },
-              persistResponse: () =>
-                Effect.succeed({
-                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
-                  digest: "d".repeat(64),
-                  byteLength: 5,
-                }),
-            }),
-          );
-          const answeredAttempt = yield* Effect.tryPromise(() =>
-            Effect.runPromise(
-              Effect.gen(function* () {
-                for (;;) {
-                  const delivered = yield* Effect.promise(() =>
-                    runner.deliverQuestionAnswer({
-                      attemptId: String(attemptId),
-                      requestId: "tool-ask-1",
-                      answer: "Dequeue, push, re-queue",
-                    }),
-                  );
-                  if (delivered !== undefined) return delivered;
-                  yield* Effect.sleep(10);
-                }
+  it.each([false, true])(
+    "parks a turn on the app question tool and returns plain or grouped answers (%s)",
+    async (grouped) => {
+      const questionnaire = {
+        questions: [
+          {
+            id: "formats",
+            prompt: "Which exports?",
+            selection: "multiple",
+            options: [
+              { id: "pdf", label: "PDF" },
+              { id: "md", label: "Markdown" },
+            ],
+          },
+        ],
+      };
+      const response = {
+        version: 1,
+        answers: [{ questionId: "formats", selectedOptionIds: ["pdf", "md"] }],
+        comment: "After the build",
+      };
+      const answer = grouped ? JSON.stringify(response) : "Dequeue, push, re-queue";
+      const updates: ChatAttempt[] = [];
+      const toolAnswers: Array<{ readonly requestId: string; readonly resultJson: string }> = [];
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Effect.gen(function* () {
+            yield* Queue.offer(queue, {
+              kind: "text-delta",
+              sessionId,
+              text: "Let me check.",
+            } as never);
+            yield* Queue.offer(queue, {
+              kind: "tool-request",
+              sessionId,
+              requestId: "tool-ask-1",
+              toolName: "ask-user",
+              inputJson: JSON.stringify({
+                prompt: "How should I proceed?",
+                ...(grouped ? { questionnaire } : {}),
+                options: ["Dequeue, push, re-queue", "Let it merge"],
               }),
-            ),
-          );
-          expect(answeredAttempt.pendingQuestion).toBeUndefined();
-          yield* Fiber.join(fiber);
+            } as never);
+          }),
+        answerTool: (input: { readonly requestId: string; readonly resultJson: string }) =>
+          Effect.gen(function* () {
+            toolAnswers.push(input);
+            yield* Queue.offer(queue, {
+              kind: "text-delta",
+              sessionId,
+              text: " Continuing.",
+            } as never);
+            yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+          }),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          providerNativeExecute: async () => ({
+            query: "x",
+            backend: "provider-native",
+            results: [],
+          }),
         }),
-      ),
-    );
+      });
 
-    expect(toolAnswers).toEqual([
-      {
-        sessionId,
-        requestId: "tool-ask-1",
-        resultJson: JSON.stringify({ answer: "Dequeue, push, re-queue" }),
-        isError: false,
-      },
-    ]);
-    expect(updates.at(-1)?.outcome).toBe("completed");
-    expect(updates.at(-1)?.answeredQuestions?.[0]).toMatchObject({
-      prompt: "How should I proceed?",
-      options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
-      answer: "Dequeue, push, re-queue",
-    });
-  });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fiber = yield* Effect.fork(
+              runner.run({
+                thread: thread(),
+                attempt: attempt(),
+                prompt: "hello",
+                scratchRoot: "/tmp/octant-scratch/thread",
+                driver: { acquire: () => Effect.succeed(connection) } as never,
+                providerInstanceId,
+                serviceLimits: serviceLimits(),
+                contextSubject: subject,
+                contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+                requestShape: "chat-turn",
+                varianceReserve: 20,
+                reservationId: reservation,
+                estimatedTokens: 100,
+                researchRoute: researchRoute({ kind: "disabled" }),
+                attachments: [],
+                appManagedTools: {
+                  definitions: [{ name: "ask-user" } as never],
+                  execute: () => {
+                    throw new Error("The ask-user tool never reaches the tool set.");
+                  },
+                  close: async () => undefined,
+                },
+                persistAttempt: (next) => {
+                  updates.push(next);
+                  return Effect.void;
+                },
+                persistAppendedResponse: (next) => {
+                  updates.push(next);
+                  return Effect.void;
+                },
+                persistResponse: () =>
+                  Effect.succeed({
+                    contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                    digest: "d".repeat(64),
+                    byteLength: 5,
+                  }),
+              }),
+            );
+            const answeredAttempt = yield* Effect.tryPromise(() =>
+              Effect.runPromise(
+                Effect.gen(function* () {
+                  for (;;) {
+                    const delivered = yield* Effect.promise(() =>
+                      runner.deliverQuestionAnswer({
+                        attemptId: String(attemptId),
+                        requestId: "tool-ask-1",
+                        answer,
+                      }),
+                    );
+                    if (delivered !== undefined) return delivered;
+                    yield* Effect.sleep(10);
+                  }
+                }),
+              ),
+            );
+            expect(answeredAttempt.pendingQuestion).toBeUndefined();
+            yield* Fiber.join(fiber);
+          }),
+        ),
+      );
+
+      expect(toolAnswers).toEqual([
+        {
+          sessionId,
+          requestId: "tool-ask-1",
+          resultJson: JSON.stringify({ answer: grouped ? response : answer }),
+          isError: false,
+        },
+      ]);
+      expect(updates.at(-1)?.outcome).toBe("completed");
+      expect(updates.at(-1)?.answeredQuestions?.[0]).toMatchObject({
+        prompt: "How should I proceed?",
+        ...(grouped ? { questionnaire } : {}),
+        options: grouped ? [] : [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
+        answer,
+      });
+    },
+  );
 
   it("answers a null ask-user body with question-invalid instead of failing the turn", async () => {
     const updates: ChatAttempt[] = [];
@@ -2239,7 +2242,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           appManagedTools: {
@@ -2345,7 +2347,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: () => Effect.void,
@@ -2440,7 +2441,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
@@ -2523,7 +2523,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -2611,7 +2610,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -2714,7 +2712,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: () => Effect.void,
@@ -2809,7 +2806,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             clock: () => at(nowMs),
@@ -3042,7 +3038,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3131,7 +3126,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3215,7 +3209,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3346,7 +3339,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3454,7 +3446,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -3539,7 +3530,6 @@ describe("ChatTurnRunner", () => {
               bytes,
             },
           ],
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           persistAttempt: () => Effect.void,
           persistAppendedResponse: () => Effect.void,
@@ -3556,7 +3546,7 @@ describe("ChatTurnRunner", () => {
     expect(sent[0]?.attachments[0]?.bytes).toEqual(bytes);
   });
 
-  it("omits the app-managed research tool for provider-native routes", async () => {
+  it("offers no web search for a provider-native route and answers a call to it as unavailable", async () => {
     const sent: Array<{ readonly tools: ReadonlyArray<{ readonly name: string }> }> = [];
     const answeredTools: Array<{ readonly isError: boolean; readonly resultJson: string }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
@@ -3570,7 +3560,7 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "unexpected-native-tool",
-            toolName: "octant_web_research",
+            toolName: "web-search",
             inputJson: JSON.stringify({ query: "should not execute" }),
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
@@ -3616,7 +3606,6 @@ describe("ChatTurnRunner", () => {
           reservationId: reservation,
           estimatedTokens: 100,
           attachments: [],
-          researchEnabled: true,
           researchRoute: researchRoute({ backend: "provider-native" }),
           persistAttempt: () => Effect.void,
           persistAppendedResponse: () => Effect.void,
@@ -3634,7 +3623,7 @@ describe("ChatTurnRunner", () => {
     expect(answeredTools).toEqual([
       expect.objectContaining({
         isError: true,
-        resultJson: JSON.stringify({ error: "research-unavailable" }),
+        resultJson: JSON.stringify({ error: "tool-unavailable" }),
       }),
     ]);
   });
@@ -3661,8 +3650,12 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "zen-request-1",
-            toolName: "octant_zen_pin_thread",
-            inputJson: JSON.stringify({ catalogRef: "chat:exact", expectedVersion: 2 }),
+            toolName: "octant_zen",
+            inputJson: JSON.stringify({
+              operation: "pin-thread",
+              catalogRef: "chat:exact",
+              expectedVersion: 2,
+            }),
           } as never;
           yield* Queue.offer(queue, request);
           yield* Queue.offer(queue, request);
@@ -3703,13 +3696,12 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           appManagedTools: {
             definitions: [
               {
-                name: "octant_zen_pin_thread",
+                name: "octant_zen",
                 inputSchema: { type: "object", properties: {}, required: [] },
               },
             ],
@@ -3727,7 +3719,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(sent[0]?.tools.map((tool) => tool.name)).toEqual(["octant_zen_pin_thread"]);
+    expect(sent[0]?.tools.map((tool) => tool.name)).toEqual(["octant_zen"]);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(answerTool).toHaveBeenCalledTimes(1);
     expect(answerTool).toHaveBeenCalledWith({
@@ -3812,7 +3804,6 @@ describe("ChatTurnRunner", () => {
             varianceReserve: 20,
             reservationId: reservation,
             estimatedTokens: 100,
-            researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             mode: "resume",
@@ -3903,7 +3894,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           mode: "resume",
@@ -3993,7 +3983,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -4082,7 +4071,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -4160,7 +4148,6 @@ describe("ChatTurnRunner", () => {
           varianceReserve: 20,
           reservationId: reservation,
           estimatedTokens: 100,
-          researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
@@ -4249,7 +4236,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: nextReservationId(),
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               clock: () => new Date(nowMs).toISOString(),
@@ -4341,7 +4327,6 @@ describe("ChatTurnRunner", () => {
               varianceReserve: 20,
               reservationId: reservation,
               estimatedTokens: 100,
-              researchEnabled: false,
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               signal: controller.signal,

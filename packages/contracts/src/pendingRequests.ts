@@ -70,6 +70,8 @@ export type TurnDecisionOptions = typeof TurnDecisionOptions.Type;
  * next turn, sent through the mode's own send command.
  */
 const PendingRequestFields = {
+  deferralKey: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))),
+  deferredUntil: Schema.optional(UtcTimestamp),
   threadTitle: Schema.NonEmptyTrimmedString,
   requestedAt: UtcTimestamp,
 } as const;
@@ -383,3 +385,10 @@ export type PendingRequestFailure = typeof PendingRequestFailure.Type;
 export const decodePendingRequest = Schema.decodeUnknownSync(PendingRequest);
 export const decodePendingRequestList = Schema.decodeUnknownSync(PendingRequestList);
 export const decodePendingRequestFailure = Schema.decodeUnknownSync(PendingRequestFailure);
+
+/** Attention only. No answer, authority or question text is journaled here. */
+export const PendingQuestionDeferral = Schema.Struct({
+  key: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  until: Schema.NullOr(UtcTimestamp),
+}).annotations(strict);
+export type PendingQuestionDeferral = typeof PendingQuestionDeferral.Type;

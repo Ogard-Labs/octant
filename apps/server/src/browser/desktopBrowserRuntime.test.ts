@@ -225,6 +225,17 @@ describe("DesktopBrowserRuntime", () => {
     ).rejects.toMatchObject({ name: "BrowserTargetStaleError" });
   });
 
+  it("reports a page the desktop Browser cannot record as that refusal, not a broker failure", async () => {
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: vi.fn(async () => Response.json({ error: "recording-unavailable" }, { status: 422 })),
+    });
+    await expect(
+      runtime.act(contextId, { kind: "record-start" }, new AbortController().signal),
+    ).rejects.toMatchObject({ name: "BrowserRecordingUnavailableError" });
+  });
+
   it("reports a timed-out wait with the conditions that never held", async () => {
     const runtime = new DesktopBrowserRuntime({
       brokerUrl: "http://127.0.0.1:41234/",

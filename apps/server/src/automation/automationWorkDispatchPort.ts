@@ -47,7 +47,10 @@ export interface AutomationWorkTurnService {
   readonly startFirstTurn: (
     scopeId: WindowId,
     command: unknown,
-    options?: Pick<WorkTurnStartOptions, "accessCeiling" | "externalData" | "admissionCurrent">,
+    options?: Pick<
+      WorkTurnStartOptions,
+      "accessCeiling" | "externalData" | "admissionCurrent" | "routineRun"
+    >,
   ) => Promise<{
     readonly kind: string;
     readonly turn?: {
@@ -260,6 +263,9 @@ async function startOrRecover(
         message: "The observed file context could not be recorded. No task was sent.",
       };
     const result = await options.turns.startFirstTurn(input.scopeId, command, {
+      // The run this turn is for, handed over here and nowhere else, so only
+      // this turn can report the run's result.
+      routineRun: { automationId: input.run.automationId, runId: input.run.id },
       ...(fileContext === undefined
         ? {}
         : {

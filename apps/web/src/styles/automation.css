@@ -408,6 +408,17 @@
   color: var(--oct-muted);
 }
 
+.automation-history__result {
+  flex-basis: 100%;
+  color: var(--oct-muted);
+  overflow-wrap: anywhere;
+}
+
+.automation-history__result[data-run-result="needs-attention"],
+.automation-history__result[data-run-result="failed"] {
+  color: var(--oct-warn-fg);
+}
+
 .automation-editor {
   display: flex;
   flex-direction: column;

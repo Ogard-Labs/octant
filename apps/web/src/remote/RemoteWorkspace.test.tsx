@@ -39,6 +39,7 @@ function unused<T extends object>(label: string): T {
 
 function workClients(
   workThread: Pick<WorkThreadClient, "bootstrap" | "navigation">,
+  replyDetailRead: RemoteProductClients["replyDetail"]["read"] = async () => undefined,
 ): RemoteProductClients {
   return {
     chat: unused<ChatClient>("chat"),
@@ -66,6 +67,7 @@ function workClients(
     workTurn: unused<WorkTurnClient>("workTurn"),
     workMutation: unused<WorkMutationClient>("workMutation"),
     workRequest: unused<WorkRequestClient>("workRequest"),
+    replyDetail: { read: replyDetailRead },
   };
 }
 
@@ -94,5 +96,27 @@ describe("RemoteWorkspace", () => {
     expect(screen.getByRole("button", { name: "Host brief" })).toBeInTheDocument();
     expect(bootstrap).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  it("reads the host's reply detail when it opens and again when the window regains focus", async () => {
+    const read = vi.fn(async () => ({ defaultLevel: "high" as const, threads: [] }));
+    const bootstrap = vi.fn(async () => decodeWorkThreadBootstrap({ threads: [] }));
+    const navigation = vi.fn(async () => ({ threads: [], runtime: [] }));
+    render(
+      <RemoteWorkspace
+        clients={workClients({ bootstrap, navigation }, read)}
+        connected
+        mode="work"
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });

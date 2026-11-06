@@ -197,4 +197,152 @@ describe("forge switch port", () => {
     ]);
     expect(run.mock.calls.filter(([arguments_]) => arguments_[0] === "api")).toHaveLength(2);
   });
+
+  it("reads a watch's activity from one view and one bounded discussion read, without the Auto-fix reads", async () => {
+    const { run, port: forge } = port((arguments_) =>
+      arguments_[0] === "api"
+        ? {
+            exitCode: 0,
+            // What the `--jq` filter prints: the newest reviews and comments,
+            // bodies already cut inside `gh`.
+            stdout: JSON.stringify({
+              reviews: [
+                {
+                  id: "PRR_1",
+                  author: { login: "rev" },
+                  state: "CHANGES_REQUESTED",
+                  submittedAt: "2026-11-01T10:30:00Z",
+                  body: "Please rename.",
+                },
+                { id: "PRR_draft", author: { login: "rev" }, state: "PENDING", body: "unsent" },
+              ],
+              comments: [
+                {
+                  id: "IC_1",
+                  author: { login: "teammate" },
+                  createdAt: "2026-11-01T10:40:00Z",
+                  body: "Looks close.",
+                  viewerDidAuthor: false,
+                },
+                {
+                  id: "IC_mine",
+                  author: { login: "me" },
+                  createdAt: "2026-11-01T10:45:00Z",
+                  body: "Posted under the person's name.",
+                  viewerDidAuthor: true,
+                },
+              ],
+            }),
+          }
+        : {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              state: "OPEN",
+              headRefOid: "a1",
+              headRefName: "feature/x",
+              baseRefName: "main",
+              mergeable: "MERGEABLE",
+              autoMergeRequest: null,
+              reviewDecision: "CHANGES_REQUESTED",
+              statusCheckRollup: [
+                {
+                  __typename: "CheckRun",
+                  name: "lint",
+                  status: "COMPLETED",
+                  conclusion: "FAILURE",
+                },
+                {
+                  __typename: "CheckRun",
+                  name: "test",
+                  status: "COMPLETED",
+                  conclusion: "SUCCESS",
+                },
+                { __typename: "StatusContext", context: "deploy", state: "SUCCESS" },
+              ],
+            }),
+          },
+    );
+    const observation = await forge.observe(request, signal, { failures: false, activity: true });
+    expect(run).toHaveBeenCalledTimes(2);
+    const view = run.mock.calls[0]?.[0] ?? [];
+    expect(view.slice(0, 2)).toEqual(["pr", "view"]);
+    expect(view.at(-1)).toContain("statusCheckRollup");
+    // `gh pr view --json reviews,comments` pages through the whole history and
+    // can outgrow the command's output cap on a long discussion.
+    expect(view.at(-1)).not.toMatch(/reviews|comments/);
+    const discussion = run.mock.calls[1]?.[0] ?? [];
+    expect(discussion.slice(0, 2)).toEqual(["api", "graphql"]);
+    const query = discussion.find((argument) => argument.startsWith("query=")) ?? "";
+    expect(query).toContain("reviews(last:50)");
+    expect(query).toContain("comments(last:50)");
+    expect(query).not.toContain("octant");
+    expect(discussion).toEqual(
+      expect.arrayContaining(["-F", "owner=octant", "-F", "name=octant", "-F", "number=12"]),
+    );
+    const filter = discussion[discussion.indexOf("--jq") + 1] ?? "";
+    expect(filter).toContain('.body // "")[0:2049]');
+    expect(filter).toContain("tojson");
+    if (observation.status !== "observed") throw new Error("expected an observation");
+    expect(observation.failures).toEqual([]);
+    expect(observation.activity).toEqual({
+      checks: "failed",
+      failedChecks: ["lint"],
+      reviewDecision: "changes-requested",
+      conflicting: false,
+      reviews: [
+        {
+          id: "PRR_1",
+          author: "rev",
+          state: "changes requested",
+          at: "2026-11-01T10:30:00Z",
+          body: "Please rename.",
+        },
+      ],
+      comments: [
+        { id: "IC_1", author: "teammate", at: "2026-11-01T10:40:00Z", body: "Looks close." },
+      ],
+    });
+  });
+
+  it("calls checks settled only once none on the head is still running", async () => {
+    const rollup = (entries: unknown[]) =>
+      port(() => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          headRefOid: "a1",
+          mergeable: "CONFLICTING",
+          reviewDecision: "",
+          statusCheckRollup: entries,
+          reviews: [],
+          comments: [],
+        }),
+      })).port;
+    const checksOf = async (entries: unknown[]) => {
+      const observation = await rollup(entries).observe(request, signal, {
+        failures: false,
+        activity: true,
+      });
+      return observation.status === "observed" ? observation.activity : undefined;
+    };
+    expect(await checksOf([])).toMatchObject({ checks: "none", conflicting: true });
+    expect(
+      await checksOf([
+        { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "FAILURE" },
+        { __typename: "CheckRun", name: "test", status: "IN_PROGRESS", conclusion: "" },
+      ]),
+    ).toMatchObject({ checks: "pending" });
+    expect(
+      await checksOf([
+        { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SKIPPED" },
+        { __typename: "StatusContext", context: "ci", state: "PENDING" },
+      ]),
+    ).toMatchObject({ checks: "pending" });
+    const passed = await checksOf([
+      { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "NEUTRAL" },
+      { __typename: "StatusContext", context: "ci", state: "SUCCESS" },
+    ]);
+    expect(passed).toMatchObject({ checks: "passed", failedChecks: [] });
+    expect(passed?.reviewDecision).toBeUndefined();
+  });
 });
