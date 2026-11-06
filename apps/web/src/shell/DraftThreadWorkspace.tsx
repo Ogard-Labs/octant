@@ -936,6 +936,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         onCreateThread={(input) => {
+          if (!workingFolderValid) return false;
           const submitted = {
             ...input,
             ...(issueContext === undefined ? {} : { issueContext }),

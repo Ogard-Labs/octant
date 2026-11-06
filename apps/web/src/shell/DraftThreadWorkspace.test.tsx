@@ -1103,6 +1103,59 @@ describe("DraftThreadWorkspace", () => {
     );
   });
 
+  it("keeps the Code draft without creating a task while its visible working subfolder is invalid", async () => {
+    const user = userEvent.setup();
+    const onCreateCodeThread = vi.fn();
+    const onCreateThread = vi.fn();
+    const main = decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`);
+    const withFolders = projects.map((project) =>
+      project.type === "code"
+        ? {
+            ...project,
+            workingFolders: [{ id: main, label: "Main folder", kind: "main" as const }],
+          }
+        : project,
+    );
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projectId={codeProjectId}
+        projects={withFolders}
+        onCreateThread={onCreateThread}
+        onCreateCodeThread={onCreateCodeThread}
+      />,
+    );
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "Fix search without losing this draft");
+    const subfolder = screen.getByLabelText("Subfolder within working folder");
+    await user.clear(subfolder);
+    await user.type(subfolder, "src");
+    await user.clear(subfolder);
+    await user.type(subfolder, "../outside");
+    expect(screen.getByRole("alert")).toHaveTextContent("relative subfolder without ..");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeEnabled(),
+    );
+    expect(onCreateCodeThread).not.toHaveBeenCalled();
+    expect(onCreateThread).not.toHaveBeenCalled();
+    expect(draft).toHaveValue("Fix search without losing this draft");
+    expect(subfolder).toHaveValue("../outside");
+
+    await user.clear(subfolder);
+    await user.type(subfolder, "docs");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateCodeThread).toHaveBeenCalledOnce());
+    expect(onCreateCodeThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Fix search without losing this draft",
+        workingFolder: { workingFolderId: main, workingDirectory: "docs" },
+      }),
+      codeProjectId,
+    );
+  });
+
   it("shows the approved working choice and submits its identity with the unchanged Work draft", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
