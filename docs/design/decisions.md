@@ -380,6 +380,7 @@ The menu bar is the closed-window fleet roster, read from the host rather than f
 - The roster has three sections, Needs you, Working and Done since you looked, with at most six rows each; a row names the thread title, mode and Project.
 - The menu bar raises no notifications, and thread titles never enter the public health response or redacted diagnostics.
 - A context-menu contribution cannot supply roles, callbacks, paths, URLs or native commands; the chosen ID returns to the same window, which runs its ordinary action under server authority.
+- Chromium's developer tools are hidden in a packaged stable release and kept in development, Preview and candidate builds (2026-11-06).
 
 Status: Built. Since: —. Detail: [Architecture: Desktop menu bar](../architecture.md#desktop-menu-bar) and [Architecture: Desktop context menus](../architecture.md#desktop-context-menus).
 

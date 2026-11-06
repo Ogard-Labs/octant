@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildApplicationMenuTemplate } from "./applicationMenu";
+import { buildApplicationMenuTemplate, developerToolsAllowed } from "./applicationMenu";
 
 describe("native application menu", () => {
   it("keeps Settings in the Octant menu and invokes the shared settings action", () => {
@@ -76,5 +76,14 @@ describe("native application menu", () => {
     for (const role of ["toggleDevTools", "reload", "forceReload"])
       expect(roles).not.toContain(role);
     expect(template.map((item) => item.role)).not.toContain("viewMenu");
+  });
+});
+
+describe("developer tools by build", () => {
+  it("keeps developer tools in development, candidate and preview builds and hides them in a stable release", () => {
+    expect(developerToolsAllowed({ packaged: false, version: "0.2.0" })).toBe(true);
+    expect(developerToolsAllowed({ packaged: true, version: "0.2.0-candidate.3" })).toBe(true);
+    expect(developerToolsAllowed({ packaged: true, version: "0.2.0-preview.5" })).toBe(true);
+    expect(developerToolsAllowed({ packaged: true, version: "0.2.0" })).toBe(false);
   });
 });
