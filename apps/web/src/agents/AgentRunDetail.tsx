@@ -1,4 +1,5 @@
 import type { AgentRunConversationEntry, AgentRunConversationResponse } from "@octant/contracts";
+import { agentRunRecoveryLabel } from "./agentsCenterModel";
 import { ArrowLeft } from "lucide-react";
 import { useId, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
@@ -73,6 +74,12 @@ export function AgentRunDetail(props: {
     row.usageLimit?.resetsAt !== undefined &&
     !usageResumeScheduled;
   const active = row.bucket === "active";
+  const recordedTime = (row.resultPackets ?? []).flatMap((packet) =>
+    packet.workingTime === undefined ? [] : [packet.workingTime],
+  );
+  const latestTime = recordedTime.at(-1);
+  const recordedTotalMs = recordedTime.reduce((sum, item) => sum + item.totalActiveMs, 0);
+  const recordedAttempts = recordedTime.reduce((sum, item) => sum + item.attempts, 0);
   const facts = [subagentRoleWord(row.role), row.model, relativeTimeLabel(row.updatedAt)].filter(
     (part): part is string => part !== undefined,
   );
@@ -106,7 +113,7 @@ export function AgentRunDetail(props: {
           <p className="agent-run-detail__fact">{row.routeReason}</p>
         )}
         {row.recoveryReason === undefined ? null : (
-          <p className="agent-run-detail__fact">{row.recoveryReason}</p>
+          <p className="agent-run-detail__fact">{agentRunRecoveryLabel(row.recoveryReason)}</p>
         )}
         {status === "waiting" && row.usageLimit !== undefined ? (
           <p className="agent-run-detail__fact">{usageLimitFact(row)}</p>
@@ -119,6 +126,23 @@ export function AgentRunDetail(props: {
             Runs inside the provider itself; Octant can read it but not step into it.
           </p>
         ) : null}
+        {row.executionKind !== "octant-managed" ? null : (
+          <p className="agent-run-detail__fact">
+            Retry and Resume start a fresh working-time window using Helper agents settings (30
+            minutes by default). Waiting for your input does not count. Project and thread ceilings
+            still apply.
+          </p>
+        )}
+        {!managed ? null : latestTime === undefined ? (
+          <p className="agent-run-detail__fact">Working time not recorded yet.</p>
+        ) : (
+          <p className="agent-run-detail__fact">
+            Latest recorded attempt: {Math.round(latestTime.activeMs / 1000)} seconds active of{" "}
+            {latestTime.limitMs / 60_000} minutes. Recorded total:{" "}
+            {Math.round(recordedTotalMs / 1000)} seconds across {recordedAttempts} attempts. Earlier
+            or lost attempts may be unavailable; this is not wall time.
+          </p>
+        )}
       </header>
 
       <div aria-label="Subagent conversation" className="agent-run-detail__transcript" role="log">

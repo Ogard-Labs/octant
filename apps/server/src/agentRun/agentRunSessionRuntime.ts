@@ -10,6 +10,7 @@ import {
   decodeProviderResumeCursor,
   decodeUtcTimestamp,
   type AgentRun,
+  type AgentRunWorkingTime,
   type AgentRunAuthority,
   type AgentRunResultEvidence,
   type AgentRunContextSnapshotId,
@@ -61,7 +62,7 @@ import {
 
 const DEFAULT_MAX_EVENTS = 256;
 /**
- * The longest one managed child turn may work, from acquiring the provider to
+ * The default time one managed child turn may work, from acquiring the provider to
  * its terminal event.
  *
  * A child doing real work reads, edits, and runs checks for many minutes, and a
@@ -268,6 +269,8 @@ export interface AgentRunSessionRuntimeOptions {
   readonly capacityEnforcement?: SchedulerCapacityEnforcement;
   readonly maxEvents?: number;
   readonly timeoutMs?: number;
+  /** Person-owned settings, read for each new attempt; agents cannot supply this value. */
+  readonly workingTimeLimitMs?: () => number;
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
   /** Publishes ephemeral managed-child transcript facts to the host read model. */
@@ -280,6 +283,7 @@ export interface AgentRunSessionRuntimeOptions {
   readonly onSessionStarted?: (input: {
     readonly runId: AgentRunId;
     readonly resumed: boolean;
+    readonly workingTimeLimitMs: number;
   }) => void;
   /** Input attribution for the bounded display history; it never exposes private cursors. */
   readonly onUserMessage?: (input: {
@@ -865,6 +869,7 @@ export function createAgentRunSessionRuntime(
         // input is still durable and must remain reachable through Resume.
         outcome = {
           kind: "interrupted",
+          ...(outcome.evidence === undefined ? {} : { evidence: outcome.evidence }),
           reason: boundedReason(
             `follow-up-not-sent: ${outcome.failure.category}: ${outcome.failure.message}`,
           ),
@@ -879,6 +884,8 @@ export function createAgentRunSessionRuntime(
       markFinished();
     };
 
+    const workingTimeLimitMs = options.workingTimeLimitMs?.() ?? timeoutMs;
+    let workingTime: AgentRunWorkingTime | undefined;
     const controller = new AbortController();
     const inputController = new AbortController();
     const live: LiveSession = {
@@ -895,6 +902,9 @@ export function createAgentRunSessionRuntime(
     void Effect.runPromiseExit(
       Effect.scoped(
         runManagedSession({
+          recordWorkingTime: (fact) => {
+            workingTime = fact;
+          },
           run,
           driver,
           authority,
@@ -919,7 +929,11 @@ export function createAgentRunSessionRuntime(
               // Recording Running is a lifecycle fact, not a precondition for the turn.
             }
             try {
-              options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
+              options.onSessionStarted?.({
+                runId: run.id,
+                resumed: continuation !== undefined,
+                workingTimeLimitMs,
+              });
               options.onUserMessage?.({
                 runId: run.id,
                 kind:
@@ -941,7 +955,7 @@ export function createAgentRunSessionRuntime(
           recordContinuation,
           requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
           maxEvents,
-          timeoutMs,
+          timeoutMs: workingTimeLimitMs,
           shutdownTimeoutMs,
           shutdown,
           onTextDelta: options.onTextDelta,
@@ -994,6 +1008,17 @@ export function createAgentRunSessionRuntime(
     ).then(
       async (exit) => {
         let outcome = outcomeFromExit(exit);
+        if (workingTime !== undefined)
+          outcome = {
+            ...outcome,
+            evidence: {
+              ...(outcome.evidence ?? {
+                files: { status: "unavailable", items: [] },
+                checks: { status: "unavailable", items: [] },
+              }),
+              workingTime,
+            },
+          };
         try {
           // Teardown has completed before this promise resolves. An unconfirmed
           // provider shutdown cannot supply a final generation comparison.
@@ -1259,6 +1284,7 @@ function reserveCapacity(input: {
 }
 
 interface ManagedSessionInput {
+  readonly recordWorkingTime: (fact: AgentRunWorkingTime) => void;
   readonly run: AgentRun;
   readonly driver: ProviderDriver;
   readonly authority: AgentRunAuthority;
@@ -1328,6 +1354,7 @@ interface WorkingTimeDeadline {
   /** Resolves once the turn has worked for the whole bound. */
   readonly reached: Promise<void>;
   readonly awaitPerson: () => () => void;
+  readonly elapsedMs: () => number;
   readonly dispose: () => void;
 }
 
@@ -1345,6 +1372,7 @@ function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
     workingSince = Date.now();
     timer = setTimeout(() => {
       settled = true;
+      remainingMs = 0;
       timer = undefined;
       reach();
     }, remainingMs);
@@ -1352,6 +1380,11 @@ function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
   work();
   return {
     reached,
+    elapsedMs: () =>
+      Math.min(
+        boundMs,
+        Math.max(0, boundMs - remainingMs + (timer === undefined ? 0 : Date.now() - workingSince)),
+      ),
     awaitPerson: () => {
       if (personWaits === 0 && timer !== undefined) {
         clearTimeout(timer);
@@ -1481,8 +1514,34 @@ function runManagedSession(
       const finished = yield* Effect.raceFirst(
         runSessionTurn(input, state, releaseCapacity),
         Effect.promise(() => deadline.reached).pipe(Effect.as("timed-out" as const)),
+      ).pipe(
+        Effect.onExit(() =>
+          Effect.sync(() => {
+            const activeMs = deadline.elapsedMs();
+            input.recordWorkingTime({
+              attemptId: String(input.reservationId),
+              activeMs,
+              totalActiveMs: activeMs,
+              attempts: 1,
+              limitMs: input.timeoutMs,
+            });
+          }),
+        ),
       );
-      const evidence = sessionEvidence(state);
+      const activeMs = deadline.elapsedMs();
+      const evidence: AgentRunResultEvidence = {
+        ...(sessionEvidence(state) ?? {
+          files: { status: "unavailable", items: [] },
+          checks: { status: "unavailable", items: [] },
+        }),
+        workingTime: {
+          attemptId: String(input.reservationId),
+          activeMs,
+          totalActiveMs: activeMs,
+          attempts: 1,
+          limitMs: input.timeoutMs,
+        },
+      };
       if (finished === "timed-out") {
         // Deliberately not recorded on `state.outcome`: the provider never
         // reported a terminal event, so the shutdown below must still interrupt
@@ -1490,7 +1549,7 @@ function runManagedSession(
         state.timedOut = true;
         return {
           kind: "interrupted",
-          reason: "Managed AgentRun turn exceeded its runtime deadline.",
+          reason: `Working-time limit reached (${input.timeoutMs / 60_000} minutes). Retry or Resume starts a fresh working-time window; waiting for your input did not count.`,
           ...(evidence === undefined ? {} : { evidence }),
         };
       }
@@ -1552,11 +1611,23 @@ function runSessionTurn(
       } satisfies ProviderFailure);
     }
     input.onSessionReady();
-    const connection = yield* input.driver.acquire({
-      instanceId: input.providerInstanceId,
-      projectRoot: input.projectRoot,
-      mode: input.run.routingReceipt.mode,
-    });
+    const connection = yield* input.driver
+      .acquire({
+        instanceId: input.providerInstanceId,
+        projectRoot: input.projectRoot,
+        mode: input.run.routingReceipt.mode,
+      })
+      .pipe(
+        Effect.timeoutFail({
+          duration: "2 minutes",
+          onTimeout: () =>
+            ({
+              category: "provider-failed",
+              message:
+                "The child provider did not become ready within 2 minutes. Retry after checking the provider.",
+            }) satisfies ProviderFailure,
+        }),
+      );
     state.acquired = true;
 
     // A stopped run must also stop a tool call still working for it.
@@ -1572,28 +1643,40 @@ function runSessionTurn(
       }),
     );
 
-    const handle = yield* input.resumeCursor === undefined
-      ? connection.start({
-          sessionId: input.sessionId,
-          modelId: input.modelId,
-          ...(input.modelOptionValues === undefined
-            ? {}
-            : { modelOptionValues: input.modelOptionValues }),
-          // The clamped run authority is what reaches the provider. Nothing here
-          // may widen it, and no parent-thread policy is consulted.
-          executionPolicy: input.authority.executionPolicy,
-          tools: input.appManagedTools?.definitions ?? [],
-        })
-      : connection.resume({
-          sessionId: input.sessionId,
-          resumeCursor: input.resumeCursor,
-          modelId: input.modelId,
-          ...(input.modelOptionValues === undefined
-            ? {}
-            : { modelOptionValues: input.modelOptionValues }),
-          executionPolicy: input.authority.executionPolicy,
-          tools: input.appManagedTools?.definitions ?? [],
-        });
+    const startup =
+      input.resumeCursor === undefined
+        ? connection.start({
+            sessionId: input.sessionId,
+            modelId: input.modelId,
+            ...(input.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: input.modelOptionValues }),
+            // The clamped run authority is what reaches the provider. Nothing here
+            // may widen it, and no parent-thread policy is consulted.
+            executionPolicy: input.authority.executionPolicy,
+            tools: input.appManagedTools?.definitions ?? [],
+          })
+        : connection.resume({
+            sessionId: input.sessionId,
+            resumeCursor: input.resumeCursor,
+            modelId: input.modelId,
+            ...(input.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: input.modelOptionValues }),
+            executionPolicy: input.authority.executionPolicy,
+            tools: input.appManagedTools?.definitions ?? [],
+          });
+    const handle = yield* startup.pipe(
+      Effect.timeoutFail({
+        duration: "2 minutes",
+        onTimeout: () =>
+          ({
+            category: "provider-failed",
+            message:
+              "The child provider did not start within 2 minutes. Retry after checking the provider.",
+          }) satisfies ProviderFailure,
+      }),
+    );
     if (
       String(handle.sessionId) !== String(input.sessionId) ||
       (input.requireResumeCursor &&

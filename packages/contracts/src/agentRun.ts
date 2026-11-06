@@ -327,7 +327,17 @@ export const AgentRunReviewSnapshot = Schema.Struct({
 export type AgentRunReviewSnapshot = typeof AgentRunReviewSnapshot.Type;
 export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(AgentRunReviewSnapshot);
 
+export const AgentRunWorkingTime = Schema.Struct({
+  attemptId: Schema.UUID,
+  activeMs: Schema.Int.pipe(Schema.nonNegative()),
+  totalActiveMs: Schema.Int.pipe(Schema.nonNegative()),
+  attempts: Schema.Int.pipe(Schema.positive()),
+  limitMs: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type AgentRunWorkingTime = typeof AgentRunWorkingTime.Type;
+
 export const AgentRunResultEvidence = Schema.Struct({
+  workingTime: Schema.optional(AgentRunWorkingTime),
   review: Schema.optional(AgentRunReviewSnapshot),
   files: Schema.Struct({
     reviewStatus: Schema.optional(Schema.Literal("available", "unavailable")),

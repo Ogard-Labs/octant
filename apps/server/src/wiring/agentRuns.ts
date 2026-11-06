@@ -12,7 +12,9 @@ import {
   decodeMultiModelRoutingVendorId,
   decodeProjectId,
   decodeWorkThreadId,
+  decodeUtcTimestamp,
   effectiveAgentRunConcurrency,
+  DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
   LOCAL_HOST_ID,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
@@ -665,6 +667,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   // the run rather than inherited from the parent thread at execution time.
   const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
     port: createAgentRunSessionRuntime({
+      workingTimeLimitMs: () =>
+        (agentRunSettingsStore.current().workingTimeLimitMinutes ??
+          DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES) * 60_000,
       reviewCapture: createAgentRunReviewCapture(),
       outsideContentMarks: runtimeOutsideContentMarks,
       canCaptureReview: (run) => {
@@ -823,8 +828,14 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       // `agentRunOrchestration` is declared below; this closure runs only
       // once a child's session has started.
       onSessionRunning: ({ runId }) => void agentRunOrchestration.onSessionRunning(runId),
-      onSessionStarted: ({ runId, resumed }) =>
-        agentRunLiveConversations.begin(runId, { resume: resumed }),
+      onSessionStarted: ({ runId, resumed, workingTimeLimitMs }) => {
+        agentRunLiveConversations.begin(runId, { resume: resumed });
+        agentRunLiveConversations.appendStatus(
+          runId,
+          `Working-time limit: ${workingTimeLimitMs / 60_000} minutes for this attempt. Waiting for your approval or answer does not count. Retry and Resume start a fresh window.`,
+          decodeUtcTimestamp(new Date().toISOString()),
+        );
+      },
       onUserMessage: ({ runId, kind, text, occurredAt }) =>
         agentRunLiveConversations.appendStatus(runId, `${kind}: ${text}`, occurredAt),
       onChildActivity: ({ run, event }) =>

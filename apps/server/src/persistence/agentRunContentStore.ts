@@ -285,7 +285,27 @@ export function writeAgentRunResultEvidence(
   const retainedChecks = checks.slice(0, 32);
   while (JSON.stringify(retainedFiles).length > 60_000) retainedFiles.pop();
   while (JSON.stringify(retainedChecks).length > 60_000) retainedChecks.pop();
+  const workingTime =
+    next.workingTime === undefined
+      ? prior?.workingTime
+      : prior?.workingTime === undefined
+        ? next.workingTime
+        : prior.workingTime.attemptId === next.workingTime.attemptId
+          ? {
+              ...next.workingTime,
+              totalActiveMs:
+                prior.workingTime.totalActiveMs -
+                prior.workingTime.activeMs +
+                next.workingTime.activeMs,
+              attempts: prior.workingTime.attempts,
+            }
+          : {
+              ...next.workingTime,
+              totalActiveMs: prior.workingTime.totalActiveMs + next.workingTime.activeMs,
+              attempts: prior.workingTime.attempts + 1,
+            };
   const merged = decodeAgentRunResultEvidence({
+    ...(workingTime === undefined ? {} : { workingTime }),
     files: {
       status:
         retainedFiles.length < files.length ||

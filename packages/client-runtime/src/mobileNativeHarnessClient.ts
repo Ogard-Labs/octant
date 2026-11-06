@@ -3,31 +3,31 @@ import {
   NativeHarnessFollowUpPreview,
   NativeHarnessApprovalDecisionResult,
   NativeHarnessQuestionAnswerResult,
-  NativeHarnessSessionView,
+  NativeHarnessSessionReadView,
   decodeHostAnswer,
 } from "@octant/contracts";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 /**
  * The harness session as the phone reads it, over the paired device's own
- * authenticated transport. Same routes, same shapes, same refusals as the
- * desktop; the phone never holds a separate view of a session.
+ * authenticated transport. The host returns only the device's eligible child
+ * requests; the phone needs no parent session records to answer them.
  */
 export async function loadMobileNativeHarnessSession(input: {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
   readonly signal?: AbortSignal;
-}): Promise<NativeHarnessSessionView | null> {
+}): Promise<NativeHarnessSessionReadView | null> {
   const response = await input.transport.authenticatedFetch({
     method: "GET",
     path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}`,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  if (!response.ok) return null;
+  if (!response.ok) throw new Error("The child requests could not be refreshed.");
   const body = (await response.json()) as { view?: unknown };
   return body.view === null || body.view === undefined
     ? null
-    : decodeHostAnswer(NativeHarnessSessionView)(body.view);
+    : decodeHostAnswer(NativeHarnessSessionReadView)(body.view);
 }
 
 export async function previewMobileNativeHarnessFollowUp(input: {

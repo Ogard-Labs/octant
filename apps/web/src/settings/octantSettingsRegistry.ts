@@ -770,6 +770,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "helper agents subagents concurrency at once limit parallel thread",
         },
         {
+          id: settingId("subagent-working-minutes"),
+          label: "Working minutes per helper attempt",
+          scope: "app",
+          keywords:
+            "helper agents subagents working time minutes limit budget retry resume approval question waits",
+        },
+        {
           id: settingId("default-model"),
           label: "Default model",
           scope: "app",

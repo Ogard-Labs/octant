@@ -266,10 +266,23 @@ describe("octantSettingsRegistry", () => {
       "subagent-creation-posture",
       "subagent-concurrency-on-host",
       "subagent-concurrency-per-thread",
+      "subagent-working-minutes",
       "default-model",
       "vision-reviewer",
     ]);
     expect(harness?.keywords).toMatch(/posture/);
+  });
+
+  it("finds the helper working-time budget at its rendered Settings row", () => {
+    expect(
+      searchSettings(
+        listAvailableSections(octantSettingsRegistry, capabilities),
+        capabilities,
+        "helper working minutes",
+      ),
+    ).toContainEqual(
+      expect.objectContaining({ sectionId: "harness", settingId: "subagent-working-minutes" }),
+    );
   });
 
   it("finds Model roles by the name Settings uses and by the slot names the CLI keeps", () => {

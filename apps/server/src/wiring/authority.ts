@@ -212,7 +212,6 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const onAgentRunExecutionAccepted: NonNullable<
     AgentRunControlAdmissionDependencies["onExecutionAccepted"]
   > = ({ run, windowId, operation }) => {
-    if (run.routingReceipt.mode !== "code") return;
     const previous = agentRunExecutionWindows.get(run.requestId);
     if (
       previous !== undefined &&
@@ -323,6 +322,12 @@ export function wireAuthority(deps: AuthorityDependencies) {
     liveTurns,
     machineChangeFeed,
     onAgentRunExecutionAccepted,
+    agentRunRequestOwner: (run: AgentRun): string | undefined => {
+      const binding = agentRunExecutionWindows.get(run.requestId);
+      return binding !== undefined && String(binding.parentThreadId) === String(run.parentThreadId)
+        ? String(binding.windowId)
+        : undefined;
+    },
     processAuthorityNow,
     onWindowRevoked,
     personMemory,

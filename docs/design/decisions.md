@@ -714,7 +714,7 @@ A child run starts only when the thread's agent delegates through `octant_agents
 - Subagent creation is one setting with two values, Off and Automatic. Only the thread's agent starts a child, and the parent and child hierarchy is the only subagent surface. _Here only._
 - The host prepares the child's workspace (research-only for Chat, the Project root for Work, an isolated managed worktree for Code); no client supplies a path, and wider-than-parent grants are refused.
 - Children start from committed source only, and provider-owned hidden subagents stay disabled.
-- Concurrency is the person's setting (defaults 4 per thread and 8 per host, at most 16); a turn may work at most 30 minutes, a clock that pauses while it waits on a person.
+- Concurrency is the person's setting (defaults 4 per thread and 8 per host, at most 16); a turn defaults to 30 working minutes, person-selectable from 1–240 before the next attempt. Retry/Resume start fresh; approval and answer waits pause the clock, and independent two-minute acquisition/startup bounds remain. Recorded attempt and cumulative working time use the existing result evidence and label gaps.
 - Cancelling a child tree proceeds leaves-up and completes only after each process is confirmed stopped; an ambiguous outcome becomes waiting, failed or interrupted, never completed. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -723,7 +723,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 A child approval permits only that request, and a child result implies no delivery, review, merge or deployment.
 
-- A child approval never creates or consumes a remembered lead-session grant and cannot approve an opaque provider action in Plan.
+- A child approval never creates or consumes a remembered lead-session grant and cannot approve an opaque provider action in Plan. The parent composer answers authoritative child request IDs inline without replacing the parent's own request; stale/disconnected views cannot answer. A paired device may answer only the managed requests owned by its own execution scope, once or deny, with live authority checked; reads and restart never claim ownership.
 - Child results, routine runs and usage-limit resumes run as the host under a per-process scope, never through a window.
 - Reviewing a run measures its branch against its confirmed delivery base, remote-tracking ref first; mergeability is asked of Git, and an unknown answer is refused. Comparing attempts states facts and ranks nothing. _Here only._
 - Merging a run into the Project's checkout is explicit, approval-gated and journaled. The host refuses when branch, base or reviewed head changed, the checkout is unreadable, dirty or on another branch, or Git reports conflicts. The merge uses `--no-ff`, and an incomplete merge is aborted. _Here only._
@@ -740,6 +740,7 @@ Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads
 - Every operation names a thread by one reference, `<thread id>@<project id>`; a reference whose Project is not the caller's refuses like an unknown one, `send` included. A `send` with more than four recipients, a malformed reference, or one of another Project is refused whole; it never reaches a subset.
 - `list`, `read` and `wait` change nothing outside the caller's record and are offered in Plan; a `list` or `read` marks the caller, and a turn may make 8 reads and 4 waits. In Work they see only Work threads, and in Code only Code threads.
 - `send`, `acknowledge` and `receipts` are Code to Code only. Work threads neither send nor receive, because only Code turns carry messages; extending messaging to Work needs a rule for how a Work turn carries one.
+- New queued messages have an explicit 24-hour deadline; expiry is journaled before body cleanup and a separate receipt, never inferred for older records or counted as delivery.
 - The current recipient can explicitly report receipt of its exact delivered message; the host rechecks both Code threads and their same-Project authority. Sender `receipts` read only its own metadata, and the person sees bounded recent receipts in Agents. Acknowledgement means reported receipt, never understanding or action; delivery and turn completion do not auto-acknowledge.
 - Plan leaves the messaging operations out of the enum, excluded profiles and cancelled turns refuse every messaging call, and receipt retries are idempotent for the same durable ID. Retrying a send creates a new message. Queued-message expiry has no recorded deadline and remains unimplemented; no receipt infers Expired from age.
 - A non-empty profile allowlist names each operation group: `octant_threads` for the reads, `octant_threads.send` for messaging, `octant_threads.board` for the planner's board, so folding the former tools together widens no existing allowlist.

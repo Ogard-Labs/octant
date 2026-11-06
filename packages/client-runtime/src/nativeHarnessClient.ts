@@ -12,6 +12,8 @@ import {
   type NativeHarnessSessionCommand,
   NativeHarnessSessionCommandResult,
   NativeHarnessSessionView,
+  NativeHarnessSessionReadView,
+  type NativeHarnessChildRequestsView,
   NativeHarnessSteeringTaken,
   type ToolEgressCommand,
   ToolEgressCommandResult,
@@ -53,6 +55,10 @@ export interface NativeHarnessClient {
     signal?: AbortSignal,
   ): Promise<NativeHarnessRoutingCommandResult>;
   session(threadId: string, signal?: AbortSignal): Promise<NativeHarnessSessionView | null>;
+  childRequests(
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHarnessChildRequestsView | null>;
   command(
     threadId: string,
     command: NativeHarnessSessionCommand,
@@ -186,9 +192,26 @@ export function createNativeHarnessClient(
         signal,
       );
       const view = (body as { view: unknown }).view;
-      return view === null || view === undefined
-        ? null
-        : decodeHostAnswer(NativeHarnessSessionView)(view);
+      if (view === null || view === undefined) return null;
+      const decoded = decodeHostAnswer(NativeHarnessSessionReadView)(view);
+      return "session" in decoded ? decoded : null;
+    },
+    async childRequests(threadId, signal) {
+      const body = await get(
+        `/api/native-harness/sessions/${encodeURIComponent(threadId)}`,
+        signal,
+      );
+      const raw = (body as { view: unknown }).view;
+      if (raw === null || raw === undefined) return null;
+      const view = decodeHostAnswer(NativeHarnessSessionReadView)(raw);
+      return "session" in view
+        ? {
+            kind: "child-requests",
+
+            approvals: (view.approvals ?? []).filter((item) => item.source !== undefined),
+            questions: view.questions.filter((item) => item.source !== undefined),
+          }
+        : view;
     },
     async command(threadId, command, signal) {
       return decodeHostAnswer(NativeHarnessSessionCommandResult)(

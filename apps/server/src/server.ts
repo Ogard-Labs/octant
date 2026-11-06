@@ -200,6 +200,7 @@ export function startOctantServer(
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
+      agentRunRequestOwner,
       agentRunPersistence,
       androidInputGrants,
       automationEventStore,
@@ -245,6 +246,7 @@ export function startOctantServer(
       threadAwaitsHarnessQuestion,
     } = wireHarnessState({
       agentRunParentAuthority,
+      agentRunRequestOwner,
       agentRunPersistence,
       persistence,
       workThreadProjection,

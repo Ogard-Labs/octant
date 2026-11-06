@@ -1523,3 +1523,44 @@ describe("AgentRunPersistenceService", () => {
     expect(settled?.version).toBe(scheduled.run.version + 1);
   });
 });
+
+it("accumulates recorded active time across distinct attempts without counting the same attempt twice", () => {
+  const harness = createHarness();
+  const accepted = harness.service.requestRun({
+    command: requestCommand(),
+    parentAuthority,
+    confirmed: true,
+  });
+  if (accepted.kind !== "run-accepted") throw new Error("Expected child admission");
+  const write = (attemptId: string, activeMs: number) =>
+    writeAgentRunResultEvidence(harness.connection, {
+      run: accepted.run,
+      reference: `octant://agent-run/${accepted.run.id}/result`,
+      createdAt: now,
+      evidence: {
+        files: { status: "unavailable", items: [] },
+        checks: { status: "unavailable", items: [] },
+        workingTime: {
+          attemptId,
+          activeMs,
+          totalActiveMs: activeMs,
+          attempts: 1,
+          limitMs: 30 * 60_000,
+        },
+      },
+    });
+  write("00000000-0000-4000-8000-000000000001", 12_000);
+  write("00000000-0000-4000-8000-000000000002", 8_000);
+  write("00000000-0000-4000-8000-000000000002", 8_000);
+  expect(harness.service.resultPackets(accepted.run.id).packets[0]?.workingTime).toMatchObject({
+    activeMs: 8_000,
+    totalActiveMs: 20_000,
+    attempts: 2,
+  });
+  harness.service.rebuildFromJournal();
+  expect(harness.service.resultPackets(accepted.run.id).packets[0]?.workingTime).toMatchObject({
+    activeMs: 8_000,
+    totalActiveMs: 20_000,
+    attempts: 2,
+  });
+});

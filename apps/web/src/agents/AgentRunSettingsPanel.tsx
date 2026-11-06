@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   MAX_AGENT_RUN_CONCURRENCY,
+  DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
+  MAX_AGENT_RUN_WORKING_TIME_MINUTES,
   effectiveAgentRunConcurrency,
   type AgentRunConcurrency,
   type AgentRunPolicySettings,
@@ -66,6 +68,7 @@ export function AgentRunSettingsPanel(props: {
   const save = useCallback(
     async (change: {
       readonly creationPosture: AgentRunSelectableCreationPosture;
+      readonly workingTimeLimitMinutes?: number;
       readonly concurrency?: AgentRunConcurrency;
     }) => {
       if (settings === undefined || saving) return;
@@ -169,6 +172,22 @@ export function AgentRunSettingsPanel(props: {
               min={1}
               onChange={(value) => setLimit("onHost", value)}
               value={limits.onHost}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Working minutes per attempt"
+            description="Default 30 minutes of active work, excluding approval and answer waits. Retry and Resume each start a fresh window at this setting; cumulative Project and thread ceilings still apply. Changes affect the next attempt only."
+            scope="app"
+            settingId="subagent-working-minutes"
+          >
+            <OctantNumberStepper
+              label="Working minutes per attempt"
+              min={1}
+              max={MAX_AGENT_RUN_WORKING_TIME_MINUTES}
+              value={settings?.workingTimeLimitMinutes ?? DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES}
+              onChange={(value) =>
+                void save({ creationPosture: posture, workingTimeLimitMinutes: value })
+              }
             />
           </SettingRow>
         </div>
