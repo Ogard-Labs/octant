@@ -306,3 +306,27 @@ describe("managed child interactions", () => {
     expect(await interactions.askUser(input)).toBeUndefined();
   });
 });
+
+it("binds a phone response to the child execution's own admitting scope and current authority", () => {
+  let authority: AgentRun["authority"] | undefined = run.authority;
+  const interactions = createAgentRunInteractions({
+    getById: () => run,
+    parentAuthority: () => authority,
+    parentLead,
+    requestOwner: () => "phone-a",
+    approvals: { ask: vi.fn() },
+    questions: { ask: vi.fn() },
+  });
+  const input = {
+    runId: String(run.id),
+    parentThreadId: String(run.parentThreadId),
+    deviceId: "phone-a",
+  };
+  expect(interactions.mayAnswerFromDevice(input)).toBe(true);
+  expect(interactions.mayAnswerFromDevice({ ...input, deviceId: "phone-b" })).toBe(false);
+  expect(interactions.mayAnswerFromDevice({ ...input, parentThreadId: "another-parent" })).toBe(
+    false,
+  );
+  authority = undefined;
+  expect(interactions.mayAnswerFromDevice(input)).toBe(false);
+});

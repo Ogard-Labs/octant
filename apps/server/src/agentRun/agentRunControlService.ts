@@ -280,7 +280,7 @@ export function buildControlRequestCommand(input: {
     facts,
     workspace: requestWorkspaceFor(input.admittedWorkspace),
   });
-  return buildAgentRunRequestCommand({
+  const command = buildAgentRunRequestCommand({
     request,
     creationPosture: input.creationPosture,
     providerReadiness: input.providerReadiness,
@@ -291,4 +291,11 @@ export function buildControlRequestCommand(input: {
     ...(input.parentContext === undefined ? {} : { parentContext: input.parentContext }),
     ...(input.poolRouting === undefined ? {} : { poolRouting: input.poolRouting }),
   });
+  return {
+    ...command,
+    routingReceipt: {
+      ...command.routingReceipt,
+      ...(facts.projectId === undefined ? {} : { projectId: facts.projectId }),
+    },
+  };
 }

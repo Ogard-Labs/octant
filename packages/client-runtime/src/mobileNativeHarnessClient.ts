@@ -23,7 +23,7 @@ export async function loadMobileNativeHarnessSession(input: {
     path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}`,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  if (!response.ok) return null;
+  if (!response.ok) throw new Error("The child requests could not be refreshed.");
   const body = (await response.json()) as { view?: unknown };
   return body.view === null || body.view === undefined
     ? null

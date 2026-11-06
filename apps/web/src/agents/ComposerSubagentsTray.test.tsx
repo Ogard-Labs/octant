@@ -294,7 +294,16 @@ describe("ThreadSubagentsTray", () => {
     } as never;
     const interactionsClient = {
       session: vi.fn(async () => ({
-        approvals: [{ status: "pending", source: { runId } }],
+        session: { status: "running" },
+        approvals: [
+          {
+            id: "approval-1",
+            toolName: "shell",
+            summary: "Run tests",
+            status: "pending",
+            source: { runId, providerInstanceId: "worker", modelId: "large" },
+          },
+        ],
         questions: [],
       })),
     } as never;
@@ -307,7 +316,7 @@ describe("ThreadSubagentsTray", () => {
         onOpenSubagent={onOpenSubagent}
       />,
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Review request" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open child" }));
     expect(onOpenSubagent).toHaveBeenCalledWith(runId);
     rendered.rerender(
       <ThreadSubagentsTray
@@ -317,7 +326,7 @@ describe("ThreadSubagentsTray", () => {
         onOpenSubagent={onOpenSubagent}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Review request" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open child" })).not.toBeInTheDocument();
   });
 
   it("opens a completed result from the host summary without offering to stop it", async () => {

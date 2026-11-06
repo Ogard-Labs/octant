@@ -811,6 +811,19 @@ export function wireChat(deps: ChatDependencies) {
     // disk bound, not a precondition: a host that cannot read the store still
     // starts.
     yield* Effect.promise(() => agentMessageService.reconcileStoredBodies().catch(() => undefined));
+    let expiringMessages = false;
+    const messageExpiryTimer = setInterval(() => {
+      if (expiringMessages) return;
+      expiringMessages = true;
+      void agentMessageService
+        .expireQueued()
+        .catch(() => undefined)
+        .finally(() => {
+          expiringMessages = false;
+        });
+    }, 60_000);
+    messageExpiryTimer.unref();
+    yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(messageExpiryTimer)));
     return {
       chatHiddenThreadIds,
       chatRoutes,

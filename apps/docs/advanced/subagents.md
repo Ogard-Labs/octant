@@ -206,8 +206,8 @@ saved session is missing, or its authority no longer matches, Octant refuses
 Resume and asks you to use **Retry**, which starts a new execution.
 
 When a child needs an approval or an answer, the composer shows **A subagent
-needs your input**. **Review request** opens its detail view. The request names
-the child, provider, and model. Allowing a child action covers that request
+needs your input**. Answer beside the composer, switch between pending requests, or choose **Open child** for the full detail. The request names
+the child, provider/account, model and recorded target folder. A disconnected view must reconnect before answering. Allowing a child action covers that request
 only; it does not grant access to siblings or later requests. Unanswered
 requests expire when the child stops or Octant restarts.
 
@@ -283,6 +283,12 @@ provider that never reports usage, such as an ACP agent, is not measured
 against the token or money budget, and the ceiling says so; a child on a
 provider that can report usage but did not is never counted as free. See
 [Spend ceilings](/advanced/usage-and-limits#spend-ceilings).
+
+In **Settings → Octant Harness → Helper agents**, **Working minutes per attempt** chooses the next attempt's active-work window (30 minutes by default, between 1 and 240). Approval and answer waits do not count. Retry and Resume start a fresh window at the current setting; they do not extend the running attempt or remove Project/thread ceilings. Provider acquisition and startup keep their separate two-minute readiness bounds. The child detail shows recorded active time and partial totals where older, cancelled or interrupted attempts have no measurement.
+
+On a paired phone, you can answer requests raised by children of your own turn, once or deny. You cannot answer a request raised by another phone, a local window or a host-owned execution. Reconnecting and reading a thread do not transfer ownership.
+
+New sibling messages expire after 24 hours if still queued. Agents lists **Expired after 24 hours** separately from delivery or acknowledgement. Older messages without a recorded deadline keep their prior lifetime.
 
 ## Next steps
 

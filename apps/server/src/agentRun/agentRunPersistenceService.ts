@@ -585,6 +585,7 @@ export class AgentRunPersistenceService {
             reviewStatus: review === undefined ? ("unavailable" as const) : ("available" as const),
           },
           checks: evidence?.checks ?? { status: "unavailable", items: [] },
+          ...(evidence?.workingTime === undefined ? {} : { workingTime: evidence.workingTime }),
           blockers:
             run.recoveryReason === undefined
               ? { status: "unavailable", items: [] }

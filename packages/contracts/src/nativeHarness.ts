@@ -942,6 +942,7 @@ export type NativeHarnessQuestionStatus = typeof NativeHarnessQuestionStatus.Typ
 /** Attribution only: a child interaction grants no authority to its parent or siblings. */
 export const NativeHarnessInteractionSource = Schema.Struct({
   runId: AgentRunId,
+  targetFolder: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),

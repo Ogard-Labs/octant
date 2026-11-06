@@ -32,6 +32,23 @@ describe("AgentRunPolicySettings", () => {
 });
 
 describe("UpdateAgentRunPolicySettings", () => {
+  it("accepts only a bounded person-chosen working-time limit", () => {
+    expect(
+      decodeUpdateAgentRunPolicySettings({
+        creationPosture: "automatic",
+        expectedVersion: 0,
+        workingTimeLimitMinutes: 90,
+      }),
+    ).toMatchObject({ workingTimeLimitMinutes: 90 });
+    for (const value of [0, 241, 1.5])
+      expect(() =>
+        decodeUpdateAgentRunPolicySettings({
+          creationPosture: "automatic",
+          expectedVersion: 0,
+          workingTimeLimitMinutes: value,
+        }),
+      ).toThrow();
+  });
   it("decodes a valid update command with an expected version", () => {
     const decoded = decodeUpdateAgentRunPolicySettings({
       creationPosture: "off",

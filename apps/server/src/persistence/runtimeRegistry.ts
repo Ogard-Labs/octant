@@ -231,6 +231,7 @@ import {
   AgentMessageSent,
   AgentMessageDelivered,
   AgentMessageRefused,
+  AgentMessageExpired,
   AgentMessageAcknowledged,
   ThreadEgressDecisionsRecordedPayload,
   ThreadEgressLaunchStartedPayload,
@@ -611,6 +612,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
     .register(AGENT_MESSAGE_EVENT_NAMES.refused, 1, AgentMessageRefused)
+    .register(AGENT_MESSAGE_EVENT_NAMES.expired, 1, AgentMessageExpired)
     .register(AGENT_MESSAGE_EVENT_NAMES.acknowledged, 1, AgentMessageAcknowledged)
     .register("automation-notification-preferences-updated@1", 1, AutomationNotificationPreferences)
     .register(

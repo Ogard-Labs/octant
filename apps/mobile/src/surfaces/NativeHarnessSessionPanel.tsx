@@ -54,6 +54,8 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [note, setNote] = useState<string>();
   const [answer, setAnswer] = useState("");
+  const [approvalSelection, setApprovalSelection] = useState<string>();
+  const [questionSelection, setQuestionSelection] = useState<string>();
   const [nowMs, setNowMs] = useState(() => Date.now());
   // Hosts ticked on a marked thread's command, for the approval they were ticked on.
   const [tickedHosts, setTickedHosts] = useState<{
@@ -61,7 +63,6 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
     readonly keys: ReadonlySet<string>;
   }>();
 
-  const lastView = useRef<NativeHarnessSessionView>(undefined);
   const [fast, setFast] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -71,10 +72,6 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
       transport: props.transport,
       threadId: props.threadId,
     });
-    // The host answering "no session" for a thread we already show means the
-    // read failed, not that the session ended; keep the last view.
-    if (next === null && lastView.current !== undefined) throw new Error("session unavailable");
-    lastView.current = next ?? undefined;
     return next;
   }, [props.transport, props.threadId]);
 
@@ -89,7 +86,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   // Every host action goes through here: one at a time, a failure becomes a
   // note instead of a silent no-op, and the view is re-read either way.
   const run = async (action: () => Promise<string | undefined>) => {
-    if (busyRef.current) return;
+    if (busyRef.current || resource.error !== undefined) return;
     busyRef.current = true;
     setBusy(true);
     try {
@@ -110,8 +107,12 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   }, [view?.retrying]);
 
   if (view === undefined || view === null) return null;
-  const pendingQuestion = view.questions.find((question) => question.status === "pending");
-  const pendingApproval = view.approvals?.find((approval) => approval.status === "pending");
+  const questions = view.questions.filter((question) => question.status === "pending");
+  const approvals = view.approvals?.filter((approval) => approval.status === "pending") ?? [];
+  const pendingQuestion =
+    questions.find((item) => String(item.id) === questionSelection) ?? questions[0];
+  const pendingApproval =
+    approvals.find((item) => String(item.id) === approvalSelection) ?? approvals[0];
   const hostKey = (entry: { readonly host: string; readonly port: number }) =>
     `${entry.host}:${String(entry.port)}`;
   const listedHosts = pendingApproval?.commandHosts;
@@ -234,6 +235,18 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           {harnessRetryStatusText(view.retrying, nowMs)}
         </Text>
       )}
+      {approvals.length < 2 ? null : (
+        <View style={styles.chips}>
+          {approvals.map((item, index) => (
+            <GlassChip
+              key={String(item.id)}
+              active={item.id === pendingApproval?.id}
+              label={`Approval ${index + 1}`}
+              onPress={() => setApprovalSelection(String(item.id))}
+            />
+          ))}
+        </View>
+      )}
       {pendingApproval === undefined ? null : (
         <View
           style={[styles.question, { borderColor: colors.border }]}
@@ -242,7 +255,10 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           {pendingApproval.source === undefined ? null : (
             <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
               Child {String(pendingApproval.source.runId).slice(0, 8)} ·{" "}
-              {pendingApproval.source.providerName ?? "Provider"} · {pendingApproval.source.modelId}
+              {pendingApproval.source.providerName ??
+                String(pendingApproval.source.providerInstanceId)}{" "}
+              · {pendingApproval.source.modelId} ·{" "}
+              {pendingApproval.source.targetFolder ?? "No folder reported"}
             </Text>
           )}
           <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
@@ -284,7 +300,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               the thread took in outside content. Offering the session choice
               there would describe a decision the host ignores. */}
           <ApprovalDecisionButtons
-            busy={busy}
+            busy={busy || resource.error !== undefined}
             onAllow={() => decide("approve")}
             onAllowSession={
               pendingApproval.source === undefined && pendingApproval.singleUse !== true
@@ -295,6 +311,21 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           />
         </View>
       )}
+      {questions.length < 2 ? null : (
+        <View style={styles.chips}>
+          {questions.map((item, index) => (
+            <GlassChip
+              key={String(item.id)}
+              active={item.id === pendingQuestion?.id}
+              label={`Question ${index + 1}`}
+              onPress={() => {
+                setQuestionSelection(String(item.id));
+                setAnswer("");
+              }}
+            />
+          ))}
+        </View>
+      )}
       {pendingQuestion === undefined ? null : (
         <View
           style={[styles.question, { borderColor: colors.border }]}
@@ -303,6 +334,14 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
             {pendingQuestion.prompt}
           </Text>
+          {pendingQuestion.source === undefined ? null : (
+            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+              Child {String(pendingQuestion.source.runId).slice(0, 8)} ·{" "}
+              {pendingQuestion.source.providerName ??
+                String(pendingQuestion.source.providerInstanceId)}{" "}
+              · {pendingQuestion.source.targetFolder ?? "No folder reported"}
+            </Text>
+          )}
           {pendingQuestion.options.length === 0 ? null : (
             <View style={styles.chips}>
               {pendingQuestion.options.map((option) => (

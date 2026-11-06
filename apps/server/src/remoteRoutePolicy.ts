@@ -691,6 +691,15 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   {
+    kind: "prefix" as const,
+    path: "/api/native-harness/sessions/",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+    maxResponseBytes: 512 * 1_024,
+  },
+  {
     kind: "exact" as const,
     path: "/api/github/authentication",
     methods: ["GET", "HEAD"] as const,

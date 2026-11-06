@@ -1,4 +1,5 @@
 import {
+  AGENT_MESSAGE_LIFETIME_MS,
   AGENT_MESSAGE_AGGREGATE,
   AGENT_MESSAGE_EVENT_NAMES,
   AggregateVersion,
@@ -206,6 +207,7 @@ export class AgentMessageService {
   }
 
   async send(request: AgentMessageSendRequest): Promise<ReadonlyArray<AgentMessageSendOutcome>> {
+    await this.expireQueued();
     if (request.recipients.length < 1) {
       throw new AgentMessageDeliveryRefused(
         "policy",
@@ -258,6 +260,7 @@ export class AgentMessageService {
    * are offered to the next one.
    */
   async carryIntoTurn(recipientThreadId: string): Promise<ReadonlyArray<CarriedAgentMessage>> {
+    await this.expireQueued();
     const deliverable: Array<{ readonly record: AgentMessageRecord; readonly byteLength: number }> =
       [];
     for (const record of this.#projection.awaitingRecipient(recipientThreadId)) {
@@ -406,7 +409,27 @@ export class AgentMessageService {
    * Keeps only the bodies of messages still waiting for a turn. Run once the
    * journal is replayed: every other stored body has no reader left.
    */
+  async expireQueued(): Promise<void> {
+    const now = this.#clock();
+    for (const record of this.#projection.inFlight()) {
+      if (record.expiresAt === undefined || Date.parse(now) < Date.parse(record.expiresAt))
+        continue;
+      await this.#appendJournaled(
+        AGENT_MESSAGE_EVENT_NAMES.expired,
+        {
+          kind: "message-expired",
+          messageId: record.messageId,
+          correlationId: record.correlationId,
+          occurredAt: now,
+        },
+        String(record.messageId),
+      );
+      await this.#bodyStore.forget(record.bodyReference.contentReference);
+    }
+  }
+
   async reconcileStoredBodies(): Promise<void> {
+    await this.expireQueued();
     await this.#bodyStore.retainOnly(
       new Set(this.#projection.inFlight().map((record) => record.bodyReference.contentReference)),
     );
@@ -494,11 +517,13 @@ export class AgentMessageService {
       };
     }
 
+    const admittedAt = this.#clock();
     try {
       await this.#appendJournaled(
         AGENT_MESSAGE_EVENT_NAMES.sent,
         {
           kind: "message-sent",
+          expiresAt: new Date(Date.parse(admittedAt) + AGENT_MESSAGE_LIFETIME_MS).toISOString(),
           messageId,
           correlationId,
           senderThreadId: request.senderThreadId,
@@ -509,7 +534,7 @@ export class AgentMessageService {
             contentReference: stored.contentReference,
             byteLength: stored.byteLength,
           },
-          occurredAt: this.#clock(),
+          occurredAt: admittedAt,
         },
         String(messageId),
       );

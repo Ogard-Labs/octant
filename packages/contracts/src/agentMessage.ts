@@ -60,12 +60,16 @@ export const AGENT_MESSAGE_AGGREGATE = "agent-message";
 
 export const AGENT_MESSAGE_EVENT_NAMES = {
   sent: "agent.message-sent@1",
+  expired: "agent.message-expired@1",
   delivered: "agent.message-delivered@1",
   refused: "agent.message-refused@1",
   acknowledged: "agent.message-acknowledged@1",
 } as const;
 
+export const AGENT_MESSAGE_LIFETIME_MS = 24 * 60 * 60_000;
+
 export const AgentMessageSent = Schema.Struct({
+  expiresAt: Schema.optional(UtcTimestamp),
   kind: Schema.Literal("message-sent"),
   messageId: AgentMessageId,
   correlationId: CorrelationId,
@@ -106,6 +110,15 @@ export const AgentMessageRefused = Schema.Struct({
 }).annotations(strict);
 export type AgentMessageRefused = typeof AgentMessageRefused.Type;
 
+export const AgentMessageExpired = Schema.Struct({
+  kind: Schema.Literal("message-expired"),
+  messageId: AgentMessageId,
+  correlationId: CorrelationId,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentMessageExpired = typeof AgentMessageExpired.Type;
+export const decodeAgentMessageExpired = Schema.decodeUnknownSync(AgentMessageExpired);
+
 export const AgentMessageAcknowledged = Schema.Struct({
   kind: Schema.Literal("message-acknowledged"),
   messageId: AgentMessageId,
@@ -141,7 +154,7 @@ export const AgentMessageStatusSummary = Schema.Struct({
   messageId: AgentMessageId,
   senderThreadId: AgentMessageEndpointId,
   recipientThreadId: AgentMessageEndpointId,
-  state: Schema.Literal("in-flight", "delivered", "refused", "acknowledged"),
+  state: Schema.Literal("in-flight", "delivered", "refused", "acknowledged", "expired"),
   refuseReason: Schema.optional(AgentMessageRefuseReason),
   occurredAt: UtcTimestamp,
 }).annotations(strict);

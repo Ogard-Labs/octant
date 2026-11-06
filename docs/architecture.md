@@ -2102,10 +2102,11 @@ frame, and a parent purge removes all generations' text and evidence. Nested
 observations retain the authorized root thread and identify their managed parent
 separately. Result reads do not consume or acknowledge delivery.
 
+Settled managed attempts record active milliseconds and the chosen limit through the existing subject-owned result evidence, atomically with lifecycle persistence. Waiting intervals are excluded. The child detail shows its latest recorded attempt and cumulative recorded time, and labels historical, cancelled or lost-startup gaps as unavailable rather than inventing wall-time totals. Existing cumulative Project/thread ceilings remain independent and authoritative.
+
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, may work for at most 30
-minutes (`MANAGED_AGENT_RUN_TURN_DEADLINE_MS`); a turn that reaches that bound
+from provider acquisition to its terminal event, has a default 30-minute working-time limit. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
 is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
@@ -2129,7 +2130,7 @@ live parent and child authority before and after the answer. A child approval
 permits only that request, never consumes or creates a remembered lead-session
 grant, and cannot approve an opaque provider action in Plan mode. Cancelled or
 expired requests and requests whose transport was lost at restart cannot be
-answered. The composer signals pending child input and opens its detail view. The same
+answered. The composer lists eligible child approvals and questions beside the parent's own request, in a bounded scroll region with keyboard-selectable requests and an Open child action. It reads and answers the same authoritative pending IDs as Agents, names the child, provider/account and recorded target folder, and disables responses on a failed refresh or lost connection. A paired device may read and answer only requests from a child execution admitted by that device's own turn, approve once or deny; another device's, a local window's and host-owned executions remain unavailable. Admission and explicit Retry/Resume bind the execution to the authenticated scope; reads never transfer ownership, restart loses live ownership, and live parent/child authority is rechecked before the response can run. Settings, launch, pause, steering and remembered grants gain no remote route. The same
 request is a Needs you row naming the parent thread and the child (see
 pending requests across modes); the row has one action, which opens the parent's
 Agents tab on that child, and no way to answer.
@@ -3456,11 +3457,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   refused in Plan, on excluded profiles and cancelled turns; managed children,
   Chat and Work gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
-- **Expiry not implemented.** Queued messages currently have no recorded
-  lifetime and can wait indefinitely for a recipient turn. No timestamp is
-  inferred to be expiry and no receipt claims Expired. A new expiry policy
-  requires an explicit deadline/authorizer and journal-before-cleanup rule.
-  The Chat mention path is unchanged.
+- **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
