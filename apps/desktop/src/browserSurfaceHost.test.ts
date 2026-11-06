@@ -2,10 +2,7 @@ import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
-import {
-  decodeBrowserEditorId,
-  decodeHumanBrowserRequest,
-} from "@octant/contracts/browser-presentation";
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -70,16 +67,23 @@ function view(): BrowserSurfaceViewPort {
 
 async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionStart) {
   const base = view();
-  const target = { id: "60000000-0000-4000-8000-000000000039", selectionStart, selectionEnd };
+  const target = {
+    id: "60000000-0000-4000-8000-000000000039",
+    kind: "text",
+    selectionStart,
+    selectionEnd,
+  };
   let current = true;
-  let readCaret = async () => ({
-    ...target,
-    id: decodeBrowserEditorId(target.id),
-    caret: { x: 20, y: 30, width: 0, height: 24 },
+  // The native lookup itself is synchronous; the host's next field read is
+  // where a deferred lookup awaits.
+  let afterCaret: Promise<void> | undefined;
+  let onCaret = () => {};
+  vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(async () => {
+    const waiting = afterCaret;
+    afterCaret = undefined;
+    if (waiting !== undefined) await waiting;
+    return { ...target };
   });
-  vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(async () => ({
-    ...target,
-  }));
   let receive:
     | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
     | undefined;
@@ -105,7 +109,10 @@ async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionS
         input: nativeInput,
         visible: vi.fn(),
         bounds: vi.fn(),
-        editor: () => readCaret(),
+        caret: () => {
+          onCaret();
+          return { x: 20, y: 30, width: 0, height: 24 };
+        },
         frames: (listener) => {
           receive = listener;
           return () => {};
@@ -169,17 +176,16 @@ async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionS
     deferCaret: () => {
       let resume: () => void = () => {};
       let entered: () => void = () => {};
-      const original = readCaret;
       const held = new Promise<void>((done) => {
         resume = done;
       });
       const started = new Promise<void>((done) => {
         entered = done;
       });
-      readCaret = async () => {
+      onCaret = () => {
+        onCaret = () => {};
+        afterCaret = held;
         entered();
-        await held;
-        return original();
       };
       return { resume, started };
     },
@@ -1059,6 +1065,7 @@ describe("BrowserSurfaceHost", () => {
     const selectAll = vi.fn();
     const target = {
       id: "60000000-0000-4000-8000-000000000029",
+      kind: "text",
       selectionStart: 0,
       selectionEnd: 0,
     };
@@ -1170,7 +1177,7 @@ describe("BrowserSurfaceHost", () => {
     const editorId = "60000000-0000-4000-8000-000000000019";
     const base = view();
     const input = vi.fn();
-    const target = { id: editorId, selectionStart: 0, selectionEnd: 0 };
+    const target = { id: editorId, kind: "text", selectionStart: 0, selectionEnd: 0 };
     vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
     let finish: (() => void) | undefined;
     const cancellation = new Promise<void>((done) => {
@@ -1198,11 +1205,7 @@ describe("BrowserSurfaceHost", () => {
             receive = listener;
             return () => {};
           },
-          editor: async () => ({
-            ...target,
-            id: decodeBrowserEditorId(editorId),
-            caret: { x: 20, y: 30, width: 0, height: 24 },
-          }),
+          caret: () => ({ x: 20, y: 30, width: 0, height: 24 }),
         },
       }),
     });
@@ -1265,6 +1268,153 @@ describe("BrowserSurfaceHost", () => {
     ).toEqual({ status: "refused" });
     host.closeContext(contextId);
   });
+  it("presents a password field by identity alone and never composes into it", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const editorId = "60000000-0000-4000-8000-000000000031";
+    const base = view();
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue({
+      id: editorId,
+      kind: "secure",
+      selectionStart: 3,
+      selectionEnd: 9,
+    });
+    const caret = vi.fn(() => ({ x: 20, y: 30, width: 6, height: 24 }));
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input: vi.fn(),
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+          caret,
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    const presented = await send({ kind: "editor" });
+    expect(presented).toEqual({ status: "editor", editor: { id: editorId, secure: true } });
+    expect(JSON.stringify(presented)).not.toMatch(/selection|caret|"x"|9/);
+    expect(await send({ kind: "composition", composition: { phase: "begin", editorId } })).toEqual({
+      status: "refused",
+    });
+    expect(base.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+      "Input.imeSetComposition",
+      expect.anything(),
+    );
+    host.closeContext(contextId);
+  });
+
+  it("offers a page editing menu for a field in a nested frame", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const base = view();
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue({
+      id: "60000000-0000-4000-8000-000000000032",
+      kind: "rich",
+      collapsed: true,
+      caret: { x: 40, y: 50, width: 0, height: 20 },
+    });
+    // The editable's own frame, not the page's main frame, reports the menu.
+    const nested = {};
+    const input = vi.fn((event: { readonly type: string; readonly button?: string }) => {
+      if (event.type === "mouseUp" && event.button === "right")
+        for (const [name, listener] of vi.mocked(base.webContents.on).mock.calls)
+          if (name === "context-menu")
+            listener({}, { frame: nested, isEditable: true, editFlags: { canPaste: true } });
+    });
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input,
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await send({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, x: 40, y: 60, button: "right", clickCount: 1 },
+        }),
+      ).toEqual({ status: "accepted" });
+    expect(await send({ kind: "edit-menu" })).toMatchObject({
+      status: "edit-menu",
+      flags: { paste: true, copy: false },
+    });
+    host.closeContext(contextId);
+  });
+
   it("refuses a composition edit when an agent action takes the surface while the edit awaits its field", async () => {
     let receive:
       | ((image: {
@@ -1274,7 +1424,7 @@ describe("BrowserSurfaceHost", () => {
       | undefined;
     const editorId = "60000000-0000-4000-8000-000000000029";
     const base = view();
-    const target = { id: editorId, selectionStart: 0, selectionEnd: 0 };
+    const target = { id: editorId, kind: "text", selectionStart: 0, selectionEnd: 0 };
     vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
     const host = createBrowserSurfaceHost({
       isEmbeddedOwner: () => true,
@@ -1289,11 +1439,7 @@ describe("BrowserSurfaceHost", () => {
             receive = listener;
             return () => {};
           },
-          editor: async () => ({
-            ...target,
-            id: decodeBrowserEditorId(editorId),
-            caret: { x: 20, y: 30, width: 0, height: 24 },
-          }),
+          caret: () => ({ x: 20, y: 30, width: 0, height: 24 }),
         },
       }),
     });

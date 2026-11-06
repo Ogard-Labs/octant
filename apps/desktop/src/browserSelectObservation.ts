@@ -4,7 +4,7 @@
  * select list opened there would draw Chromium's own popup over a window
  * nobody can see, so a trusted press that would open one is held instead and
  * its options are offered to the person's native menu. Only a single-choice
- * list in the main frame is held; a list box draws inside the page itself.
+ * list is held, in whichever frame it sits; a list box draws inside the page.
  *
  * The function is serialized for the real-page test, so it stays self-contained.
  */

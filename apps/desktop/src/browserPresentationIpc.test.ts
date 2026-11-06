@@ -128,6 +128,13 @@ describe("sandboxed human Browser protocol", () => {
           caret: { x: 87, y: 119, width: 0, height: 28 },
         },
       },
+      // An email or number field and a rich editor carry only their caret.
+      {
+        status: "editor",
+        editor: { id: presentationId, caret: { x: 4, y: 6, width: 0, height: 20 } },
+      },
+      // A password field carries its identity alone.
+      { status: "editor", editor: { id: presentationId, secure: true } },
     ])
       expect(decodeHumanBrowserIpcResult(result)).toEqual(decodeHumanBrowserResult(result));
   });
@@ -175,6 +182,29 @@ describe("sandboxed human Browser protocol", () => {
       { ...frame, width: NaN },
       { ...frame, width: 1_921 },
       { ...frame, dataUrl: "data:text/html,fixture" },
+      // A password field's offsets, caret or value never travel with its identity.
+      {
+        status: "editor",
+        editor: { id: presentationId, secure: true, selectionStart: 0, selectionEnd: 7 },
+      },
+      {
+        status: "editor",
+        editor: {
+          id: presentationId,
+          secure: true,
+          caret: { x: 4, y: 6, width: 0, height: 20 },
+        },
+      },
+      { status: "editor", editor: { id: presentationId, secure: true, value: "fixture" } },
+      { status: "editor", editor: { id: presentationId, secure: false } },
+      {
+        status: "editor",
+        editor: {
+          id: presentationId,
+          selectionStart: 2,
+          caret: { x: 4, y: 6, width: 0, height: 20 },
+        },
+      },
     ]) {
       expect(() => decodeHumanBrowserIpcResult(result)).toThrow();
       expect(() => decodeHumanBrowserResult(result)).toThrow();

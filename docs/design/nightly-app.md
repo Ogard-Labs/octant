@@ -377,23 +377,63 @@ attached; unexpected capture loss or blur retires it.
 
 ### Standard text composition
 
-The human input path supports native composition in main-frame standard text,
-search, URL and telephone inputs and textareas. Stable's sandboxed document-start
-preload installs the first window-capture focus observers before page scripts.
-It exposes a read-only bridge only in isolated world 1002, separate from agent
-scripts. The bridge returns a fresh field incarnation and bounded UTF16 selection
-offsets, never field contents or surrounding text. A document replacement that
-removes those observers refuses until a real navigation installs the preload
-again. Password, custom editable and nested-frame targets remain unsupported.
+The human input path supports native composition in text, search, URL,
+telephone, email and number inputs, textareas and rich text editors (an editing
+host with `contenteditable`), in the main frame and in nested frames. Stable's
+sandboxed document-start preload runs in every frame of the hidden window and
+installs the first window-capture focus observers before page scripts. It
+exposes a read-only bridge only in isolated world 1002, separate from agent
+scripts, and names that world so Stable can find it in a nested frame. The bridge
+returns a fresh field incarnation, its kind and either bounded UTF16 selection
+offsets or a page-computed caret, never field contents or surrounding text. A
+document replacement that removes those observers refuses until a real
+navigation installs the preload again. Date, time, color and other non-text
+inputs stay unsupported.
+
+The field's kind decides where its caret comes from:
+
+| Kind     | Fields                                 | Caret                                                         | Nightly receives         |
+| -------- | -------------------------------------- | ------------------------------------------------------------- | ------------------------ |
+| Text     | text, search, URL, telephone; textarea | native lookup at the selection start, on its own line         | identity, offsets, caret |
+| Field    | email, number                          | start of the field's text box; no selection API exists        | identity, caret          |
+| Rich     | `contenteditable` editing host         | the page's own line box at the selection start, one line high | identity, caret          |
+| Password | password                               | native lookup, kept in Stable for the editing menu            | identity only            |
 
 Stable binds its own hidden window once to an opaque main-only native object.
 The public requested-range text-input API returns caret geometry for the observed
-selection start. Native cached selection and marked-text flags can lag hidden
-Chromium documents, so they do not establish the field or its selection. A lookup
-may return that point or the exact host-observed selected span, never a partial
-or displaced range. The host rechecks the same field and selection after geometry
-lookup. No native
+selection start of a text or password field. Chromium answers it for whichever
+frame holds focus, already in the page's coordinates, and for a multiline field
+the rectangle is the caret's own line. Native cached selection and marked-text
+flags can lag hidden Chromium documents, so they do not establish the field or
+its selection. A lookup may return that point or the exact host-observed selected
+span, never a partial or displaced range. The host rechecks the same field and
+selection after geometry lookup. A rich editor's caret is the line box at the
+collapsed selection start, or the empty line's own start, never the whole
+selection or editor; a selected range stays bounded to its first line. No native
 pointer crosses the presentation protocol.
+
+A password field never sends its value, offsets, caret or selection text to
+Nightly: its editor is its identity alone, and composition refuses it at both
+the host and the client. Nightly focuses a local password field instead of its
+composition input, so Chromium in Nightly turns on macOS secure event input and
+the ASCII-capable input sources for as long as it has focus: no input method
+window, accessibility value or input observer sees the person's keys. The keys
+still reach the page over the ordinary input lane, and a dead key's composed
+character follows as a typed character; the local field never holds it.
+
+**Nested frames.** The top document's bridge reports only that focus sits in a
+frame. Stable then follows the focus chain through its own protocol attachment,
+at most 8 frames deep: in each document a Stable-owned isolated world reads the
+focused frame element and where that frame's content sits, without scrolling the
+page; a frame on the same site shares its parent's session, and a frame on
+another site is its own target, announced by the attachment's automatic frame
+attachment. The focused frame's bridge world is found by its name in that
+frame's session. A caret the page computes is moved by the frame's offset and
+scale into the top page's coordinates. One frame holds focus at a time, and a
+chain that cannot be followed refuses rather than guessing. Composition commands
+go to the page, and Chromium delivers them to the focused frame on either site.
+The automatic frame attachment is shared with agent actions, which still send
+their commands to the page itself.
 
 Nightly positions its local native input context at that caret. It holds only
 the person's current candidate, at most 256 well-formed UTF16 code units. Closed
@@ -432,11 +472,12 @@ editing commands or menus into the Stable-owned page behind an embedded image.
 
 ### Standard page editing menus
 
-A pointer right-click in an already focused, supported main-frame standard text
-field opens a native editing menu in Nightly. Shift+F10 or a context-menu key
+A pointer right-click in an already focused, supported field (any kind above, in
+any frame) opens a native editing menu in Nightly. Shift+F10 or a context-menu key
 uses the same supported field through a paired user key gesture. Stable captures that field's
-issued incarnation before forwarding the gesture, accepts only its actual
-main-frame editable context-menu event, and rechecks the same view, presentation,
+issued incarnation before forwarding the gesture, accepts only an actual
+editable context-menu event, from whichever frame reports it, and rechecks the
+field in the focused frame, the same view, presentation,
 layout, field and live native lease before executing one enabled action. The
 keyboard gesture binds a host-issued pending identity to its captured field and
 selection. Only its matching user key release may activate it. Cleanup key
@@ -467,9 +508,9 @@ Select All, reopening a selected range, dismissal and reinvocation. The physical
 context-menu key uses the same policy but has no separate hardware acceptance.
 Clipboard actions are wired through the same closed commands but have no live
 clipboard acceptance evidence. Keyboard navigation within an open menu is
-separate from invoking it. Password,
-custom-editor and iframe menus, spelling and page accessibility remain separate
-parity work; link and image menus and select lists follow below.
+separate from invoking it. A password field's menu offers what Chromium enables
+there, which never includes Cut or Copy. Spelling and page accessibility remain
+separate parity work; link and image menus and select lists follow below.
 
 ### Page popups
 
@@ -482,7 +523,7 @@ refuses them.
 
 - **Select lists.** The hidden window's sandboxed document-start preload, in the
   same private isolated world as the editable observer, holds a trusted press
-  that would open a single-choice main-frame `<select>` (button press, Space,
+  that would open a single-choice `<select>`, in any frame (button press, Space,
   F4, Alt+arrow, and the plain arrows on macOS) and keeps Chromium's popup
   closed. Any other trusted press ends the hold. Stable offers a hold only when
   it is at most 1.5 seconds old, no older than the person's own press through
@@ -490,7 +531,8 @@ refuses them.
   run since; an agent's click on a list is held but never offered. The offer
   carries at most 512 options, each label at most 256 UTF16 units, their
   optgroup labels, disabled flags, the selected index and the field's
-  rectangle. A list whose options, group headings and separators exceed 1,024
+  rectangle, moved by the frame's offset into the page's coordinates. A list
+  whose options, group headings and separators exceed 1,024
   native menu entries is refused as too many rather than cut short. Nightly shows the options as radio items in a native menu, with
   group headings, and places the selected item at the field (the press point and
   the cursor give the Browser image's origin). The chosen index returns to
@@ -511,7 +553,9 @@ refuses them.
   reports it to the agent and retires the person's popup. After three dialogs
   within 10 seconds in one page load, Stable answers that load's further
   dialogs by the same fixed policy and tells the person once with a system
-  notification instead of a sheet. Electron has no sheet scoped to part of a
+  notification instead of a sheet. Chromium reports a dialog from any frame,
+  on the page's site or another, to the page itself, so a frame's dialog is held
+  the same way. Electron has no sheet scoped to part of a
   window, so a held dialog stays window-modal; that limit keeps a page from
   holding the window with dialog after dialog.
 - **Link and image menus.** A right-click on a link or image right after the
@@ -530,9 +574,12 @@ refuses them.
   hands the field only paths that are existing regular files, through
   Chromium's file-input command for the same chooser node and document. That
   command waits behind any agent action and is refused while one holds the
-  page. A chooser in a frame on the page's own site is held like the page's; a
-  frame on another site is its own protocol target, so its chooser is not held
-  yet and belongs to the nested-frame parity work.
+  page. A chooser in a frame on the page's own site is held like the page's. A
+  frame on another site is its own protocol target: when automatic attachment
+  announces it, Stable enables its page events and holds its choosers in that
+  session, at most 64 frame sessions per page, and answers through the same
+  session. When the person's watch ends while an agent keeps the attachment,
+  each frame session stops holding choosers too.
 - **New windows.** `window.open` and `target="_blank"` follow Stable's existing
   Browser policy: the page's own popup is refused, and no free window opens in
   either app.
@@ -547,8 +594,7 @@ choice or the presentation retires. Nightly shows a popup only while its
 window is visible and focused, never shows the same pending popup twice, and
 holds a bounded watch on the shown popup so its sheet or menu closes as soon as
 Stable retires it, as when the page closed its own dialog. Page text in a popup is display copy and
-grants nothing. Select lists and dialogs in nested frames are part of the
-nested-frame parity work.
+grants nothing.
 
 Evidence: contract tests for the bounds; Stable surface tests for dialog,
 select, link-menu and file-chooser capture and their negatives (two dialogs,
@@ -559,15 +605,36 @@ action, a dialog handed to an agent action, a dialog burst, another debugger);
 real-page tests in Chromium that hold a select list and an `alert`, refuse a
 disabled option, apply an enabled one and answer the dialog, hand a timer
 dialog to an agent action that then completes, never offer a list an agent's
-click opened, and hold a same-site frame's file chooser but not a cross-site
-frame's; and Nightly presentation tests for showing, answering, dismissing,
+click opened, hold a same-site and a cross-site frame's file chooser and
+answer the cross-site one, and hold and answer a select list and an `alert`
+inside a same-site and a cross-site frame; and Nightly presentation tests for showing, answering, dismissing,
 detaching, closing on retirement, not reshowing, not asking while unfocused and
 refusing renderer popup requests. No packaged Electron run has yet confirmed that Electron's own
 message box stays out of sight while the hidden window's dialog is held.
 
+Field evidence: real-page tests in Chromium that present email and number
+fields with a caret and no value, a password field by identity alone and refuse
+its composition, leave a date field unsupported, place a rich editor's caret on
+each of its lines and compose into it, and follow focus into a same-site and a
+cross-site frame for an email field's mapped caret, a text field's composition
+and a rich editor's line; desktop tests that a password field's editor carries
+no offsets or caret and never composes, and that a nested frame's editing menu
+is offered; IPC tests that refuse a password editor with offsets, a caret or a
+value; and a renderer test that focus moves to the local password field and
+back. The Chromium harness has no native view, so a text control's native caret
+there is a stand-in: per-line textarea geometry and macOS secure input rest on
+Chromium's own behavior and the maintainers' physical IME check. No packaged
+Electron run has yet confirmed the preload in nested frames or its named world.
+Known limits: the whole frame walk refuses after 1 second, so a frame that stops
+answering refuses its field rather than stalling the person's input; once a
+nested frame is followed, the protocol's runtime events stay on for that page; a
+loaded Browser extension's own isolated world could carry the bridge's name, and
+then answers for that frame's fields in place of the preload; and a select list
+held in a frame the walk cannot follow stays closed rather than opening
+Chromium's popup in the hidden window.
+
 The current foundation remains publication-gated while full IME reconversion,
-accessibility,
-nested-frame popups, other native brokers and the remaining lifecycle behavior
+accessibility, other native brokers and the remaining lifecycle behavior
 need implementation and evidence. An isolated synthetic fixture validates only the exercised components; it does not establish
 packaged coexistence, signed-in browsing, or native identity verification.
 
@@ -659,9 +726,11 @@ evidence; the preflight that replaces the early gate checks them:
 - [x] Embedded Browser page popups: select lists, page dialogs, link and
       image menus, file chooser and `window.open` (see
       [page popups](#page-popups)).
-- [ ] The rest of embedded Browser parity: password and other secure input,
-      nested frames, custom editors, multiline caret and accessibility
-      (decision 2).
+- [x] Embedded Browser fields: email, number and password (secure input),
+      nested frames on either site (fields, composition, editing menus and
+      popups), rich text editors and multiline caret (see
+      [standard text composition](#standard-text-composition)).
+- [ ] Embedded Browser accessibility (decision 2).
 - [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
       an unsigned packaged Nightly smoke.
 - [ ] The full `octant-nightly` command.

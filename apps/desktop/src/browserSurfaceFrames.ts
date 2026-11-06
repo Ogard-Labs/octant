@@ -133,31 +133,8 @@ export function surfaceFrames(options: {
     return created.executionContextId;
   };
 
-  /** The frames on other sites a session's page holds, each its own target. */
-  const attachedFrames = async (sessionId: string | undefined) => {
-    const key = sessionId ?? "";
-    let asked = options.targets.autoAttached.get(key);
-    if (asked === undefined) {
-      // Bounded, and forgotten on failure, so a dead session neither holds the
-      // action nor refuses every later frame of the attachment.
-      asked = Promise.race([
-        options
-          .send(
-            "Target.setAutoAttach",
-            { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
-            sessionId,
-          )
-          .then(() => undefined),
-        new Promise<never>((_resolve, reject) =>
-          setTimeout(() => reject(new Error("Browser frame did not answer.")), 2_000),
-        ),
-      ]);
-      options.targets.autoAttached.set(key, asked);
-      asked.catch(() => options.targets.autoAttached.delete(key));
-    }
-    await asked;
-    return options.targets.frames;
-  };
+  const attachedFrames = (sessionId: string | undefined) =>
+    autoAttachSurfaceFrames(options.send, options.targets, sessionId);
 
   return Object.freeze({
     evaluate,
@@ -250,6 +227,39 @@ export function surfaceFrames(options: {
 
 export type SurfaceFrames = ReturnType<typeof surfaceFrames>;
 
+/**
+ * The frames on other sites a session's page holds, each its own target. One
+ * request per session and attachment, shared by the agent's reads and the
+ * person's presentation, since a second request announces nothing again.
+ */
+export async function autoAttachSurfaceFrames(
+  send: SurfaceProtocolSend,
+  targets: SurfaceFrameTargets,
+  sessionId: string | undefined,
+): Promise<Map<string, AttachedFrame>> {
+  const key = sessionId ?? "";
+  let asked = targets.autoAttached.get(key);
+  if (asked === undefined) {
+    // Bounded, and forgotten on failure, so a dead session neither holds the
+    // action nor refuses every later frame of the attachment.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    asked = Promise.race([
+      send(
+        "Target.setAutoAttach",
+        { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+        sessionId,
+      ).then(() => undefined),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Browser frame did not answer.")), 2_000);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    targets.autoAttached.set(key, asked);
+    asked.catch(() => targets.autoAttached.delete(key));
+  }
+  await asked;
+  return targets.frames;
+}
+
 export interface AttachedFrame {
   readonly sessionId: string;
   readonly url: string;
@@ -267,16 +277,16 @@ interface ProtocolEvaluation {
   };
 }
 
-interface ProtocolFrameTree {
+export interface ProtocolFrameTree {
   readonly frameTree?: ProtocolFrameNode;
 }
 
-interface ProtocolFrameNode {
+export interface ProtocolFrameNode {
   readonly frame?: { readonly id?: unknown; readonly url?: unknown };
   readonly childFrames?: ReadonlyArray<ProtocolFrameNode>;
 }
 
-function findFrame(
+export function findFrame(
   node: ProtocolFrameNode | undefined,
   frameId: string,
 ): { readonly url: string } | undefined {
