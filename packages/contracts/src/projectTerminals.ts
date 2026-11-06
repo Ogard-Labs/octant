@@ -1,9 +1,16 @@
 import { Schema } from "effect";
-import { CodeTerminalId, CodeThreadId, CodeCheckoutId } from "./code";
-import { MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
+import { CodeTerminalId, CodeThreadId, CodeCheckoutId, WorktreeReceiptId } from "./code";
+import { CodeOperationId, MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
 import { UtcTimestamp, AggregateVersion } from "./events";
-import { BindingRevisionId, ProjectActionId, ProjectActionDirectory, ProjectId } from "./projects";
+import {
+  BindingRevisionId,
+  ProjectAction,
+  ProjectActionId,
+  ProjectActionDirectory,
+  ProjectId,
+} from "./projects";
 import { WindowId } from "./shell";
+import { AgentRunRequestId } from "./agentRun";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -70,7 +77,48 @@ const ActionRun = Schema.Struct({
   thread: Schema.optional(ActionThread),
 }).annotations(strict);
 
+export const WorktreePreparation = Schema.Struct({
+  recipe: ProjectAction,
+  state: Schema.Literal(
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+    "skipped",
+    "cleanup-uncertain",
+  ),
+  attemptId: Schema.optional(CodeOperationId),
+  startedAt: Schema.optional(UtcTimestamp),
+  completedAt: Schema.optional(UtcTimestamp),
+  exitCode: Schema.optional(Schema.Int),
+  reason: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type WorktreePreparation = typeof WorktreePreparation.Type;
+export const decodeWorktreePreparation = Schema.decodeUnknownSync(WorktreePreparation);
+export const WORKTREE_PREPARATION_UPDATED = "code.worktree-preparation-updated@1";
+export const WorktreePreparationUpdated = Schema.Struct({
+  kind: Schema.Literal("worktree-preparation-updated"),
+  receiptId: WorktreeReceiptId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  preparation: WorktreePreparation,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export const decodeWorktreePreparationUpdated = Schema.decodeUnknownSync(
+  WorktreePreparationUpdated,
+);
+
 export const ProjectTerminalCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("worktree-preparation"),
+    projectId: ProjectId,
+    thread: ActionThread,
+    childRequestId: Schema.optional(AgentRunRequestId),
+    action: Schema.Literal("inspect", "retry", "cancel", "skip"),
+  }).annotations(strict),
+
   Schema.Struct({
     kind: Schema.Literal("preview-action"),
     projectId: ProjectId,
@@ -188,6 +236,14 @@ export const ProjectActionSuggestion = Schema.Struct({
 export type ProjectActionSuggestion = typeof ProjectActionSuggestion.Type;
 
 export const ProjectTerminalResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("worktree-preparation"),
+    receiptId: WorktreeReceiptId,
+    preparation: Schema.optional(WorktreePreparation),
+    output: Schema.String.pipe(Schema.maxLength(MAX_PROJECT_TERMINAL_OUTPUT_CHARACTERS)),
+    outputTruncated: Schema.Boolean,
+  }).annotations(strict),
+
   Schema.Struct({
     kind: Schema.Literal("project-action-preview"),
     projectId: ProjectId,

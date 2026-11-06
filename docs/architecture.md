@@ -11409,6 +11409,28 @@ access` agree); a thread's own change is journaled as
   never automatically retried. Preparing a new run is an explicit decision;
   an interrupted run is never restarted by reopening or restarting the host.
 
+- **Worktree setup.** A Code Project may designate one saved action as its
+  optional worktree preparation recipe. The person reviews the command and
+  relative folder before enabling automatic use. Each new managed worktree
+  records the reviewed recipe separately from its Git readiness. The first
+  agent task waits for preparation; child runs use their admitted task access.
+  Plan cannot execute setup. Enabling a recipe does not grant wider access.
+  The shared confined process runner owns the recipe's shell, bounded output,
+  ten minute timeout, cancellation and descendant cleanup. Its environment is
+  allowlisted; no secret files, arbitrary credentials or parent environment are
+  copied. The recipe folder resolves inside the new checkout. A changed recipe
+  or revoked task authority refuses launch and cancels an active preparation.
+
+  Pending, running, succeeded, failed, cancelled, interrupted, skipped and
+  uncertain cleanup are separate recorded states. Running is journaled before
+  spawn. Failure needs an explicit Retry or Skip in **Worktree setup**, beside
+  the task; child checkouts are selectable there. A skipped preparation stays
+  visible. Restart first reconciles owned processes, then exposes interrupted
+  setup without replaying it. Unconfirmed descendant cleanup blocks Retry and
+  Skip. Output is a bounded host-lifetime tail, not journal content, and is
+  unavailable after restart. A new recipe does not retroactively alter an
+  existing worktree's recorded recipe.
+
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per

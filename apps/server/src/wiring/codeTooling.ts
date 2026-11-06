@@ -97,7 +97,13 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<FoundationsWiring, "browserAuthority"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<IntegrationsWiring, "toolEgressRules"> &
-  Pick<ProvidersWiring, "extensionLifecycleService" | "extensionPackageStore">;
+  Pick<
+    ProvidersWiring,
+    | "extensionLifecycleService"
+    | "extensionPackageStore"
+    | "worktreePreparation"
+    | "resolveChildWorktree"
+  >;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
@@ -107,6 +113,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     serverProjectStore,
     codeFileWatch,
     codeOperationRuntime,
+    worktreePreparation,
+    resolveChildWorktree,
     codeSessionAuthority,
     contributeCodeTools,
     codeWorkingDirectoryProbePath,
@@ -154,6 +162,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         ? undefined
         : new ProjectTerminalService({
             terminals: sharedTerminals,
+            worktreePreparation,
             readProject: persistence.readProject,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
@@ -184,7 +193,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 return undefined;
               }
             },
-            resolveActionCheckout: async (windowId, projectId, requested) => {
+            resolveActionCheckout: async (windowId, projectId, requested, childRequestId) => {
               const view = await routeCodeService.read(windowId, requested.threadId);
               if (
                 view === undefined ||
@@ -231,8 +240,31 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                   (present.head.kind === "none" || present.head.oid === head)
                 );
               };
+              if (childRequestId !== undefined) {
+                const project = persistence.readProject(projectId);
+                if (project?.type !== "code") return undefined;
+                const receipt = await resolveChildWorktree({
+                  parentThreadId: String(thread.id),
+                  requestId: childRequestId,
+                  repositoryId: String(thread.repositoryId),
+                  repositoryRoot: project.binding.canonicalRoot,
+                  parentCheckoutRoot: rooted.rootPath,
+                });
+                if (receipt === undefined || !current()) return undefined;
+                return {
+                  root: receipt.canonicalWorktreePath,
+                  receiptId: receipt.receiptId,
+                  preparationThread: { threadId: receipt.threadId, checkoutId: receipt.checkoutId },
+                  executionPolicy: thread.executionPolicy,
+                  current,
+                  active,
+                };
+              }
               return {
                 root: rooted.rootPath,
+                ...(checkout.kind === "managed-worktree"
+                  ? { receiptId: String(checkout.ownershipReceiptId) }
+                  : {}),
                 executionPolicy: thread.executionPolicy,
                 ...(head === undefined ? {} : { head }),
                 ...(checkout.head.kind === "branch"

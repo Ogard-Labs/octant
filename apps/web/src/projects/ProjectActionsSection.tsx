@@ -10,6 +10,7 @@ import { Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantFieldError } from "../ui/base/OctantField";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 
 type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "work" | "code" }>;
@@ -27,6 +28,7 @@ interface Row {
   readonly name: string;
   readonly command: string;
   readonly directory: string;
+  readonly preparesWorktrees?: true | undefined;
 }
 
 type Suggestions =
@@ -46,6 +48,7 @@ function actionsOf(rows: ReadonlyArray<Row>): ReadonlyArray<ProjectAction> | und
         name: row.name,
         command: row.command,
         directory: row.directory.trim() === "" ? "." : row.directory.trim(),
+        ...(row.preparesWorktrees === true ? { preparesWorktrees: true } : {}),
       })),
     );
   } catch {
@@ -170,6 +173,33 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
           >
             <X aria-hidden="true" size={14} />
           </OctantButton>
+          {props.project.type !== "code" ? null : (
+            <label className="project-actions__preparation">
+              <OctantCheckbox
+                checked={row.preparesWorktrees === true}
+                disabled={disabled}
+                onChange={(event) =>
+                  setRows((current) =>
+                    current.map((other) => {
+                      const { preparesWorktrees: _preparesWorktrees, ...rest } = other;
+                      return event.target.checked
+                        ? {
+                            ...rest,
+                            ...(other.id === row.id ? { preparesWorktrees: true as const } : {}),
+                          }
+                        : other.id === row.id
+                          ? rest
+                          : other;
+                    }),
+                  )
+                }
+              />
+              <span>
+                I reviewed this command and folder; prepare new worktrees automatically with task
+                access. Secrets and the parent environment are not copied.
+              </span>
+            </label>
+          )}
         </div>
       ))}
       {changed && draft === undefined ? (

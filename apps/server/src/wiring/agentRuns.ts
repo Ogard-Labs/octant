@@ -727,6 +727,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           repositoryRoot: code.repositoryRoot,
           parentCheckoutRoot: code.parentCheckoutRoot,
           worktreeRoot: workspace.worktreeRoot,
+          executionPolicy: run.authority.executionPolicy,
           signal,
         });
       },

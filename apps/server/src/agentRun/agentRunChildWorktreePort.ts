@@ -9,6 +9,7 @@ import {
   type AgentRunWorkspaceReceipt,
   type CodeCheckoutIdentity,
   type CodeThreadId,
+  type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type {
@@ -166,6 +167,14 @@ function toPrepared(receipt: ManagedWorktreeReceipt): AgentRunChildWorktreePrepa
  * parent checkout. Confirmation re-checks isolation before admission.
  */
 export function createAgentRunChildWorktreePort(input: {
+  readonly prepareForExecution?: (
+    receipt: ManagedWorktreeReceipt,
+    request: {
+      readonly parentThreadId: string;
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly signal: AbortSignal;
+    },
+  ) => Promise<string | undefined>;
   readonly service: ManagedWorktreeService;
   readonly repository: ManagedWorktreeRepositoryPort;
   readonly observeExecutionIdentity: (
@@ -183,6 +192,13 @@ export function createAgentRunChildWorktreePort(input: {
     readonly refIntent: string;
   }) => Promise<ManagedWorktreeReceipt | undefined>;
 }): AgentRunChildWorktreePort & {
+  readonly preparationReceipt: (input: {
+    readonly parentThreadId: string;
+    readonly requestId: string;
+    readonly repositoryId: string;
+    readonly repositoryRoot: string;
+    readonly parentCheckoutRoot: string;
+  }) => Promise<ManagedWorktreeReceipt | undefined>;
   readonly verifyExecution: (request: {
     readonly requestId: string;
     readonly parentThreadId: string;
@@ -191,6 +207,7 @@ export function createAgentRunChildWorktreePort(input: {
     readonly parentCheckoutRoot: string;
     readonly worktreeRoot: string;
     readonly signal: AbortSignal;
+    readonly executionPolicy?: ProviderExecutionPolicy;
   }) => Promise<
     | { readonly status: "verified"; readonly identity: string }
     | { readonly status: "refused"; readonly reason: string }
@@ -222,6 +239,24 @@ export function createAgentRunChildWorktreePort(input: {
     );
   }
   return {
+    preparationReceipt: async (request) => {
+      const childThreadId = deriveAgentRunChildWorktreeThreadId(
+        request.parentThreadId,
+        request.requestId,
+      );
+      const receipt = await input.findActive(
+        agentRunChildWorktreeLookup({
+          repositoryId: request.repositoryId,
+          repositoryRoot: request.repositoryRoot,
+          childThreadId,
+        }),
+      );
+      return receipt?.state === "ready" &&
+        isolated(receipt, request.parentCheckoutRoot) &&
+        (await available(receipt))
+        ? receipt
+        : undefined;
+    },
     verifyExecution: async (request) => {
       const refused = {
         status: "refused",
@@ -282,6 +317,19 @@ export function createAgentRunChildWorktreePort(input: {
           request.signal.aborted
         )
           return refused;
+        if (receipt.setupRecipe !== undefined) {
+          if (request.executionPolicy === undefined || input.prepareForExecution === undefined)
+            return {
+              status: "refused",
+              reason: "Worktree setup is unavailable before this child starts.",
+            };
+          const refusal = await input.prepareForExecution(receipt, {
+            parentThreadId: request.parentThreadId,
+            executionPolicy: request.executionPolicy,
+            signal: request.signal,
+          });
+          if (refusal !== undefined) return { status: "refused", reason: refusal };
+        }
         return {
           status: "verified",
           identity: createHash("sha256")

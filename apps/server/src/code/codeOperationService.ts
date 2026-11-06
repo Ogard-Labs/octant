@@ -1134,6 +1134,11 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  readonly prepareWorktree?: (
+    thread: CodeThread,
+    root: string,
+    current: () => boolean,
+  ) => Promise<string | undefined>;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -5504,6 +5509,13 @@ export class CodeOperationService {
     rootIdentity?: { readonly device: string; readonly inode: string },
     routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
+    const preparationRefusal = await this.#options.prepareWorktree?.(
+      thread,
+      checkoutRoot,
+      () => admissionCurrent?.() !== false,
+    );
+    if (preparationRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", preparationRefusal, "refused");
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(

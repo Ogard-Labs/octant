@@ -631,3 +631,17 @@ Select text in one of the agent's replies and choose **New thread from
 selection**, from the small button under the reply or the right-click menu. A
 new Code draft opens in the same Project with your selection quoted at the top.
 Nothing is sent until you send it.
+
+### Preparing a new worktree
+
+In the Project overview's Actions list, write a setup command and a folder
+relative to each new worktree. Check the review statement on that action and
+save to enable it for future worktrees. Only one action can prepare worktrees.
+
+**Worktree setup** in the task header shows the recorded recipe and its result;
+choose a child checkout there to inspect its preparation. The first agent task
+waits for setup. You can Cancel a running setup, explicitly Retry a failed or
+interrupted one, or Skip it. Plan cannot run setup. A host restart never repeats
+a potentially non-idempotent recipe automatically. Output is retained only for
+the current host session. Setup uses task access and does not copy secret files
+or the parent environment.

@@ -368,6 +368,8 @@ export function changeWorkProjectActions(
   if (project.type !== "work") {
     reject("binding-not-allowed", "Only Work Projects take Work Project actions");
   }
+  if (actions.some((action) => action.preparesWorktrees === true))
+    reject("binding-not-allowed", "Work Projects have no worktree preparation recipe");
   if (project.lifecycle === "archived") {
     reject("invalid-lifecycle", "Archived Projects are read-only");
   }

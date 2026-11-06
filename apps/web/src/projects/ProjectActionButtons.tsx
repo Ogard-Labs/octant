@@ -9,6 +9,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 const INLINE_ACTIONS = 3;
 
 export interface ProjectActionButtonsProps {
+  readonly onSetup?: () => void;
   readonly actions: ReadonlyArray<ProjectAction>;
   /** The Project's main folder and its extra folders; a choice is offered only with an extra one. */
   readonly mainFolder?: string;
@@ -47,7 +48,7 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
       : "";
   const run = (action: ProjectAction) =>
     folder === "" ? props.onRun(action) : props.onRun(action, folder);
-  if (host === null || props.actions.length === 0) return null;
+  if (host === null || (props.actions.length === 0 && props.onSetup === undefined)) return null;
   const inline = props.actions.slice(0, INLINE_ACTIONS);
   const rest = props.actions.slice(INLINE_ACTIONS);
   return createPortal(
@@ -56,6 +57,11 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
       className="project-action-buttons window-no-drag"
       role="group"
     >
+      {props.onSetup === undefined ? null : (
+        <OctantButton onClick={props.onSetup} size="sm" type="button" variant="ghost">
+          Worktree setup
+        </OctantButton>
+      )}
       {inline.map((action) => (
         <OctantButton
           key={String(action.id)}

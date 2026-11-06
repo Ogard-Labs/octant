@@ -1,3 +1,7 @@
+import {
+  WorktreePreparationDialog,
+  type PreparationTarget,
+} from "./projects/WorktreePreparationDialog";
 import type { CodeReviewFileRequest } from "./code/codeReviewNavigation";
 import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
 import { autoReviewFor } from "./code/autoReview";
@@ -6780,6 +6784,7 @@ function LaunchedShell(
     return undefined;
   }
 
+  const [preparationTarget, setPreparationTarget] = useState<PreparationTarget>();
   const [projectActionRun, setProjectActionRun] = useState<{
     readonly target: ProjectActionTarget;
     readonly open: boolean;
@@ -7640,9 +7645,38 @@ function LaunchedShell(
                 />
               )}
 
+              {preparationTarget === undefined ? null : (
+                <WorktreePreparationDialog
+                  key={JSON.stringify(preparationTarget)}
+                  client={projectTerminalClient}
+                  children={agentRunClient}
+                  target={preparationTarget}
+                  onClose={() => setPreparationTarget(undefined)}
+                />
+              )}
               {actionsProject === undefined ? null : (
                 <ProjectActionButtons
                   actions={activeProjectActions}
+                  {...(activeMode === "code" &&
+                  activeCodeThreadView !== undefined &&
+                  activeCodeThreadView.checkout.kind !== "remote-root" &&
+                  String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                    ? {
+                        onSetup: () => {
+                          const view = activeCodeThreadView;
+                          setPreparationTarget({
+                            projectId: actionsProject.id,
+                            thread: {
+                              threadId: view.thread.id,
+                              checkoutId: view.checkout.id,
+                              ...(view.checkout.head.kind === "none"
+                                ? {}
+                                : { head: view.checkout.head.oid }),
+                            },
+                          });
+                        },
+                      }
+                    : {})}
                   {...(activeMode === "code" &&
                   activeCodeThreadView !== undefined &&
                   String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)

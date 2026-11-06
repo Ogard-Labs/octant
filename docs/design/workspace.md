@@ -1194,3 +1194,10 @@ tool returns the decoded response to the model. This keeps the existing
 authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
+
+A Code task's **Worktree setup** header control opens preparation status beside
+that task, including a selector for its child checkouts. It shows the reviewed
+command and relative folder, bounded output, exit result, Retry, Cancel and
+explicit Skip. The Project overview's Actions list lets the person review and
+designate one automatic worktree setup recipe. See the owning
+[worktree setup rule](../architecture.md#security-and-authority).

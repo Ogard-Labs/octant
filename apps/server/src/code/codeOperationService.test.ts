@@ -2289,6 +2289,17 @@ describe("CodeOperationService", () => {
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
   });
 
+  it("does not start a provider while required worktree preparation is refused", async () => {
+    const prepareWorktree = vi.fn(async () => "Worktree setup failed. Retry or Skip setup first.");
+    const fixture = providerTurnFixture({ prepareWorktree });
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { message: "Worktree setup failed. Retry or Skip setup first." },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(prepareWorktree).toHaveBeenCalledOnce();
+  });
+
   it("refuses a Code follow-up when its Project provider policy no longer accepts it", async () => {
     const fixture = providerTurnFixture({ isProviderModelAllowed: () => false });
 
@@ -3373,6 +3384,7 @@ function providerTurnFixture(
   options: Partial<
     Pick<
       CodeOperationServiceOptions,
+      | "prepareWorktree"
       | "resolveSideChatReturns"
       | "resolveThreadMentionContext"
       | "resolveProfileSkills"

@@ -317,6 +317,7 @@ export const ProjectAction = Schema.Struct({
     ),
   ),
   directory: ProjectActionDirectory,
+  preparesWorktrees: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ProjectAction = typeof ProjectAction.Type;
 
@@ -324,6 +325,7 @@ export const ProjectActions = Schema.Array(ProjectAction).pipe(
   Schema.filter(
     (actions) =>
       actions.length <= MAX_PROJECT_ACTIONS &&
+      actions.filter((action) => action.preparesWorktrees === true).length <= 1 &&
       new Set(actions.map((action) => String(action.id))).size === actions.length &&
       new Set(actions.map((action) => action.name.toLowerCase())).size === actions.length,
   ),

@@ -1729,6 +1729,15 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority]
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project actions](../architecture.md#security-and-authority).
 
+### Worktree setup
+
+- A Code Project can mark one reviewed saved action as its optional preparation recipe. New managed worktrees record that recipe separately from Git readiness.
+- The first task waits for setup or the person's explicit Skip. Setup uses admitted task access and the existing confined process lifecycle, with bounded output, a ten minute timeout, cancellation and no parent environment or secret copying. Plan refuses execution.
+- Failure needs an explicit Retry or Skip. Host restart reconciles owned processes and exposes interruption without replay; uncertain cleanup refuses a new execution.
+- Worktree setup stays beside the task and can inspect its child checkouts. Existing worktrees keep their recorded recipe when Project actions change.
+
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Worktree setup](../architecture.md#security-and-authority).
+
 ## Remote access and pairing
 
 ### Remote clients

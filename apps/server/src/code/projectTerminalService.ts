@@ -38,6 +38,7 @@ import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
 import { defaultTerminalShell } from "./terminalShell";
+import type { WorktreePreparationService } from "./worktreePreparationService";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -54,6 +55,8 @@ export const PROJECT_TERMINAL_AGGREGATE = "project-terminal";
 export type ProjectTerminalCaller = "local-window" | "remote-device";
 
 interface ActionCheckout {
+  readonly receiptId?: string;
+  readonly preparationThread?: { readonly threadId: string; readonly checkoutId: string };
   readonly root: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly branch?: string;
@@ -66,6 +69,7 @@ type ActionReceipt = NonNullable<
 >;
 
 export interface ProjectTerminalServiceOptions {
+  readonly worktreePreparation?: WorktreePreparationService;
   readonly resolveActionCheckout?: (
     windowId: WindowId,
     projectId: ProjectId,
@@ -74,6 +78,7 @@ export interface ProjectTerminalServiceOptions {
       readonly checkoutId: CodeCheckoutId;
       readonly head?: string | undefined;
     },
+    childRequestId?: string,
   ) => Promise<ActionCheckout | undefined>;
 
   readonly terminals: Pick<
@@ -204,6 +209,7 @@ export class ProjectTerminalService {
     if (command.kind === "start") return this.#start(windowId, command);
     if (command.kind === "preview-action") return this.#previewAction(windowId, command);
     if (command.kind === "start-action") return this.#startAction(windowId, command);
+    if (command.kind === "worktree-preparation") return this.#preparation(windowId, command);
     if (command.kind === "suggest-actions") return this.#suggest(windowId, command.projectId);
 
     const owner = this.#owners.get(String(command.terminalId));
@@ -255,6 +261,43 @@ export class ProjectTerminalService {
       }
     } catch {
       return refused("unavailable", "This terminal is no longer running.");
+    }
+  }
+
+  async #preparation(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "worktree-preparation" }>,
+  ): Promise<ProjectTerminalResult> {
+    const authority = this.#authority(windowId, command.projectId);
+    if (authority.kind !== "allowed")
+      return refused("unauthorized", "Worktree setup requires this Project's local window.");
+    const service = this.#options.worktreePreparation;
+    const checkout = await this.#options
+      .resolveActionCheckout?.(windowId, command.projectId, command.thread, command.childRequestId)
+      .catch(() => undefined);
+    if (service === undefined || checkout?.receiptId === undefined || !checkout.current())
+      return refused("unavailable", "This checkout has no available managed preparation.");
+    const context = await service.context({
+      receiptId: checkout.receiptId,
+      root: checkout.root,
+      executionPolicy: checkout.executionPolicy,
+      current: checkout.active ?? checkout.current,
+      threadId: checkout.preparationThread?.threadId ?? String(command.thread.threadId),
+      checkoutId: checkout.preparationThread?.checkoutId ?? String(command.thread.checkoutId),
+      projectId: String(command.projectId),
+    });
+    if (context === undefined)
+      return refused("authority-revoked", "Worktree preparation ownership changed.");
+    try {
+      return decodeProjectTerminalResult({
+        kind: "worktree-preparation",
+        ...(await service.command(context, command.action)),
+      });
+    } catch {
+      return refused(
+        "unavailable",
+        "Setup cannot perform that action. Cancel a running preparation first; retry needs the reviewed recipe, write access, and confirmed process cleanup.",
+      );
     }
   }
 
