@@ -1,3 +1,4 @@
+import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import {
   OWNER_BROWSER_AUDIT_EVENT,
   OwnerBrowserAuditRecord,
@@ -485,6 +486,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
+    .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)

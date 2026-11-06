@@ -158,18 +158,22 @@ export function InboxView(props: InboxViewProps) {
 
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
   const decisions = props.decisions;
-  const { rows: requestRows, answer } = usePendingRequestRows(decisions);
-  // Decisions finished turns asked, subagents waiting on the person, and the
-  // agent's own approvals and Work questions are the requests the Inbox lists
-  // from this read; its other approvals and questions come from thread
-  // attention signals.
+  const { rows: requestRows, answer, defer } = usePendingRequestRows(decisions);
+  // Questions use their exact pending request so attention deferral does not
+  // hide an execution approval or create a duplicate thread attention row.
   const decisionRows = (requestRows ?? []).filter(
-    (entry) => entry.request.kind === "decision" || isFindOnlyPendingRequest(entry.request),
+    (entry) =>
+      entry.request.kind === "question" ||
+      entry.request.kind === "decision" ||
+      isFindOnlyPendingRequest(entry.request),
   );
   // A thread whose agent waits on its own approval or question is listed once,
   // as that request, rather than again as the thread's attention signal for it.
   const approving = threadsWith(decisionRows, isLeadApprovalPendingRequest);
-  const asking = threadsWith(decisionRows, isLeadQuestionPendingRequest);
+  const asking = threadsWith(
+    decisionRows,
+    (request) => request.kind === "question" || isLeadQuestionPendingRequest(request),
+  );
   const attentionItems = props.attentionItems.filter(
     (item) =>
       !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)) &&
@@ -205,6 +209,7 @@ export function InboxView(props: InboxViewProps) {
             {decisionRows.map(({ request, unlisted }) => (
               <li className="surface-row" key={pendingRequestKey(request)}>
                 <PendingRequestRow
+                  onDefer={defer}
                   now={decisions.now}
                   onAnswer={answer}
                   onOpenThread={decisions.onOpenThread}

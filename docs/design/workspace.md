@@ -283,6 +283,23 @@ means the host's. The choice is independent of the durable resume opt-in —
 hiding authorizes no provider turn, and a dispatched recovery lifts only the
 snooze the host set, never one the person set.
 
+### Deferring a pending question
+
+Home, Inbox and Review let a person defer an answerable Chat, Work or Code
+question using the existing future-time presets. The condensed row stays in
+the attention list and its count, after active requests, with **Bring back now**
+and a link to the thread. The shell clock restores its answers when the time
+arrives. Thread visibility, the original questionnaire and draft answers do not
+change. Deferring never answers a question, grants approval or resumes a turn.
+
+The local host rechecks window access and the current pending request before
+journaling an opaque request key and wake time. The key binds the exact request,
+choices and authority context; a changed, answered or cancelled request does
+not transfer its deferral to another question. Preferences replay after restart
+and invalidate navigation reads in other windows. Execution approvals, decisions
+and find-only lead/subagent questions cannot be deferred. Find-only questions
+need a stable answer identity before this control can apply to them.
+
 ## Panes and content navigation
 
 The central workspace is one persistent recursive
