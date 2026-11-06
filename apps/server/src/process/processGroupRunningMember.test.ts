@@ -1,31 +1,46 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { processGroupHasRunningMember } from "./processGroupRunningMember";
+import {
+  processGroupHasRunningMember,
+  type ProcessGroupObservation,
+} from "./processGroupRunningMember";
 
 const parents: ChildProcess[] = [];
-const procRoots: string[] = [];
 
 afterEach(() => {
   for (const parent of parents.splice(0)) parent.kill("SIGKILL");
-  for (const root of procRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** Writes a `/proc` tree holding one process with the given thread states. */
-function procWithThreads(pid: number, threadStates: ReadonlyArray<string>): string {
-  const root = mkdtempSync(join(tmpdir(), "octant-proc-"));
-  procRoots.push(root);
-  const stat = (id: number, state: string) => `${id} (worker (main)) ${state} 1 ${pid} ${pid} 0\n`;
-  mkdirSync(join(root, String(pid)));
-  writeFileSync(join(root, String(pid), "stat"), stat(pid, threadStates[0] ?? "Z"));
-  threadStates.forEach((state, index) => {
-    const thread = join(root, String(pid), "task", String(pid + index));
-    mkdirSync(thread, { recursive: true });
-    writeFileSync(join(thread, "stat"), stat(pid + index, state));
-  });
-  return root;
+const statLine = (pid: number, state: string, pgid: number) =>
+  `${pid} (worker (main)) ${state} 1 ${pgid} ${pgid} 0\n`;
+
+/**
+ * A `/proc` that answers each listing of `/proc` with the next of `listings`
+ * (repeating the last), so a test can place a fork between two reads.
+ */
+function fakeProc(
+  listings: ReadonlyArray<ReadonlyArray<string>>,
+  files: Readonly<Record<string, string>>,
+): ProcessGroupObservation {
+  let listing = 0;
+  return {
+    readdir: async (path) => {
+      if (path === "/proc") return listings[Math.min(listing++, listings.length - 1)] ?? [];
+      const prefix = `${path}/`;
+      const children = Object.keys(files)
+        .filter((file) => file.startsWith(prefix))
+        .map((file) => file.slice(prefix.length).split("/")[0] ?? "");
+      if (children.length === 0) throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      return [...new Set(children)];
+    },
+    readFile: async (path) => {
+      const content = files[path];
+      if (content === undefined) throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      return content;
+    },
+    groupExists: () => true,
+  };
 }
 
 /**
@@ -71,12 +86,26 @@ describe.skipIf(process.platform !== "linux")("process group running member", ()
   it("reports a group as running while a thread outlives its process's exited main thread", async () => {
     // After `pthread_exit()` on the main thread, the process reads as a zombie
     // and only its task list shows the worker thread still running.
-    await expect(
-      processGroupHasRunningMember(4242, procWithThreads(4242, ["Z", "S"])),
-    ).resolves.toBe(true);
-    await expect(
-      processGroupHasRunningMember(4242, procWithThreads(4242, ["Z", "Z"])),
-    ).resolves.toBe(false);
+    const process42 = (workerState: string) =>
+      fakeProc([["42"]], {
+        "/proc/42/stat": statLine(42, "Z", 42),
+        "/proc/42/task/42/stat": statLine(42, "Z", 42),
+        "/proc/42/task/43/stat": statLine(43, workerState, 42),
+      });
+    await expect(processGroupHasRunningMember(42, process42("S"))).resolves.toBe(true);
+    await expect(processGroupHasRunningMember(42, process42("Z"))).resolves.toBe(false);
+  });
+
+  it("reports a group as running when a member forks a live child and exits during a scan", async () => {
+    // The listing was taken before 42 forked 43; 42 had exited by the time its
+    // entry was read, so the first pass sees only its zombie.
+    const observation = fakeProc([["42"], ["42", "43"]], {
+      "/proc/42/stat": statLine(42, "Z", 42),
+      "/proc/42/task/42/stat": statLine(42, "Z", 42),
+      "/proc/43/stat": statLine(43, "S", 42),
+      "/proc/43/task/43/stat": statLine(43, "S", 42),
+    });
+    await expect(processGroupHasRunningMember(42, observation)).resolves.toBe(true);
   });
 
   it("reports a group with a member that can still run as running", async () => {

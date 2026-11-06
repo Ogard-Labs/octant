@@ -1,5 +1,30 @@
 import { readdir, readFile } from "node:fs/promises";
 
+/**
+ * What the group check reads from the host. Paths are absolute `/proc` paths.
+ * A test supplies its own to present process and thread states, and the
+ * moments between reads, that the kernel cannot be made to produce on demand.
+ */
+export interface ProcessGroupObservation {
+  readonly readdir: (path: string) => Promise<ReadonlyArray<string>>;
+  readonly readFile: (path: string) => Promise<string>;
+  /** Whether a signal probe of the group still reaches any member. */
+  readonly groupExists: (pgid: number) => boolean;
+}
+
+const hostObservation: ProcessGroupObservation = {
+  readdir: (path) => readdir(path),
+  readFile: (path) => readFile(path, "utf8"),
+  groupExists: (pgid) => {
+    try {
+      process.kill(-pgid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+  },
+};
+
 type StatRead =
   | { readonly status: "read"; readonly state: string; readonly group: string }
   | { readonly status: "gone" }
@@ -10,10 +35,10 @@ type StatRead =
  * is parenthesised and may itself contain spaces or parentheses, so the fields
  * are read after the last ")".
  */
-async function readStat(path: string): Promise<StatRead> {
+async function readStat(observation: ProcessGroupObservation, path: string): Promise<StatRead> {
   let processStat: string;
   try {
-    processStat = await readFile(path, "utf8");
+    processStat = await observation.readFile(path);
   } catch (error) {
     // The process or thread was reaped between listing and reading its entry.
     const code = (error as NodeJS.ErrnoException).code;
@@ -41,21 +66,55 @@ function exited(state: string): boolean {
  * `pthread_exit()`, `/proc/<pid>/stat` reports `Z` while its other threads keep
  * executing, and listing `/proc` visits only each process's main thread.
  */
-async function zombieLeaderHasRunningThread(procRoot: string, pid: string): Promise<boolean> {
+async function zombieLeaderHasRunningThread(
+  observation: ProcessGroupObservation,
+  pid: string,
+): Promise<boolean> {
   let threads: ReadonlyArray<string>;
   try {
-    threads = await readdir(`${procRoot}/${pid}/task`);
+    threads = await observation.readdir(`/proc/${pid}/task`);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     return !(code === "ENOENT" || code === "ESRCH");
   }
   for (const thread of threads) {
     if (!/^[1-9]\d*$/.test(thread)) continue;
-    const stat = await readStat(`${procRoot}/${pid}/task/${thread}/stat`);
+    const stat = await readStat(observation, `/proc/${pid}/task/${thread}/stat`);
     if (stat.status === "unreadable") return true;
     if (stat.status === "read" && !exited(stat.state)) return true;
   }
   return false;
+}
+
+type GroupScan =
+  | { readonly status: "running" }
+  | { readonly status: "exited"; readonly members: ReadonlyArray<string> };
+
+/**
+ * One pass over `/proc`. It reports the group exited only when every member
+ * it found is a zombie with no running thread, and it found at least one: a
+ * group the signal probe reaches but `/proc` does not list (a `/proc` from
+ * another PID namespace) is unobserved, not gone.
+ */
+async function scanGroup(observation: ProcessGroupObservation, pgid: number): Promise<GroupScan> {
+  let entries: ReadonlyArray<string>;
+  try {
+    entries = await observation.readdir("/proc");
+  } catch {
+    return { status: "running" };
+  }
+  const group = String(pgid);
+  const members: string[] = [];
+  for (const entry of entries) {
+    if (!/^[1-9]\d*$/.test(entry)) continue;
+    const stat = await readStat(observation, `/proc/${entry}/stat`);
+    if (stat.status === "unreadable") return { status: "running" };
+    if (stat.status === "gone" || stat.group !== group) continue;
+    if (!exited(stat.state)) return { status: "running" };
+    if (await zombieLeaderHasRunningThread(observation, entry)) return { status: "running" };
+    members.push(entry);
+  }
+  return members.length === 0 ? { status: "running" } : { status: "exited", members };
 }
 
 /**
@@ -68,35 +127,29 @@ async function zombieLeaderHasRunningThread(procRoot: string, pid: string): Prom
  * than any termination deadline, so the group read as alive after SIGKILL and
  * cleanup failed although nothing in it could run.
  *
+ * One scan is not enough to say no member runs: a member can fork after the
+ * `/proc` listing is taken and exit before its own entry is read, so the scan
+ * sees only its zombie and never the live child. The group counts as exited
+ * only when a second scan, taken after the signal probe still reaches the
+ * group, finds exactly the same zombie members; a child forked during the
+ * first scan carries the group's id and appears in the second.
+ *
  * Only Linux exposes per-process state cheaply, through `/proc`. Elsewhere,
  * and whenever `/proc` cannot be read or does not list the group, it is
  * reported as running so a caller never treats an unobserved group as gone.
- * `procRoot` lets a test present thread states without compiling a native
- * fixture.
  */
 export async function processGroupHasRunningMember(
   pgid: number,
-  procRoot = "/proc",
+  observation: ProcessGroupObservation = hostObservation,
 ): Promise<boolean> {
   if (process.platform !== "linux") return true;
-  let entries: ReadonlyArray<string>;
-  try {
-    entries = await readdir(procRoot);
-  } catch {
-    return true;
-  }
-  const group = String(pgid);
-  let observedMember = false;
-  for (const entry of entries) {
-    if (!/^[1-9]\d*$/.test(entry)) continue;
-    const stat = await readStat(`${procRoot}/${entry}/stat`);
-    if (stat.status === "unreadable") return true;
-    if (stat.status === "gone" || stat.group !== group) continue;
-    if (!exited(stat.state)) return true;
-    if (await zombieLeaderHasRunningThread(procRoot, entry)) return true;
-    observedMember = true;
-  }
-  // A group the signal probe found but `/proc` does not list (a `/proc` from
-  // another PID namespace) is unobserved, not gone.
-  return !observedMember;
+  const first = await scanGroup(observation, pgid);
+  if (first.status === "running") return true;
+  if (!observation.groupExists(pgid)) return false;
+  const second = await scanGroup(observation, pgid);
+  if (second.status === "running") return true;
+  const earlier = new Set(first.members);
+  return !(
+    second.members.length === earlier.size && second.members.every((pid) => earlier.has(pid))
+  );
 }

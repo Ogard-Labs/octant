@@ -452,9 +452,14 @@ function makeProcessTerminator(
   let termination: Promise<void> | undefined;
   return () => {
     termination ??= (async () => {
-      if (!(await processGroupRunning(child))) return;
+      // Whether to signal is decided by the signal probe alone. The `/proc`
+      // reading only judges when a signalled group has finished: a group of
+      // zombies takes a signal harmlessly, while a reading that missed a live
+      // member would leave it running.
+      if (!processGroupExists(child)) return;
       signalProcessGroup(child, "SIGTERM");
-      if (await waitForProcessGroupExit(child, shutdownTimeoutMs)) return;
+      await waitForProcessGroupExit(child, shutdownTimeoutMs);
+      if (!processGroupExists(child)) return;
       signalProcessGroup(child, "SIGKILL");
       const forcedShutdownTimeoutMs = Math.min(5_000, Math.max(250, shutdownTimeoutMs * 3));
       if (!(await waitForProcessGroupExit(child, forcedShutdownTimeoutMs))) {
