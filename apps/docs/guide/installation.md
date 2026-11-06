@@ -70,7 +70,7 @@ Produces:
 - `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
 - `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
 
-The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed `<ring>/linux-x64.json` feed, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed feed for its ring, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
 
 It will not update a package or an unpacked archive, and it will not update an image it cannot write. The reason appears in **Settings → General → Updates**. It also will not relaunch while an agent is still working or while Octant cannot confirm what is running — the same rule as on macOS. A provider that is not installed or not signed in, or one you switched off, does not hold the update back, because stopping Octant interrupts nothing for it. A launch that is not the portable image does not contact the update service.
 
@@ -84,6 +84,250 @@ chmod +x out/Octant-*-linux-x64.AppImage
 If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1`. Work/Code still need Bubblewrap and a live Secret Service session on the host (see below).
 
 AppRun preserves Chromium's sandbox and lets Chromium refuse when it cannot establish one. It never adds `--no-sandbox`. A separate `unshare` command is not a reliable prerequisite probe because it has a different AppArmor identity. See [Desktop sandbox prerequisites](./linux-host#desktop-sandbox-prerequisites) for a tested isolated installation and the boundary for administrator-reviewed host profiles.
+
+## Nightly development foundation
+
+On macOS, both packaged desktop apps use a sealed bundled entry and refuse arbitrary
+script paths, runtime loader options and remote-debugging flags. Their terminal
+Browser command, `octant mcp`, accepts only its existing MCP/help commands.
+Stable runs its fixed scoped CLI script through a separately identified bundled
+Node runtime, preserving Code confinement without GUI-service permissions.
+Octant's host and approved executable tools use that same separate runtime.
+Nightly's full `octant-nightly` command runs with that runtime too (see
+[below](#the-octant-nightly-command)).
+
+Nightly's separate application identity and packaging foundation are available
+for development. On macOS, ordinary Nightly
+startup first authenticates a status check with a compatible signed Octant in
+the same login session. Development/ad-hoc builds refuse this connection; a
+missing response can mean Octant is closed or too old. If it is closed, Nightly
+can start the installed compatible signed Octant without opening an Octant
+window, then authenticate it again. An older installation that lacks this launch
+capability refuses. Nightly reports a missing installation and, on Octant's
+data, never starts its own host. A successful status check
+is followed by separate authenticated window registration. A compatible host
+issues only that window's short-lived capability; Nightly loads its own screens
+without owning host data or credentials. If renewal fails, its old renderer
+closes and Nightly tries fresh authenticated registration for up to 30 seconds.
+Quitting cancels recovery; failure explains why Nightly closed. A recovered window
+keeps its normal bounds, but does not transfer unsaved layout or drafts to its
+new window identity. A connected Browser can display Stable-owned page images and
+forward ordinary pointer, text and keyboard input inside the Nightly window.
+Control-Escape leaves the page; Tab moves among its controls. Nightly’s own
+dropdown, context and local text-editing menus use native macOS menus. These
+local menus act on Nightly itself. An already focused standard text field in the
+Stable-owned page also supports a native editing menu through pointer right-click
+or Shift+F10.
+Its source and lease remain checked while the menu is open; source retirement
+dismisses the menu. Pointer invocation, Select All and Undo have native evidence.
+Keyboard invocation preserves the current field and selection, and menu
+retirement releases held page keys. Live clipboard acceptance remains pending. Text,
+search, address, telephone, email and number fields, textareas and rich text
+editors support native composition with a caret anchored to the Stable-owned
+field, on each line of a multiline field. In an email or number field the input
+window sits at the start of the field. While a password field has focus, Nightly
+turns on macOS secure input: typing still reaches the page, but no input method
+window opens and Nightly never receives the field's contents or selection. All of
+this works the same inside the page's frames, on its own site or another. Full
+IME reconversion is not supported. A page's select lists, link and
+image menus open as native menus in the Nightly window, its alerts, confirmations
+and leave-page questions as sheets, and its file fields as Nightly's own open
+panel, also inside frames; links that would open a new window are refused, as in
+Octant. With VoiceOver on, the page can be read and used in the Nightly window:
+headings, links, buttons, fields, sliders and frames are announced with their
+names, values and states, the VoiceOver cursor follows the page's focus, and
+activating, focusing or adjusting a control acts on the page as your own click
+or key would. A password field is announced by name only, never its contents.
+While an agent is acting on the page, these actions wait for it to finish.
+VoiceOver on a physical Mac has not been checked yet. Nightly is now usable as
+a second client. Each Nightly build is checked before it is published, against
+the newest published Octant among other things, but no Nightly has been
+published yet: the first publication waits for the maintainers' signed checks
+and approval.
+
+Nightly has its own application menu, with **Settings…** (⌘,) and the same
+press-twice ⌘Q as Octant. Sign-in and other web links open in your default
+browser, attention notifications and the Dock badge work, and
+`octant-nightly://` links open in Nightly. Reset window size, the sidebar
+material, window capture for the composer (under Nightly's own Screen Recording
+permission) and saving Browser screenshots also work.
+
+Through Octant, Nightly also chooses Project, plugin and skill folders and a
+runtime binary, saves a support bundle (to a new file only), opens a Code file
+in your editor, a checkout in another app and a preview in Quick Look or
+Finder, and stores provider keys, including several API keys for one
+provider. The keys stay in Octant's credential store. Code approvals appear in
+the same approval panel as in Octant, and only your click on **Allow** there
+approves one. When your Octant is too old to do one of these for Nightly,
+Nightly says "Needs a newer Octant" instead. Opening a Project in a new window
+is not available in Nightly yet.
+
+### The `octant-nightly` command
+
+Octant Nightly carries `octant-nightly`, the Nightly build of the `octant`
+command, so you can try a newer command against your real work without
+replacing `octant`. Put it on your `PATH` once with a link (use `~/.local/bin`
+or another folder on your `PATH` if you prefer):
+
+```sh
+sudo ln -sf "/Applications/Octant Nightly.app/Contents/Resources/command-line/octant-nightly" /usr/local/bin/octant-nightly
+octant-nightly --version
+octant-nightly --help
+```
+
+- It works with the Octant that is running: the same Projects, threads and
+  settings as `octant`. For example, `octant-nightly harness slots` or
+  `octant-nightly project add ~/Code/app --type code`.
+- When Nightly's **Data** is **Separate test data**, it works with Nightly's
+  test host instead (port `13774`).
+- It never starts, stops, installs or upgrades a host. If Octant is not
+  running, it says so: open Octant, or run `octant server start`. With test
+  data, open Octant Nightly. The `server start`, `stop`, `restart`, `enable`,
+  `disable`, `run`, `install`, `upgrade` and `uninstall` commands, `web --dev`,
+  and the hub's service options stay with `octant`.
+- When your Octant is too old for a command, it says "Needs a newer Octant".
+- `octant-nightly agent` uses its line view; the full-screen view needs
+  `octant`.
+- `OCTANT_DATA_DIR` chooses another data folder's host, as for `octant`;
+  `OCTANT_SERVER_PORT` moves the test host's port.
+- The command is available on macOS only.
+
+### Separate test data in Nightly
+
+For development and testing on macOS and Linux, Nightly can run a host of its
+own on data that is never Octant's. In Nightly, open **Settings › Updates** and set **Data**
+to **Separate test data**, then choose **Relaunch Octant Nightly**. The choice
+takes effect on that relaunch.
+
+- Nightly's test data lives in
+  `~/Library/Application Support/Octant Nightly/Test Data`, its host listens on
+  port `13774`, and its log is in `~/Library/Logs/Octant Nightly`. It never
+  reads or changes Octant's data, never connects to Octant's host, and Octant
+  and Nightly can both run.
+- Keys and secrets Octant keeps in the Keychain are kept apart: you enter them
+  again for test data, and they are stored under Nightly's own Keychain names.
+  Provider command-line tools keep their own sign-ins in your home folder
+  (such as `~/.claude` and `~/.codex`), and those are shared with Octant.
+- Work and Code without a Project use `~/Octant Nightly` instead of `~/Octant`.
+- The window shows a **Test data** label beside the Nightly label.
+- To go back, set **Data** to **Octant's data** and relaunch. While Nightly uses
+  Octant's data, **Remove test data** moves the test data folder to the Trash.
+- On Linux the test data lives in `~/.local/share/octant-nightly/test-data`
+  (under `$XDG_DATA_HOME` when you set it) and its log under
+  `~/.local/state/octant-nightly/logs`. Keys go into your keyring as separate
+  items whose `service` starts with `octant-nightly-test-data.`, so they never
+  replace or read Octant's. **Remove test data** also removes those keyring
+  items; if the keyring is locked, nothing is removed and Settings says so.
+
+### Octant Nightly on Linux
+
+Nightly connects to Octant on Linux the same way it does on macOS, with these
+prerequisites:
+
+- Both apps are the packaged AppImages, run by you, directly on your desktop:
+  not inside a container, Flatpak, snap or other sandbox, and not as another
+  user. Nightly checks that Octant runs as the same user in the same session
+  namespaces, and Octant checks Nightly the same way.
+- Linux 5.3 or later.
+- Chromium's sandbox works for both apps. Never start either with
+  `--no-sandbox`: Nightly refuses to connect while its windows run without the
+  sandbox. On Ubuntu 23.10 and later, see
+  [an AppArmor profile for Octant](./linux-host#an-apparmor-profile-for-octant).
+- Open Octant once from its AppImage. Each launch records which image it came
+  from, so Nightly can later start Octant's host in the background. If Octant
+  has never been opened, was moved, or its image was replaced or made writable
+  by others, Nightly says **Open Octant, then try again.**
+
+The check admits any program you run yourself outside a sandbox, which can
+already read Octant's own files. It keeps out programs in a sandbox and other
+users.
+
+An in-app Quit command in Octant closes its workspace windows while a current
+Nightly window still uses its host. The host remains in the background, and
+opening Octant again brings its screens back. When the final Nightly client
+leaves, the host uses its normal active-work confirmation before stopping.
+Cancelling keeps the host running. Signals, logout and update restart keep their
+existing shutdown behavior. A headless launch waits up to 30 seconds after
+host-ready for its first Nightly window, then follows that same guarded quit.
+An already retained current Nightly client receives bounded recovery grace during
+an app-managed host restart. This does not yet prove full signed coexistence or
+reconnect acceptance.
+
+Nightly's update controls follow only the Nightly channel and show no channel
+switch. Its automatic-check choice is saved separately from Octant, and
+changing it does not change Octant's channel. An update relaunch waits while host work is active
+or cannot be confirmed, and closes Nightly's own window resources before asking
+the platform updater to apply it. Failed cleanup or apply leaves a fresh Nightly
+window available; an unconfirmed cleanup requires quitting and reopening Nightly
+before retrying. This client wiring does not establish signed installed-update
+or rollback acceptance.
+
+A local desktop package defaults to Octant. An explicitly selected
+`OCTANT_PACKAGE_FLAVOR=nightly` requires a matching dated preview
+`OCTANT_RELEASE_VERSION` for the repository's existing base version; Octant
+accepts a stable version or a dated candidate one. Packaging
+stamps the flavor, product name, bundle id and link scheme, and selects the
+inverted Nightly icon on macOS and for the Linux desktop launcher. Stable keeps
+its original icon. Nightly keeps its
+window storage under `Octant Nightly`, separate from Octant's shared host data.
+It cannot start or migrate that host data.
+
+Packaged Octant follows the stable ring or, when you choose Preview or Nightly, the
+candidate ring, and refuses a feed signed for preview. The Nightly identity
+follows only preview and refuses stable and candidate feeds. Each signed update
+also names the app it is for, so Octant refuses an Octant Nightly build ("This
+update is for Octant Nightly, not Octant.") and Nightly refuses an Octant
+build, on Linux as on macOS.
+
+If you installed an Octant build from the preview stream before Octant Nightly
+took it over (up to `0.1.0-preview.20261104.71`), that copy is never offered
+Nightly and sees no further update there. Choose Preview in Settings › Updates
+to keep getting new Octant builds. Development runs keep their existing
+behavior. The stable-host connection, full Nightly command, Nightly labels and
+coexistence remain required before Nightly can be offered as a usable download.
+
+Settings › Updates has an update channel switch with Stable, Preview and
+Nightly. Stable is the released build, Preview tests the next release, and
+Nightly adds Octant Nightly, a separate app. Octant itself never follows the
+Nightly stream; Nightly and Preview both keep it on the Preview stream. While
+packaged Octant on macOS is on Nightly, an Octant Nightly row appears below the
+switch. Octant downloads Nightly only when
+you choose Install Octant Nightly. Before placing it beside Octant as
+`Octant Nightly.app`, it checks the Nightly feed's signature, the download's
+hash, and that the app is Octant Nightly signed by Octant's own developer. If
+a check fails, the row says which one and nothing is installed. Octant never
+replaces another app with that name. Once Nightly is installed, the row offers
+Open Octant Nightly and Remove Octant Nightly. Remove moves the app to the
+Trash and leaves your data alone. Installing a newer Nightly over an installed
+one moves the old copy to the Trash. Quit Octant Nightly before you replace or
+remove it; the row asks you to if it is still open. After you switch to Stable or Preview, the row
+stays while Nightly is installed. Octant on Linux does not install Nightly;
+download it from octant.sh instead. The release workflow's scheduled Nightly run
+has an explicit preflight stop until that functional client is implemented and
+verified, and so does a dispatched rollback, which rebuilds a known-good
+Nightly under a newer version because updates only move forward. Its other
+dispatched run builds Octant on the candidate ring and is not held by that stop; stable releases and local packaging have no such stop
+either.
+
+Nightly identifies its local window with a neutral "Nightly" label beside
+"Octant" below the sidebar's native controls. Collapsing the sidebar moves the
+label into the title bar; Settings keeps the same identity visible. The label
+is a local display cue, not permission to access a host or shared data.
+
+## Desktop host shutdown
+
+Closing the last window keeps the desktop-owned host available. Quitting
+Octant uses the existing active-work confirmation; cancelling it keeps the
+host running. Once quit is accepted, queued starts and restarts cannot reopen
+the host. Startup failure and shutdown both attempt all acquired native
+services even if one cleanup step fails, including closing the Computer and
+managed-device listeners after their service cleanup fails. A host started
+independently is left running.
+
+If graceful shutdown stalls, the existing quit deadline still attempts to
+terminate Octant's owned server and tracked managed tools before ending the
+app. Completion of service cleanup alone does not confirm every managed-tool
+process has exited.
 
 ## Data directory
 
@@ -226,26 +470,26 @@ different update service does not lower the bar an update has to clear.
 
 ### Release rings
 
-Octant publishes three streams, and you pick one in
-**Settings → General → Updates**:
+Octant publishes three streams. Octant itself follows one of the first two,
+which you pick in **Settings → General → Updates** (choosing Nightly there keeps
+Octant on Preview and offers the separate Octant Nightly app):
 
 - **Stable** — the released build. This is where a normal install stays.
-- **Preview** — a one-off build produced by hand from a chosen ref, signed
-  and notarized exactly as a nightly is. It has no schedule and no followers:
-  its feed changes only when someone runs that build, so a branch can be
-  update-tested through the real feed path — signature, hash and wrong-ring
-  refusals included — without offering that branch to everyone on Nightly.
+- **Preview** — a pre-release of the next stable version, built by hand from
+  a chosen ref and signed and notarized exactly as a nightly is. It has no
+  schedule: its feed changes only when someone runs that build. The same
+  Octant app follows it; switching is a setting, not a second download.
 - **Nightly** — a scheduled build of whatever has been merged. Newer, less
-  settled, and a separate download.
+  settled, and a separate app, Octant Nightly, which follows only this stream
+  and has no channel switch.
 
 Version numbers still carry the rings' internal names. A Nightly version
 reads like `0.2.0-preview.20260828.4` and a Preview like
 `0.2.0-candidate.20260828.12`. Each sorts _below_ the `0.2.0` it leads to.
-That is what makes the handover work without any special case: a Nightly
-install moves onto stable the day stable catches up, and Octant never offers
-you an older version than the one you are running. So switching from Nightly
-back to Stable leaves you where you are until the next stable release passes
-you.
+That is what makes the handover work without any special case: Octant never
+offers you an older version than the one you are running. So switching from
+Preview back to Stable leaves you where you are until the next stable release
+passes you.
 
 Each ring is its own signed feed, and the ring is inside the signature. A
 preview release published at the stable address is refused, not installed.

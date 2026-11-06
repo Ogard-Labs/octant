@@ -4,6 +4,7 @@ import type { RoutineScheduleFormState } from "./RoutineScheduleFields";
 
 /** The file-trigger variant of the existing routine schedule form. */
 export function RoutineFileArrivalFields(props: {
+  readonly mode?: "work" | "code";
   readonly trigger: RoutineScheduleFormState;
   readonly onChange: (
     update: (previous: RoutineScheduleFormState) => RoutineScheduleFormState,
@@ -107,9 +108,17 @@ export function RoutineFileArrivalFields(props: {
       >
         <h4>Before enabling</h4>
         <p>
-          Set up and re-arm from a window on this host. Runs the fixed task in a new Work thread,
-          under the Project, profile, level and delivery you choose here.
+          Set up and re-arm from a window on this host. Runs the fixed task in a new{" "}
+          {props.mode === "code" ? "Code" : "Work"} thread, under the Project, profile, level and
+          delivery you choose here.
         </p>
+        {props.mode === "code" ? (
+          <p>
+            The exact observed inputs are copied into the run's own checkout. Changed or missing
+            source bytes stop admission. Existing different files are never overwritten. Review
+            copied inputs before committing or pushing.
+          </p>
+        ) : null}
         <ul>
           <li>The first complete scan is a baseline; existing files do not start a run.</li>
           <li>

@@ -645,6 +645,23 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
+.application-identity {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: calc(12 * var(--oct-text-step));
+  white-space: nowrap;
+}
+
+.sidebar__application-identity {
+  display: flex;
+  flex: 0 0 var(--oct-space-6);
+  align-items: center;
+  padding: 0 var(--oct-space-3);
+}
+
 .sidebar__native-leading {
   display: flex;
   min-width: 0;
@@ -4267,7 +4284,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* Proposal titles sit below the section's own heading, so they never outrank it. */
-.code-project-planner__proposals h3 {
+.code-project-planner__proposals h3,
+.code-project-planner__review h3 {
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -4284,6 +4302,22 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   width: min(760px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
   overflow: auto;
+}
+
+/* The review reuses the start screen's composer, but it is a decision inside a
+   dialog: the composer fills the dialog's measure, and the decision heading
+   sits at its top edge, aligned with the text under it, instead of floating
+   centred in a start screen's open space. */
+.code-project-planner__review .welcome {
+  width: 100%;
+  min-height: 0;
+  padding-block: 0;
+}
+
+.code-project-planner__review .welcome__heading {
+  flex: 0 0 auto;
+  justify-items: start;
+  text-align: start;
 }
 
 .code-project-planner__review h2 {

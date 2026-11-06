@@ -1,3 +1,14 @@
+import {
+  decodeBrowserCredentialGrant,
+  decodeBrowserCredentialResult,
+  decodeBrowserCredentialMetadata,
+} from "@octant/contracts/browser-credential-use";
+import { CommandCredentialBindings } from "./commandCredentialBindings";
+import {
+  decodeCommandCredentialDefinition,
+  decodeCommandCredentialHostRequest,
+} from "@octant/contracts/command-credentials";
+import { readCommandCredentialHistory } from "./secretStoresJournal";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -221,6 +232,8 @@ async function host(
   };
   return {
     tool,
+    journal,
+    commandJournal: real,
     directory,
     instances,
     store,
@@ -232,6 +245,7 @@ async function host(
     journalNames,
     reprobes,
     connectorServers,
+    records: real,
   };
 }
 
@@ -262,6 +276,129 @@ const fakeSts = Object.assign(
 );
 
 describe("the AWS command line through a linked store", () => {
+  it("journals Browser permission references and refuses secret values during decoding", async () => {
+    const h = await host();
+    const grant = decodeBrowserCredentialGrant({
+      kind: "browser-credential-grant",
+      grantId: "00000000-0000-4000-8000-000000000010",
+      hostSessionId: "00000000-0000-4000-8000-000000000011",
+      metadata: {
+        item: {
+          store: "onepassword",
+          accountId: "a".repeat(26),
+          vaultId: "v".repeat(26),
+          itemId: "i".repeat(26),
+        },
+        title: "Fixture login",
+        version: 1,
+        websiteOrigins: ["https://login.example"],
+        storeRevision: "fixture-link",
+      },
+      target: {
+        contextId: "00000000-0000-4000-8000-000000000012",
+        threadId: "00000000-0000-4000-8000-000000000013",
+        mode: "code",
+        projectId: "00000000-0000-4000-8000-000000000014",
+        profile: { kind: "private" },
+        topOrigin: "https://login.example",
+        frame: { kind: "top", origin: "https://login.example" },
+      },
+      scope: {
+        kind: "task",
+        projectId: "00000000-0000-4000-8000-000000000014",
+        threadId: "00000000-0000-4000-8000-000000000013",
+        contextId: "00000000-0000-4000-8000-000000000012",
+      },
+      createdAt: "2026-11-03T10:00:00.000Z",
+      expiresAt: "2026-11-03T18:00:00.000Z",
+    });
+    h.records.record({ name: "browser-credential.granted", grant, windowId: WINDOW });
+    h.records.record({
+      name: "browser-credential.revoked",
+      grantId: grant.grantId,
+      reason: "changed",
+    });
+    const outcome = decodeBrowserCredentialResult({
+      kind: "browser-credential-fill-outcome",
+      planId: "00000000-0000-4000-8000-000000000015",
+      status: "filled",
+      effect: "completed",
+      message: "Fields filled; sign-in not confirmed.",
+    });
+    if (outcome.kind !== "browser-credential-fill-outcome")
+      throw new Error("Expected effect receipt");
+    const recorded = {
+      name: "browser-credential.fill-recorded" as const,
+      grantId: grant.grantId,
+      planId: outcome.planId,
+      windowId: WINDOW,
+      status: outcome.status,
+      effect: outcome.effect,
+    };
+    h.records.record(recorded);
+    expect(h.journalNames()).toEqual([
+      "browser-credential.granted",
+      "browser-credential.revoked",
+      "browser-credential.fill-recorded",
+    ]);
+    expect(h.journalText()).toContain(grant.metadata.item.accountId);
+
+    const registry = createPhase1RuntimeRegistries().events;
+    expect(registry.decodePersisted("secret-store.recorded@1", 1, recorded)).toEqual(recorded);
+    expect(() =>
+      registry.decodePersisted("secret-store.recorded@1", 1, {
+        ...recorded,
+        password: "fixture-secret",
+      }),
+    ).toThrow();
+    expect(
+      registry.decodePersisted("secret-store.recorded@1", 1, {
+        name: "browser-credential.granted",
+        grant,
+        windowId: WINDOW,
+      }),
+    ).toMatchObject({
+      name: "browser-credential.granted",
+      grant: { kind: "browser-credential-grant" },
+    });
+    expect(() =>
+      registry.decodePersisted("secret-store.recorded@1", 1, {
+        name: "browser-credential.granted",
+        grant: { ...grant, password: "fixture-secret" },
+        windowId: WINDOW,
+      }),
+    ).toThrow();
+  });
+
+  it("bounds selected-item broker metadata and refuses mismatched or secret-bearing answers", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const metadata = decodeBrowserCredentialMetadata({
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+      storeRevision: "link",
+    });
+    const answer = { status: "described", ...metadata };
+    for (const response of [
+      Response.json({ ...answer, item: { ...item, accountId: "b".repeat(26) } }),
+      Response.json({ ...answer, password: "fixture" }),
+      Response.json({ ...answer, title: "x".repeat(33 * 1024) }),
+    ]) {
+      const client = makeSecretStoreBrokerClient({
+        url: "http://127.0.0.1:12345",
+        token: "fixture",
+        fetch: async () => response,
+      });
+      expect((await client.browserMetadata?.(metadata.item))?.status).not.toBe("described");
+    }
+  });
+
   it("points at two items, journals both halves as one change, and gives a command only a session", async () => {
     const h = await host();
     await h.service.linkStore(WINDOW, "onepassword");
@@ -720,7 +857,7 @@ describe("secret store routes", () => {
     const handler = createSecretStoresRouteHandler({
       service,
       windowAuthorityStore: {
-        authenticate: vi.fn(() => WINDOW),
+        authenticateAuthority: vi.fn(() => ({ windowId: WINDOW })),
       } as unknown as WindowAuthorityStore,
     });
     return { service, handler };
@@ -791,5 +928,126 @@ describe("secret store routes", () => {
     expect(await handler(new Request("http://127.0.0.1:13773/api/replica-store/commands"))).toBe(
       undefined,
     );
+  });
+});
+
+describe("command reference custody and recovery", () => {
+  it("authorizes reference pins without reading values and invalidates unlink/relink at the same clock", async () => {
+    const h = await host();
+    const client = makeSecretStoreBrokerClient({ url: h.broker.url, token: h.broker.token });
+    const request = decodeCommandCredentialHostRequest({
+      requestId: crypto.randomUUID(),
+      bindingId: crypto.randomUUID(),
+      accountId: "a".repeat(26),
+      environment: [
+        {
+          name: "API_TOKEN",
+          vaultId: "v".repeat(26),
+          itemId: "i".repeat(26),
+          fieldId: "credential",
+        },
+      ],
+    });
+    expect(await client.commandUse?.(request)).toEqual({ status: "not-linked" });
+    await h.service.linkStore(WINDOW, "onepassword");
+    const first = await client.commandUse?.(request);
+    if (first?.status !== "authorized") throw Error("Expected authorization");
+    await h.service.unlinkStore(WINDOW, "onepassword");
+    await h.service.linkStore(WINDOW, "onepassword");
+    expect(await client.commandUse?.({ ...request, expectedRevision: first.revision })).toEqual({
+      status: "changed",
+    });
+    expect(h.journalText()).not.toContain(VALUE);
+  });
+  it("replays reference configuration from the real journal but never restores an approval or command output", async () => {
+    const h = await host();
+    const definition = decodeCommandCredentialDefinition({
+      label: "Fixture",
+      projectId: crypto.randomUUID(),
+      executable: "/usr/bin/client",
+      args: ["status"],
+      directory: "",
+      accountId: "a".repeat(26),
+      environment: [
+        {
+          name: "API_TOKEN",
+          vaultId: "v".repeat(26),
+          itemId: "i".repeat(26),
+          fieldId: "credential",
+        },
+      ],
+      timeoutMs: 1000,
+    });
+    const create = () =>
+      new CommandCredentialBindings({
+        now: () => performance.now(),
+        uuid: () => crypto.randomUUID(),
+        canConfigure: () => true,
+        context: async (windowId, threadId) => ({
+          windowId,
+          threadId,
+          projectId: String(definition.projectId),
+          root: "/fixture",
+          authorityKey: "one",
+          executionPolicy: "full-access",
+          current: () => true,
+          revalidate: async () => true,
+        }),
+        pin: async (executable) => ({
+          executable,
+          digest: "a".repeat(64),
+          credentialExecutable: "/usr/local/bin/op",
+          credentialExecutableDigest: "b".repeat(64),
+          credentialVersion: "2.33.0",
+        }),
+        execute: async (_b, _c, _s, before, started) => {
+          if (!before()) throw Error("Expected admission");
+          started();
+          return {
+            status: "exited",
+            exitCode: 0,
+            effect: "completed",
+            output: "private-command-output",
+            truncated: false,
+          };
+        },
+        record: (record) => h.commandJournal.record(record),
+        records: readCommandCredentialHistory(h.journal),
+      });
+    const first = create();
+    let requestId: string;
+    try {
+      const saved = await first.save(WINDOW, definition);
+      if (saved.kind !== "command-credential-view" || !saved.bindings[0])
+        throw Error("Expected binding");
+      const review = await first.review(
+        WINDOW,
+        crypto.randomUUID(),
+        saved.bindings[0].bindingId,
+        crypto.randomUUID(),
+      );
+      if (review.kind !== "command-credential-view" || !review.requests[0])
+        throw Error("Expected review");
+      requestId = review.requests[0].requestId;
+      await first.approve(WINDOW, requestId);
+    } finally {
+      first.close();
+    }
+    const recovered = create();
+    try {
+      expect(recovered.view(WINDOW)).toMatchObject({
+        bindings: [{ definition }],
+        requests: [],
+        receipts: [],
+      });
+      expect(await recovered.approve(WINDOW, requestId)).toMatchObject({
+        kind: "command-credential-refused",
+      });
+      const history = readCommandCredentialHistory(h.journal);
+      expect(history.map((record) => record.name)).toContain("command-binding.run");
+      expect(h.journalText()).not.toContain("private-command-output");
+    } finally {
+      recovered.close();
+    }
   });
 });

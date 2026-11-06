@@ -19,11 +19,9 @@ import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import {
   type ForgeShellChange,
   type ForgeShellHardLine,
-  forgeShellChanges,
-  FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
-  forgeShellHardLine,
-  forgeShellHardLineMessage,
 } from "@octant/domain/forge-shell-change-policy";
+import { admitNativeHarnessForgeCommand } from "./nativeHarnessForgeCommand";
+import { admitNativeHarnessTool } from "./nativeHarnessToolAdmission";
 import { shieldCallFromHarness } from "@octant/domain/shield-judge-policy";
 import { remoteHostsNamedBy, type ShieldServerRule } from "@octant/domain/shield-server-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
@@ -65,7 +63,6 @@ import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
 import {
   createNativeHarnessTools,
-  type NativeHarnessDelegatePort,
   type NativeHarnessShellPort,
   type NativeHarnessShellRun,
   type NativeHarnessToolPorts,
@@ -215,14 +212,6 @@ export interface NativeHarnessCompositionOptions {
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
   }) => NonNullable<NativeHarnessToolPorts["secondOpinion"]>;
-  /** Delegation for a lead thread; absent on a host that cannot admit children. */
-  readonly delegate?: (scope: {
-    readonly parentThreadId: string;
-    readonly windowId: string;
-    readonly mode: OctantMode;
-    readonly projectId?: ProjectId | undefined;
-    readonly lead: NativeHarnessSlotCandidate;
-  }) => NativeHarnessDelegatePort;
   readonly hostId: ToolActionAuthority["hostId"];
   readonly readThreadTaint: (threadId: string) => boolean;
   /** Questions to the person; absent on a host with no surface to answer them. */
@@ -276,13 +265,35 @@ export interface HarnessEgressScope {
 }
 
 export interface NativeHarnessComposition {
+  /** Ordinary admission for a fixed Code command; does not execute it or return credentials. */
+  readonly prepareCodeCommand: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly extraFolders?: ReadonlyArray<string>;
+    readonly windowId: string;
+    readonly command: string;
+    readonly signal?: AbortSignal;
+  }) => Promise<
+    | { readonly status: "refused"; readonly reason: string; readonly message?: string }
+    | {
+        readonly status: "admitted";
+        readonly callId: string;
+        readonly confirmedHosts?: ToolEgressCallConfirmation;
+        readonly admitStart: () => boolean;
+        readonly finish: (input: {
+          readonly started: boolean;
+          readonly exitCode?: number;
+        }) => "recorded" | "no-change" | "unavailable" | undefined;
+      }
+  >;
   readonly forChat: (input: {
     readonly thread: ChatThread;
     readonly windowId: string;
     /**
      * The thread is a Side Chat sidecar. It is a side conversation about one
-     * source thread, so it gets no task list, goal, question, or delegation:
-     * those belong to the lead of a thread the person is steering.
+     * source thread, so it gets no task list, goal, or question: those belong
+     * to the lead of a thread the person is steering. Its Chat wiring withholds
+     * `octant_agents` for the same reason.
      */
     readonly sideChat?: boolean;
   }) => AppManagedToolSet | undefined;
@@ -348,18 +359,8 @@ export interface NativeHarnessComposition {
 export function createNativeHarnessComposition(
   options: NativeHarnessCompositionOptions,
 ): NativeHarnessComposition {
-  const resultTaintsThread = (
-    call: { readonly name: string; readonly inputJson: string },
-    result: unknown,
-  ) => {
-    let args: unknown;
-    try {
-      args = call.inputJson.trim().length === 0 ? {} : JSON.parse(call.inputJson);
-    } catch {
-      args = undefined;
-    }
-    return nativeHarnessResultTaintsThread({ toolName: call.name, arguments: args, result });
-  };
+  const resultTaintsThread = (call: { readonly name: string }) =>
+    nativeHarnessResultTaintsThread({ toolName: call.name });
   const contextRemaining =
     options.contextHarness === undefined
       ? undefined
@@ -534,6 +535,7 @@ export function createNativeHarnessComposition(
               projectId: scope.projectId,
               lead: scope.lead,
               prompt: input.prompt,
+              ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
               options: input.options,
               signal: input.signal,
             }),
@@ -768,70 +770,14 @@ export function createNativeHarnessComposition(
     const withheld = { status: "unavailable", output: "", truncated: false } as const;
     return {
       run: async (input) => {
-        const changes = forgeShellChanges(input.command);
-        if (changes.length === 0) return shell.run(input);
-        const fullAccess = atFullAccess();
-        let hardLine: ForgeShellHardLine | undefined;
-        let branchUnavailable = false;
-        if (fullAccess) {
-          try {
-            if (forge === undefined) branchUnavailable = true;
-            hardLine = forgeShellHardLine(
-              changes,
-              forge?.branches(threadId) ?? { otherThreadBranches: [] },
-            );
-          } catch {
-            branchUnavailable = true;
-            hardLine = forgeShellHardLine(changes, { otherThreadBranches: [] });
-          }
-        }
-        if (
-          !fullAccess ||
-          hardLine !== undefined ||
-          (branchUnavailable && changes.some((change) => change.kind === "push"))
-        ) {
-          try {
-            forge?.record({
-              threadId,
-              changes,
-              outcome: "refused",
-              hardLine,
-              command: input.command,
-            });
-          } catch {
-            // The refusal stands whether or not its record could be kept.
-          }
-          return {
-            ...withheld,
-            refusal: {
-              reason:
-                hardLine !== undefined
-                  ? `forge-${hardLine}`
-                  : fullAccess
-                    ? "forge-authority-unavailable"
-                    : "forge-tool-required",
-              message:
-                hardLine !== undefined
-                  ? forgeShellHardLineMessage(hardLine)
-                  : fullAccess
-                    ? "Octant could not verify which branches other threads own, so this push was refused. Retry when repository authority is available."
-                    : FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
-            },
-          };
-        }
-        const recordRan = (exitCode: number | undefined) => {
-          try {
-            return forge?.record({
-              threadId,
-              changes,
-              outcome: "ran",
-              command: input.command,
-              ...(exitCode === undefined ? {} : { exitCode }),
-            });
-          } catch {
-            return "unavailable";
-          }
-        };
+        const admission = admitNativeHarnessForgeCommand({
+          threadId,
+          command: input.command,
+          fullAccess: atFullAccess(),
+          forge,
+        });
+        if (admission.status === "refused") return { ...withheld, refusal: admission.refusal };
+        const { recordRan } = admission;
         let run: NativeHarnessShellRun;
         try {
           run = await shell.run(input);
@@ -913,14 +859,6 @@ export function createNativeHarnessComposition(
       ),
       () => options.readWorkExecutionPolicy?.(scope.threadId) === "full-access",
     );
-  const delegateFor = (scope: {
-    readonly parentThreadId: string;
-    readonly windowId: string;
-    readonly mode: OctantMode;
-    readonly projectId?: ProjectId | undefined;
-    readonly lead: NativeHarnessSlotCandidate;
-  }): Pick<NativeHarnessToolPorts, "delegate"> =>
-    options.delegate === undefined ? {} : { delegate: options.delegate(scope) };
   /**
    * `journal-lookup` for a lead, reading the session `latestSession` names
    * when a call runs. Chat and Work turns resolve no credential values, so
@@ -942,7 +880,105 @@ export function createNativeHarnessComposition(
           }),
         };
   return {
-    forChat: ({ thread, windowId, sideChat = false }) => {
+    prepareCodeCommand: async ({
+      thread,
+      checkoutRoot,
+      extraFolders,
+      windowId,
+      command,
+      signal,
+    }) => {
+      const threadId = String(thread.id);
+      const posture = options.readCodeExecutionPolicy?.(threadId, windowId);
+      if (posture === undefined || signal?.aborted)
+        return { status: "refused", reason: "tool-authority-stale" };
+      const ports = askUserFor({
+        parentThreadId: threadId,
+        mode: "code",
+        projectId: thread.projectId,
+        lead: leadOf(thread),
+        windowId,
+        boundRoot: checkoutRoot,
+        ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+      });
+      const admission = await admitNativeHarnessTool(
+        {
+          threadId,
+          authority: options.authority.service,
+          resolveAuthority: () => options.authority.resolve(threadId, "code"),
+          resolveTurnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
+          ports,
+          uuid: options.uuid,
+        },
+        {
+          name: "bash",
+          args: { command },
+          intent: `bash: ${command}`.slice(0, 2048),
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
+      if (admission.status === "refused")
+        return {
+          status: "refused",
+          reason: admission.outcome.result.error,
+          ...(admission.outcome.result.message === undefined
+            ? {}
+            : { message: admission.outcome.result.message }),
+        };
+      const callId = String(admission.request.actionId);
+      const forge = admitNativeHarnessForgeCommand({
+        threadId,
+        command,
+        fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+        forge: options.forgeChanges,
+      });
+      if (forge.status === "refused") {
+        ports.callEnded?.(callId);
+        return { status: "refused", ...forge.refusal };
+      }
+      const confirmedHosts = confirmedCommandHosts.get(callId);
+      confirmedCommandHosts.delete(callId);
+      let finished = false;
+      let recordRan = forge.recordRan;
+      let recorded: ReturnType<typeof recordRan>;
+      return {
+        status: "admitted",
+        callId,
+        ...(confirmedHosts === undefined ? {} : { confirmedHosts }),
+        admitStart: () => {
+          if (
+            finished ||
+            signal?.aborted ||
+            options.readCodeExecutionPolicy?.(threadId, windowId) !== posture
+          )
+            return false;
+          const currentAuthority = options.authority.resolve(threadId, "code");
+          if (
+            currentAuthority === undefined ||
+            JSON.stringify(currentAuthority) !== JSON.stringify(admission.request.authority)
+          )
+            return false;
+          const currentForge = admitNativeHarnessForgeCommand({
+            threadId,
+            command,
+            fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+            forge: options.forgeChanges,
+          });
+          if (currentForge.status === "refused") return false;
+          recordRan = currentForge.recordRan;
+          return true;
+        },
+        finish: ({ started, exitCode }) => {
+          if (!finished) {
+            finished = true;
+            ports.callEnded?.(callId);
+            if (started) recorded = recordRan(exitCode);
+          }
+          return recorded;
+        },
+      };
+    },
+    forChat: ({ thread, sideChat = false }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const { askUser, ...approvalPorts } = askUserFor({
@@ -956,15 +992,6 @@ export function createNativeHarnessComposition(
         mode: "chat",
         ports: {
           ...(sideChat ? {} : shared(threadId)),
-          ...(sideChat
-            ? {}
-            : delegateFor({
-                parentThreadId: threadId,
-                windowId,
-                mode: "chat",
-                projectId: thread.projectId,
-                lead: leadOf(thread),
-              })),
           ...approvalPorts,
           ...(sideChat || askUser === undefined ? {} : { askUser }),
           // Research is the user's grant for a Chat thread to reach the web,
@@ -989,7 +1016,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forWork: ({ thread, projectRoot, extraFolders, windowId }) => {
+    forWork: ({ thread, projectRoot, extraFolders }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = workShell({ threadId, projectId: String(thread.projectId) });
@@ -998,13 +1025,6 @@ export function createNativeHarnessComposition(
         mode: "work",
         ports: {
           ...shared(threadId),
-          ...delegateFor({
-            parentThreadId: threadId,
-            windowId,
-            mode: "work",
-            projectId: thread.projectId,
-            lead: leadOf(thread),
-          }),
           ...askUserFor({
             parentThreadId: threadId,
             mode: "work",
@@ -1052,13 +1072,6 @@ export function createNativeHarnessComposition(
         turnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
         ports: {
           ...shared(threadId),
-          ...delegateFor({
-            parentThreadId: threadId,
-            windowId,
-            mode: "code",
-            projectId: thread.projectId,
-            lead: leadOf(thread),
-          }),
           ...askUserFor({
             parentThreadId: threadId,
             mode: "code",

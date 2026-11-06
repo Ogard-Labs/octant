@@ -2124,6 +2124,15 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   font-size: var(--oct-text-xs);
 }
 
+.code-checkout-bar:has(.code-checkout-bar__working-folder) {
+  flex-wrap: wrap;
+}
+.code-checkout-bar__working-folder {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .code-checkout-bar__identity {
   display: flex;
   flex: 1 1 auto;

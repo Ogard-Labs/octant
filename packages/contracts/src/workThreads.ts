@@ -6,7 +6,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { ProjectId } from "./projects";
 import { BindingRevisionId } from "./projects";
 import { WorkStatusDatedItem } from "./workProjectStatus";
@@ -17,6 +17,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -79,6 +80,7 @@ export const WorkThread = Schema.Struct({
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   /**
    * The level this thread runs at: taken from Work settings when it was
    * created, and changed from its composer since. A thread journaled before
@@ -98,6 +100,8 @@ export const WorkThread = Schema.Struct({
    * {@link ThreadDocumentDelivery}.
    */
   documentDelivery: Schema.optional(ThreadDocumentDelivery),
+  /** A person's default for this task's new Browser pages; a profile choice grants no access. */
+  browserTaskProfile: Schema.optional(BrowserProfileChoice),
   /** Present on a fork: the thread and turn its carried conversation came from. */
   forkedFrom: Schema.optional(WorkThreadForkOrigin),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
@@ -126,6 +130,7 @@ export const CreateWorkThreadCommand = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   /** Confined working directory relative to the Project root; defaults to `.`. */
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
   /** A terminal session in the Project's folder the thread starts from. */
@@ -223,6 +228,7 @@ export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-working-directory"),
   ...WorkThreadCommandFields,
   workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
 }).annotations(strict);
 export type ChangeWorkThreadWorkingDirectoryCommand =
   typeof ChangeWorkThreadWorkingDirectoryCommand.Type;
@@ -247,6 +253,14 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
 }).annotations(strict);
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
+
+export const ChangeWorkThreadBrowserProfileCommand = Schema.Struct({
+  kind: Schema.Literal("change-work-thread-browser-profile"),
+  ...WorkThreadCommandFields,
+  browserTaskProfile: BrowserProfileChoice,
+}).annotations(strict);
+export type ChangeWorkThreadBrowserProfileCommand =
+  typeof ChangeWorkThreadBrowserProfileCommand.Type;
 
 /**
  * Chooses how this thread delivers documents. Turning on `native-artifacts`
@@ -353,6 +367,7 @@ export const WorkThreadCommand = Schema.Union(
   MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
+  ChangeWorkThreadBrowserProfileCommand,
   ChangeWorkThreadAccessCommand,
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,

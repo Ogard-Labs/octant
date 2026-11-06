@@ -7,6 +7,13 @@ import {
   AutomationSourceDigest,
 } from "./automationFileArrival";
 export * from "./automationFileArrival";
+import {
+  AutomationIntegrationEventTrigger,
+  AutomationIntegrationEventReceipt,
+  AutomationEventSourceCheckpoint,
+  AutomationIntegrationEvent,
+} from "./automationEvents";
+export * from "./automationEvents";
 import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AgentRunAuthority } from "./agentRun";
@@ -97,6 +104,7 @@ export const AutomationTriggerKind = Schema.Literal(
   "interval",
   "weekly-local",
   "file-arrival",
+  "integration-event",
 );
 export type AutomationTriggerKind = typeof AutomationTriggerKind.Type;
 
@@ -267,6 +275,7 @@ export type AutomationScheduledTrigger = typeof AutomationScheduledTrigger.Type;
 export const AutomationTrigger = Schema.Union(
   AutomationScheduledTrigger,
   AutomationFileArrivalTrigger,
+  AutomationIntegrationEventTrigger,
 );
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 
@@ -583,8 +592,9 @@ function automationAuthorityIsChat(authority: AgentRunAuthority): boolean {
 
 function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinitionDraft): boolean {
   if (
-    (definition.trigger.kind === "file-arrival" &&
-      (definition.mode !== "work" || definition.targetPolicy !== "new-thread")) ||
+    ((definition.trigger.kind === "file-arrival" ||
+      definition.trigger.kind === "integration-event") &&
+      (definition.mode === "chat" || definition.targetPolicy !== "new-thread")) ||
     definition.mode !== definition.binding.kind ||
     definition.binding.hostId !== definition.hostId ||
     definition.binding.projectId !== definition.projectId ||
@@ -651,7 +661,8 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
   const dueEvidenceMatches =
     definition.nextDueAt === null
       ? definition.nextDueResolution === undefined
-      : definition.trigger.kind === "file-arrival"
+      : definition.trigger.kind === "file-arrival" ||
+          definition.trigger.kind === "integration-event"
         ? false
         : definition.trigger.kind === "once"
           ? definition.nextDueAt === definition.trigger.scheduledAt &&
@@ -666,13 +677,16 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
               );
   const enabledDueMatches =
     definition.lifecycle !== "enabled" ||
-    (definition.trigger.kind === "file-arrival"
+    (definition.trigger.kind === "file-arrival" || definition.trigger.kind === "integration-event"
       ? definition.nextDueAt === null
       : definition.trigger.kind === "once"
         ? definition.nextDueAt === definition.trigger.scheduledAt
         : definition.nextDueAt !== null);
   return (
     automationDefinitionDraftMatchesPolicy(definition) &&
+    (definition.trigger.kind !== "integration-event" ||
+      (definition.trigger.sourceIdentity !== undefined &&
+        definition.trigger.sourceLabel !== undefined)) &&
     (definition.targetPolicy !== "same-thread" || definition.originThreadId !== undefined) &&
     dueEvidenceMatches &&
     enabledDueMatches &&
@@ -720,7 +734,18 @@ export const AutomationManualOccurrence = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
   runNowRequestId: AutomationRunNowRequestId,
-}).annotations(strict);
+  retryOfRunId: Schema.optional(AutomationRunId),
+  fileSource: Schema.optional(AutomationFileArrivalReceipt),
+  eventSource: Schema.optional(AutomationIntegrationEventReceipt),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (occurrence) =>
+        (occurrence.fileSource === undefined && occurrence.eventSource === undefined) ||
+        occurrence.retryOfRunId !== undefined,
+    ),
+  );
 export type AutomationManualOccurrence = typeof AutomationManualOccurrence.Type;
 
 export const AutomationFileArrivalOccurrence = Schema.Struct({
@@ -731,10 +756,19 @@ export const AutomationFileArrivalOccurrence = Schema.Struct({
 }).annotations(strict);
 export type AutomationFileArrivalOccurrence = typeof AutomationFileArrivalOccurrence.Type;
 
+export const AutomationIntegrationEventOccurrence = Schema.Struct({
+  kind: Schema.Literal("integration-event"),
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  source: AutomationIntegrationEventReceipt,
+}).annotations(strict);
+export type AutomationIntegrationEventOccurrence = typeof AutomationIntegrationEventOccurrence.Type;
+
 export const AutomationOccurrence = Schema.Union(
   AutomationScheduledOccurrence,
   AutomationManualOccurrence,
   AutomationFileArrivalOccurrence,
+  AutomationIntegrationEventOccurrence,
 );
 export type AutomationOccurrence = typeof AutomationOccurrence.Type;
 
@@ -761,6 +795,10 @@ export function deriveAutomationOccurrenceKey(
     return decodeAutomationOccurrenceKeyText(
       `file:${occurrence.automationId}:${occurrence.definitionRevision}:${occurrence.source.checkpoint.armGeneration}:${occurrence.source.checkpoint.observationRevision}:${occurrence.source.checkpoint.baselineDigest}`,
     );
+  if (occurrence.kind === "integration-event")
+    return decodeAutomationOccurrenceKeyText(
+      `event:${occurrence.automationId}:${occurrence.definitionRevision}:${occurrence.source.checkpoint.sourceIdentity}:${occurrence.source.checkpoint.observationRevision}:${occurrence.source.event.id}`,
+    );
   return decodeAutomationOccurrenceKeyText(
     `manual:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${String(occurrence.runNowRequestId)}`,
   );
@@ -781,6 +819,7 @@ function automationScheduledAtMatchesTrigger(
 ): boolean {
   switch (trigger.kind) {
     case "file-arrival":
+    case "integration-event":
       return false;
     case "once":
       return scheduledAt === trigger.scheduledAt;
@@ -927,6 +966,44 @@ export const AutomationRunFailure = Schema.Struct({
 }).annotations(strict);
 export type AutomationRunFailure = typeof AutomationRunFailure.Type;
 
+/**
+ * How a run's own agent said the work went, in its own words. The run's
+ * lifecycle stays the host's: a reported "failed" never fails a run, and a
+ * reported "succeeded" never completes one.
+ */
+export const AutomationRunResultOutcome = Schema.Literal(
+  "succeeded",
+  "nothing-to-do",
+  "needs-attention",
+  "failed",
+);
+export type AutomationRunResultOutcome = typeof AutomationRunResultOutcome.Type;
+export const MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES = 1_024;
+const automationTextEncoder = new TextEncoder();
+const AutomationRunResultSummary = boundedText(MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES).pipe(
+  Schema.filter(
+    (summary) =>
+      automationTextEncoder.encode(summary).byteLength <= MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES,
+  ),
+);
+
+export const AutomationRunReportedResult = Schema.Struct({
+  outcome: AutomationRunResultOutcome,
+  summary: AutomationRunResultSummary,
+  reportedAt: UtcTimestamp,
+}).annotations(strict);
+export type AutomationRunReportedResult = typeof AutomationRunReportedResult.Type;
+
+/**
+ * Which run a routine-dispatched turn belongs to. The dispatcher hands it to
+ * the turn it starts; no wire command or request body carries it.
+ */
+export const AutomationRunReference = Schema.Struct({
+  automationId: AutomationId,
+  runId: AutomationRunId,
+}).annotations(strict);
+export type AutomationRunReference = typeof AutomationRunReference.Type;
+
 export const AutomationRun = Schema.Struct({
   id: AutomationRunId,
   automationId: AutomationId,
@@ -947,6 +1024,8 @@ export const AutomationRun = Schema.Struct({
   notificationRefs: Schema.Array(AutomationOpaqueReference).pipe(
     Schema.maxItems(MAX_AUTOMATION_NOTIFICATION_REFERENCES),
   ),
+  /** The result the run's own agent reported, if any; at most one per run. */
+  reportedResult: Schema.optional(AutomationRunReportedResult),
   completedAt: Schema.optional(UtcTimestamp),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
@@ -955,7 +1034,31 @@ export const AutomationRun = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter((run) => {
+      const fileSource =
+        run.occurrence.kind === "file-arrival"
+          ? run.occurrence.source
+          : run.occurrence.kind === "manual"
+            ? run.occurrence.fileSource
+            : undefined;
+      const eventSource =
+        run.occurrence.kind === "integration-event"
+          ? run.occurrence.source
+          : run.occurrence.kind === "manual"
+            ? run.occurrence.eventSource
+            : undefined;
       const occurrenceIdentityMatches =
+        !(fileSource !== undefined && eventSource !== undefined) &&
+        (fileSource === undefined ||
+          (run.definitionSnapshot.trigger.kind === "file-arrival" &&
+            fileSource.automaticStartOrdinal <=
+              run.definitionSnapshot.trigger.automaticStartLimit)) &&
+        (eventSource === undefined ||
+          (run.definitionSnapshot.trigger.kind === "integration-event" &&
+            eventSource.checkpoint.sourceIdentity ===
+              run.definitionSnapshot.trigger.sourceIdentity &&
+            eventSource.checkpoint.automaticStarts > 0 &&
+            eventSource.checkpoint.automaticStarts <=
+              run.definitionSnapshot.trigger.automaticStartLimit)) &&
         run.automationId === run.occurrence.automationId &&
         run.definitionSnapshot.automationId === run.occurrence.automationId &&
         run.definitionSnapshot.definitionRevision === run.occurrence.definitionRevision &&
@@ -1062,6 +1165,7 @@ export const AutomationCommand = Schema.Union(
     kind: Schema.Literal("update-automation"),
     ...AutomationCommandFields,
     definition: AutomationDefinitionDraft,
+    rearmEvents: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pause-automation"),
@@ -1079,6 +1183,7 @@ export const AutomationCommand = Schema.Union(
     kind: Schema.Literal("run-now-automation"),
     ...AutomationCommandFields,
     runNowRequestId: AutomationRunNowRequestId,
+    retryRunId: Schema.optional(AutomationRunId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("cancel-current-automation-run"),
@@ -1150,6 +1255,14 @@ export const AutomationCommandResult = Schema.Union(
 export type AutomationCommandResult = typeof AutomationCommandResult.Type;
 
 export const AutomationSummary = Schema.Struct({
+  latestEventRun: Schema.optional(
+    Schema.Struct({
+      event: AutomationIntegrationEvent,
+      runId: AutomationRunId,
+      lifecycle: AutomationRunLifecycle,
+    }).annotations(strict),
+  ),
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   id: AutomationId,
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   hostId: HostId,
@@ -1178,6 +1291,8 @@ export type AutomationSummary = typeof AutomationSummary.Type;
 // ── Routine proposals from a thread ────────────────────────────────────────
 
 export const ROUTINE_PROPOSAL_TOOL_NAME = "octant_propose_routine";
+/** The tool a Work or Code thread's agent reads routines with and asks the person to change one. */
+export const ROUTINES_TOOL_NAME = "octant_routines";
 
 export const RoutineProposalId = brandedUuid("RoutineProposalId");
 export type RoutineProposalId = typeof RoutineProposalId.Type;
@@ -1204,9 +1319,37 @@ export const RoutineProposal = Schema.Struct({
 }).annotations(strict);
 export type RoutineProposal = typeof RoutineProposal.Type;
 
+/**
+ * A Work or Code thread's agent asking the person to pause or archive one
+ * routine, waiting for the person like a proposal. It changes nothing: only
+ * the person's confirmation does, as that person's own pause or archive.
+ */
+export const RoutineChangeRequest = Schema.Struct({
+  kind: Schema.Literal("routine-change-request"),
+  proposalId: RoutineProposalId,
+  threadId: AutomationThreadId,
+  mode: AutomationThreadMode,
+  projectId: ProjectId,
+  automationId: AutomationId,
+  change: Schema.Literal("pause", "archive"),
+  displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  /** Present when the routine is a follow-up, whose archive the person knows as cancel. */
+  targetPolicy: Schema.optional(AutomationTargetPolicy),
+  /** The routine's version the agent saw; a routine changed since then is left as it is. */
+  expectedVersion: AggregateVersion,
+  /** Why the agent asks, in its own words. */
+  reason: Schema.optional(boundedText(500)),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type RoutineChangeRequest = typeof RoutineChangeRequest.Type;
+
+/** What a thread's agent is waiting on the person for: a new routine, or a change to one. */
+export const RoutineAgentRequest = Schema.Union(RoutineProposal, RoutineChangeRequest);
+export type RoutineAgentRequest = typeof RoutineAgentRequest.Type;
+
 export const RoutineProposalList = Schema.Struct({
   kind: Schema.Literal("routine-proposal-list"),
-  proposals: Schema.Array(RoutineProposal).pipe(Schema.maxItems(32)),
+  proposals: Schema.Array(RoutineAgentRequest).pipe(Schema.maxItems(32)),
 }).annotations(strict);
 export type RoutineProposalList = typeof RoutineProposalList.Type;
 
@@ -1217,6 +1360,7 @@ export const RoutineProposalDecision = Schema.Struct({
 export type RoutineProposalDecision = typeof RoutineProposalDecision.Type;
 
 export const RoutineProposalDecisionResult = Schema.Union(
+  /** The routine created, or for a change request, the routine as paused or archived. */
   Schema.Struct({
     kind: Schema.Literal("routine-proposal-confirmed"),
     automation: AutomationDefinition,
@@ -1320,6 +1464,7 @@ export const AutomationListResponse = Schema.Struct({
 export type AutomationListResponse = typeof AutomationListResponse.Type;
 
 export const AutomationDetailResponse = Schema.Struct({
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   fileSource: Schema.optional(AutomationFileSourceSummary),
   kind: Schema.Literal("automation-detail"),
   automation: AutomationDefinition,
@@ -1349,6 +1494,7 @@ export type AutomationQueryResult = AutomationQueryResponse;
 // ── Journal event payload contracts ─────────────────────────────────────────
 
 export const AutomationDefinitionCreated = Schema.Struct({
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
 })
@@ -1356,16 +1502,22 @@ export const AutomationDefinitionCreated = Schema.Struct({
   .pipe(
     Schema.filter(
       (event) =>
-        event.fileSource === undefined ||
-        (event.automation.trigger.kind === "file-arrival" &&
-          !event.fileSource.baselineReady &&
-          event.fileSource.observationRevision === 1 &&
-          event.fileSource.armGeneration === 1),
+        (event.eventSource === undefined ||
+          (event.automation.trigger.kind === "integration-event" &&
+            event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
+            !event.eventSource.baselineReady &&
+            event.eventSource.automaticStarts === 0)) &&
+        (event.fileSource === undefined ||
+          (event.automation.trigger.kind === "file-arrival" &&
+            !event.fileSource.baselineReady &&
+            event.fileSource.observationRevision === 1 &&
+            event.fileSource.armGeneration === 1)),
     ),
   );
 export type AutomationDefinitionCreated = typeof AutomationDefinitionCreated.Type;
 
 export const AutomationDefinitionUpdated = Schema.Struct({
+  eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
   previousDefinitionRevision: AutomationDefinitionRevision,
@@ -1373,7 +1525,13 @@ export const AutomationDefinitionUpdated = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (event) => event.fileSource === undefined || event.automation.trigger.kind === "file-arrival",
+      (event) =>
+        (event.fileSource === undefined || event.automation.trigger.kind === "file-arrival") &&
+        (event.eventSource === undefined ||
+          (event.automation.trigger.kind === "integration-event" &&
+            event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
+            !event.eventSource.baselineReady &&
+            event.eventSource.automaticStarts === 0)),
     ),
   );
 export type AutomationDefinitionUpdated = typeof AutomationDefinitionUpdated.Type;
@@ -1415,6 +1573,14 @@ export const AutomationFileSourceObserved = Schema.Struct({
   recordedAt: UtcTimestamp,
 }).annotations(strict);
 export type AutomationFileSourceObserved = typeof AutomationFileSourceObserved.Type;
+
+export const AutomationEventSourceObserved = Schema.Struct({
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  checkpoint: AutomationEventSourceCheckpoint,
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type AutomationEventSourceObserved = typeof AutomationEventSourceObserved.Type;
 
 export const AutomationDefinitionExhausted = Schema.Struct({
   automationId: AutomationId,
@@ -1525,7 +1691,19 @@ export const AutomationNotificationRefRecorded = Schema.Struct({
 }).annotations(strict);
 export type AutomationNotificationRefRecorded = typeof AutomationNotificationRefRecorded.Type;
 
+/**
+ * A routine-dispatched turn's agent reporting how its run went. Journaled on
+ * the run at most once; it annotates the run and never changes its lifecycle.
+ */
+export const AutomationRunResultReported = Schema.Struct({
+  automationId: AutomationId,
+  runId: AutomationRunId,
+  result: AutomationRunReportedResult,
+}).annotations(strict);
+export type AutomationRunResultReported = typeof AutomationRunResultReported.Type;
+
 export const AUTOMATION_EVENT_NAMES = [
+  "automation-event-source-observed@1",
   "automation-file-source-observed@1",
   "automation-definition-created@1",
   "automation-definition-updated@1",
@@ -1541,10 +1719,15 @@ export const AUTOMATION_EVENT_NAMES = [
   "automation-first-turn-dispatch-cancelled@1",
   "automation-first-turn-accepted@1",
   "automation-notification-ref-recorded@1",
+  "automation-run-result-reported@1",
 ] as const;
 export type AutomationEventName = (typeof AUTOMATION_EVENT_NAMES)[number];
 
 export const AutomationEvent = Schema.Union(
+  Schema.Struct({
+    eventName: Schema.Literal("automation-event-source-observed@1"),
+    payload: AutomationEventSourceObserved,
+  }).annotations(strict),
   Schema.Struct({
     eventName: Schema.Literal("automation-file-source-observed@1"),
     payload: AutomationFileSourceObserved,
@@ -1605,6 +1788,10 @@ export const AutomationEvent = Schema.Union(
     eventName: Schema.Literal("automation-notification-ref-recorded@1"),
     payload: AutomationNotificationRefRecorded,
   }).annotations(strict),
+  Schema.Struct({
+    eventName: Schema.Literal("automation-run-result-reported@1"),
+    payload: AutomationRunResultReported,
+  }).annotations(strict),
 );
 export type AutomationEvent = typeof AutomationEvent.Type;
 
@@ -1641,6 +1828,10 @@ export const decodeAutomationEvent = Schema.decodeUnknownSync(AutomationEvent);
 export const decodeAutomationThreadId = Schema.decodeUnknownSync(AutomationThreadId);
 export const decodeRoutineProposalId = Schema.decodeUnknownSync(RoutineProposalId);
 export const decodeRoutineProposal = Schema.decodeUnknownSync(RoutineProposal);
+export const decodeRoutineChangeRequest = Schema.decodeUnknownSync(RoutineChangeRequest);
+export const decodeAutomationRunReportedResult = Schema.decodeUnknownSync(
+  AutomationRunReportedResult,
+);
 export const decodeRoutineProposalList = Schema.decodeUnknownSync(RoutineProposalList);
 export const decodeRoutineProposalDecision = Schema.decodeUnknownSync(RoutineProposalDecision);
 export const decodeRoutineProposalDecisionResult = Schema.decodeUnknownSync(

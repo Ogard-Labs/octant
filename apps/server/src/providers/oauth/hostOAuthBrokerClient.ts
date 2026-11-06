@@ -1,12 +1,25 @@
+import {
+  decodeGithubActionsSourceRead,
+  decodeGithubActionsSourceResult,
+  type GithubActionsSourceRead,
+  type GithubActionsSourceResult,
+} from "@octant/host-runtime";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface HostOAuthBrokerDescriptor {
   readonly descriptorId: string;
   readonly clientId?: string;
+  readonly clientAuthentication?: {
+    readonly method: "client_secret_post" | "client_secret_basic";
+    readonly secretRef: string;
+    readonly tokenEndpoint: string;
+  };
   readonly dialect?:
     | "openrouter-pkce"
     | "chatgpt-plan-siwc"
     | "mcp-authorization"
+    | "slack-mcp-user"
+    | "github-mcp-oauth-app"
     | "directory-oidc"
     | "issuer-oidc";
   readonly flow: "authorization-code-pkce" | "device-code";
@@ -22,7 +35,11 @@ export interface HostOAuthBrokerDescriptor {
   readonly agentNameHint?: string;
   /** MCP authorization dialect: the server the token is for, and the callback port. */
   readonly resource?: string;
+  readonly mcpTransportUrl?: string;
+  readonly mcpIssuer?: string;
+  readonly mcpPermissionProfile?: "github-repositories-read-write";
   readonly redirectPort?: number;
+  readonly redirectHostname?: "localhost";
   /** Directory dialect: the tenant, the one audience, and the endpoint origin the grant binds. */
   readonly tenantId?: string;
   readonly audience?: string;
@@ -50,12 +67,20 @@ export type HostOAuthBrokerBinding =
     };
 
 export interface HostOAuthBrokerPort {
+  readonly githubActionsSource?: (
+    request: GithubActionsSourceRead,
+  ) => Promise<GithubActionsSourceResult>;
   readonly begin: (input: {
     readonly descriptor: HostOAuthBrokerDescriptor;
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
     /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
     readonly credentialRef?: string;
+  }) => Promise<unknown>;
+  readonly cancel?: (input: {
+    readonly attemptId: string;
+    readonly descriptorId: string;
+    readonly actorId: string;
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
@@ -82,7 +107,7 @@ export function makeHostOAuthBrokerClient(options: {
   readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): HostOAuthBrokerPort {
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const post = async (path: string, body: unknown): Promise<unknown> => {
+  const post = async (path: string, body: unknown, signal?: AbortSignal): Promise<unknown> => {
     const response = await fetchImpl(new URL(path, options.url), {
       method: "POST",
       redirect: "error",
@@ -91,6 +116,7 @@ export function makeHostOAuthBrokerClient(options: {
         "x-octant-credential-broker-token": options.token,
       },
       body: JSON.stringify(body),
+      ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) throw new Error("Octant host OAuth broker refused the request.");
     const value: unknown = await response.json();
@@ -98,6 +124,34 @@ export function makeHostOAuthBrokerClient(options: {
   };
 
   const client: HostOAuthBrokerPort = {
+    githubActionsSource: async (request) => {
+      const decoded = decodeGithubActionsSourceRead(request);
+      if (decoded === undefined) return { kind: "refused", reason: "invalid-request" };
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          post("/v1/oauth/github-actions-source", decoded, controller.signal),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              resolve(undefined);
+            }, 20_000);
+          }),
+        ]);
+        return (
+          decodeGithubActionsSourceResult(result) ?? {
+            kind: "refused",
+            reason: "connection-unavailable",
+          }
+        );
+      } catch {
+        return { kind: "refused", reason: "connection-unavailable" };
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+      }
+    },
     begin: (input) => {
       if (!UUID_PATTERN.test(input.actorId)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
@@ -115,6 +169,9 @@ export function makeHostOAuthBrokerClient(options: {
             ? {}
             : { clientId: input.descriptor.clientId }),
           ...(input.descriptor.dialect === undefined ? {} : { dialect: input.descriptor.dialect }),
+          ...(input.descriptor.clientAuthentication === undefined
+            ? {}
+            : { clientAuthentication: input.descriptor.clientAuthentication }),
           flow: input.descriptor.flow,
           ...(input.descriptor.tokenEndpoint === undefined
             ? {}
@@ -136,6 +193,18 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.resource === undefined
             ? {}
             : { resource: input.descriptor.resource }),
+          ...(input.descriptor.mcpTransportUrl === undefined
+            ? {}
+            : { mcpTransportUrl: input.descriptor.mcpTransportUrl }),
+          ...(input.descriptor.mcpIssuer === undefined
+            ? {}
+            : { mcpIssuer: input.descriptor.mcpIssuer }),
+          ...(input.descriptor.mcpPermissionProfile === undefined
+            ? {}
+            : { mcpPermissionProfile: input.descriptor.mcpPermissionProfile }),
+          ...(input.descriptor.redirectHostname === undefined
+            ? {}
+            : { redirectHostname: input.descriptor.redirectHostname }),
           ...(input.descriptor.redirectPort === undefined
             ? {}
             : { redirectPort: input.descriptor.redirectPort }),
@@ -151,11 +220,24 @@ export function makeHostOAuthBrokerClient(options: {
         },
       });
     },
+    cancel: (input) => {
+      if (!UUID_PATTERN.test(input.attemptId) || !UUID_PATTERN.test(input.actorId))
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      return post(
+        "/v1/oauth/cancel",
+        {
+          attemptId: input.attemptId,
+          descriptorId: input.descriptorId,
+          actorId: input.actorId,
+        },
+        AbortSignal.timeout(10_000),
+      );
+    },
     status: (attemptId) => {
       if (!UUID_PATTERN.test(attemptId)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
-      return post("/v1/oauth/status", { attemptId });
+      return post("/v1/oauth/status", { attemptId }, AbortSignal.timeout(10_000));
     },
     refresh: (credentialRef) => {
       if (!UUID_PATTERN.test(credentialRef)) {

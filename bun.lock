@@ -16,6 +16,7 @@
     "apps/desktop": {
       "name": "@octant/desktop",
       "dependencies": {
+        "@octant/cli": "workspace:*",
         "@octant/client-runtime": "workspace:*",
         "@octant/contracts": "workspace:*",
         "@octant/domain": "workspace:*",
@@ -155,6 +156,7 @@
         "@types/react-dom": "catalog:",
         "@vitejs/plugin-react": "6.0.3",
         "jsdom": "29.1.1",
+        "playwright-core": "catalog:",
         "tailwindcss": "4.3.3",
         "typescript": "catalog:",
         "vite": "catalog:",
@@ -223,6 +225,9 @@
     },
     "packages/host-runtime": {
       "name": "@octant/host-runtime",
+      "dependencies": {
+        "@octant/contracts": "workspace:*",
+      },
       "devDependencies": {
         "tsdown": "0.22.5",
         "typescript": "catalog:",
@@ -279,6 +284,8 @@
     "scripts": {
       "name": "@octant/scripts",
       "devDependencies": {
+        "@electron/asar": "4.2.0",
+        "@electron/fuses": "2.1.3",
         "@electron/packager": "20.0.2",
         "@electron/rebuild": "4.2.0",
         "@octant/contracts": "workspace:*",
@@ -539,6 +546,8 @@
     "@electron-internal/extract-zip": ["@electron-internal/extract-zip@1.0.4", "", {}, "sha512-Zr1Vs7E9tpCNhZHDAbFVXc2gEVCG9RqPDjrno5+bdgB6LRAuvgyMHJut4NCVyYwtAieapMzc3fiQ3CSTi75ARg=="],
 
     "@electron/asar": ["@electron/asar@4.2.0", "", { "dependencies": { "commander": "^13.1.0", "glob": "^13.0.2", "minimatch": "^10.0.1" }, "bin": { "asar": "bin/asar.mjs" } }, "sha512-npW1NW5yy8EB9XY/vEw9sUdgmq0sJEhmSBb6bqyFOAw1CSkrhvAvO6QWlW8CdIMo8VN1lkdF345l/MeW0LrY0Q=="],
+
+    "@electron/fuses": ["@electron/fuses@2.1.3", "", { "bin": { "electron-fuses": "dist/bin.js" } }, "sha512-LoKJUXNiJ4JM8IIrUltSHI+8pkogaGj5wmJx81jE/Wk3g2w1/kfMbTEKNoY5kitGE8hiC12h32R/1SlywFtxXg=="],
 
     "@electron/get": ["@electron/get@5.0.0", "", { "dependencies": { "debug": "^4.1.1", "env-paths": "^3.0.0", "graceful-fs": "^4.2.11", "progress": "^2.0.3", "semver": "^7.6.3", "sumchecker": "^3.0.1" }, "optionalDependencies": { "undici": "^7.24.4" } }, "sha512-pjoBpru1KdEtcExBnuHAP1cAc/5faoedw0hzJkL3o4/IJp7HNF1+fbrdxT3gMYRX2oJfvnA/WXeCTVQpYYxyJA=="],
 

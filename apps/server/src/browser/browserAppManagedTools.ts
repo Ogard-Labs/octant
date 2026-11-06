@@ -3,6 +3,7 @@ import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import {
   browserDownloadSavedResult,
+  browserOperationRefusedInPlan,
   browserToolAction,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -12,9 +13,11 @@ import {
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
+  runRecordedBrowserCall,
   signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
+  type BrowserToolRecordingOperation,
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
@@ -55,6 +58,8 @@ export interface BrowserAppManagedToolsOptions {
   ) => string | undefined;
   /** Host-owned in-memory bindings that survive per-turn tool-set factories. */
   readonly modelBindings: Map<string, BrowserModelBinding>;
+  /** Live task default, used only when navigate omits its explicit profile. */
+  readonly resolveTaskProfile?: () => "private" | "project" | "personal" | undefined;
   readonly resolveAuthority: (
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
@@ -79,6 +84,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly activityBy?: "agent";
+      /** On a `record-stop`: end the recording and keep nothing; see the service. */
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
@@ -142,6 +149,8 @@ export interface BrowserAppManagedToolsOptions {
 }
 
 export interface BrowserModelBinding {
+  /** Identity of a person-switched page; it grants no agent access. */
+  readonly approval?: "pending";
   readonly modelId: string;
   readonly authority: ToolActionAuthority;
 }
@@ -172,6 +181,12 @@ export function createBrowserAppManagedTools(
     if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
       return failure("browser-authority-stale");
     }
+    if (input.operation === "run-script") {
+      // The Work/terminal adapter has no live Full-access script admission yet.
+      return failure(
+        options.executionPolicy === "plan" ? "plan-mode-read-only" : "script-unavailable",
+      );
+    }
     if (input.operation === "stop") {
       const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
       if (snapshot.context !== undefined) {
@@ -182,7 +197,11 @@ export function createBrowserAppManagedTools(
       );
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
-    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    // Plan admits the reads of the page already open; every other gate below
+    // still applies to them.
+    if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
+      return failure("plan-mode-read-only");
+    }
     let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
     // While the person signs in, the page is theirs: no other agent action
     // reaches it until they press Continue or the ask ends.
@@ -242,13 +261,20 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("browser-profile-differs-stop-first");
     }
+    const defaultChoice = options.resolveTaskProfile?.();
+    const choice = input.operation === "navigate" ? (input.profile ?? defaultChoice) : undefined;
     const profile: StoredBrowserProfile | undefined =
       existing !== undefined
         ? existingProfile
-        : input.operation === "navigate" && input.profile !== undefined
-          ? requestedProfile(input.profile, authority)
+        : input.operation === "navigate" && choice !== undefined
+          ? requestedProfile(choice, authority)
           : undefined;
-    if (input.operation === "navigate" && input.profile === "project" && profile === undefined) {
+    if (
+      existing === undefined &&
+      input.operation === "navigate" &&
+      choice === "project" &&
+      profile === undefined
+    ) {
       return failure("profile-unavailable");
     }
     if (
@@ -258,18 +284,28 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("profile-needs-a-person");
     }
+    if (
+      profile !== undefined &&
+      defaultChoice !== undefined &&
+      defaultChoice !== "private" &&
+      (input.operation !== "navigate" || input.profile === undefined) &&
+      options.approvals?.isPairedDevice?.(options.windowId) === true
+    )
+      return failure("profile-not-local");
     const existingBinding =
       existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
-    const contextApproved =
+    const identityMatches =
       existingBinding !== undefined &&
       String(existingBinding.modelId) === String(options.modelId) &&
       sameToolActionAuthority(existingBinding.authority, authority);
+    const contextApproved = identityMatches && existingBinding?.approval !== "pending";
     // A remembered origin grant stands in for the prompt when the context
     // itself is new: "always allow" answered an open for this origin before.
     // An existing context still asks when its binding no longer matches —
     // the remembered grant covers the page, not a new model driving it.
     const remembered =
-      existing === undefined && options.approvals?.isRemembered?.(origin, profile) === true;
+      (existing === undefined || (identityMatches && existingBinding?.approval === "pending")) &&
+      options.approvals?.isRemembered?.(origin, profile) === true;
     if ((existing === undefined || !contextApproved) && !remembered) {
       if (options.approvals === undefined) return failure("browser-approval-required");
       const outcome = await options.approvals.request({
@@ -294,6 +330,11 @@ export function createBrowserAppManagedTools(
         });
       }
     }
+    if (remembered && existing !== undefined)
+      rememberModelBinding(options.modelBindings, String(existing.contextId), {
+        modelId: options.modelId,
+        authority,
+      });
     if (existing === undefined) {
       const created = await options.browser.create({
         windowId: options.windowId,
@@ -321,6 +362,7 @@ export function createBrowserAppManagedTools(
     const binding = options.modelBindings.get(contextId);
     const bindingMatches =
       binding !== undefined &&
+      binding.approval !== "pending" &&
       String(binding.modelId) === String(options.modelId) &&
       sameToolActionAuthority(binding.authority, authority);
     if (!bindingMatches && existing !== undefined) {
@@ -454,6 +496,9 @@ export function createBrowserAppManagedTools(
       threadId: options.threadId,
       request,
       capturedBy: "agent",
+      ...(input.operation === "record-stop" && input.discard === true
+        ? { discardRecording: true }
+        : {}),
       refuseStaleRevision: true,
       // Downloads are held only for a turn at this computer with a workspace to
       // save into, where the question about saving one can be answered.
@@ -521,7 +566,9 @@ export function createBrowserAppManagedTools(
       return failure("browser-authority-stale");
     }
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
-    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
+      return failure("plan-mode-read-only");
+    }
     return runBrowserFlowOperation(input, {
       flows,
       projectId: authority.projectId,
@@ -541,9 +588,24 @@ export function createBrowserAppManagedTools(
       if (signal?.aborted) return failure("tool-interrupted");
       const input = parseBrowserToolInput(inputJson, { allowProfile: true });
       if (input === undefined) return failure("invalid-browser-input");
-      if (isBrowserToolFlowInput(input)) return runFlow(input, signal);
+      // The stop runs without the turn's signal, so a turn that ends mid-call
+      // still ends its recording and keeps what was recorded. It runs in Plan
+      // too, keeping nothing, so a recording started before Plan never runs
+      // on to its own bound.
+      const record = async (operation: BrowserToolRecordingOperation) => {
+        if (operation === "record-start") return runOne({ operation }, signal);
+        if (options.executionPolicy !== "plan") return runOne({ operation }, undefined);
+        const stopped = await runOne({ operation, discard: true }, undefined);
+        return stopped.isError ? stopped : failure("plan-mode-read-only");
+      };
+      if (isBrowserToolFlowInput(input)) {
+        return input.operation === "flow-run" && input.record === true
+          ? runRecordedBrowserCall(() => runFlow(input, signal), record)
+          : runFlow(input, signal);
+      }
       if (input.operation === "steps") {
-        return runBrowserToolSteps(input.steps, (step) => runRecorded(step, signal));
+        const batch = () => runBrowserToolSteps(input.steps, (step) => runRecorded(step, signal));
+        return input.record === true ? runRecordedBrowserCall(batch, record) : batch();
       }
       return runRecorded(input, signal);
     },
@@ -569,9 +631,10 @@ function signInRefusal(options: BrowserAppManagedToolsOptions): string | undefin
 
 /** The stored profile a `profile` argument names for this thread, if it has one. */
 function requestedProfile(
-  choice: "project" | "personal",
+  choice: "private" | "project" | "personal",
   authority: ToolActionAuthority,
 ): StoredBrowserProfile | undefined {
+  if (choice === "private") return undefined;
   if (choice === "personal") return { kind: "personal" };
   return authority.projectId === undefined
     ? undefined
@@ -585,7 +648,7 @@ function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {
 
 const MAX_BROWSER_MODEL_BINDINGS = 256;
 
-function rememberModelBinding(
+export function rememberModelBinding(
   bindings: Map<string, BrowserModelBinding>,
   contextId: string,
   binding: BrowserModelBinding,

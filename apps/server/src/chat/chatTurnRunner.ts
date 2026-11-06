@@ -1,3 +1,5 @@
+import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contracts";
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
@@ -97,25 +99,8 @@ function boundedQuestionText(value: string): string {
   return trimmed.slice(0, 2_000).trim();
 }
 
-const RESEARCH_TOOL_NAME = "octant_web_research";
 /** The harness tool a direct-API provider calls to ask the person a question. */
 const HARNESS_ASK_USER_TOOL_NAME = "ask-user";
-const RESEARCH_TOOL_DEFINITION = {
-  name: RESEARCH_TOOL_NAME,
-  inputSchema: {
-    type: "object",
-    properties: { query: { type: "string" } },
-    required: ["query"],
-  },
-} as const;
-
-function researchToolsForRoute(
-  researchRoute: ResearchRouteDecision,
-): ReadonlyArray<typeof RESEARCH_TOOL_DEFINITION> {
-  return researchRoute.kind === "ready" && researchRoute.backend === "searxng"
-    ? [RESEARCH_TOOL_DEFINITION]
-    : [];
-}
 
 function mapProviderFailure(failure: ProviderFailure): ChatFailure {
   const category =
@@ -236,6 +221,7 @@ export interface ChatTurnRunnerOptions {
  * without an answer.
  */
 interface OpenChatQuestion {
+  readonly questionnaire?: Questionnaire;
   readonly requestId: string;
   readonly deliver: (answer: string) => void;
   readonly answered: Promise<ChatAttempt>;
@@ -243,6 +229,7 @@ interface OpenChatQuestion {
 }
 
 export interface ChatTurnRunnerInput {
+  readonly inputsCurrent?: () => boolean;
   readonly thread: ChatThread;
   readonly attempt: ChatAttempt;
   readonly prompt: string;
@@ -258,7 +245,6 @@ export interface ChatTurnRunnerInput {
   readonly reservationId: CapacityReservationId;
   readonly estimatedTokens: number;
   readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-  readonly researchEnabled: boolean;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
   readonly researchRoute: ResearchRouteDecision;
@@ -348,6 +334,12 @@ export class ChatTurnRunner {
   }): Promise<ChatAttempt | undefined> {
     const question = this.#openQuestions.get(input.attemptId);
     if (question === undefined || question.requestId !== input.requestId) return undefined;
+    if (
+      question.questionnaire !== undefined &&
+      validateQuestionnaireAnswer(question.questionnaire, input.answer).status === "invalid"
+    )
+      return undefined;
+    this.#openQuestions.delete(input.attemptId);
     question.deliver(input.answer);
     return await question.answered;
   }
@@ -428,7 +420,7 @@ export class ChatTurnRunner {
         });
       const answeredToolRequestIds = new Set<string>();
       const answeredApprovalRequestIds = new Set<string>();
-      let selectedResearchBackend: "searxng" | "provider-native" =
+      const selectedResearchBackend: "searxng" | "provider-native" =
         input.researchRoute.kind === "ready" ? input.researchRoute.backend : "searxng";
       let handledEvents = 0;
       let responseText = "";
@@ -712,6 +704,9 @@ export class ChatTurnRunner {
             abandonAnswered = reject;
           });
           openQuestions.set(String(input.attempt.id), {
+            ...(question.questionnaire === undefined
+              ? {}
+              : { questionnaire: question.questionnaire }),
             requestId: question.requestId,
             deliver: (answer) => {
               void Effect.runPromise(Deferred.succeed(answerDeferred, answer)).catch(
@@ -888,10 +883,7 @@ export class ChatTurnRunner {
               modelId: input.attempt.modelId,
               resumeCursor: input.resumeCursor,
               executionPolicy: "approval-gated",
-              tools: [
-                ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
-                ...(input.appManagedTools?.definitions ?? []),
-              ],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
               ...modelOptionValues,
               ...nativeSetup,
             })
@@ -899,10 +891,7 @@ export class ChatTurnRunner {
               sessionId: input.attempt.providerSessionId,
               modelId: input.attempt.modelId,
               executionPolicy: "approval-gated",
-              tools: [
-                ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
-                ...(input.appManagedTools?.definitions ?? []),
-              ],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
               ...modelOptionValues,
               ...nativeSetup,
             })
@@ -1208,6 +1197,7 @@ export class ChatTurnRunner {
                     let parsedInput: {
                       readonly prompt?: unknown;
                       readonly options?: unknown;
+                      readonly questionnaire?: unknown;
                     };
                     try {
                       const decoded: unknown = JSON.parse(event.inputJson);
@@ -1216,10 +1206,28 @@ export class ChatTurnRunner {
                           ? (decoded as {
                               readonly prompt?: unknown;
                               readonly options?: unknown;
+                              readonly questionnaire?: unknown;
                             })
                           : {};
                     } catch {
                       parsedInput = {};
+                    }
+                    let questionnaire: Questionnaire | undefined;
+                    try {
+                      if (parsedInput.questionnaire !== undefined)
+                        questionnaire = Schema.decodeUnknownSync(NativeHarnessAskUserArguments)(
+                          parsedInput,
+                        ).questionnaire;
+                    } catch {
+                      yield* callProvider(
+                        connection.answerTool({
+                          sessionId: input.attempt.providerSessionId,
+                          requestId: event.requestId,
+                          resultJson: JSON.stringify({ error: "question-invalid" }),
+                          isError: true,
+                        }),
+                      );
+                      return;
                     }
                     const prompt =
                       typeof parsedInput.prompt === "string"
@@ -1228,7 +1236,7 @@ export class ChatTurnRunner {
                     const rawOptions = Array.isArray(parsedInput.options)
                       ? parsedInput.options
                       : [];
-                    const options = rawOptions
+                    const options = (questionnaire === undefined ? rawOptions : [])
                       .filter((option): option is string => typeof option === "string")
                       .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
                       .map(boundedQuestionText)
@@ -1250,121 +1258,22 @@ export class ChatTurnRunner {
                         requestId: event.requestId,
                         prompt,
                         options,
+                        ...(questionnaire === undefined ? {} : { questionnaire }),
                       }),
                     );
                     yield* callProvider(
                       connection.answerTool({
                         sessionId: input.attempt.providerSessionId,
                         requestId: event.requestId,
-                        resultJson: JSON.stringify({ answer }),
+                        resultJson: JSON.stringify({
+                          answer: questionnaire === undefined ? answer : JSON.parse(answer),
+                        }),
                         isError: false,
                       }),
                     );
                     yield* settleAnsweredAttempt(answer, event.requestId);
                     return;
                   }
-                  if (event.toolName === RESEARCH_TOOL_NAME) {
-                    if (!input.researchEnabled) {
-                      yield* callProvider(
-                        connection.answerTool({
-                          sessionId: input.attempt.providerSessionId,
-                          requestId: event.requestId,
-                          resultJson: JSON.stringify({ error: "research-disabled" }),
-                          isError: true,
-                        }),
-                      );
-                      return;
-                    }
-                    let parsedQuery = "";
-                    try {
-                      const parsed = JSON.parse(event.inputJson) as { readonly query?: string };
-                      parsedQuery = typeof parsed.query === "string" ? parsed.query : input.prompt;
-                    } catch {
-                      parsedQuery = input.prompt;
-                    }
-                    const route = input.researchRoute;
-                    if (route.kind !== "ready" || route.backend !== "searxng") {
-                      yield* callProvider(
-                        connection.answerTool({
-                          sessionId: input.attempt.providerSessionId,
-                          requestId: event.requestId,
-                          resultJson: JSON.stringify({ error: "research-unavailable" }),
-                          isError: true,
-                        }),
-                      );
-                      return;
-                    }
-                    selectedResearchBackend = route.backend;
-                    const researchAbort = new AbortController();
-                    const researchSignal =
-                      executionSignal === undefined
-                        ? researchAbort.signal
-                        : AbortSignal.any([executionSignal, researchAbort.signal]);
-                    // App-owned work suspends the idle timeout, so the call
-                    // gets its own copy of the turn's deadline: a research
-                    // request that never returns must end the turn, not
-                    // leave it running forever.
-                    const results = yield* idle.during(
-                      Effect.raceFirst(
-                        Effect.tryPromise({
-                          try: () =>
-                            route.execute({
-                              query: parsedQuery,
-                              limit: 5,
-                              signal: researchSignal,
-                            }),
-                          catch: () =>
-                            decodeChatFailure({
-                              category: "failed",
-                              message: "Research failed.",
-                            }),
-                        }).pipe(
-                          Effect.catchAll((error) =>
-                            Effect.gen(function* () {
-                              if (executionSignal?.aborted) return;
-                              if (researchAbort.signal.aborted) {
-                                return yield* failTurn(
-                                  { code: decodeDiagnosticFailureCode("research-timed-out") },
-                                  decodeChatFailure({
-                                    category: "failed",
-                                    message: "Research did not return before the turn deadline.",
-                                  }),
-                                );
-                              }
-                              return yield* failTurn(
-                                { code: decodeDiagnosticFailureCode("research-failed") },
-                                error,
-                              );
-                            }),
-                          ),
-                        ),
-                        Effect.andThen(
-                          Effect.sleep(timeoutMs),
-                          Effect.gen(function* () {
-                            researchAbort.abort();
-                            return yield* failTurn(
-                              { code: decodeDiagnosticFailureCode("research-timed-out") },
-                              decodeChatFailure({
-                                category: "failed",
-                                message: "Research did not return before the turn deadline.",
-                              }),
-                            );
-                          }),
-                        ),
-                      ),
-                    );
-                    if (executionSignal?.aborted || results === undefined) return;
-                    yield* callProvider(
-                      connection.answerTool({
-                        sessionId: input.attempt.providerSessionId,
-                        requestId: event.requestId,
-                        resultJson: JSON.stringify(results),
-                        isError: false,
-                      }),
-                    );
-                    return;
-                  }
-
                   const toolSet = input.appManagedTools;
                   const allowed = toolSet?.definitions.some(
                     (definition) => definition.name === event.toolName,
@@ -1682,6 +1591,16 @@ export class ChatTurnRunner {
               decodeChatFailure({ category: "interrupted", message: "Chat turn was cancelled." }),
             );
           }
+          if (input.inputsCurrent?.() === false) {
+            yield* cancelOwnedSession();
+            return yield* Effect.fail(
+              decodeChatFailure({
+                category: "unavailable",
+                message:
+                  "The original continuation inputs are no longer available. No prompt was sent.",
+              }),
+            );
+          }
           timing = startTurnMetrics(clock());
           promptSent = true;
           // A runtime that keeps its own conversation already holds the
@@ -1700,10 +1619,7 @@ export class ChatTurnRunner {
               prompt: input.prompt,
               context: [...context],
               attachments: [...input.attachments],
-              tools: [
-                ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
-                ...(input.appManagedTools?.definitions ?? []),
-              ],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
             })
             .pipe(Effect.catchAll(persistProviderFailure));
         }),

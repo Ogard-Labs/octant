@@ -1,5 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import type { RoutineProposal } from "@octant/contracts/automation";
+import type { RoutineAgentRequest, RoutineChangeRequest } from "@octant/contracts/automation";
 import { useCallback, useEffect, useState } from "react";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
@@ -26,8 +26,10 @@ const IDLE_PROPOSAL_POLL_MS = 5_000;
  * as a suggestion chip at the foot of the thread like the reply's suggested
  * tasks. It says exactly what would run and when; nothing exists until its one
  * click, which the host performs as this window. Dismissing it declines, so
- * the agent hears no and nothing is created. The host lists only this
- * window's proposals; the open thread's are shown, oldest first.
+ * the agent hears no and nothing is created. A request to pause or archive a
+ * routine this thread started shows the same way and changes nothing until
+ * its one click, which pauses or archives it as this window. The host lists
+ * only this window's requests; the open thread's are shown, oldest first.
  */
 export function RoutineProposalPrompt(props: {
   readonly client: AutomationClient | undefined;
@@ -37,7 +39,7 @@ export function RoutineProposalPrompt(props: {
   readonly className: string;
 }) {
   const { client, threadId, turnActive } = props;
-  const [proposals, setProposals] = useState<ReadonlyArray<RoutineProposal>>([]);
+  const [proposals, setProposals] = useState<ReadonlyArray<RoutineAgentRequest>>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
   const revision = useThreadActivityRevision("toolApprovals");
@@ -92,6 +94,18 @@ export function RoutineProposalPrompt(props: {
     }
   }
 
+  if ("kind" in pending) {
+    return (
+      <section aria-label="Asked by the agent" className={`follow-up-cards ${props.className}`}>
+        <RoutineChangeCard busy={busy} decide={decide} request={pending} />
+        {message === undefined ? null : (
+          <OctantAlert className="follow-up-cards__error" tone="danger">
+            {message}
+          </OctantAlert>
+        )}
+      </section>
+    );
+  }
   const followUp = pending.targetPolicy === "same-thread";
   const schedule =
     pending.trigger.kind === "weekly-local"
@@ -139,5 +153,61 @@ export function RoutineProposalPrompt(props: {
         </OctantAlert>
       )}
     </section>
+  );
+}
+
+/**
+ * The agent asking to pause or archive a routine. Archiving a follow-up is
+ * what the thread calls cancelling it, so the card says so.
+ */
+function RoutineChangeCard(props: {
+  readonly request: RoutineChangeRequest;
+  readonly busy: boolean;
+  readonly decide: (decision: "confirm" | "decline") => Promise<void>;
+}) {
+  const { request, busy, decide } = props;
+  const followUp = request.targetPolicy === "same-thread";
+  const action =
+    request.change === "pause"
+      ? "Pause routine"
+      : followUp
+        ? "Cancel follow-up"
+        : "Archive routine";
+  const summary =
+    request.change === "pause"
+      ? "It stops running until you resume it in Automation Center."
+      : followUp
+        ? "Its scheduled turn will not be sent."
+        : "It stops for good. Its run history stays in Automation Center.";
+  return (
+    <article aria-label={`${action} request`} className="follow-up-card">
+      <div className="follow-up-card__head">
+        <span className="follow-up-card__kind">{action} · asked by the agent</span>
+        <OctantIconButton
+          disabled={busy}
+          label={`Keep ${request.displayName}`}
+          onClick={() => void decide("decline")}
+          size="icon-xs"
+          type="button"
+        >
+          <X aria-hidden="true" size={12} />
+        </OctantIconButton>
+      </div>
+      <p className="follow-up-card__title">{request.displayName}</p>
+      <p className="follow-up-card__summary">{summary}</p>
+      {request.reason === undefined ? null : (
+        <p className="follow-up-card__prompt">{request.reason}</p>
+      )}
+      <div className="follow-up-card__actions">
+        <OctantButton
+          disabled={busy}
+          onClick={() => void decide("confirm")}
+          size="xs"
+          type="button"
+        >
+          {action}
+        </OctantButton>
+      </div>
+    </article>
   );
 }

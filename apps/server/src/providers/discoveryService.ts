@@ -6,6 +6,7 @@ import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider
 import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery";
 import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
 import { execVersionRead, prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import { prepareConfinedReadinessProbe } from "../process/confinedReadinessProbe";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 
@@ -357,22 +358,30 @@ async function scanDescriptor(
       versionProbeConfinement,
     );
 
-    // Auth readiness probe. This one reads the provider's own credential state
-    // out of the user's home, so the confinement above would answer
-    // "unauthenticated" for every installed provider. Giving it a home it can
-    // read is a readiness-probe question, not a version read.
     let readiness: DiscoveryCandidate["readiness"] = "unknown";
-    if (descriptor.authProbeArgs !== undefined) {
-      try {
-        await exec(validated.canonicalPath, [...descriptor.authProbeArgs], {
-          timeout: MAX_PROBE_TIMEOUT_MS,
-          maxBuffer: MAX_PROBE_OUTPUT_BYTES,
-          env: sanitizeProbeEnvironment(environment),
-        });
-        readiness = "ready";
-      } catch {
-        readiness = "unauthenticated";
-      }
+    if (descriptor.authProbeArgs !== undefined && descriptor.driverKind === "codex") {
+      const probe = prepareConfinedReadinessProbe({
+        family: "codex",
+        binaryPath: validated.canonicalPath,
+        args: descriptor.authProbeArgs,
+        environment: sanitizeProbeEnvironment(environment),
+        ...(versionProbeConfinement === undefined ? {} : { confinement: versionProbeConfinement }),
+      });
+      if (probe.status === "prepared")
+        try {
+          await exec(probe.launch.command, probe.launch.args, {
+            timeout: MAX_PROBE_TIMEOUT_MS,
+            maxBuffer: MAX_PROBE_OUTPUT_BYTES,
+            env: probe.launch.environment,
+            cwd: probe.launch.workingDirectory,
+          });
+          readiness = "ready";
+        } catch {
+          // A timeout, locked Keychain or broken wrapper cannot prove sign-out.
+          readiness = "unknown";
+        } finally {
+          probe.launch.release();
+        }
     }
 
     candidates.push({

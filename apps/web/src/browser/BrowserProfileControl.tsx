@@ -7,6 +7,7 @@ import { BROWSER_PROFILE_DESCRIPTIONS, BROWSER_PROFILE_LABELS } from "./browserP
 
 export interface BrowserProfileControlProps {
   readonly profile: BrowserProfileChoice;
+  readonly label?: string;
   /** Without a Project there is no Project profile to offer. */
   readonly projectProfileAvailable: boolean;
   /** Signed-in pages open in the desktop app's own Browser only. */
@@ -73,12 +74,15 @@ export function BrowserProfileControl(props: BrowserProfileControlProps) {
         trigger={
           <>
             {ICONS[props.profile]}
-            <span>{BROWSER_PROFILE_LABELS[props.profile]}</span>
+            <span>
+              {props.label === undefined ? "" : "Task default: "}
+              {BROWSER_PROFILE_LABELS[props.profile]}
+            </span>
           </>
         }
         triggerClassName="browser-profile-control"
         triggerDisabled={props.disabled === true}
-        triggerLabel={`Browser profile: ${BROWSER_PROFILE_LABELS[props.profile]}`}
+        triggerLabel={`${props.label ?? "Browser profile"}: ${BROWSER_PROFILE_LABELS[props.profile]}`}
         value={props.profile}
       />
       {confirmingSignOut ? (

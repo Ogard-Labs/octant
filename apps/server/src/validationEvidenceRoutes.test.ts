@@ -8,9 +8,9 @@ import type { ValidationEvidenceSnapshot } from "@octant/contracts/validation-rp
 
 function makeStore(ok = true): WindowAuthorityStore {
   return {
-    authenticate: () => {
+    authenticateAuthority: () => {
       if (!ok) throw new WindowAuthorityError("unauthorized", "nope");
-      return "window-1";
+      return { windowId: "window-1" };
     },
   } as unknown as WindowAuthorityStore;
 }

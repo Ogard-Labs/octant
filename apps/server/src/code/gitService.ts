@@ -50,7 +50,19 @@ interface ObservationPort {
     input: Parameters<GitObservationPort["readTreeChanges"]>[0],
     signal?: AbortSignal,
   ) => Promise<GitTreeChangesResult>;
+  readTreeDiff?: (
+    input: Parameters<GitObservationPort["readTreeDiff"]>[0],
+    signal?: AbortSignal,
+  ) => Promise<GitScopedDiffResult>;
 }
+
+export type GitCapturedChangesResult = GitTreeChangesResult & {
+  readonly capture?: {
+    readonly from: string;
+    readonly to: string;
+    readonly diff: GitObservation["diff"];
+  };
+};
 
 interface MutationPort {
   applyHunks?: GitMutationPort["applyHunks"];
@@ -120,6 +132,12 @@ export type GitCheckpointResult =
   | { readonly status: "unavailable" };
 
 export class GitService {
+  get supportsCapturedDiff(): boolean {
+    return (
+      this.#observation.readTreeChanges !== undefined &&
+      this.#observation.readTreeDiff !== undefined
+    );
+  }
   readonly #observation: ObservationPort;
   readonly #mutation: MutationPort;
   readonly #queues = new Map<string, Promise<void>>();
@@ -490,21 +508,38 @@ export class GitService {
       /** The `worktree` tree of the earlier capture. */
       readonly from: string;
       readonly executionPolicy?: ProviderExecutionPolicy;
+      /** A preview reads its bounded patch from the same immutable current tree as its counts. */
+      readonly includeDiff?: boolean;
+      /** Host-owned operation/checkout/authority fence; never supplied by a provider. */
+      readonly captureCurrent?: () => boolean | Promise<boolean>;
       /** Re-read immediately before the queued capture writes; the grant can drop to Plan while waiting. */
       readonly resolveExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
     },
     signal?: AbortSignal,
-  ): Promise<GitTreeChangesResult> {
+  ): Promise<GitCapturedChangesResult> {
     const read = this.#observation.readTreeChanges?.bind(this.#observation);
+    const readDiff = this.#observation.readTreeDiff?.bind(this.#observation);
     if (read === undefined) return Promise.resolve({ status: "unavailable" });
+    if (input.includeDiff === true && readDiff === undefined)
+      return Promise.resolve({ status: "unavailable" });
     const resolvedPolicy = (): ProviderExecutionPolicy | undefined =>
       input.resolveExecutionPolicy?.() ?? input.executionPolicy;
+    const aborted = () => signal?.aborted === true;
+    const captureCurrent = async () =>
+      !aborted() &&
+      (await input.captureCurrent?.()) !== false &&
+      !aborted() &&
+      resolvedPolicy() !== "plan";
     // The capture copies a scratch index into `.git`. Plan is read-only, so a
     // turn that is Plan now must not snapshot, even if it started writable.
     if (resolvedPolicy() === "plan") return Promise.resolve({ status: "unavailable" });
+    if (input.includeDiff === true && signal?.aborted === true)
+      return Promise.resolve({ status: "unavailable" });
     return this.#serialized(input.checkoutId, async () => {
       const executionPolicy = resolvedPolicy();
       if (executionPolicy === "plan") return { status: "unavailable" as const };
+      if (input.includeDiff === true && !(await captureCurrent()))
+        return { status: "unavailable" as const };
       const now = await this.#mutation.snapshotWorkingTree(
         {
           checkoutRoot: input.checkoutRoot,
@@ -515,10 +550,23 @@ export class GitService {
       );
       if (now.status !== "captured") return { status: "unavailable" };
       try {
-        return await read(
-          { checkoutRoot: input.checkoutRoot, from: input.from, to: now.snapshot.worktree },
-          signal,
-        );
+        const comparison = {
+          checkoutRoot: input.checkoutRoot,
+          from: input.from,
+          to: now.snapshot.worktree,
+        };
+        if (input.includeDiff === true && !(await captureCurrent()))
+          return { status: "unavailable" };
+        const changes = await read(comparison, signal);
+        if (input.includeDiff !== true) return changes;
+        if (changes.status !== "ready" || readDiff === undefined || !(await captureCurrent()))
+          return { status: "unavailable" };
+        const patch = await readDiff(comparison, signal);
+        if (patch.status !== "ready" || !(await captureCurrent())) return { status: "unavailable" };
+        return {
+          ...changes,
+          capture: { from: input.from, to: now.snapshot.worktree, diff: patch.diff },
+        };
       } finally {
         await this.#mutation.releaseCheckpoint(
           {
@@ -527,7 +575,8 @@ export class GitService {
             anchorId: now.anchorId,
             ...mutationPolicy(executionPolicy),
           },
-          signal,
+          // An aborted preview must still release its temporary anchor.
+          input.includeDiff === true ? undefined : signal,
         );
       }
     });

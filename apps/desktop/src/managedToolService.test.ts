@@ -5,7 +5,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as updateModule from "./managedToolUpdates";
 import { createManagedToolService } from "./managedToolService";
 import {
   BUNDLED_MANAGED_TOOL_RELEASES,
@@ -91,9 +92,40 @@ describe("managed tool service", () => {
       dataDirectory: directory,
       execPath: process.execPath,
       smokeTimeoutMs: 250,
+      confineDeviceTool: (input) => ({
+        command: input.runtime,
+        args: [input.entrypoint, ...input.args],
+        env: input.environment,
+      }),
       ...(fetchBytes === undefined ? {} : { fetchBytes }),
     });
   }
+
+  it("closes every updater once when one updater rejects", async () => {
+    const create = updateModule.createManagedToolUpdates;
+    const closes: Array<ReturnType<typeof vi.fn>> = [];
+    const spy = vi.spyOn(updateModule, "createManagedToolUpdates").mockImplementation((options) => {
+      const updates = create(options);
+      const actualClose = updates.close;
+      const first = closes.length === 0;
+      const close = vi.fn(async () => {
+        await actualClose();
+        if (first) throw new Error("private updater failure");
+      });
+      closes.push(close);
+      return { ...updates, close };
+    });
+    try {
+      const service = makeService();
+      const completion = service.close();
+      await expect(completion).rejects.toThrow();
+      expect(closes.length).toBeGreaterThan(1);
+      for (const close of closes) expect(close).toHaveBeenCalledOnce();
+      expect(service.close()).toBe(completion);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 
   it("reports every platform tool as available from the bundled copy", async () => {
     const service = makeService();
@@ -178,6 +210,41 @@ describe("managed tool service", () => {
       if (previous === undefined) delete process.env.OCTANT_TEST_PROVIDER_API_KEY;
       else process.env.OCTANT_TEST_PROVIDER_API_KEY = previous;
     }
+  });
+
+  it("prepares the selected Android SDK before confinement and refuses an unsafe installed stream", async () => {
+    const prepare = vi.fn<
+      NonNullable<Parameters<typeof createManagedToolService>[0]["confineDeviceTool"]>
+    >(() => undefined);
+    const service = createManagedToolService({
+      bundledToolsDirectory: bundledDirectory,
+      dataDirectory: directory,
+      execPath: process.execPath,
+      confineDeviceTool: prepare,
+    });
+    let stateDirectory: string | undefined;
+    try {
+      expect(
+        await service.launchSpec("serve-avd", ["emulator-5554"], "/selected/android-sdk"),
+      ).toBeUndefined();
+      expect(prepare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: "serve-avd",
+          environment: expect.objectContaining({
+            ANDROID_HOME: "/selected/android-sdk",
+            ANDROID_SDK_ROOT: "/selected/android-sdk",
+          }),
+        }),
+      );
+      stateDirectory = prepare.mock.calls[0]?.[0].stateDirectory;
+      expect(existsSync(stateDirectory ?? "")).toBe(true);
+      expect(
+        (await service.status()).tools.find((tool) => tool.tool === "serve-avd")?.message,
+      ).toMatch(/Cannot start.*safely/);
+    } finally {
+      await service.close();
+    }
+    expect(existsSync(stateDirectory ?? "")).toBe(false);
   });
 
   it("remembers the update preference across restarts", async () => {

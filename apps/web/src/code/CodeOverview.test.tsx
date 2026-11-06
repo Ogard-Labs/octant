@@ -1,5 +1,5 @@
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -123,7 +123,15 @@ describe("CodeOverview", () => {
       expect(screen.getByRole("button", { name: "Review and approve" })).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole("button", { name: "Review and approve" }));
-    expect(await screen.findByRole("dialog", { name: "Approve planner proposal" })).toBeVisible();
+    const review = await screen.findByRole("dialog", { name: "Approve planner proposal" });
+    expect(review).toBeVisible();
+    expect(
+      within(review).getByRole("heading", { name: "Review the planner's proposal" }),
+    ).toBeVisible();
+    expect(
+      within(review).queryByRole("heading", { name: "What are we building today?" }),
+    ).not.toBeInTheDocument();
+    expect(within(review).queryByText(/just start typing/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Only the described parser fix.",
     );
@@ -744,6 +752,7 @@ function controller(): CodeController {
     setAccessNotice: vi.fn(),
     announceFirstPrompt: vi.fn(),
     answerProviderRequest: vi.fn(async () => true),
+    forceStopTurn: vi.fn(async () => false),
     cancelTurn: vi.fn(async () => true),
     archiveThread: vi.fn(async () => true),
     completeThread: vi.fn(async () => ({ status: "ok" }) as const),

@@ -4,13 +4,19 @@ import {
   type ClaudeAuthentication,
   type ContextEntryId,
   type PermissionPersistence,
+  type ProviderContextBlock,
   type ProviderFailure,
   type ProviderModelId,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import {
+  renderProviderContextSections,
+  renderProviderTurnPrompt,
+} from "@octant/provider-sdk/chat-conformance";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -75,6 +81,7 @@ const initialized = (
   sdkSessionId: string,
   root = projectRoot,
   model: string = modelId,
+  runtimeVersion = "2.1.211",
 ): ClaudeDecodedMessage => ({
   kind: "initialized",
   sessionId: sdkSessionId,
@@ -84,7 +91,7 @@ const initialized = (
   permissionMode: "default",
   tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"],
   capabilities: ["interrupt_receipt_v1"],
-  runtimeVersion: "2.1.211",
+  runtimeVersion,
 });
 
 const completed = (sdkSessionId: string): ClaudeDecodedMessage => ({
@@ -146,10 +153,14 @@ class FakeQuery implements ClaudeQueryPort {
   );
   readonly readPlanUsage = vi.fn<ClaudeQueryPort["readPlanUsage"]>(() => Effect.succeed(undefined));
   readonly close = vi.fn(() => Effect.void);
-  readonly send = vi.fn(({ text }: Parameters<ClaudeQueryPort["send"]>[0]) =>
-    Effect.sync(() => {
-      this.sent.push(text);
-    }),
+  /** Whether the prompt hook runs for each message, as it does unless a policy turns hooks off. */
+  hookRuns = true;
+  readonly send = vi.fn(
+    ({ text, context, onContextDelivered }: Parameters<ClaudeQueryPort["send"]>[0]) =>
+      Effect.sync(() => {
+        this.sent.push(text);
+        if (this.hookRuns && context !== undefined) onContextDelivered?.();
+      }),
   );
   readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure>;
   readonly sessionId: Effect.Effect<string, ProviderFailure>;
@@ -168,6 +179,7 @@ class FakeQuery implements ClaudeQueryPort {
     models: ClaudeQueryPort["initialization"]["models"] = [],
     autoCompactThreshold?: number,
     compactAnnounced = true,
+    runtimeVersion?: string,
   ) {
     this.initialization = {
       ...this.initialization,
@@ -180,7 +192,7 @@ class FakeQuery implements ClaudeQueryPort {
     this.messages =
       stream ??
       Stream.concat(
-        Stream.make(initialized(sdkSessionId, projectRoot, model)),
+        Stream.make(initialized(sdkSessionId, projectRoot, model, runtimeVersion)),
         Stream.fromPubSub(this.pubsub),
       );
   }
@@ -202,6 +214,7 @@ function harness(
     readonly autoCompactThreshold?: number;
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
+    readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly makeEnvironmentScope?: (
@@ -228,6 +241,7 @@ function harness(
           options.models ?? [],
           options.autoCompactThreshold,
           options.compactAnnounced ?? true,
+          options.runtimeVersion,
         );
         queries.push(query);
         sessions.set(query.sdkSessionId, {
@@ -248,7 +262,7 @@ function harness(
     ),
   };
   const process: ClaudeProcessPort = {
-    probeVersion: vi.fn(() => Effect.succeed("2.1.211")),
+    probeVersion: vi.fn(() => Effect.succeed(options.runtimeVersion ?? "2.1.211")),
     probeSubscription: vi.fn(() => Effect.succeed("authenticated" as const)),
     spawn: vi.fn() as ClaudeProcessPort["spawn"],
   };
@@ -447,6 +461,63 @@ describe("Claude file tools and the secret guard", () => {
     it("lets a search run where no protected file lies beneath it", () => {
       expect(search("Grep", { pattern: "export" })).toBeUndefined();
       expect(search("Glob", { pattern: "src/**/*.ts" })).toBeUndefined();
+    });
+
+    it.each(["Grep", "Glob", "LS"])(
+      "refuses a relative %s root that contains a protected entry",
+      (tool) => {
+        expect(search(tool, { path: ".", pattern: "**/*" }, fakeHome)).toContain(
+          "Cloud command-line credentials",
+        );
+        expect(search(tool, { path: "src", pattern: "**/*" })).toBeUndefined();
+      },
+    );
+
+    it("checks the resolved prefix of a relative Glob that leaves the search folder", () => {
+      expect(search("Glob", { pattern: "../.aws/*" })).toContain("Cloud command-line credentials");
+      expect(search("Glob", { path: "src", pattern: "../../.aws/*" })).toContain(
+        "Cloud command-line credentials",
+      );
+      expect(search("Glob", { pattern: "src/**/*.ts" })).toBeUndefined();
+    });
+
+    it("distinguishes an explicit protected relative read from a mixed-root search", () => {
+      const direct = search("Read", { file_path: ".aws/credentials" }, fakeHome);
+      expect(direct).toContain("Cloud command-line credentials");
+      expect(direct).not.toContain("This search");
+    });
+
+    it("checks a parent traversal after resolving the symlink it follows", async () => {
+      const link = join(fakeHome, "project", "mixed-target");
+      await symlink(join(fakeHome, ".aws"), link);
+      try {
+        expect(search("Grep", { path: "mixed-target/../.aws", pattern: "." })).toContain(
+          "Cloud command-line credentials",
+        );
+        expect(search("Glob", { pattern: "mixed-target/../.aws/*" })).toContain(
+          "Cloud command-line credentials",
+        );
+        expect(search("Read", { file_path: "mixed-target/../.aws/credentials" })).toContain(
+          "Cloud command-line credentials",
+        );
+      } finally {
+        await unlink(link);
+      }
+    });
+
+    it("rechecks a linked search folder after its target changes", async () => {
+      const shortcut = join(fakeHome, "shortcut");
+      await symlink(join(fakeHome, "project", "src"), shortcut);
+      try {
+        expect(search("Grep", { path: "shortcut", pattern: "export" }, fakeHome)).toBeUndefined();
+        await unlink(shortcut);
+        await symlink(join(fakeHome, ".aws"), shortcut);
+        expect(search("Grep", { path: "shortcut", pattern: "key" }, fakeHome)).toContain(
+          "Cloud command-line credentials",
+        );
+      } finally {
+        await unlink(shortcut);
+      }
     });
 
     it("leaves searches to the OS rule only where the runtime runs inside Octant's profile", () => {
@@ -4501,6 +4572,136 @@ describe("Claude session lifecycle", () => {
     await acquired.close();
     expect(f.queries.every((query) => query.close.mock.calls.length === 1)).toBe(true);
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+  });
+
+  describe("Octant context beside the person's message", () => {
+    const rules = { kind: "instructions", text: "Offer follow-ups only when useful." } as const;
+    const status = {
+      kind: "project-memory",
+      key: "work-status-file",
+      text: "Draft sent.",
+    } as const;
+    const sendWith = async (
+      f: ReturnType<typeof harness>,
+      context: ReadonlyArray<ProviderContextBlock>,
+      nativeSetup?: ProviderNativeSetup,
+    ) => {
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hei", context, attachments: [], tools: [] }),
+      );
+      const call = f.queries[0]?.send.mock.calls[0]?.[0];
+      await acquired.close();
+      return call;
+    };
+
+    it("hands the context to the prompt hook and sends only what the person typed", async () => {
+      expect(await sendWith(harness(), [rules, status])).toMatchObject({
+        text: "hei",
+        context: `${rules.text}\n\n${renderProviderContextSections([status])}`,
+      });
+    });
+
+    it("keeps material that would be cut short in the message, and Octant's rules beside it", async () => {
+      const large = { kind: "user-message", text: "x".repeat(12_000) } as const;
+      expect(await sendWith(harness(), [rules, large])).toMatchObject({
+        text: renderProviderTurnPrompt({ prompt: "hei", context: [large] }),
+        context: rules.text,
+      });
+    });
+
+    it("frames the context inside the message on a Claude Code too old for the prompt hook", async () => {
+      const call = await sendWith(
+        harness("subscription", "current-session", { runtimeVersion: "2.1.200" }),
+        [rules],
+      );
+      expect(call).toMatchObject({
+        text: renderProviderTurnPrompt({ prompt: "hei", context: [rules] }),
+      });
+      expect(call).not.toHaveProperty("context");
+    });
+
+    it("keeps the context inside the message when the person's own hooks are off on a release not measured to spare Octant's hook", async () => {
+      const ownSetupHooksOff: ProviderNativeSetup = {
+        subagents: false,
+        webTools: false,
+        skills: true,
+        toolServers: false,
+        hooks: false,
+        projectCode: false,
+      };
+      expect(await sendWith(harness(), [rules], ownSetupHooksOff)).toMatchObject({
+        text: "hei",
+        context: rules.text,
+      });
+      const unmeasured = await sendWith(
+        harness("subscription", "current-session", { runtimeVersion: "2.1.212" }),
+        [rules],
+        ownSetupHooksOff,
+      );
+      expect(unmeasured).toMatchObject({
+        text: renderProviderTurnPrompt({ prompt: "hei", context: [rules] }),
+      });
+      expect(unmeasured).not.toHaveProperty("context");
+    });
+
+    it("counts context as kept only when the prompt hook delivered it, and frames it in the message once the hook has missed", async () => {
+      const f = harness();
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const events: ProviderRuntimeEvent[] = [];
+      const subscription = Effect.runFork(
+        Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ),
+      );
+      const settle = () => new Promise((done) => setTimeout(done, 20));
+      const query = f.queries[0]!;
+      const turn = async (prompt: string) => {
+        await Effect.runPromise(
+          acquired.connection.send({
+            sessionId,
+            prompt,
+            context: [rules],
+            attachments: [],
+            tools: [],
+          }),
+        );
+        await query.emit(completed("sdk-session-1"));
+        await settle();
+      };
+
+      await turn("delivered");
+      query.hookRuns = false;
+      await turn("missed");
+      await turn("framed");
+
+      expect(
+        events.flatMap((event) => (event.kind === "usage" ? [event.promptRetention] : [])),
+      ).toEqual(["kept", undefined, "kept"]);
+      expect(query.send.mock.calls.map(([call]) => call)).toEqual([
+        expect.objectContaining({ text: "delivered", context: rules.text }),
+        expect.objectContaining({ text: "missed", context: rules.text }),
+        expect.objectContaining({
+          text: renderProviderTurnPrompt({ prompt: "framed", context: [rules] }),
+        }),
+      ]);
+      expect(query.send.mock.calls[2]?.[0]).not.toHaveProperty("context");
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    });
   });
 
   it("queues multiple turns through one query and emits exactly one terminal per turn", async () => {

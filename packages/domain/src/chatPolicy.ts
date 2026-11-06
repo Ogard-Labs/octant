@@ -235,6 +235,7 @@ export function changeChatResearch(thread: ChatThread, input: ChangeChatResearch
 }
 
 export interface BeginChatTurnInput {
+  readonly toolCatalogHandoff?: boolean;
   readonly turnId: ChatTurnId;
   readonly submissionId?: ChatTurn["submissionId"];
   readonly attemptId: ChatAttempt["id"];
@@ -242,7 +243,10 @@ export interface BeginChatTurnInput {
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
   /** Set when this turn's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
+  readonly inputReceipt?: ChatAttempt["inputReceipt"];
   readonly contextManifestId: ContextManifestId;
+  readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
+  readonly sideChatReturns?: ChatTurn["sideChatReturns"];
   readonly userMessageRef: ChatContentReference;
   readonly attachmentIds?: ReadonlyArray<ChatAttachmentId>;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
@@ -274,8 +278,12 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     providerSessionId: input.providerSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
+    ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
+    ...(input.sideChatSourceReceipt === undefined
+      ? {}
+      : { sideChatSourceReceipt: input.sideChatSourceReceipt }),
     outcome: "queued",
     responseRefs: [],
     citationIds: [],
@@ -287,6 +295,9 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     id: input.turnId,
     threadId: thread.id,
     ...(input.submissionId === undefined ? {} : { submissionId: input.submissionId }),
+    ...(input.toolCatalogHandoff === undefined
+      ? {}
+      : { toolCatalogHandoff: input.toolCatalogHandoff }),
     sequence: input.sequence,
     userMessageRef: input.userMessageRef,
     attachmentIds: input.attachmentIds ?? [],
@@ -296,6 +307,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     ...(input.supersedes === undefined ? {} : { supersedes: input.supersedes }),
     ...(input.delivery === undefined ? {} : { delivery: input.delivery }),
     attempts: [attempt],
+    ...(input.sideChatReturns === undefined ? {} : { sideChatReturns: input.sideChatReturns }),
     createdAt: input.createdAt,
   });
 }
@@ -414,7 +426,9 @@ export interface RetryChatTurnInput {
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
   /** Set when the retried attempt's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
+  readonly inputReceipt?: ChatAttempt["inputReceipt"];
   readonly newContextManifestId: ContextManifestId;
+  readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
 }
@@ -464,8 +478,12 @@ export function retryChatTurn(
     providerSessionId: input.newProviderSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
+    ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
+    ...(input.sideChatSourceReceipt === undefined
+      ? {}
+      : { sideChatSourceReceipt: input.sideChatSourceReceipt }),
     outcome: "queued",
     responseRefs: [],
     citationIds: [],
@@ -479,6 +497,7 @@ export interface ResumeChatTurnInput {
   readonly attemptId: ChatAttempt["id"];
   readonly newAttemptId: ChatAttempt["id"];
   readonly newContextManifestId: ContextManifestId;
+  readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
 }
@@ -520,7 +539,11 @@ export function resumeChatTurn(
     providerInstanceId: attempt.providerInstanceId,
     providerSessionId: attempt.providerSessionId,
     modelId: attempt.modelId,
+    ...(attempt.inputReceipt === undefined ? {} : { inputReceipt: attempt.inputReceipt }),
     contextManifestId: input.newContextManifestId,
+    ...(input.sideChatSourceReceipt === undefined
+      ? {}
+      : { sideChatSourceReceipt: input.sideChatSourceReceipt }),
     outcome: "queued",
     responseRefs: [],
     citationIds: [],
@@ -571,6 +594,7 @@ export function answerChatTurnQuestion(
     ...(attempt.answeredQuestions ?? []),
     {
       requestId: question.requestId,
+      ...(question.questionnaire === undefined ? {} : { questionnaire: question.questionnaire }),
       prompt: question.prompt,
       options: [...question.options],
       ...(question.questionIndex === undefined || question.questionCount === undefined

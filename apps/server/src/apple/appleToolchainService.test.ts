@@ -917,30 +917,243 @@ describe("AppleToolchainService lifecycle", () => {
     ]);
   });
 
-  it("collects bounded logs without leaking project or artifact paths", async () => {
-    const execute = discoveryExecutor();
-    const writeArtifact = vi.fn(async () => undefined);
+  it("reads an app's log by its executable's process or its subsystem, without leaking project paths", async () => {
+    const base = discoveryExecutor();
+    const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {
+      const command = input.argv.join(" ");
+      if (command.startsWith("xcrun simctl appinfo")) {
+        return processResult(
+          '{\n    CFBundleDisplayName = Fixture;\n    CFBundleExecutable = "Fixture App";\n    CFBundleIdentifier = "app.octant.fixture";\n}\n',
+        );
+      }
+      if (command.includes("log show")) {
+        return processResult(
+          `Timestamp               Ty Process[PID:TID]\n2026-11-05 10:00:00.000 E  Fixture App[42:7] loaded ${context.checkoutRoot}/secret.swift\n`,
+        );
+      }
+      return base(input);
+    });
+    const artifacts = new Map<string, Uint8Array>();
     const service = new AppleToolchainService({
       execute,
-      writeArtifact,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      readArtifact: async (reference: string) => artifacts.get(reference),
       realpath: async (path: string) => path,
       now: () => "2026-07-27T20:00:00.000Z",
       newId: () => "30000000-0000-4000-8000-000000000012",
     });
     await service.discover(discoveryRequest, context);
-    execute.mockResolvedValue(
-      processResult(`${context.checkoutRoot}/secret.swift:2:1: error: boom\n`),
-    );
-    const evidence = await service.execute(simulatorRequest(), context);
-    expect(evidence.outcome).toBe("succeeded");
+    const plan = { ...context, executionPolicy: "plan" as const, approvalValid: false };
+    const evidence = await service.execute(simulatorRequest(), plan);
+    expect(evidence).toMatchObject({ outcome: "succeeded", truncated: false });
+    const commands = execute.mock.calls.map(([input]) => input.argv);
+    expect(commands).toContainEqual([
+      "xcrun",
+      "simctl",
+      "appinfo",
+      ids.simulator,
+      "app.octant.fixture",
+    ]);
+    expect(commands).toContainEqual([
+      "xcrun",
+      "simctl",
+      "spawn",
+      ids.simulator,
+      "log",
+      "show",
+      "--style",
+      "compact",
+      "--last",
+      "5m",
+      "--predicate",
+      'process == "Fixture App" OR subsystem == "app.octant.fixture"',
+    ]);
     expect(evidence.diagnostics).toEqual([
-      expect.objectContaining({ message: "boom", location: "[PROJECT]/secret.swift:2:1" }),
+      { severity: "note", message: "logs returned 2 lines from app.octant.fixture" },
     ]);
     expect(JSON.stringify(evidence)).not.toContain(context.checkoutRoot);
-    expect(writeArtifact).toHaveBeenCalledWith(
-      expect.stringMatching(/^apple-log-/),
-      expect.any(Uint8Array),
+    const log = await (service as any).readLogArtifact(evidence.artifacts[0].reference, plan);
+    expect(log).toContain("loaded [PROJECT]/secret.swift");
+    expect(log).not.toContain(context.checkoutRoot);
+    // Another thread holds no such evidence, so it reads nothing.
+    expect(
+      await (service as any).readLogArtifact(evidence.artifacts[0].reference, {
+        ...context,
+        threadId: "40000000-0000-4000-8000-000000000001",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns the newest log lines when the window holds more than the process capture keeps", async () => {
+    const base = discoveryExecutor();
+    const full = Array.from(
+      { length: 2_000 },
+      (_unused, index) => `2026-11-05 10:00:00.000 E  Fixture App[42:7] line ${index}`,
+    ).join("\n");
+    // The process port keeps a bounded part of an oversized output, and which
+    // end follows the launch's retention.
+    const cap = 4_096;
+    const execute = vi.fn(
+      async (input: Parameters<typeof base>[0] & { readonly outputRetention?: string }) => {
+        const command = input.argv.join(" ");
+        if (command.startsWith("xcrun simctl appinfo")) {
+          return processResult('{\n    CFBundleExecutable = "Fixture App";\n}\n');
+        }
+        if (command.includes("log show")) {
+          return processResult(
+            input.outputRetention === "newest" ? full.slice(-cap) : full.slice(0, cap),
+          );
+        }
+        return base(input);
+      },
     );
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      readArtifact: async (reference: string) => artifacts.get(reference),
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(simulatorRequest(), context);
+    expect(evidence.outcome).toBe("succeeded");
+    const log = await (service as any).readLogArtifact(evidence.artifacts[0].reference, context);
+    expect(log.trim().split("\n").at(-1)).toContain("line 1999");
+  });
+
+  it("falls back to the app's subsystem when the installed app's executable cannot be read", async () => {
+    const base = discoveryExecutor();
+    const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {
+      const command = input.argv.join(" ");
+      if (command.startsWith("xcrun simctl appinfo")) {
+        return processResult("", { exitCode: 1, stderr: "not installed" });
+      }
+      if (command.includes("log show")) return processResult("");
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(simulatorRequest({ sinceSeconds: 90 }), context);
+    expect(evidence.outcome).toBe("succeeded");
+    const shown = execute.mock.calls
+      .map(([input]) => input.argv)
+      .find((argv) => argv.includes("show"));
+    expect(shown?.slice(-4)).toEqual([
+      "--last",
+      "2m",
+      "--predicate",
+      'subsystem == "app.octant.fixture"',
+    ]);
+    expect(evidence.diagnostics[0].message).toContain("executable could not be read");
+  });
+
+  it("hands back the newest three crash reports whose header names the app, and none for others", async () => {
+    const reports = await mkdtemp(join(tmpdir(), "octant-crash-reports-"));
+    try {
+      const header = (bundleID: string) =>
+        `${JSON.stringify({ app_name: "Fixture", bundleID, name: "Fixture" })}\n`;
+      const write = async (name: string, body: string, minutesAgo: number) => {
+        const path = join(reports, name);
+        await writeFile(path, body);
+        const at = new Date(Date.parse("2026-11-05T10:00:00.000Z") - minutesAgo * 60_000);
+        await utimes(path, at, at);
+      };
+      await write("Fixture-1.ips", `${header("app.octant.fixture")}{"exception":"first"}`, 40);
+      await write("Fixture-2.ips", `${header("app.octant.fixture")}{"exception":"second"}`, 30);
+      await write("Fixture-3.ips", `${header("app.octant.fixture")}${"x".repeat(20_000)}`, 20);
+      await write("Fixture-4.ips", `${header("app.octant.fixture")}{"exception":"newest"}`, 10);
+      await write("Other-1.ips", `${header("com.example.other")}{"exception":"other"}`, 1);
+      await write("Fixture-5.crash", `${header("app.octant.fixture")}{}`, 0);
+      await symlink(join(reports, "Fixture-1.ips"), join(reports, "Fixture-link.ips"));
+
+      const base = discoveryExecutor();
+      const written: Uint8Array[] = [];
+      const service = new AppleToolchainService({
+        execute: vi.fn(async (input: Parameters<typeof base>[0]) => {
+          const command = input.argv.join(" ");
+          if (command.startsWith("xcrun simctl appinfo")) {
+            return processResult("{\n    CFBundleExecutable = Fixture;\n}\n");
+          }
+          if (command.includes("log show")) return processResult("a line\n");
+          return base(input);
+        }),
+        writeArtifact: async (_reference: string, bytes: Uint8Array) => {
+          written.push(bytes);
+        },
+        diagnosticReportsDirectory: reports,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      const evidence = await service.execute(simulatorRequest({ includeCrashes: true }), context);
+      expect(evidence).toMatchObject({ outcome: "succeeded", truncated: true });
+      expect(evidence.diagnostics[0].message).toBe(
+        "logs returned 1 line from app.octant.fixture and 3 crash reports",
+      );
+      const log = new TextDecoder().decode(written[0]);
+      const named = [...log.matchAll(/^--- (\S+\.ips) /gm)].map((match) => match[1]);
+      expect(named).toEqual(["Fixture-4.ips", "Fixture-3.ips", "Fixture-2.ips"]);
+      expect(log).not.toContain("other");
+      // Each report keeps only its start.
+      expect(log.length).toBeLessThan(3 * 8 * 1024 + 1_024);
+    } finally {
+      rmSync(reports, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a crash report whose first 8 KiB end inside a character", async () => {
+    const reports = await mkdtemp(join(tmpdir(), "octant-crash-reports-"));
+    try {
+      const header = `${JSON.stringify({ app_name: "Fixture", bundleID: "app.octant.fixture" })}\n`;
+      // "é" is two bytes and starts at byte 8191, so the read stops between them.
+      const body = `${header}${"x".repeat(8_191 - header.length)}é${"y".repeat(100)}`;
+      await writeFile(join(reports, "Fixture-1.ips"), body);
+
+      const base = discoveryExecutor();
+      const written: Uint8Array[] = [];
+      const service = new AppleToolchainService({
+        execute: vi.fn(async (input: Parameters<typeof base>[0]) => {
+          const command = input.argv.join(" ");
+          if (command.startsWith("xcrun simctl appinfo")) {
+            return processResult("{\n    CFBundleExecutable = Fixture;\n}\n");
+          }
+          if (command.includes("log show")) return processResult("a line\n");
+          return base(input);
+        }),
+        writeArtifact: async (_reference: string, bytes: Uint8Array) => {
+          written.push(bytes);
+        },
+        diagnosticReportsDirectory: reports,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      const evidence = await service.execute(simulatorRequest({ includeCrashes: true }), context);
+      expect(evidence).toMatchObject({ outcome: "succeeded", truncated: true });
+      expect(evidence.diagnostics[0].message).toBe(
+        "logs returned 1 line from app.octant.fixture and 1 crash reports",
+      );
+      const log = new TextDecoder().decode(written[0]);
+      expect(log).toContain("--- Fixture-1.ips ");
+      expect(log).toContain("x".repeat(100));
+      expect(log).not.toContain("é");
+    } finally {
+      rmSync(reports, { recursive: true, force: true });
+    }
   });
 
   it("reconciles the shared Simulator state after owned boot and shutdown", async () => {

@@ -1,7 +1,18 @@
+import { packagedNativePath } from "./desktop-client-runtime";
 import { execFileSync } from "node:child_process";
-import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
+import {
+  readFile,
+  mkdtemp,
+  mkdir,
+  writeFile,
+  access,
+  rm,
+  readdir,
+  stat,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   CANVAS_PROTOTYPE_PRELOAD_FILENAME,
   EXTENSION_BRIDGE_PRELOAD_FILENAME,
@@ -14,6 +25,7 @@ import {
 } from "../apps/desktop/tsdown.config";
 import { SERVER_INTERNAL_RUNTIME_PATTERN } from "../apps/server/tsdown.config";
 import { describe, expect, it, vi } from "vitest";
+import { desktopIdentity } from "@octant/host-runtime";
 import {
   DESKTOP_PACKAGE_IDENTITY,
   DESKTOP_PACKAGE_TARGETS,
@@ -43,7 +55,9 @@ import {
   createQuitAppleScript,
   createServerRuntimeManifest,
   createDesktopRuntimeManifest,
+  installNightlyCommand,
   installTerminalLauncher,
+  nightlyCommandLauncherScript,
   linuxPackageDirectoryName,
   packagedBundlePath,
   packagedLinuxBundlePath,
@@ -57,6 +71,7 @@ import {
   validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
+  NIGHTLY_CLIENT_HARNESS_MARKER,
   resolveReleaseVersion,
   validateBundledInternalRuntime,
   validateSandboxedPreloads,
@@ -64,14 +79,35 @@ import {
   validateCodeWebAssets,
   validateLinuxNativePayloadAllowlist,
   validateNativePayloadAllowlist,
+  validateDarwinBundleIdentity,
+  validateLinuxDesktopEntry,
+  validateBundleIdentity,
   waitForChildExit,
   stageBundledLanguageServer,
   stageExternalRuntimePackages,
+  stageLinuxAppDir,
+  stageHostPayload,
 } from "./package-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 describe("desktop packaging boundary", () => {
+  it("requires the signed desktop entry marker and exact native status resource", () => {
+    const identity = desktopIdentity("stable");
+    const metadata = {
+      CFBundleIdentifier: identity.bundleId,
+      CFBundleName: identity.productName,
+      CFBundleExecutable: identity.productName,
+    };
+    expect(() => validateDarwinBundleIdentity(metadata, identity)).toThrow(/entry policy/);
+    expect(() =>
+      validateNativePayloadAllowlist([
+        "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+        "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
+      ]),
+    ).not.toThrow();
+  });
+
   it("stages native SDK dependencies once at their signed runtime location", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "octant-package-dependencies-"));
     try {
@@ -107,6 +143,34 @@ describe("desktop packaging boundary", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  it("requires Stable's signed host-only capability while keeping it out of Nightly", () => {
+    const stable = desktopIdentity("stable");
+    const metadata = {
+      CFBundleIdentifier: stable.bundleId,
+      CFBundleName: stable.productName,
+      CFBundleExecutable: stable.productName,
+      OctantDesktopEntryPolicy: "sealed-main-v1",
+    };
+    expect(() => validateDarwinBundleIdentity(metadata, stable)).toThrow(/host launch/);
+    expect(() =>
+      validateDarwinBundleIdentity(
+        {
+          ...metadata,
+          OctantHostLaunchPolicy: "host-only-v1",
+          CFBundleURLTypes: [{ CFBundleURLSchemes: ["octant"] }],
+        },
+        stable,
+      ),
+    ).not.toThrow();
+    const nightly = createPackagerOptions(
+      "/tmp/stage",
+      "/tmp/output",
+      "0.1.0-preview.20261104.1",
+      undefined,
+      desktopIdentity("nightly"),
+    );
+    expect(nightly.extendInfo).not.toHaveProperty("OctantHostLaunchPolicy");
+  });
   it("defaults the Apple Silicon packager options, and can target Linux x64 AppImage packaging", () => {
     // The version is not cosmetic: the updater compares it against the feed,
     // and a build that cannot say which version it is cannot refuse a
@@ -115,10 +179,13 @@ describe("desktop packaging boundary", () => {
       appBundleId: "app.octant.desktop",
       appVersion: "0.1.0",
       arch: "arm64",
-      asar: false,
+      asar: { unpack: expect.stringContaining("cua_driver_node_runtime.node") },
+      ignore: /^\/apps\/server(?:\/|$)/,
       dir: "/tmp/octant-stage",
       electronVersion: "43.7.11",
       extendInfo: {
+        OctantDesktopEntryPolicy: "sealed-main-v1",
+        OctantHostLaunchPolicy: "host-only-v1",
         NSMicrophoneUsageDescription:
           "Octant uses the microphone to dictate a message when you press the microphone button.",
       },
@@ -154,6 +221,34 @@ describe("desktop packaging boundary", () => {
     });
   });
 
+  it("seals both desktop entries while keeping each app's worker host tree physical", () => {
+    const nightly = createPackagerOptions(
+      "/tmp/stage",
+      "/tmp/out",
+      "0.1.0-preview.20261103.1",
+      DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+      desktopIdentity("nightly"),
+    );
+    expect(nightly.asar).toEqual({
+      unpack: expect.stringContaining(
+        "apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
+      ),
+    });
+    expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("*.js") });
+    expect(nightly.asar).toEqual({ unpack: expect.not.stringContaining("apps/server/") });
+    expect(nightly.ignore).toEqual(/^\/apps\/server(?:\/|$)/);
+    const stable = createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0");
+    expect(stable.asar).toEqual({
+      unpack: expect.stringContaining("cua_driver_node_runtime.node"),
+    });
+    expect(stable.ignore).toEqual(nightly.ignore);
+    expect(
+      packagedNativePath(
+        "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      ),
+    ).toBe("Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node");
+  });
+
   it("resolves packaging targets from the host or an explicit override", () => {
     expect(resolveDesktopPackageTarget({}, { platform: "darwin", arch: "arm64" }).id).toBe(
       "darwin-arm64",
@@ -181,6 +276,57 @@ describe("desktop packaging boundary", () => {
     ).toThrow(/OCTANT_PACKAGE_TARGET/);
   });
 
+  it("packages Nightly under its own bundle, executable and link scheme and stamps its flavor", () => {
+    const identity = desktopIdentity("nightly");
+    const version = "0.1.0-preview.20261103.1";
+    expect(
+      createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        version,
+        DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+        identity,
+      ),
+    ).toMatchObject({
+      appBundleId: "app.octant.desktop.nightly",
+      icon: "/tmp/stage/apps/desktop/resources/icon-nightly.icns",
+      name: "Octant Nightly",
+      protocols: [{ name: "Octant Nightly Code links", schemes: ["octant-nightly"] }],
+    });
+    expect(createDesktopRuntimeManifest(version, identity)).toMatchObject({
+      productName: "Octant Nightly",
+      octantDesktopFlavor: "nightly",
+    });
+    expect(packagedBundlePath("apps/web/dist/index.html", identity)).toBe(
+      "Octant Nightly.app/Contents/Resources/app/apps/web/dist/index.html",
+    );
+    expect(linuxPackageDirectoryName(DESKTOP_PACKAGE_TARGETS["linux-x64"], identity)).toBe(
+      "Octant Nightly-linux-x64",
+    );
+    expect(createLinuxDesktopEntry(version, identity)).toContain("StartupWMClass=Octant Nightly");
+    expect(createLinuxDesktopEntry(version, identity)).toContain(
+      "MimeType=x-scheme-handler/octant-nightly;",
+    );
+    const helper = "Octant Nightly.app/Contents/Resources/native/octant-keychain-helper";
+    expect(() => validateNativePayloadAllowlist([helper], identity)).not.toThrow();
+    expect(() => validateNativePayloadAllowlist([helper])).toThrow();
+    expect(() =>
+      validateNativePayloadAllowlist(
+        ["Octant Nightly.app/Contents/Resources/native/unknown-helper"],
+        identity,
+      ),
+    ).toThrow();
+    expect(() =>
+      createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        "0.1.0",
+        DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+        identity,
+      ),
+    ).toThrow();
+  });
+
   it("uses only Octant product and bundle identity", () => {
     expect(DESKTOP_PACKAGE_IDENTITY).toEqual({
       bundleId: "app.octant.desktop",
@@ -188,6 +334,64 @@ describe("desktop packaging boundary", () => {
       version: "0.1.0",
     });
   });
+
+  it.each(["stable", "nightly"] as const)(
+    "refuses swapped app identity when validating a %s bundle",
+    (flavor) => {
+      const expected = desktopIdentity(flavor);
+      const other = desktopIdentity(flavor === "stable" ? "nightly" : "stable");
+      const metadata = (identity: typeof expected) => ({
+        CFBundleIdentifier: identity.bundleId,
+        OctantDesktopEntryPolicy: "sealed-main-v1",
+        ...(identity.flavor === "stable" ? { OctantHostLaunchPolicy: "host-only-v1" } : {}),
+        CFBundleName: identity.productName,
+        CFBundleExecutable: identity.productName,
+        CFBundleURLTypes: [
+          { CFBundleURLName: "Code links", CFBundleURLSchemes: [identity.scheme] },
+        ],
+      });
+      expect(() => validateDarwinBundleIdentity(metadata(expected), expected)).not.toThrow();
+      expect(() => validateDarwinBundleIdentity(metadata(other), expected)).toThrow();
+      expect(() =>
+        validateDarwinBundleIdentity({ ...metadata(expected), CFBundleURLTypes: [] }, expected),
+      ).toThrow(`does not declare its ${expected.scheme}:// Code links`);
+      expect(() =>
+        validateDarwinBundleIdentity(
+          {
+            ...metadata(expected),
+            CFBundleURLTypes: [{ CFBundleURLSchemes: [other.scheme] }],
+          },
+          expected,
+        ),
+      ).toThrow(/Code links/);
+      expect(() =>
+        validateLinuxDesktopEntry(createLinuxDesktopEntry("0.1.0", expected), expected),
+      ).not.toThrow();
+      expect(() =>
+        validateLinuxDesktopEntry(createLinuxDesktopEntry("0.1.0", other), expected),
+      ).toThrow();
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "reads bundle identity through the native property-list parser",
+    async () => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-bundle-identity-"));
+      try {
+        await mkdir(resolve(root, "Contents"));
+        await writeFile(
+          resolve(root, "Contents/Info.plist"),
+          '<?xml version="1.0"?><plist version="1.0"><dict><key>OctantDesktopEntryPolicy</key><string>sealed-main-v1</string><key>CFBundleIdentifier</key><string>app.octant.desktop.nightly</string><key>CFBundleName</key><string>Octant Nightly</string><key>CFBundleExecutable</key><string>Octant Nightly</string><key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>octant-nightly</string></array></dict></array></dict></plist>',
+        );
+        await expect(
+          validateBundleIdentity(root, desktopIdentity("nightly")),
+        ).resolves.toBeUndefined();
+        await expect(validateBundleIdentity(root, desktopIdentity("stable"))).rejects.toThrow();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("bundles internal Octant packages into both Electron runtimes", () => {
     for (const pattern of [DESKTOP_INTERNAL_RUNTIME_PATTERN, SERVER_INTERNAL_RUNTIME_PATTERN]) {
@@ -207,6 +411,7 @@ describe("desktop packaging boundary", () => {
       "apps/desktop/dist/entry.mjs",
       "apps/desktop/dist/main.mjs",
       "apps/desktop/dist/preload.cjs",
+      "apps/desktop/dist/browserEditablePreload.cjs",
       "apps/desktop/dist/codeOperationApprovalViewPreload.cjs",
       "apps/desktop/dist/canvasPrototypePreload.cjs",
       "apps/desktop/dist/extensionBridgePreload.cjs",
@@ -234,6 +439,8 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-device-helper",
+      "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+      "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
       "Octant.app/Contents/Resources/native/cua-driver",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -271,11 +478,14 @@ describe("desktop packaging boundary", () => {
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
+      "native/octant-desktop-peer-linux.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_ARM64_FILES).toEqual([
+      "native/octant-desktop-peer-status.node",
+      "native/octant-browser-text-input.node",
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
       "native/octant-device-helper",
@@ -295,7 +505,12 @@ describe("desktop packaging boundary", () => {
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
     );
-    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(3);
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(5);
+    expect(
+      FORBIDDEN_LINUX_HELPER_PATTERNS.some((pattern) =>
+        pattern.test("native/octant-browser-text-input.node"),
+      ),
+    ).toBe(true);
     expect(FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS).toEqual([
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk\/(?:vendor\/)?claude(?:\.exe)?$/,
@@ -306,8 +521,15 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant-linux-x64/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      "Octant-linux-x64/resources/native/octant-desktop-peer-linux.node",
     ];
     expect(() => validateLinuxNativePayloadAllowlist(allowed)).not.toThrow();
+    expect(() =>
+      validateLinuxNativePayloadAllowlist([
+        ...allowed,
+        "Octant-linux-x64/resources/app/apps/desktop/dist/native/octant-desktop-peer-linux.node",
+      ]),
+    ).toThrow(/unexpected native payload/);
     expect(() =>
       validateLinuxNativePayloadAllowlist([
         ...allowed,
@@ -344,6 +566,76 @@ describe("desktop packaging boundary", () => {
     ).not.toThrow();
     expect(() => validatePackagedPayload(linuxPayload)).toThrow(/spawn-helper/);
   });
+
+  it("refuses Stable icons as substitutes for the Nightly package assets", () => {
+    const target = DESKTOP_PACKAGE_TARGETS["linux-x64"];
+    const identity = desktopIdentity("nightly");
+    const stable = [
+      ...REQUIRED_STAGED_PACKAGED_FILES,
+      ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
+      "apps/web/dist/assets/MonacoEditorPane-a.js",
+      "apps/web/dist/assets/editor.api-b.js",
+      "apps/web/dist/assets/editor.worker-c.js",
+      "apps/web/dist/assets/xtermRuntime-d.js",
+      "apps/web/dist/assets/xtermRuntime-e.css",
+    ].map((path) => ({ path }));
+    expect(() => validatePackagedPayload(stable, target, identity)).toThrow("icon-nightly.icns");
+    const nightly = stable.map(({ path }) => ({
+      path: path.replace(/resources\/icon\.(png|icns)$/, "resources/icon-nightly.$1"),
+    }));
+    expect(() => validatePackagedPayload(nightly, target, identity)).not.toThrow();
+    for (const extension of ["png", "icns"]) {
+      const missing = `apps/desktop/resources/icon-nightly.${extension}`;
+      expect(() =>
+        validatePackagedPayload(
+          nightly.filter(({ path }) => path !== missing),
+          target,
+          identity,
+        ),
+      ).toThrow(`missing ${missing}`);
+    }
+    // Nightly's client shows Code approvals in the same native view as Octant,
+    // so its package carries that view's preload too.
+    const approvalPreload = `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`;
+    expect(() =>
+      validatePackagedPayload(
+        nightly.filter(({ path }) => path !== approvalPreload),
+        target,
+        identity,
+      ),
+    ).toThrow(`missing ${approvalPreload}`);
+    expect(
+      createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0-preview.20261104.1", target, identity)
+        .icon,
+    ).toBe("/tmp/stage/apps/desktop/resources/icon-nightly.png");
+  });
+
+  it.each(["stable", "nightly"] as const)(
+    "uses the %s icon for its Linux desktop launcher",
+    async (flavor) => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-icon-appdir-"));
+      try {
+        const packageDirectory = resolve(root, "package");
+        const resources = resolve(packageDirectory, "resources/app/apps/desktop/resources");
+        await mkdir(resources, { recursive: true });
+        await writeFile(resolve(resources, "icon.png"), "Stable pixels");
+        await writeFile(resolve(resources, "icon-nightly.png"), "Nightly pixels");
+        const identity = desktopIdentity(flavor);
+        const appDir = resolve(root, "appdir");
+        await stageLinuxAppDir({
+          packageDirectory,
+          appDir,
+          identity,
+          version: "0.1.0-preview.20261104.1",
+        });
+        expect(await readFile(resolve(appDir, `${identity.scheme}.png`), "utf8")).toBe(
+          flavor === "nightly" ? "Nightly pixels" : "Stable pixels",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("refuses a package without the target's language server, its standard library, or its license notice", () => {
     const linux = DESKTOP_PACKAGE_TARGETS["linux-x64"];
@@ -520,6 +812,8 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
       "Octant.app/Contents/Resources/native/octant-device-helper",
+      "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
+      "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
@@ -971,9 +1265,31 @@ describe("desktop packaging boundary", () => {
     expect(() =>
       validatePackagedPayload([
         ...required,
+        { path: "apps/desktop/dist/nightly-client-harness-nightly.mjs", content: "" },
+      ]),
+    ).toThrow("Nightly client smoke harness");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
+        {
+          path: "apps/desktop/dist/main.mjs",
+          content: `const m = "${NIGHTLY_CLIENT_HARNESS_MARKER}";`,
+        },
+      ]),
+    ).toThrow("Nightly client smoke harness in apps/desktop/dist/main.mjs");
+    expect(() =>
+      validatePackagedPayload([
+        ...required,
         { path: "apps/web/dist/app.js", content: "OpenOr" + "bit" },
       ]),
     ).toThrow("forbidden product identity");
+  });
+
+  it("finds its marker in every Nightly client smoke harness entry, so packaging refuses them", async () => {
+    for (const entry of ["nightly-client-harness-nightly.ts", "nightly-client-harness-stable.ts"]) {
+      const source = await readFile(resolve(import.meta.dirname, entry), "utf8");
+      expect(source).toContain(`"${NIGHTLY_CLIENT_HARNESS_MARKER}"`);
+    }
   });
 
   it("keeps output ignored and packages without third-party release tooling", async () => {
@@ -996,8 +1312,25 @@ describe("desktop packaging boundary", () => {
 
   it("reports the packaged release version through the Electron runtime manifest", () => {
     expect(createDesktopRuntimeManifest("0.1.0").version).toBe("0.1.0");
-    expect(createDesktopRuntimeManifest("0.1.0-preview.20260915.1").version).toBe(
-      "0.1.0-preview.20260915.1",
+    expect(
+      createDesktopRuntimeManifest("0.1.0-preview.20260915.1", desktopIdentity("nightly")).version,
+    ).toBe("0.1.0-preview.20260915.1");
+    expect(createDesktopRuntimeManifest("0.1.0-candidate.20261105.3")).toMatchObject({
+      version: "0.1.0-candidate.20261105.3",
+      productName: "Octant",
+      octantDesktopFlavor: "stable",
+    });
+  });
+
+  it("refuses a Nightly package on an Octant ring and an Octant package on the Nightly ring", () => {
+    expect(() =>
+      createDesktopRuntimeManifest("0.1.0-candidate.20261105.3", desktopIdentity("nightly")),
+    ).toThrow(/require Octant/);
+    expect(() => createDesktopRuntimeManifest("0.1.0", desktopIdentity("nightly"))).toThrow(
+      /require Octant/,
+    );
+    expect(() => createDesktopRuntimeManifest("0.1.0-preview.20261105.3")).toThrow(
+      /preview versions require Octant Nightly/,
     );
   });
 
@@ -1123,43 +1456,174 @@ describe("desktop packaging boundary", () => {
 });
 
 describe("the terminal launcher the desktop app ships", () => {
-  it("runs the bundled octant with the app's own runtime in Node mode from wherever the app sits", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "octant-terminal-launcher-"));
+  it.each(["Octant", "Octant Nightly"])(
+    "runs the bundled terminal command with %s's own runtime from a moved app",
+    async (productName) => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-terminal-launcher-"));
+      try {
+        const repository = resolve(root, "repository");
+        await mkdir(resolve(repository, "apps/desktop/dist"), { recursive: true });
+        await writeFile(resolve(repository, "apps/desktop/dist/entry.mjs"), "// bundle\n");
+        await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
+        await writeFile(
+          resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
+          "// scoped terminal bundle\n",
+        );
+        // An app moved to a path with a space, as a person's Applications folder can be.
+        const contents = resolve(root, `Moved Apps/${productName}.app/Contents`);
+        const launcher = resolve(contents, "Resources/terminal-launcher");
+        await installTerminalLauncher(
+          repository,
+          launcher,
+          desktopIdentity(productName === "Octant" ? "stable" : "nightly"),
+        );
+        const runtime =
+          productName === "Octant"
+            ? resolve(contents, "Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime")
+            : resolve(contents, `MacOS/${productName}`);
+        await mkdir(dirname(runtime), { recursive: true });
+        // Stands in for the app's executable: reports how it was started.
+        await writeFile(
+          runtime,
+          '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "$@"\n',
+          { mode: 0o755 },
+        );
+
+        expect((await readdir(launcher)).sort()).toEqual(
+          productName === "Octant" ? ["octant", "octant.mjs"] : ["octant"],
+        );
+        expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
+        const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
+          env: { PATH: `${launcher}:/usr/bin:/bin` },
+          encoding: "utf8",
+        });
+        expect(output.split("\n")).toEqual([
+          ...(productName === "Octant"
+            ? ["node-mode=1", resolve(launcher, "octant.mjs")]
+            : ["node-mode=", "--octant-terminal-cli"]),
+          "mcp",
+          "--help",
+          "",
+        ]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe("the octant-nightly command Octant Nightly ships", () => {
+  it("runs the bundled full command with the worker runtime through a link on PATH", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-nightly-command-"));
     try {
       const repository = resolve(root, "repository");
       await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
-      await writeFile(
-        resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
-        "// bundle\n",
+      await writeFile(resolve(repository, "packages/cli/dist/octant-nightly.mjs"), "// full CLI\n");
+      // An app moved to a path with a space, linked from a folder on PATH.
+      const contents = resolve(root, "Moved Apps/Octant Nightly.app/Contents");
+      const commandDirectory = resolve(contents, "Resources/command-line");
+      await installNightlyCommand(
+        repository,
+        commandDirectory,
+        desktopIdentity("nightly"),
+        "0.12.0-preview.20261106.1",
       );
-      // An app moved to a path with a space, as a person's Applications folder can be.
-      const contents = resolve(root, "Moved Apps/Octant.app/Contents");
-      const launcher = resolve(contents, "Resources/terminal-launcher");
-      await installTerminalLauncher(repository, launcher);
-      await mkdir(resolve(contents, "MacOS"), { recursive: true });
-      // Stands in for the app's executable: reports how it was started.
+      const runtime = resolve(
+        contents,
+        "Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime",
+      );
+      await mkdir(dirname(runtime), { recursive: true });
+      // Stands in for the worker runtime: reports how it was started.
       await writeFile(
-        resolve(contents, "MacOS/Octant"),
-        '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "$@"\n',
+        runtime,
+        '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "version=$OCTANT_CLI_VERSION" "$@"\n',
         { mode: 0o755 },
       );
+      const bin = resolve(root, "bin");
+      await mkdir(bin);
+      await symlink(resolve(commandDirectory, "octant-nightly"), resolve(bin, "octant-nightly"));
 
-      expect((await readdir(launcher)).sort()).toEqual(["octant", "octant.mjs"]);
-      expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
-      expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
-      const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
-        env: { PATH: `${launcher}:/usr/bin:/bin` },
+      expect((await readdir(commandDirectory)).sort()).toEqual([
+        "octant-nightly",
+        "octant-nightly.mjs",
+      ]);
+      expect((await stat(resolve(commandDirectory, "octant-nightly"))).mode & 0o777).toBe(0o755);
+      const output = execFileSync("/bin/sh", ["-c", "octant-nightly project add --inspect ."], {
+        env: { PATH: `${bin}:/usr/bin:/bin` },
         encoding: "utf8",
       });
+      // Every argument reaches the bundled command, after its fixed script path.
       expect(output.split("\n")).toEqual([
         "node-mode=1",
-        `${launcher}/octant.mjs`,
-        "mcp",
-        "--help",
+        "version=0.12.0-preview.20261106.1",
+        resolve(commandDirectory, "octant-nightly.mjs"),
+        "project",
+        "add",
+        "--inspect",
+        ".",
         "",
       ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("refuses a link loop on PATH instead of following it forever", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-nightly-loop-"));
+    try {
+      const script = resolve(root, "launcher");
+      await writeFile(
+        script,
+        nightlyCommandLauncherScript(desktopIdentity("nightly"), "1.0.0-preview.20261106.1"),
+        { mode: 0o755 },
+      );
+      await symlink(resolve(root, "b"), resolve(root, "a"));
+      await symlink(resolve(root, "a"), resolve(root, "b"));
+      // $0 is the looping link, as a PATH lookup through it would give. The
+      // command and its arguments are constants; only the working folder varies.
+      let stderr = "";
+      try {
+        execFileSync("/bin/sh", ["-c", ". ./launcher", "./a"], { cwd: root, stdio: "pipe" });
+      } catch (error) {
+        stderr = String((error as { readonly stderr?: unknown }).stderr);
+      }
+      expect(stderr).toBe("octant-nightly: too many links\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is Nightly's alone and refuses a version that could leave its quotes", () => {
+    expect(() => nightlyCommandLauncherScript(desktopIdentity("stable"), "1.0.0")).toThrow(
+      "Only Octant Nightly ships octant-nightly.",
+    );
+    expect(() =>
+      nightlyCommandLauncherScript(desktopIdentity("nightly"), "1.0.0'; rm -rf /"),
+    ).toThrow("Invalid release version.");
+  });
+});
+
+it("keeps the worker server physical without copying a loose desktop entry", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "octant-host-payload-"));
+  try {
+    const stage = resolve(root, "stage");
+    const app = resolve(root, "Octant.app");
+    for (const name of ["server", "web", "desktop"]) {
+      await mkdir(resolve(stage, "apps", name, "dist"), { recursive: true });
+      await writeFile(resolve(stage, "apps", name, "dist/main.mjs"), name);
+    }
+    await writeFile(resolve(stage, "package.json"), "{}");
+    await stageHostPayload(stage, app);
+    expect(
+      await readFile(resolve(app, "Contents/Resources/app/apps/server/dist/main.mjs"), "utf8"),
+    ).toBe("server");
+    expect(
+      await readFile(resolve(app, "Contents/Resources/app/apps/web/dist/main.mjs"), "utf8"),
+    ).toBe("web");
+    await expect(access(resolve(app, "Contents/Resources/app/apps/desktop"))).rejects.toMatchObject(
+      { code: "ENOENT" },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

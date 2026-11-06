@@ -88,6 +88,7 @@ export const dockModuleInputs = {
   review: [
     "agentRunClient",
     "requestedAgentReview",
+    "requestedCodeReviewFile",
     "onAgentReviewBack",
     "codeClient",
     "codeDiffLayout",

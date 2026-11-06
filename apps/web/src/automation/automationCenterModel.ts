@@ -2,6 +2,8 @@ import {
   decodeAutomationDefinitionDraft,
   decodeAutomationTrigger,
   type AutomationFileArrivalTrigger,
+  type AutomationEventSourceChoice,
+  type AutomationIntegrationEventTrigger,
   type AutomationAuthorityProfileReceipt,
   type AutomationBindingReceipt,
   type AutomationBlockReason,
@@ -13,6 +15,7 @@ import {
   type AutomationRun,
   type AutomationRunLevel,
   type AutomationRunLifecycle,
+  type AutomationRunResultOutcome,
   type AutomationTrigger,
 } from "@octant/contracts";
 
@@ -51,6 +54,21 @@ const runStatusLabels: Record<AutomationRunLifecycle, string> = {
 
 export function automationRunStatusLabel(lifecycle: AutomationRunLifecycle): string {
   return runStatusLabels[lifecycle];
+}
+
+const runResultLabels: Record<AutomationRunResultOutcome, string> = {
+  succeeded: "Succeeded",
+  "nothing-to-do": "Nothing to do",
+  "needs-attention": "Needs attention",
+  failed: "Did not succeed",
+};
+
+/**
+ * What the run's own agent said, kept apart from the run's status: a run can
+ * complete while its agent reports that the work did not succeed.
+ */
+export function automationRunResultLabel(outcome: AutomationRunResultOutcome): string {
+  return `Agent reported: ${runResultLabels[outcome]}`;
 }
 
 export function automationModeLabel(mode: AutomationMode): string {
@@ -137,6 +155,8 @@ export function automationTriggerSummary(
   options: AutomationFormatOptions = {},
 ): string {
   switch (trigger.kind) {
+    case "integration-event":
+      return `${trigger.sourceLabel ?? "Integration events"}; every ${trigger.pollMinutes} minutes; at most ${trigger.automaticStartLimit} automatic runs per arm`;
     case "file-arrival":
       return `File arrivals in ${trigger.directory}; at most ${trigger.automaticStartLimit} automatic runs per arm`;
     case "once":
@@ -227,6 +247,7 @@ export interface AutomationAuthorityProfileOption {
 
 /** Server-provided facts the editor may choose between; never renderer truth. */
 export interface AutomationEditorCatalog {
+  readonly eventSources?: ReadonlyArray<AutomationEventSourceChoice>;
   readonly hosts: readonly AutomationHostOption[];
   readonly projects: readonly AutomationProjectOption[];
   readonly executionProfiles: readonly AutomationExecutionProfileOption[];
@@ -235,6 +256,7 @@ export interface AutomationEditorCatalog {
 }
 
 export type AutomationTriggerFormValue =
+  | AutomationIntegrationEventTrigger
   | AutomationFileArrivalTrigger
   | { readonly kind: "once"; readonly scheduledAt: string }
   | { readonly kind: "interval"; readonly anchorAt: string; readonly intervalMinutes: number }
@@ -317,6 +339,15 @@ export function isValidAutomationTimeZone(timeZone: string): boolean {
 /** What is wrong with a schedule as entered, in the editor's words; empty when it is valid. */
 export function automationTriggerIssues(trigger: AutomationTriggerFormValue): readonly string[] {
   switch (trigger.kind) {
+    case "integration-event":
+      try {
+        decodeAutomationTrigger(trigger);
+        return [];
+      } catch {
+        return [
+          "Choose a connected event source, valid filters, a 1–60 minute polling interval and 1–32 automatic runs per arm.",
+        ];
+      }
     case "file-arrival":
       try {
         decodeAutomationTrigger(trigger);
@@ -400,10 +431,8 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
   }
   issues.push(...crossConsistencyIssues(input));
   issues.push(...automationTriggerIssues(input.trigger));
-  if (input.trigger.kind === "file-arrival" && input.mode !== "work")
-    issues.push(
-      "File arrivals start Work routines only. Code input transfer is not available yet.",
-    );
+  if (input.trigger.kind === "file-arrival" && input.mode === "chat")
+    issues.push("File arrivals start Work or Code routines, not Chat routines.");
   if (targetSummary.length === 0) issues.push("Describe the delivery target.");
   if (targetSummary.length > MAX_AUTOMATION_TARGET_LENGTH) {
     issues.push(`Keep the delivery target under ${MAX_AUTOMATION_TARGET_LENGTH} characters.`);

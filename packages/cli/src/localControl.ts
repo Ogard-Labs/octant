@@ -79,6 +79,12 @@ export async function openLocalControlSession(
     body: JSON.stringify({ windowId, capability, rendererIdentity }),
   }).catch(() => undefined);
   if (registration === undefined || registration.status !== 204) {
+    if (registration !== undefined && (await hostLacksRoute(registration))) {
+      return {
+        kind: "refuses",
+        reason: await needsNewerOctant(call, info.url, "command-line sessions"),
+      };
+    }
     return { kind: "refuses", reason: "Octant refused this command's local authority." };
   }
   return {
@@ -108,7 +114,20 @@ export async function openLocalControlSession(
           body: { message: "Octant stopped answering on this host before the command finished." },
         };
       }
-      return { status: response.status, body: await readBody(response).catch(() => undefined) };
+      const text = await response.text().catch(() => "");
+      if (isUnknownRoute(response.status, text)) {
+        return {
+          status: response.status,
+          body: {
+            message: await needsNewerOctant(
+              call,
+              info.url,
+              `${request.method} ${new URL(request.path, info.url).pathname}`,
+            ),
+          },
+        };
+      }
+      return { status: response.status, body: parseBody(text) };
     },
     stream: async (path, signal) => {
       const response = await call(new URL(path, info.url).toString(), {
@@ -165,8 +184,39 @@ async function* ndjsonLines(body: ReadableStream<Uint8Array>): AsyncIterable<str
   if (rest.length > 0) yield rest;
 }
 
-async function readBody(response: Response): Promise<unknown> {
-  const text = await response.text();
+/**
+ * An older host answers a route it does not have with its catch-all plain
+ * `Not Found`; every route it does have answers a missing resource with a JSON
+ * refusal. That difference is how a newer command learns the host is older.
+ */
+function isUnknownRoute(status: number, text: string): boolean {
+  return status === 404 && text === "Not Found";
+}
+
+async function hostLacksRoute(response: Response): Promise<boolean> {
+  const text = await response.text().catch(() => "");
+  return isUnknownRoute(response.status, text);
+}
+
+/** Names the host's advertised version when it gives one, so the person knows what to update. */
+async function needsNewerOctant(
+  call: typeof fetch,
+  hostUrl: string,
+  missing: string,
+): Promise<string> {
+  const health = await call(new URL("/health", hostUrl).toString())
+    .then(async (response) => (response.ok ? ((await response.json()) as unknown) : undefined))
+    .catch(() => undefined);
+  const version =
+    typeof health === "object" &&
+    health !== null &&
+    typeof (health as Record<string, unknown>).version === "string"
+      ? String((health as Record<string, unknown>).version)
+      : undefined;
+  return `Needs a newer Octant: the running host${version === undefined ? "" : ` (${version})`} does not offer ${missing}. Update Octant, then try again.`;
+}
+
+function parseBody(text: string): unknown {
   if (text === "") return undefined;
   try {
     return JSON.parse(text);

@@ -576,6 +576,9 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   return (
     <>
       <ShellSidebar
+        {...(hostBridge?.applicationIdentity === undefined
+          ? {}
+          : { applicationIdentity: hostBridge.applicationIdentity })}
         {...(activeSidebarDestination === undefined
           ? {}
           : { activeDestination: activeSidebarDestination })}

@@ -1,3 +1,11 @@
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import {
+  resolveThreadWorkingDirectory,
+  threadWorkingDirectoryCurrent,
+} from "../threadWorkingDirectoryAuthority";
+import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import { workThreadAccessOf } from "@octant/domain";
+import { clampAgentRunSessionAuthority } from "../agentRun/agentRunSessionRuntime";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath, rm } from "node:fs/promises";
@@ -83,7 +91,7 @@ import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
-  Pick<AuthorityWiring, "codeSessionAuthority" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
@@ -94,19 +102,31 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     CodeRuntimeWiring,
     "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
   > &
-  Pick<FoundationsWiring, "browserAuthority"> &
+  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<IntegrationsWiring, "toolEgressRules"> &
-  Pick<ProvidersWiring, "extensionLifecycleService" | "extensionPackageStore">;
+  Pick<
+    ProvidersWiring,
+    | "extensionLifecycleService"
+    | "extensionPackageStore"
+    | "worktreePreparation"
+    | "childWorktreeSources"
+    | "resolveChildWorktree"
+  >;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
     browserAuthority,
+    workThreadProjection,
+    agentRunPersistence,
     canAccessCodeProject,
     serverConnection,
     serverProjectStore,
     codeFileWatch,
     codeOperationRuntime,
+    worktreePreparation,
+    childWorktreeSources,
+    resolveChildWorktree,
     codeSessionAuthority,
     contributeCodeTools,
     codeWorkingDirectoryProbePath,
@@ -154,6 +174,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         ? undefined
         : new ProjectTerminalService({
             terminals: sharedTerminals,
+            worktreePreparation,
+            childWorktreeSources,
             readProject: persistence.readProject,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
@@ -184,6 +206,183 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 return undefined;
               }
             },
+            resolveActionWorkThread: async (windowId, projectId, threadId) => {
+              const thread = workThreadProjection.read(threadId);
+              const project = persistence.readProject(projectId);
+              if (
+                thread === undefined ||
+                project?.type !== "work" ||
+                thread.projectId !== projectId ||
+                thread.lifecycle !== "active" ||
+                !windowCanAccessWorkProject({
+                  workspace: persistence.readWindowWorkspace(windowId)?.workspace,
+                  projectId,
+                })
+              )
+                return undefined;
+              const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+              if (selected === undefined) return undefined;
+              const root = await resolveThreadWorkingDirectory(
+                selected,
+                thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+              );
+              const physicalCurrent = threadWorkingDirectoryCurrent(selected, root);
+              const current = () => {
+                const latest = persistence.readProject(projectId);
+                return (
+                  physicalCurrent() &&
+                  latest?.type === "work" &&
+                  approvedWorkingFolderRoot(latest, thread.workingFolderId) === selected &&
+                  JSON.stringify(workThreadProjection.read(threadId)) === JSON.stringify(thread) &&
+                  windowCanAccessWorkProject({
+                    workspace: persistence.readWindowWorkspace(windowId)?.workspace,
+                    projectId,
+                  })
+                );
+              };
+              return {
+                root,
+                executionPolicy: workThreadAccessOf(thread.access).executionPolicy,
+                current,
+                active: current,
+              };
+            },
+            resolveActionCheckout: async (windowId, projectId, requested, childRequestId) => {
+              const view = await routeCodeService.read(windowId, requested.threadId);
+              if (
+                view === undefined ||
+                String(view.thread.projectId) !== String(projectId) ||
+                String(view.checkout.id) !== String(requested.checkoutId) ||
+                view.checkout.availability !== "available" ||
+                view.checkout.kind === "remote-root"
+              )
+                return undefined;
+              const { thread, checkout } = view;
+              const head = checkout.head.kind === "none" ? undefined : checkout.head.oid;
+              if (requested.head !== undefined && requested.head !== head) return undefined;
+              const rooted = await roots.resolve(
+                windowId,
+                thread,
+                checkout,
+                codeWorkingDirectoryProbePath,
+              );
+              if (rooted === undefined) return undefined;
+              const active = () => {
+                const fresh = persistence.readCodeThread(thread.id);
+                const present = persistence.readCodeCheckout(checkout.id);
+                return (
+                  fresh !== undefined &&
+                  present !== undefined &&
+                  rooted.current?.() === true &&
+                  fresh.lifecycle === "active" &&
+                  String(fresh.bindingRevisionId) === String(thread.bindingRevisionId) &&
+                  String(fresh.checkoutId) === String(checkout.id) &&
+                  codeSessionAuthority.effectiveThread(windowId, fresh).executionPolicy ===
+                    thread.executionPolicy &&
+                  present.availability === "available" &&
+                  present.head.kind === checkout.head.kind &&
+                  (present.head.kind !== "branch" ||
+                    (checkout.head.kind === "branch" && present.head.name === checkout.head.name))
+                );
+              };
+              const current = () => {
+                const present = persistence.readCodeCheckout(checkout.id);
+                return (
+                  active() &&
+                  canAccessCodeProject(windowId, projectId) &&
+                  present !== undefined &&
+                  (present.head.kind === "none" || present.head.oid === head)
+                );
+              };
+              if (childRequestId !== undefined) {
+                const project = persistence.readProject(projectId);
+                if (project?.type !== "code") return undefined;
+                const receipt = await resolveChildWorktree({
+                  parentThreadId: String(thread.id),
+                  requestId: childRequestId,
+                  repositoryId: String(thread.repositoryId),
+                  repositoryRoot: project.binding.canonicalRoot,
+                  parentCheckoutRoot: rooted.rootPath,
+                });
+                if (receipt === undefined || !current()) return undefined;
+                const run = agentRunPersistence.getByRequestId(childRequestId);
+                if (
+                  run === undefined ||
+                  String(run.parentThreadId) !== String(thread.id) ||
+                  run.workspaceReceipt.kind !== "code-worktree" ||
+                  run.workspaceReceipt.worktreeRoot !== receipt.canonicalWorktreePath
+                )
+                  return undefined;
+                let preparationAuthority;
+                try {
+                  preparationAuthority = clampAgentRunSessionAuthority(run);
+                } catch {
+                  return undefined;
+                }
+                const childActive = () => {
+                  const fresh = agentRunPersistence.getById(run.id);
+                  return (
+                    active() &&
+                    fresh !== undefined &&
+                    JSON.stringify(fresh.authority) === JSON.stringify(run.authority) &&
+                    JSON.stringify(fresh.routingReceipt.executionResolution) ===
+                      JSON.stringify(run.routingReceipt.executionResolution)
+                  );
+                };
+                return {
+                  root: receipt.canonicalWorktreePath,
+                  receiptId: receipt.receiptId,
+                  preparationThread: { threadId: receipt.threadId, checkoutId: receipt.checkoutId },
+                  preparationAccess: {
+                    commands: preparationAuthority.shell && preparationAuthority.filesystem,
+                    network: preparationAuthority.network,
+                  },
+                  executionPolicy: preparationAuthority.executionPolicy,
+                  current: () => current() && childActive(),
+                  active: childActive,
+                };
+              }
+              const project = persistence.readProject(projectId);
+              const selectedRoot =
+                project?.type === "code"
+                  ? approvedWorkingFolderRoot(project, thread.workingFolderId, rooted.rootPath)
+                  : undefined;
+              if (selectedRoot === undefined) return undefined;
+              const workingRoot =
+                thread.workingFolderId === undefined
+                  ? rooted.rootPath
+                  : await resolveThreadWorkingDirectory(
+                      selectedRoot,
+                      thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+                    );
+              const physicalCurrent = threadWorkingDirectoryCurrent(selectedRoot, workingRoot);
+              const folderCurrent = () => {
+                const latest = persistence.readProject(projectId);
+                return (
+                  physicalCurrent() &&
+                  current() &&
+                  latest?.type === "code" &&
+                  approvedWorkingFolderRoot(latest, thread.workingFolderId, rooted.rootPath) ===
+                    selectedRoot
+                );
+              };
+              return {
+                root: rooted.rootPath,
+                workingRoot,
+                ...(checkout.kind === "managed-worktree"
+                  ? { receiptId: String(checkout.ownershipReceiptId) }
+                  : {}),
+                executionPolicy: thread.executionPolicy,
+                ...(head === undefined ? {} : { head }),
+                ...(checkout.head.kind === "branch"
+                  ? { branch: checkout.head.name }
+                  : head === undefined
+                    ? {}
+                    : { branch: `Detached at ${head.slice(0, 12)}` }),
+                current: folderCurrent,
+                active: () => active() && folderCurrent(),
+              };
+            },
             suggestActions: suggestProjectActions,
             serverProject: (projectId) => {
               const project = serverProjectStore.codeProject(String(projectId));
@@ -209,6 +408,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
+        if (event.aggregateType === "code-thread" || event.aggregateType === "code-checkout")
+          void projectTerminals.settleActionAuthorities();
         if (
           event.aggregateType === "project" &&
           (event.eventName === "project.lifecycle-changed@1" ||
@@ -418,14 +619,16 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const unsubscribeDebugAuthority = debugService.endOnAuthorityChanges(persistence.journal);
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeDebugAuthority));
     yield* Effect.addFinalizer(() => Effect.promise(() => debugService.close()));
-    // The same reads as app-managed tools on each Code turn whose provider
-    // carries them, Plan included (decision D5). Each call is checked at the
+    // The same reads as one app-managed tool on each Code turn whose provider
+    // carries them, Plan included (decision D5), where a server an agent may
+    // start covers a file of the checkout. Each call is checked at the
     // tool-call choke point, then by the service on the turn's window.
-    contributeCodeTools(({ windowId, thread, readThread }) =>
+    contributeCodeTools(({ windowId, thread, readThread, folders }) =>
       createCodeLanguageAgentTools({
         windowId,
         thread,
         readThread,
+        folders,
         authority: () => browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
         externalContentIngested: () =>
           readThreadExternalContentTaint(persistence.connection, String(thread.id))
@@ -559,6 +762,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     const codeExternalEditorRoutes = createCodeExternalEditorRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
       resolve: async (input) => {
         const editor = persistence.readCodeSettings()?.settings.externalEditor;
         if (editor === undefined) return undefined;
@@ -589,6 +793,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     const codeCheckoutOpenRoutes = createCodeCheckoutOpenRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
       resolve: async (input) => {
         const windowId = decodeWindowId(input.windowId);
         const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));

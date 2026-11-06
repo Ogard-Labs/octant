@@ -1,7 +1,14 @@
+import { lstatSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { CONNECTOR_PACKAGE_PREFIX, connectorById, connectorPackageName } from "@octant/domain";
+import { basename, join, resolve } from "node:path";
+import {
+  CONNECTOR_PACKAGE_PREFIX,
+  connectorById,
+  connectorPackageName,
+  PAPER_LOCAL_SETUP,
+} from "@octant/domain";
 import type { UserAddedMcpServerRequest } from "@octant/contracts/extension-rpc";
+import type { GithubMcpPermissionProfile } from "@octant/contracts/host-oauth";
 import type { ExtensionPackageState, ExtensionSource } from "@octant/contracts/extensions";
 import {
   AGENT_PLUGINS_MCP_SCHEMA,
@@ -56,10 +63,29 @@ export interface LinkedSecretPointers {
     secretId: string,
     linked: { readonly store: string; readonly reference: string },
   ) => Promise<
-    { readonly status: "pointed" } | { readonly status: "refused"; readonly message: string }
+    | { readonly status: "pointed" }
+    | { readonly status: "refused" | "uncertain"; readonly message: string }
   >;
   readonly forget: (secretId: string) => Promise<void>;
+  /** A definitive reply distinguishes completed local deletion from an unknown outcome. */
+  readonly retire?: (secretId: string) => Promise<"cleared" | "uncertain">;
 }
+
+export interface GeneratedMcpSignInPolicy {
+  /** Source reads require effective activation; registration and consent use current alone. */
+  readonly sourceCurrent?: () => boolean;
+  readonly url: string;
+  readonly mcpPermissionProfile?: GithubMcpPermissionProfile;
+  readonly current: () => boolean;
+}
+type SignInInstalled =
+  | {
+      readonly source: ExtensionSource;
+      readonly components: ReadonlyArray<
+        Pick<ExtensionPackageState["components"][number], "component">
+      >;
+    }
+  | undefined;
 
 /**
  * MCP servers a person adds by hand in Settings. Each becomes an ordinary
@@ -85,7 +111,16 @@ export class UserAddedMcpServerStore {
   }
 
   async add(request: UserAddedMcpServerRequest): Promise<{ source: UserAddedMcpServerSource }> {
-    const slug = connectorSlug(request) ?? packageSlug(request.name);
+    if (request.localSetupId !== undefined && request.connectorId !== undefined) {
+      throw new UserAddedMcpServerError("invalid", "Choose a local setup or a hosted connector.");
+    }
+    const slug = localSetupSlug(request) ?? connectorSlug(request) ?? packageSlug(request.name);
+    if (request.localSetupId === undefined && slug === PAPER_LOCAL_SETUP.packageName) {
+      throw new UserAddedMcpServerError(
+        "invalid",
+        "This name is reserved for the local Paper setup.",
+      );
+    }
     if (request.connectorId === undefined && slug.startsWith(CONNECTOR_PACKAGE_PREFIX)) {
       throw new UserAddedMcpServerError(
         "invalid",
@@ -234,6 +269,40 @@ export class UserAddedMcpServerStore {
     return this.#registry.get(sourceRef) !== undefined;
   }
 
+  /** Verify the generated source's actual configuration, including packages added before this setup existed. */
+  localSetupId(sourceRef: string): "paper" | undefined {
+    const registered = this.#registry.get(sourceRef);
+    if (
+      registered === undefined ||
+      basename(registered.absolutePath) !== PAPER_LOCAL_SETUP.packageName
+    )
+      return undefined;
+    const content = registered.packageInput.entries.find(
+      (entry) => entry.path === "mcp.json",
+    )?.content;
+    if (content === undefined) return undefined;
+    try {
+      const document = validateAgentPluginsMcpDocument(
+        JSON.parse(typeof content === "string" ? content : new TextDecoder().decode(content)),
+        {
+          pluginSchema: AGENT_PLUGINS_PLUGIN_SCHEMA,
+        },
+      );
+      const [server, ...others] = document.servers;
+      if (
+        document.topLevelInvalid ||
+        others.length !== 0 ||
+        server?.type !== "streamable-http" ||
+        server.url !== PAPER_LOCAL_SETUP.url ||
+        Object.keys(server.headers ?? {}).length !== 0
+      )
+        return undefined;
+      return "paper";
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * The address a sign-in may target: the hosted server in a package this
    * host wrote for one the person added, read from the installed package's
@@ -243,39 +312,80 @@ export class UserAddedMcpServerStore {
    * left every connector and hand-added server without a sign-in.
    */
   async signInAddress(
-    installed:
-      | {
-          readonly source: ExtensionSource;
-          readonly components: ReadonlyArray<
-            Pick<ExtensionPackageState["components"][number], "component">
-          >;
-        }
-      | undefined,
+    installed: SignInInstalled,
     componentId: string,
     readConfiguration: () => Promise<string>,
   ): Promise<string | undefined> {
-    if (
-      installed === undefined ||
-      !("sourceRef" in installed.source) ||
-      !this.owns(installed.source.sourceRef)
-    ) {
+    return (await this.signInPolicy(installed, componentId, readConfiguration))?.url;
+  }
+
+  /** Broader consent comes from this host's generated path, never a plugin-supplied label. */
+  async signInPolicy(
+    installed: SignInInstalled,
+    componentId: string,
+    readConfiguration: () => Promise<string>,
+  ): Promise<GeneratedMcpSignInPolicy | undefined> {
+    if (installed === undefined || !("sourceRef" in installed.source)) return undefined;
+    const sourceRef = installed.source.sourceRef;
+    const registered = this.#registry.get(sourceRef);
+    if (registered === undefined) return undefined;
+    // Resolve the host-owned parent, not the package: an ancestor alias is
+    // legitimate, but a package symlink must never grant broader consent.
+    let repositoryCurrent: (() => boolean) | undefined;
+    try {
+      const directory = realpathSync.native(this.#directory);
+      const folder = resolve(directory, connectorPackageName("github-repositories"));
+      if (registered.absolutePath === folder) {
+        const identity = lstatSync(folder, { bigint: true });
+        if (!identity.isDirectory() || identity.isSymbolicLink()) return undefined;
+        repositoryCurrent = () => {
+          try {
+            const actual = lstatSync(folder, { bigint: true });
+            return (
+              realpathSync.native(this.#directory) === directory &&
+              actual.isDirectory() &&
+              !actual.isSymbolicLink() &&
+              actual.dev === identity.dev &&
+              actual.ino === identity.ino
+            );
+          } catch {
+            return false;
+          }
+        };
+      }
+    } catch {
       return undefined;
     }
+    if (this.localSetupId(sourceRef) === "paper") return undefined;
+    const current = () =>
+      this.#registry.get(sourceRef) === registered && repositoryCurrent?.() !== false;
     const component = installed.components.find(
       (candidate) => String(candidate.component.id) === componentId,
     )?.component;
     if (component?.kind !== "mcp-server") return undefined;
-    let raw: unknown;
+    let document: ReturnType<typeof validateAgentPluginsMcpDocument>;
     try {
-      raw = JSON.parse(await readConfiguration());
+      document = validateAgentPluginsMcpDocument(JSON.parse(await readConfiguration()), {
+        pluginSchema: AGENT_PLUGINS_PLUGIN_SCHEMA,
+      });
     } catch {
       return undefined;
     }
-    const document = validateAgentPluginsMcpDocument(raw, {
-      pluginSchema: AGENT_PLUGINS_PLUGIN_SCHEMA,
-    });
+    if (!current()) return undefined;
     const server = document.servers.find((candidate) => candidate.name === component.displayName);
-    return server !== undefined && server.type !== "stdio" ? server.url : undefined;
+    if (server === undefined || server.type === "stdio") return undefined;
+    const repository = repositoryCurrent !== undefined;
+    if (
+      repository &&
+      (server.url !== connectorById("github-repositories")?.url ||
+        Object.keys(server.headers ?? {}).length !== 0)
+    )
+      return undefined;
+    return {
+      url: server.url,
+      current,
+      ...(repository ? { mcpPermissionProfile: "github-repositories-read-write" } : {}),
+    };
   }
 
   /** Removes the generated folder and every secret its package referenced. */
@@ -397,7 +507,31 @@ function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
   if (request.server.type !== "streamable-http" || request.server.url !== entry.url) {
     throw new UserAddedMcpServerError("invalid", "This address is not the connector's own.");
   }
+  if (
+    entry.auth.kind === "sign-in" &&
+    entry.auth.clientSetup === "registered" &&
+    request.server.headers.length !== 0
+  )
+    throw new UserAddedMcpServerError(
+      "invalid",
+      "This connector uses registered client setup, not inline headers.",
+    );
   return connectorPackageName(entry.id);
+}
+
+function localSetupSlug(request: UserAddedMcpServerRequest): string | undefined {
+  if (request.localSetupId === undefined) return undefined;
+  if (
+    request.server.type !== "streamable-http" ||
+    request.server.url !== PAPER_LOCAL_SETUP.url ||
+    request.server.headers.length !== 0
+  ) {
+    throw new UserAddedMcpServerError(
+      "invalid",
+      "Paper's local setup uses its own loopback address without credentials.",
+    );
+  }
+  return PAPER_LOCAL_SETUP.packageName;
 }
 
 function validateRemoteUrl(url: string): void {

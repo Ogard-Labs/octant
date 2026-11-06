@@ -1,3 +1,27 @@
+import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
+import {
+  retainedReviewTarget,
+  reviewFindingAnchorDigest,
+  reviewFindingLabel,
+  boundReviewText,
+  type RetainedCodeReview,
+} from "./codeReviewComparison";
+import type {
+  RecordExternalContentIngestionInput,
+  ExternalContentIngestionResult,
+} from "../context/externalContentIngestionStore";
+import { frameExternalContentForModel } from "../context/externalContentFraming";
+import {
+  type AutomationRunReference,
+  type CodeReviewTarget,
+  type CodeReviewRevision,
+  type CodeReviewFindingAssessment,
+  type CodeReviewFindingReference,
+  type CodeReviewCorrectionPrepared,
+  type CodeTurnReviewPreview,
+  type CodeTurnReviewCapture,
+} from "@octant/contracts";
+import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import type { GitService } from "./gitService";
 import {
   coveredAgentResultDeliveryMembers,
@@ -115,6 +139,12 @@ const REMOTE_FOLDER_UNAVAILABLE =
  * on the server, and its terminals, which are logins there.
  */
 const SERVER_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "prepare-review-target",
+  "observe-turn-review",
+  "list-review-findings",
+  "prepare-review-correction",
+  "create-review-finding",
+  "update-review-finding",
   // A server thread takes no checkpoints, so it rewinds its conversation
   // only; the files part refuses with the reason.
   "preview-code-rewind",
@@ -213,8 +243,9 @@ export interface CodeOperationAuthorityPort {
   ) => Awaitable<
     | Readonly<{
         checkoutRoot: string;
-        rootCurrent?: () => boolean;
+        /** Host-only physical directory identity; never persisted or supplied by a provider. */
         rootIdentity?: { readonly device: string; readonly inode: string };
+        rootCurrent?: () => boolean;
         workingDirectory?: string;
         /** The Project's extra folders, by absolute path. */
         extraFolders?: ReadonlyArray<string>;
@@ -254,6 +285,15 @@ export type CodeOperationReplay =
     };
 
 export interface CodeOperationEventPort {
+  readonly reviewSource?: (
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+  ) =>
+    | Pick<
+        CodeConversationTurn,
+        "operationId" | "checkoutId" | "checkpoint" | "status" | "reviewPreview"
+      >
+    | undefined;
   readonly append: (input: {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
@@ -893,19 +933,31 @@ export type CodeOperationPullRequestReview =
   | { readonly status: "unavailable" };
 
 export interface CodeOperationReviewFindingPort {
+  readonly list?: (
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ) => Promise<ReadonlyArray<CodeReviewFinding>>;
   readonly create: (
     windowId: WindowId,
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeReviewFinding>;
   readonly changeState: (
     windowId: WindowId,
     input: {
       readonly findingId: string;
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
       readonly expectedVersion: number;
       readonly state: CodeReviewFinding["state"];
     },
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeReviewFinding>;
 }
+
+type ReviewAnchorAssessment = Pick<CodeReviewFindingAssessment, "explanation"> & {
+  readonly anchorState: "current" | "outdated" | "unavailable";
+};
 
 export interface CodeOperationTurnPort {
   readonly start: (input: {
@@ -918,7 +970,10 @@ export interface CodeOperationTurnPort {
      */
     readonly operationId: CodeOperationId;
     readonly sessionId: string;
+    readonly providerRoot?: string;
+    readonly folderCurrent?: () => boolean;
     readonly checkoutRoot: string;
+    readonly rootIdentity?: { readonly device: string; readonly inode: string };
     readonly prompt: string;
     /**
      * Read-only context this turn alone carries, beside the prompt.
@@ -937,6 +992,8 @@ export interface CodeOperationTurnPort {
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
     readonly admissionCurrent?: () => boolean;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
     /**
      * Told once a provider has accepted this turn's prompt and context. A
      * start that returns `running` has only taken the turn on: the context is
@@ -945,7 +1002,7 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: () => {
+    readonly takeProductFeedback?: (maxAttachments?: number) => {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };
@@ -967,6 +1024,11 @@ export interface CodeOperationTurnPort {
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
   }) => Promise<CodeOperationTurnResult>;
+  readonly forceStop?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly turnOperationId: CodeOperationId;
+  }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
@@ -980,6 +1042,13 @@ export interface CodeOperationTurnPort {
   readonly pendingRequests?: () => ReadonlyArray<CodeTurnPendingRequest>;
   /** Whether a turn of this thread was noted, runs, or waits on the person. */
   readonly holdsTurn?: (threadId: string) => boolean;
+  readonly reviewPreview?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly operationId: CodeOperationId;
+    readonly refresh: boolean;
+    readonly admissionCurrent?: () => boolean;
+  }) => Promise<CodeTurnReviewPreview | undefined>;
   /**
    * The other threads with a live turn that may write to this checkout root.
    * A port that cannot say refuses nothing, so a restore is never held up by
@@ -1056,9 +1125,28 @@ export interface CodeOperationExecuteOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /** Host-owned input preparation, only for a fresh start after checkout authority resolves. */
+  readonly prepareTurnInput?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly checkoutRoot: string;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<(() => boolean) | undefined>;
+  /**
+   * Set by the routine dispatcher for the provider turn it starts for a run,
+   * and only there: that turn may report the run's result. Host-only: the
+   * wire command cannot carry it.
+   */
+  readonly routineRun?: AutomationRunReference;
 }
 
 export interface CodeOperationServiceOptions {
+  readonly prepareWorktree?: (
+    thread: CodeThread,
+    root: string,
+    current: () => boolean,
+  ) => Promise<string | undefined>;
+  readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
   readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
@@ -1133,6 +1221,9 @@ export interface CodeOperationServiceOptions {
    */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
   readonly reviewFindings: CodeOperationReviewFindingPort;
+  readonly recordReviewContent?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
   /**
@@ -1194,6 +1285,7 @@ export interface CodeOperationServiceOptions {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
     readonly supportsImages: boolean;
+    readonly maxAttachments?: number;
   }) => {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
@@ -1314,12 +1406,28 @@ export class CodeOperationService {
         "unauthorized",
         "Checkout request is no longer current.",
       );
-    const deliveredResult = (result: CodeOperationResult): CodeOperationResult =>
-      command.kind === "start-provider-turn" &&
-      command.delivery !== undefined &&
-      result.kind === "provider-turn-state"
+    const deliveredResult = (result: CodeOperationResult): CodeOperationResult => {
+      if (requiresLiveCodeReviewAuthority(command) && options.admissionCurrent?.() === false)
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "The review request is no longer authorized.",
+          "refused",
+        );
+      return command.kind === "start-provider-turn" &&
+        command.delivery !== undefined &&
+        result.kind === "provider-turn-state"
         ? decodeCodeOperationResult({ ...result, delivery: command.delivery })
         : result;
+    };
+    if (requiresLiveCodeReviewAuthority(command) && options.admissionCurrent?.() === false)
+      return deliveredResult(
+        this.#failed(
+          command.operationId,
+          "unauthorized",
+          "The review request is no longer authorized.",
+        ),
+      );
     const initiator = options.initiator ?? "agent";
     // Switching a grant off only narrows authority, so losing the checkout
     // cannot stand in its way: it needs the thread and a window that can open
@@ -1418,6 +1526,7 @@ export class CodeOperationService {
             existing.event.result,
             deliveredResult(this.#providerResult(command.operationId, { state: "interrupted" })),
             options.admissionCurrent,
+            options.routineRun,
           ),
         );
       }
@@ -1590,10 +1699,13 @@ export class CodeOperationService {
             if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
             // A start stopped while it prepares is refused at its next
             // admission check, at the latest just before the runtime takes it on.
+            let inputCurrent: (() => boolean) | undefined;
+            const preparationCurrent = () =>
+              startingTurn?.cancelled !== true && options.admissionCurrent?.() !== false;
             const admissionCurrent =
               startingTurn === undefined
                 ? options.admissionCurrent
-                : () => !startingTurn.cancelled && options.admissionCurrent?.() !== false;
+                : () => preparationCurrent() && inputCurrent?.() !== false;
             try {
               // Held first, so no restore starts after this; one already
               // overwriting the files finishes before the checkpoint is taken.
@@ -1626,6 +1738,26 @@ export class CodeOperationService {
                 recordedStart === undefined &&
                 turnRefusal === undefined
               ) {
+                if (options.prepareTurnInput !== undefined) {
+                  try {
+                    inputCurrent = await options.prepareTurnInput({
+                      threadId: command.threadId,
+                      checkoutRoot: root.checkoutRoot,
+                      current: preparationCurrent,
+                      signal: AbortSignal.timeout(10_000),
+                    });
+                  } catch {
+                    inputCurrent = undefined;
+                  }
+                  if (inputCurrent === undefined || admissionCurrent?.() === false)
+                    turnRefusal = admissionRefusal();
+                }
+              }
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined
+              ) {
                 // A server folder is no folder of this host: Git here never
                 // captures a path that only names it there.
                 const checkpoint =
@@ -1651,10 +1783,17 @@ export class CodeOperationService {
                     expectedCursor: resultCursor,
                     event: {
                       kind: "conversation-turn-started",
+                      ...(command.toolCatalogHandoff === undefined
+                        ? {}
+                        : { toolCatalogHandoff: command.toolCatalogHandoff }),
                       providerInstanceId: scope.thread.providerInstanceId,
                       modelId: scope.thread.modelId,
                       sessionId: command.sessionId,
                       prompt: command.prompt,
+                      checkoutId: scope.checkout.id,
+                      ...(command.reviewFindingReferences === undefined
+                        ? {}
+                        : { reviewFindingReferences: command.reviewFindingReferences }),
                       ...(command.extensionSelections === undefined ||
                       command.extensionSelections.length === 0
                         ? {}
@@ -1683,6 +1822,7 @@ export class CodeOperationService {
                         starting.attachments,
                         admissionCurrent,
                         initiator,
+                        options.routineRun,
                       );
               } catch (error) {
                 const category =
@@ -1779,6 +1919,7 @@ export class CodeOperationService {
     cached: CodeOperationResult,
     stopped: CodeOperationResult,
     admissionCurrent?: () => boolean,
+    routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
     // A stale turn can be resumed long after the Project's provider policy
     // changed, and this path starts a real provider session. The policy admits
@@ -1837,6 +1978,10 @@ export class CodeOperationService {
         root.checkoutRoot,
         recordedTurnAttachments(frames),
         () => !held.cancelled && admissionCurrent?.() !== false,
+        root.rootIdentity,
+        routineRun,
+        thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+        thread.workingFolderId === undefined ? undefined : root.rootCurrent,
       );
       // Stopped before the runtime took it on: whatever the preparation then
       // answered (the admission refusal, or a failure of its own), the start
@@ -2410,6 +2555,469 @@ export class CodeOperationService {
     }
   }
 
+  async #reviewFindings(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<ReadonlyArray<CodeReviewFinding>> {
+    const list = this.#options.reviewFindings.list;
+    if (list === undefined) throw new CodeOperationServiceError("unavailable");
+    return await list(windowId, threadId);
+  }
+
+  async #retainedReview(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    reviewOperationId: CodeOperationId,
+    captureCursor?: number,
+  ): Promise<RetainedCodeReview> {
+    const replay = this.#replay(
+      threadId,
+      reviewOperationId,
+      captureCursor === undefined ? 0 : captureCursor - 1,
+      captureCursor === undefined ? 256 : 1,
+    );
+    if (captureCursor !== undefined) {
+      const frame = replay.frames.find((candidate) => candidate.cursor === captureCursor);
+      const capture =
+        frame?.event.kind === "conversation-turn-review-preview"
+          ? frame.event.preview.capture
+          : undefined;
+      if (
+        frame === undefined ||
+        frame.threadId !== threadId ||
+        frame.operationId !== reviewOperationId ||
+        capture === undefined ||
+        capture.cursor !== frame.cursor ||
+        capture.checkoutId !== checkoutId
+      )
+        throw new CodeOperationServiceError("unavailable");
+      if (this.#options.events.reviewSource !== undefined) {
+        const source = this.#options.events.reviewSource(threadId, reviewOperationId);
+        if (
+          source === undefined ||
+          source.checkoutId !== checkoutId ||
+          source.checkpoint?.worktree !== capture.baseline
+        )
+          throw new CodeOperationServiceError("unavailable");
+      }
+      const read = await this.readEvidence(
+        windowId,
+        threadId,
+        reviewOperationId,
+        capture.diff.contentId,
+      );
+      return {
+        operationId: reviewOperationId,
+        evidence: capture.diff,
+        capturedAt: capture.capturedAt,
+        text: read.text,
+        revision: {
+          kind: "turn-capture",
+          operationId: reviewOperationId,
+          captureCursor,
+          version: capture.version,
+          baseline: capture.baseline,
+          tree: capture.tree,
+        },
+      };
+    }
+    const frame = replay.frames.find(
+      (frame) =>
+        frame.threadId === threadId &&
+        frame.operationId === reviewOperationId &&
+        frame.event.kind === "operation-result" &&
+        (frame.event.result.kind === "git-observed" || frame.event.result.kind === "run-reviewed"),
+    );
+    if (frame?.event.kind !== "operation-result")
+      throw new CodeOperationServiceError("unavailable");
+    const result = frame.event.result;
+    if (
+      (result.kind !== "git-observed" && result.kind !== "run-reviewed") ||
+      result.operationId !== reviewOperationId ||
+      result.reviewScope?.threadId !== threadId ||
+      result.reviewScope.checkoutId !== checkoutId
+    )
+      throw new CodeOperationServiceError("unauthorized");
+    const evidence = result.kind === "git-observed" ? result.diff : result.outcome.diff;
+    const revision: CodeReviewRevision =
+      result.kind === "git-observed"
+        ? { kind: "working-tree", stateToken: result.stateToken }
+        : {
+            kind: "branch",
+            head: result.outcome.head,
+            ...(result.outcome.base === undefined ? {} : { base: result.outcome.base }),
+            baseRef: result.outcome.baseRef,
+          };
+    const read = await this.readEvidence(windowId, threadId, reviewOperationId, evidence.contentId);
+    return {
+      operationId: reviewOperationId,
+      evidence,
+      revision,
+      capturedAt: frame.occurredAt,
+      text: read.text,
+    };
+  }
+
+  /** Reconstructs the exact source coordinate from retained host evidence; callers supply no content or digest. */
+  async resolveReviewTarget(
+    windowId: WindowId,
+    input: {
+      threadId: CodeThreadId;
+      checkoutId: CodeCheckoutId;
+      reviewOperationId: CodeOperationId;
+      captureCursor?: number | undefined;
+      path: string;
+      side: "original" | "modified";
+      line: number;
+    },
+    admissionCurrent?: () => boolean,
+  ): Promise<CodeReviewTarget> {
+    const scope = await this.#scope(windowId, input);
+    if ("failure" in scope)
+      throw new CodeOperationServiceError(
+        scope.failure === "waiting" ? "unavailable" : scope.failure,
+      );
+    const snapshot = await this.#retainedReview(
+      windowId,
+      input.threadId,
+      input.checkoutId,
+      input.reviewOperationId,
+      input.captureCursor,
+    );
+    const selected = retainedReviewTarget(snapshot, input);
+    if (selected === undefined) throw new CodeOperationServiceError("unavailable");
+    // A delayed read cannot prepare an anchor under a different checkout binding.
+    const current = await this.#scope(windowId, input);
+    if ("failure" in current) throw new CodeOperationServiceError("unauthorized");
+    if (admissionCurrent?.() === false) throw new CodeOperationServiceError("unauthorized");
+    return selected.target;
+  }
+
+  #latestTurnCapture(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+  ): CodeTurnReviewCapture | undefined {
+    if (this.#options.events.reviewSource !== undefined)
+      return this.#options.events.reviewSource(threadId, operationId)?.reviewPreview?.capture;
+    let cursor = 0;
+    let latest: CodeTurnReviewCapture | undefined;
+    for (;;) {
+      const frames = this.#replay(threadId, operationId, cursor, 256).frames;
+      for (const frame of frames)
+        if (
+          frame.threadId === threadId &&
+          frame.operationId === operationId &&
+          frame.event.kind === "conversation-turn-review-preview" &&
+          frame.event.preview.capture?.cursor === frame.cursor
+        )
+          latest = frame.event.preview.capture;
+      if (frames.length < 256) break;
+      cursor = frames.at(-1)?.cursor ?? cursor;
+    }
+    return latest;
+  }
+
+  #reviewAssessmentReader(
+    checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
+    threadId: CodeThreadId,
+  ) {
+    let observation: ReturnType<CodeOperationGitPort["observe"]> | undefined;
+    const assessments = new Map<string, Promise<ReviewAnchorAssessment>>();
+    const captures = new Map<string, CodeTurnReviewCapture | undefined>();
+    const readObservation =
+      git === undefined
+        ? undefined
+        : () => (observation ??= git.observe({ checkoutRoot, maxDiffBytes: 0 }));
+    return (revision: CodeReviewRevision) => {
+      const key = JSON.stringify(revision);
+      let assessed = assessments.get(key);
+      if (assessed === undefined) {
+        if (revision.kind === "turn-capture" && !captures.has(String(revision.operationId)))
+          captures.set(
+            String(revision.operationId),
+            this.#latestTurnCapture(threadId, revision.operationId),
+          );
+        assessed = this.#reviewAnchorState(
+          revision,
+          checkoutRoot,
+          git,
+          readObservation,
+          threadId,
+          revision.kind === "turn-capture"
+            ? () => captures.get(String(revision.operationId))
+            : undefined,
+        );
+        assessments.set(key, assessed);
+      }
+      return assessed;
+    };
+  }
+
+  async #reviewAnchorState(
+    revision: CodeReviewRevision,
+    checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
+    readObservation?: () => ReturnType<CodeOperationGitPort["observe"]>,
+    threadId?: CodeThreadId,
+    readCapture?: () => CodeTurnReviewCapture | undefined,
+  ): Promise<ReviewAnchorAssessment> {
+    try {
+      if (revision.kind === "turn-capture") {
+        if (threadId === undefined)
+          return {
+            anchorState: "unavailable",
+            explanation: "The owning turn capture is unavailable.",
+          };
+        const latest =
+          readCapture === undefined
+            ? this.#latestTurnCapture(threadId, revision.operationId)
+            : readCapture();
+        const current =
+          latest !== undefined &&
+          latest.cursor === revision.captureCursor &&
+          latest.version === revision.version &&
+          latest.baseline === revision.baseline &&
+          latest.tree === revision.tree;
+        return {
+          anchorState: latest === undefined ? "unavailable" : current ? "current" : "outdated",
+          explanation: current
+            ? "This is the latest captured turn version. Later checkout edits may still be uncaptured; viewing it does not verify or resolve the finding."
+            : "This finding stays on its original captured turn version. Open the latest preview before resolving it.",
+        };
+      }
+      if (git === undefined)
+        return {
+          anchorState: "unavailable",
+          explanation:
+            "The current comparison cannot be read. The original captured anchor is retained.",
+        };
+      const observed = await (readObservation?.() ??
+        git.observe({ checkoutRoot, maxDiffBytes: 0 }));
+      if (observed.status !== "ready")
+        return {
+          anchorState: "unavailable",
+          explanation: "The current checkout revision could not be read.",
+        };
+      let current = false;
+      if (revision.kind === "working-tree") current = observed.stateToken === revision.stateToken;
+      else if (observed.head === undefined)
+        return {
+          anchorState: "unavailable",
+          explanation: "The current checkout revision could not be read.",
+        };
+      else if (
+        git.compareBranch !== undefined &&
+        revision.base !== undefined &&
+        "oid" in observed.head &&
+        observed.head.oid === revision.head
+      ) {
+        const compared = await git.compareBranch({
+          checkoutRoot,
+          baseRef: revision.baseRef,
+          headRef: "HEAD",
+        });
+        current =
+          compared.status === "ready" &&
+          compared.head === revision.head &&
+          compared.base === revision.base &&
+          (observed.statusEntries?.length ?? 1) === 0;
+      }
+      return current
+        ? {
+            anchorState: "current",
+            explanation:
+              "This comparison still matches the captured revision. The finding remains open until you review and resolve it.",
+          }
+        : {
+            anchorState: "outdated",
+            explanation:
+              "The checkout or compared revision changed. This finding stays on its original side and line; review the latest changes before resolving it.",
+          };
+    } catch {
+      return {
+        anchorState: "unavailable",
+        explanation:
+          "The current comparison is unavailable; the original captured anchor is retained.",
+      };
+    }
+  }
+
+  async #selectedReviewFindings(
+    windowId: WindowId,
+    thread: CodeThread,
+    selection: ReadonlyArray<{ findingId: CodeReviewFinding["id"]; expectedVersion: number }>,
+  ): Promise<
+    ReadonlyArray<{
+      finding: CodeReviewFinding;
+      reference: CodeReviewFindingReference;
+      excerpt?: string;
+    }>
+  > {
+    const findings = await this.#reviewFindings(windowId, thread.id);
+    const chosen: Array<{
+      finding: CodeReviewFinding;
+      reference: CodeReviewFindingReference;
+      excerpt?: string;
+    }> = [];
+    const seen = new Set<string>();
+    for (const wanted of selection) {
+      const finding = findings.find((item) => item.id === wanted.findingId);
+      if (
+        finding === undefined ||
+        finding.threadId !== thread.id ||
+        finding.checkoutId !== thread.checkoutId ||
+        finding.version !== wanted.expectedVersion ||
+        finding.state !== "open" ||
+        seen.has(finding.id)
+      )
+        throw new CodeOperationServiceError("invalid");
+      seen.add(finding.id);
+      let excerpt: string | undefined;
+      if (finding.anchor !== undefined) {
+        if (finding.location.kind !== "line") throw new CodeOperationServiceError("unavailable");
+        const snapshot = await this.#retainedReview(
+          windowId,
+          thread.id,
+          thread.checkoutId,
+          finding.anchor.reviewOperationId,
+          finding.anchor.revision.kind === "turn-capture"
+            ? finding.anchor.revision.captureCursor
+            : undefined,
+        );
+        const selected = retainedReviewTarget(snapshot, {
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          path: finding.path,
+          side: finding.anchor.side,
+          line: finding.location.line,
+        });
+        if (
+          selected === undefined ||
+          reviewFindingAnchorDigest({ ...finding, ...selected.target }) !==
+            reviewFindingAnchorDigest(finding)
+        )
+          throw new CodeOperationServiceError("unavailable");
+        excerpt = selected.excerpt;
+      }
+      chosen.push({
+        finding,
+        reference: {
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          findingId: finding.id,
+          version: finding.version,
+          anchorDigest: reviewFindingAnchorDigest(finding),
+        },
+        ...(excerpt === undefined ? {} : { excerpt }),
+      });
+    }
+    const current = await this.#scope(windowId, {
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+    });
+    if ("failure" in current) throw new CodeOperationServiceError("unauthorized");
+    const latest = await this.#reviewFindings(windowId, thread.id);
+    if (
+      chosen.some(
+        ({ finding }) => latest.find((item) => item.id === finding.id)?.version !== finding.version,
+      )
+    )
+      throw new CodeOperationServiceError("invalid");
+    return chosen;
+  }
+
+  async #prepareReviewCorrection(
+    windowId: WindowId,
+    thread: CodeThread,
+    selection: ReadonlyArray<{ findingId: CodeReviewFinding["id"]; expectedVersion: number }>,
+    checkoutRoot: string,
+    git: CodeOperationGitPort | undefined,
+    admissionCurrent?: () => boolean,
+  ): Promise<CodeReviewCorrectionPrepared> {
+    const selected = await this.#selectedReviewFindings(windowId, thread, selection);
+    const assess = this.#reviewAssessmentReader(checkoutRoot, git, thread.id);
+    const pieces = [
+      "Please address these selected local review findings. This is an editable correction request, not execution approval.",
+    ];
+    for (const { finding, excerpt } of selected) {
+      pieces.push(
+        `\n${finding.summary}\n${reviewFindingLabel(finding)}\nFinding ${finding.id} version ${finding.version}; reviewed digest ${finding.fileDigest}.`,
+      );
+      if (finding.anchor === undefined) {
+        pieces.push("Legacy finding: the original comparison revision is unrecorded.");
+        continue;
+      }
+      const assessed = await assess(finding.anchor.revision);
+      pieces.push(
+        `Captured ${finding.anchor.capturedAt}; ${assessed.anchorState}: ${assessed.explanation}`,
+        "Untrusted captured compared regions only, not the whole file:",
+        excerpt ?? "",
+      );
+    }
+    await this.#revalidateReviewEvidence(windowId, thread.id, thread.checkoutId);
+    if (admissionCurrent?.() === false) throw new CodeOperationServiceError("unauthorized");
+    const bounded = boundReviewText(pieces.join("\n"), 60_000);
+    const omissions = [
+      "Only selected findings and bounded captured regions are included; other comments and the full files are omitted.",
+      ...(bounded.truncated
+        ? [
+            "Some selected note/context text was omitted to keep this draft bounded; all selected finding references remain attached.",
+          ]
+        : []),
+    ];
+    return {
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+      text: bounded.text + "\n\n" + omissions.join("\n"),
+      references: selected.map((item) => item.reference),
+      omissions,
+    };
+  }
+
+  #reviewEvidenceScope(
+    threadId: CodeThreadId,
+    frame: CodeOperationEventFrame,
+  ): CodeCheckoutId | false | undefined {
+    if (frame.event.kind === "conversation-turn-review-preview") {
+      const checkoutId = frame.event.preview.capture?.checkoutId;
+      if (checkoutId === undefined) return undefined;
+      return frame.threadId === threadId &&
+        this.#options.authority.readThread(threadId)?.checkoutId === checkoutId
+        ? checkoutId
+        : false;
+    }
+    if (
+      frame.event.kind !== "operation-result" ||
+      (frame.event.result.kind !== "git-observed" && frame.event.result.kind !== "run-reviewed")
+    )
+      return undefined;
+    const bound = frame.event.result.reviewScope;
+    if (bound === undefined) return undefined;
+    return bound.threadId === threadId &&
+      this.#options.authority.readThread(threadId)?.checkoutId === bound.checkoutId
+      ? bound.checkoutId
+      : false;
+  }
+
+  async #revalidateReviewEvidence(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    admissionCurrent?: () => boolean,
+  ): Promise<void> {
+    const scope = await this.#scope(windowId, { threadId, checkoutId });
+    const current = this.#options.authority.readThread(threadId);
+    if (
+      "failure" in scope ||
+      current?.checkoutId !== checkoutId ||
+      current.projectId !== scope.thread.projectId ||
+      admissionCurrent?.() === false
+    )
+      throw new CodeOperationServiceError("unauthorized");
+  }
+
   #hunkEvidenceScope(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
@@ -2455,16 +3063,19 @@ export class CodeOperationService {
   ): Promise<{ readonly reference: CodeEvidenceReference; readonly text: string }> {
     let cursor = 0;
     let reference: CodeEvidenceReference | undefined;
+    let reviewCheckoutId: CodeCheckoutId | undefined;
     let hunkCheckoutId: CodeCheckoutId | undefined;
     while (reference === undefined) {
       const frames = await this.subscribe(windowId, threadId, operationId, cursor, 256);
       for (const frame of frames) {
+        const reviewScope = this.#reviewEvidenceScope(threadId, frame);
         const hunkScope = this.#hunkEvidenceScope(threadId, operationId, frame);
-        if (hunkScope === false) continue;
+        if (reviewScope === false || hunkScope === false) continue;
         reference = evidenceReferences(frame.event).find(
           (candidate) => candidate.contentId === contentId,
         );
         if (reference !== undefined) {
+          reviewCheckoutId = reviewScope;
           hunkCheckoutId = hunkScope;
           break;
         }
@@ -2479,6 +3090,8 @@ export class CodeOperationService {
     if (hunkCheckoutId !== undefined)
       this.#requireHunkEvidenceCurrent(windowId, threadId, hunkCheckoutId, admissionCurrent);
     if (text === undefined) throw new CodeOperationServiceError("unavailable");
+    if (reviewCheckoutId !== undefined)
+      await this.#revalidateReviewEvidence(windowId, threadId, reviewCheckoutId, admissionCurrent);
     return { reference, text };
   }
 
@@ -2511,6 +3124,7 @@ export class CodeOperationService {
       requestedByOperation.set(String(item.operationId), requested);
     }
     const references = new Map<string, CodeEvidenceReference>();
+    const reviewCheckouts = new Set<CodeCheckoutId>();
     const hunkScopes = new Map<string, CodeCheckoutId>();
     const processedOperations = new Set<string>();
     for (const item of items) {
@@ -2522,12 +3136,14 @@ export class CodeOperationService {
       for (;;) {
         const frames = this.#replay(threadId, item.operationId, cursor, 256).frames;
         for (const frame of frames) {
+          const reviewScope = this.#reviewEvidenceScope(threadId, frame);
           const hunkScope = this.#hunkEvidenceScope(threadId, item.operationId, frame);
-          if (hunkScope === false) continue;
+          if (reviewScope === false || hunkScope === false) continue;
           for (const reference of evidenceReferences(frame.event)) {
             if (requested.has(String(reference.contentId))) {
               const key = `${operationKey}:${String(reference.contentId)}`;
               references.set(key, reference);
+              if (reviewScope !== undefined) reviewCheckouts.add(reviewScope);
               if (hunkScope !== undefined) hunkScopes.set(key, hunkScope);
             }
           }
@@ -2555,6 +3171,8 @@ export class CodeOperationService {
       if (text === undefined) throw new CodeOperationServiceError("unavailable");
       result.push({ operationId: item.operationId, contentId: item.contentId, text });
     }
+    for (const checkout of reviewCheckouts)
+      await this.#revalidateReviewEvidence(windowId, threadId, checkout, admissionCurrent);
     for (const checkoutId of hunkScopes.values())
       this.#requireHunkEvidenceCurrent(windowId, threadId, checkoutId, admissionCurrent);
     return result;
@@ -2767,6 +3385,7 @@ export class CodeOperationService {
     attachments: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
     initiator: CodeOperationInitiator = "agent",
+    routineRun?: AutomationRunReference,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     // A server thread's Git runs on its server; it never reaches this host's.
@@ -3311,20 +3930,112 @@ export class CodeOperationService {
         return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
         return this.#pullRequestReview(command, root.checkoutRoot, git);
-      case "create-review-finding": {
-        const finding = await this.#options.reviewFindings.create(windowId, {
-          id: command.findingId,
+      case "observe-turn-review": {
+        const preview = await this.#options.turns.reviewPreview?.({
+          windowId,
+          thread,
+          operationId: command.turnOperationId,
+          refresh: command.refresh,
+          ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+        });
+        await this.#revalidateReviewEvidence(windowId, thread.id, checkout.id, admissionCurrent);
+        if (preview?.capture !== undefined && preview.capture.checkoutId !== checkout.id)
+          throw new CodeOperationServiceError("unauthorized");
+        return decodeCodeOperationResult({
+          kind: "turn-review-preview",
+          operationId: command.operationId,
+          turnOperationId: command.turnOperationId,
           threadId: thread.id,
           checkoutId: checkout.id,
-          fileId: command.fileId,
-          path: command.path,
-          fileDigest: command.fileDigest,
-          location: command.location,
-          severity: command.severity,
-          summary: command.summary,
-          author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-          provenance: { kind: "manual" },
+          preview: preview ?? {
+            status: "unavailable",
+            explanation:
+              "This turn has no retained captured comparison. No current working-tree diff was substituted.",
+          },
         });
+      }
+      case "prepare-review-target": {
+        const target = await this.resolveReviewTarget(windowId, command, admissionCurrent);
+        const assessment = await this.#reviewAnchorState(
+          target.anchor.revision,
+          root.checkoutRoot,
+          git,
+          undefined,
+          thread.id,
+        );
+        await this.#revalidateReviewEvidence(windowId, thread.id, checkout.id, admissionCurrent);
+        return decodeCodeOperationResult({
+          kind: "review-target-state",
+          operationId: command.operationId,
+          target,
+          ...assessment,
+        });
+      }
+      case "list-review-findings": {
+        const findings = await this.#reviewFindings(windowId, thread.id);
+        const assessed = [];
+        const assess = this.#reviewAssessmentReader(root.checkoutRoot, git, thread.id);
+        for (const finding of findings.slice(0, 256)) {
+          const assessment =
+            finding.checkoutId !== checkout.id
+              ? {
+                  anchorState: "unavailable",
+                  explanation:
+                    "This finding belongs to a previous checkout. Its original anchor is retained.",
+                }
+              : finding.anchor === undefined
+                ? {
+                    anchorState: "legacy",
+                    explanation:
+                      "Legacy file finding: no captured comparison revision was recorded.",
+                  }
+                : await assess(finding.anchor.revision);
+          assessed.push({ finding, ...assessment });
+        }
+        await this.#revalidateReviewEvidence(windowId, thread.id, checkout.id, admissionCurrent);
+        return decodeCodeOperationResult({
+          kind: "review-findings-state",
+          operationId: command.operationId,
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          findings: assessed,
+          truncated: findings.length > 256,
+        });
+      }
+      case "prepare-review-correction": {
+        const prepared = await this.#prepareReviewCorrection(
+          windowId,
+          thread,
+          command.findings,
+          root.checkoutRoot,
+          git,
+          admissionCurrent,
+        );
+        return decodeCodeOperationResult({
+          kind: "review-correction-prepared",
+          operationId: command.operationId,
+          prepared,
+        });
+      }
+      case "create-review-finding": {
+        const finding = await this.#options.reviewFindings.create(
+          windowId,
+          {
+            id: command.findingId,
+            threadId: thread.id,
+            checkoutId: checkout.id,
+            fileId: command.fileId,
+            path: command.path,
+            fileDigest: command.fileDigest,
+            ...(command.anchor === undefined ? {} : { anchor: command.anchor }),
+            location: command.location,
+            severity: command.severity,
+            summary: command.summary,
+            author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            provenance: { kind: "manual" },
+          },
+          admissionCurrent,
+        );
         return finding.id === command.findingId
           ? decodeCodeOperationResult({
               kind: "review-finding-state",
@@ -3337,11 +4048,17 @@ export class CodeOperationService {
         return decodeCodeOperationResult({
           kind: "review-finding-state",
           operationId: command.operationId,
-          finding: await this.#options.reviewFindings.changeState(windowId, {
-            findingId: command.findingId,
-            expectedVersion: command.expectedVersion,
-            state: command.state,
-          }),
+          finding: await this.#options.reviewFindings.changeState(
+            windowId,
+            {
+              findingId: command.findingId,
+              threadId: thread.id,
+              checkoutId: checkout.id,
+              expectedVersion: command.expectedVersion,
+              state: command.state,
+            },
+            admissionCurrent,
+          ),
         });
       case "start-provider-turn":
         return this.#providerTurn(
@@ -3351,6 +4068,10 @@ export class CodeOperationService {
           root.checkoutRoot,
           attachments,
           admissionCurrent,
+          root.rootIdentity,
+          routineRun,
+          thread.workingFolderId === undefined ? undefined : root.workingDirectory,
+          thread.workingFolderId === undefined ? undefined : root.rootCurrent,
         );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
@@ -3363,6 +4084,23 @@ export class CodeOperationService {
             approvalId: command.approvalId,
             decision: command.decision,
           }),
+        );
+      case "force-stop-provider-turn":
+        return this.#providerResult(
+          command.operationId,
+          this.#options.turns.forceStop === undefined
+            ? {
+                state: "failed",
+                failure: {
+                  category: "failed",
+                  message: "This runtime does not support force-stopping an owned attempt.",
+                },
+              }
+            : await this.#options.turns.forceStop({
+                thread,
+                checkoutRoot: root.checkoutRoot,
+                turnOperationId: command.turnOperationId,
+              }),
         );
       case "cancel-provider-turn": {
         // A turn still preparing is not the runtime's yet, so the runtime
@@ -3690,6 +4428,7 @@ export class CodeOperationService {
       if (diff.status !== "ready") continue;
       return decodeCodeOperationResult({
         kind: "run-reviewed",
+        reviewScope: { threadId: thread.id, checkoutId: command.checkoutId },
         operationId: command.operationId,
         gitOperationId: command.gitOperationId,
         outcome: {
@@ -3818,6 +4557,7 @@ export class CodeOperationService {
       );
     return decodeCodeOperationResult({
       kind: "git-observed",
+      reviewScope: { threadId: command.threadId, checkoutId: command.checkoutId },
       operationId: command.operationId,
       gitOperationId: command.gitOperationId,
       head:
@@ -4798,6 +5538,10 @@ export class CodeOperationService {
     checkoutRoot: string,
     references: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
+    rootIdentity?: { readonly device: string; readonly inode: string },
+    routineRun?: AutomationRunReference,
+    providerRoot?: string,
+    folderCurrent?: () => boolean,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -4807,6 +5551,13 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
         "refused",
       );
+    const preparationRefusal = await this.#options.prepareWorktree?.(
+      thread,
+      checkoutRoot,
+      () => admissionCurrent?.() !== false,
+    );
+    if (preparationRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", preparationRefusal, "refused");
     const selections =
       command.extensionSelections?.filter(
         (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),
@@ -4849,9 +5600,37 @@ export class CodeOperationService {
       instructions: profileContext.sent.instructions,
       skills: [...skillContext, ...profileContext.sent.skills],
     };
+    let sideChatReturnContext: ReadonlyArray<ProviderContextBlock> = [];
+    if ((command.sideChatReturns?.length ?? 0) > 0) {
+      if (this.#options.resolveSideChatReturns === undefined)
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          SIDE_CHAT_RETURN_UNAVAILABLE,
+          "refused",
+        );
+      try {
+        const text = await this.#options.resolveSideChatReturns({
+          references: command.sideChatReturns ?? [],
+          readerThreadId: String(thread.id),
+          mode: "code",
+          windowId,
+        });
+        if (text.trim().length === 0) throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+        sideChatReturnContext = [{ kind: "user-message", text }];
+      } catch {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          SIDE_CHAT_RETURN_UNAVAILABLE,
+          "refused",
+        );
+      }
+    }
     const context = [
       ...skillContext,
       ...profileContext.blocks,
+      ...sideChatReturnContext,
       ...(await this.#resolveThreadMentions(thread.id, command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(issueContext === undefined
@@ -4887,6 +5666,61 @@ export class CodeOperationService {
         "refused",
       );
     }
+    if ((command.reviewFindingReferences?.length ?? 0) > 0) {
+      try {
+        const references = command.reviewFindingReferences ?? [];
+        if (
+          this.#options.recordReviewContent === undefined ||
+          references.some(
+            (ref) => ref.threadId !== thread.id || ref.checkoutId !== thread.checkoutId,
+          )
+        )
+          throw new Error("unavailable");
+        const selected = await this.#selectedReviewFindings(
+          windowId,
+          thread,
+          references.map((ref) => ({ findingId: ref.findingId, expectedVersion: ref.version })),
+        );
+        if (
+          selected.some(
+            (item, index) => item.reference.anchorDigest !== references[index]?.anchorDigest,
+          )
+        )
+          throw new Error("stale");
+        if (admissionCurrent?.() === false) throw new Error("revoked");
+        for (const { reference } of selected) {
+          const recorded = this.#options.recordReviewContent({
+            threadId: thread.id,
+            provenance: { origin: "external-content", sourceLabel: "Local Code review correction" },
+            contentReference: `code-review:${reference.findingId}:v${reference.version}:${reference.anchorDigest}`,
+            correlationId: command.operationId,
+            authorized: true,
+          });
+          if (recorded.kind !== "recorded" && recorded.kind !== "already-recorded")
+            throw new Error("unavailable");
+        }
+        const text = frameExternalContentForModel({
+          origin: "external-content",
+          sourceLabel: "Local Code review correction",
+          section: "conversation",
+          body: [
+            "The editable request carries selected local review references. Its text may have been edited by the person; no other findings, full files or new approval are included.",
+            ...selected.map(
+              ({ finding, reference }) =>
+                `${reviewFindingLabel(finding)}; finding ${finding.id} version ${reference.version}; original anchor ${reference.anchorDigest}.`,
+            ),
+          ].join("\n"),
+        }).text;
+        context.push({ kind: "user-message", text });
+      } catch {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          "A selected review finding or its captured comparison is unavailable or changed. Reopen Review to prepare it again, or explicitly clear this draft. Nothing was sent.",
+          "refused",
+        );
+      }
+    }
     // Read last, after every refusal above: carrying a message marks this
     // thread as having ingested external content, and a turn that was never
     // going to start should not do that. A failed read costs the turn its
@@ -4901,7 +5735,10 @@ export class CodeOperationService {
       thread,
       operationId: command.operationId,
       sessionId: command.sessionId,
+      ...(providerRoot === undefined ? {} : { providerRoot }),
+      ...(folderCurrent === undefined ? {} : { folderCurrent }),
       checkoutRoot,
+      ...(rootIdentity === undefined ? {} : { rootIdentity }),
       prompt,
       ...(context.length === 0 ? {} : { context }),
       ...(sentContext.instructions.length === 0 && sentContext.skills.length === 0
@@ -4910,6 +5747,7 @@ export class CodeOperationService {
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+      ...(routineRun === undefined ? {} : { routineRun }),
       // A message is delivered when a provider has it, not when the turn was
       // taken on: the runtime launches after this call returns, and a host
       // that stopped in between would have journaled a delivery, dropped the
@@ -4927,11 +5765,12 @@ export class CodeOperationService {
       ...(takeProductFeedback === undefined
         ? {}
         : {
-            takeProductFeedback: () =>
+            takeProductFeedback: (maxAttachments) =>
               takeProductFeedback({
                 threadId: command.threadId,
                 operationId: command.operationId,
                 supportsImages,
+                ...(maxAttachments === undefined ? {} : { maxAttachments }),
               }),
           }),
     });
@@ -5381,11 +6220,15 @@ function sameConversationStart(
     event.providerInstanceId === thread.providerInstanceId &&
     event.modelId === thread.modelId &&
     event.sessionId === command.sessionId &&
+    (event.toolCatalogHandoff === true) === (command.toolCatalogHandoff === true) &&
+    (event.checkoutId === undefined || event.checkoutId === command.checkoutId) &&
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&
     event.prompt.byteLength === command.prompt.byteLength &&
     JSON.stringify(event.extensionSelections ?? []) ===
       JSON.stringify(command.extensionSelections ?? []) &&
+    JSON.stringify(event.reviewFindingReferences ?? []) ===
+      JSON.stringify(command.reviewFindingReferences ?? []) &&
     JSON.stringify(event.delivery ?? null) === JSON.stringify(command.delivery ?? null)
   );
 }
@@ -5442,6 +6285,8 @@ function isDurableProviderLaunchEvidence(event: CodeOperationEvent): boolean {
 
 function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceReference[] {
   switch (event.kind) {
+    case "conversation-turn-review-preview":
+      return event.preview.capture === undefined ? [] : [event.preview.capture.diff];
     case "conversation-turn-started":
       return [event.prompt];
     case "provider-content":
@@ -5466,6 +6311,8 @@ function resultEvidenceReferences(result: CodeOperationResult): readonly CodeEvi
     case "git-observed":
     case "git-hunks":
       return [result.diff];
+    case "run-reviewed":
+      return result.reviewScope === undefined ? [] : [result.outcome.diff];
     case "pull-request-review":
       return result.state === "observed" ? [result.description, result.diff] : [];
     case "terminal-state":
@@ -5480,12 +6327,20 @@ function resultEvidenceReferences(result: CodeOperationResult): readonly CodeEvi
 
 function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
   switch (kind) {
+    // Local review journals annotations, not checkout effects or execution grants.
+    case "prepare-review-target":
+    case "observe-turn-review":
+    case "list-review-findings":
+    case "prepare-review-correction":
+    case "create-review-finding":
+    case "update-review-finding":
     case "observe-git":
     case "observe-pull-request":
     case "start-provider-turn":
     case "answer-provider-input":
     case "answer-provider-approval":
     case "cancel-provider-turn":
+    case "force-stop-provider-turn":
     case "attach-terminal":
       return "read";
     case "start-terminal":

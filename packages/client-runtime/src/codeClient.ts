@@ -174,7 +174,10 @@ export interface CodeClient {
   navigation(): Promise<CodeNavigation>;
   thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
   execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
-  executeOperation(command: CodeOperationCommand): Promise<CodeOperationResult>;
+  executeOperation(
+    command: CodeOperationCommand,
+    signal?: AbortSignal,
+  ): Promise<CodeOperationResult>;
   inspectTerminal(request: CodeTerminalInspectionRequest): Promise<CodeTerminalInspection>;
   /**
    * A terminal's output as it is printed, outside the journal, for as long as
@@ -318,6 +321,7 @@ export interface CodeClient {
   readTestStatus?(
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
+    signal?: AbortSignal,
   ): Promise<CodeRepositoryTestStatus>;
   /**
    * Tell the host's language server what the editor holds open: `open` names
@@ -459,7 +463,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeCommandResult),
       );
     },
-    async executeOperation(command) {
+    async executeOperation(command, signal) {
       let validated: CodeOperationCommand;
       try {
         validated = decodeCodeOperationCommand(command);
@@ -473,6 +477,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
         },
         (value) => {
           const result = decodeHostAnswer(CodeOperationResult)(value);
@@ -1160,7 +1165,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeLanguageReadResult),
       );
     },
-    readTestStatus(threadId, checkoutId) {
+    readTestStatus(threadId, checkoutId, signal) {
       try {
         decodeCodeThreadId(threadId);
         decodeCodeCheckoutId(checkoutId);
@@ -1173,7 +1178,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       return request(
         fetch,
         url.toString(),
-        { method: "GET", headers },
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeHostAnswer(CodeRepositoryTestStatus),
       );
     },

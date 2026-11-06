@@ -5,12 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import { CredentialPurgeFailure, CredentialStoreFailure } from "@octant/host-runtime";
 import {
   KEYCHAIN_HELPER_MAX_BYTES,
+  keychainHelperArguments,
   keychainHelperSpec,
   keychainPurgeHelperSpec,
   makeKeychainCredentialPurgeStore as makeNativeKeychainCredentialPurgeStore,
   makeKeychainCredentialStore as makeNativeKeychainCredentialStore,
   type KeychainHelperExecutor,
 } from "./keychainCredentialStore";
+import { hostSigningHelperSpec } from "./hostIdentityKeychain";
 
 const providerInstanceId = "7d444840-9dc0-11d1-b245-5ffdce74fad2";
 const storeScope = "7d444840-9dc0-41d1-b245-5ffdce74fad2";
@@ -365,6 +367,49 @@ describe("makeKeychainCredentialStore", () => {
       fill.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Nightly's test-data Keychain services", () => {
+  it("asks the helper for Nightly's own services for every store, purge and signing request", async () => {
+    const execute = vi.fn<KeychainHelperExecutor>(async (spec) => {
+      const request = JSON.parse(spec.stdin) as { operation: string };
+      if (request.operation === "purge")
+        return {
+          exitCode: 0,
+          stdout:
+            '{"version":1,"ok":true,"operation":"purge","dryRun":true,"matched":0,"deleted":0}\n',
+          stderr: "",
+        };
+      return { exitCode: 0, stdout: '{"version":1,"ok":true}\n', stderr: "" };
+    });
+    const family = { serviceFamily: "octant-nightly-test-data" as const, execute };
+    await makeKeychainCredentialStore(helperPath, family).set(providerInstanceId, "value");
+    await makeKeychainCredentialStore(helperPath, { ...family, namespace: "ssh-key" }).delete(
+      providerInstanceId,
+    );
+    await makeKeychainCredentialPurgeStore(helperPath, family)
+      .purge(purgeInput(true))
+      .catch(() => undefined);
+    const nightly = ["--service-family=octant-nightly-test-data"];
+    expect(execute.mock.calls.map(([spec]) => spec.args)).toEqual([nightly, nightly, nightly]);
+    expect(
+      hostSigningHelperSpec(
+        helperPath,
+        { operation: "ensure", keyId: "host-identity" },
+        storeScope,
+        "octant-nightly-test-data",
+      ).args,
+    ).toEqual(nightly);
+  });
+
+  it("keeps Octant's own requests free of any service argument", () => {
+    expect(keychainHelperArguments()).toEqual([]);
+    expect(keychainHelperArguments("octant")).toEqual([]);
+    expect(
+      hostSigningHelperSpec(helperPath, { operation: "ensure", keyId: "host-identity" }, storeScope)
+        .args,
+    ).toEqual([]);
   });
 });
 

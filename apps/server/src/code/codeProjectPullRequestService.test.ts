@@ -789,6 +789,29 @@ describe("CodeProjectPullRequestService", () => {
     ]);
   });
 
+  it("names only a thread's own linked pull requests that are still open for it to watch", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [
+          ghRow({ number: 12, state: "open" }),
+          ghRow({ number: 11, state: "merged", mergeability: "unknown" }),
+        ],
+      }),
+    });
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    expect(
+      (await service.linkedPullRequests(windowId, threadId)).map((target) => target.number),
+    ).toEqual([12]);
+    expect(
+      await service.linkedPullRequests(
+        windowId,
+        decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+      ),
+    ).toEqual([]);
+  });
+
   it("reuses one board join for sidebar navigation reads until it ages out or a refresh replaces it", async () => {
     let clockMs = Date.parse(now);
     const remoteLookup = vi.fn(

@@ -107,6 +107,7 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   // once or deny. Remembering the answer for the Project stays with a local
   // window; the approval service refuses it from a paired device.
   "extension.tool-call.answer-once",
+  "agent-run.request.answer-once",
   // Dictation: the device sends a clip it recorded on an explicit act, the
   // host transcribes it on its own Voice endpoint within the device's budget,
   // and the text lands in the device's draft. Nothing is sent for it.

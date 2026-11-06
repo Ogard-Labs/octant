@@ -1,6 +1,16 @@
+import { decodeBrowserPageScriptPlanId } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { startBrowserRuntimeBroker } from "./browserRuntimeBroker";
-import { BrowserNavigationBlockedError, BrowserTargetStaleError } from "./browserSurfaceHost";
+import {
+  BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
+  BrowserTargetStaleError,
+} from "./browserSurfaceHost";
+import { createBrowserSurfaceHost } from "./browserSurfaceHost";
+import type {
+  OwnerBrowserNativeCommand,
+  OwnerBrowserNativeResult,
+} from "@octant/contracts/owner-browser";
 
 const contextId = "10000000-0000-4000-8000-000000000001";
 
@@ -8,6 +18,28 @@ function host() {
   const personInput: Array<(contextId: string) => void> = [];
   return {
     personInput,
+    runPageScript: vi.fn(
+      async (
+        _command: import("@octant/contracts/browser-page-script").BrowserPageScriptNativeCommand,
+        _signal: AbortSignal,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptPreparation> => ({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      }),
+    ),
+    prepareCredentialFill: vi.fn(async () => ({
+      status: "prepared",
+      planId: contextId,
+      usernameLabel: "Email",
+      passwordLabel: "Password",
+      submissionOrigin: "https://example.com",
+      expiresAt: new Date(Date.now() + 180000).toISOString(),
+    })),
+    submitCredentialFill: vi.fn(async () => ({
+      status: "authentication-required",
+      effect: "completed",
+    })),
     onPersonInput: vi.fn((listener: (contextId: string) => void) => {
       personInput.push(listener);
       return () => undefined;
@@ -31,6 +63,297 @@ function host() {
 }
 
 describe("BrowserRuntimeBroker", () => {
+  it("cancels queued owner input on a complete POST disconnect and refuses untyped or unauthenticated native requests", async () => {
+    const base = createBrowserSurfaceHost({
+      createView: () => {
+        throw new Error("This transport fixture opens no native page");
+      },
+    });
+    const entered = Promise.withResolvers<AbortSignal | undefined>();
+    const waiting = Promise.withResolvers<void>();
+    let starts = 0;
+    const settled = Promise.withResolvers<void>();
+    const surface = {
+      ...base,
+      ownerControl: vi.fn(
+        async (
+          _command: OwnerBrowserNativeCommand,
+          signal?: AbortSignal,
+        ): Promise<OwnerBrowserNativeResult> => {
+          entered.resolve(signal);
+          await waiting.promise;
+          if (!signal?.aborted) starts += 1;
+          settled.resolve();
+          return signal?.aborted ? { status: "refused" } : { status: "input", effect: "completed" };
+        },
+      ),
+    };
+    const broker = await startBrowserRuntimeBroker(surface);
+    const body = {
+      operation: "input",
+      contextId,
+      owner: { windowId: contextId, threadId: contextId },
+      controlId: contextId,
+      sequence: 2,
+      expectedFrame: 1,
+      input: { kind: "type", text: "synthetic-only" },
+    };
+    const abort = new AbortController();
+    const pending = fetch(request(broker.url, broker.token, body, "v1/contexts/owner-control"), {
+      signal: abort.signal,
+    }).catch(() => undefined);
+    try {
+      const signal = await entered.promise;
+      abort.abort();
+      await pending;
+      await vi.waitFor(() => expect(signal?.aborted).toBe(true));
+      waiting.resolve();
+      await settled.promise;
+      expect(starts).toBe(0);
+      expect(
+        (
+          await broker.fetchForTest(
+            request(broker.url, "wrong-token", body, "v1/contexts/owner-control"),
+          )
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await broker.fetchForTest(
+            request(
+              broker.url,
+              broker.token,
+              { ...body, input: { kind: "evaluate", source: "1+1" } },
+              "v1/contexts/owner-control",
+            ),
+          )
+        ).status,
+      ).toBe(400);
+      expect(surface.ownerControl).toHaveBeenCalledOnce();
+    } finally {
+      waiting.resolve();
+      await pending;
+      await broker.close();
+    }
+  });
+  it("keeps a normally completed HTTP preparation current for its subsequent execute request", async () => {
+    const surface = host();
+    let preparationSignal: AbortSignal | undefined;
+    surface.runPageScript.mockImplementation(async (command, signal) => {
+      if (command.operation === "prepare") {
+        preparationSignal = signal;
+        return { status: "prepared", planId: decodeBrowserPageScriptPlanId(contextId) };
+      }
+      return preparationSignal?.aborted === false && !signal.aborted
+        ? { status: "completed", effect: "possible", valueJson: "42" }
+        : { status: "cancelled", effect: "none" };
+    });
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const owner = { windowId: contextId, threadId: contextId };
+    try {
+      const prepared = await fetch(
+        request(
+          broker.url,
+          broker.token,
+          {
+            operation: "prepare",
+            contextId,
+            owner,
+            source: "42",
+            expectedUrl: "https://example.com/",
+          },
+          "v1/contexts/page-script",
+        ),
+      );
+      expect((await prepared.json()).status).toBe("prepared");
+      expect(preparationSignal?.aborted).toBe(false);
+      const result = await fetch(
+        request(
+          broker.url,
+          broker.token,
+          { operation: "execute", contextId, owner, planId: contextId },
+          "v1/contexts/page-script",
+        ),
+      );
+      expect(await result.json()).toEqual({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("cancels an owned script after a complete HTTP POST disconnects before effect admission", async () => {
+    const surface = host();
+    let release: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false,
+      starts = 0,
+      settled = false;
+    let nativeSignal: AbortSignal | undefined;
+    surface.runPageScript.mockImplementation(async (_command, signal) => {
+      entered = true;
+      nativeSignal = signal;
+      await waiting;
+      if (signal.aborted) {
+        settled = true;
+        return { status: "cancelled", effect: "none" };
+      }
+      starts++;
+      settled = true;
+      return { status: "completed", effect: "possible", valueJson: "42" };
+    });
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const abort = new AbortController();
+    const pending = fetch(
+      request(
+        broker.url,
+        broker.token,
+        {
+          operation: "execute",
+          contextId,
+          owner: { windowId: contextId, threadId: contextId },
+          planId: contextId,
+        },
+        "v1/contexts/page-script",
+      ),
+      { signal: abort.signal },
+    ).catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(entered).toBe(true));
+      abort.abort();
+      await pending;
+      await vi.waitFor(() => expect(nativeSignal?.aborted).toBe(true));
+      release?.();
+      await vi.waitFor(() => expect(settled).toBe(true));
+      expect(starts).toBe(0);
+    } finally {
+      release?.();
+      await pending;
+      await broker.close();
+    }
+  });
+
+  it("requires private native authentication, strict script phases and a bounded final reply", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const command = {
+      operation: "prepare",
+      contextId,
+      owner: { windowId: contextId, threadId: contextId },
+      source: "42",
+      expectedUrl: "https://example.com/",
+    };
+    const path = "v1/contexts/page-script";
+    try {
+      expect((await broker.fetchForTest(request(broker.url, "wrong", command, path))).status).toBe(
+        401,
+      );
+      expect(
+        (
+          await broker.fetchForTest(
+            request(broker.url, broker.token, { ...command, source: "😀".repeat(2049) }, path),
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await broker.fetchForTest(
+            request(
+              broker.url,
+              broker.token,
+              {
+                operation: "execute",
+                contextId,
+                owner: command.owner,
+                planId: contextId,
+                source: "unapproved-change",
+              },
+              path,
+            ),
+          )
+        ).status,
+      ).toBe(400);
+      expect(surface.runPageScript).not.toHaveBeenCalled();
+      const valid = await broker.fetchForTest(request(broker.url, broker.token, command, path));
+      expect(await valid.json()).toEqual({
+        status: "completed",
+        effect: "possible",
+        valueJson: "42",
+      });
+      surface.runPageScript.mockResolvedValue({
+        status: "completed",
+        effect: "possible",
+        valueJson: "\u0000".repeat(6000),
+      });
+      const bounded = await broker.fetchForTest(request(broker.url, broker.token, command, path));
+      expect(await bounded.json()).toEqual({ status: "truncated", effect: "possible" });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("authenticates and strictly decodes reference-only credential form requests", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    const command = {
+      kind: "prepare",
+      contextId,
+      owner: { windowId: contextId, threadId: contextId },
+      origin: "https://example.com",
+    };
+    try {
+      const path = "v1/contexts/credential-fill";
+      expect((await broker.fetchForTest(request(broker.url, "wrong", command, path))).status).toBe(
+        401,
+      );
+      expect(
+        (
+          await broker.fetchForTest(
+            request(broker.url, broker.token, { ...command, password: "must-not-cross" }, path),
+          )
+        ).status,
+      ).toBe(400);
+      expect(surface.prepareCredentialFill).not.toHaveBeenCalled();
+      const response = await broker.fetchForTest(request(broker.url, broker.token, command, path));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        status: "prepared",
+        submissionOrigin: "https://example.com",
+      });
+      expect(surface.prepareCredentialFill).toHaveBeenCalledWith(
+        contextId,
+        command.owner,
+        command.origin,
+      );
+      const expiresAt = new Date(Date.now() + 180000).toISOString();
+      const submitted = await broker.fetchForTest(
+        request(
+          broker.url,
+          broker.token,
+          { kind: "submit", contextId, owner: command.owner, planId: contextId, expiresAt },
+          path,
+        ),
+      );
+      expect(await submitted.json()).toEqual({
+        status: "authentication-required",
+        effect: "completed",
+      });
+      expect(surface.submitCredentialFill).toHaveBeenCalledWith(
+        contextId,
+        command.owner,
+        contextId,
+        expiresAt,
+      );
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("reports the pages the person used once, to the server that asks", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);
@@ -171,6 +494,28 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
+  it("passes an audit naming a known audit to the page and refuses any other", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const audit = { kind: "audit", auditKind: "performance" };
+      const response = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: audit }),
+      );
+      expect(response.status).toBe(200);
+      expect(surface.act).toHaveBeenCalledWith(contextId, audit);
+      const unknown = await broker.fetchForTest(
+        request(broker.url, broker.token, {
+          contextId,
+          request: { kind: "audit", auditKind: "everything" },
+        }),
+      );
+      expect(unknown.status).toBe(400);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("returns a picture of the page on peek without treating it as an action", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);
@@ -215,6 +560,21 @@ describe("BrowserRuntimeBroker", () => {
         error: "navigation-blocked",
         url: "https://www.example.com/",
       });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("reports a page it cannot record as a structured 422", async () => {
+    const surface = host();
+    surface.act.mockRejectedValueOnce(new BrowserRecordingUnavailableError());
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const response = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: { kind: "record-start" } }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({ error: "recording-unavailable" });
     } finally {
       await broker.close();
     }

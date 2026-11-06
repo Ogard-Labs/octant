@@ -34,8 +34,9 @@ describe("Project default mode", () => {
     render(<ProjectPermissionModeSection onChange={onChange} project={project("work")} />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Default mode for this Project" }));
+    const auto = await screen.findByRole("option", { name: "Auto" });
     expect(screen.queryByRole("option", { name: "Plan" })).toBeNull();
-    await userEvent.click(screen.getByRole("option", { name: "Auto" }));
+    await userEvent.click(auto);
 
     expect(onChange).toHaveBeenCalledWith("auto");
   });

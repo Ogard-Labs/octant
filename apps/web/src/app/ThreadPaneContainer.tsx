@@ -240,12 +240,10 @@ export interface ThreadPaneContainerProps {
  * screens and Project overviews, under the providers that scope the context
  * meter, thread stats and agent profile names to the active thread.
  *
- * This is the surface a streaming turn is for, and it still takes the shell's
- * controllers whole (`WorkspaceView` reads them), which are new objects on
- * every shell render; so unlike the sidebar and the dock it re-renders with
- * the shell. Memoizing the controller hooks' return values would let the
- * `memo` here bail out too; that is a change to those hooks, not to this
- * container.
+ * Controller hooks retain their records while their fields are unchanged,
+ * and shell actions keep stable identities. Preserve those input identities:
+ * the pane can then skip a quiet parent render without ignoring real changes
+ * to thread state or permissions.
  */
 export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   props: ThreadPaneContainerProps,
@@ -694,7 +692,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 onOpenCodeThread={(threadId, title, projectId) =>
                   void openCodeThread(threadId, title, undefined, projectId)
                 }
-                onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                onOpenReview={(threadId, request) => openReviewForThread(String(threadId), request)}
                 onSelectPullRequest={selectProjectPullRequestIdentity}
                 onOpenPullRequests={() => setCodePullRequestsOpen(true)}
                 onOpenCodeSurface={(kind, threadId, title, terminalId) =>

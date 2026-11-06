@@ -1,4 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
 import {
+  decodeBrowserTaskProfileReadCommand,
+  decodeBrowserTaskProfileSelectCommand,
+  decodeBrowserTaskProfileState,
+  decodeBrowserTaskProfileSelection,
+  type BrowserTaskProfileState,
+  type BrowserTaskProfileSelectCommand,
   decodeBrowserActionCommand,
   decodeBrowserAutomationSnapshot,
   decodeBrowserContextCancelCommand,
@@ -18,6 +26,7 @@ import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
   type BrowserThreadId,
+  type BrowserProfile,
 } from "@octant/contracts/browser-automation";
 import {
   decodeBrowserCaptureImage,
@@ -31,6 +40,7 @@ import {
 import type {
   BrowserAuthorityResolver,
   BrowserAutomationService,
+  BrowserTaskProfileCommit,
 } from "./browser/browserAutomationService";
 import type { BrowserCaptureService } from "./browser/browserCaptureService";
 import { remoteBrowserActionReach } from "@octant/domain";
@@ -58,7 +68,12 @@ import {
 } from "@octant/contracts/browser-profiles";
 import { storedBrowserProfile } from "@octant/domain";
 import { authenticateRoutePrincipal, readPrincipalRouteContext } from "./principalRouteContext";
-import { isAllowedRendererOrigin } from "./shellRoutes";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
+import {
+  decodeBrowserCredentialCommand,
+  decodeBrowserCredentialResult,
+} from "@octant/contracts/browser-credential-use";
+import type { BrowserCredentialUseService } from "./browser/browserCredentialUseService";
 import type { WindowId } from "@octant/contracts/shell";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -68,11 +83,12 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
   readonly service: Pick<
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
-    Partial<Pick<BrowserAutomationService, "takeOver" | "handBack">> &
+    Partial<Pick<BrowserAutomationService, "takeOver" | "handBack" | "switchTaskProfile">> &
     Partial<
       Pick<
         BrowserAutomationService,
@@ -100,6 +116,24 @@ export interface BrowserAutomationRouteDependencies {
     windowId: WindowId,
     threadId: BrowserThreadId,
   ) => Promise<boolean>;
+  readonly taskProfiles?: {
+    read(
+      threadId: BrowserThreadId,
+      mode: "work" | "code",
+    ):
+      | {
+          readonly version: BrowserTaskProfileState["version"];
+          readonly profile: BrowserTaskProfileState["profile"];
+          readonly modelId: string;
+        }
+      | undefined;
+    save(
+      windowId: WindowId,
+      command: BrowserTaskProfileSelectCommand,
+      commit: (persist: () => void) => boolean,
+    ): Promise<BrowserTaskProfileCommit>;
+    bind(contextId: string, modelId: string, authority: ToolActionAuthority): void;
+  };
   readonly authority: BrowserAuthorityResolver;
   readonly approvals?: {
     list(windowId: WindowId): ReadonlyArray<BrowserToolApproval>;
@@ -207,6 +241,134 @@ export function createBrowserAutomationRouteHandler(
     const shown = (snapshot: BrowserAutomationSnapshot): BrowserAutomationSnapshot =>
       callerKind === "remote-device" ? withheldFromRemote(snapshot) : snapshot;
     try {
+      if (
+        url.pathname === "/api/browser/task-profile/current" ||
+        url.pathname === "/api/browser/task-profile"
+      ) {
+        const selecting = url.pathname === "/api/browser/task-profile";
+        const command = selecting
+          ? decodeBrowserTaskProfileSelectCommand(decoded.value)
+          : decodeBrowserTaskProfileReadCommand(decoded.value);
+        if (
+          callerKind !== "local-window" ||
+          !dependencies.authority.canAccessWindow(windowId, command.threadId, command.mode)
+        )
+          return notThisWindowsThread(origin);
+        const profiles = dependencies.taskProfiles;
+        if (profiles === undefined || dependencies.service.switchTaskProfile === undefined)
+          return failure(
+            { category: "unavailable", message: "Task Browser profile controls are unavailable." },
+            503,
+            origin,
+          );
+        const current = profiles.read(command.threadId, command.mode);
+        const authority = dependencies.authority.resolve(command.threadId, command.mode);
+        if (current === undefined || authority === undefined) return notThisWindowsThread(origin);
+        const state = () => {
+          const value = profiles.read(command.threadId, command.mode);
+          if (value === undefined) throw new Error("Task changed");
+          const context = dependencies.service.inspectThread(windowId, command.threadId).context;
+          return decodeBrowserTaskProfileState({
+            threadId: command.threadId,
+            mode: command.mode,
+            version: value.version,
+            profile: value.profile,
+            ...(context?.state === "active" ? { contextId: context.contextId } : {}),
+          });
+        };
+        if (!selecting) return success(state(), origin);
+        const selection = decodeBrowserTaskProfileSelectCommand(command);
+        if (current.version !== selection.expectedVersion)
+          return failure(
+            { category: "stale", message: "The task changed. Reload before choosing a profile." },
+            409,
+            origin,
+          );
+        const profile: BrowserProfile | undefined =
+          selection.profile === "project"
+            ? authority.projectId === undefined
+              ? undefined
+              : { kind: "project", projectId: authority.projectId }
+            : { kind: selection.profile };
+        if (profile === undefined)
+          return failure(
+            { category: "unavailable", message: "This task has no Project Browser profile." },
+            409,
+            origin,
+          );
+        const result = await dependencies.service.switchTaskProfile({
+          windowId,
+          threadId: selection.threadId,
+          action: {
+            actionId: randomUUID() as never,
+            correlationId: randomUUID() as never,
+            capability: { id: "browser-automation" as never, version: 1 },
+            authority,
+            intent: "Choose this task's default Browser profile.",
+            approval: { kind: "not-required" },
+          },
+          profile,
+          ...(selection.expectedContextId === undefined
+            ? {}
+            : { expectedContextId: selection.expectedContextId }),
+          ...(selection.url === undefined ? {} : { url: selection.url }),
+          isCurrent: () => {
+            const live = profiles.read(selection.threadId, selection.mode);
+            const granted = dependencies.authority.resolve(selection.threadId, selection.mode);
+            return (
+              live?.version === current.version &&
+              live.modelId === current.modelId &&
+              granted !== undefined &&
+              dependencies.authority.canAccessWindow(
+                windowId,
+                selection.threadId,
+                selection.mode,
+              ) &&
+              sameToolActionAuthority(authority, granted)
+            );
+          },
+          save: (commit) => profiles.save(windowId, selection, commit),
+          bind: (contextId, bindingAuthority) =>
+            profiles.bind(String(contextId), current.modelId, bindingAuthority),
+        });
+        if (result.status === "refused")
+          return failure(
+            result.failure,
+            result.failure.category === "unauthorized" ? 403 : 409,
+            origin,
+          );
+        return success(
+          decodeBrowserTaskProfileSelection({ selection: state(), browser: result.browser }),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/credential-use") {
+        if (callerKind !== "local-window" || !isLoopbackHostname(url.hostname))
+          return failure(
+            {
+              category: "unauthorized",
+              message: "Login permission requires a local window on this computer.",
+            },
+            403,
+            origin,
+          );
+        if (dependencies.credentialUse === undefined)
+          return failure(
+            { category: "unavailable", message: "Login permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserCredentialResult(
+            await dependencies.credentialUse.execute(
+              windowId,
+              decodeBrowserCredentialCommand(decoded.value),
+              request.signal,
+            ),
+          ),
+          origin,
+        );
+      }
       if (url.pathname === "/api/browser/project-contexts") {
         if (dependencies.projectBrowsers === undefined) {
           return failure(

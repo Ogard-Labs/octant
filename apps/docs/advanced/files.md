@@ -124,7 +124,13 @@ slide deck, dashboard, web page, design, or prototype, or any reply long enough
 to need headings, tables, or charts), the agent builds it as a Canvas and
 replies with a short pointer; brief answers, one-off snippets, and questions
 stay in the conversation. When it could go either way, the agent makes the
-Canvas; ask for plain text if you would rather read it in the thread. A follow-up such as "add
+Canvas; ask for plain text if you would rather read it in the thread. Inline diagrams keep the proportions of their drawing, so a tall flow reads
+down the conversation instead of shrinking into a widescreen frame. You can
+zoom, pan, or expand the Canvas in place. To rearrange nodes, open its Canvas
+pane. Retry arrows visibly loop back to the same step; dashed alternatives,
+node icons, and subtitles stay part of the structured diagram.
+
+A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. The tool's always-visible description stays short; its read-only
@@ -583,3 +589,12 @@ Voice & images** instead.
 - [Editor and terminals](/advanced/editor-and-terminals) for editing and command surfaces
 - [Git and worktrees](/advanced/git-worktrees) for repository-scoped files
 - [Privacy and security](/advanced/privacy-and-security) for path and preview boundaries
+
+In a local desktop Work or Code composer, drop a folder from Finder or a local
+file tree to insert an editable `@folder/` reference at the caret. Octant checks
+that the folder exists inside the current Project or checkout, including its
+extra folders, and names this computer and the canonical path. It reads no folder
+contents and grants no access. Text and images already in the draft stay intact.
+A folder outside those roots needs an explicit Project folder change first.
+Remote client paths cannot identify folders on the execution host. For a draft
+that will create a managed checkout, open the thread before dropping its folders.

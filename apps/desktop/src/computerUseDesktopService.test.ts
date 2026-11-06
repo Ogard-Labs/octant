@@ -4,6 +4,7 @@ const fixture = vi.hoisted(() => ({
   host: { accessibility: true, screenRecording: true },
   driver: { accessibility: false, screen_recording: false } as unknown,
   starts: 0,
+  runtimeCloses: 0,
 }));
 vi.mock("./computerUseDriverRelease", () => ({
   BUNDLED_CUA_DRIVER: { version: "0.38.0" },
@@ -26,10 +27,14 @@ vi.mock("./computerUseSdkRuntime", async (actual) => ({
         name === "check_permissions"
           ? { isError: false, structuredJson: JSON.stringify(fixture.driver) }
           : { isError: true },
-      close: async () => {},
+      close: vi.fn(async () => {
+        fixture.runtimeCloses += 1;
+      }),
     };
   }),
 }));
+import * as updateModule from "./computerUseDriverUpdates";
+import * as controlModule from "./computerUseControlHost";
 import { createComputerUseDesktopService } from "./computerUseDesktopService";
 
 function service() {
@@ -43,6 +48,48 @@ function service() {
 describe.skipIf(process.platform !== "darwin" || process.arch !== "arm64")(
   "Computer use permission status",
   () => {
+    it("closes controls and its driver even after updater cleanup fails", async () => {
+      const createUpdates = updateModule.createComputerUseDriverUpdates;
+      const createControls = controlModule.createComputerUseControlHost;
+      const closes: Array<ReturnType<typeof vi.fn>> = [];
+      const updatesSpy = vi
+        .spyOn(updateModule, "createComputerUseDriverUpdates")
+        .mockImplementation((options) => {
+          const updates = createUpdates(options);
+          return {
+            ...updates,
+            close: async () => {
+              await updates.close();
+              throw new Error("updater failed");
+            },
+          };
+        });
+      const controlsSpy = vi
+        .spyOn(controlModule, "createComputerUseControlHost")
+        .mockImplementation((options) => {
+          const controls = createControls(options);
+          const close = vi.fn(controls.close);
+          closes.push(close);
+          return { ...controls, close };
+        });
+      const computer = service();
+      const previousRuntimeCloses = fixture.runtimeCloses;
+      try {
+        fixture.host = { accessibility: true, screenRecording: true };
+        fixture.driver = { accessibility: true, screen_recording: true };
+        await computer.configure({ enabled: true, automaticUpdates: false });
+        await computer.status();
+        const completion = computer.close();
+        await expect(completion).rejects.toThrow();
+        expect(closes[0]).toHaveBeenCalledOnce();
+        expect(fixture.runtimeCloses).toBe(previousRuntimeCloses + 1);
+        expect(computer.close()).toBe(completion);
+      } finally {
+        updatesSpy.mockRestore();
+        controlsSpy.mockRestore();
+      }
+    });
+
     it("reports the acting driver's refusal even when macOS allows Octant itself", async () => {
       fixture.host = { accessibility: true, screenRecording: true };
       fixture.driver = { accessibility: false, screen_recording: false };

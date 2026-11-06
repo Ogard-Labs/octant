@@ -6,7 +6,7 @@ import {
   type ComputerUseSettings,
   type ComputerUseStatus,
 } from "@octant/contracts/computer-use-plugin";
-import { computerUseBrokerHandler } from "./computerUseBroker";
+import { computerUseBrokerHandler, startComputerUseBroker } from "./computerUseBroker";
 
 const token = "a".repeat(43);
 const owner = decodeComputerUseOwner({
@@ -56,6 +56,24 @@ function request(body: unknown, headers: HeadersInit = {}, signal?: AbortSignal)
 }
 
 describe("Private computer-use broker", () => {
+  it("closes its listener even when service cleanup rejects and shares the failed completion", async () => {
+    const { service } = fixture();
+    const close = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("private driver diagnostic"))
+      .mockResolvedValue(undefined);
+    const broker = await startComputerUseBroker({ ...service, close });
+    try {
+      const completion = broker.close();
+      await expect(completion).rejects.toThrow();
+      await expect(fetch(broker.url)).rejects.toThrow();
+      expect(broker.close()).toBe(completion);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close().catch(() => undefined);
+    }
+  });
+
   it("refuses browser, remote, unauthenticated and malformed calls before host effects", async () => {
     const { service, handle } = fixture();
     expect(

@@ -1,3 +1,6 @@
+import { ConversationInputPolicy } from "./conversationInputs";
+import { CodeReviewFindingReferences } from "./codeOperations";
+import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { Schema } from "effect";
 import { SendChatTurnCommand } from "./chat";
 import { CodeAttachmentId, MAX_CODE_TURN_ATTACHMENTS } from "./code";
@@ -34,24 +37,31 @@ const work = StartWorkThreadTurnCommand.fields;
 export const ThreadMessageQueuePayload = Schema.Union(
   Schema.Struct({
     mode: Schema.Literal("chat"),
+    contextInputPolicy: chat.contextInputPolicy,
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: chat.attachmentIds,
     previewSelections: chat.previewSelections,
     canvasSelections: chat.canvasSelections,
     extensionSelections: chat.extensionSelections,
     threadMentionIds: chat.threadMentionIds,
+    sideChatReturns: chat.sideChatReturns,
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("work"),
+    contextInputPolicy: work.contextInputPolicy,
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: work.attachmentIds,
     extensionSelections: work.extensionSelections,
     computerUseSelection: work.computerUseSelection,
     threadMentionIds: work.threadMentionIds,
+    sideChatReturns: work.sideChatReturns,
     fileMentionPaths: work.fileMentionPaths,
   }).annotations(strict),
   Schema.Struct({
     mode: Schema.Literal("code"),
+    contextInputPolicy: Schema.optional(ConversationInputPolicy),
+    reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+    sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
     prompt: ThreadMessageQueuePrompt,
     attachmentIds: Schema.optional(
       Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),

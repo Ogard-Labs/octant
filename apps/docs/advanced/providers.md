@@ -134,7 +134,7 @@ policy.
 Supported app-tool adapters can request an isolated browser session under
 **Ask for approvals** without changing the task to Full access. The request
 names the origin. Cancelling the task revokes its browser grant, and Plan mode
-refuses browser effects. The native OpenCode CLI adapter offers Octant tools
+refuses browser effects while still reading the page already open. The native OpenCode CLI adapter offers Octant tools
 only on macOS and only on the OpenCode releases whose isolated configuration
 was verified (1.18.21, 2.0.22 and 2.0.27); on any other release it reports app-managed
 tools as unsupported, and its text and native-tool support do not imply an

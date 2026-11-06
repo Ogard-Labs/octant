@@ -1,8 +1,19 @@
+import { Schema } from "effect";
+import {
+  CredentialRequestResolution,
+  type CredentialRequestReference,
+} from "@octant/contracts/credential-request";
+import {
+  decodeCommandCredentialHostRequest,
+  decodeCommandCredentialHostResult,
+  type CommandCredentialHostRequest,
+  type CommandCredentialHostResult,
+} from "@octant/contracts/command-credentials";
 /**
  * The server's handle on the host credential broker's linked-secret-store
  * routes. Every call answers with a value: a broker that is down, refuses, or
  * answers in an unexpected shape is `broker-unavailable`, never an exception
- * and never a guess. No answer carries what an item resolves to.
+ * and never a guess. Only the private request-card lookup and scoped cloud sessions carry transient credential material; they are never renderer responses.
  */
 
 import type {
@@ -17,6 +28,27 @@ import {
   decodeGoogleCliAccountReference,
   decodeGoogleCliAccountIdentity,
 } from "@octant/contracts/secret-stores";
+import {
+  decodeBrowserCredentialMetadata,
+  type BrowserCredentialItem,
+  type BrowserCredentialMetadata,
+  decodeBrowserCredentialHostResult,
+  type BrowserCredentialHostCommand,
+  type BrowserCredentialHostResult,
+} from "@octant/contracts/browser-credential-use";
+
+export type BrowserMetadataAnswer =
+  | { readonly status: "described"; readonly metadata: BrowserCredentialMetadata }
+  | {
+      readonly status:
+        | "invalid-item"
+        | "locked"
+        | "missing"
+        | "unavailable"
+        | "not-linked"
+        | "uncertain"
+        | "changed";
+    };
 
 export type SecretStoreNamespace = "provider" | "mcp-server";
 export type SecretStoreBrokerDown = { readonly status: "broker-unavailable" };
@@ -92,6 +124,11 @@ export type GoogleCliSessionAnswer =
     }
   | { readonly status: "none" | "refused" | Exclude<StoreCheckStatus, "found"> };
 export interface SecretStoreBrokerClient {
+  /** Transient lookup for an already claimed local credential card; never expose to a client. */
+  readonly requestCardRead?: (
+    reference: CredentialRequestReference,
+    signal: AbortSignal,
+  ) => Promise<CredentialRequestResolution>;
   readonly googleCliReference?: (
     signal?: AbortSignal,
   ) => Promise<GoogleCliReferenceAnswer | SecretStoreBrokerDown>;
@@ -109,6 +146,13 @@ export interface SecretStoreBrokerClient {
   readonly googleCliSession?: (
     signal?: AbortSignal,
   ) => Promise<GoogleCliSessionAnswer | SecretStoreBrokerDown>;
+  readonly browserFill?: (
+    command: BrowserCredentialHostCommand,
+  ) => Promise<BrowserCredentialHostResult>;
+  readonly browserMetadata?: (item: BrowserCredentialItem) => Promise<BrowserMetadataAnswer>;
+  readonly commandUse?: (
+    request: CommandCredentialHostRequest,
+  ) => Promise<CommandCredentialHostResult>;
   readonly awsCliReference: () => Promise<AwsCliReferenceAnswer | SecretStoreBrokerDown>;
   /** Points the AWS command line at two items, after the broker proved both resolve now. */
   readonly pointAwsCli: (
@@ -198,6 +242,7 @@ export function makeSecretStoreBrokerClient(
     operation: string,
     body: object,
     signal?: AbortSignal,
+    maxBytes?: number,
   ): Promise<Record<string, unknown> | undefined> => {
     try {
       const response = await fetchPort(
@@ -217,7 +262,25 @@ export function makeSecretStoreBrokerClient(
         },
       );
       if (!response.ok) return undefined;
-      const parsed: unknown = await response.json();
+      let parsed: unknown;
+      if (maxBytes === undefined) parsed = await response.json();
+      else {
+        if (response.body === null) return undefined;
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let length = 0;
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          length += chunk.value.byteLength;
+          if (length > maxBytes) {
+            await reader.cancel();
+            return undefined;
+          }
+          chunks.push(chunk.value);
+        }
+        parsed = JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
+      }
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : undefined;
@@ -272,6 +335,15 @@ export function makeSecretStoreBrokerClient(
     return DOWN;
   };
   return {
+    requestCardRead: async (reference, signal) => {
+      try {
+        return Schema.decodeUnknownSync(CredentialRequestResolution)(
+          await post("request-card-read", reference, signal, 32_768),
+        );
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
     googleCliReference: async (signal) => {
       const answer = await post(`${GOOGLE}reference`, {}, signal);
       if (answer?.status === "none") return { status: "none" };
@@ -336,6 +408,79 @@ export function makeSecretStoreBrokerClient(
         status === "invalid-reference"
         ? { status }
         : DOWN;
+    },
+    browserFill: async (command) => {
+      const answer = await post("browser-fill", command, undefined, 32 * 1024);
+      try {
+        return decodeBrowserCredentialHostResult(answer);
+      } catch {
+        return { status: "refused", reason: "unavailable" };
+      }
+    },
+    browserMetadata: async (item) => {
+      const answer = await post("browser-metadata", item, undefined, 32 * 1024);
+      if (answer?.status === "described") {
+        try {
+          const { status: _status, ...value } = answer;
+          const metadata = decodeBrowserCredentialMetadata(value);
+          if (
+            metadata.item.accountId !== item.accountId ||
+            metadata.item.vaultId !== item.vaultId ||
+            metadata.item.itemId !== item.itemId
+          )
+            return { status: "uncertain" };
+          return { status: "described", metadata };
+        } catch {
+          return { status: "uncertain" };
+        }
+      }
+      const status = answer?.status;
+      return status === "invalid-item" ||
+        status === "locked" ||
+        status === "missing" ||
+        status === "not-linked" ||
+        status === "uncertain" ||
+        status === "changed"
+        ? { status }
+        : { status: "unavailable" };
+    },
+    commandUse: async (request) => {
+      try {
+        const body = decodeCommandCredentialHostRequest(request);
+        const response = await fetchPort(
+          new URL("/v1/secret-stores/command-use", options.url).toString(),
+          {
+            method: "POST",
+            redirect: "error",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-credential-broker-token": options.token,
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10000),
+          },
+        );
+        if (!response.ok || response.body === null) return { status: "unavailable" };
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const part = await reader.read();
+            if (part.done) break;
+            bytes += part.value.byteLength;
+            if (bytes > 4096) return { status: "unavailable" };
+            chunks.push(part.value);
+          }
+          return decodeCommandCredentialHostResult(
+            JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          );
+        } finally {
+          await reader.cancel().catch(() => undefined);
+        }
+      } catch {
+        return { status: "unavailable" };
+      }
     },
     awsCliReference: async () => {
       const answer = await post(`${AWS}reference`, {});

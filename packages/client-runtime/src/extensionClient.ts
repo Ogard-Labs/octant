@@ -253,17 +253,37 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionProjectPinListing),
       );
     },
-    mcpServerSignIn(signIn) {
-      return request(
-        fetch,
-        new URL("/api/extensions/sign-in", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(signIn),
-        },
-        decodeHostAnswer(McpServerSignInView),
-      );
+    async mcpServerSignIn(signIn) {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          request(
+            fetch,
+            new URL("/api/extensions/sign-in", options.baseUrl).toString(),
+            {
+              method: "POST",
+              signal: controller.signal,
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify(signIn),
+            },
+            decodeHostAnswer(McpServerSignInView),
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(
+                new ExtensionClientFailure(
+                  "unavailable",
+                  "Sign-in response was not confirmed. Check the existing attempt before trying again.",
+                ),
+              );
+            }, 30_000);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     },
     listDiscoveredTooling() {
       return request(

@@ -3,7 +3,11 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decodeNativeHarnessSessionView, type NativeHarnessSessionView } from "@octant/contracts";
+import {
+  decodeNativeHarnessSessionView,
+  type NativeHarnessSessionReadView,
+  type NativeHarnessSessionView,
+} from "@octant/contracts";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { ThemeProvider } from "../../design-system/theme";
@@ -144,7 +148,7 @@ function approvalChoices(container: ParentNode): readonly string[] {
 }
 
 async function renderPanel(
-  view: NativeHarnessSessionView,
+  view: NativeHarnessSessionReadView,
   panelTransport: MobileRemoteTransport = transport,
   authenticator: BiometricAuthenticator = confirming(),
 ): Promise<HTMLElement> {
@@ -172,24 +176,31 @@ async function renderPanel(
 
 describe("phone harness approvals", () => {
   it("offers Allow and Deny only when a child asks", async () => {
-    const container = await renderPanel(
-      sessionView({
-        id: "00000000-0000-4000-8000-000000000061",
-        toolName: "bash",
-        summary: "bash: bun run test",
-        approvalClass: "shell-commands",
-        status: "pending",
-        askedAt: "2026-09-05T12:06:00.000Z",
-        source: {
-          runId: "00000000-0000-4000-8000-000000000062",
-          providerInstanceId: "00000000-0000-4000-8000-000000000063",
-          providerName: "Workbench",
-          modelId: "session-small",
-        },
-      }),
-    );
+    const full = sessionView({
+      id: "00000000-0000-4000-8000-000000000061",
+      toolName: "bash",
+      summary: "bash: bun run test",
+      approvalClass: "shell-commands",
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+      source: {
+        runId: "00000000-0000-4000-8000-000000000062",
+        providerInstanceId: "00000000-0000-4000-8000-000000000063",
+        providerName: "Workbench",
+        modelId: "session-small",
+      },
+    });
+    const container = await renderPanel({
+      kind: "child-requests",
+
+      approvals: full.approvals ?? [],
+      questions: [],
+    });
 
     expect(approvalChoices(container)).toEqual(["Allow", "Deny"]);
+    expect(container.textContent).toContain("Child requests");
+    expect(container.textContent).not.toContain("session-lead");
+    expect(container.querySelector('[data-testid="mobile-native-harness-pause"]')).toBeNull();
     expect(container.textContent).toContain("Child 00000000 · Workbench · session-small");
     expect(container.textContent).toContain("Allow this request for this child.");
   });

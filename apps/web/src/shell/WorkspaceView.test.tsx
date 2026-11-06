@@ -69,7 +69,7 @@ const codeTabs: ReadonlyArray<
     "code-local-review",
     "Review findings",
     undefined,
-    { role: "heading", name: "Local review unavailable" },
+    { role: "region", name: "Review findings and correction draft" },
   ],
 ];
 

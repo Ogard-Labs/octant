@@ -18,6 +18,17 @@
  */
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  consumeOnePasswordBrowserCredential,
+  type BrowserCredentialValues,
+  type BrowserCredentialConsumption,
+} from "./onePasswordBrowserCredential";
+import {
+  readOnePasswordBrowserMetadata,
+  type BrowserCredentialItemPin,
+  type BrowserItemMetadata,
+} from "./onePasswordBrowserMetadata";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -59,6 +70,11 @@ export interface LinkedSecretStoreAdapter {
   /** Whether the tool is installed and the store is open to it. */
   readonly probe: () => Promise<LinkedSecretToolState>;
   readonly read: (reference: string) => Promise<LinkedSecretRead>;
+  readonly browserMetadata?: (item: BrowserCredentialItemPin) => Promise<BrowserItemMetadata>;
+  readonly consumeBrowserCredential?: (
+    metadata: Omit<Extract<BrowserItemMetadata, { readonly status: "described" }>, "status">,
+    consume: (values: BrowserCredentialValues) => Promise<void>,
+  ) => Promise<BrowserCredentialConsumption>;
 }
 
 export interface LinkedSecretStoreStatus {
@@ -76,6 +92,14 @@ export type LinkSecretStoreResult =
   | { readonly status: "unavailable" };
 
 export interface LinkedSecretStores {
+  readonly commandLinkRevision?: () => Promise<string | undefined>;
+  readonly consumeBrowserCredential?: (
+    metadata: Omit<Extract<BrowserItemMetadata, { readonly status: "described" }>, "status"> & {
+      readonly storeRevision: string;
+    },
+    consume: (values: BrowserCredentialValues) => Promise<void>,
+  ) => Promise<BrowserCredentialConsumption>;
+  readonly browserRevisionCurrent?: (revision: string) => boolean;
   readonly status: () => Promise<ReadonlyArray<LinkedSecretStoreStatus>>;
   readonly link: (kind: LinkedSecretStoreKind) => Promise<LinkSecretStoreResult>;
   readonly unlink: (kind: LinkedSecretStoreKind) => Promise<void>;
@@ -91,6 +115,13 @@ export interface LinkedSecretStores {
   readonly setAwsCliPointer: (pointer: AwsCliPointer | undefined) => Promise<void>;
   readonly googleCliPointer?: () => Promise<GoogleCliPointerState>;
   readonly setGoogleCliPointer?: (pointer: GoogleCliPointer | undefined) => Promise<void>;
+  readonly browserMetadata?: (item: BrowserCredentialItemPin) => Promise<
+    | (Extract<BrowserItemMetadata, { readonly status: "described" }> & {
+        readonly storeRevision: string;
+      })
+    | Exclude<BrowserItemMetadata, { readonly status: "described" }>
+    | { readonly status: "not-linked" | "changed" }
+  >;
 }
 
 /**
@@ -261,6 +292,27 @@ export interface OnePasswordAdapterOptions {
   readonly timeoutMs?: number;
 }
 
+export async function resolveOnePasswordExecutable(
+  options: Pick<OnePasswordAdapterOptions, "executablePath" | "env"> = {},
+): Promise<string | undefined> {
+  if (options.executablePath !== undefined) return options.executablePath;
+  const candidates = [
+    ...ONE_PASSWORD_LOCATIONS,
+    ...((options.env ?? process.env).PATH?.split(process.platform === "win32" ? ";" : ":")
+      .filter((directory) => directory.startsWith("/"))
+      .map((directory) => join(directory, "op")) ?? []),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Try the next location.
+    }
+  }
+  return undefined;
+}
+
 export function makeOnePasswordAdapter(
   options: OnePasswordAdapterOptions = {},
 ): LinkedSecretStoreAdapter {
@@ -274,24 +326,7 @@ export function makeOnePasswordAdapter(
       Object.entries(source).filter(([name]) => !name.toUpperCase().startsWith("OCTANT_")),
     );
   };
-  const executable = async (): Promise<string | undefined> => {
-    if (options.executablePath !== undefined) return options.executablePath;
-    const candidates = [
-      ...ONE_PASSWORD_LOCATIONS,
-      ...((options.env ?? process.env).PATH?.split(process.platform === "win32" ? ";" : ":")
-        .filter((directory) => directory.startsWith("/"))
-        .map((directory) => join(directory, "op")) ?? []),
-    ];
-    for (const candidate of candidates) {
-      try {
-        await access(candidate, constants.X_OK);
-        return candidate;
-      } catch {
-        // Try the next location.
-      }
-    }
-    return undefined;
-  };
+  const executable = () => resolveOnePasswordExecutable(options);
   const classify = (outcome: CommandOutcome): "ok" | "locked" | "missing" | "unavailable" => {
     if (outcome.kind !== "exited") return "unavailable";
     if (outcome.exitCode === 0) return "ok";
@@ -307,6 +342,25 @@ export function makeOnePasswordAdapter(
   return {
     kind: "onepassword",
     label: "1Password",
+    browserMetadata: async (item) => {
+      const file = await executable();
+      if (file === undefined) return { status: "unavailable" };
+      return readOnePasswordBrowserMetadata(item, {
+        executable: file,
+        run,
+        env: environment(),
+        timeoutMs,
+      });
+    },
+    consumeBrowserCredential: async (metadata, consume) => {
+      const file = await executable();
+      if (file === undefined) return { status: "unavailable" };
+      return consumeOnePasswordBrowserCredential(
+        metadata,
+        { executable: file, run, env: environment(), timeoutMs },
+        consume,
+      );
+    },
     isValidReference: (reference) =>
       isPlainReference(reference) && ONE_PASSWORD_REFERENCE.test(reference),
     probe: async () => {
@@ -361,7 +415,12 @@ export function linkedSecretStoresStatePath(dataDirectory: string): string {
 
 export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): LinkedSecretStores {
   const adapters = options.adapters ?? [makeOnePasswordAdapter()];
+  const commandSession = randomUUID();
+  let commandGeneration = 0;
   const now = options.now ?? (() => new Date().toISOString());
+  const browserSession = randomUUID();
+  let browserRevision = 0;
+  let lastBrowserRevision: string | undefined;
   const adapterFor = (kind: LinkedSecretStoreKind): LinkedSecretStoreAdapter | undefined =>
     adapters.find((adapter) => adapter.kind === kind);
 
@@ -406,6 +465,33 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
   };
 
   return {
+    browserRevisionCurrent: (revision) =>
+      lastBrowserRevision === revision &&
+      revision.startsWith(`${browserSession}:${browserRevision}:`),
+    consumeBrowserCredential: async (metadata, consume) => {
+      const adapter = adapterFor(metadata.item.store);
+      if (adapter?.consumeBrowserCredential === undefined) return { status: "unavailable" };
+      const before = (await load()).stores[metadata.item.store];
+      const revision = browserRevision;
+      if (before === undefined) return { status: "not-linked" };
+      if (metadata.storeRevision !== `${browserSession}:${revision}:${before.linkedAt}`)
+        return { status: "changed" };
+      let refused = false;
+      const result = await adapter.consumeBrowserCredential(metadata, async (values) => {
+        const after = (await load()).stores[metadata.item.store];
+        if (
+          after === undefined ||
+          after.linkedAt !== before.linkedAt ||
+          browserRevision !== revision
+        ) {
+          refused = true;
+          return;
+        }
+        lastBrowserRevision = metadata.storeRevision;
+        await consume(values);
+      });
+      return refused ? { status: "changed" } : result;
+    },
     status: async () => {
       const state = await load();
       return Promise.all(
@@ -422,12 +508,14 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       );
     },
     link: async (kind) => {
+      commandGeneration += 1;
       const adapter = adapterFor(kind);
       if (adapter === undefined) return { status: "unavailable" };
       // Linking is the person's decision, and it needs the store open now: a
       // locked or missing tool is reported and nothing is linked.
       const tool = await adapter.probe();
       if (tool !== "ready") return { status: tool };
+      browserRevision += 1;
       await update((state) => ({
         ...state,
         stores: { ...state.stores, [kind]: { linkedAt: now() } },
@@ -435,13 +523,37 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       return { status: "linked" };
     },
     unlink: async (kind) => {
+      browserRevision += 1;
+      commandGeneration += 1;
       // A pointer stays, and fails closed until the store is linked again.
       await update((state) => {
         const { [kind]: _removed, ...rest } = state.stores;
         return { ...state, stores: rest };
       });
     },
+    commandLinkRevision: async () => {
+      const generation = commandGeneration;
+      const linked = (await load()).stores.onepassword;
+      return linked === undefined || generation !== commandGeneration
+        ? undefined
+        : `${commandSession}:${generation}:${linked.linkedAt}`;
+    },
     isLinked: async (kind) => (await load()).stores[kind] !== undefined,
+    browserMetadata: async (item) => {
+      const adapter = adapterFor(item.store);
+      if (adapter?.browserMetadata === undefined) return { status: "unavailable" };
+      const before = (await load()).stores[item.store];
+      if (before === undefined) return { status: "not-linked" };
+      const revision = browserRevision;
+      const result = await adapter.browserMetadata(item);
+      const after = (await load()).stores[item.store];
+      if (after === undefined || after.linkedAt !== before.linkedAt || revision !== browserRevision)
+        return { status: "changed" };
+      lastBrowserRevision = `${browserSession}:${revision}:${before.linkedAt}`;
+      return result.status === "described"
+        ? { ...result, storeRevision: `${browserSession}:${revision}:${before.linkedAt}` }
+        : result;
+    },
     isValidReference: (kind, reference) => adapterFor(kind)?.isValidReference(reference) ?? false,
     read: async (kind, reference) => {
       const adapter = adapterFor(kind);

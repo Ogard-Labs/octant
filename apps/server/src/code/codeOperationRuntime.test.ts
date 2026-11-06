@@ -1,16 +1,38 @@
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
+import { withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import type { CodeOperationPullRequestActions } from "./codeOperationService";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  renameSync,
+  statSync,
+  realpathSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
+import { GitMutationPort } from "./gitMutationPort";
+import { CodeEvidenceStore } from "./codeEvidenceStore";
+import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import {
   ActorId,
   decodeAgentMessageEndpointId,
-  CODE_DEFINITION_TOOL_NAME,
-  CODE_DIAGNOSTICS_TOOL_NAME,
+  CODE_LANGUAGE_TOOL_NAME,
   decodeCodeFileId,
+  decodeCodeRelativePath,
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
+  CodeReviewFindingUpdated,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
@@ -36,13 +58,14 @@ import {
   decodeSiblingThreadsToolResult,
   type CodeOperationEventFrame as OperationFrame,
   type CodeOperationId,
+  type CodeEvidenceReference,
   type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
-import { Effect, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
   ProviderConnection,
   ProviderDriver,
@@ -59,8 +82,6 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
-import { createCodeRouteHandler } from "../codeRoutes";
-import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -74,11 +95,9 @@ import {
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
   readCodeThreadActivity,
+  readCodeReviewFinding,
+  readCodeReviewFindings,
 } from "../persistence/codeProjection";
-import {
-  AGENT_MESSAGE_TOOL_NAME,
-  createAgentMessageTools,
-} from "../agentMessage/agentMessageTools";
 import { AgentMessageService } from "../agentMessage/agentMessageService";
 import { AgentMessageProjection } from "../agentMessage/agentMessageProjection";
 import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
@@ -95,16 +114,18 @@ import { CodeProjectAccess } from "../codeProjectAccess";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import {
   SiblingThreadsService,
-  createSiblingThreadTools,
+  createThreadsTools,
   type SiblingThreadOutcome,
   type SiblingThreadSource,
 } from "../siblingThreads/siblingThreadTools";
+import type { CodePlannerToolPort } from "./codePlannerTools";
 import { defaultWindowWorkspace, contextKeyForProject } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
-import { CODE_BOARD_TOOL_NAME, CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
+import { CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
 import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
+import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
 import {
@@ -121,10 +142,10 @@ import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
-import type {
+import {
   GitObservationPort,
-  GitObservationResult,
-  GitScopedDiffResult,
+  type GitObservationResult,
+  type GitScopedDiffResult,
 } from "./gitObservationPort";
 
 const now = "2026-07-21T13:00:00.000Z";
@@ -499,6 +520,53 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("keeps the Git checkout separate from the provider folder and stops on folder revocation", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const acquire = vi.fn(() => Effect.succeed(connection));
+    let current = true;
+    const fixture = runtimeFixture({
+      provider: { ...providerDriver(connection), acquire },
+      approvalValidator: false,
+      resolveCheckoutRoot: async () => ({
+        checkoutRoot: "/private/exact",
+        workingDirectory: "/approved/notes",
+        rootCurrent: () => current,
+        shell: "/bin/zsh",
+        credentialReferences: [],
+        environment: {},
+      }),
+    });
+    try {
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), workingFolderId: `folder_${"a".repeat(64)}` }),
+      );
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(acquire).toHaveBeenCalled());
+      expect(acquire).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectRoot: "/approved/notes",
+          extraFolders: expect.arrayContaining(["/private/exact"]),
+        }),
+      );
+      current = false;
+      await vi.waitFor(() => expect(fixture.conversation().turns[0]?.status).toBe("interrupted"), {
+        timeout: 2000,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
   it("releases the spend reservation when a Code turn is cancelled", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -1630,6 +1698,118 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("wires task-profile approval and revocation through the actual Code runtime adapter", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const page = decodeBrowserAutomationSnapshot({
+      status: "running",
+      threadId,
+      evidence: [],
+      context: {
+        contextId: "90000000-0000-4000-8000-000000000011",
+        threadId,
+        actionId: "90000000-0000-4000-8000-000000000012",
+        correlationId: "90000000-0000-4000-8000-000000000013",
+        authority,
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 600000,
+        },
+        state: "active",
+        createdAt: now,
+      },
+    });
+    const request = vi.fn(async () => "approved" as const);
+    const rememberBinding = vi.fn();
+    const forgetBinding = vi.fn();
+    const create = vi.fn(async () => page);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserProfiles: {
+        approvals: { request, isRemembered: () => false },
+        readBinding: () => undefined,
+        rememberBinding,
+        forgetBinding,
+      },
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ({ status: "ready", threadId: threadId as never, evidence: [] }),
+        create,
+        act: vi.fn(async () => page),
+        releaseThread: vi.fn(async () => page),
+      },
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        browserTaskProfile: "personal",
+      }),
+    );
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(991),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "task-profile",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(provider.answerTool).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: "task-profile", isError: false }),
+        ),
+      );
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: { kind: "personal" }, origin: "https://example.com" }),
+      );
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          policy: expect.objectContaining({ profile: { kind: "personal" } }),
+        }),
+      );
+      expect(rememberBinding).toHaveBeenCalledWith(
+        String(page.context!.contextId),
+        expect.objectContaining({ modelId: String(thread().modelId), authority }),
+      );
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(992),
+        threadId,
+        checkoutId,
+      });
+      expect(forgetBinding).toHaveBeenCalledWith(String(page.context!.contextId));
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each(["approved", "denied", "cancelled"] as const)(
     "honors %s browser approval without changing thread access",
     async (decision) => {
@@ -2524,6 +2704,7 @@ describe("CodeOperationRuntime", () => {
     expect(withCanvas).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
+      tool: "octant_canvas",
     });
     expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
     const withoutCanvas = (await turn(false)).context;
@@ -2547,6 +2728,105 @@ describe("CodeOperationRuntime", () => {
     });
     expect(canvasRule(chosen.context)).toHaveLength(0);
     expect(chosen.start).toMatchObject({ nativeArtifacts: true });
+  });
+
+  it("lets a Plan turn create and revise the thread's Canvas, and offers no way to publish or share it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      card: { canvasId: "canvas-1", versionId: "version-1" },
+    }));
+    const revise = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      receipt: { versionId: "version-2", sequence: 2 },
+    }));
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools: true,
+      canvas: ({ windowId: owner, thread: owning }) =>
+        createCanvasAgentTools({
+          windowId: owner,
+          mode: "code",
+          thread: {
+            id: String(owning.id),
+            projectId: String(owning.projectId),
+            providerInstanceId: owning.providerInstanceId,
+            modelId: owning.modelId,
+          },
+          port: {
+            activeContext: () => undefined,
+            project: async (_window, id) => ({ id, type: "code", lifecycle: "active" }),
+            canvas: {
+              create,
+              revise,
+              get: () => ({ kind: "unavailable" }),
+              threadReferenceCards: () => [],
+            } as never,
+            markReader: () => ({ status: "nothing-to-mark" }) as never,
+            uuid: randomUUID,
+            hostId: LOCAL_HOST_ID,
+            resolveWorkspace: () =>
+              ({
+                kind: "code-worktree",
+                projectId: String(owning.projectId),
+                repositoryId: "88888888-8888-4888-8888-888888888888",
+                worktreeId: "99999999-9999-4999-8999-999999999999",
+              }) as never,
+          },
+        }),
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const blocks = [
+      {
+        blockId: "steps",
+        schemaVersion: 1,
+        kind: "diagram",
+        nodes: [
+          { nodeId: "read", label: "Read" },
+          { nodeId: "propose", label: "Propose" },
+        ],
+        edges: [{ edgeId: "then", source: "read", target: "propose" }],
+      },
+    ];
+    const calls = [
+      { operation: "create", title: "Plan", blocks },
+      { operation: "revise", canvasId: "canvas-1", expectedSequence: 1, blocks },
+      { operation: "publish", canvasId: "canvas-1" },
+      { operation: "share", canvasId: "canvas-1" },
+    ];
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1301),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      for (const [index, input] of calls.entries()) {
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: `canvas-${String(index)}`,
+              toolName: "octant_canvas",
+              inputJson: JSON.stringify(input),
+            }),
+          ),
+        );
+      }
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledTimes(calls.length));
+      const answers = vi.mocked(connection.answerTool).mock.calls.map(([answer]) => answer);
+      expect(answers.map((answer) => answer.isError === true)).toEqual([false, false, true, true]);
+      expect(create).toHaveBeenCalledOnce();
+      expect(revise).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   describe("Octant Shield answering a provider runtime's prompts", () => {
@@ -2848,6 +3128,63 @@ describe("CodeOperationRuntime", () => {
       await fixture.runtime.close();
       fixture.close();
     });
+  });
+
+  it("force-stops only the stopped exact provider attempt and refuses a replaced attempt", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+      forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(710),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      const stopping = fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(711),
+        threadId,
+        checkoutId,
+      });
+      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(712),
+          turnOperationId: operationId(709),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.forceStop).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(713),
+          turnOperationId: operationId(710),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      await stopping;
+      expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
@@ -3222,6 +3559,66 @@ describe("CodeOperationRuntime", () => {
       checkoutId,
     });
     await vi.waitFor(() => expect(activeTurns.has(String(threadId))).toBe(false));
+    fixture.close();
+  });
+
+  it("keeps a grouped question pending after an invalid answer and journals its full ask", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const answerQuestion = vi.fn(() => "invalid-answer" as const);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async () => undefined,
+        answerQuestion,
+      },
+    });
+    const operation = operationId(907);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const questionnaire = {
+      questions: [
+        {
+          id: "formats",
+          prompt: "Which formats?",
+          selection: "multiple" as const,
+          options: [{ id: "pdf", label: "PDF" }],
+        },
+      ],
+    };
+    expect(
+      fixture.runtime.raiseHarnessQuestion?.({
+        threadId: String(threadId),
+        questionId: "grouped-question",
+        prompt: "Exports",
+        options: [],
+        questionnaire,
+      }),
+    ).toBe(true);
+    const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+    expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
+      questionnaire,
+    });
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "answer-provider-input",
+      operationId: operationId(908),
+      threadId,
+      checkoutId,
+      requestId: "grouped-question",
+      response: fixture.response,
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", failure: { category: "invalid" } });
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+    expect(answerQuestion).toHaveBeenCalledOnce();
     fixture.close();
   });
 
@@ -5976,6 +6373,49 @@ describe("provider switch handoff", () => {
     });
   }
 
+  it("uses a new session with a journaled text handoff when the person explicitly updates tools", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async (current) => ({
+        ...(await drivers.resolveProviderDriver(current)),
+        toolCatalogContinuation: () => "handoff-required",
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      const prompt = storedEvidence(86, "Use the updated tools.");
+      fixture.evidenceValues.set(prompt.contentId, "Use the updated tools.");
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId,
+        sessionId: switchSession,
+        prompt,
+        toolCatalogHandoff: true,
+      });
+      await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+      expect(drivers.provider.start).toHaveBeenCalledTimes(2);
+      expect(drivers.provider.resume).not.toHaveBeenCalled();
+      const sent = vi.mocked(drivers.provider.send).mock.calls[1]?.[0];
+      expect(JSON.stringify(sent?.context)).toContain("First reply.");
+      expect(sent?.prompt).toBe("Use the updated tools.");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      });
+      expect(fixture.conversation(threadId).turns).toHaveLength(2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       direction: "from a provider's session to the Octant Harness",
@@ -6354,8 +6794,87 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it.each([true, false])(
+    "carries original screenshot input on a Code provider switch only when supported: %s",
+    async (supports) => {
+      const drivers = twoHarnesses();
+      const bytes = new Uint8Array([137, 80, 78]);
+      const reference = {
+        source: {
+          mode: "code" as const,
+          threadId: String(threadId),
+          attachmentId: "30000000-0000-4000-8000-000000000001",
+          projectId: String(thread().projectId),
+        },
+        displayName: "Original.png",
+        mediaType: "image/png",
+        byteLength: bytes.length,
+        digest: createHash("sha256").update(bytes).digest("hex"),
+      };
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        inputTransfer: (directory) =>
+          new ConversationInputTransfer({
+            dataDirectory: directory,
+            ownerCurrent: () => true,
+            sourceCurrent: () => true,
+            read: async () => bytes,
+            supports: () => supports,
+          }),
+        providerSwitchContext: (input) => {
+          const selected = selectThreadConversation(fixture, input);
+          return selected.status === "available" ? { ...selected, inputs: [reference] } : selected;
+        },
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+        const result = await sendAfterSwitch(fixture);
+        if (!supports) {
+          expect(result).toMatchObject({
+            state: "failed",
+            failure: { message: expect.stringContaining("Original.png (unsupported)") },
+          });
+          expect(drivers.harness.start).not.toHaveBeenCalled();
+          expect(drivers.harness.send).not.toHaveBeenCalled();
+          return;
+        }
+        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+        expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+          expect.objectContaining({ displayName: "Original.png", bytes }),
+        ]);
+        expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+          inputReceipt: { purpose: "provider-switch", included: 1, omitted: 0 },
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("reads a journaled handoff back after a restart instead of choosing it again", async () => {
     const drivers = twoHarnesses();
+    const bytes = new Uint8Array([137, 80, 78]);
+    const originalInput = {
+      source: {
+        mode: "code" as const,
+        threadId: String(threadId),
+        attachmentId: "30000000-0000-4000-8000-000000000001",
+      },
+      displayName: "Original.png",
+      mediaType: "image/png",
+      byteLength: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const inputTransfer = (directory: string) =>
+      new ConversationInputTransfer({
+        dataDirectory: directory,
+        ownerCurrent: () => true,
+        sourceCurrent: () => true,
+        read: async () => bytes,
+        supports: () => true,
+      });
     // The new session opens and the handoff is journaled, but the prompt never
     // goes out and nothing streams back: what a host exit at that moment leaves.
     const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -6372,7 +6891,13 @@ describe("provider switch handoff", () => {
         String(current.providerInstanceId) === String(harnessInstance)
           ? stalled
           : drivers.resolveProviderDriver(current),
-      providerSwitchContext: (input) => firstSelection(input),
+      inputTransfer,
+      providerSwitchContext: (input) => {
+        const selection = firstSelection(input);
+        return selection.status === "available"
+          ? { ...selection, inputs: [originalInput] }
+          : selection;
+      },
     });
     const restartedDrivers = twoHarnesses();
     const restartedSelection = vi.fn(() => ({
@@ -6394,6 +6919,7 @@ describe("provider switch handoff", () => {
       restarted = runtimeFixture({
         resolveProviderDriver: restartedDrivers.resolveProviderDriver,
         providerSwitchContext: restartedSelection,
+        inputTransfer,
         restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
       });
       restarted.setThread(onProvider(harnessInstance, "harness-model", 2));
@@ -6403,6 +6929,9 @@ describe("provider switch handoff", () => {
       // The recovered start sends the handoff first disclosed, without reading
       // the conversation again, and journals no second handoff.
       expect(restartedSelection).not.toHaveBeenCalled();
+      expect(vi.mocked(restartedDrivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+        expect.objectContaining({ displayName: "Original.png", bytes }),
+      ]);
       const context = vi.mocked(restartedDrivers.harness.send).mock.calls[0]![0].context ?? [];
       expect(context.slice(0, journaled.blocks.length)).toEqual(journaled.blocks);
       const frames = await restarted.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
@@ -7064,6 +7593,102 @@ describe("provider switch handoff", () => {
       });
     });
 
+    it.each(["current", "folder-revoked", "source-revoked"] as const)(
+      "keeps a fork’s selected provider folder and original screenshot together (%s)",
+      async (admission) => {
+        const drivers = twoHarnesses();
+        let folderCurrent = true;
+        let sourceCurrent = true;
+        const acquired: Array<{
+          readonly projectRoot: string;
+          readonly extraFolders?: ReadonlyArray<string>;
+        }> = [];
+        const bytes = new Uint8Array([137, 80, 78]);
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(threadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Original.png",
+          mediaType: "image/png",
+          byteLength: bytes.length,
+          digest: createHash("sha256").update(bytes).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: async (current) => {
+            const driver = await drivers.resolveProviderDriver(current);
+            return {
+              ...driver,
+              acquire: (input) => {
+                acquired.push(input);
+                return driver.acquire(input);
+              },
+            };
+          },
+          resolveCheckoutRoot: async () => ({
+            checkoutRoot: "/private/exact",
+            workingDirectory: "/approved/notes",
+            rootCurrent: () => folderCurrent,
+            shell: "/bin/zsh",
+            credentialReferences: [],
+            environment: {},
+          }),
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => sourceCurrent,
+              read: async () => {
+                await Promise.resolve();
+                if (admission === "folder-revoked") folderCurrent = false;
+                if (admission === "source-revoked") sourceCurrent = false;
+                return bytes;
+              },
+              supports: () => true,
+            }),
+          forkContext: (input) => {
+            const selected = fixture.selectForkConversation(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
+        });
+        try {
+          await finishFirstTurn(fixture, drivers, providerInstance);
+          fixture.setOtherThread(
+            decodeCodeThread({
+              ...forkOn(harnessInstance, "harness-model"),
+              workingFolderId: `folder_${"a".repeat(64)}`,
+            }),
+          );
+          const result = await sendOnFork(fixture);
+          if (admission !== "current") {
+            expect(result).toMatchObject({ state: "failed" });
+            expect(acquired).toHaveLength(1);
+            expect(drivers.harness.send).not.toHaveBeenCalled();
+            return;
+          }
+          expect(acquired.at(-1)).toMatchObject({
+            projectRoot: "/approved/notes",
+            extraFolders: expect.arrayContaining(["/private/exact"]),
+          });
+          await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+          expect(vi.mocked(drivers.harness.send).mock.calls[0]?.[0].attachments).toEqual([
+            expect.objectContaining({ displayName: "Original.png", bytes }),
+          ]);
+          expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toMatchObject({
+            reason: "fork",
+            inputReceipt: { purpose: "fork", included: 1 },
+          });
+          expect(drivers.harness.resume).not.toHaveBeenCalled();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
     describe("merging a fork's conversation back into its source", () => {
       const sourceSession = sessionId;
 
@@ -7117,6 +7742,96 @@ describe("provider switch handoff", () => {
       async function sourceFrames(fixture: ReturnType<typeof runtimeFixture>, n = 85) {
         return fixture.runtime.subscribe(windowId, threadId, operationId(n), 0, 50);
       }
+
+      it("retains merge-back inputs and pending feedback until the exact original screenshot can be delivered", async () => {
+        const drivers = twoHarnesses();
+        const original = new Uint8Array([137, 80, 78]);
+        let bytes = original;
+        const reference = {
+          source: {
+            mode: "code" as const,
+            threadId: String(forkThreadId),
+            attachmentId: "30000000-0000-4000-8000-000000000001",
+          },
+          displayName: "Fork original.png",
+          mediaType: "image/png",
+          byteLength: original.length,
+          digest: createHash("sha256").update(original).digest("hex"),
+        };
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          inputTransfer: (directory) =>
+            new ConversationInputTransfer({
+              dataDirectory: directory,
+              ownerCurrent: () => true,
+              sourceCurrent: () => true,
+              read: async () => bytes,
+              supports: () => true,
+            }),
+          forkMergeBackContext: (input) => {
+            const selected = fixture.selectForkMergeBack(input);
+            return selected.status === "available"
+              ? { ...selected, inputs: [reference] }
+              : selected;
+          },
+        });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          expect(
+            await fixture.runtime.mergeForkContext?.(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toMatchObject({ status: "merged" });
+          await fixture.feedback.execute(windowId, {
+            kind: "capture-product-feedback",
+            threadId,
+            mode: "code",
+            contextId: operationId(40),
+            point: { x: 0.3, y: 0.5 },
+            comment: "Keep this feedback pending on a refused handoff.",
+          });
+          bytes = new Uint8Array([0, 1]);
+          expect(await sendOnSource(fixture)).toMatchObject({
+            state: "failed",
+            failure: { message: expect.stringContaining("Fork original.png (changed)") },
+          });
+          expect(drivers.provider.send).toHaveBeenCalledTimes(1);
+          expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+            { lifecycle: "pending" },
+          ]);
+          bytes = original;
+          await sendOnSource(fixture, 86);
+          await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+          expect(vi.mocked(drivers.provider.send).mock.calls[1]?.[0].attachments).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ displayName: "Fork original.png", bytes: original }),
+            ]),
+          );
+          expect(await sourceFrames(fixture, 86)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                event: expect.objectContaining({
+                  kind: "fork-context-delivered",
+                  inputReceipt: expect.objectContaining({
+                    purpose: "fork-merge-back",
+                    included: 1,
+                  }),
+                }),
+              }),
+            ]),
+          );
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
 
       it.each([
         {
@@ -7405,8 +8120,13 @@ function selectThreadConversation(
 }
 
 function runtimeFixture(options: {
+  inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
+  browserProfiles?: Parameters<typeof createCodeOperationRuntime>[0]["browserProfiles"];
+  resolveSideChatReturns?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveSideChatReturns"];
   appleToolchain?: Parameters<typeof createCodeOperationRuntime>[0]["appleToolchain"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
   threadDesktopDestination?: Parameters<
@@ -7415,7 +8135,6 @@ function runtimeFixture(options: {
   resolveSelectedExtensions?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveSelectedExtensions"];
-  agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   shield?: Parameters<typeof createCodeOperationRuntime>[0]["shield"];
   chosenAutoReviewer?: Parameters<typeof createCodeOperationRuntime>[0]["chosenAutoReviewer"];
   resolveProviderCapabilities?: Parameters<
@@ -7424,7 +8143,7 @@ function runtimeFixture(options: {
   readThreadExternalContentTaint?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["readThreadExternalContentTaint"];
-  siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
+  threads?: Parameters<typeof createCodeOperationRuntime>[0]["threads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
@@ -7462,6 +8181,8 @@ function runtimeFixture(options: {
   credentialResolver?: Parameters<typeof createCodeOperationRuntime>[0]["credentialResolver"];
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
+  checkoutIdentity?: ReturnType<typeof decodeCodeCheckoutIdentity>;
+  resolveCheckoutRoot?: Parameters<typeof createCodeOperationRuntime>[0]["resolveCheckoutRoot"];
   hunkCurrent?: () => boolean;
   hunkApply?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
@@ -7474,6 +8195,8 @@ function runtimeFixture(options: {
   gitReadDiff?: (
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
+  gitTreeDiff?: GitObservationPort["readTreeDiff"];
+  liveGit?: { readonly observation: GitObservationPort; readonly mutation: GitMutationPort };
   /**
    * What differs between a turn's starting capture and the checkout when it
    * settles. Setting it also lets the checkout be captured; left out, the
@@ -7489,12 +8212,14 @@ function runtimeFixture(options: {
   /** Where the runtime keeps its running turns, as the host passes it. */
   activeTurns?: CodeActiveTurns;
   /** Whether a window may access a Project; a function answers per Project. */
-  projectAccess?: boolean | ((projectId: string) => boolean);
+  projectAccess?: boolean | ((projectId: string) => boolean | Promise<boolean>);
   /**
    * The host's own request-scoped Project access, in place of `projectAccess`:
    * a check sees whichever request, if any, its async chain started in.
    */
   codeProjectAccess?: CodeProjectAccess;
+  waitProjectAccess?: () => Promise<void>;
+  projectAccessCurrent?: () => boolean;
   planner?: Parameters<typeof createCodeOperationRuntime>[0]["planner"];
   managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
@@ -7555,6 +8280,7 @@ function runtimeFixture(options: {
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
       .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated)
+      .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
       .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered),
     projections: new ProjectionRegistry()
@@ -7581,28 +8307,35 @@ function runtimeFixture(options: {
     });
   }
   let activeThread = thread();
+  let threadPurged = false;
+  let releasedCheckpoints = 0;
   const snapshotPolicies: Array<string | undefined> = [];
   let restoredTrees = 0;
-  let checkout = decodeCodeCheckoutIdentity({
-    id: checkoutId,
-    repositoryId: activeThread.repositoryId,
-    kind: "existing-worktree",
-    availability: "available",
-    head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
-    observedAt: now,
-  });
+  let checkout =
+    options.checkoutIdentity ??
+    decodeCodeCheckoutIdentity({
+      id: checkoutId,
+      repositoryId: activeThread.repositoryId,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+      observedAt: now,
+    });
   const hostAccess = options.codeProjectAccess;
-  const access = vi.fn(async (accessWindowId: WindowId, projectId: string) =>
-    hostAccess !== undefined
-      ? hostAccess.canAccessProject(accessWindowId, decodeProjectId(projectId))
-      : typeof options.projectAccess === "function"
-        ? options.projectAccess(String(projectId))
-        : (options.projectAccess ?? true),
-  );
+  const access = vi.fn(async (accessWindowId: WindowId, projectId: string) => {
+    const granted =
+      hostAccess !== undefined
+        ? hostAccess.canAccessProject(accessWindowId, decodeProjectId(projectId))
+        : typeof options.projectAccess === "function"
+          ? options.projectAccess(String(projectId))
+          : (options.projectAccess ?? true);
+    if (options.waitProjectAccess !== undefined) await options.waitProjectAccess();
+    return granted;
+  });
   // Threads other than the one under test, such as the source a fork reads.
   const otherThreads = new Map<string, CodeThread>();
   const readThread = (id: CodeThreadId) =>
-    id === threadId ? activeThread : otherThreads.get(String(id));
+    id === threadId ? (threadPurged ? undefined : activeThread) : otherThreads.get(String(id));
   const prompt = evidence(40);
   const response = evidence(41);
   const evidenceValues =
@@ -7611,6 +8344,10 @@ function runtimeFixture(options: {
       [prompt.contentId, "Implement this."],
       [response.contentId, "A"],
     ]);
+  let evidenceReadHook:
+    | ((reference: CodeEvidenceReference) => Promise<string | undefined>)
+    | undefined;
+  let gitObservationReadHook: (() => Promise<GitObservationResult>) | undefined;
   let evidenceCounter = 50;
   // A restarted host mints new event identities, never the first host's again.
   let uuidCounter = options.restartOf === undefined ? 100 : 10_000;
@@ -7639,7 +8376,7 @@ function runtimeFixture(options: {
   let exitTerminal: (() => void) | undefined;
   const conversationReader = new CodeOperationEventStore({
     journal,
-    uuid: () => "",
+    uuid: randomUUID,
     clock: () => now,
     actor,
   });
@@ -7712,6 +8449,12 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.inputTransfer === undefined
+      ? {}
+      : { conversationInputTransfer: options.inputTransfer(directory) }),
+    ...(options.resolveSideChatReturns === undefined
+      ? {}
+      : { resolveSideChatReturns: options.resolveSideChatReturns }),
     ...(options.activeTurns === undefined ? {} : { activeTurns: options.activeTurns }),
     persistence: {
       journal,
@@ -7719,28 +8462,42 @@ function runtimeFixture(options: {
         readCodeRuntimeWorkAggregateVersion(connection, id),
       readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
-      readReviewFinding: () => undefined,
-      readReviewFindings: () => [],
+      readReviewFinding: (id) => readCodeReviewFinding(connection, id),
+      readReviewFindings: (id) => readCodeReviewFindings(connection, id),
     },
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     windowAccess: {
       canAccessProject: access,
-      ...(options.hunkCurrent === undefined ? {} : { currentProjectAccess: options.hunkCurrent }),
+      currentProjectAccess: (scope, project) => {
+        if (options.hunkCurrent !== undefined) return options.hunkCurrent();
+        if (hostAccess !== undefined)
+          return hostAccess.standingAuthority(() => hostAccess.canAccessProject(scope, project));
+        if (options.projectAccessCurrent !== undefined) return options.projectAccessCurrent();
+        const granted =
+          typeof options.projectAccess === "function"
+            ? options.projectAccess(String(project))
+            : (options.projectAccess ?? true);
+        if (typeof granted === "boolean") return granted;
+        void granted.catch(() => {});
+        return false;
+      },
       standingAuthority: (run) =>
         hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
     },
     ...(options.acpTerminalConfinement === undefined
       ? {}
       : { acpTerminalConfinement: options.acpTerminalConfinement }),
-    resolveCheckoutRoot: async () => ({
-      checkoutRoot: options.checkoutRoot ?? "/private/exact",
-      ...(options.hunkCurrent === undefined
-        ? {}
-        : { rootCurrent: options.hunkCurrent, rootIdentity: { device: "1", inode: "1" } }),
-      shell: "/bin/zsh",
-      credentialReferences: options.credentialReferences ?? [],
-      environment: {},
-    }),
+    resolveCheckoutRoot:
+      options.resolveCheckoutRoot ??
+      (async () => ({
+        checkoutRoot: options.checkoutRoot ?? "/private/exact",
+        ...(options.hunkCurrent === undefined
+          ? {}
+          : { rootCurrent: options.hunkCurrent, rootIdentity: { device: "1", inode: "1" } }),
+        shell: "/bin/zsh",
+        credentialReferences: options.credentialReferences ?? [],
+        environment: {},
+      })),
     resolveProviderDriver: options.resolveProviderDriver ?? (async () => options.provider),
     ...(options.threadDesktopDestination === undefined
       ? {}
@@ -7751,7 +8508,6 @@ function runtimeFixture(options: {
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
-    ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.shield === undefined ? {} : { shield: options.shield }),
     ...(options.chosenAutoReviewer === undefined
       ? {}
@@ -7762,7 +8518,7 @@ function runtimeFixture(options: {
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
-    ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.threads === undefined ? {} : { threads: options.threads }),
     ...(options.serverCodeTurn === undefined ? {} : { serverCodeTurn: options.serverCodeTurn }),
     ...(options.holdsServerThread === undefined
       ? {}
@@ -7797,6 +8553,7 @@ function runtimeFixture(options: {
                 supportsAcpClientCapabilities: () => options.supportsAcpClientCapabilities ?? false,
               }),
         }),
+    ...(options.browserProfiles === undefined ? {} : { browserProfiles: options.browserProfiles }),
     ...(options.appleToolchain === undefined ? {} : { appleToolchain: options.appleToolchain }),
     ...(options.planner === undefined ? {} : { planner: options.planner }),
     ...(options.supportsModelSwitch === undefined
@@ -7842,7 +8599,10 @@ function runtimeFixture(options: {
         evidenceValues.set(reference.contentId, content);
         return reference;
       },
-      read: async (reference) => evidenceValues.get(reference.contentId),
+      read: async (reference) =>
+        evidenceReadHook === undefined
+          ? evidenceValues.get(reference.contentId)
+          : await evidenceReadHook(reference),
     },
     ...(options.managedThreadCreation === undefined
       ? {}
@@ -7915,10 +8675,14 @@ function runtimeFixture(options: {
       readArtifact: async () => undefined,
     },
     ...(options.pullRequestPort === undefined ? {} : { pullRequestPort: options.pullRequestPort }),
-    gitObservationPort: {
-      observe: async () => options.gitObservation ?? { status: "unavailable" as const },
+    gitObservationPort: options.liveGit?.observation ?? {
+      observe: async () =>
+        gitObservationReadHook === undefined
+          ? (options.gitObservation ?? { status: "unavailable" as const })
+          : await gitObservationReadHook(),
       observeRemotes: async () => options.gitRemotes ?? [],
       ...(options.gitReadDiff === undefined ? {} : { readDiff: options.gitReadDiff }),
+      ...(options.gitTreeDiff === undefined ? {} : { readTreeDiff: options.gitTreeDiff }),
       ...(options.gitTreeChanges === undefined
         ? {}
         : {
@@ -7928,7 +8692,7 @@ function runtimeFixture(options: {
             }),
           }),
     },
-    gitMutationPort: {
+    gitMutationPort: options.liveGit?.mutation ?? {
       ...(options.hunkApply === undefined ? {} : { applyHunks: options.hunkApply }),
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
@@ -7950,7 +8714,9 @@ function runtimeFixture(options: {
         restoredTrees += 1;
         return { status: "failed" as const };
       },
-      releaseCheckpoint: async () => {},
+      releaseCheckpoint: async () => {
+        releasedCheckpoints += 1;
+      },
     },
   });
   return {
@@ -7960,15 +8726,30 @@ function runtimeFixture(options: {
     prompt,
     response,
     evidenceValues,
+    setEvidenceRead: (hook: typeof evidenceReadHook) => {
+      evidenceReadHook = hook;
+    },
+    setGitObservationRead: (hook: typeof gitObservationReadHook) => {
+      gitObservationReadHook = hook;
+    },
+    reviewFindings: () => readCodeReviewFindings(connection, threadId),
     directory,
     selectConversation,
     selectForkConversation,
     selectForkMergeBack,
     conversation: (of: CodeThreadId = threadId) =>
       conversationReader.conversation({ threadId: of, afterCursor: 0, limit: 100 }),
+    spyJournalReplay: () => vi.spyOn(journal, "replayAggregate"),
+    appendOperationEvent: (input: Parameters<CodeOperationEventStore["append"]>[0]) =>
+      conversationReader.append(input),
     setThread: (next: CodeThread) => {
       activeThread = next;
+      threadPurged = false;
     },
+    purgeThread: () => {
+      threadPurged = true;
+    },
+    releasedCheckpoints: () => releasedCheckpoints,
     /** Make the thread's checkout a remote root, a folder on another machine. */
     bindCheckoutToRemoteFolder: () => {
       checkout = decodeCodeCheckoutIdentity({
@@ -8660,29 +9441,24 @@ it("offers the Computer tool and its host line on a Code turn whose send has no 
   fixture.close();
 });
 
-it("offers the agent message tool to a Code turn and withholds it from one in Plan", async () => {
+it("offers messaging in the threads tool to a Code turn and withholds it from one in Plan", async () => {
   const offered = async (executionPolicy: CodeThread["executionPolicy"], operation: number) => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const starts: Array<ProviderSessionStart> = [];
     const fixture = runtimeFixture({
       provider: providerDriver(providerConnection(queue, starts)),
       supportsAppManagedTools: true,
-      agentMessages: ({ thread: sender, readPosture }) =>
-        createAgentMessageTools({
-          service: {
-            send: async () => [],
-            recordRefusedSend: async () => undefined,
-            acknowledge: async () => ({
-              status: "refused",
-              reason: "unauthorized",
-              message: "Unavailable",
-            }),
-            statusForSender: () => [],
-          },
-          senderThreadId: String(sender.id),
+      threads: ({ windowId: turnWindowId, thread: sender, readPosture }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer: async () => Promise.reject(new Error("unused")) },
+          source: noSiblings,
+          callerThreadId: String(sender.id),
           toolConstraints: [],
           profileDisplayName: "the bound profile",
           readPosture,
+          messaging: quietMessaging,
         }),
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
@@ -8695,13 +9471,15 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
       prompt: fixture.prompt,
     });
     fixture.close();
-    return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+    return threadsOperations(starts[0]?.tools);
   };
 
-  expect(await offered("approval-gated", 83)).toContain(AGENT_MESSAGE_TOOL_NAME);
+  expect(await offered("approval-gated", 83)).toContain("send");
   // Plan is read-only, and sending stores a body and journals: the provider
-  // is never told the tool exists.
-  expect(await offered("plan", 84)).not.toContain(AGENT_MESSAGE_TOOL_NAME);
+  // is never told the operation exists.
+  const plan = await offered("plan", 84);
+  expect(plan).toContain("list");
+  expect(plan).not.toContain("send");
 });
 
 describe("language reads on Code turns", () => {
@@ -8732,14 +9510,15 @@ describe("language reads on Code turns", () => {
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools,
-      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread }) =>
+      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread, folders }) =>
         createCodeLanguageAgentTools({
           windowId: turnWindow,
           thread: turnThread,
           readThread,
+          folders,
           authority: () => authority,
           externalContentIngested: () => false,
-          language: { readForAgent },
+          language: { readForAgent, servesAgentsIn: () => true },
           uuid: randomUUID,
         }),
     });
@@ -8755,12 +9534,12 @@ describe("language reads on Code turns", () => {
     return { queue, starts, connection, readForAgent, fixture };
   }
 
-  it("offers a Plan turn the diagnostics and definition reads and answers one from the language service", async () => {
+  it("offers a Plan turn the language reads and answers one from the language service", async () => {
     const { queue, starts, connection, readForAgent, fixture } = await planTurn(true, 1301);
     try {
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
       expect(starts[0]?.tools?.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME, CODE_DEFINITION_TOOL_NAME]),
+        expect.arrayContaining([CODE_LANGUAGE_TOOL_NAME]),
       );
       await Effect.runPromise(
         Queue.offer(
@@ -8768,8 +9547,8 @@ describe("language reads on Code turns", () => {
           providerEvent({
             kind: "tool-request",
             requestId: "language-1",
-            toolName: CODE_DIAGNOSTICS_TOOL_NAME,
-            inputJson: JSON.stringify({ path: "src/b.ts" }),
+            toolName: CODE_LANGUAGE_TOOL_NAME,
+            inputJson: JSON.stringify({ operation: "diagnostics", path: "src/b.ts" }),
           }),
         ),
       );
@@ -8793,15 +9572,12 @@ describe("language reads on Code turns", () => {
     }
   });
 
-  it("offers neither read to a provider that cannot carry app-managed tools", async () => {
+  it("offers no language read to a provider that cannot carry app-managed tools", async () => {
     const { starts, connection, fixture } = await planTurn(false, 1302);
     try {
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
       expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
-        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME]),
-      );
-      expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
-        expect.arrayContaining([CODE_DEFINITION_TOOL_NAME]),
+        expect.arrayContaining([CODE_LANGUAGE_TOOL_NAME]),
       );
     } finally {
       await fixture.runtime.close();
@@ -8810,7 +9586,7 @@ describe("language reads on Code turns", () => {
   });
 });
 
-describe("sibling-threads tool on Code turns", () => {
+describe("the threads tool on Code turns", () => {
   const siblingId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
   const siblingReference = `${String(siblingId)}@${String(thread().projectId)}`;
   const quietSource: SiblingThreadSource = {
@@ -8834,30 +9610,17 @@ describe("sibling-threads tool on Code turns", () => {
       const fixture = runtimeFixture({
         provider: providerDriver(providerConnection(queue, starts)),
         supportsAppManagedTools: true,
-        agentMessages: ({ thread: sender, readPosture }) =>
-          createAgentMessageTools({
-            service: {
-              send: async () => [],
-              recordRefusedSend: async () => undefined,
-              acknowledge: async () => ({
-                status: "refused",
-                reason: "unauthorized",
-                message: "Unavailable",
-              }),
-              statusForSender: () => [],
-            },
-            senderThreadId: String(sender.id),
-            toolConstraints: sender.toolConstraints ?? [],
-            profileDisplayName: "the bound profile",
-            readPosture,
-          }),
-        siblingThreads: ({ thread: caller }) =>
-          createSiblingThreadTools({
+        threads: ({ windowId: turnWindowId, thread: caller, readPosture }) =>
+          createThreadsTools({
+            mode: "code",
+            windowId: turnWindowId,
             service: { answer: async () => waited() },
             source: quietSource,
             callerThreadId: String(caller.id),
             toolConstraints: caller.toolConstraints ?? [],
             profileDisplayName: "Reviewer",
+            readPosture,
+            messaging: quietMessaging,
           }),
       });
       fixture.setThread(decodeCodeThread({ ...thread(), ...overrides }));
@@ -8870,7 +9633,10 @@ describe("sibling-threads tool on Code turns", () => {
         prompt: fixture.prompt,
       });
       fixture.close();
-      return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+      return {
+        names: starts[0]?.tools?.map((tool) => tool.name) ?? [],
+        operations: threadsOperations(starts[0]?.tools),
+      };
     };
 
     for (const [executionPolicy, operation] of [
@@ -8878,40 +9644,53 @@ describe("sibling-threads tool on Code turns", () => {
       ["auto-accept-edits", 1202],
       ["full-access", 1203],
     ] as const) {
-      expect(await offered({ executionPolicy }, operation)).toEqual(
-        expect.arrayContaining([SIBLING_THREADS_TOOL_NAME, AGENT_MESSAGE_TOOL_NAME]),
+      expect((await offered({ executionPolicy }, operation)).operations).toEqual(
+        expect.arrayContaining(["list", "read", "wait", "send"]),
       );
     }
     // Plan reads its siblings like any other posture; messaging stays withheld.
     const plan = await offered({ executionPolicy: "plan" }, 1204);
-    expect(plan).toContain(SIBLING_THREADS_TOOL_NAME);
-    expect(plan).not.toContain(AGENT_MESSAGE_TOOL_NAME);
-    // A profile allowlist that does not name the tool keeps it off the turn.
-    const narrowed = await offered({ toolConstraints: [AGENT_MESSAGE_TOOL_NAME] }, 1205);
-    expect(narrowed).toContain(AGENT_MESSAGE_TOOL_NAME);
-    expect(narrowed).not.toContain(SIBLING_THREADS_TOOL_NAME);
-    expect(await offered({ toolConstraints: [SIBLING_THREADS_TOOL_NAME] }, 1206)).toContain(
+    expect(plan.operations).toEqual(["help", "list", "read", "wait"]);
+    // A profile allowlist names each group on its own, and one that names
+    // neither keeps the tool off the turn.
+    expect((await offered({ toolConstraints: ["octant_threads.send"] }, 1205)).operations).toEqual([
+      "help",
+      "send",
+      "acknowledge",
+      "receipts",
+    ]);
+    expect(
+      (await offered({ toolConstraints: [SIBLING_THREADS_TOOL_NAME] }, 1206)).operations,
+    ).toEqual(["help", "list", "read", "wait"]);
+    expect((await offered({ toolConstraints: ["octant_terminal"] }, 1207)).names).not.toContain(
       SIBLING_THREADS_TOOL_NAME,
     );
+    // None of the tools this one replaced reaches a turn under its old name.
+    for (const retired of ["octant_agent_message", "octant_board", "octant_propose_thread"]) {
+      expect((await offered({}, 1208)).names).not.toContain(retired);
+    }
   });
 
   it("gives each turn its own read and wait bounds", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const answer = vi.fn(async () => waited());
-    const toolSets = vi.fn(({ thread: caller }: { readonly thread: CodeThread }) =>
-      createSiblingThreadTools({
-        service: { answer },
-        source: quietSource,
-        callerThreadId: String(caller.id),
-        toolConstraints: [],
-        profileDisplayName: "Reviewer",
-      }),
+    const toolSets = vi.fn(
+      ({ windowId: turnWindowId, thread: caller }: { windowId: WindowId; thread: CodeThread }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
+          service: { answer },
+          source: quietSource,
+          callerThreadId: String(caller.id),
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+        }),
     );
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       supportsAppManagedTools: true,
-      siblingThreads: toolSets,
+      threads: toolSets,
     });
     const answers = () =>
       vi
@@ -8926,7 +9705,7 @@ describe("sibling-threads tool on Code turns", () => {
               kind: "tool-request",
               requestId: `${prefix}-${String(index)}`,
               toolName: SIBLING_THREADS_TOOL_NAME,
-              inputJson: JSON.stringify({ action, reference: siblingReference }),
+              inputJson: JSON.stringify({ operation: action, reference: siblingReference }),
             }),
           ),
         );
@@ -9054,7 +9833,7 @@ describe("sibling-threads tool on Code turns", () => {
         ? responsesToolCallStream(
             "call_sibling",
             SIBLING_THREADS_TOOL_NAME,
-            JSON.stringify({ action: "read", reference: siblingReference }),
+            JSON.stringify({ operation: "read", reference: siblingReference }),
           )
         : responsesTextStream("done");
     });
@@ -9088,8 +9867,10 @@ describe("sibling-threads tool on Code turns", () => {
       provider: driver,
       supportsAppManagedTools: true,
       codeProjectAccess: access,
-      siblingThreads: ({ thread: caller }) =>
-        createSiblingThreadTools({
+      threads: ({ windowId: turnWindowId, thread: caller }) =>
+        createThreadsTools({
+          mode: "code",
+          windowId: turnWindowId,
           service,
           source,
           callerThreadId: String(caller.id),
@@ -9200,13 +9981,17 @@ it("reports an explicit recipient receipt through the real turn tool path after 
   const fixture = runtimeFixture({
     provider: providerDriver(provider),
     supportsAppManagedTools: true,
-    agentMessages: ({ thread: current, readPosture }) =>
-      createAgentMessageTools({
-        service,
-        senderThreadId: String(current.id),
+    threads: ({ windowId: turnWindowId, thread: current, readPosture }) =>
+      createThreadsTools({
+        mode: "code",
+        windowId: turnWindowId,
+        service: { answer: async () => Promise.reject(new Error("unused")) },
+        source: noSiblings,
+        callerThreadId: String(current.id),
         toolConstraints: current.toolConstraints ?? [],
         profileDisplayName: "Worker",
         readPosture,
+        messaging: service,
       }),
     carryAgentMessages: (id) => service.carryIntoTurn(id),
     confirmAgentMessagesDelivered: (ids) => service.confirmDelivered(ids),
@@ -9243,8 +10028,8 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-1",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
-          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+          toolName: SIBLING_THREADS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "acknowledge", messageIds: [messageId] }),
         }),
       ),
     );
@@ -9264,9 +10049,9 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-forgery",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
+          toolName: SIBLING_THREADS_TOOL_NAME,
           inputJson: JSON.stringify({
-            action: "acknowledge",
+            operation: "acknowledge",
             messageIds: [messageId],
             recipientThreadId: String(senderId),
           }),
@@ -9282,8 +10067,8 @@ it("reports an explicit recipient receipt through the real turn tool path after 
         providerEvent({
           kind: "tool-request",
           requestId: "receipt-again",
-          toolName: AGENT_MESSAGE_TOOL_NAME,
-          inputJson: JSON.stringify({ action: "acknowledge", messageIds: [messageId] }),
+          toolName: SIBLING_THREADS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "acknowledge", messageIds: [messageId] }),
         }),
       ),
     );
@@ -9625,7 +10410,7 @@ describe("Project access inside a Code turn's tool calls", () => {
   const read = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "read" } };
   const write = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "write", command: "ls" } };
   const stop = { name: CODE_TERMINAL_TOOL_NAME, input: { operation: "stop" } };
-  const board = { name: CODE_BOARD_TOOL_NAME, input: { operation: "read" } };
+  const board = { name: SIBLING_THREADS_TOOL_NAME, input: { operation: "board" } };
 
   /** The host's access, reading the window's persisted Code binding on every check. */
   function windowBoundTo(
@@ -9669,6 +10454,27 @@ describe("Project access inside a Code turn's tool calls", () => {
     };
   }
 
+  /** The threads tool of a planner turn, which reads the board through the runtime's planner. */
+  const plannerThreads = ({
+    windowId: turnWindowId,
+    thread: caller,
+    planner,
+  }: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly planner?: CodePlannerToolPort;
+  }) =>
+    createThreadsTools({
+      mode: "code",
+      windowId: turnWindowId,
+      service: { answer: async () => Promise.reject(new Error("unused")) },
+      source: noSiblings,
+      callerThreadId: String(caller.id),
+      toolConstraints: [],
+      profileDisplayName: "Reviewer",
+      ...(planner === undefined ? {} : { planner }),
+    });
+
   /** The terminal answer a provider got back, reduced to what it says about access. */
   function terminalOutcome(answer: string | undefined): string {
     const parsed = JSON.parse(answer ?? "{}") as {
@@ -9690,6 +10496,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       codeProjectAccess: access,
       terminalExit: { exitCode: 0 },
       planner: boardStandIn(access, boardDecisions),
+      threads: plannerThreads,
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     try {
@@ -9718,7 +10525,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       expect(answers.map(terminalOutcome)).toEqual([
         "running",
         "running",
-        "stand-in",
+        "refused",
         "interrupted",
       ]);
       expect(boardDecisions).toEqual([true]);
@@ -9888,6 +10695,7 @@ describe("Project access inside a Code turn's tool calls", () => {
       codeProjectAccess: access,
       terminalExit: { exitCode: 0 },
       planner: boardStandIn(access, boardDecisions),
+      threads: plannerThreads,
     });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     try {
@@ -10214,6 +11022,1494 @@ async function functionCallingEndpoint(
   return { driver, bodies, answers };
 }
 
+it("forwards Side Chat return validation through the actual Code runtime-to-service composition before launching a provider", async () => {
+  const resolveSideChatReturns = vi.fn(async () => {
+    throw new Error("purged reference");
+  });
+  const fixture = runtimeFixture({ approvalValidator: false, resolveSideChatReturns });
+  try {
+    const sideChatReturns = [
+      {
+        sidecarThreadId: checkoutId,
+        sourceThreadId: threadId,
+        sourceMode: "code",
+        turnId: operationId(901),
+        attemptId: operationId(902),
+        answerDigest: "a".repeat(64),
+      },
+    ];
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(903),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      sideChatReturns,
+    });
+    expect(resolveSideChatReturns).toHaveBeenCalledWith({
+      references: sideChatReturns,
+      readerThreadId: String(threadId),
+      mode: "code",
+      windowId,
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+  } finally {
+    fixture.close();
+  }
+});
+
+it("requests a preview through the actual app-managed terminal write composition while a terminal read remains passive", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const readTreeDiff = vi.fn(async () => ({
+    status: "ready" as const,
+    paths: ["src/app.ts"],
+    diff: {
+      text: "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-before\n+after\n",
+      byteLength: 109,
+      truncated: false,
+    },
+  }));
+  const f = runtimeFixture({
+    terminalExit: { exitCode: 0 },
+    provider: providerDriver(provider),
+    supportsAppManagedTools: true,
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: readTreeDiff,
+  });
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+  try {
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "start-terminal",
+        operationId: operationId(1800),
+        terminalId: decodeCodeTerminalId(threadId),
+        threadId,
+        checkoutId,
+        columns: 80,
+        rows: 24,
+        credentialRefs: [],
+      }),
+    ).toMatchObject({ kind: "terminal-state", state: "running" });
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(1801),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "terminal-read",
+          toolName: "octant_terminal",
+          inputJson: JSON.stringify({ operation: "read" }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledOnce());
+    expect(readTreeDiff).not.toHaveBeenCalled();
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "terminal-write",
+          sequence: 2,
+          toolName: "octant_terminal",
+          inputJson: JSON.stringify({ operation: "write", command: "echo changed\n" }),
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2));
+    await vi.waitFor(
+      () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
+      { timeout: 3_000 },
+    );
+    expect(readTreeDiff).toHaveBeenCalledOnce();
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("keeps real Git previews on the original start tree through other writers, then sends an exact older finding under ordinary Plan authority", async () => {
+  const root = mkdtempSync(join(tmpdir(), "octant-live-review-git-"));
+  directories.push(root);
+  const confinement = createFakeSandboxConfinement("octant-live-review-confinement-");
+  directories.push(confinement.root);
+  const gitExecutable = (process.env.PATH ?? "")
+    .split(delimiter)
+    .map((entry) => resolve(entry, "git"))
+    .find((candidate) => existsSync(candidate));
+  if (gitExecutable === undefined) throw new Error("Configured Git is unavailable.");
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: 5_000 });
+  git("init", "-b", "main");
+  git("config", "user.name", "Review fixture");
+  git("config", "user.email", "review@example.invalid");
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src/app.ts"), "original boundary\n");
+  git("add", ".");
+  git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "commit", "-m", "baseline");
+  const head = git("rev-parse", "HEAD").trim();
+  const options = {
+    confinement: confinement.confinement,
+    temporaryDirectory: confinement.temporaryDirectory,
+    gitExecutable,
+  };
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const record = vi.fn(() => ({
+    kind: "recorded" as const,
+    taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
+  }));
+  const f = runtimeFixture({
+    checkoutRoot: root,
+    provider: providerDriver(provider),
+    recordExternalContentIngestion: record,
+    liveGit: {
+      observation: new GitObservationPort(options),
+      mutation: new GitMutationPort(undefined, options),
+    },
+  });
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+  const turn = operationId(1700);
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const baseline = f.conversation().turns[0]?.checkpoint?.worktree;
+    expect(baseline).toMatch(/^[a-f0-9]{40}$/);
+    const retainedRefs = git(
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/octant/checkpoints/${checkoutId}`,
+    );
+    expect(retainedRefs.trim()).not.toBe("");
+    let first: import("@octant/contracts").CodeTurnReviewCapture | undefined;
+    for (let i = 0; i < 8; i++) {
+      writeFileSync(join(root, "src/app.ts"), `agent edit ${i}\n`);
+      if (i === 3) writeFileSync(join(root, "person.txt"), "independent person edit\n");
+      const result = await f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(1710 + i),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: true,
+      });
+      expect(result.kind).toBe("turn-review-preview");
+      if (result.kind !== "turn-review-preview" || result.preview.capture === undefined)
+        throw new Error("capture unavailable");
+      const capture = result.preview.capture;
+      first ??= capture;
+      expect(capture.baseline).toBe(baseline);
+      expect(capture.version).toBe(i + 1);
+      const text = f.evidenceValues.get(capture.diff.contentId) ?? "";
+      expect(text).toContain(`agent edit ${i}`);
+      if (i >= 3) expect(text).toContain("independent person edit");
+      expect(
+        git("for-each-ref", "--format=%(refname)", `refs/octant/checkpoints/${checkoutId}`),
+      ).toBe(retainedRefs);
+      expect(git("diff", "--cached", "--name-only")).toBe("");
+    }
+    if (first === undefined) throw new Error("capture missing");
+    const target = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1720),
+      threadId,
+      checkoutId,
+      reviewOperationId: turn,
+      captureCursor: first.cursor,
+      path: "src/app.ts",
+      side: "original",
+      line: 1,
+    });
+    expect(target).toMatchObject({ kind: "review-target-state", anchorState: "outdated" });
+    if (target.kind !== "review-target-state") throw new Error("target unavailable");
+    const findingId = randomUUID();
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "create-review-finding",
+        operationId: operationId(1721),
+        threadId,
+        checkoutId,
+        findingId,
+        ...target.target,
+        severity: "warning",
+        summary: "Preserve the original boundary.",
+      }),
+    ).toMatchObject({ kind: "review-finding-state" });
+    const prepared = await f.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1722),
+      threadId,
+      checkoutId,
+      findings: [{ findingId, expectedVersion: 1 }],
+    });
+    if (prepared.kind !== "review-correction-prepared") throw new Error("correction unavailable");
+    expect(prepared.prepared.text).toContain("original boundary");
+    expect(prepared.prepared.text).not.toContain("agent edit 7");
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() =>
+      expect(f.conversation().turns[0]?.reviewPreview?.capture?.final).toBe(true),
+    );
+    f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const prompt = storedEvidence(1723, prepared.prepared.text);
+    f.evidenceValues.set(prompt.contentId, prepared.prepared.text);
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1724),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt,
+        reviewFindingReferences: prepared.prepared.references,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+    expect(record).toHaveBeenCalledOnce();
+    expect(f.conversation().turns.at(-1)).toMatchObject({
+      executionPolicy: "plan",
+      reviewFindingReferences: prepared.prepared.references,
+    });
+    expect(f.reviewFindings()[0]).toMatchObject({
+      state: "open",
+      version: 1,
+      anchor: { revision: { kind: "turn-capture", captureCursor: first.cursor, baseline } },
+    });
+    expect(git("rev-parse", "HEAD").trim()).toBe(head);
+    expect(git("diff", "--cached", "--name-only")).toBe("");
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it.each([
+  "Project binding replaced",
+  "physical root replaced",
+  "Project binding replaced during final root stat",
+  "window authority revoked during final root stat",
+  "Project binding replaced during final access",
+  "physical root replaced during final access",
+  "window authority revoked during final access",
+] as const)(
+  "suppresses held native preview evidence after same-ID %s through the production root authority",
+  async (change) => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-preview-root-proof-")));
+    directories.push(directory);
+    const repositoryRoot = join(directory, "repository");
+    const worktreeRoot = join(directory, "worktree");
+    mkdirSync(repositoryRoot);
+    mkdirSync(worktreeRoot);
+    const source = thread();
+    const nativeRepositoryId: `repo_${string}` = `repo_${"a".repeat(64)}`;
+    expect(String(source.repositoryId)).toBe(nativeRepositoryId);
+    let bindingRevision: string = source.bindingRevisionId;
+    const receiptId = operationId(1950);
+    const checkout = decodeCodeCheckoutIdentity({
+      id: checkoutId,
+      repositoryId: source.repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+      ownershipReceiptId: receiptId,
+      observedAt: now,
+    });
+    let holdFinalStat = false;
+    let finalStatChecks = 0;
+    let holdFinalAccess = false;
+    let finalAccessStats = 0;
+    let accessReady = false;
+    const accessEntered = Promise.withResolvers<void>();
+    const accessHeld = Promise.withResolvers<void>();
+    const statEntered = Promise.withResolvers<void>();
+    const statHeld = Promise.withResolvers<void>();
+    const roots = createExistingWorktreeCodeFileRootAuthority({
+      projects: {
+        bootstrap: async () =>
+          ({
+            active: [
+              { id: source.projectId, type: "code", binding: { canonicalRoot: repositoryRoot } },
+            ],
+            archived: [],
+            availability: [],
+            memory: [],
+          }) as never,
+      },
+      readProject: () =>
+        ({
+          id: source.projectId,
+          type: "code",
+          lifecycle: "active",
+          binding: { canonicalRoot: repositoryRoot },
+          bindingHistory: [
+            { revisionId: bindingRevision, currentBinding: { canonicalRoot: repositoryRoot } },
+          ],
+        }) as never,
+      managedReceipts: {
+        load: async () =>
+          ({
+            receiptId,
+            state: "ready",
+            threadId,
+            checkoutId,
+            repositoryId: source.repositoryId,
+            canonicalRepositoryPath: repositoryRoot,
+            canonicalWorktreePath: worktreeRoot,
+          }) as never,
+      },
+      repository: {
+        observe: async () => ({
+          status: "available",
+          repositoryId: nativeRepositoryId,
+          repositoryRoot,
+          commonDirectory: join(repositoryRoot, ".git"),
+          objectDirectory: join(repositoryRoot, ".git/objects"),
+          checkout: {
+            status: "present",
+            canonicalPath: repositoryRoot,
+            reportedPath: repositoryRoot,
+            head: "a".repeat(40),
+            detached: false,
+            branch: "refs/heads/main",
+          },
+          worktrees: [
+            {
+              status: "present",
+              canonicalPath: worktreeRoot,
+              reportedPath: worktreeRoot,
+              head: "a".repeat(40),
+              detached: false,
+              branch: "refs/heads/feature/runtime",
+            },
+          ],
+        }),
+      },
+      currentIdentity: (path) => {
+        const stat = statSync(path);
+        return {
+          canonicalPath: realpathSync(path),
+          device: String(stat.dev),
+          inode: String(stat.ino),
+        };
+      },
+      statIdentity: async (path) => {
+        if (holdFinalAccess && ++finalAccessStats === 2) accessReady = true;
+        if (holdFinalStat && ++finalStatChecks === 2) {
+          holdFinalStat = false;
+          statEntered.resolve();
+          await statHeld.promise;
+        }
+        const stat = statSync(path);
+        return { device: String(stat.dev), inode: String(stat.ino) };
+      },
+    });
+    let windowLive = true;
+    const access = new CodeProjectAccess({
+      readWorkspace: () => ({ contextByMode: { code: { projectId: source.projectId } } }) as never,
+      hasActiveCodeProject: (id) => id === source.projectId,
+      isWindowLive: () => windowLive,
+    });
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<void>();
+    let hold = false;
+    const patch =
+      "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+original capture\n";
+    const late = patch.replace("original capture", "late private root content");
+    const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+    const f = runtimeFixture({
+      provider: providerDriver(provider),
+      codeProjectAccess: access,
+      waitProjectAccess: async () => {
+        if (accessReady) {
+          accessReady = false;
+          accessEntered.resolve();
+          await accessHeld.promise;
+        }
+      },
+      checkoutIdentity: checkout,
+      resolveCheckoutRoot: async (window, currentThread, currentCheckout) => {
+        const root = await roots.resolve(
+          window,
+          currentThread,
+          currentCheckout,
+          decodeCodeRelativePath("src/app.ts"),
+        );
+        return root === undefined
+          ? undefined
+          : {
+              checkoutRoot: root.rootPath,
+              rootIdentity: root.rootIdentity,
+              ...(root.current === undefined ? {} : { rootCurrent: root.current }),
+              shell: "/bin/sh",
+              credentialReferences: [],
+              environment: {},
+            };
+      },
+      gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+      gitTreeDiff: async () => {
+        if (hold) {
+          entered.resolve();
+          await held.promise;
+        }
+        const text = hold ? late : patch;
+        return {
+          status: "ready",
+          paths: ["src/app.ts"],
+          diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+        };
+      },
+    });
+    const turn = operationId(1951);
+    const refresh = (id: number) =>
+      f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: true,
+      });
+    try {
+      await f.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: f.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      expect(await refresh(1952)).toMatchObject({
+        kind: "turn-review-preview",
+        preview: { capture: { version: 1 } },
+      });
+      const first = f.conversation().turns[0]?.reviewPreview?.capture;
+      const released = f.releasedCheckpoints();
+      hold = true;
+      const pending = refresh(1953);
+      await entered.promise;
+      if (change === "Project binding replaced") bindingRevision = operationId(1954);
+      else if (change.endsWith("during final root stat")) holdFinalStat = true;
+      else if (change.endsWith("during final access")) holdFinalAccess = true;
+      else {
+        renameSync(worktreeRoot, join(directory, "retired-worktree"));
+        mkdirSync(worktreeRoot);
+      }
+      // Same active Project/window/thread/checkout IDs still pass this real production access check.
+      expect(
+        access.standingAuthority(() => access.canAccessProject(windowId, source.projectId)),
+      ).toBe(true);
+      held.resolve();
+      if (change.endsWith("during final root stat")) {
+        await statEntered.promise;
+        if (change === "window authority revoked during final root stat") windowLive = false;
+        else bindingRevision = operationId(1954);
+        statHeld.resolve();
+      }
+      if (change.endsWith("during final access")) {
+        await accessEntered.promise;
+        if (change.startsWith("window authority")) windowLive = false;
+        else if (change.startsWith("physical root")) {
+          renameSync(worktreeRoot, join(directory, "retired-worktree"));
+          mkdirSync(worktreeRoot);
+        } else bindingRevision = operationId(1954);
+        accessHeld.resolve();
+      }
+      const result = await pending;
+      if (change.startsWith("physical root replaced")) {
+        expect(result).toMatchObject({
+          kind: "turn-review-preview",
+          preview: { status: "unavailable", capture: { version: 1 } },
+        });
+        if (first === undefined) throw new Error("Original capture missing");
+        await expect(
+          f.runtime.readEvidence(windowId, threadId, turn, first.diff.contentId),
+        ).resolves.toMatchObject({
+          bytes: new TextEncoder().encode(patch),
+          digest: first.diff.digest,
+        });
+      }
+      expect(f.conversation().turns[0]?.reviewPreview?.capture).toEqual(first);
+      expect([...f.evidenceValues.values()]).not.toContain(late);
+      expect(f.releasedCheckpoints()).toBe(released + 1);
+    } finally {
+      held.resolve();
+      statHeld.resolve();
+      accessHeld.resolve();
+      await f.runtime.close();
+      f.close();
+    }
+  },
+);
+
+it("keeps a newer successful preview when an older failure authority read completes late", async () => {
+  const entered = Promise.withResolvers<void>();
+  const held = Promise.withResolvers<boolean>();
+  let holdNext = false;
+  let oldReadFinished = false;
+  let rejectStorage = false;
+  let text = "first";
+  let evidenceId = 1960;
+  const patch = () =>
+    `diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+${text}\n`;
+  const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+  const f = runtimeFixture({
+    provider: providerDriver(provider),
+    projectAccessCurrent: () => true,
+    projectAccess: () => {
+      if (holdNext) {
+        holdNext = false;
+        entered.resolve();
+        return held.promise.then((value) => {
+          oldReadFinished = true;
+          return value;
+        });
+      }
+      return true;
+    },
+    evidencePut: (body) => {
+      if (rejectStorage) {
+        rejectStorage = false;
+        holdNext = true;
+        throw new Error("bounded evidence unavailable");
+      }
+      return storedEvidence(++evidenceId, body);
+    },
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: async () => {
+      const body = patch();
+      return {
+        status: "ready",
+        paths: ["src/app.ts"],
+        diff: { text: body, byteLength: Buffer.byteLength(body), truncated: false },
+      };
+    },
+  });
+  const turn = operationId(1970);
+  const refresh = (id: number) =>
+    f.runtime.execute(windowId, {
+      kind: "observe-turn-review",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      turnOperationId: turn,
+      refresh: true,
+    });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    expect(await refresh(1971)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 1 } },
+    });
+    rejectStorage = true;
+    text = "failed older attempt";
+    const failed = refresh(1972);
+    await entered.promise;
+    expect(await failed).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "unavailable", capture: { version: 1 } },
+    });
+    text = "new successful attempt";
+    expect(await refresh(1973)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "ready", capture: { version: 2 } },
+    });
+    held.resolve(true);
+    await vi.waitFor(() => expect(oldReadFinished).toBe(true));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.conversation().turns[0]?.reviewPreview).toMatchObject({
+      status: "ready",
+      capture: { version: 2 },
+    });
+  } finally {
+    held.resolve(true);
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("retains the last readable preview when bounded evidence storage is full, including final capture failure", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "octant-preview-capacity-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "evidence.sqlite3"));
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const patch =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+first\n";
+  const evidence = new CodeEvidenceStore({
+    connection,
+    maxStoredBytes: Buffer.byteLength(patch),
+    maxEntries: 1,
+  });
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  let text = patch;
+  const f = runtimeFixture({
+    provider: providerDriver(provider),
+    evidencePut: (body, metadata) => evidence.put(body, metadata),
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: async () => ({
+      status: "ready",
+      paths: ["src/app.ts"],
+      diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+    }),
+  });
+  const turn = operationId(1910);
+  const refresh = (id: number) =>
+    f.runtime.execute(windowId, {
+      kind: "observe-turn-review",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      turnOperationId: turn,
+      refresh: true,
+    });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const first = await refresh(1911);
+    expect(first).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 1 } },
+    });
+    if (first.kind !== "turn-review-preview" || first.preview.capture === undefined)
+      throw new Error("First capture missing");
+    text = patch.replace("first", "later content cannot be stored");
+    expect(await refresh(1912)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "unavailable", capture: { version: 1 } },
+    });
+    expect(evidence.read(first.preview.capture.diff)).toBe(patch);
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed", sequence: 1 })));
+    await vi.waitFor(() => expect(f.conversation().turns[0]?.status).toBe("completed"));
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(1913),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: false,
+      }),
+    ).toMatchObject({
+      kind: "turn-review-preview",
+      preview: {
+        status: "unavailable",
+        settled: true,
+        capture: { version: 1, final: false },
+        explanation: expect.stringContaining("final comparison was not captured"),
+      },
+    });
+    expect(evidence.read(first.preview.capture.diff)).toBe(patch);
+    expect(
+      connection.prepare("SELECT COUNT(*) AS count FROM code_evidence_content_store").get(),
+    ).toEqual({ count: 1 });
+  } finally {
+    await f.runtime.close();
+    f.close();
+    connection.close();
+  }
+});
+
+it("refuses a native preview completed past its elapsed deadline when the timer callback was delayed", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const held = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const patch =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+first\n";
+  const late = patch.replace("first", "late private bytes");
+  let waiting = false;
+  let nowValue = performance.now();
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => nowValue);
+  const f = runtimeFixture({
+    provider: providerDriver(provider),
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: async () => {
+      if (waiting) {
+        entered.resolve();
+        await held.promise;
+      }
+      const text = waiting ? late : patch;
+      return {
+        status: "ready",
+        paths: ["src/app.ts"],
+        diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+      };
+    },
+  });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(1900),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const refresh = (id: number) =>
+      f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        turnOperationId: operationId(1900),
+        refresh: true,
+      });
+    expect(await refresh(1901)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 1 } },
+    });
+    waiting = true;
+    const pending = refresh(1902);
+    await entered.promise;
+    nowValue += 20_001;
+    held.resolve();
+    const result = await pending;
+    expect(result).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { status: "unavailable", capture: { version: 1 } },
+    });
+    expect([...f.evidenceValues.values()]).not.toContain(late);
+  } finally {
+    held.resolve();
+    await f.runtime.close();
+    f.close();
+    clock.mockRestore();
+  }
+});
+
+it.each([
+  "project revoked",
+  "checkout rebound",
+  "model changed",
+  "task purged",
+  "owner closed",
+] as const)(
+  "suppresses a held preview after %s and releases its temporary checkpoint",
+  async (retired) => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const patch =
+      "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+first capture\n";
+    const late = patch.replace("first capture", "late private capture");
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    let hold = false;
+    let allowed = true;
+    const readTreeDiff = async () => {
+      if (hold) {
+        entered.resolve();
+        await finish.promise;
+      }
+      const text = hold ? late : patch;
+      return {
+        status: "ready" as const,
+        paths: ["src/app.ts"],
+        diff: { text, byteLength: Buffer.byteLength(text), truncated: false },
+      };
+    };
+    const f = runtimeFixture({
+      provider: providerDriver(connection),
+      projectAccess: () => allowed,
+      gitObservation: readyGitObservation([]),
+      gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+      gitTreeDiff: readTreeDiff,
+    });
+    const turn = operationId(1600);
+    const refresh = (id: number) =>
+      f.runtime.execute(windowId, {
+        kind: "observe-turn-review",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        turnOperationId: turn,
+        refresh: true,
+      });
+    try {
+      await f.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: f.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(await refresh(1601)).toMatchObject({
+        kind: "turn-review-preview",
+        preview: { capture: { version: 1 } },
+      });
+      const retained = f.conversation().turns[0]?.reviewPreview?.capture;
+      const released = f.releasedCheckpoints();
+      hold = true;
+      const pending = refresh(1602);
+      await entered.promise;
+      if (retired === "project revoked") allowed = false;
+      else if (retired === "checkout rebound")
+        f.setThread(decodeCodeThread({ ...thread(), checkoutId: operationId(1603) }));
+      else if (retired === "model changed")
+        f.setThread(decodeCodeThread({ ...thread(), modelId: "other-model" }));
+      else if (retired === "task purged") f.purgeThread();
+      else await f.runtime.close();
+      finish.resolve();
+      await pending;
+      await vi.waitFor(() => expect(f.releasedCheckpoints()).toBe(released + 1));
+      expect(f.conversation().turns[0]?.reviewPreview?.capture).toEqual(retained);
+      expect([...f.evidenceValues.values()]).not.toContain(late);
+      if (retired === "task purged") {
+        expect(
+          await f.runtime.execute(windowId, {
+            kind: "observe-turn-review",
+            operationId: operationId(1604),
+            threadId,
+            checkoutId,
+            turnOperationId: turn,
+            refresh: false,
+          }),
+        ).toMatchObject({ kind: "operation-failed" });
+        if (retained !== undefined)
+          await expect(
+            f.runtime.readEvidence(windowId, threadId, turn, retained.diff.contentId),
+          ).rejects.toBeDefined();
+      }
+    } finally {
+      finish.resolve();
+      await f.runtime.close();
+      f.close();
+    }
+  },
+);
+
+it("captures typed edit bursts during a running turn, never on text or metadata polls, then retains the final version", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const patch =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n";
+  const readTreeDiff = vi.fn(async () => ({
+    status: "ready" as const,
+    paths: ["src/app.ts"],
+    diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+  }));
+  const f = runtimeFixture({
+    provider: providerDriver(connection),
+    gitObservation: readyGitObservation([]),
+    gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }],
+    gitTreeDiff: readTreeDiff,
+  });
+  const turn = operationId(1500);
+  const read = (id: number) =>
+    f.runtime.execute(windowId, {
+      kind: "observe-turn-review",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      turnOperationId: turn,
+      refresh: false,
+    });
+  try {
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    for (let i = 0; i < 10; i++)
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "text-delta", text: "working", sequence: i + 1 })),
+      );
+    await read(1501);
+    expect(readTreeDiff).not.toHaveBeenCalled();
+    for (let i = 0; i < 20; i++)
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "file-change",
+            path: "src/app.ts",
+            change: "modified",
+            sequence: i + 11,
+          }),
+        ),
+      );
+    await vi.waitFor(
+      () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
+      { timeout: 3_000 },
+    );
+    expect(readTreeDiff).toHaveBeenCalledOnce();
+    const first = f.conversation().turns[0]?.reviewPreview?.capture;
+    expect(first).toMatchObject({ baseline: "d".repeat(40), final: false });
+    for (let i = 0; i < 5; i++)
+      expect(await read(1502 + i)).toMatchObject({
+        kind: "turn-review-preview",
+        preview: { capture: { version: 1 } },
+      });
+    expect(readTreeDiff).toHaveBeenCalledOnce();
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed", sequence: 40 })));
+    await vi.waitFor(
+      () =>
+        expect(f.conversation().turns[0]?.reviewPreview?.capture).toMatchObject({
+          version: 2,
+          final: true,
+        }),
+      { timeout: 3_000 },
+    );
+    expect(readTreeDiff).toHaveBeenCalledTimes(2);
+    expect(f.conversation().turns[0]?.reviewPreview?.capture?.baseline).toBe(first?.baseline);
+    expect(await read(1508)).toMatchObject({
+      kind: "turn-review-preview",
+      preview: { capture: { version: 2, final: true } },
+    });
+    expect(readTreeDiff).toHaveBeenCalledTimes(2);
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("resolves an exact preview beyond the first replay page and retains its finding across newer captures", async () => {
+  const f = runtimeFixture({ approvalValidator: false });
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+  const turnId = operationId(1400);
+  let cursor = 0;
+  const append = (input: unknown) => {
+    const event = decodeCodeOperationEvent(input);
+    const frame = f.appendOperationEvent({
+      threadId,
+      operationId: turnId,
+      expectedCursor: cursor,
+      event,
+    });
+    cursor = frame.cursor;
+    return frame;
+  };
+  const patch =
+    "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4 +4 @@\n-old value\n+new value\n";
+  const first = storedEvidence(1401, patch);
+  const second = storedEvidence(1402, patch.replace("new value", "later value"));
+  f.evidenceValues.set(first.contentId, patch);
+  f.evidenceValues.set(second.contentId, patch.replace("new value", "later value"));
+  try {
+    append({
+      kind: "conversation-turn-started",
+      providerInstanceId: thread().providerInstanceId,
+      modelId: "model-a",
+      sessionId,
+      prompt: f.prompt,
+      checkoutId,
+      checkpoint: { worktree: "a".repeat(40), index: "b".repeat(40) },
+    });
+    for (let i = 0; i < 300; i++) append({ kind: "operation-state", state: "running" });
+    const capturedCursor = cursor + 1;
+    const capture = {
+      checkoutId,
+      cursor: capturedCursor,
+      version: 1,
+      baseline: "a".repeat(40),
+      tree: "b".repeat(40),
+      diff: first,
+      changedFiles: {
+        files: [{ path: "src/example.ts", insertions: 1, deletions: 1 }],
+        total: 1,
+        truncated: false,
+      },
+      capturedAt: now,
+      final: false,
+    };
+    append({
+      kind: "conversation-turn-review-preview",
+      preview: {
+        status: "ready",
+        capture,
+        explanation: "Captured checkout changes, not exclusive authorship.",
+      },
+    });
+    append({
+      kind: "conversation-turn-review-preview",
+      preview: {
+        status: "capturing",
+        explanation: "A newer comparison is being captured; later writes may be uncaptured.",
+      },
+    });
+    expect(f.conversation().turns[0]?.reviewPreview).toMatchObject({
+      status: "capturing",
+      capture: { cursor: capturedCursor, version: 1 },
+    });
+    append({
+      kind: "conversation-turn-review-preview",
+      preview: {
+        status: "ready",
+        capture: { ...capture, cursor: cursor + 1, version: 2, tree: "c".repeat(40), diff: second },
+        explanation: "Latest captured comparison.",
+      },
+    });
+    const target = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1403),
+      threadId,
+      checkoutId,
+      reviewOperationId: turnId,
+      captureCursor: capturedCursor,
+      path: "src/example.ts",
+      side: "modified",
+      line: 4,
+    });
+    expect(target).toMatchObject({
+      kind: "review-target-state",
+      anchorState: "outdated",
+      target: {
+        anchor: {
+          diff: first,
+          revision: {
+            kind: "turn-capture",
+            operationId: turnId,
+            captureCursor: capturedCursor,
+            version: 1,
+            baseline: "a".repeat(40),
+            tree: "b".repeat(40),
+          },
+        },
+      },
+    });
+    if (target.kind !== "review-target-state") throw new Error("target unavailable");
+    const replay = f.spyJournalReplay();
+    for (let i = 0; i < 3; i++)
+      expect(
+        await f.runtime.execute(windowId, {
+          kind: "observe-turn-review",
+          operationId: operationId(1420 + i),
+          threadId,
+          checkoutId,
+          turnOperationId: turnId,
+          refresh: false,
+        }),
+      ).toMatchObject({ kind: "turn-review-preview", preview: { capture: { version: 2 } } });
+    const repeated = replay.mock.calls.filter(
+      ([query]) => String(query.aggregateId) === String(turnId),
+    );
+    expect(repeated.length).toBeGreaterThan(0);
+    expect(repeated.every(([query]) => query.afterVersion === cursor)).toBe(true);
+    replay.mockRestore();
+    const note = await f.runtime.execute(windowId, {
+      kind: "create-review-finding",
+      operationId: operationId(1404),
+      threadId,
+      checkoutId,
+      findingId: operationId(1405),
+      ...target.target,
+      severity: "warning",
+      summary: "Correct the first captured version.",
+    });
+    expect(note.kind).toBe("review-finding-state");
+    const prepared = await f.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1406),
+      threadId,
+      checkoutId,
+      findings: [{ findingId: operationId(1405), expectedVersion: 1 }],
+    });
+    expect(prepared.kind).toBe("review-correction-prepared");
+    if (prepared.kind !== "review-correction-prepared") throw new Error("correction unavailable");
+    expect(prepared.prepared.text).toContain("4: new value");
+    expect(prepared.prepared.text).not.toContain("later value");
+    const otherThread = decodeCodeThread({
+      ...thread(),
+      id: operationId(1410),
+      executionPolicy: "plan",
+    });
+    f.setOtherThread(otherThread);
+    const otherOperation = operationId(1411);
+    f.appendOperationEvent({
+      threadId,
+      operationId: otherOperation,
+      expectedCursor: 0,
+      event: { kind: "operation-state", state: "running" },
+    });
+    for (const crossed of [
+      { threadId: otherThread.id, reviewOperationId: turnId },
+      { threadId, reviewOperationId: otherOperation },
+    ]) {
+      const rejected = await f.runtime.execute(windowId, {
+        kind: "prepare-review-target",
+        operationId: randomUUID(),
+        checkoutId,
+        captureCursor: capturedCursor,
+        path: "src/example.ts",
+        side: "modified",
+        line: 4,
+        ...crossed,
+      });
+      expect(rejected.kind).toBe("operation-failed");
+    }
+    f.setThread(
+      decodeCodeThread({ ...thread(), checkoutId: operationId(1412), executionPolicy: "plan" }),
+    );
+    const rebound = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1413),
+      threadId,
+      checkoutId,
+      reviewOperationId: turnId,
+      captureCursor: capturedCursor,
+      path: "src/example.ts",
+      side: "modified",
+      line: 4,
+    });
+    expect(rebound.kind).toBe("operation-failed");
+    f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    f.evidenceValues.set(first.contentId, "replaced bytes with the same claimed content id");
+    const changedBytes = await f.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1414),
+      threadId,
+      checkoutId,
+      reviewOperationId: turnId,
+      captureCursor: capturedCursor,
+      path: "src/example.ts",
+      side: "modified",
+      line: 4,
+    });
+    expect(changedBytes.kind).toBe("operation-failed");
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it("turns a retained diff line into a Plan-safe local finding and an unsent correction without changing its anchor", async () => {
+  const patch =
+    "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4,2 +4,2 @@\n-old value\n+new value\n context\n";
+  const observation = {
+    ...readyGitObservation([]),
+    statusEntries: [{ path: "src/example.ts", index: " ", worktree: "M" }],
+    changedPaths: ["src/example.ts"],
+    diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+  } as import("./gitObservationPort").GitObservationResult;
+  const fixture = runtimeFixture({ approvalValidator: false, gitObservation: observation });
+  fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+  try {
+    const observed = await fixture.runtime.execute(windowId, {
+      kind: "observe-git",
+      operationId: operationId(1001),
+      gitOperationId: operationId(1002),
+      threadId,
+      checkoutId,
+      maxDiffBytes: 1_048_576,
+    });
+    expect(observed.kind).toBe("git-observed");
+    const target = await fixture.runtime.execute(windowId, {
+      kind: "prepare-review-target",
+      operationId: operationId(1003),
+      threadId,
+      checkoutId,
+      reviewOperationId: operationId(1001),
+      path: "src/example.ts",
+      side: "original",
+      line: 4,
+    });
+    expect(target).toMatchObject({
+      kind: "review-target-state",
+      anchorState: "current",
+      target: {
+        path: "src/example.ts",
+        location: { kind: "line", line: 4 },
+        anchor: {
+          kind: "captured-diff",
+          reviewOperationId: operationId(1001),
+          side: "original",
+          revision: { kind: "working-tree", stateToken: "b".repeat(64) },
+        },
+      },
+    });
+    if (target.kind !== "review-target-state") throw new Error("target");
+    const findingId = "90000000-0000-4000-8000-000000001004";
+    const finding = await fixture.runtime.execute(windowId, {
+      kind: "create-review-finding",
+      operationId: operationId(1005),
+      threadId,
+      checkoutId,
+      findingId,
+      ...target.target,
+      severity: "warning",
+      summary: "Keep the existing behavior while correcting the new value.",
+    });
+    expect(finding).toMatchObject({
+      kind: "review-finding-state",
+      finding: {
+        id: findingId,
+        state: "open",
+        anchor: target.target.anchor,
+        fileDigest: target.target.fileDigest,
+      },
+    });
+    const prepared = await fixture.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1006),
+      threadId,
+      checkoutId,
+      findings: [{ findingId, expectedVersion: 1 }],
+    });
+    expect(prepared).toMatchObject({
+      kind: "review-correction-prepared",
+      prepared: { threadId, checkoutId, references: [{ findingId, version: 1 }] },
+    });
+    if (prepared.kind !== "review-correction-prepared") throw new Error("correction");
+    expect(prepared.prepared.text).toContain("original line 4");
+    expect(prepared.prepared.text).toContain("old value");
+    expect(prepared.prepared.text).toContain("not the whole file");
+    const listed = await fixture.runtime.execute(windowId, {
+      kind: "list-review-findings",
+      operationId: operationId(1007),
+      threadId,
+      checkoutId,
+    });
+    expect(listed).toMatchObject({
+      kind: "review-findings-state",
+      findings: [{ finding: { id: findingId, state: "open" }, anchorState: "current" }],
+    });
+    expect(fixture.conversation().turns).toHaveLength(0);
+    expect(fixture.restoredTrees()).toBe(0);
+  } finally {
+    fixture.close();
+  }
+});
+
+async function capturedReviewFixture(options: Parameters<typeof runtimeFixture>[0] = {}) {
+  const patch =
+    "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -4,2 +4,2 @@\n-old value\n+new value\n context\n";
+  const observation = {
+    ...readyGitObservation([]),
+    statusEntries: [{ path: "src/example.ts", index: " ", worktree: "M" }],
+    changedPaths: ["src/example.ts"],
+    diff: { text: patch, byteLength: Buffer.byteLength(patch), truncated: false },
+  } as GitObservationResult;
+  const fixture = runtimeFixture({
+    ...options,
+    approvalValidator: false,
+    gitObservation: observation,
+  });
+  fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+  const observed = await fixture.runtime.execute(windowId, {
+    kind: "observe-git",
+    operationId: operationId(1101),
+    gitOperationId: operationId(1102),
+    threadId,
+    checkoutId,
+    maxDiffBytes: 1_048_576,
+  });
+  if (observed.kind !== "git-observed") throw new Error("observation unavailable");
+  const target = await fixture.runtime.execute(windowId, {
+    kind: "prepare-review-target",
+    operationId: operationId(1103),
+    threadId,
+    checkoutId,
+    reviewOperationId: operationId(1101),
+    path: "src/example.ts",
+    side: "modified",
+    line: 4,
+  });
+  if (target.kind !== "review-target-state") throw new Error("target unavailable");
+  const findingId = "90000000-0000-4000-8000-000000001104";
+  const finding = await fixture.runtime.execute(windowId, {
+    kind: "create-review-finding",
+    operationId: operationId(1105),
+    threadId,
+    checkoutId,
+    findingId,
+    ...target.target,
+    severity: "warning",
+    summary: "Correct the behavior.",
+  });
+  if (finding.kind !== "review-finding-state") throw new Error("finding unavailable");
+  const prepared = await fixture.runtime.execute(windowId, {
+    kind: "prepare-review-correction",
+    operationId: operationId(1106),
+    threadId,
+    checkoutId,
+    findings: [{ findingId, expectedVersion: 1 }],
+  });
+  if (prepared.kind !== "review-correction-prepared") throw new Error("correction unavailable");
+  return {
+    ...fixture,
+    prepared: prepared.prepared,
+    review: observed,
+    finding: finding.finding,
+    reviseComparison: () => Object.assign(observation, { stateToken: "c".repeat(64) }),
+  };
+}
+
+it("marks a persisted selected review reference before ordinary Code provider reads and retains it in the resulting turn", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "octant-review-taint-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "events.sqlite3"));
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const registries = createPhase1RuntimeRegistries();
+  const journal = new Journal({
+    connection,
+    registry: registries.events,
+    projections: registries.projections,
+    clock: () => now,
+  });
+  const ingestion = new ExternalContentIngestionStore({
+    journal,
+    connection,
+    uuid: randomUUID,
+    clock: () => now,
+    actor,
+  });
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  vi.mocked(provider.send).mockImplementation(() => {
+    expect(
+      readThreadExternalContentTaint(connection, String(threadId)).externalContentIngested,
+    ).toBe(true);
+    return Effect.void;
+  });
+  const fixture = await capturedReviewFixture({
+    provider: providerDriver(provider),
+    recordExternalContentIngestion: (input) => ingestion.record(input),
+    readThreadExternalContentTaint: (id) => readThreadExternalContentTaint(connection, String(id)),
+  });
+  try {
+    expect(
+      readThreadExternalContentTaint(connection, String(threadId)).externalContentIngested,
+    ).toBe(false);
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(1110),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      reviewFindingReferences: fixture.prepared.references,
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+    expect(
+      sent?.context?.some(
+        (block) =>
+          block.kind === "user-message" &&
+          block.text.includes(EXTERNAL_CONTENT_FRAME_OPEN_PREFIX) &&
+          block.text.includes(fixture.finding.id),
+      ),
+    ).toBe(true);
+    expect(
+      sent?.context?.some(
+        (block) => block.kind === "user-message" && block.text.includes("new value"),
+      ),
+    ).toBe(false);
+    expect(fixture.conversation().turns[0]).toMatchObject({
+      checkoutId,
+      reviewFindingReferences: fixture.prepared.references,
+      executionPolicy: "plan",
+    });
+    const listed = await fixture.runtime.execute(windowId, {
+      kind: "list-review-findings",
+      operationId: operationId(1111),
+      threadId,
+      checkoutId,
+    });
+    expect(listed).toMatchObject({
+      kind: "review-findings-state",
+      findings: [{ finding: { id: fixture.finding.id, state: "open", version: 1 } }],
+    });
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+    connection.close();
+  }
+});
+
+it.each(["changed finding", "purged diff", "wrong thread", "missing taint recorder"] as const)(
+  "refuses a review correction with %s before provider reads",
+  async (reason) => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
+    }));
+    const fixture = await capturedReviewFixture({
+      provider: providerDriver(provider),
+      ...(reason === "missing taint recorder" ? {} : { recordExternalContentIngestion: record }),
+    });
+    try {
+      if (reason === "changed finding")
+        await fixture.runtime.execute(windowId, {
+          kind: "update-review-finding",
+          operationId: operationId(1120),
+          threadId,
+          checkoutId,
+          findingId: fixture.finding.id,
+          expectedVersion: 1,
+          state: "resolved",
+        });
+      if (reason === "purged diff") fixture.evidenceValues.delete(fixture.review.diff.contentId);
+      const refs = fixture.prepared.references.map((reference) =>
+        reason === "wrong thread"
+          ? { ...reference, threadId: "90000000-0000-4000-8000-000000001199" }
+          : reference,
+      );
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1121),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+        reviewFindingReferences: refs,
+      });
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable", message: expect.stringContaining("Reopen Review") },
+      });
+      expect(provider.send).not.toHaveBeenCalled();
+      expect(record).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  },
+);
+
 it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
   "prepares exact retained %s approval and applies it through the production runtime adapter",
   async (kind) => {
@@ -10332,3 +12628,307 @@ it.each(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const)(
     }
   },
 );
+
+it("keeps an outdated finding on its captured source after checkout edits, without resolving it", async () => {
+  const f = await capturedReviewFixture();
+  try {
+    f.reviseComparison();
+    const listed = await f.runtime.execute(windowId, {
+      kind: "list-review-findings",
+      operationId: operationId(1130),
+      threadId,
+      checkoutId,
+    });
+    expect(listed).toMatchObject({
+      kind: "review-findings-state",
+      findings: [
+        {
+          anchorState: "outdated",
+          finding: {
+            id: f.finding.id,
+            state: "open",
+            version: 1,
+            fileDigest: f.finding.fileDigest,
+            anchor: f.finding.anchor,
+          },
+        },
+      ],
+    });
+    const prepared = await f.runtime.execute(windowId, {
+      kind: "prepare-review-correction",
+      operationId: operationId(1131),
+      threadId,
+      checkoutId,
+      findings: [{ findingId: f.finding.id, expectedVersion: 1 }],
+    });
+    expect(prepared.kind).toBe("review-correction-prepared");
+    if (prepared.kind !== "review-correction-prepared") throw new Error("unavailable");
+    expect(prepared.prepared.text).toContain("outdated");
+    expect(prepared.prepared.text).toContain("4: new value");
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
+it.each(
+  (
+    ["body", "diff", "assessment", "typed-send", "content", "content-batch", "capture"] as const
+  ).flatMap((phase) =>
+    (["revoke", "expire", "rotate", "remote-abort"] as const).map((revoked) => ({
+      phase,
+      revoked,
+    })),
+  ),
+)(
+  "refuses a bound request revoked during review $phase/$revoked before notes/source return",
+  async ({ phase, revoked }) => {
+    let authorityNow = Date.parse(now);
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability: token, now: authorityNow });
+    const workspace = defaultWindowWorkspace(windowId);
+    const access = new CodeProjectAccess({
+      readWorkspace: () => ({
+        ...workspace,
+        contextByMode: {
+          ...workspace.contextByMode,
+          code: contextKeyForProject("code", LOCAL_HOST_ID, thread().projectId, "/repo"),
+        },
+      }),
+      hasActiveCodeProject: () => true,
+      isWindowLive: (id) => store.listWindowIds(authorityNow).includes(id),
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["Local Code review correction"] },
+    }));
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const f = await capturedReviewFixture({
+      ...(phase === "capture"
+        ? {
+            gitTreeChanges: [
+              { path: "src/example.ts", insertions: 1, deletions: 1, binary: false },
+            ],
+            gitTreeDiff: async () => {
+              entered.resolve();
+              await finish.promise;
+              return {
+                status: "ready" as const,
+                paths: ["src/example.ts"],
+                diff: { text: "late private capture", byteLength: 20, truncated: false },
+              };
+            },
+          }
+        : {}),
+      codeProjectAccess: access,
+      provider: providerDriver(provider),
+      recordExternalContentIngestion: record,
+    });
+    const aborted = new AbortController();
+    const context: PrincipalRouteContext =
+      revoked === "remote-abort"
+        ? {
+            scopeId: windowId,
+            abortSignal: aborted.signal,
+            principal: createRemoteDevicePrincipal({
+              hostId: Schema.decodeUnknownSync(StableHostId)(
+                "90000000-0000-4000-8000-0000000000d2",
+              ),
+              deviceId: Schema.decodeUnknownSync(DeviceId)(String(windowId)),
+              credentialGeneration: 1,
+              origin: "https://octant.example",
+              protocolVersion: 1,
+              capabilityDigest: "b".repeat(64),
+              sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+                "90000000-0000-4000-8000-0000000000d3",
+              ),
+            }),
+          }
+        : {
+            scopeId: windowId,
+            principal: {
+              kind: "local-window",
+              windowId: String(windowId),
+              capabilityGeneration: 0,
+            },
+          };
+    const unused = () => {
+      throw new Error("unused route");
+    };
+    const route = createCodeRouteHandler({
+      windowAuthorityStore: store,
+      now: () => authorityNow,
+      service: withCodeOperationRuntime(
+        {
+          bootstrap: unused,
+          navigation: unused,
+          read: unused,
+          execute: unused,
+          subscribe: async function* () {},
+          readContent: unused,
+          saveFile: unused,
+          openFile: unused,
+        },
+        f.runtime,
+      ),
+    });
+    const base = { threadId, checkoutId, operationId: operationId(1200) };
+    const command =
+      phase === "capture"
+        ? {
+            ...base,
+            kind: "observe-turn-review",
+            turnOperationId: operationId(1220),
+            refresh: true,
+          }
+        : phase === "typed-send"
+          ? {
+              ...base,
+              kind: "start-provider-turn",
+              sessionId,
+              prompt: f.prompt,
+              reviewFindingReferences: f.prepared.references,
+            }
+          : phase === "assessment"
+            ? {
+                ...base,
+                kind: "prepare-review-correction",
+                findings: [{ findingId: f.finding.id, expectedVersion: 1 }],
+              }
+            : {
+                ...base,
+                kind: "create-review-finding",
+                findingId: "90000000-0000-4000-8000-000000001201",
+                fileId: f.finding.fileId,
+                path: f.finding.path,
+                fileDigest: f.finding.fileDigest,
+                location: f.finding.location,
+                anchor: f.finding.anchor,
+                severity: "warning",
+                summary: "Do not save after revocation",
+              };
+    const body = new TextEncoder().encode(JSON.stringify(command));
+    const request =
+      phase === "content-batch"
+        ? new Request("http://127.0.0.1/api/code/evidence/batch", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-octant-window-capability": token },
+            body: JSON.stringify({
+              threadId,
+              items: [{ operationId: f.review.operationId, contentId: f.review.diff.contentId }],
+            }),
+          })
+        : phase === "content"
+          ? new Request(
+              `http://127.0.0.1/api/code/threads/${threadId}/operations/${f.review.operationId}/evidence/${f.review.diff.contentId}`,
+              { headers: { "x-octant-window-capability": token } },
+            )
+          : new Request("http://127.0.0.1/api/code/commands", {
+              method: "POST",
+              headers: { "content-type": "application/json", "x-octant-window-capability": token },
+              body,
+            });
+    bindPrincipalRouteContext(request, context);
+    if (phase === "body")
+      vi.spyOn(request, "arrayBuffer").mockImplementation(async () => {
+        entered.resolve();
+        await finish.promise;
+        return body.buffer;
+      });
+    if (
+      phase === "diff" ||
+      phase === "typed-send" ||
+      phase === "content" ||
+      phase === "content-batch"
+    )
+      f.setEvidenceRead(async (reference) => {
+        entered.resolve();
+        await finish.promise;
+        return f.evidenceValues.get(reference.contentId);
+      });
+    if (phase === "assessment")
+      f.setGitObservationRead(async () => {
+        entered.resolve();
+        await finish.promise;
+        return readyGitObservation([]);
+      });
+    try {
+      if (phase === "capture") {
+        f.setThread(thread());
+        await f.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(1220),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: f.prompt,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      }
+      const response = access.run(context, () => route(request));
+      await entered.promise;
+      if (revoked === "remote-abort") aborted.abort();
+      else if (revoked === "expire") authorityNow += 2 * 24 * 60 * 60 * 1000;
+      else {
+        store.revoke(windowId);
+        if (revoked === "rotate")
+          store.register({
+            windowId,
+            capability: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA",
+            now: authorityNow,
+          });
+      }
+      finish.resolve();
+      const result = await response;
+      const payload = await result?.json();
+      expect(payload, `${phase}/${revoked}`).toMatchObject(
+        phase === "content" || phase === "content-batch"
+          ? { category: "unauthorized" }
+          : { kind: "operation-failed", failure: { category: "unauthorized" } },
+      );
+      expect(provider.start).toHaveBeenCalledTimes(phase === "capture" ? 1 : 0);
+      expect(provider.send).toHaveBeenCalledTimes(phase === "capture" ? 1 : 0);
+      expect(record).not.toHaveBeenCalled();
+      expect(f.reviewFindings()).toHaveLength(1);
+      if (phase === "capture") {
+        expect([...f.evidenceValues.values()]).not.toContain("late private capture");
+        expect(f.conversation().turns[0]?.reviewPreview?.capture).toBeUndefined();
+      }
+    } finally {
+      finish.resolve();
+      await f.runtime.close();
+      f.close();
+    }
+  },
+);
+
+/** The operations a turn's threads tool offered the provider, in enum order. */
+function threadsOperations(
+  tools: ReadonlyArray<{ readonly name: string; readonly inputSchema: unknown }> | undefined,
+): ReadonlyArray<string> {
+  const schema = tools?.find((tool) => tool.name === SIBLING_THREADS_TOOL_NAME)?.inputSchema as
+    | { readonly properties?: { readonly operation?: { readonly enum?: ReadonlyArray<string> } } }
+    | undefined;
+  return schema?.properties?.operation?.enum ?? [];
+}
+
+/** Message delivery that admits nothing, for turns that only need to be offered messaging. */
+const quietMessaging: Pick<
+  AgentMessageService,
+  "send" | "recordRefusedSend" | "acknowledge" | "statusForSender"
+> = {
+  send: async () => [],
+  recordRefusedSend: async () => undefined,
+  acknowledge: async () => ({ status: "refused", reason: "unauthorized", message: "Unavailable" }),
+  statusForSender: () => [],
+};
+
+const noSiblings: SiblingThreadSource = {
+  thread: () => undefined,
+  projectThreads: () => [],
+  readTranscript: async () => undefined,
+};

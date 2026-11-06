@@ -52,6 +52,27 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     glyphMargin: options.onToggleBreakpoint !== undefined,
     theme: OCTANT_EDITOR_THEME,
   });
+  if (options.viewState !== undefined) {
+    editor.setPosition(lease.model.validatePosition(options.viewState));
+    editor.setScrollPosition({
+      scrollTop: options.viewState.scrollTop,
+      scrollLeft: options.viewState.scrollLeft,
+    });
+  }
+  const reportView = () => {
+    const position = editor.getPosition();
+    if (position !== null)
+      options.onViewState?.({
+        lineNumber: position.lineNumber,
+        column: position.column,
+        scrollTop: editor.getScrollTop(),
+        scrollLeft: editor.getScrollLeft(),
+      });
+  };
+  const viewScroll =
+    options.onViewState === undefined ? undefined : editor.onDidScrollChange(reportView);
+  const viewCursor =
+    options.onViewState === undefined ? undefined : editor.onDidChangeCursorPosition(reportView);
   const disposeMenu = installNativeEditorMenu(editor);
   const debugDecorations = editor.createDecorationsCollection();
   const disposeGutter =
@@ -94,6 +115,9 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      reportView();
+      viewScroll?.dispose();
+      viewCursor?.dispose();
       disposeMenu();
       disposeGutter?.();
       cursor?.dispose();
@@ -458,6 +482,9 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     readOnly: true,
     originalEditable: false,
     renderSideBySide: options.renderSideBySide,
+    ...(options.ignoreTrimWhitespace === undefined
+      ? {}
+      : { ignoreTrimWhitespace: options.ignoreTrimWhitespace }),
     fontFamily: typography.fontFamily,
     fontSize: typography.fontSize,
     fontWeight: `${typography.fontWeight}`,
@@ -469,6 +496,18 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
   editor.setModel({ original, modified });
   const disposeOriginalMenu = installNativeEditorMenu(editor.getOriginalEditor());
   const disposeModifiedMenu = installNativeEditorMenu(editor.getModifiedEditor());
+  const lineSelections =
+    options.onSelectLine === undefined
+      ? []
+      : (["original", "modified"] as const).map((side) =>
+          (side === "original"
+            ? editor.getOriginalEditor()
+            : editor.getModifiedEditor()
+          ).onDidChangeCursorPosition((event) => {
+            if (event.source === "keyboard" || event.source === "mouse")
+              options.onSelectLine?.({ side, line: event.position.lineNumber });
+          }),
+        );
   let disposed = false;
 
   return {
@@ -477,11 +516,13 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       disposed = true;
       disposeOriginalMenu();
       disposeModifiedMenu();
+      for (const selection of lineSelections) selection.dispose();
       editor.dispose();
       original.dispose();
       modified.dispose();
     },
     setRenderSideBySide: (sideBySide) => editor.updateOptions({ renderSideBySide: sideBySide }),
+    setIgnoreTrimWhitespace: (ignore) => editor.updateOptions({ ignoreTrimWhitespace: ignore }),
     setColors: applyEditorColors,
     setTypography: (next) => {
       editor.updateOptions({
@@ -493,8 +534,10 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       });
     },
     setValues: (values) => {
+      const viewState = editor.saveViewState();
       if (original.getValue() !== values.original) original.setValue(values.original);
       if (modified.getValue() !== values.modified) modified.setValue(values.modified);
+      if (viewState !== null) editor.restoreViewState(viewState);
     },
   } satisfies MonacoDiffSession;
 };

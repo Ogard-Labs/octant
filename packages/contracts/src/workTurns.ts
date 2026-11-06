@@ -1,3 +1,9 @@
+import {
+  ConversationInputReceipt,
+  ConversationInputPolicy,
+  ConversationInputReference,
+} from "./conversationInputs";
+import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
@@ -21,7 +27,7 @@ import {
   ProviderResumeCursor,
   ProviderUsageLimit,
 } from "./providers";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
@@ -85,6 +91,7 @@ export const WorkAttachmentReference = Schema.Struct({
   mediaType: WorkAttachmentMediaType,
   byteLength: Schema.Int.pipe(Schema.between(1, MAX_WORK_ATTACHMENT_BYTES)),
   digest: WorkAttachmentDigest,
+  source: Schema.optional(ConversationInputReference.fields.source),
 }).annotations(strict);
 export type WorkAttachmentReference = typeof WorkAttachmentReference.Type;
 
@@ -99,6 +106,7 @@ export const WorkTurnAuthority = Schema.Struct({
   projectId: ProjectId,
   bindingRevisionId: BindingRevisionId,
   workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   confinementPosture: Schema.Literal("project-root-confined"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -145,6 +153,7 @@ export const WorkTurnFailure = Schema.Struct({
     "invalid",
     "unauthorized",
     "unavailable",
+    "tools-changed",
     "unsupported",
     "interrupted",
     "failed",
@@ -216,6 +225,7 @@ export const WorkForkConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type WorkForkConversationHandoff = typeof WorkForkConversationHandoff.Type;
 
@@ -245,7 +255,9 @@ export const WorkExternalInputReceipt = Schema.Struct({
 export type WorkExternalInputReceipt = typeof WorkExternalInputReceipt.Type;
 
 export const WorkTurnState = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   externalInput: Schema.optional(WorkExternalInputReceipt),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -288,6 +300,7 @@ export const WorkTurnState = Schema.Struct({
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
   capabilities: WorkTurnCapabilityFacts,
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -296,6 +309,8 @@ export type WorkTurnState = typeof WorkTurnState.Type;
 
 export const StartWorkThreadTurnCommand = Schema.Struct({
   kind: Schema.Literal("start-work-thread-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -309,6 +324,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * never accepted, and the journal records the attachment by name and digest
    * rather than by content.
    */
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   attachmentIds: Schema.optional(
     Schema.Array(WorkAttachmentId).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
@@ -319,6 +335,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * alone and never enters the prompt the journal records as the user's
    * message.
    */
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -341,7 +358,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;
 
 export const CancelWorkTurnCommand = Schema.Struct({
-  kind: Schema.Literal("cancel-work-turn"),
+  kind: Schema.Literal("cancel-work-turn", "force-stop-work-turn"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -373,7 +390,7 @@ export const WorkTurnLookupResult = Schema.Union(
 export type WorkTurnLookupResult = typeof WorkTurnLookupResult.Type;
 
 export const WorkTurnCancelResult = Schema.Struct({
-  kind: Schema.Literal("turn-cancelled", "turn-already-terminal"),
+  kind: Schema.Literal("turn-cancelled", "turn-already-terminal", "stop-requested"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -489,7 +506,9 @@ export type WorkTurnStreamFrame = typeof WorkTurnStreamFrame.Type;
 
 export const WorkTurnAccepted = Schema.Struct({
   externalInput: Schema.optional(WorkExternalInputReceipt),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   kind: Schema.Literal("turn-accepted"),
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
@@ -499,6 +518,7 @@ export const WorkTurnAccepted = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
   handoff: Schema.optional(WorkTurnHandoff),
   carriedFrom: Schema.optional(WorkTurnCarriedFrom),
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),

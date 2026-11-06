@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts/chat";
 import type { ChatEventFrame, ChatThreadId, ChatThreadView } from "@octant/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { decodeUtcTimestamp } from "@octant/contracts";
+import { decodeSideChatDraftReturnReference, decodeUtcTimestamp } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acceptChatEventFrame,
@@ -1507,11 +1507,13 @@ describe("useChatController", () => {
     expect(result.current.pendingDraft).toBe("half a reply");
   });
 
-  it("keeps composer draft text on failed sends and clears it after success", async () => {
+  it("keeps the refused draft and carries the explicit updated-tools choice on the next send", async () => {
     const attachmentId = "00000000-0000-4000-8000-000000000906" as never;
     const execute = vi
       .fn()
-      .mockRejectedValueOnce(new Error("transport failed"))
+      .mockRejectedValueOnce(
+        new ChatClientFailure({ category: "tools-changed", message: "Choose updated tools" }),
+      )
       .mockResolvedValueOnce({
         kind: "turn-created",
         turn: {
@@ -1548,6 +1550,7 @@ describe("useChatController", () => {
       await result.current.sendTurn("draft stays");
     });
     expect(result.current.pendingDraft).toBe("draft stays");
+    expect(result.current.toolCatalogHandoffRequired).toBe(true);
     await act(async () => {
       await result.current.sendTurn(
         "draft stays",
@@ -1566,11 +1569,18 @@ describe("useChatController", () => {
             origin: { kind: "draft", reference: "draft-1" },
           },
         ],
+        [],
+        undefined,
+        { composerDraft: "consume" },
+        [],
+        true,
       );
     });
     expect(result.current.pendingDraft).toBe("");
+    expect(result.current.toolCatalogHandoffRequired).toBe(false);
     expect(execute).toHaveBeenLastCalledWith({
       kind: "send-chat-turn",
+      toolCatalogHandoff: true,
       threadId,
       expectedVersion: threadView(1).thread.version,
       prompt: "draft stays",
@@ -2591,4 +2601,74 @@ describe("useChatController thread windows", () => {
     });
     expect(threadWindow).toHaveBeenCalledOnce();
   });
+});
+
+it("sends the exact edited return reference while preserving a newer reply appended during send preparation", async () => {
+  const draftStore = createComposerThreadDraftStore();
+  draftStore.clear("chat", threadId);
+  const reference = decodeSideChatDraftReturnReference({
+    sidecarThreadId: otherThreadId,
+    sourceThreadId: threadId,
+    sourceMode: "chat" as const,
+    turnId: otherThreadId,
+    attemptId: otherThreadId,
+    answerDigest: "a".repeat(64),
+  });
+  const readCursorStore = createChatReadCursorStore();
+  const client = createMockClient({
+    bootstrap: vi.fn(async () => bootstrap()),
+    thread: vi.fn(async () => threadView(0)),
+    subscribe: vi.fn(async function* () {}),
+    execute: vi.fn(async () => {
+      throw new ChatClientFailure({ category: "unavailable", message: "host unavailable" }, 503);
+    }),
+  });
+  const { result, unmount } = renderHook(() =>
+    useChatController({ activeThreadId: threadId, client, draftStore, readCursorStore }),
+  );
+  await waitFor(() => expect(result.current.activeView?.thread.id).toBe(threadId));
+  act(() =>
+    draftStore.write("chat", threadId, {
+      text: "Person edited returned excerpt",
+      caretIndex: 4,
+      stagedDropped: false,
+      sideChatReturns: [reference],
+    }),
+  );
+  const revision = result.current.draftRevision!;
+  act(() =>
+    draftStore.write("chat", threadId, {
+      text: "Person edited returned excerpt\n\nNewer appended answer",
+      caretIndex: 4,
+      stagedDropped: false,
+      sideChatReturns: [reference],
+    }),
+  );
+  await act(async () => {
+    await result.current.sendTurn(
+      "Person edited returned excerpt",
+      [],
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      { composerDraft: "consume", draftRevision: revision },
+      [reference],
+    );
+  });
+  expect(client.execute).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "send-chat-turn",
+      prompt: "Person edited returned excerpt",
+      sideChatReturns: [reference],
+    }),
+  );
+  expect(draftStore.read("chat", threadId)).toMatchObject({
+    text: "Person edited returned excerpt\n\nNewer appended answer",
+    sideChatReturns: [reference],
+    caretIndex: 4,
+  });
+  unmount();
+  draftStore.clear("chat", threadId);
 });

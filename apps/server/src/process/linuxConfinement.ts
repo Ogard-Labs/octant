@@ -23,6 +23,7 @@ import {
 } from "./seatbeltProfile";
 import { buildLinuxProcessDenySeccompFilter } from "./linuxProcessDenySeccomp";
 import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
+import { pinnedRecipientAdmission } from "./pinnedRecipientAdmission";
 
 export const DEFAULT_BWRAP_PATH = "/usr/bin/bwrap";
 
@@ -236,6 +237,8 @@ export function buildBubblewrapLaunch(
 ): ConfinedProcessLaunch {
   const bwrapPath = options.bwrapPath ?? DEFAULT_BWRAP_PATH;
   requireLinuxConfinement(bwrapPath);
+  const admission = pinnedRecipientAdmission(input);
+  const target = admission?.launch ?? { command: input.executable, args: input.args };
 
   if (!isAbsolute(input.executable)) {
     throw new ProcessConfinementError(
@@ -445,6 +448,7 @@ export function buildBubblewrapLaunch(
   for (const path of input.readRoots ?? []) {
     tryBindReadOnly(path);
   }
+  if (admission !== undefined) tryBindReadOnly(admission.runtime);
   for (const path of input.privateHomeAllowPaths ?? []) {
     tryBindReadOnly(path);
   }
@@ -729,11 +733,11 @@ export function buildBubblewrapLaunch(
         "--",
       );
     }
-    args.push(input.executable);
+    args.push(target.command);
   } else {
-    args.push("--", input.executable);
+    args.push("--", target.command);
   }
-  args.push(...input.args);
+  args.push(...target.args);
 
   if (nestedForProcessDenial) return { command: bwrapPath, args };
   if (denyProcessFork || denyProcessExec) {

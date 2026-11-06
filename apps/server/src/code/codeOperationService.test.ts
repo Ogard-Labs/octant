@@ -525,6 +525,7 @@ describe("CodeOperationService", () => {
     expect(reviewFindings.create).toHaveBeenCalledWith(
       ids.window,
       expect.objectContaining({ id: findingId }),
+      undefined,
     );
 
     reviewFindings.changeState.mockRejectedValueOnce(new ReviewFindingServiceError("stale"));
@@ -589,6 +590,7 @@ describe("CodeOperationService", () => {
         prompt: expect.objectContaining({
           contentId: "61616161-6161-4161-8161-616161616161",
         }),
+        checkoutId: ids.checkout,
         executionPolicy: "approval-gated",
       },
     });
@@ -668,32 +670,22 @@ describe("CodeOperationService", () => {
     expect(approvals.validate).toHaveBeenCalledTimes(approvalChecksBeforeUser);
 
     // Vouching for a command is authority to open a shell and nothing else.
-    // A durable mutation the classifier calls an edit keeps its ordinary gate
-    // even when the caller labels it user-initiated.
-    const findingOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
+    // A checkout mutation keeps its ordinary gate even when the caller labels
+    // it user-initiated. (Local review notes are reads, so they cannot show it.)
+    const userMutationOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
     events.replay.mockReturnValue({ status: "ok", frames: [], nextCursor: 0 });
     await expect(
       service.execute(
         ids.window,
         {
-          kind: "create-review-finding",
-          operationId: findingOperation,
+          kind: "stage-git",
+          operationId: userMutationOperation,
           threadId: ids.thread,
           checkoutId: ids.checkout,
-          findingId: "51515151-5151-4515-8515-515151515151",
-          fileId: "52525252-5252-4525-8525-525252525252",
-          path: "src/index.ts",
-          fileDigest: "d".repeat(64),
-          location: {
-            kind: "selection",
-            startLine: 4,
-            startColumn: 1,
-            endLine: 4,
-            endColumn: 12,
-          },
-          severity: "warning",
-          summary: "Keep this boundary strict.",
-        } as never,
+          gitOperationId: decodeCodeOperationId("51515151-5151-4515-8515-515151515151"),
+          paths: ["src/index.ts"],
+          expectedStateToken: "f".repeat(64),
+        },
         { initiator: "user" },
       ),
     ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "waiting" } });
@@ -2033,6 +2025,52 @@ describe("CodeOperationService", () => {
     });
   });
 
+  it("prepares host input once before a fresh turn and refuses a stale input without a checkpoint", async () => {
+    const fixture = providerTurnFixture();
+    const prepareTurnInput = vi.fn(async () => undefined);
+    const result = await fixture.service.execute(ids.window, startProviderTurn, {
+      prepareTurnInput,
+    });
+    expect(prepareTurnInput).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ kind: "operation-failed", admission: "refused" });
+    expect(fixture.git.checkpoint).not.toHaveBeenCalled();
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
+  it("retains the prepared input fence through provider startup", async () => {
+    const fixture = providerTurnFixture();
+    let current = true;
+    fixture.evidence.read.mockImplementation(async () => {
+      current = false;
+      return "process the selected files";
+    });
+    await expect(
+      fixture.service.execute(ids.window, startProviderTurn, {
+        prepareTurnInput: async ({ checkoutRoot, current: admissionCurrent }) => {
+          expect(checkoutRoot).toBe("/checkout");
+          expect(admissionCurrent()).toBe(true);
+          return () => current;
+        },
+      }),
+    ).resolves.toMatchObject({ kind: "operation-failed", admission: "refused" });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
+  it("recovers an accepted turn without preparing its live source again", async () => {
+    const fixture = providerTurnFixture({ recordEvents: true });
+    const prepareTurnInput = vi.fn(async () => () => true);
+    await fixture.service.execute(ids.window, startProviderTurn, { prepareTurnInput });
+    expect(prepareTurnInput).toHaveBeenCalledOnce();
+    prepareTurnInput.mockRejectedValue(new Error("The source is now unavailable"));
+    await expect(
+      fixture.service.execute(ids.window, startProviderTurn, { prepareTurnInput }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(prepareTurnInput).toHaveBeenCalledOnce();
+    expect(fixture.turns.start.mock.calls[1]?.[0]).toMatchObject({
+      sessionId: fixture.turns.start.mock.calls[0]?.[0].sessionId,
+    });
+  });
+
   it("refuses a host turn revoked while its checkout checkpoint is being prepared", async () => {
     const release = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
@@ -2249,6 +2287,17 @@ describe("CodeOperationService", () => {
     );
     // The journal names the image by what the host measured, never its bytes.
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
+  });
+
+  it("does not start a provider while required worktree preparation is refused", async () => {
+    const prepareWorktree = vi.fn(async () => "Worktree setup failed. Retry or Skip setup first.");
+    const fixture = providerTurnFixture({ prepareWorktree });
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { message: "Worktree setup failed. Retry or Skip setup first." },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(prepareWorktree).toHaveBeenCalledOnce();
   });
 
   it("refuses a Code follow-up when its Project provider policy no longer accepts it", async () => {
@@ -2497,7 +2546,8 @@ describe("CodeOperationService", () => {
     });
     expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
       { kind: "instructions", text: "Review as a skeptic." },
-      { kind: "instructions", text: "Review diffs in isolation." },
+      // The admitted skill is third-party text, sent apart from the profile's.
+      { kind: "skill-instructions", text: "Review diffs in isolation." },
     ]);
   });
 
@@ -3334,6 +3384,8 @@ function providerTurnFixture(
   options: Partial<
     Pick<
       CodeOperationServiceOptions,
+      | "prepareWorktree"
+      | "resolveSideChatReturns"
       | "resolveThreadMentionContext"
       | "resolveProfileSkills"
       | "resolveSelectedExtensions"
@@ -4720,4 +4772,50 @@ describe("CodeOperationService live terminal output", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it("revalidates a returned Side Chat reference at the Code turn boundary and refuses missing or purged provenance", async () => {
+  const sideChatReturns = [
+    {
+      sidecarThreadId: ids.checkout,
+      sourceThreadId: ids.thread,
+      sourceMode: "code",
+      turnId: ids.operation,
+      attemptId: ids.operation,
+      answerDigest: "a".repeat(64),
+    },
+  ];
+  const missing = providerTurnFixture();
+  expect(
+    await missing.service.execute(ids.window, { ...startProviderTurn, sideChatReturns }),
+  ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+  expect(missing.turns.start).not.toHaveBeenCalled();
+  let allowed = true;
+  const resolveSideChatReturns = vi.fn(async () => {
+    if (!allowed) throw new Error("purged");
+    return "Original reply/source digest; editable reference, not approval.";
+  });
+  const valid = providerTurnFixture({ resolveSideChatReturns });
+  expect(
+    await valid.service.execute(ids.window, { ...startProviderTurn, sideChatReturns }),
+  ).toMatchObject({ kind: "provider-turn-state" });
+  expect(resolveSideChatReturns).toHaveBeenCalledWith({
+    references: sideChatReturns,
+    readerThreadId: String(ids.thread),
+    mode: "code",
+    windowId: ids.window,
+  });
+  expect(valid.turns.start.mock.calls[0]![0].context).toContainEqual({
+    kind: "user-message",
+    text: "Original reply/source digest; editable reference, not approval.",
+  });
+  allowed = false;
+  expect(
+    await valid.service.execute(ids.window, {
+      ...startProviderTurn,
+      operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
+      sideChatReturns,
+    }),
+  ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+  expect(valid.turns.start).toHaveBeenCalledTimes(1);
 });

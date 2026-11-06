@@ -359,6 +359,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
         </div>
       ) : native ? (
         <div aria-label="Project page" className="zen-research__page" ref={surface.mount}>
+          {surface.embedded}
           {surface.failed ? (
             <OctantAlert className="zen-research__notice" tone="warning">
               <p>The page could not attach to the dock.</p>

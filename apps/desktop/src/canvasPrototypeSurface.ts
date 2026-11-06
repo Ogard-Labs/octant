@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createNativeHelperShutdown, type NativeHelperStopOutcome } from "./nativeHelperShutdown";
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import type {
   CanvasPrototypeEditCommand,
@@ -71,10 +72,11 @@ export interface CanvasPrototypeOwnerContentsPort {
 
 /** The running prototype host process. */
 export interface CanvasPrototypeHostConnection {
+  readonly exited: Promise<void>;
   readonly send: (command: CanvasPrototypeHostCommand) => void;
   readonly onEvent: (listener: (event: CanvasPrototypeHostEvent) => void) => void;
   readonly onExit: (listener: () => void) => void;
-  readonly stop: () => void;
+  readonly stop: () => Promise<NativeHelperStopOutcome>;
 }
 
 export interface CanvasPrototypeSurfaceOptions {
@@ -288,6 +290,21 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   // goes takes its requests with it.
   const pendingOpens = new Map<number, Set<AbortController>>();
 
+  const retiring = new Map<CanvasPrototypeHostConnection, Promise<NativeHelperStopOutcome>>();
+  let stopping: Promise<NativeHelperStopOutcome> | undefined;
+  let generation = 0;
+  const stopConnection = (connection: CanvasPrototypeHostConnection) => {
+    const previous = retiring.get(connection);
+    if (previous !== undefined) return previous;
+    const completion = connection.stop();
+    retiring.set(connection, completion);
+    void completion.then((outcome) => {
+      if (outcome.status === "stopped") retiring.delete(connection);
+    });
+    void connection.exited.then(() => retiring.delete(connection));
+    return completion;
+  };
+
   /** The host is gone: every prototype it drew is gone with it. */
   const forget = () => {
     ready = false;
@@ -305,8 +322,20 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
     owner.send(event);
   };
 
-  const start = (): Promise<CanvasPrototypeSurfacePreparation> =>
-    new Promise((settle) => {
+  const start = (expectedGeneration = generation): Promise<CanvasPrototypeSurfacePreparation> => {
+    if (expectedGeneration !== generation)
+      return Promise.resolve({ status: "unavailable", reason: NOT_STARTED });
+    if (retiring.size > 0)
+      return Promise.all(retiring.values()).then((outcomes) => {
+        if (expectedGeneration !== generation)
+          return { status: "unavailable", reason: NOT_STARTED };
+        if (outcomes.some((outcome) => outcome.status === "failed")) {
+          preparing = undefined;
+          return { status: "unavailable", reason: NOT_STARTED };
+        }
+        return start(expectedGeneration);
+      });
+    return new Promise((settle) => {
       let settled = false;
       let started: CanvasPrototypeHostConnection | undefined;
       const finish = (result: CanvasPrototypeSurfacePreparation) => {
@@ -316,7 +345,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
         if (abandonStart === abandon) abandonStart = undefined;
         if (result.status === "ready") ready = true;
         else {
-          started?.stop();
+          if (started !== undefined) stopConnection(started);
           // A host already stopped and replaced must not take its successor down.
           if (host === started) forget();
         }
@@ -337,6 +366,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       const launched = started;
       host = launched;
       launched.onEvent((event) => {
+        if (host !== launched) return;
         if (event.kind === "ready") finish({ status: "ready" });
         else if (event.kind === "unavailable") {
           finish({ status: "unavailable", reason: event.reason });
@@ -348,6 +378,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
         forget();
       });
     });
+  };
 
   const fetchPage = async (ticket: string, server: string, signal: AbortSignal) => {
     const page = await options.fetch(
@@ -365,13 +396,22 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   const ownedBy = (owner: CanvasPrototypeOwner, surfaceId: unknown): surfaceId is string =>
     typeof surfaceId === "string" && owners.get(surfaceId)?.id === owner.id;
 
-  const stopHost = () => {
+  const stopHost = (): Promise<NativeHelperStopOutcome> => {
+    if (host === undefined && abandonStart === undefined && stopping !== undefined) return stopping;
+    generation += 1;
     const running = host;
     const abandon = abandonStart;
+    for (const requests of pendingOpens.values()) for (const request of requests) request.abort();
+    pendingOpens.clear();
+    users.clear();
     forget();
-    // A host still starting is stopped by settling its start.
-    if (abandon === undefined) running?.stop();
-    else abandon();
+    if (abandon !== undefined) abandon();
+    if (running !== undefined) stopConnection(running);
+    stopping = Promise.all(retiring.values()).then(
+      (outcomes) =>
+        outcomes.find((outcome) => outcome.status === "failed") ?? { status: "stopped" },
+    );
+    return stopping;
   };
 
   return Object.freeze({
@@ -383,7 +423,10 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
      */
     prepare: (owner: CanvasPrototypeOwner): Promise<CanvasPrototypeSurfacePreparation> => {
       users.add(owner.id);
-      preparing ??= start();
+      if (preparing === undefined) {
+        stopping = undefined;
+        preparing = start();
+      }
       return preparing;
     },
 
@@ -485,7 +528,9 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
      * waiting on, as the window's page goes away. The host stops when no other
      * window uses it; the next prepare starts a new one.
      */
-    closeOwnedBy: (ownerId: number): void => {
+    closeOwnedBy: (
+      ownerId: number,
+    ): Promise<NativeHelperStopOutcome | { readonly status: "retained" }> => {
       closings.set(ownerId, (closings.get(ownerId) ?? 0) + 1);
       for (const request of pendingOpens.get(ownerId) ?? []) request.abort();
       pendingOpens.delete(ownerId);
@@ -495,7 +540,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
         host?.send({ kind: "close", surfaceId });
       }
       users.delete(ownerId);
-      if (users.size === 0) stopHost();
+      return users.size === 0 ? stopHost() : Promise.resolve({ status: "retained" });
     },
 
     /** Stops the prototype host, as the app quits. */
@@ -543,9 +588,16 @@ export function spawnCanvasPrototypeHost(
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     serialization: "advanced",
   });
-  child.on("error", () => undefined);
-  const running = () => child.exitCode === null && child.signalCode === null;
   const graceMs = lifetime.quitGraceMs ?? HOST_QUIT_GRACE_MS;
+  const shutdown = createNativeHelperShutdown({
+    child,
+    closeGracefully: () => {
+      if (child.connected) child.disconnect();
+    },
+    gracefulMs: graceMs,
+    terminateMs: graceMs,
+    killMs: graceMs,
+  });
   const onAppExit =
     lifetime.onAppExit ??
     ((listener) => {
@@ -553,37 +605,40 @@ export function spawnCanvasPrototypeHost(
       return () => process.removeListener("exit", listener);
     });
   const forgetAppExit = onAppExit(() => {
-    if (running()) child.kill("SIGKILL");
+    if (shutdown.state() !== "exited") child.kill("SIGKILL");
   });
-  child.once("exit", forgetAppExit);
+  void shutdown.exited.then(forgetAppExit);
+  const messages = new Set<(message: unknown) => void>();
+  void shutdown.exited.then(() => {
+    for (const listener of messages) child.off("message", listener);
+    messages.clear();
+  });
   return {
+    exited: shutdown.exited,
     send: (message) => {
-      if (child.connected) child.send(message);
+      if (child.connected && shutdown.state() === "running") child.send(message, () => {});
     },
     // The host speaks only the events it declares; anything else is dropped.
-    onEvent: (listener) =>
-      child.on("message", (message: unknown) => {
-        if (isRecord(message) && typeof message.kind === "string") {
+    onEvent: (listener) => {
+      if (shutdown.state() === "exited") return;
+      const messageListener = (message: unknown) => {
+        if (
+          shutdown.state() === "running" &&
+          isRecord(message) &&
+          typeof message.kind === "string"
+        ) {
           listener(message as CanvasPrototypeHostEvent);
         }
-      }),
+      };
+      messages.add(messageListener);
+      child.on("message", messageListener);
+    },
     onExit: (listener) => {
-      child.once("exit", () => listener());
-      child.once("error", () => listener());
+      void shutdown.exited.then(listener);
     },
     // Closing the channel lets the host quit on its own. One still running a
     // moment later is asked to stop, and a moment after that, killed. The
-    // timers do not keep the app open; the exit listener above covers that.
-    stop: () => {
-      if (!running()) return;
-      if (child.connected) child.disconnect();
-      setTimeout(() => {
-        if (!running()) return;
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (running()) child.kill("SIGKILL");
-        }, graceMs).unref();
-      }, graceMs).unref();
-    },
+    // returned promise waits for observed exit through the bounded escalation.
+    stop: shutdown.stop,
   };
 }

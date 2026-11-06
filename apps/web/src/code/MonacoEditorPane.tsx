@@ -1,3 +1,4 @@
+import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeClient, CodeFileSaveResult } from "@octant/client-runtime/code-client";
 import type {
   CodeCheckoutId,
@@ -9,13 +10,22 @@ import type {
 } from "@octant/contracts/code";
 import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
 import type { ProjectId } from "@octant/contracts/projects";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   MonacoEditorAdapter,
   type MonacoAdapterRuntime,
   type MonacoEditorRange,
   type MonacoEditorPosition,
+  type MonacoEditorView,
   type MonacoLanguageBridge,
 } from "./MonacoEditorAdapter";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -35,6 +45,7 @@ import {
   toEditorRange,
 } from "./codeLanguageEditor";
 import { CodeReferences } from "./CodeReferences";
+import { CodeEditPreviews } from "./CodeEditPreviews";
 import type { CodeLanguageDefinitionTarget } from "@octant/contracts/code-language";
 import type { CodeLanguageReferencesOutcome } from "./useCodeLanguageServices";
 import { useCodeLanguageServices } from "./useCodeLanguageServices";
@@ -121,6 +132,8 @@ function AvailableEditor(
     readonly file: Extract<CodeEditorFileProjection, { readonly state: "available" }>;
   },
 ) {
+  const viewStore = useContext(WorkspaceViewStateContext);
+
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [draft, setDraft] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -131,6 +144,8 @@ function AvailableEditor(
   const dirtyRef = useRef(false);
   const draftRef = useRef("");
   const metadataRef = useRef(props.file.metadata);
+  const viewKey = `editor:${JSON.stringify([props.file.threadId, props.file.checkoutId, props.file.fileId, metadataRef.current.identity, metadataRef.current.digest])}`;
+  const savedView = viewStore?.read(viewKey);
   const debugLoadedFile = useRef<
     { readonly key: string; readonly metadata: CodeFileMetadata } | undefined
   >(undefined);
@@ -651,6 +666,71 @@ function AvailableEditor(
           </OctantButton>
         </div>
       )}
+      {props.client.readLanguage === undefined ||
+      props.client.syncLanguageDocument === undefined ? null : (
+        <CodeEditPreviews
+          key={referenceKey}
+          text={draft}
+          checkout={props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
+          writable={writable && props.draftStore !== undefined}
+          prepare={(query) => language.prepareEdits(toLanguagePosition(cursor.current), query)}
+          apply={async (preview) => {
+            if (!writable || props.draftStore === undefined)
+              return "The editor cannot confirm draft safety. Reopen the file in its workspace.";
+            let completed = 0;
+            const held = () => mounted.current && currentReferenceKey.current === referenceKey;
+            for (const file of preview.files) {
+              if (!held())
+                return `Stopped after ${completed} saved files because the editor changed.`;
+              const draft = props.draftStore.read(modelUri(checkoutId, file.fileId));
+              if (
+                (draft !== undefined && draft !== file.before) ||
+                (file.path === path && draftRef.current !== file.before)
+              )
+                return `Unsaved changes in ${file.path}. Nothing further was saved; ${completed} files were saved.`;
+            }
+            for (const file of preview.files) {
+              if (!held())
+                return `Stopped after ${completed} saved files because the editor changed.`;
+              const draft = props.draftStore.read(modelUri(checkoutId, file.fileId));
+              if (
+                (draft !== undefined && draft !== file.before) ||
+                (file.path === path && draftRef.current !== file.before)
+              )
+                return `Stopped at unsaved changes in ${file.path}; ${completed} files were saved.`;
+              const result = await props.client.save({
+                threadId,
+                checkoutId,
+                path: file.path,
+                expectedIdentity: file.identity,
+                expectedDigest: file.digest,
+                text: file.after,
+              });
+              if (result.status !== "completed") {
+                props.onRequestRefresh?.();
+                return `Stopped at ${file.path}: ${result.status}. ${completed} files were saved. Check the files before preparing again.`;
+              }
+              completed++;
+              if (file.path === path && held()) {
+                metadataRef.current = result.metadata;
+                setLoadState({ kind: "ready", text: file.after });
+                if (draftRef.current === file.before) {
+                  draftRef.current = file.after;
+                  setDraft(file.after);
+                  dirtyRef.current = false;
+                  setDirty(false);
+                  props.draftStore.clear(draftKey);
+                }
+              }
+            }
+            props.onRequestRefresh?.();
+            return `Saved ${completed} reviewed files.`;
+          }}
+          {...(props.onOpenExternalEditor === undefined
+            ? {}
+            : { onOpenExternal: props.onOpenExternalEditor })}
+        />
+      )}
       {visibleReferences === undefined ? null : (
         <CodeReferences
           onReloadLanguage={() => {
@@ -686,6 +766,13 @@ function AvailableEditor(
       {loadState.kind === "ready" ? (
         <MonacoEditorAdapter
           ariaLabel={`Editor for ${props.file.path}`}
+          viewState={savedView?.kind === "editor" ? savedView : undefined}
+          {...(viewStore === undefined
+            ? {}
+            : {
+                onViewState: (view: MonacoEditorView) =>
+                  viewStore.write(viewKey, { kind: "editor", ...view }),
+              })}
           language={props.file.language}
           {...(props.client.readLanguage === undefined ? {} : { languageBridge })}
           languageMarkers={languageMarkers}

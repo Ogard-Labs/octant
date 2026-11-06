@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
+import * as googleCliCredentials from "./googleCliCommandCredentials";
 import { makePersistenceLive } from "../persistence/persistenceService";
 import { startOctantServer } from "../server";
 
@@ -17,14 +17,21 @@ describe("Google command resource recovery during host startup", () => {
       await writeFile(previous, "fixture-prior-token");
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
-      const original = RepositoryTestProcessPort.prototype.reconcile;
+      const original = googleCliCredentials.createGoogleCliCommandCredentials;
       const reconcile = vi
-        .spyOn(RepositoryTestProcessPort.prototype, "reconcile")
-        .mockImplementationOnce(async function (this: RepositoryTestProcessPort) {
-          entered.resolve();
-          await release.promise;
-          if (outcome === "uncertain") throw new Error("Owned process recovery unavailable");
-          return original.call(this);
+        .spyOn(googleCliCredentials, "createGoogleCliCommandCredentials")
+        .mockImplementationOnce((options) => {
+          const credentials = original(options);
+          return {
+            ...credentials,
+            recover: (recoverProcesses) =>
+              credentials.recover(async () => {
+                entered.resolve();
+                await release.promise;
+                if (outcome === "uncertain") throw new Error("Owned process recovery unavailable");
+                await recoverProcesses();
+              }),
+          };
         });
       const serve = vi.fn(() => ({
         url: new URL("http://127.0.0.1:13775"),

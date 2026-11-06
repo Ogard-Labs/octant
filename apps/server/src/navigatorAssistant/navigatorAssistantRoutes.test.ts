@@ -22,17 +22,14 @@ const configured = decodeNavigatorAssistantModelRef({
   modelId: "model-a",
 });
 
-// `WindowAuthorityStore.authenticate` returns the WindowId itself, not an
-// object wrapping it. A fake that answers `{ windowId: "w1" }` would make the
-// route see `[object Object]` as the authenticated window — exactly the fixture
-// drift that hides an authorization bug.
+// The authenticated authority record carries the window used by the route.
 function authStore(): WindowAuthorityStore {
   return {
-    authenticate: vi.fn((presented: string) => {
+    authenticateAuthority: vi.fn((presented: string) => {
       if (presented !== capability["x-octant-window-capability"]) {
         throw new WindowAuthorityError("unauthorized", "Window capability is unknown.");
       }
-      return "11111111-1111-4111-8111-111111111111";
+      return { windowId: "11111111-1111-4111-8111-111111111111" };
     }),
   } as unknown as WindowAuthorityStore;
 }

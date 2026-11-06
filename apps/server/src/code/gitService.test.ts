@@ -295,6 +295,60 @@ describe("GitService", () => {
     ).resolves.toEqual({ status: "unavailable" });
   });
 
+  it.each(["ready", "failed diff", "aborted", "revoked"] as const)(
+    "captures a bounded preview from one immutable current tree and releases it (%s)",
+    async (phase) => {
+      const mutation = mutationPort();
+      const controller = new AbortController();
+      let current = true;
+      const changes = [{ path: "src/app.ts", insertions: 1, deletions: 1, binary: false }];
+      const diff = { text: "captured patch", byteLength: 14, truncated: false };
+      const readTreeDiff = vi.fn(async () => {
+        if (phase === "aborted") controller.abort();
+        if (phase === "revoked") current = false;
+        return phase === "failed diff"
+          ? { status: "unavailable" as const }
+          : { status: "ready" as const, paths: ["src/app.ts"], diff };
+      });
+      const service = new GitService(
+        {
+          observe: vi.fn(async () => readyObservation()),
+          readTreeChanges: vi.fn(async () => ({ status: "ready" as const, changes })),
+          readTreeDiff,
+        },
+        mutation,
+      );
+      const result = await service.changesSince(
+        {
+          checkoutId: "checkout-1",
+          checkoutRoot: "/repo",
+          from: "f".repeat(40),
+          includeDiff: true,
+          captureCurrent: () => current,
+        },
+        controller.signal,
+      );
+      expect(result).toEqual(
+        phase === "ready"
+          ? {
+              status: "ready",
+              changes,
+              capture: { from: "f".repeat(40), to: "d".repeat(40), diff },
+            }
+          : { status: "unavailable" },
+      );
+      expect(mutation.snapshotWorkingTree).toHaveBeenCalledOnce();
+      expect(mutation.releaseCheckpoint).toHaveBeenCalledWith(
+        {
+          checkoutRoot: "/repo",
+          checkoutId: "checkout-1",
+          anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
+        },
+        undefined,
+      );
+    },
+  );
+
   it("does not snapshot the working tree when the thread is Plan", async () => {
     const observation = readyObservation();
     const mutation = mutationPort();

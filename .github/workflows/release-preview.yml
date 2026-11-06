@@ -1,13 +1,25 @@
 # Nightly preview ring and on-demand candidate ring.
 #
-# Scheduled runs build what is on `main`, sign and notarize darwin-arm64,
-# package the linux-x64 AppImage dogfood artifact, and publish signed feeds at
-# `<base>/preview/<platform>-<arch>.preview-key.json` when feed signing
-# material is present. Signed with the preview key only; the old
-# `<platform>-<arch>.json` name belongs to the stable-signed bridge that
-# `release-preview-bridge.yml` publishes for installs predating that key. A manual run does the same for whatever ref it was started on and
-# publishes to `<base>/candidate/…` instead, so a test install can follow the
-# candidate ring without the live preview feed being disturbed.
+# Scheduled runs build what is on `main` as Octant Nightly on the `preview`
+# ring, sign and notarize darwin-arm64, package the linux-x64 AppImage dogfood
+# artifact, and publish signed feeds at
+# `<base>/preview/<platform>-<arch>.octant-nightly.json` when feed signing
+# material is present. Signed with the preview key only. The older preview
+# names (`.json`, `.preview-key.json`) were read by Octant builds published on
+# this ring before Nightly took it; nothing writes them again, so those installs
+# are never offered Nightly. A manual run builds whatever ref it was started on
+# as Octant (the stable flavor) on the `candidate` ring, which Octant offers as
+# its Preview channel, and publishes to `<base>/candidate/….octant.json`, plus
+# an old-shape document at `….preview-key.json` for candidate installs built
+# before the release named its app. A manual run with `rollback_ref` instead
+# rebuilds a published Nightly tag on `main` as Octant Nightly on `preview`
+# under a new, strictly newer version: the updater only moves forward, so a
+# rollback is a roll-forward. Building runs the source's own code beside the
+# Apple credentials, so the feed key lives only in the separate `feed` job,
+# which runs this workflow's code against the uploaded archive. A Nightly run
+# builds only after its secret-free usable-client preflight passes; an Octant
+# candidate skips it. The flavor follows the ring
+# (`docs/design/nightly-app.md`, "Which build is which").
 # An updater fed by unsigned builds is an unauthenticated code-delivery
 # channel (`docs/architecture.md`, "Current Release Boundary"), so a ring either
 # publishes a signed feed or refuses — never an unsigned document at the live
@@ -25,6 +37,12 @@ on:
     # failure is waiting rather than interrupting.
     - cron: "0 0 * * *"
   workflow_dispatch:
+    inputs:
+      rollback_ref:
+        description: "Published Nightly tag (v<version>-preview.<date>.<run>, on main) to rebuild on preview with a new version. Leave empty to build this ref as an Octant candidate."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: release-preview
@@ -44,6 +62,10 @@ jobs:
       build: ${{ steps.decide.outputs.build }}
       version: ${{ steps.decide.outputs.version }}
       ring: ${{ steps.decide.outputs.ring }}
+      flavor: ${{ steps.decide.outputs.flavor }}
+      product: ${{ steps.decide.outputs.product }}
+      asset_prefix: ${{ steps.decide.outputs.asset_prefix }}
+      source_commit: ${{ steps.decide.outputs.source_commit }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,12 +83,75 @@ jobs:
           # moved. A dispatched run is a candidate of whichever ref it was
           # started on; clicking the button is the intent, so it always builds.
           FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          ROLLBACK_REF: ${{ inputs.rollback_ref }}
         run: |
           set -euo pipefail
+          # The declared version is this workflow's own, never the rollback
+          # ref's: with the date and the run number it keeps every build of this
+          # workflow strictly newer than the last, which is all the updater
+          # accepts.
           declared=$(grep -oE 'version: "[^"]+"' scripts/package-desktop.ts | head -1 | cut -d'"' -f2)
           ring="preview"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then ring="candidate"; fi
-          echo "ring=${ring}" >> "$GITHUB_OUTPUT"
+          flavor="nightly"
+          product="Octant Nightly"
+          # Release asset names carry no space: GitHub renames an uploaded
+          # asset with one, and the feed URL and the bridge both need the
+          # exact published name.
+          asset_prefix="Octant-Nightly"
+          source_commit=""
+          if [ -n "${ROLLBACK_REF:-}" ]; then
+            # The rollback source runs in a job that holds the Developer ID and
+            # notary credentials, so it must be code that was already reviewed
+            # and shipped: a published Nightly tag (`v*-preview.*`, built on
+            # schedule from `main`) whose commit is on `main`. A branch, a
+            # candidate tag (built from any ref) or a bare commit is refused
+            # before anything is checked out or built. The workflow itself must
+            # also run from `main`, so the scripts that sign are main's.
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              echo "::error::A rollback runs only from main."
+              exit 1
+            fi
+            case "${ROLLBACK_REF}" in
+              v[0-9]*.[0-9]*.[0-9]*-preview.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::${ROLLBACK_REF} is not a published Nightly tag (v<version>-preview.<date>.<run>)."
+                exit 1
+                ;;
+            esac
+            if ! gh release view "${ROLLBACK_REF}" --json tagName >/dev/null 2>&1; then
+              echo "::error::${ROLLBACK_REF} is not a published release."
+              exit 1
+            fi
+            source_commit=$(git rev-parse --verify --quiet "refs/tags/${ROLLBACK_REF}^{commit}") || {
+              echo "::error::${ROLLBACK_REF} does not name a tag in this repository."
+              exit 1
+            }
+            git fetch --quiet origin main
+            if ! git merge-base --is-ancestor "${source_commit}" origin/main; then
+              echo "::error::${ROLLBACK_REF} (${source_commit}) is not on main."
+              exit 1
+            fi
+            # The rebuilt Nightly must refuse Octant's builds and read the feed
+            # name this workflow publishes; an older ref would decode the new
+            # feed as malformed and never update again.
+            if ! git show "${source_commit}:apps/desktop/src/appUpdateFeed.ts" | grep -qF '.octant-nightly.json'; then
+              echo "::error::${ROLLBACK_REF} predates the feed that names its app; it cannot be rolled forward to."
+              exit 1
+            fi
+            echo "Rolling Nightly forward to ${ROLLBACK_REF} (${source_commit})."
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            ring="candidate"
+            flavor="stable"
+            product="Octant"
+            asset_prefix="Octant"
+          fi
+          {
+            echo "ring=${ring}"
+            echo "flavor=${flavor}"
+            echo "product=${product}"
+            echo "asset_prefix=${asset_prefix}"
+            echo "source_commit=${source_commit}"
+          } >> "$GITHUB_OUTPUT"
           # The date and the run number both go in: the date is for whoever
           # reads the version, and the run number keeps two builds on one day
           # distinct. Both are numeric, so they order the way the updater
@@ -78,15 +163,100 @@ jobs:
           # release target can be a branch name even when a SHA is needed.
           bun scripts/decide-preview-release.ts
 
+  # The usable-client preflight a Nightly build must pass before anything is
+  # built, signed or published (`docs/design/nightly-app.md`, "Before Nightly
+  # publishes"). It holds no secret and no environment: the channel table, the
+  # synthetic client smoke, an unsigned packaged Nightly, and the newest
+  # published Octant's host feature list, read with a read-only token. Only a
+  # Nightly run (scheduled, or a rollback) needs it; a dispatched Octant
+  # candidate skips it and is not held by it.
+  nightly-preflight:
+    name: Nightly usable-client preflight
+    needs: decide
+    if: needs.decide.outputs.build == 'true' && needs.decide.outputs.flavor == 'nightly'
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      # A rollback is checked as the source it rebuilds, against today's Octant.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      # The client smoke runs the Electron the desktop app pins, which its
+      # package fetches only on demand.
+      - run: node node_modules/electron/install.js
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+      - run: bun run --cwd apps/desktop build
+      # The packaged check reads the development-build refusal through System
+      # Events; without Accessibility access on the runner it reports that one
+      # check unverified and the rest still decide.
+      - name: Run the Nightly preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run nightly:preflight
+
+  # Linux Nightly's equivalents: the client trust tests the "Desktop Linux
+  # client trust" CI job runs, on this run's source. The AppImage payload check
+  # is part of packaging itself, which refuses before anything is uploaded.
+  # Keep the steps in step with that job in ci.yml.
+  nightly-preflight-linux:
+    name: Nightly Linux client trust
+    needs: decide
+    if: needs.decide.outputs.build == 'true' && needs.decide.outputs.flavor == 'nightly'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          bubblewrap dbus gnome-keyring libsecret-tools
+      - env:
+          OCTANT_REQUIRE_LINUX_ISOLATION: "1"
+        run: bun run --cwd scripts test -- build-desktop-peer-linux.test.ts
+      - run: bun run --cwd apps/desktop test -- --exclude=src/browserSurfaceHost.realPage.test.ts
+      - env:
+          OCTANT_SECRET_SERVICE_KEYRING_TEST: "1"
+        run: >-
+          dbus-run-session -- sh -c
+          'printf octant-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+          bun run --cwd packages/host-runtime test -- src/secretServiceKeyringSeparation.test.ts'
+
   publish:
     name: Build and publish (${{ matrix.target }})
-    needs: decide
-    if: needs.decide.outputs.build == 'true'
-    # Holds the Developer ID, the notary profile, the preview feed signing key
-    # (never the stable one: unreviewed main runs here and could read it).
+    needs: [decide, nightly-preflight, nightly-preflight-linux]
+    # A Nightly build runs only after both preflights passed. An Octant
+    # candidate skips them: `skipped` is accepted for that flavor alone, so a
+    # failed, cancelled or skipped preflight never lets a Nightly through.
+    if: >-
+      ${{ !cancelled() && needs.decide.outputs.build == 'true' &&
+      ((needs.decide.outputs.flavor == 'nightly' &&
+      needs.nightly-preflight.result == 'success' &&
+      needs.nightly-preflight-linux.result == 'success') ||
+      (needs.decide.outputs.flavor == 'stable' &&
+      needs.nightly-preflight.result == 'skipped' &&
+      needs.nightly-preflight-linux.result == 'skipped')) }}
+    # Holds the Developer ID and the notary profile, which packaging needs.
     # Scoping them to an environment keeps them off every other workflow in the
-    # repository. The feed is published with the job's own token, so no
-    # separate publish credential lives here.
+    # repository. This job runs the built source's own code (install scripts,
+    # build, packaging), so the feed signing key is never in it: the `feed` job
+    # signs from the uploaded archive alone.
     environment: preview
     strategy:
       fail-fast: false
@@ -97,25 +267,43 @@ jobs:
             platform: darwin
             arch: arm64
             apple_signing: true
-            artifact_glob: "out/Octant-*-darwin-arm64.zip"
+            artifact_suffix: "-darwin-arm64.zip"
           - target: linux-x64
             runner: ubuntu-24.04
             platform: linux
             arch: x64
             apple_signing: false
-            artifact_glob: "out/Octant-*-linux-x64.AppImage"
+            artifact_suffix: "-linux-x64.AppImage"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: write
+    env:
+      # A rollback builds the published Nightly tag in its own checkout; the
+      # `feed` job still signs and publishes with this workflow's scripts, so
+      # the feed carries the fields and names current installs require.
+      SOURCE_DIR: ${{ needs.decide.outputs.source_commit != '' && 'release-source' || '.' }}
+      SOURCE_COMMIT: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the known-good ref
+        if: needs.decide.outputs.source_commit != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit }}
+          path: release-source
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - name: Install the known-good ref
+        if: needs.decide.outputs.source_commit != ''
+        working-directory: release-source
+        run: bun install --frozen-lockfile
       - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+        working-directory: ${{ env.SOURCE_DIR }}
       - run: bun run --cwd apps/desktop build
+        working-directory: ${{ env.SOURCE_DIR }}
 
       # Values that are not credentials are repository variables rather than
       # secrets: the team id and the identity appear in the signature.
@@ -148,19 +336,23 @@ jobs:
         if: matrix.apple_signing
         env:
           OCTANT_RELEASE_BUILD: "1"
+          OCTANT_PACKAGE_FLAVOR: ${{ needs.decide.outputs.flavor }}
           OCTANT_RELEASE_VERSION: ${{ needs.decide.outputs.version }}
           OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           OCTANT_SIGNING_IDENTITY: ${{ vars.OCTANT_SIGNING_IDENTITY }}
           OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
           OCTANT_NOTARY_PROFILE: octant-notary
+        working-directory: ${{ env.SOURCE_DIR }}
         run: bun run package:desktop
 
       - name: Package Linux AppImage (unsigned dogfood)
         if: ${{ !matrix.apple_signing }}
         env:
+          OCTANT_PACKAGE_FLAVOR: ${{ needs.decide.outputs.flavor }}
           OCTANT_RELEASE_VERSION: ${{ needs.decide.outputs.version }}
           OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
+        working-directory: ${{ env.SOURCE_DIR }}
         run: bun run package:desktop
 
       # The candidate that could not start imported @modelcontextprotocol/sdk
@@ -169,7 +361,20 @@ jobs:
       # before a tag is published.
       - name: Refuse to publish if the packaged server cannot start
         if: matrix.apple_signing
+        env:
+          OCTANT_PACKAGE_FLAVOR: ${{ needs.decide.outputs.flavor }}
+        working-directory: ${{ env.SOURCE_DIR }}
         run: bun scripts/assert-packaged-server-starts.ts
+
+      # The signed and notarized bundle, read again: a Developer ID from the
+      # release's team, its fuses, the peer-status addon, its link scheme, its
+      # command and no client smoke harness. This workflow's own check runs on
+      # a rollback's bundle too.
+      - name: Refuse to publish a Nightly that is not the packaged client
+        if: matrix.apple_signing && needs.decide.outputs.flavor == 'nightly'
+        env:
+          OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
+        run: bun scripts/assert-packaged-nightly-client.ts --bundle "${SOURCE_DIR}/out/Octant Nightly.app" --require-developer-id
 
       - name: Publish the release archive
         id: release
@@ -177,11 +382,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.decide.outputs.version }}
           RING: ${{ needs.decide.outputs.ring }}
-          ARTIFACT_GLOB: ${{ matrix.artifact_glob }}
+          PRODUCT: ${{ needs.decide.outputs.product }}
+          ASSET_PREFIX: ${{ needs.decide.outputs.asset_prefix }}
+          ARTIFACT_SUFFIX: ${{ matrix.artifact_suffix }}
           TARGET: ${{ matrix.target }}
+          ROLLBACK_REF: ${{ inputs.rollback_ref }}
         run: |
           set -euo pipefail
-          archive=$(ls ${ARTIFACT_GLOB})
+          # `Octant-*` cannot match `Octant Nightly-*`, so the glob names one
+          # flavor's artifact and a stray build of the other is not published.
+          built=$(python3 -c 'import glob, os; artifacts = glob.glob(os.path.join(os.environ["SOURCE_DIR"], "out", glob.escape(os.environ["PRODUCT"]) + "-*" + os.environ["ARTIFACT_SUFFIX"])); assert len(artifacts) == 1, "Expected one " + os.environ["PRODUCT"] + " release artifact"; print(artifacts[0])')
+          # Copied to the exact space-free name the release and feed use, so
+          # the bytes uploaded are the bytes the feed step hashes and signs.
+          mkdir -p "${RUNNER_TEMP}/release"
+          archive="${RUNNER_TEMP}/release/${ASSET_PREFIX}-${VERSION}${ARTIFACT_SUFFIX}"
+          cp "$built" "$archive"
           tag="v${VERSION}"
           # Matrix rows share one tag. The first arch creates the release;
           # later arches attach their artifact without racing a second create.
@@ -190,17 +405,87 @@ jobs:
           else
             gh release create "$tag" "$archive" \
               --prerelease \
-              --target "${GITHUB_SHA}" \
-              --title "Octant ${VERSION} (${RING})" \
-              --notes "${RING} build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Not a stable release." \
+              --target "${SOURCE_COMMIT}" \
+              --title "${PRODUCT} ${VERSION} (${RING})" \
+              --notes "${RING} build of ${ROLLBACK_REF:-${GITHUB_REF_NAME}} at ${SOURCE_COMMIT}. Not a stable release." \
               || gh release upload "$tag" "$archive" --clobber
           fi
-          # Constructed rather than read back from the API: the download URL of
-          # a release asset is determined by the tag and the file name, and
-          # deriving it means the feed cannot end up pointing at whichever
-          # asset a list query happened to return first.
-          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+
+      # What this Octant candidate's host offers an Octant Nightly window, so
+      # a Nightly build can be checked against the published Octant before it
+      # ships. One row attaches it; the document does not depend on the
+      # platform. A candidate is built from this checkout, so the contracts
+      # read here are the build's own.
+      - name: Attach the host feature list
+        if: needs.decide.outputs.ring == 'candidate' && matrix.target == 'linux-x64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/host-features/octant-host-features.json"
+          bun scripts/write-host-features.ts --version "$VERSION" --out "$out"
+          gh release upload "v${VERSION}" "$out" --clobber
+
+      # The exact bytes uploaded to the release, for the job that signs them.
+      - name: Hand the archive to the feed job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ steps.release.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Signs and publishes the feed without running any of the built source's
+  # code: it checks out this workflow's own commit, downloads the archive the
+  # build job uploaded, hashes it into the signature and publishes. Only this
+  # job reads the preview feed key (never the stable one: unreviewed main runs
+  # in the preview workflow and could read it).
+  feed:
+    name: Sign and publish the feed (${{ matrix.target }})
+    needs: [decide, nightly-preflight, nightly-preflight-linux, publish]
+    # A target whose build failed has no archive and fails here; the other
+    # target's feed still publishes, as when each build signed its own. The
+    # preflight condition repeats the build's, so no feed names a Nightly that
+    # did not pass it.
+    if: >-
+      ${{ !cancelled() && needs.decide.outputs.build == 'true' &&
+      needs.publish.result != 'skipped' &&
+      ((needs.decide.outputs.flavor == 'nightly' &&
+      needs.nightly-preflight.result == 'success' &&
+      needs.nightly-preflight-linux.result == 'success') ||
+      (needs.decide.outputs.flavor == 'stable' &&
+      needs.nightly-preflight.result == 'skipped' &&
+      needs.nightly-preflight-linux.result == 'skipped')) }}
+    environment: preview
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            platform: darwin
+            arch: arm64
+            apple_signing: true
+          - target: linux-x64
+            platform: linux
+            arch: x64
+            apple_signing: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Writes the feed files to the ring's mailbox release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ runner.temp }}/release
 
       - name: Sign the feed (or dry-run when unsigned)
         id: feed
@@ -208,28 +493,37 @@ jobs:
           OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY }}
           VERSION: ${{ needs.decide.outputs.version }}
           RING: ${{ needs.decide.outputs.ring }}
-          ARTIFACT_URL: ${{ steps.release.outputs.url }}
-          ARCHIVE: ${{ steps.release.outputs.archive }}
+          FLAVOR: ${{ needs.decide.outputs.flavor }}
           PLATFORM: ${{ matrix.platform }}
           ARCH: ${{ matrix.arch }}
-          TARGET: ${{ matrix.target }}
           APPLE_SIGNING: ${{ matrix.apple_signing }}
         run: |
           set -euo pipefail
-          # The name `updateFeedRelativePath` gives preview and candidate. Never
-          # the bare `${TARGET}.json`: that one is the bridge feed, and
-          # overwriting it with a preview-key signature would strand installs
-          # that know only the stable key.
-          out="${RUNNER_TEMP}/feed/${RING}/${TARGET}.preview-key.json"
+          shopt -s nullglob
+          archives=("${RUNNER_TEMP}"/release/*)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "Expected one release archive, found ${#archives[@]}." >&2
+            exit 1
+          fi
+          archive="${archives[0]}"
+          # Constructed rather than read back from the API: the download URL of
+          # a release asset is determined by the tag and the file name, and
+          # deriving it means the feed cannot end up pointing at whichever
+          # asset a list query happened to return first.
+          asset=$(python3 -c 'import os, sys, urllib.parse; print(urllib.parse.quote(os.path.basename(sys.argv[1]), safe=""))' "$archive")
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${asset}"
+          machine=(--ring "$RING" --platform "$PLATFORM" --arch "$ARCH")
+          # The names `updateFeedRelativePath` gives this ring, never the older
+          # preview names: Octant builds published on preview read those, and
+          # must never be offered Nightly.
+          out="${RUNNER_TEMP}/feed/$(bun scripts/sign-update-feed.ts --print-feed-path "${machine[@]}")"
           args=(
             --version "$VERSION"
-            --ring "$RING"
-            --platform "$PLATFORM"
-            --arch "$ARCH"
-            --url "$ARTIFACT_URL"
-            --artifact "$ARCHIVE"
+            "${machine[@]}"
+            --flavor "$FLAVOR"
+            --url "$url"
+            --artifact "$archive"
             --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-            --out "$out"
           )
           if [ -z "${OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY:-}" ]; then
             # macOS Apple Silicon remains a hard require: an unsigned zip at the
@@ -239,11 +533,22 @@ jobs:
               echo "OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY is required for darwin-arm64 releases." >&2
               exit 1
             fi
-            bun scripts/sign-update-feed.ts --dry-run "${args[@]}"
+            bun scripts/sign-update-feed.ts --dry-run "${args[@]}" --out "$out"
             echo "signed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          bun scripts/sign-update-feed.ts "${args[@]}"
+          bun scripts/sign-update-feed.ts "${args[@]}" --out "$out"
+          # Published in this order: the new name first, so the build an older
+          # install is moved to already finds its own feed.
+          printf '%s\n' "$out" > "${RUNNER_TEMP}/feed-files"
+          if [ "$RING" = "candidate" ]; then
+            # Candidate installs built before the release named its app decode
+            # a feed strictly; they read this old-shape document and move to a
+            # build that reads the new name.
+            legacy="${RUNNER_TEMP}/feed/$(bun scripts/sign-update-feed.ts --print-feed-path "${machine[@]}" --legacy-document)"
+            bun scripts/sign-update-feed.ts "${args[@]}" --legacy-document --out "$legacy"
+            printf '%s\n' "$legacy" >> "${RUNNER_TEMP}/feed-files"
+          fi
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish the feed
@@ -251,5 +556,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RING: ${{ needs.decide.outputs.ring }}
-          TARGET: ${{ matrix.target }}
-        run: scripts/publish-update-feed.sh "$RING" "${RUNNER_TEMP}/feed/${RING}/${TARGET}.preview-key.json"
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < "${RUNNER_TEMP}/feed-files"
+          scripts/publish-update-feed.sh "$RING" "${files[@]}"

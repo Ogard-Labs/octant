@@ -1,4 +1,3 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute } from "node:path";
 import {
   decodeDiscoveryCommand,
@@ -14,6 +13,7 @@ import {
 import { canLocateRuntimeBinary } from "@octant/domain";
 import { isLoopbackHostname } from "../shellRoutes";
 import type { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
+import { admitDesktopBroker, admitsWindow } from "../desktopBrokerAdmission";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import { authenticateProjectRequest } from "../projectBindingRoutes";
 import type { DiscoveryService } from "./discoveryService";
@@ -254,15 +254,17 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
    * renderer cannot mint a receipt for a path of its own choosing.
    */
   async function issueBinaryReceipt(request: Request): Promise<Response> {
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: dependencies.desktopBridgeSecret,
+      windowAuthorityStore: dependencies.windowAuthorityStore,
+      now: now(),
+    });
     if (
       request.method !== "POST" ||
-      request.headers.get("origin") !== null ||
       dependencies.desktopBridgeSecret === undefined ||
       dependencies.binaryReceipts === undefined ||
-      !secretsEqual(
-        dependencies.desktopBridgeSecret,
-        request.headers.get("x-octant-desktop-secret") ?? "",
-      )
+      admission.status !== "admitted"
     ) {
       return response(
         { category: "unauthorized", message: "Binary receipt request is unauthorized." },
@@ -288,6 +290,13 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
       return response(
         { category: "invalid-configuration", message: "Binary receipt request is invalid." },
         400,
+        null,
+      );
+    }
+    if (!admitsWindow(admission, value.windowId)) {
+      return response(
+        { category: "unauthorized", message: "Binary receipt request is unauthorized." },
+        401,
         null,
       );
     }
@@ -431,12 +440,6 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
         (candidate.binaryPath === path || candidate.discoveredPath === path),
     );
   }
-}
-
-function secretsEqual(expected: string, actual: string): boolean {
-  const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
-  const actualDigest = createHash("sha256").update(actual, "utf8").digest();
-  return timingSafeEqual(expectedDigest, actualDigest);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

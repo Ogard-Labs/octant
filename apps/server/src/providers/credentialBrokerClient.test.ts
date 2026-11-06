@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import { makeCredentialBrokerClient, makeCredentialCleanupClient } from "./credentialBrokerClient";
+import { startCredentialBroker } from "@octant/host-runtime";
+import {
+  makeCredentialBrokerClient,
+  makeCredentialCleanupClient,
+  makeProviderKeyReferenceReader,
+} from "./credentialBrokerClient";
 
 const providerInstanceId = randomUUID();
 
@@ -343,3 +348,45 @@ async function listen(
       }),
   };
 }
+
+describe("makeProviderKeyReferenceReader", () => {
+  const id = "80000000-0000-4000-8000-000000000401";
+
+  it("reads no link from a broker started without linked secret stores", async () => {
+    const broker = await startCredentialBroker({
+      has: async () => true,
+      resolve: async () => "sk-test",
+      set: async () => undefined,
+      delete: async () => undefined,
+    });
+    try {
+      const read = makeProviderKeyReferenceReader({
+        url: broker.url,
+        token: broker.token,
+        fetch: async (input, init) =>
+          await broker.fetchForTest(new Request(String(input), init), "127.0.0.1"),
+      });
+      await expect(read(id)).resolves.toEqual({ status: "none" });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("keeps the keyring's cause when the broker cannot read the key", async () => {
+    const answer = (body: unknown, status: number) =>
+      makeProviderKeyReferenceReader({
+        url: "http://127.0.0.1:1",
+        token: "token",
+        fetch: async () => Response.json(body, { status }),
+      })(id);
+    await expect(answer({ error: "unavailable", cause: "locked" }, 503)).resolves.toEqual({
+      status: "unavailable",
+      cause: "locked",
+    });
+    await expect(answer({ error: "failed" }, 503)).resolves.toEqual({ status: "unavailable" });
+    await expect(
+      answer({ status: "linked", store: "1password", reference: "op://v/i/f" }, 200),
+    ).resolves.toEqual({ status: "linked" });
+    await expect(answer({ status: "none" }, 200)).resolves.toEqual({ status: "none" });
+  });
+});

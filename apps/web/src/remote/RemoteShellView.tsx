@@ -1,3 +1,5 @@
+import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
+import { readContinuationLink } from "../continuity/continuationLink";
 import type { OctantMode } from "@octant/contracts/modes";
 import { useEffect, useMemo, useState } from "react";
 import type { RemoteSessionBridge } from "@octant/client-runtime";
@@ -41,7 +43,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   const connectionStatus = useConnectionStatus(supervisor);
   const clients = useMemo(() => createRemoteProductClients(props.bridge), [props.bridge]);
   const hosts = buildRemoteHostObservation({ state });
-  const [activeMode, setActiveMode] = useState<OctantMode>("chat");
+  const [activeMode, setActiveMode] = useState<OctantMode>(
+    () => readContinuationLink(globalThis.location?.href ?? "")?.mode ?? "chat",
+  );
   const connected = canExecuteRemoteProductMutation(state);
   const localHostSurfaces = useMemo(
     () => listRemoteShellSurfacesByAvailability("local-host-only"),
@@ -133,7 +137,15 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         />
       ) : null}
 
-      <RemoteWorkspace clients={clients} connected={connected} mode={activeMode} />
+      <ContinuityScreenContext.Provider
+        value={{
+          hostLabel: hosts[0]?.displayName ?? "Paired host",
+          screenLabel: "This paired browser",
+          origin,
+        }}
+      >
+        <RemoteWorkspace clients={clients} connected={connected} mode={activeMode} />
+      </ContinuityScreenContext.Provider>
 
       <RemoteDeviceSelfPanel
         bridge={props.bridge}

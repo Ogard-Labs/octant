@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import {
   type MentionableThreadId,
   type ThreadMentionTranscriptEntry,
   type UtcTimestamp,
+  type WindowId,
 } from "@octant/contracts";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
@@ -556,6 +558,7 @@ describe("ThreadMentionService Side Chat source", () => {
     expect(resolved.source.truncated).toBe(true);
     expect(chat.readTranscript).toHaveBeenCalledWith(windowId, chatThreadId, {
       maxEntries: MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
+      observeVersion: expect.any(Function),
     });
   });
 
@@ -1416,4 +1419,88 @@ describe("createCodeThreadMentionDirectory", () => {
       "a3",
     );
   });
+});
+
+it("captures actual Work turn versions and authorized Code evidence hashes at the transcript read boundary", async () => {
+  const observed: import("@octant/contracts").SideChatSourceVersionFact[] = [];
+  const turnId = "00000000-0000-4000-8000-000000000601";
+  const work = createWorkThreadMentionDirectory({
+    bootstrap: async () => ({ threads: [] }),
+    transcript: async () => ({
+      turns: [
+        {
+          turnId,
+          version: 7 as import("@octant/contracts").AggregateVersion,
+          status: "completed",
+          transcript: [
+            { role: "user", text: "actual Work prompt" },
+            { role: "assistant", text: "actual Work answer" },
+          ],
+          acceptedAt: "2026-08-14T10:00:00.000Z" as UtcTimestamp,
+          updatedAt: "2026-08-14T10:01:00.000Z" as UtcTimestamp,
+        },
+      ],
+    }),
+  });
+  expect(
+    await work.readTranscript(windowId, workThreadId, {
+      maxEntries: 40,
+      observeVersion: (fact) => observed.push(fact),
+    }),
+  ).toMatchObject([{ text: "actual Work prompt" }, { text: "actual Work answer" }]);
+  expect(observed).toEqual([
+    { kind: "aggregate", aggregateType: "work-turn", id: turnId, version: 7 },
+  ]);
+  const promptId = "00000000-0000-4000-8000-000000000602";
+  const answerId = "00000000-0000-4000-8000-000000000603";
+  const readEvidence = vi.fn(
+    async (_window: WindowId, _thread: unknown, _operation: unknown, id: string) => ({
+      bytes: new TextEncoder().encode(
+        id === promptId ? "actual Code prompt" : "actual Code answer",
+      ),
+    }),
+  );
+  const code = createCodeThreadMentionDirectory({
+    bootstrap: async () => ({ threads: [] }),
+    conversation: async () => ({
+      turns: [
+        {
+          operationId: turnId as never,
+          prompt: { contentId: promptId },
+          assistant: [{ contentId: answerId }],
+          status: "completed",
+          startedAt: "2026-08-14T10:00:00.000Z" as UtcTimestamp,
+          updatedAt: "2026-08-14T10:01:00.000Z" as UtcTimestamp,
+        },
+      ],
+      nextCursor: 1,
+      hasMore: false,
+    }),
+    readEvidence,
+  });
+  observed.length = 0;
+  expect(
+    await code.readTranscript(windowId, chatThreadId, {
+      maxEntries: 40,
+      observeVersion: (fact) => observed.push(fact),
+    }),
+  ).toMatchObject([{ text: "actual Code prompt" }, { text: "actual Code answer" }]);
+  expect(observed).toEqual([
+    {
+      kind: "content",
+      id: promptId,
+      digest: createHash("sha256").update("actual Code prompt").digest("hex"),
+    },
+    {
+      kind: "content",
+      id: answerId,
+      digest: createHash("sha256").update("actual Code answer").digest("hex"),
+    },
+  ]);
+  expect(readEvidence).toHaveBeenCalledWith(
+    windowId,
+    decodeCodeThreadId(String(chatThreadId)),
+    turnId,
+    answerId,
+  );
 });

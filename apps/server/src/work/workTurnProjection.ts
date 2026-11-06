@@ -65,6 +65,9 @@ export class WorkTurnProjection {
       const existing = this.#byRequest.get(accepted.requestId);
       if (existing !== undefined && existing.version >= 1) return;
       const turn = decodeWorkTurnState({
+        ...(accepted.toolCatalogHandoff === undefined
+          ? {}
+          : { toolCatalogHandoff: accepted.toolCatalogHandoff }),
         requestId: accepted.requestId,
         threadId: accepted.threadId,
         turnId: accepted.turnId,
@@ -77,10 +80,14 @@ export class WorkTurnProjection {
         ...(accepted.carriedFrom === undefined ? {} : { carriedFrom: accepted.carriedFrom }),
         status: "accepted",
         prompt: accepted.prompt,
+        ...(accepted.sideChatReturns === undefined
+          ? {}
+          : { sideChatReturns: accepted.sideChatReturns }),
         transcript: [{ role: "user", text: accepted.prompt }],
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}
           : { attachments: accepted.attachments }),
+        ...(accepted.inputReceipt === undefined ? {} : { inputReceipt: accepted.inputReceipt }),
         ...(accepted.extensionSelections === undefined || accepted.extensionSelections.length === 0
           ? {}
           : { extensionSelections: accepted.extensionSelections }),

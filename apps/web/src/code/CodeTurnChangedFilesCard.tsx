@@ -14,7 +14,12 @@ const VISIBLE_AT_REST = 5;
  * "created", because a file the person saved from an editor during the turn is
  * recorded exactly like one the provider wrote.
  */
-export function CodeTurnChangedFilesCard(props: { readonly changedFiles: CodeTurnChangedFiles }) {
+export function CodeTurnChangedFilesCard(props: {
+  readonly changedFiles: CodeTurnChangedFiles;
+  readonly onReviewFile?: (path: string) => void;
+  readonly reviewUnavailable?: string;
+  readonly comparison?: "current-checkout" | "captured-turn";
+}) {
   const { files, total, truncated } = props.changedFiles;
   const [open, setOpen] = useState(false);
   const listId = useId();
@@ -45,14 +50,26 @@ export function CodeTurnChangedFilesCard(props: { readonly changedFiles: CodeTur
             return (
               <li className="code-turn-files__row" key={file.path} title={file.path}>
                 <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
-                <span className="code-turn-files__path">
-                  {slash === -1 ? null : (
-                    <span className="code-turn-files__directory">
-                      {file.path.slice(0, slash + 1)}
-                    </span>
-                  )}
-                  <span className="code-turn-files__name">{file.path.slice(slash + 1)}</span>
-                </span>
+                {props.onReviewFile === undefined ? (
+                  <span className="code-turn-files__path">
+                    {slash === -1 ? null : (
+                      <span className="code-turn-files__directory">
+                        {file.path.slice(0, slash + 1)}
+                      </span>
+                    )}
+                    <span className="code-turn-files__name">{file.path.slice(slash + 1)}</span>
+                  </span>
+                ) : (
+                  <OctantButton
+                    type="button"
+                    variant="link"
+                    className="code-turn-files__path"
+                    aria-label={`Review ${file.path}`}
+                    onClick={() => props.onReviewFile?.(file.path)}
+                  >
+                    {file.path}
+                  </OctantButton>
+                )}
                 {file.binary === true ? (
                   <span className="code-turn-files__binary">Binary</span>
                 ) : (
@@ -79,11 +96,21 @@ export function CodeTurnChangedFilesCard(props: { readonly changedFiles: CodeTur
           <ChevronDown aria-hidden="true" data-open={open} size={12} />
         </OctantButton>
       )}
+      <p className="code-turn-files__note">
+        Checkout-only observation; extra Project folders are not included.
+      </p>
+      {props.reviewUnavailable === undefined ? null : (
+        <p className="code-turn-files__note" role="status">
+          {props.reviewUnavailable}
+        </p>
+      )}
       {truncated ? (
         <p className="code-turn-files__note" role="status">
           {files.length === 0
-            ? "More changed than could be listed here. Review has the whole change."
-            : `Showing ${files.length} of ${total}. Review has the whole change.`}
+            ? "More changed than could be listed here. Review shows the current checkout comparison."
+            : props.comparison === "captured-turn"
+              ? `Showing ${files.length} of ${total}. Some captured paths are omitted.`
+              : `Showing ${files.length} of ${total}. Review shows the current checkout comparison.`}
         </p>
       ) : null}
     </section>

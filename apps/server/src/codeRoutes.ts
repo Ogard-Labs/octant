@@ -1,3 +1,4 @@
+import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
   refusesTerminalSessionImport,
@@ -179,7 +180,7 @@ import {
 import { Schema } from "effect";
 import type { CodeDebugService } from "./code/codeDebugService";
 import type { CodeLanguageService } from "./code/codeLanguageService";
-import type { CodeService } from "./code/codeService";
+import type { CodeService, CodeServiceExecutionContext } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
@@ -251,6 +252,7 @@ export interface CodeFileWatchInput {
   readonly checkoutId: typeof CodeCheckoutId.Type;
   /** An extra folder of the Project, by absolute path, in place of the checkout. */
   readonly folder?: CodeRelativePath | undefined;
+  readonly folders?: ReadonlyArray<CodeRelativePath | ".">;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -289,6 +291,7 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     command: CodeCommand,
     signal?: AbortSignal,
+    executionContext?: CodeServiceExecutionContext,
   ) => Promise<CodeCommandResult> | CodeCommandResult;
   readonly executeOperation?: (
     authenticatedWindowId: WindowId,
@@ -615,7 +618,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // route directly.
     let operationInitiator: "user" | "agent";
     let callerKind: "local-window" | "remote-device";
-    let hunkAdmissionCurrent: () => boolean;
+    let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
     try {
@@ -631,8 +634,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       callerKind = principalContext.principal.kind;
       principalAbortSignal = principalContext.abortSignal;
       operationInitiator = callerKind === "local-window" ? "user" : "agent";
-      const capability = request.headers.get("x-octant-window-capability") ?? "";
-      hunkAdmissionCurrent = () => {
+      const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
+      // Review and selected-hunk requests recheck that this same window still
+      // holds the authority it presented, at each awaited step of the request.
+      liveAdmissionCurrent = () => {
         if (request.signal.aborted || principalContext.abortSignal?.aborted === true) return false;
         if (principalContext.principal.kind === "remote-device") return true;
         try {
@@ -725,6 +730,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          if (command?.kind === "change-code-thread-browser-profile") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Choose the default Browser profile through this task’s Browser control.",
+              },
+              403,
+              origin,
+            );
+          }
           // Full access no longer asks for a native confirmation, so the
           // confirmation no longer keeps a paired device from reaching it.
           // A device may lower a thread; raising one to Full access is chosen
@@ -789,13 +804,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
-              ...([
+              ...(requiresLiveCodeReviewAuthority(operation) ||
+              [
                 "prepare-git-hunks",
                 "stage-git-hunks",
                 "unstage-git-hunks",
                 "reverse-git-hunks",
               ].includes(operation.kind)
-                ? { admissionCurrent: hunkAdmissionCurrent }
+                ? { admissionCurrent: liveAdmissionCurrent }
                 : {}),
             }),
           );
@@ -1890,7 +1906,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               threadId,
               operationId,
               contentId,
-              hunkAdmissionCurrent,
+              liveAdmissionCurrent,
             ),
             origin,
           );
@@ -2021,15 +2037,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           const watchInput = decodeFileWatchQuery(url);
+          const closed = new AbortController();
           // Awaited here, not inside the stream: a watch the host refuses must
           // fail while this call can still answer with a status. Once the
           // response exists the only thing left to say is "the stream ended",
           // which the client cannot tell from a dropped connection.
           const notices = await dependencies.service.watchFiles(authenticatedWindowId, {
             ...watchInput,
-            signal: request.signal,
+            signal: AbortSignal.any([request.signal, closed.signal]),
           });
-          return noticeStreamResponse(notices, request.signal, origin);
+          return noticeStreamResponse(notices, request.signal, origin, () => closed.abort());
         }
         case "test-listing": {
           if (request.method !== "GET") {
@@ -2132,7 +2149,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               await dependencies.service.readOperationContents(
                 authenticatedWindowId,
                 input,
-                hunkAdmissionCurrent,
+                liveAdmissionCurrent,
               ),
             ),
             200,
@@ -2676,19 +2693,40 @@ function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
   const threadId = url.searchParams.get("threadId");
   const checkoutId = url.searchParams.get("checkoutId");
   const folder = url.searchParams.get("folder");
+  const folders = url.searchParams.get("folders");
   if (
     threadId === null ||
     checkoutId === null ||
-    url.searchParams.size > (folder === null ? 2 : 3)
+    (folder !== null && folders !== null) ||
+    url.searchParams.size > (folder === null && folders === null ? 2 : 3)
   ) {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
   }
   try {
     if (folder !== null && !folder.startsWith("/")) throw new Error("not absolute");
+    const values: unknown = folders === null ? undefined : JSON.parse(folders);
+    if (
+      values !== undefined &&
+      (!Array.isArray(values) ||
+        values.length < 1 ||
+        values.length > 17 ||
+        new Set(values).size !== values.length ||
+        values.some(
+          (value) => typeof value !== "string" || (value !== "." && !value.startsWith("/")),
+        ))
+    )
+      throw new Error("invalid folders");
     return {
       threadId: decodeCodeThreadId(threadId),
       checkoutId: decodeCheckoutId(checkoutId),
       ...(folder === null ? {} : { folder: decodeCodeProjectFilePath(folder) }),
+      ...(Array.isArray(values)
+        ? {
+            folders: values.map((value) =>
+              value === "." ? ("." as const) : decodeCodeProjectFilePath(value),
+            ),
+          }
+        : {}),
     };
   } catch {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
@@ -2864,6 +2902,7 @@ function noticeStreamResponse(
   notices: AsyncIterable<CodeFileChangeNotice>,
   signal: AbortSignal,
   origin: string | null,
+  onCancel?: () => void,
 ): Response {
   const encoder = new TextEncoder();
   const iterator = notices[Symbol.asyncIterator]();
@@ -2890,6 +2929,7 @@ function noticeStreamResponse(
       }
     },
     async cancel() {
+      onCancel?.();
       await iterator.return?.(undefined);
     },
   });

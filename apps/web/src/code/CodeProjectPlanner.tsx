@@ -377,23 +377,18 @@ export function CodeProjectPlanner(
           }}
           className="code-project-planner__review"
         >
-          <h2>{review.proposal.title}</h2>
-          <p className="oct-row-detail">
-            Approve and start creates this described task in {props.projectName ?? "this Project"}{" "}
-            and sends its exact proposal as the first message, using the provider, checkout and
-            access you choose below.
-          </p>
-          {!current || !reviewCurrent ? (
-            <OctantAlert tone="warning">
-              The proposal or host state changed. Close this review and refresh before deciding.
-            </OctantAlert>
-          ) : null}
           <NewTaskDraftScopeContext.Provider
             value={`planner-proposal:${String(review.proposal.id)}`}
           >
             <CodeComposerAdapter
               projectId={props.projectId}
               projectAvailable={current && reviewCurrent === true}
+              heading={
+                <>
+                  <h2>{"Review the planner's proposal"}</h2>
+                  <h3>{review.proposal.title}</h3>
+                </>
+              }
               fixedPrompt={review.proposal.intent}
               createLabel="Approve and start described task"
               providerGroups={providerGroups}
@@ -468,6 +463,16 @@ export function CodeProjectPlanner(
               }}
             />
           </NewTaskDraftScopeContext.Provider>
+          <p className="oct-row-detail">
+            Approve and start creates this described task in {props.projectName ?? "this Project"}{" "}
+            and sends its exact proposal as the first message, using the provider, checkout and
+            access you choose above.
+          </p>
+          {!current || !reviewCurrent ? (
+            <OctantAlert tone="warning">
+              The proposal or host state changed. Close this review and refresh before deciding.
+            </OctantAlert>
+          ) : null}
         </OctantDialog>
       )}
     </section>

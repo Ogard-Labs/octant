@@ -5008,6 +5008,12 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
 }
+/* A Nightly client's Octant-only page: one quiet line, no controls. */
+.settings-managed-in-octant {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
 /* label left, control right, description under the label */
 .settings-item {
   display: grid;
@@ -7236,6 +7242,17 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .thinking[open] > summary .chev {
   transform: rotate(90deg);
 }
+/* Reply detail at medium: the first line of shut reasoning, clipped to the row.
+   The zero width keeps its longest word out of the row's min-content: without
+   it the reply's grid widened past a 390px column instead of clipping. */
+.thinking-preview {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .thinking-body {
   margin-top: var(--oct-space-2);
   font-family: var(--oct-font-transcript);
@@ -9167,4 +9184,68 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   .skeleton::after {
     display: none;
   }
+}
+
+/* Thread decisions share the question card's typography and neutral ground. */
+.questionnaire {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.questionnaire__question {
+  border: 0;
+  margin: 0;
+  padding: var(--oct-space-2) 0;
+  min-width: 0;
+}
+.questionnaire__question legend {
+  font-weight: var(--oct-weight-medium);
+  overflow-wrap: anywhere;
+}
+.questionnaire__checkbox {
+  display: flex;
+  align-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  cursor: pointer;
+}
+.questionnaire__checkbox > span {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.questionnaire__written {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2);
+  min-width: 0;
+}
+.questionnaire__written textarea {
+  width: 100%;
+  min-width: 0;
+}
+.questionnaire .provider-question-card__actions {
+  flex-wrap: wrap;
+}
+.questionnaire-summary {
+  margin-block: var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+.questionnaire-summary summary {
+  cursor: pointer;
+  color: var(--oct-muted);
+}
+.questionnaire-summary dl {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-2) 0;
+}
+.questionnaire-summary dt {
+  font-weight: var(--oct-weight-medium);
+}
+.questionnaire-summary dd {
+  margin: 0;
+  white-space: pre-wrap;
 }

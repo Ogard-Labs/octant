@@ -65,6 +65,38 @@ settlement, duplicate requests, authority refusals, and dead approvals/questions
 Rendered checks at 1000px and 390px confirm the notice, actionable refusal,
 single-click continuation, and preservation of the composer draft.
 
+## Continue elsewhere
+
+An existing Chat, Work or Code conversation offers **Continue elsewhere** beside
+its composer. Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
+the source provider and the authoritative current destination. Choosing another
+provider uses the same provider/model command as its composer picker and sends
+nothing. Task state, the checkout and pending feedback remain on the execution
+host. The next turn uses the ordinary handoff and original-input checks described
+in the [architecture](../architecture.md#stop-reasons).
+
+The person may explicitly choose **Text only: omit files and images** for the
+next continuation. The choice is scoped to this endpoint and task, survives a
+reload with its unsent draft, travels in a queued message and resets after
+admission. Missing or unsupported originals refuse a preserving send; a text-only
+send records its omissions. A receiving thread's **Original inputs** disclosure
+reads the manifest admitted for that exact turn, attempt or operation, separately
+from the task briefing and agent reports. Unavailable or purged manifests remain
+unavailable; the renderer never substitutes a later input.
+
+A local window can read its existing paired-screen inventory and configured,
+browser-verifiable private listener. Copying a task link for a paired screen
+carries only mode and thread identity. After normal paired authentication, that
+screen selects the same host's existing task through ordinary read paths; it
+creates no thread, session, checkout or writer and sends no message. The receipt
+states that unsent drafts and local view state stay on their source screen,
+while host-held inputs, task state and pending feedback stay with the task. A
+paired browser can copy its already authenticated origin's task link. A missing
+browser-verifiable listener offers the existing paired app's task selection
+instead; opening the flow never pairs a device or enables a listener. Moving
+execution to another host remains subject to the existing supported host paths
+and is not implied by changing screens.
+
 ## Navigation and Projects
 
 The window is mode-first: a persistent left sidebar with the Work and Code
@@ -181,6 +213,16 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Reply detail in the thread in front
+
+The `reply-detail-cycle` keybinding (Mod+Shift+D by default) and the palette's
+Reply detail commands act on the thread in the active pane, setting that
+thread's own level, and only while that thread is on screen: a page or Settings
+covering the workspace leaves no thread in front. The palette also sets the
+default. The levels, the thread
+menu, and where the levels are kept are owned by
+[DESIGN.md: Transcript](../../DESIGN.md#transcript).
+
 ### Jump to the next waiting thread
 
 The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
@@ -293,19 +335,51 @@ means the host's. The choice is independent of the durable resume opt-in —
 hiding authorizes no provider turn, and a dispatched recovery lifts only the
 snooze the host set, never one the person set.
 
+### Deferring a pending question
+
+Home, Inbox and Review let a person defer an answerable Chat, Work or Code
+question using the existing future-time presets. The condensed row stays in
+the attention list and its count, after active requests, with **Bring back now**
+and a link to the thread. The shell clock restores its answers when the time
+arrives. Thread visibility, the original questionnaire and draft answers do not
+change. Deferring never answers a question, grants approval or resumes a turn.
+
+The local host rechecks window access and the current pending request before
+journaling an opaque request key and wake time. The key binds the exact request,
+choices and authority context; a changed, answered or cancelled request does
+not transfer its deferral to another question. Preferences replay after restart
+and invalidate navigation reads in other windows. Execution approvals, decisions
+and find-only lead/subagent questions cannot be deferred. Find-only questions
+need a stable answer identity before this control can apply to them.
+
 ## Panes and content navigation
 
 The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome. A pane retains renderer-session
-navigation tabs for conversations, files, previews, and canvases; selecting a
+overview, a utility surface, or a mode welcome. A pane retains navigation references for conversations, files, previews, and canvases; selecting a
 tab reopens that surface through the authoritative command path. Image creation
 and revision occupy pane-owned tabs whose drafts remain mounted while switching
 back to the conversation. Opening the same content selects its existing entry; closing active content
 selects its neighbor. A refused host open does not activate a successful tab.
-References are cleared when the pane or its authority context changes; reload
-restores only the authoritative visible surface. Closing image creation stops
-observation, while only Cancel job cancels generation on the host. Editor drafts
+Kept references and their order are saved in device-local storage per execution
+endpoint and client window, with exact host/mode/Project/root context and pane
+identity. Reload restores those references only when the current authorized
+workspace has the same context and pane. The authoritative workspace alone
+chooses the visible surface and selected tab; restoring references never opens
+another surface, starts a process, sends a draft or reapplies an approval.
+Temporary single-click thread previews are omitted, closed references stay
+closed, and selecting a missing or revoked reference shows the ordinary host
+refusal without opening a substitute. A pane/context change drops old references.
+Storage is bounded to 128 references per pane, 64 panes and 512 KiB on read;
+malformed or unavailable storage falls back to the current visible surface. Closing image creation stops
+observation, while only Cancel job cancels generation on the host. Editor cursor/scroll state is restored only for the same thread, checkout, file
+identity and digest. Review retains its selected file and scroll for the exact
+captured diff; an absent selected file stays explicit rather than retargeting.
+Transcript offsets require the same first loaded row and viewport width. These
+presentation references share the endpoint/window/context boundary, retain at
+most 64 entries and 128 KiB, and write no document text, native process identity,
+approval or authority. They never take focus or perform a host operation during
+restore. Composer drafts retain their existing durable storage. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
@@ -496,6 +570,87 @@ commits and says when older ones are not shown. **Ignore whitespace** is one
 per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
 commit diffs apply by asking Git for `-w`. It changes only the diff text: the
 changed-path list, line totals and checkout state token are unchanged.
+Local review findings belong to the Code thread and checkout that supplied the
+comparison. A completed turn's changed-file row opens that file in Review only
+when its recorded checkout is still the thread's binding. Older receipts that
+did not record a checkout say so; a rebind never retargets their files. Review
+shows its current captured comparison for an unversioned receipt. A receipt with a
+retained turn capture opens that exact version instead; it never substitutes
+today’s Working tree for missing captured evidence.
+Changed-file receipts and Review cover the checkout only, not extra Project folders.
+
+A running local Code turn can publish versioned comparisons from the durable
+working-tree checkpoint recorded when it started. Each capture names its turn,
+checkout, starting tree, captured tree, immutable journal cursor, version and
+capture time. These are checkout observations that can include another person’s
+or agent’s writes, never proof of exclusive authorship. Relevant normalized file
+edit/diff events and admitted app-managed terminal write completion or timeout
+request captures; text tokens, generic tool progress and passive metadata reads
+do not. Bursts coalesce for 500 ms, background captures start at most once per
+five seconds, and one in-flight capture owns a twenty-second deadline. Explicit
+**Capture now** requests one bounded current comparison of the same live turn.
+Every capture rechecks current standing Project access, operation, model,
+checkout and writable posture, including after queued native work. The existing
+root authority must still resolve the original Project binding, repository and
+checkout, including the admitted physical directory identity; replacing a root
+under the same IDs cannot authorize fresh capture. Plan can read
+retained captures but creates no scratch-index capture. Missing baselines,
+server/unreadable checkouts, changed bindings, expired authority and failed
+capture have explicit unavailable states; none silently reopens another source.
+
+A capture retains at most the existing 256 KiB diff limit in the bounded,
+deduplicating Code evidence store. Binary files, omitted paths and truncated
+patches are visible; partial captures cannot anchor a new line finding. The last
+valid version remains readable while another capture runs or fails. A delayed
+failure notice belongs only to its own capture attempt and cannot supersede a
+newer successful version. Final
+capture precedes a settled receipt when authority and the original baseline are
+still available; otherwise the missing final capture is explained. Temporary
+native checkpoint anchors are released even after cancellation. Host close or a
+purged/rebound owner permits no late fresh preview or orphaned captured bytes.
+These observations create no execution grant or persistent unattended owner.
+
+Captured Review pins the person’s displayed immutable version. Newer and final
+versions are announced separately and replace it only when the person chooses
+**View newer capture** or **View final capture**, after the bytes’ length, digest
+and UTF-8 are validated. File selection and scroll survive refresh/reconnect;
+a selected path absent from the chosen version requires a new selection.
+Existing notes retain their original capture and never follow the displayed
+version silently. The shared whitespace preference is preserved, but this view
+labels its bounded display-only behavior **Ignore edge whitespace**: paired
+leading/trailing-whitespace-only changes are unhighlighted in unified view and
+Monaco ignores trim whitespace. This does not claim full Git `-w` equivalence;
+canonical bytes, source line numbers, captured version and note references stay
+unchanged. Opening the current file in an editor remains separate from reading
+its captured compared regions.
+
+The person selects a real source line on the original or modified side of a
+retained Working tree or run diff. The host binds the local finding to its own
+comparison evidence, digest, revision and side. Reconstructed hunks identify only
+those compared regions, never the full file. A deleted file supports its captured
+original lines; binary, missing, purged and uncaptured lines say why a line note
+is unavailable. Outdated anchors stay visible on their original revision and are
+never moved silently. Legacy findings remain readable with unrecorded comparison
+identity labeled explicitly.
+
+Creating or resolving a local note journals review data and grants no execution;
+it works in Plan under ordinary thread, checkout and Project access. The person
+may select open findings to prepare a bounded correction request in that same
+task's editable unsent draft. Existing draft text, caret and extra context are
+kept, including while the task is busy. The request names its selected finding
+versions and captured anchors and says which files or comments were omitted.
+It sends, queues and approves nothing automatically. Ordinary send or queue
+delivery revalidates the typed references and records outside-content provenance
+before the provider reads; missing or changed provenance refuses actionably.
+Editing prose preserves its references. Clearing a damaged reference requires
+clearing the imported draft or preparing a truthful replacement, not silently
+retaining the excerpt as trusted plain prose.
+
+After a correction, Refresh reads the new comparison and latest recorded checks.
+Checks that lack a comparison binding are labeled as such. An agent reply never
+resolves a finding: the person inspects the resulting changes and explicitly
+resolves or dismisses it.
+
 A pull request opened in Review shows, under its header, an **Automatic
 actions** section with two switches: **Merge when ready** and **Auto-fix**.
 Each has one status line under its name that says what it is doing now (off,
@@ -664,6 +819,8 @@ page's picture with the thread, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a
 thread with Browser steps also shows a folded _Browser proof_ panel there: the
 agent's steps as a numbered list with each capture under the step that took it.
+An agent's recording sits in the strip and the panel like a screenshot, still,
+with a play mark and its length, and plays when the person opens it.
 The rules are in [Browser captures](browser-captures.md) and
 [Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
@@ -755,6 +912,16 @@ follow-up sends is shown in the transcript under a "Scheduled follow-up" line
 with only its prompt, so a reader can tell it was scheduled and not typed. The
 sidebar row shows no mark for a pending follow-up: no existing row mark fits a
 scheduled turn, and the Environment row is where it is managed.
+
+An agent's request to pause or archive one of its thread's routines waits in
+the same place, labelled "Pause routine · asked by the agent" or "Archive
+routine · asked by the agent" ("Cancel follow-up" for a follow-up). It states
+the routine's name, what the change does, and the agent's reason in its own
+words. Its one action does it as the person; dismissing it leaves the routine
+as it was and the agent is told so. In Automation Center's run
+history, a run whose agent reported a result shows "Agent reported:" with the
+outcome and summary beside the run's own status, in the warning colour for
+Needs attention and Did not succeed; the latest-run line carries the outcome.
 
 ### Subagents
 
@@ -936,20 +1103,28 @@ journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
 Refusal fails creation visibly. No Linear write-back path exists.
 
 Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
-Project, for a local window. It lists the newest sessions the Claude Code and
-Codex command-line tools kept on this Mac for the Project's bound folder, with
-their title and last activity. Selecting one attaches only
-`{ provider, sessionId }`. At creation the server reads the session again,
-refuses one started in another folder, keeps the person's and the assistant's
-words (no tool calls, results, thinking, or text the tool injected), bounds
-them to the recent part of the conversation, marks the thread with outside
-content before it exists, and journals the history on the thread
-([details](host-reads-and-commands.md#terminal-sessions)). The thread shows it
-folded and read-only above its own turns. Its first admitted turn hands the
-history to the model once, framed as outside data. The provider's native
-session is not resumed: a resumed session would hold the earlier conversation
-unframed, and the Claude runtime refuses a session id Octant did not record.
-Nothing is uploaded or written back to the tool's files.
+Project, for a local window. It lists the newest Claude Code and Codex sessions
+in the Project's canonical bound root and its subfolders. A Code Project also
+includes available managed worktrees whose ready ownership receipt matches its
+current binding, thread, repository and checkout. Clients supply no source
+folder: the server resolves eligible scopes and verifies the session's own
+canonical working directory at listing and again at creation. Symlink escapes
+and foreign scopes are refused; the picker and imported history name the exact
+original working directory.
+
+Selecting a session explicitly chooses a **text handoff**. The server rereads
+bounded visible user/assistant words, excludes original inputs, tool activity,
+hidden reasoning and injected tool text, marks the new thread with outside
+content before it exists, and journals the framed read-only history on that
+thread ([details](host-reads-and-commands.md#terminal-sessions)). Its first
+admitted turn reads this snapshot once. The receipt and UI distinguish that new
+session from native adoption. Native adoption is refused while the adapter
+cannot prove historical account binding, runtime compatibility and exclusive
+session ownership: a folder, filename or current provider login is not proof of
+the account that created an external session. The current adapters cannot
+supply that proof and offer only the labeled text handoff. They never resume
+an unverified native session or clone its writer. Nothing is uploaded or written
+back to the command-line tool's files.
 
 ## Context and usage
 
@@ -1010,8 +1185,11 @@ and the journal record follow the
 Project's saved actions (Run, Test, Dev) are buttons in the window header, three
 inline and the rest under More, and entries in the command palette's Actions
 group; the Project overview's Actions section edits them and offers suggestions
-the person confirms. Choosing one runs it in the window's pinned Project
-terminal, or opens and pins one, and enters Zen to show it (see
+the person confirms. Choosing one previews its actual folder and branch,
+then starts a dedicated run beside the task. A Code thread defaults to its
+active checkout; the Project folder and approved extra folders remain explicit
+choices. Output, exit status and Stop stay in the action dialog; Open terminal
+explicitly opens Zen. A lost reply is never retried automatically (see
 [Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
@@ -1057,3 +1235,52 @@ kinds, labelling the leftover; it adds no authority of its own.
 - Render changed interactions at the affected window sizes, including keyboard
   navigation and unavailable states. A documentation-only consolidation needs
   consistency and link checks; it is not evidence of fresh rendered QA.
+
+## Inline questionnaires
+
+An agent can ask for related decisions through the app-owned `ask-user` tool
+in Chat, Work, and Code. A questionnaire belongs in its originating thread,
+with one compact card containing up to four questions. It creates no Canvas.
+Each question offers one choice or several choices, optional descriptions,
+and an optional written alternative. Recommendations are labelled and never
+preselected. A person can add a comment alongside their choices.
+
+Choosing an option only edits the draft. **Send answers** submits the complete
+set once; the host validates question and option identities, required answers,
+and selection limits before settling the request. Empty selection is allowed
+only when the question explicitly permits zero choices. A submitted answer
+from another window settles the same request; a stale or duplicate answer
+cannot replace it. Validation and delivery failures keep the draft available.
+
+Submitted questionnaires collapse into an expandable, readable summary of
+the questions, selected labels, written answers, and comment. The journal
+keeps the definition and response so the summary survives reopening. Expired,
+cancelled, and recovered requests cannot resume a dead provider session.
+Answers convey preferences within existing thread authority and never grant
+permissions. Credentials continue through the credential request mechanism.
+
+The tool carries a bounded typed `questionnaire` alongside its existing prompt.
+For example, `{ "prompt": "Choose the exports", "questionnaire": { "questions":
+[{ "id": "formats", "prompt": "Which formats?", "selection": "multiple",
+"options": [{ "id": "pdf", "label": "PDF" }, { "id": "md", "label": "Markdown" }] }] } }`.
+The existing answer channel carries a versioned JSON response with question
+IDs, selected option IDs, optional written alternatives, and a comment. The
+tool returns the decoded response to the model. This keeps the existing
+authenticated, thread-scoped answer routes and one-use request identity.
+Provider-native question formats keep their existing adapter contracts; the
+questionnaire capability uses the provider-neutral app tool boundary.
+
+A Code task's **Worktrees** header control opens its Setup tab beside
+that task, including a selector for its child checkouts. It shows the reviewed
+command and relative folder, bounded output, exit result, Retry, Cancel and
+explicit Skip. The Project overview's Actions list lets the person review and
+designate one automatic worktree setup recipe. See the owning
+[worktree setup rule](../architecture.md#security-and-authority).
+
+The same dialog's **Child source** tab controls the parent task's source for
+future children. **Committed revision** is the default. **Review current edits**
+captures a preview with base revision, snapshot identity, tracked changes and
+eligible untracked paths; **Use this snapshot** is the separate enabling
+choice. It shows the selected source and an actionable stale-source refusal.
+Existing children retain their recorded source. The rule belongs to
+[Code child workspaces](../architecture.md#modes-chat-work-and-code).

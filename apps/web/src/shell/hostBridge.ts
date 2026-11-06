@@ -1,5 +1,12 @@
+import type { EmbeddedBrowserBridge } from "@octant/contracts/desktop-bridge";
 import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
-import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
+import type {
+  AppReleaseRing,
+  AppUpdateState,
+  NightlyDataChoice,
+  NightlyDataState,
+  NightlyInstallState,
+} from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 
@@ -323,6 +330,7 @@ export type BrowserProofSaveResult =
 
 export interface OctantHostBridge
   extends
+    EmbeddedBrowserBridge,
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
     Partial<HubAdministrationBridge>,
@@ -349,6 +357,7 @@ export interface OctantHostBridge
   readonly subscribeRemoteServerPageSigning?: (
     signer: (request: unknown) => Promise<unknown>,
   ) => () => void;
+  readonly getDroppedFilePath?: (file: File) => string | undefined;
   readonly popupNativeMenu?: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;
@@ -421,11 +430,42 @@ export interface OctantHostBridge
    * served by a host it does not update.
    */
   readonly checkForAppUpdate?: () => Promise<AppUpdateState>;
+  /** This application's native process persists its own update preferences. */
+  readonly appUpdatePreferenceScope?: "local";
+  /**
+   * Set only in an Octant Nightly client window. Its bridge omits Octant-only
+   * administration (remote access, pairing, hubs, owner unlock, host
+   * identity), so Settings shows one line saying it is managed in Octant.
+   */
+  readonly managedInOctant?: true;
+  /** Local application display only; never a host or capability identity. */
+  readonly applicationIdentity?: Readonly<{
+    readonly flavor: "nightly";
+    readonly productName: "Octant Nightly";
+    /** The Data role this launch runs with, where Nightly offers the choice. */
+    readonly data?: NightlyDataChoice;
+  }>;
+  /**
+   * Nightly's Data setting. Present only where Nightly offers separate test
+   * data; its main process owns the folder, the role and the relaunch.
+   */
+  readonly readNightlyData?: () => Promise<NightlyDataState>;
+  readonly chooseNightlyData?: (choice: NightlyDataChoice) => Promise<NightlyDataState>;
+  readonly removeNightlyTestData?: () => Promise<NightlyDataState>;
+  readonly relaunchNightly?: () => Promise<{ readonly kind: "relaunching" | "unchanged" }>;
   readonly downloadAppUpdate?: () => Promise<AppUpdateState>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateState>;
   readonly setAppUpdateRing?: (ring: AppReleaseRing) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState?: (listener: (state: AppUpdateState) => void) => () => void;
+  /**
+   * Octant's Octant Nightly row. Absent in Nightly and on a remote client; the
+   * desktop main process decides every install, open and remove.
+   */
+  readonly readNightlyInstall?: () => Promise<NightlyInstallState>;
+  readonly installNightly?: () => Promise<NightlyInstallState>;
+  readonly openNightly?: () => Promise<NightlyInstallState>;
+  readonly removeNightly?: () => Promise<NightlyInstallState>;
   /**
    * Local What's new for the build on disk. Desktop-owned; never a network
    * fetch. Absent on a remote client.

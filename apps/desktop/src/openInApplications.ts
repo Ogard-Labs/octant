@@ -152,7 +152,8 @@ export async function launchOpenInApplication(options: {
 
 export async function openCodeCheckoutInApplicationFromServer(options: {
   readonly serverUrl: string;
-  readonly desktopBridgeSecret: string;
+  /** Stable's bridge secret, or a native Nightly main's own window authority. */
+  readonly brokerHeaders: () => Readonly<Record<string, string>>;
   readonly windowId: string;
   readonly request: OpenInApplicationRequest;
   readonly fetch: typeof globalThis.fetch;
@@ -168,7 +169,7 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-octant-desktop-secret": options.desktopBridgeSecret,
+          ...options.brokerHeaders(),
         },
         body: JSON.stringify({ windowId: options.windowId, threadId: options.request.threadId }),
       },

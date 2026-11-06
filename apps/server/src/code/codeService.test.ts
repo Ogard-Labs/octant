@@ -1,3 +1,4 @@
+import { decodeProjectWorkingFolderId } from "@octant/contracts";
 import {
   decodeCodeRelativePath,
   decodeAgentProfile,
@@ -2039,6 +2040,58 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("records a default Browser profile for this task and refuses an archived task", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    const changed = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-browser-profile",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      browserTaskProfile: "personal",
+    });
+    expect(changed).toMatchObject({
+      kind: "thread-updated",
+      thread: { browserTaskProfile: "personal", version: 2 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ browserTaskProfile: "personal" }),
+            }),
+          }),
+        ],
+      }),
+    );
+    const stale = serviceFixture();
+    const commitBrowserProfile = vi.fn(() => false);
+    await expect(
+      stale.service.execute(
+        ids.window,
+        {
+          kind: "change-code-thread-browser-profile",
+          threadId: ids.thread,
+          expectedVersion: 1,
+          browserTaskProfile: "personal",
+        },
+        undefined,
+        { commitBrowserProfile },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(commitBrowserProfile).toHaveBeenCalledOnce();
+    expect(stale.persistence.journal.append).not.toHaveBeenCalled();
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-code-thread-browser-profile",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        browserTaskProfile: "project",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
     const fixture = serviceFixture();
     await expect(
@@ -2921,6 +2974,23 @@ describe("CodeService managed thread creation", () => {
     }
   });
 
+  it("refuses an unrecognized approved-folder identity before creating a managed worktree", async () => {
+    const port = {
+      prepare: vi.fn<ManagedCodeThreadCreationPort["prepare"]>(),
+      commit: vi.fn<ManagedCodeThreadCreationPort["commit"]>(),
+      cleanup: vi.fn<ManagedCodeThreadCreationPort["cleanup"]>(),
+    };
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port });
+    const command = managedCommand;
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...command,
+        workingFolderId: decodeProjectWorkingFolderId(`folder_${"a".repeat(64)}`),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(port.commit).not.toHaveBeenCalled();
+  });
   it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
     const port = mockCreationPort();
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
@@ -3890,28 +3960,32 @@ describe("moving a Code thread to another Project", () => {
 describe("merging a fork's conversation back", () => {
   const throughOperationId = "00000000-0000-4000-8000-000000005101";
 
-  it("hands an authorized fork to the host's merge and answers with its outcome", async () => {
-    const merge = vi.fn(async () => ({
-      status: "refused" as const,
-      reason: "already-merged" as const,
-    }));
-    const fixture = serviceFixture({ threads: [thread()], forkMergeBack: { merge } });
+  it.each([undefined, "text-only"] as const)(
+    "hands an authorized fork and its explicit input choice %s to the host merge",
+    async (policy) => {
+      const merge = vi.fn(async () => ({
+        status: "refused" as const,
+        reason: "already-merged" as const,
+      }));
+      const fixture = serviceFixture({ threads: [thread()], forkMergeBack: { merge } });
 
-    const result = await fixture.service.execute(ids.window, {
-      kind: "merge-code-fork-context",
-      threadId: ids.thread,
-      throughOperationId,
-    });
+      const result = await fixture.service.execute(ids.window, {
+        kind: "merge-code-fork-context",
+        ...(policy === undefined ? {} : { contextInputPolicy: policy }),
+        threadId: ids.thread,
+        throughOperationId,
+      });
 
-    expect(merge).toHaveBeenCalledWith(ids.window, ids.thread, throughOperationId);
-    expect(result).toEqual({
-      kind: "fork-context-merge",
-      threadId: ids.thread,
-      outcome: { status: "refused", reason: "already-merged" },
-    });
-    // The thread record itself is never written by a merge.
-    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
-  });
+      expect(merge).toHaveBeenCalledWith(ids.window, ids.thread, throughOperationId, policy);
+      expect(result).toEqual({
+        kind: "fork-context-merge",
+        threadId: ids.thread,
+        outcome: { status: "refused", reason: "already-merged" },
+      });
+      // The thread record itself is never written by a merge.
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuses a fork in a Project this window may not reach before merging anything", async () => {
     const merge = vi.fn();
@@ -4855,6 +4929,7 @@ describe("CodeService.listTests", () => {
 
 function serviceFixture(
   options: {
+    readonly workingFolderAllowed?: boolean;
     readonly threads?: ReturnType<typeof thread>[];
     readonly watcher?: {
       readonly watch: (input: { readonly signal?: AbortSignal }) => AsyncIterable<never>;
@@ -4960,6 +5035,7 @@ function serviceFixture(
   const tests = { discover: vi.fn(async () => [] as ReadonlyArray<never>) };
   const approvals = { validate: vi.fn(async () => options.approve === true) };
   const workingDirectories = {
+    validateChoice: vi.fn(async () => options.workingFolderAllowed === true),
     resolve: vi.fn(async () => "/private/authorized-root/packages/app"),
   };
   const onWorkingDirectoryChanged = vi.fn(async () => undefined);

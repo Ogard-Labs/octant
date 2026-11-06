@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type {
   CredentialRequestAnswer,
+  CredentialRequestReference,
+  CredentialRequestResolution,
+  CredentialRequestFailure,
   CredentialRequestCard,
   CredentialRequestView,
 } from "@octant/contracts/credential-request";
@@ -17,6 +20,7 @@ interface Pending {
   readonly controller: AbortController;
   readonly finish: (result: Result) => void;
   state: State;
+  failure?: CredentialRequestFailure;
 }
 
 /**
@@ -27,15 +31,26 @@ interface Pending {
 export class CredentialRequests {
   readonly #requests = new Map<string, Pending>();
   readonly #fetch: (request: Request) => Promise<Response>;
+  readonly #resolveLinked:
+    | ((
+        reference: CredentialRequestReference,
+        signal: AbortSignal,
+      ) => Promise<CredentialRequestResolution>)
+    | undefined;
   readonly #now: () => number;
   readonly #timer: ReturnType<typeof setInterval>;
 
   constructor(
     options: {
+      readonly resolveLinked?: (
+        reference: CredentialRequestReference,
+        signal: AbortSignal,
+      ) => Promise<CredentialRequestResolution>;
       readonly fetch?: (request: Request) => Promise<Response>;
       readonly now?: () => number;
     } = {},
   ) {
+    this.#resolveLinked = options.resolveLinked;
     this.#fetch = options.fetch ?? fetch;
     this.#now = options.now ?? (() => performance.now());
     this.#timer = setInterval(() => this.#sweep(), 1000);
@@ -80,7 +95,7 @@ export class CredentialRequests {
           label: input.operation.label,
           reason: input.operation.reason,
           consumer: input.operation.consumer,
-          destination: url.origin,
+          destination: input.operation.request.method === "GET" ? url.href : url.origin,
           actionLabel: input.operation.actionLabel,
           state: "pending",
         },
@@ -100,7 +115,11 @@ export class CredentialRequests {
     return {
       requests: [...this.#requests.values()]
         .filter((entry) => entry.windowId === windowId && entry.card.threadId === threadId)
-        .map((entry) => ({ ...entry.card, state: entry.state })),
+        .map((entry) => ({
+          ...entry.card,
+          state: entry.state,
+          ...(entry.failure === undefined ? {} : { failure: entry.failure }),
+        })),
     };
   }
 
@@ -113,13 +132,8 @@ export class CredentialRequests {
       this.#settle(entry, "declined");
       return true;
     }
-    // Header injection and whitespace-only values fail without consuming the card.
-    if (
-      !answer.secret.trim() ||
-      ["\r", "\n", "\0"].some((character) => answer.secret.includes(character)) ||
-      Buffer.byteLength(answer.secret) > 4096
-    )
-      return false;
+    // Invalid manual values leave the card available without starting a lookup.
+    if (answer.action === "allow" && !validSecret(answer.secret)) return false;
     // Synchronous claim precedes every await, including the network launch.
     entry.state = "using";
     const timeout = setTimeout(() => this.#settle(entry, "failed"), 15_000);
@@ -128,23 +142,47 @@ export class CredentialRequests {
         this.#settle(entry, "cancelled");
         return false;
       }
+      let secret: string;
+      if (answer.action === "allow-linked") {
+        const result = (await this.#resolveLinked?.(
+          { store: answer.store, reference: answer.reference },
+          entry.controller.signal,
+        )) ?? { status: "unavailable" as const };
+        this.#sweep();
+        if (entry.state !== "using" || entry.controller.signal.aborted) return true;
+        if (result.status !== "read") {
+          entry.failure = result.status;
+          this.#settle(entry, "failed");
+          return true;
+        }
+        secret = result.value;
+        if (!validSecret(secret)) {
+          entry.failure = "invalid-reference";
+          this.#settle(entry, "failed");
+          return true;
+        }
+      } else secret = answer.secret;
       const spec = entry.operation.request;
       const response = await this.#fetch(
         new Request(spec.url, {
-          method: "POST",
+          method: spec.method ?? "POST",
           redirect: "error",
           credentials: "omit",
           cache: "no-store",
           headers: {
             "content-type": "application/json",
-            authorization:
-              spec.authorization === "bearer" ? `Bearer ${answer.secret}` : answer.secret,
+            authorization: spec.authorization === "bearer" ? `Bearer ${secret}` : secret,
           },
-          body: spec.body,
+          ...(spec.method === "GET" ? {} : { body: spec.body }),
           signal: entry.controller.signal,
         }),
       );
-      const body = await boundedJson(response);
+      let body: unknown;
+      if (entry.operation.response === "status-only") {
+        await response.body?.cancel().catch(() => undefined);
+      } else {
+        body = await boundedJson(response);
+      }
       if (entry.state !== "using") return true;
       if (!entry.current()) this.#settle(entry, "cancelled");
       else this.#settle(entry, response.ok && entry.operation.accepted(body) ? "used" : "failed");
@@ -199,4 +237,12 @@ async function boundedJson(response: Response): Promise<unknown> {
   } finally {
     await reader.cancel().catch(() => undefined);
   }
+}
+
+function validSecret(value: string): boolean {
+  return (
+    Boolean(value.trim()) &&
+    !["\r", "\n", "\0"].some((character) => value.includes(character)) &&
+    Buffer.byteLength(value) <= 4096
+  );
 }

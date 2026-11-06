@@ -1053,6 +1053,16 @@ describe("MCP servers added by hand", () => {
     server: { type: "stdio", command: "npx", args: ["-y", "docs-search-mcp"], env: [] },
   };
 
+  const paperBody = {
+    name: "Paper",
+    localSetupId: "paper",
+    server: {
+      type: "streamable-http",
+      url: "http://127.0.0.1:29979/mcp",
+      headers: [],
+    },
+  };
+
   it("refuses a paired device and a host that cannot add one", async () => {
     const add = vi.fn();
     const handler = createExtensionRouteHandler({
@@ -1063,6 +1073,10 @@ describe("MCP servers added by hand", () => {
     });
     const denied = await handler(pairedDeviceRequest("/api/extensions/user-servers", body));
     expect(denied?.status).toBe(401);
+    expect(add).not.toHaveBeenCalled();
+    expect(
+      (await handler(pairedDeviceRequest("/api/extensions/user-servers", paperBody)))?.status,
+    ).toBe(401);
     expect(add).not.toHaveBeenCalled();
 
     const without = createExtensionRouteHandler({
@@ -1092,63 +1106,66 @@ describe("MCP servers added by hand", () => {
     expect(add).not.toHaveBeenCalled();
   });
 
-  it("writes the package, then installs, trusts and switches it on as one act", async () => {
-    const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
-    const add = vi.fn(async () => ({ source }));
-    const observed: Array<ExtensionCommand> = [];
-    let stateVersion = 1;
-    const packageState = (components: ReadonlyArray<string>) => ({
-      extensionId,
-      packageId,
-      stateVersion: stateVersion++,
-      version: "1.0.0",
-      digest,
-      source,
-      components: components.map((id) => ({
-        component: { id, kind: "mcp-server", displayName: "Docs search" },
-      })),
-    });
-    const execute = vi.fn(async (command: ExtensionCommand) => {
-      observed.push(command);
-      if (command.kind === "inspect-package") {
+  it.each([body, paperBody])(
+    "writes the package, then installs, trusts and switches it on as one act: %#",
+    async (setup) => {
+      const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
+      const add = vi.fn(async () => ({ source }));
+      const observed: Array<ExtensionCommand> = [];
+      let stateVersion = 1;
+      const packageState = (components: ReadonlyArray<string>) => ({
+        extensionId,
+        packageId,
+        stateVersion: stateVersion++,
+        version: "1.0.0",
+        digest,
+        source,
+        components: components.map((id) => ({
+          component: { id, kind: "mcp-server", displayName: "Docs search" },
+        })),
+      });
+      const execute = vi.fn(async (command: ExtensionCommand) => {
+        observed.push(command);
+        if (command.kind === "inspect-package") {
+          return {
+            kind: "package-inspected",
+            preview: { entry: { extensionId, packageId, version: "1.0.0", digest, source } },
+          } as never;
+        }
         return {
-          kind: "package-inspected",
-          preview: { entry: { extensionId, packageId, version: "1.0.0", digest, source } },
+          kind: "extension-state-updated",
+          snapshot: { ...setupSnapshot(), packages: [packageState(["mcp-docs-search"])] },
         } as never;
-      }
-      return {
+      });
+      const handler = createExtensionRouteHandler({
+        service: { snapshot: setupSnapshot, execute } as never,
+        windowAuthorityStore: registeredWindowStore(),
+        userAddedMcpServers: { add } as never,
+        now: () => now,
+      });
+      const answered = await handler(request("/api/extensions/user-servers", setup));
+      expect(answered?.status).toBe(200);
+      expect(add).toHaveBeenCalledWith(setup);
+      expect(observed.map((command) => command.kind)).toEqual([
+        "inspect-package",
+        "install-package",
+        "set-source-trust",
+        "set-plugin-desired",
+        "set-component-desired",
+      ]);
+      expect(observed[2]).toMatchObject({ trusted: true, expectedStateVersion: 1 });
+      expect(observed[3]).toMatchObject({ desired: true, expectedStateVersion: 2 });
+      expect(observed[4]).toMatchObject({
+        componentId: "mcp-docs-search",
+        desired: true,
+        expectedStateVersion: 3,
+      });
+      expect(await answered?.json()).toMatchObject({
         kind: "extension-state-updated",
-        snapshot: { ...setupSnapshot(), packages: [packageState(["mcp-docs-search"])] },
-      } as never;
-    });
-    const handler = createExtensionRouteHandler({
-      service: { snapshot: setupSnapshot, execute } as never,
-      windowAuthorityStore: registeredWindowStore(),
-      userAddedMcpServers: { add } as never,
-      now: () => now,
-    });
-    const answered = await handler(request("/api/extensions/user-servers", body));
-    expect(answered?.status).toBe(200);
-    expect(add).toHaveBeenCalledWith(body);
-    expect(observed.map((command) => command.kind)).toEqual([
-      "inspect-package",
-      "install-package",
-      "set-source-trust",
-      "set-plugin-desired",
-      "set-component-desired",
-    ]);
-    expect(observed[2]).toMatchObject({ trusted: true, expectedStateVersion: 1 });
-    expect(observed[3]).toMatchObject({ desired: true, expectedStateVersion: 2 });
-    expect(observed[4]).toMatchObject({
-      componentId: "mcp-docs-search",
-      desired: true,
-      expectedStateVersion: 3,
-    });
-    expect(await answered?.json()).toMatchObject({
-      kind: "extension-state-updated",
-      addedPackage: { extensionId, componentId: "mcp-docs-search" },
-    });
-  });
+        addedPackage: { extensionId, componentId: "mcp-docs-search" },
+      });
+    },
+  );
 
   it("answers a refusal from the store with its own sentence", async () => {
     const add = vi.fn(async () => {
@@ -1395,6 +1412,9 @@ describe("servers and plugins found on this computer", () => {
 describe("signing in to a hosted server from Settings", () => {
   const target = { extensionId, componentId: "mcp-docs" };
   const signIn = {
+    prepareClient: vi.fn(async () => ({ kind: "signed-out" })),
+    saveClient: vi.fn(async () => ({ kind: "client-configured" })),
+    configureClient: vi.fn(async () => ({ kind: "signed-out" })),
     status: vi.fn(async () => ({ kind: "signed-out" })),
     begin: vi.fn(async (_e: string, _c: string, principal: string) =>
       principal === "local-window"
@@ -1413,6 +1433,80 @@ describe("signing in to a hosted server from Settings", () => {
     poll: vi.fn(async () => ({ kind: "signed-in", issuer: "auth.example" })),
     signOut: vi.fn(async () => ({ kind: "signed-out" })),
   };
+
+  it("authorizes explicit application setup separately and rejects remote, anonymous and secret-value requests", async () => {
+    signIn.prepareClient.mockClear();
+    signIn.saveClient.mockClear();
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    const setup = {
+      binding: {
+        resource: "https://mcp.example/mcp",
+        issuer: "https://auth.example",
+        tokenEndpoint: "https://auth.example/token",
+        callback: "http://127.0.0.1:43125/oauth/callback",
+      },
+      kind: "registered",
+      clientId: "owned-client",
+      authentication: "client_secret_post",
+      secret: { store: "onepassword", reference: "op://Private/App/client secret" },
+    };
+    const prepared = await handler(
+      request("/api/extensions/sign-in", { kind: "prepare-client", ...target }),
+    );
+    expect(prepared?.status).toBe(200);
+    expect(signIn.prepareClient).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    const saved = await handler(
+      request("/api/extensions/sign-in", { kind: "save-client", ...target, setup }),
+    );
+    expect(saved?.status).toBe(200);
+    expect(signIn.saveClient).toHaveBeenCalledWith(extensionId, "mcp-docs", setup, "local-window");
+    signIn.prepareClient.mockClear();
+    signIn.saveClient.mockClear();
+    for (const body of [
+      { kind: "prepare-client", ...target },
+      { kind: "save-client", ...target, setup },
+    ]) {
+      expect((await handler(pairedDeviceRequest("/api/extensions/sign-in", body)))?.status).toBe(
+        401,
+      );
+      expect(
+        (
+          await handler(
+            request("/api/extensions/sign-in", body, { "x-octant-window-capability": "wrong" }),
+          )
+        )?.status,
+      ).toBe(401);
+    }
+    expect(
+      (
+        await handler(
+          request("/api/extensions/sign-in", {
+            kind: "save-client",
+            ...target,
+            setup: { ...setup, clientSecret: "do-not-dispatch" },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          request("/api/extensions/sign-in", {
+            kind: "save-client",
+            ...target,
+            setup: { ...setup, secret: { ...setup.secret, value: "do-not-dispatch" } },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(signIn.prepareClient).not.toHaveBeenCalled();
+    expect(signIn.saveClient).not.toHaveBeenCalled();
+  });
 
   it("lets a local window begin, poll and sign out, and tells a paired device to use the host", async () => {
     const handler = createExtensionRouteHandler({
@@ -1446,6 +1540,48 @@ describe("signing in to a hosted server from Settings", () => {
     expect(remote?.status).toBe(200);
     expect(await remote?.json()).toMatchObject({ kind: "refused", reason: "local-host-required" });
     expect(signIn.begin).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+  });
+
+  it("accepts safe registered-client setup only from an authorized local window", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    const setup = {
+      kind: "configure-client",
+      ...target,
+      registration: {
+        kind: "registered",
+        clientId: "owned-client",
+        issuer: "https://auth.example",
+        resource: "https://mcp.example/mcp",
+        redirectPort: 43126,
+      },
+    };
+    expect((await handler(request("/api/extensions/sign-in", setup)))?.status).toBe(200);
+    expect(signIn.configureClient).toHaveBeenCalledWith(
+      extensionId,
+      "mcp-docs",
+      setup.registration,
+      "local-window",
+    );
+    const calls = signIn.configureClient.mock.calls.length;
+    expect((await handler(pairedDeviceRequest("/api/extensions/sign-in", setup)))?.status).toBe(
+      401,
+    );
+    expect(
+      (
+        await handler(
+          request("/api/extensions/sign-in", {
+            ...setup,
+            registration: { ...setup.registration, clientSecret: "must-not-accept" },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(signIn.configureClient).toHaveBeenCalledTimes(calls);
   });
 
   it("answers 503 on a host without the sign-in service and 400 for a malformed request", async () => {

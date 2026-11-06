@@ -8,6 +8,8 @@ export interface ToolPartCardProps {
   readonly name: string;
   readonly status: "running" | "done" | "failed";
   readonly summary: string;
+  /** Whether a finished call starts with its summary showing (Reply detail High). */
+  readonly defaultOpen?: boolean;
   readonly testID?: string;
 }
 
@@ -39,7 +41,7 @@ export function ToolPartCard(props: ToolPartCardProps) {
   // A finished call collapses to one line so a long run stays scannable; a
   // running or failed call keeps its detail in view.
   const collapsible = props.status === "done" && props.summary.length > 0;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(props.defaultOpen === true);
   const showSummary = props.summary.length > 0 && (!collapsible || open);
   const tone =
     props.status === "failed"

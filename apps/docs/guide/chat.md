@@ -33,8 +33,8 @@ You can schedule a Chat routine in Automation Center: choose **Chat**, pick a
 Chat Project, and say what to do and when. Each run starts a new Chat thread in
 that Project and sends it the task, on the model the routine names. A Chat
 routine keeps Chat's limits, so it has no files, commands, or Git and no mode
-to pick. A Chat thread's agent does not propose routines; you create them in
-Automation Center.
+to pick. A Chat thread's agent does not propose, read, or change routines; you
+create and manage them in Automation Center.
 
 ## Scoped memory
 
@@ -86,6 +86,8 @@ Deleting or purging the thread removes its draft.
 Type `#` in the composer to pick a thread you can already open. Octant inserts a `#[Title]` chip. You can also drag a thread from the sidebar onto the composer, or focus that row, open its menu, and choose **Attach as context**. Either way the mentioned thread is not interrupted and the draft is not sent: this turn receives a bounded, read-only excerpt of its title, filing, and recent messages. `@plugin` and `$skill` addressing is unchanged; an unmatched `#` or `@` stays ordinary text. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
 A chip you can no longer open is marked unavailable and contributes no content. Cross-mode mentions are read-only context, not mixed execution — mentioning a Work or Code thread from Chat does not grant that thread's filesystem or shell.
+
+When you mention another Chat thread and ask the agent to check with it, the agent can ask that thread one question at a time and wait for its reply, up to three times in one message. The thread it asks answers on its own provider and cannot ask onward; if that thread is already busy, the agent tells you instead of interrupting it. Mentioning only Work or Code threads does not offer this.
 
 ## Attaching a window capture
 
@@ -158,7 +160,11 @@ A reply's reasoning folds into a **Thinking** disclosure above the text: shut
 by default, opened only if you want it, and still findable while closed. While
 the reply is still streaming, you can expand the reasoning to watch it arrive.
 It stays in the state you choose when the turn settles. A tool call a
-reply made folds into its own disclosure the same way.
+reply made folds into its own disclosure the same way. To see more of this
+without opening each one, raise **Settings › Appearance › Reading › Reply
+detail** to Medium or High for every thread, or choose a level for one thread
+from its **Reply detail** menu or with **⌘/Ctrl+Shift+D**
+([Themes and Appearance](../advanced/themes.md)).
 
 A checkpoint marker stays on the turn only when that point is marked. Restoring
 it starts a second thread; it does not rewind this one. The restored thread's
@@ -166,6 +172,18 @@ sidebar row carries a fork mark — as does the thread it came from — so you c
 see the origin chain and any direct forks and switch to one of them. If the
 origin has been archived or deleted, the lineage says the origin is no longer
 available rather than hiding that the thread is a fork.
+
+## Remind me about a question
+
+In Home, Inbox or Review, choose **Remind me…** on an answerable question,
+select a future time and click **Defer question**. The question stays in the
+list and its count as a smaller row below active requests. **Bring back now**
+restores its answers early; otherwise they return when the time arrives. You
+can still open the thread, and its questionnaire and draft stay intact.
+
+Deferring does not send an answer or let the agent continue. It also works for
+answerable Work and Code questions. Approval requests and questions that only
+offer **Review request** cannot be deferred.
 
 ## Put away and snooze threads
 
@@ -265,3 +283,18 @@ In Settings → Chat, turn off **Stream replies** to wait for the finished
 answer in Chat, Work, and Code. Reasoning remains expandable during the turn;
 approval requests and provider questions remain available immediately. Streaming
 is enabled by default. This preference changes presentation, not provider execution.
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

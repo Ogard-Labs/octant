@@ -69,6 +69,7 @@ export interface CodeTurnFailure {
    * absence of a request or a limit.
    */
   readonly resumeRefused?: true;
+  readonly toolCatalogHandoffRequired?: true;
 }
 
 export interface CodeProviderAcquireInput extends ProviderAcquireInput {
@@ -173,6 +174,7 @@ export interface CodeTurnRunnerInput {
   readonly thread: CodeThread;
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
   readonly checkoutRoot: string;
+  readonly providerRoot?: string;
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
   readonly prompt: string;
@@ -241,6 +243,7 @@ export interface CodeTurnRunnerInput {
    * whatever the context carried is known not to have reached a provider.
    */
   readonly onPromptSent?: () => void;
+  readonly inputsCurrent?: () => boolean;
   /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
@@ -334,7 +337,7 @@ export class CodeTurnRunner {
       const fail = (
         next: Exclude<CodeTurnOutcome, "completed">,
         message: string,
-        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
         resumeRefused?: true,
       ) =>
         Effect.gen(function* () {
@@ -364,7 +367,7 @@ export class CodeTurnRunner {
         .acquire({
           instanceId: input.thread.providerInstanceId,
           mode: "code",
-          projectRoot: input.checkoutRoot,
+          projectRoot: input.providerRoot ?? input.checkoutRoot,
           ...(input.extraFolders === undefined || input.extraFolders.length === 0
             ? {}
             : { extraFolders: input.extraFolders }),
@@ -691,6 +694,13 @@ export class CodeTurnRunner {
           if (input.signal?.aborted) {
             yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
             return yield* fail("interrupted", "Code turn was cancelled before provider send.");
+          }
+          if (input.inputsCurrent?.() === false) {
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            return yield* fail(
+              "failed",
+              "The original continuation inputs are no longer available. No prompt was sent.",
+            );
           }
           timing = startTurnMetrics(clock());
           yield* connection
@@ -1101,20 +1111,24 @@ function failForProvider(
   fail: (
     outcome: Exclude<CodeTurnOutcome, "completed">,
     message: string,
-    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
     resumeRefused?: true,
   ) => Effect.Effect<never, CodeTurnFailure>,
 ): Effect.Effect<never, CodeTurnFailure> {
   if (!isProviderFailure(failure)) return fail("failed", "Provider execution failed.");
-  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs"> = {
-    ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
-    ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
-  };
+  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired"> =
+    {
+      ...(failure.toolCatalogHandoffRequired === undefined
+        ? {}
+        : { toolCatalogHandoffRequired: failure.toolCatalogHandoffRequired }),
+      ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
+      ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+    };
   if (failure.category === "rate-limited") return fail("waiting", failure.message, limit);
   // A refused resume parks the turn `waiting` with the provider's sentence,
   // but the fact that no answer can ever restart this session must survive
   // the boundary too, or the transcript can only guess at it.
-  if (failure.category === "stale-resume") return fail("waiting", failure.message, undefined, true);
+  if (failure.category === "stale-resume") return fail("waiting", failure.message, limit, true);
   if (failure.category === "interrupted") return fail("interrupted", failure.message);
   return fail("failed", failure.message, limit);
 }
@@ -1145,7 +1159,7 @@ function isCodeTurnFailure(value: unknown): value is CodeTurnFailure {
 function codeTurnFailure(
   category: Exclude<CodeTurnOutcome, "completed">,
   message: string,
-  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
   resumeRefused?: true,
 ): CodeTurnFailure {
   return {
@@ -1154,6 +1168,9 @@ function codeTurnFailure(
     ...(limit?.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
     ...(limit?.retryAfterMs === undefined ? {} : { retryAfterMs: limit.retryAfterMs }),
     ...(resumeRefused === undefined ? {} : { resumeRefused }),
+    ...(limit?.toolCatalogHandoffRequired === true
+      ? { toolCatalogHandoffRequired: true as const }
+      : {}),
   };
 }
 

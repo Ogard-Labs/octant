@@ -65,6 +65,7 @@
     "./cache-backoff-policy": "./src/cacheBackoffPolicy.ts",
     "./context-compaction": "./src/contextCompaction.ts",
     "./context-policy": "./src/contextPolicy.ts",
+    "./conversation-input-policy": "./src/conversationInputPolicy.ts",
     "./trim-trailing": "./src/trimTrailing.ts",
     "./keyring-advice": "./src/keyringAdvice.ts",
     "./model-context-window": "./src/modelContextWindow.ts",
@@ -103,6 +104,7 @@
     "./provider-policy": "./src/providerPolicy.ts",
     "./provider-runtime-integration": "./src/providerRuntimeIntegration.ts",
     "./research-policy": "./src/researchPolicy.ts",
+    "./reply-detail-policy": "./src/replyDetailPolicy.ts",
     "./shell-policy": "./src/shellPolicy.ts",
     "./sidebar-thread-status-policy": "./src/sidebarThreadStatusPolicy.ts",
     "./theme-policy": "./src/themePolicy.ts",
@@ -130,7 +132,8 @@
     "./turn-metrics-policy": "./src/turnMetricsPolicy.ts",
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
-    "./local-usage-pricing": "./src/localUsagePricing.ts"
+    "./local-usage-pricing": "./src/localUsagePricing.ts",
+    "./command-credential-policy": "./src/commandCredentialPolicy.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

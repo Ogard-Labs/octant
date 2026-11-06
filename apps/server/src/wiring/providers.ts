@@ -1,7 +1,12 @@
+import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
+import { GitObservationPort } from "../code/gitObservationPort";
+import { WorktreePreparationService } from "../code/worktreePreparationService";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createLocalUsageHistoryCheckpointStore } from "../persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
+import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -185,6 +190,7 @@ import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegist
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
+import { githubRoutineEventSources } from "../extensions/githubRoutineEventSources";
 import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
 import type {
   ExtensionProjectPinListing,
@@ -833,15 +839,12 @@ export function wireProviders(deps: ProvidersDependencies) {
     // The address a user-added server's package names, read from the
     // installed package itself so a sign-in can only ever target the server
     // the person added.
-    const mcpServerSignInAddress = async (
-      extensionId: string,
-      componentId: string,
-    ): Promise<string | undefined> => {
+    const mcpServerSignInPolicy = async (extensionId: string, componentId: string) => {
       const packageState = extensionLifecycleService
         .snapshot()
         .packages.find((candidate) => String(candidate.extensionId) === extensionId);
       if (packageState === undefined) return undefined;
-      return userAddedMcpServers.signInAddress(packageState, componentId, () =>
+      const policy = await userAddedMcpServers.signInPolicy(packageState, componentId, () =>
         extensionPackageStore.readVerifiedConfiguration(
           {
             extensionId: packageState.extensionId,
@@ -852,7 +855,21 @@ export function wireProviders(deps: ProvidersDependencies) {
           componentId,
         ),
       );
+      if (policy === undefined) return undefined;
+      return bindGeneratedMcpSignInPolicy({
+        policy,
+        packageState,
+        componentId,
+        readPackage: () =>
+          extensionLifecycleService
+            .snapshot()
+            .packages.find((candidate) => String(candidate.extensionId) === extensionId),
+      });
     };
+    const mcpServerSignInAddress = async (
+      extensionId: string,
+      componentId: string,
+    ): Promise<string | undefined> => (await mcpServerSignInPolicy(extensionId, componentId))?.url;
     // Settings asks about every MCP server component, so a host without the
     // broker names the missing broker only for a server that could sign in;
     // every other component, a third-party plugin's included, has nothing to
@@ -940,6 +957,12 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        bindUserAddedAuthentication: (launch, target) =>
+          mcpServerSignInHolder.current?.bindAuthentication(
+            target.extensionId,
+            target.componentId,
+            launch,
+          ) ?? Promise.resolve(undefined),
         resolveUserAddedSecrets: async (launch, target) => {
           const withSecrets = await userAddedMcpServers.resolveLaunchSecrets(launch);
           const signIn = mcpServerSignInHolder.current;
@@ -1015,6 +1038,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       userAddedMcpServers: {
         owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        localSetupId: (sourceRef) => userAddedMcpServers.localSetupId(sourceRef),
+        prepareRemoval: async (extensionId) =>
+          (await mcpServerSignInHolder.current?.preparePackageRemoval(extensionId)) ??
+          (() => undefined),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
           await userAddedMcpServers.remove(sourceRef);
@@ -1122,6 +1149,18 @@ export function wireProviders(deps: ProvidersDependencies) {
         },
       },
       mcpServerSignIn: {
+        prepareClient: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.prepareClient(extensionId, componentId, principalKind),
+          ),
+        saveClient: (extensionId, componentId, setup, principalKind) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.saveClient(extensionId, componentId, setup, principalKind),
+          ),
+        configureClient: (extensionId, componentId, registration, principalKind) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.configureForServer(extensionId, componentId, registration, principalKind),
+          ),
         status: (extensionId, componentId, principalKind) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.status(extensionId, componentId, principalKind),
@@ -1142,8 +1181,49 @@ export function wireProviders(deps: ProvidersDependencies) {
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
     });
+    const preparationProcess = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "worktree-preparation-processes"),
+    });
+    const preparationRecovered = yield* Effect.promise(() =>
+      preparationProcess.reconcile().then(
+        () => true,
+        () => false,
+      ),
+    );
+    const worktreePreparation = new WorktreePreparationService({
+      processRecovery: preparationRecovered ? "ready" : "uncertain",
+      journal: persistence.journal,
+      loadReceipt: (id) => managedWorktreeReceipts.load(id),
+      execute: (input, signal) => preparationProcess.executeReviewedAction(input, signal),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      readRecipe: (projectId) => {
+        const project = persistence.readProject(decodeProjectId(projectId));
+        return project?.type === "code"
+          ? project.actions?.find((action) => action.preparesWorktrees === true)
+          : undefined;
+      },
+    });
+    if (preparationRecovered) worktreePreparation.reconciled();
+    yield* Effect.addFinalizer(() => Effect.promise(() => worktreePreparation.close()));
+    const childWorktreeSources = new ChildWorktreeSourceService({
+      journal: persistence.journal,
+      mutation: new GitMutationPort(),
+      observation: new GitObservationPort(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+    });
     const managedWorktreePorts = createManagedWorktreeNodePorts();
     const managedWorktreeService = new ManagedWorktreeService({
+      setupRecipe: (projectId) => {
+        const project = persistence.readProject(projectId);
+        return project?.type === "code"
+          ? project.actions?.find((action) => action.preparesWorktrees === true)
+          : undefined;
+      },
+
       grants: new ManagedRootGrantStore(randomUUID, processAuthorityNow),
       receipts: managedWorktreeReceipts,
       ...managedWorktreePorts,
@@ -1171,6 +1251,51 @@ export function wireProviders(deps: ProvidersDependencies) {
       now: Date.now,
     });
     agentRunChildWorktree.current = createAgentRunChildWorktreePort({
+      sourceSnapshot: async (request) => {
+        const parent = persistence.readCodeThread(decodeCodeThreadId(request.parentThreadId));
+        if (parent === undefined)
+          return { status: "refused", message: "The parent task is unavailable." };
+        return childWorktreeSources.selected({
+          threadId: String(parent.id),
+          checkoutId: String(parent.checkoutId),
+          bindingRevisionId: request.bindingRevisionId,
+          root: request.parentCheckoutRoot,
+          head: request.startPoint,
+          executionPolicy: parent.executionPolicy,
+          current: () => {
+            const fresh = persistence.readCodeThread(parent.id);
+            return (
+              fresh?.lifecycle === "active" &&
+              String(fresh.bindingRevisionId) === request.bindingRevisionId &&
+              String(fresh.checkoutId) === String(parent.checkoutId)
+            );
+          },
+        });
+      },
+      applySourceSnapshot: (receipt) => childWorktreeSources.apply(receipt),
+      sourceSnapshotApplied: (receipt) => childWorktreeSources.applied(receipt),
+      prepareForExecution: async (receipt, request) => {
+        const parent = persistence.readCodeThread(decodeCodeThreadId(request.parentThreadId));
+        if (parent === undefined) return "The parent task is unavailable.";
+        const context = await worktreePreparation.context({
+          receiptId: receipt.receiptId,
+          threadId: receipt.threadId,
+          checkoutId: receipt.checkoutId,
+          projectId: String(parent.projectId),
+          root: receipt.canonicalWorktreePath,
+          executionPolicy: request.executionPolicy,
+          commandAccess: request.commandAccess,
+          networkAllowed: request.networkAllowed,
+          current: () =>
+            !request.signal.aborted &&
+            persistence.readCodeThread(parent.id)?.lifecycle === "active" &&
+            String(persistence.readCodeThread(parent.id)?.bindingRevisionId) ===
+              String(parent.bindingRevisionId),
+        });
+        return context === undefined
+          ? "Child preparation ownership is unavailable."
+          : worktreePreparation.ensure(context);
+      },
       service: managedWorktreeService,
       repository: managedWorktreePorts.repository,
       observeExecutionIdentity: observeManagedWorktreeExecutionIdentity,
@@ -1393,8 +1518,31 @@ export function wireProviders(deps: ProvidersDependencies) {
         statePath: join(providerDataDirectory, "extensions", "mcp-server-sign-ins.json"),
         oauth: hostOAuth,
         access: (credentialRef) => oauthBroker.access(credentialRef),
+        refresh: (credentialRef) => oauthBroker.refresh(credentialRef),
+        ...(oauthBroker.githubActionsSource === undefined
+          ? {}
+          : { githubActionsSource: oauthBroker.githubActionsSource }),
         actorId: OCTANT_LOCAL_ACTOR_ID,
         serverUrl: mcpServerSignInAddress,
+        serverPolicy: mcpServerSignInPolicy,
+        onAuthenticationChanged: (extensionId, componentId) =>
+          agentPluginMcpSessionManager.invalidateAuthentication(extensionId, componentId),
+        ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? {}
+          : {
+              linkedSecrets: makeConnectorLinkedSecrets({
+                broker: makeSecretStoreBrokerClient({
+                  url: options.credentialBrokerUrl,
+                  token: options.credentialBrokerToken,
+                }),
+                journal: secretStoresJournal({
+                  journal: persistence.journal,
+                  connection: persistence.connection,
+                  uuid: randomUUID,
+                  now: () => new Date().toISOString(),
+                }),
+              }),
+            }),
       });
     }
     const subscriptionOAuth =
@@ -1889,6 +2037,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
       agentPluginMcpSessionManager,
+      githubRoutineEventSources: githubRoutineEventSources(() => mcpServerSignInHolder.current),
       chatAttachmentStore,
       chatDataDirectory,
       claudeResumeIdentityStore,
@@ -1909,6 +2058,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      worktreePreparation,
+      childWorktreeSources,
+      resolveChildWorktree: agentRunChildWorktree.current.preparationReceipt,
       managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
       nativeHarnessLeadFallback,

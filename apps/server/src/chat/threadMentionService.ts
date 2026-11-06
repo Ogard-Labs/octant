@@ -1,4 +1,11 @@
 import {
+  prepareSideChatReturnedText,
+  readSideChatReturnAnswer,
+  sideChatSourceReceiptDigest,
+  sideChatReturnProvenance,
+  SIDE_CHAT_RETURN_UNAVAILABLE,
+} from "./sideChatReturn";
+import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeWorkThreadId,
@@ -8,6 +15,7 @@ import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_THREAD_MENTION_CANDIDATES,
   MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
+  MAX_SIDE_CHAT_SOURCE_VERSION_FACTS,
   MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
   type ChatThreadId,
   type CodeOperationId,
@@ -27,6 +35,10 @@ import {
   type UnavailableThreadMention,
   UtcTimestamp,
   type WindowId,
+  type AggregateVersion,
+  type SideChatSourceVersionFact,
+  type ChatThreadView,
+  type SideChatDraftReturnReference,
 } from "@octant/contracts";
 import {
   activeChatTurns,
@@ -38,7 +50,7 @@ import {
   sideChatTitle,
 } from "@octant/domain";
 import { Schema } from "effect";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   markReaderOfMarkedThread,
   type ThreadOutsideContentMarks,
@@ -57,6 +69,8 @@ export interface ThreadMentionDirectoryThread {
   readonly title: string;
   readonly placement: ThreadMentionPlacement;
   readonly updatedAt: UtcTimestamp;
+  readonly version?: AggregateVersion;
+  readonly busy?: boolean;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly modelId?: ProviderModelId;
 }
@@ -81,7 +95,10 @@ export interface ThreadMentionDirectory {
   readTranscript(
     windowId: WindowId,
     threadId: MentionableThreadId,
-    options?: { readonly maxEntries?: number },
+    options?: {
+      readonly maxEntries?: number;
+      readonly observeVersion?: (fact: SideChatSourceVersionFact) => void;
+    },
   ): Promise<ReadonlyArray<ThreadMentionTranscriptEntry> | undefined>;
 }
 
@@ -99,6 +116,9 @@ export type SideChatSourceResolution =
         readonly placement: ThreadMentionPlacement;
         readonly transcript: ReadonlyArray<ThreadMentionTranscriptEntry>;
         readonly truncated: boolean;
+        readonly versionBefore?: AggregateVersion;
+        readonly versions?: ReadonlyArray<SideChatSourceVersionFact>;
+        readonly versionsTruncated?: boolean;
       };
     }
   | { readonly kind: "unreadable" };
@@ -130,6 +150,8 @@ export interface SideChatThreadFactory {
 }
 
 export interface ThreadMentionServiceOptions {
+  /** Host-owned Chat read, used only after revalidating the linked source's Open authority. */
+  readonly readSidecar?: (threadId: ChatThreadId) => ChatThreadView | undefined;
   readonly directories: ReadonlyArray<ThreadMentionDirectory>;
   readonly sidecars: SideChatSidecarStore;
   readonly sideChatThreads: SideChatThreadFactory;
@@ -150,6 +172,7 @@ export interface ThreadMentionServiceOptions {
  */
 export class ThreadMentionService {
   readonly #directories: ReadonlyArray<ThreadMentionDirectory>;
+  readonly #readSidecar: ThreadMentionServiceOptions["readSidecar"];
   readonly #sidecars: SideChatSidecarStore;
   readonly #sideChatThreads: SideChatThreadFactory;
   readonly #clock: () => string;
@@ -164,6 +187,7 @@ export class ThreadMentionService {
 
   constructor(options: ThreadMentionServiceOptions) {
     this.#directories = options.directories;
+    this.#readSidecar = options.readSidecar;
     this.#sidecars = options.sidecars;
     this.#sideChatThreads = options.sideChatThreads;
     this.#clock = options.clock;
@@ -190,7 +214,146 @@ export class ThreadMentionService {
         });
       case "open-side-chat":
         return await this.#openSideChat(context.windowId, command);
+      case "prepare-side-chat-return":
+        return await this.#prepareReturn(context.windowId, command);
     }
+  }
+
+  async #returnAnswer(
+    windowId: WindowId,
+    anchor: {
+      readonly sidecarThreadId: MentionableThreadId;
+      readonly sourceThreadId: MentionableThreadId;
+      readonly turnId: string;
+      readonly attemptId: string;
+    },
+  ) {
+    const sidecar = this.#sidecars.findBySidecarThread(
+      decodeChatThreadId(String(anchor.sidecarThreadId)),
+    );
+    if (sidecar === undefined || String(sidecar.sourceThreadId) !== String(anchor.sourceThreadId))
+      return undefined;
+    const source = (await this.#openable(windowId)).get(String(sidecar.sourceThreadId));
+    if (
+      source === undefined ||
+      source.mode !== sidecar.sourceMode ||
+      source.version === undefined ||
+      this.#readSidecar === undefined
+    )
+      return undefined;
+    let view: ChatThreadView | undefined;
+    try {
+      view = this.#readSidecar(sidecar.sidecarThreadId);
+    } catch {
+      return undefined;
+    }
+    if (view === undefined) return undefined;
+    const answer = readSideChatReturnAnswer(view, anchor);
+    if (answer === undefined) return undefined;
+    // A delayed read never changes which source this action may address.
+    const current = this.#sidecars.findBySidecarThread(sidecar.sidecarThreadId);
+    const latest = (await this.#openable(windowId)).get(String(sidecar.sourceThreadId));
+    if (
+      current === undefined ||
+      current.sourceThreadId !== sidecar.sourceThreadId ||
+      latest === undefined ||
+      latest.mode !== sidecar.sourceMode ||
+      latest.version === undefined
+    )
+      return undefined;
+    const currentView = this.#readSidecar(sidecar.sidecarThreadId);
+    const currentAnswer =
+      currentView === undefined ? undefined : readSideChatReturnAnswer(currentView, anchor);
+    if (
+      currentAnswer === undefined ||
+      currentAnswer.digest !== answer.digest ||
+      currentAnswer.sidecarVersion !== answer.sidecarVersion
+    )
+      return undefined;
+    return { sidecar, source: { ...latest, version: latest.version }, answer: currentAnswer };
+  }
+
+  async #prepareReturn(
+    windowId: WindowId,
+    command: Extract<ThreadMentionCommand, { kind: "prepare-side-chat-return" }>,
+  ): Promise<ThreadMentionCommandResult> {
+    const read = await this.#returnAnswer(windowId, {
+      ...command,
+      sourceThreadId: command.expectedSourceThreadId,
+    });
+    if (read === undefined)
+      return { kind: "failed", requestId: command.requestId, reason: "unavailable" };
+    const receipt = read.answer.attempt.sideChatSourceReceipt;
+    const reference: SideChatDraftReturnReference = {
+      sidecarThreadId: command.sidecarThreadId,
+      sourceThreadId: read.sidecar.sourceThreadId,
+      sourceMode: read.sidecar.sourceMode,
+      turnId: command.turnId,
+      attemptId: command.attemptId,
+      answerDigest: read.answer.digest,
+      ...(receipt === undefined
+        ? {}
+        : { sourceReceiptDigest: sideChatSourceReceiptDigest(receipt) }),
+    };
+    const prepared = prepareSideChatReturnedText(reference, read.answer.text, receipt);
+    return decodeThreadMentionCommandResult({
+      kind: "side-chat-draft-prepared",
+      requestId: command.requestId,
+      reference,
+      destination: {
+        threadId: reference.sourceThreadId,
+        mode: reference.sourceMode,
+        title: read.source.title,
+        version: read.source.version,
+        ...(read.source.busy === undefined ? {} : { busy: read.source.busy }),
+      },
+      ...prepared,
+    });
+  }
+
+  /** Admission read only: no source turn, queue item, approval or draft is mutated here. */
+  async resolveSideChatReturns(input: {
+    readonly windowId: WindowId;
+    readonly readerThreadId: string;
+    readonly mode: OctantMode;
+    readonly references: ReadonlyArray<SideChatDraftReturnReference>;
+  }): Promise<
+    ReadonlyArray<{ readonly reference: SideChatDraftReturnReference; readonly text: string }>
+  > {
+    const results: Array<{ reference: SideChatDraftReturnReference; text: string }> = [];
+    for (const reference of input.references) {
+      if (
+        String(reference.sourceThreadId) !== input.readerThreadId ||
+        reference.sourceMode !== input.mode
+      )
+        throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+      const read = await this.#returnAnswer(input.windowId, reference);
+      if (
+        read === undefined ||
+        read.sidecar.sourceMode !== input.mode ||
+        read.answer.digest !== reference.answerDigest
+      )
+        throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+      const receipt = read.answer.attempt.sideChatSourceReceipt;
+      if (
+        (receipt === undefined ? undefined : sideChatSourceReceiptDigest(receipt)) !==
+        reference.sourceReceiptDigest
+      )
+        throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+      if (
+        receipt !== undefined &&
+        (receipt.sourceThreadId !== reference.sourceThreadId ||
+          receipt.sourceMode !== reference.sourceMode)
+      )
+        throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+      results.push({
+        reference,
+        text:
+          sideChatReturnProvenance(reference, receipt) +
+          "\nThe editable draft carries the selected text; no other Side Chat conversation is added.",
+      });
+    }
+    return results;
   }
 
   /**
@@ -243,10 +406,16 @@ export class ThreadMentionService {
     if (thread === undefined) return { kind: "unreadable" };
     const directory = this.#directories.find((candidate) => candidate.mode === thread.mode);
     if (directory === undefined) return { kind: "unreadable" };
+    const versions: SideChatSourceVersionFact[] = [];
+    let versionsTruncated = false;
     let entries: ReadonlyArray<ThreadMentionTranscriptEntry> | undefined;
     try {
       entries = await directory.readTranscript(windowId, sourceThreadId, {
         maxEntries: MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
+        observeVersion: (fact) => {
+          if (versions.length < MAX_SIDE_CHAT_SOURCE_VERSION_FACTS) versions.push(fact);
+          else versionsTruncated = true;
+        },
       });
     } catch {
       entries = undefined;
@@ -262,6 +431,9 @@ export class ThreadMentionService {
         placement: thread.placement,
         transcript: bounded.transcript,
         truncated: bounded.truncated,
+        ...(thread.version === undefined ? {} : { versionBefore: thread.version }),
+        versions,
+        versionsTruncated,
       },
     };
   }
@@ -569,6 +741,33 @@ export function threadMentionContextResolver(
   };
 }
 
+export function sideChatReturnContextResolver(
+  service: () => ThreadMentionService,
+  marks: ThreadOutsideContentMarks,
+) {
+  return async (input: {
+    readonly references: ReadonlyArray<SideChatDraftReturnReference>;
+    readonly readerThreadId: string;
+    readonly mode: OctantMode;
+    readonly windowId?: WindowId;
+  }): Promise<string> => {
+    if (input.references.length === 0) return "";
+    if (input.windowId === undefined) throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+    const resolved = await service().resolveSideChatReturns({ ...input, windowId: input.windowId });
+    for (const item of resolved) {
+      const marked = markReaderOfMarkedThread({
+        marks,
+        readerThreadId: input.readerThreadId,
+        sourceThreadId: String(item.reference.sidecarThreadId),
+        sourceLabel: "side-chat-return",
+        correlationId: randomUUID,
+      });
+      if (marked.status === "refused") throw new Error(SIDE_CHAT_RETURN_UNAVAILABLE);
+    }
+    return resolved.map((item) => item.text).join("\n\n");
+  };
+}
+
 /**
  * Chat-mode directory over the existing Chat service. Openability is exactly
  * what Chat's own bootstrap and thread read allow: a thread the read refuses
@@ -581,12 +780,14 @@ export function createChatThreadMentionDirectory(input: {
       readonly title: string;
       readonly lifecycle: string;
       readonly updatedAt: UtcTimestamp;
+      readonly version?: AggregateVersion;
       readonly projectId?: unknown;
       readonly providerInstanceId: ProviderInstanceId;
       readonly modelId: ProviderModelId;
     }>;
   }>;
   readonly read: (threadId: ChatThreadId) => {
+    readonly thread?: { readonly version: AggregateVersion };
     readonly turns: ReadonlyArray<{
       readonly id: string;
       readonly supersedes?: string | undefined;
@@ -614,17 +815,25 @@ export function createChatThreadMentionDirectory(input: {
           title: thread.title,
           placement: threadPlacement(thread.projectId, input.projectLabel),
           updatedAt: thread.updatedAt,
+          ...(thread.version === undefined ? {} : { version: thread.version }),
           providerInstanceId: thread.providerInstanceId,
           modelId: thread.modelId,
         }));
     },
-    async readTranscript(_windowId, threadId) {
+    async readTranscript(_windowId, threadId, options) {
       let view: ReturnType<typeof input.read>;
       try {
         view = input.read(decodeChatThreadId(String(threadId)));
       } catch {
         return undefined;
       }
+      if (view.thread?.version !== undefined)
+        options?.observeVersion?.({
+          kind: "aggregate",
+          aggregateType: "chat-thread",
+          id: String(threadId),
+          version: view.thread.version,
+        });
       const bodies = new Map(
         view.contents.map((content) => [String(content.contentId), content.body]),
       );
@@ -763,6 +972,7 @@ export function createWorkThreadMentionDirectory(input: {
       readonly lifecycle: string;
       readonly projectId: unknown;
       readonly updatedAt: UtcTimestamp;
+      readonly version?: AggregateVersion;
       readonly providerInstanceId: ProviderInstanceId;
       readonly modelId: ProviderModelId;
     }>;
@@ -777,6 +987,8 @@ export function createWorkThreadMentionDirectory(input: {
     threadId: WorkThreadId,
   ) => Promise<{
     readonly turns: ReadonlyArray<{
+      readonly turnId?: string;
+      readonly version?: AggregateVersion;
       readonly status: string;
       readonly transcript: ReadonlyArray<{
         readonly role: "user" | "assistant";
@@ -800,11 +1012,12 @@ export function createWorkThreadMentionDirectory(input: {
           title: thread.title,
           placement: threadPlacement(thread.projectId, input.projectLabel),
           updatedAt: thread.updatedAt,
+          ...(thread.version === undefined ? {} : { version: thread.version }),
           providerInstanceId: thread.providerInstanceId,
           modelId: thread.modelId,
         }));
     },
-    async readTranscript(windowId, threadId) {
+    async readTranscript(windowId, threadId, options) {
       let view: Awaited<ReturnType<typeof input.transcript>>;
       try {
         view = await input.transcript(windowId, decodeWorkThreadId(String(threadId)));
@@ -812,6 +1025,16 @@ export function createWorkThreadMentionDirectory(input: {
         return undefined;
       }
       const entries: ThreadMentionTranscriptEntry[] = [];
+      for (const turn of view.turns.slice(
+        -(options?.maxEntries ?? MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES),
+      ))
+        if (turn.turnId !== undefined && turn.version !== undefined)
+          options?.observeVersion?.({
+            kind: "aggregate",
+            aggregateType: "work-turn",
+            id: turn.turnId,
+            version: turn.version,
+          });
       for (const turn of view.turns) {
         for (const line of turn.transcript) {
           // A turn that has not completed has no answer yet: its text is a
@@ -851,6 +1074,7 @@ export function createCodeThreadMentionDirectory(input: {
       readonly lifecycle: string;
       readonly projectId: unknown;
       readonly updatedAt: UtcTimestamp;
+      readonly version?: AggregateVersion;
       readonly providerInstanceId: ProviderInstanceId;
       readonly modelId: ProviderModelId;
     }>;
@@ -892,6 +1116,7 @@ export function createCodeThreadMentionDirectory(input: {
           title: thread.title,
           placement: threadPlacement(thread.projectId, input.projectLabel),
           updatedAt: thread.updatedAt,
+          ...(thread.version === undefined ? {} : { version: thread.version }),
           providerInstanceId: thread.providerInstanceId,
           modelId: thread.modelId,
         }));
@@ -905,9 +1130,14 @@ export function createCodeThreadMentionDirectory(input: {
       // evidence read, so older turns are dropped before any content is read.
       const window = options?.maxEntries ?? MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES;
       for (const turn of turns.slice(-window)) {
-        const prompt = await readCodeEvidenceText(input, windowId, threadId, turn.operationId, [
-          turn.prompt.contentId,
-        ]);
+        const prompt = await readCodeEvidenceText(
+          input,
+          windowId,
+          threadId,
+          turn.operationId,
+          [turn.prompt.contentId],
+          options?.observeVersion,
+        );
         if (prompt !== undefined) {
           entries.push({ role: "user", text: prompt, occurredAt: turn.startedAt });
         }
@@ -921,6 +1151,7 @@ export function createCodeThreadMentionDirectory(input: {
           threadId,
           turn.operationId,
           turn.assistant.map((reference) => reference.contentId),
+          options?.observeVersion,
         );
         if (response !== undefined) {
           entries.push({ role: "assistant", text: response, occurredAt: turn.updatedAt });
@@ -998,6 +1229,7 @@ async function readCodeEvidenceText(
   threadId: CodeThreadId,
   operationId: CodeOperationId,
   contentIds: ReadonlyArray<string>,
+  observeVersion?: (fact: SideChatSourceVersionFact) => void,
 ): Promise<string | undefined> {
   const decoder = new TextDecoder();
   let text = "";
@@ -1005,6 +1237,11 @@ async function readCodeEvidenceText(
     if (text.length > MAX_THREAD_MENTION_ENTRY_CHARACTERS) break;
     try {
       const evidence = await input.readEvidence(windowId, threadId, operationId, contentId);
+      observeVersion?.({
+        kind: "content",
+        id: contentId,
+        digest: createHash("sha256").update(evidence.bytes).digest("hex"),
+      });
       text += decoder.decode(evidence.bytes);
     } catch {
       // Evidence the host cannot serve is simply absent from the window; a

@@ -5,6 +5,9 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import {
   MAX_REPOSITORY_TEST_ARTIFACT_BYTES,
   MAX_REPOSITORY_TEST_OUTPUT_BYTES,
+  decodeProjectAction,
+  type ProjectAction,
+  type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import type { RepositoryTestProcessResult } from "./repositoryTestRunner";
 import {
@@ -26,6 +29,7 @@ import {
 } from "../process/seatbeltProfile";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import type { EgressProxyEndpoint, OsNetworkEgress } from "../process/threadEgressPolicy";
+import { defaultTerminalShell } from "./terminalShell";
 
 interface ProcessStream {
   on(event: "data", listener: (chunk: unknown) => void): unknown;
@@ -156,7 +160,14 @@ export interface HarnessShellScriptInput {
 }
 
 export interface RepositoryTestProcessInput {
+  readonly networkAccess?: "none";
+  readonly executionPolicy?: ProviderExecutionPolicy;
+  readonly checkoutRoot?: string;
   readonly beforeLaunch?: () => boolean;
+  /** Rechecks named-command authority after launch preparation, immediately before spawn. */
+  readonly admitStart?: () => boolean | Promise<boolean>;
+  /** Reports an actually created child, before any asynchronous receipt work. */
+  readonly onStarted?: () => void;
   readonly argv: readonly string[];
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
@@ -241,6 +252,13 @@ export interface RepositoryTestProcessInput {
    * bounded capture, for a caller that reads output while the command runs.
    */
   readonly onOutput?: (chunk: Uint8Array) => void;
+  /**
+   * Which end of an output over the port's bound the result keeps: the first
+   * bytes (the default), or the newest. A log read is the caller for
+   * `newest`: the line an agent is looking for is the last one the app
+   * wrote, and a prefix cannot give it back.
+   */
+  readonly outputRetention?: "first" | "newest";
 }
 
 export interface RepositoryTestArtifactReadInput {
@@ -334,6 +352,25 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
     return this.#launch(input, validated, signal);
+  }
+
+  /** Only the reviewed Project recipe path uses a shell. Structured repository
+   * tests keep their argv-only refusal; both share process ownership and cleanup. */
+  async executeReviewedAction(
+    input: Omit<RepositoryTestProcessInput, "argv"> & { readonly action: ProjectAction },
+    signal?: AbortSignal,
+  ): Promise<RepositoryTestProcessResult> {
+    if (!supportsOwnedProcessGroups(this.#platform)) return unavailable(false);
+    if (signal?.aborted) return cancelledBeforeSpawn();
+    try {
+      const action = decodeProjectAction(input.action);
+      const executable = defaultTerminalShell();
+      const launch = { ...input, argv: [executable, "-lc", action.command] };
+      validateLaunchInput(launch, this.#maxOutputBytes);
+      return this.#launch(launch, { executable, args: launch.argv.slice(1) }, signal);
+    } catch {
+      return unavailable(false);
+    }
   }
 
   /**
@@ -545,6 +582,13 @@ export class RepositoryTestProcessPort {
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
+      if (input.executionPolicy === "plan") return unavailable(false);
+      let checkoutRoot = input.cwd;
+      if (input.checkoutRoot !== undefined) {
+        checkoutRoot = await realpath(input.checkoutRoot);
+        const cwd = await realpath(input.cwd);
+        if (!contained(checkoutRoot, cwd)) return unavailable(false);
+      }
       const executable = isAbsolute(validated.executable)
         ? validated.executable
         : await resolveTestExecutable(validated.executable);
@@ -604,9 +648,10 @@ export class RepositoryTestProcessPort {
       launch = this.#confinement.prepare({
         executable,
         args: validated.args,
-        boundRoot: input.cwd,
+        boundRoot: checkoutRoot,
         temporaryDirectory: this.#temporaryDirectory,
-        networkEgress: proxied?.networkEgress ?? this.#networkEgress,
+        networkEgress:
+          input.networkAccess === "none" ? "none" : (proxied?.networkEgress ?? this.#networkEgress),
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [
@@ -640,6 +685,16 @@ export class RepositoryTestProcessPort {
 
     if (signal?.aborted) return cancelledBeforeSpawn();
 
+    try {
+      if (input.admitStart !== undefined) {
+        const admission = input.admitStart();
+        if ((typeof admission === "boolean" ? admission : await admission) === false)
+          return cancelledBeforeSpawn();
+      }
+    } catch {
+      return cancelledBeforeSpawn();
+    }
+    if (signal?.aborted) return cancelledBeforeSpawn();
     if (input.beforeLaunch !== undefined && !input.beforeLaunch()) return unavailable(false);
 
     let child: SpawnedProcess;
@@ -659,7 +714,7 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
 
-    const output = new CombinedOutputCapture(this.#maxOutputBytes);
+    const output = new CombinedOutputCapture(this.#maxOutputBytes, input.outputRetention);
     const forward = (chunk: unknown) => {
       if (input.onOutput === undefined) return;
       input.onOutput(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(String(chunk)));
@@ -673,6 +728,13 @@ export class RepositoryTestProcessPort {
       forward(chunk);
     });
     const closed = observeClose(child);
+    let notificationFailed = false;
+    try {
+      if (child.pid !== undefined) input.onStarted?.();
+    } catch {
+      notificationFailed = true;
+    }
+
     const receiptAttempt = persistProcessReceipt(
       {
         supervisor: "repository-test-runner",
@@ -687,7 +749,11 @@ export class RepositoryTestProcessPort {
       await value.ready;
       return value;
     });
-    const settlement = firstSettlement(closed, input.timeoutMs, signal);
+    const settlement = firstSettlement(
+      closed,
+      input.timeoutMs,
+      notificationFailed ? AbortSignal.abort() : signal,
+    );
     const receiptOutcome = await Promise.race([
       receiptAttempt.then(
         (value) => ({ kind: "receipt" as const, value }),
@@ -914,30 +980,81 @@ export class RepositoryTestProcessPort {
 
 class CombinedOutputCapture {
   readonly #maximum: number;
-  readonly #stdout: Buffer[] = [];
-  readonly #stderr: Buffer[] = [];
+  readonly #retention: "first" | "newest";
+  readonly #chunks: Array<{ readonly target: "stdout" | "stderr"; bytes: Buffer }> = [];
   #retained = 0;
 
-  constructor(maximum: number) {
+  constructor(maximum: number, retention: "first" | "newest" = "first") {
     this.#maximum = maximum + 1;
+    this.#retention = retention;
   }
 
   append(target: "stdout" | "stderr", chunk: unknown): void {
-    if (this.#retained >= this.#maximum) return;
+    if (this.#retention === "first" && this.#retained >= this.#maximum) return;
     const bytes = Buffer.isBuffer(chunk)
       ? chunk
       : chunk instanceof Uint8Array
         ? Buffer.from(chunk)
         : Buffer.from(String(chunk), "utf8");
-    const retained = bytes.subarray(0, this.#maximum - this.#retained);
+    const retained =
+      this.#retention === "first" ? bytes.subarray(0, this.#maximum - this.#retained) : bytes;
     if (retained.byteLength === 0) return;
-    (target === "stdout" ? this.#stdout : this.#stderr).push(Buffer.from(retained));
+    this.#chunks.push({ target, bytes: Buffer.from(retained) });
     this.#retained += retained.byteLength;
+    if (this.#retention === "newest") this.#dropOldest();
+  }
+
+  /**
+   * Drops the oldest bytes over the bound, then the continuation bytes of a
+   * character the cut split, so a valid UTF-8 tail does not read as a parser
+   * failure.
+   */
+  #dropOldest(): void {
+    if (this.#retained <= this.#maximum) return;
+    const cut = new Set<"stdout" | "stderr">();
+    let oldest = this.#chunks[0];
+    while (oldest !== undefined && this.#retained > this.#maximum) {
+      const excess = this.#retained - this.#maximum;
+      cut.add(oldest.target);
+      if (oldest.bytes.byteLength <= excess) {
+        this.#chunks.shift();
+        this.#retained -= oldest.bytes.byteLength;
+        oldest = this.#chunks[0];
+        continue;
+      }
+      oldest.bytes = oldest.bytes.subarray(excess);
+      this.#retained -= excess;
+    }
+    // A dropped whole chunk can end inside a character as well as a partial
+    // cut can, and stdout and stderr interleave, so each stream that lost
+    // bytes has its first retained bytes checked, oldest chunk overall or not.
+    for (const target of cut) {
+      for (let index = 0; index < this.#chunks.length;) {
+        const chunk = this.#chunks[index];
+        if (chunk === undefined) break;
+        if (chunk.target !== target) {
+          index += 1;
+          continue;
+        }
+        let start = 0;
+        while (start < chunk.bytes.byteLength && ((chunk.bytes[start] ?? 0) & 0xc0) === 0x80) {
+          start += 1;
+        }
+        chunk.bytes = chunk.bytes.subarray(start);
+        this.#retained -= start;
+        if (chunk.bytes.byteLength > 0) break;
+        this.#chunks.splice(index, 1);
+      }
+    }
   }
 
   result(): Pick<RepositoryTestProcessResult, "stdout" | "stderr" | "parserFailed"> {
-    const stdout = Buffer.concat(this.#stdout);
-    const stderr = Buffer.concat(this.#stderr);
+    const stream = (target: "stdout" | "stderr") =>
+      Buffer.concat(
+        this.#chunks.filter((chunk) => chunk.target === target).map((chunk) => chunk.bytes),
+      );
+    const stdout = stream("stdout");
+    const stderr = stream("stderr");
     return {
       stdout: new Uint8Array(stdout),
       stderr: new Uint8Array(stderr),

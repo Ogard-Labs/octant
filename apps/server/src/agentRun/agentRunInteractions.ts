@@ -1,3 +1,4 @@
+import { decodeAgentRunId, type Questionnaire } from "@octant/contracts";
 import type {
   AgentRun,
   AgentRunAuthority,
@@ -44,6 +45,7 @@ export interface AgentRunInteractionOptions {
   readonly childTainted?: (run: AgentRun) => boolean;
   /** What the Watcher found in what a child read, which counts beside its parent's. */
   readonly childWatcherLabels?: (run: AgentRun) => ReadonlyArray<ShieldWatcherLabel>;
+  readonly requestOwner?: (run: AgentRun) => string | undefined;
   readonly providerName?: (id: ProviderInstanceId) => string | undefined;
   readonly parentLead: (run: AgentRun) => NativeHarnessSlotCandidate | undefined;
   readonly parentAuthority: (run: AgentRun) => AgentRunAuthority | undefined;
@@ -104,7 +106,19 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         ? {}
         : { projectId: run.workspaceReceipt.projectId }),
       lead: options.parentLead(run),
-      source: { runId: run.id, ...target, ...(providerName ? { providerName } : {}) },
+      source: {
+        runId: run.id,
+        ...target,
+        ...(providerName ? { providerName } : {}),
+        ...(run.workspaceReceipt.kind === "chat-virtual"
+          ? {}
+          : {
+              targetFolder:
+                run.workspaceReceipt.kind === "work-root"
+                  ? run.workspaceReceipt.canonicalRoot
+                  : run.workspaceReceipt.worktreeRoot,
+            }),
+      },
     };
   };
   const approve = async (input: {
@@ -185,6 +199,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
   const ask = async (input: {
     readonly run: AgentRun;
     readonly prompt: string;
+    readonly questionnaire?: Questionnaire;
     readonly options: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
   }) => {
@@ -201,6 +216,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       ...parent,
       lead: parent.lead,
       prompt: input.prompt,
+      ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
       options: input.options,
       signal: input.signal,
     });
@@ -250,6 +266,19 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         options: choices.map((option) => option.label),
       });
       return outcome.status === "answered" ? outcome.answer : undefined;
+    },
+    mayAnswerFromDevice: (input: {
+      readonly runId: string;
+      readonly parentThreadId: string;
+      readonly deviceId: string;
+    }): boolean => {
+      const run = options.getById(decodeAgentRunId(input.runId));
+      return (
+        run !== undefined &&
+        String(run.parentThreadId) === input.parentThreadId &&
+        options.requestOwner?.(run) === input.deviceId &&
+        authorized(run)
+      );
     },
     toolsFor: (run: AgentRun): NativeHarnessChildInteractions => ({
       approvals: (input) => approve({ ...input, run, shieldCall: harnessShieldCall(input) }),

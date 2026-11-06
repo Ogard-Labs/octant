@@ -13,14 +13,16 @@ action is re-authorized before any effect.
 Open **Browser** from a Work or Code thread's tool launcher. The host requires
 exactly one owning thread before it can create an isolated context.
 
-- Each context is an isolated incognito context scoped to exactly one owning
+- A new context is Private unless you approve a Project or Personal profile.
+  Each context is scoped to exactly one owning
   thread (thread, host, mode, Project or root, provider, action, correlation,
   and window authority are re-resolved server-side before any effect).
 - An **origin allowlist** governs navigation; an empty allowlist fails
   closed. Disallowed origins and redirects, popup tabs, and cross-thread or
   cross-window use are denied.
-- **Credential-field protection** is always on: password and credential
-  fields are blocked.
+- **Credential-field protection** applies to fixed actions and readers:
+  they refuse password entry and redact protected values. Full-access scripts
+  have the separate DOM/account authority described below.
 - Session settings include a max concurrent tab count and a session timeout
   (5 minutes in the interface).
 
@@ -39,6 +41,15 @@ The Browser pane provides an address bar, history controls, and the isolated
 page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
+
+In Plan mode the agent can still look at the page already open in its thread's
+Browser: take a snapshot, read its text, take a screenshot, read what it
+logged and failed to load, audit its accessibility or performance, list its
+tabs, wait for it to reach a state, list the Project's saved flows, and stop
+the Browser. It cannot open a page or tab, click, type, scroll, resize, switch
+or close a tab, upload, save a download, sign in, run a script, record, or save
+or run a flow. You are still asked about a site
+or a model you have not allowed, even for a read.
 
 ### Recovering the agent's page
 
@@ -62,10 +73,10 @@ it open. Sign-in or Take over keeps it open for eleven minutes from the handoff
 or your latest take-over input, then two minutes after Continue or Hand back,
 using whichever deadline is later than the ordinary idle deadline.
 
-A Work agent can request a Project or Personal profile. Code's separate agent
-adapter currently opens new pages Private and does not yet accept that profile
-argument; the profile controls for pages you open are available in both modes.
-Expiry recovery does not add Code agent profile selection.
+A Work or Code agent can request a Project or Personal profile. You can also
+choose a **Default browser profile for this task**; the agent's new pages then
+open in it until you change it. The default grants no access: Octant still asks
+you before the agent uses a site in a signed-in profile.
 
 ### Browser profiles
 
@@ -79,8 +90,9 @@ choose a profile from the control at the left of the address bar:
 | **Project**  | On this Mac, until you sign out | Every page of this Work or Code Project           |
 | **Personal** | On this Mac, until you sign out | Every page, in any Project, that chooses Personal |
 
-- Sign in by typing into the page yourself. Octant saves no passwords and fills
-  none. Choosing another profile opens the same address again as a new page in
+- Sign in manually or approve a selected-item brokered fill through **Login
+  permission**. Fill and submit are separate approvals; neither confirms
+  authentication. Choosing another profile opens the same address again as a new page in
   that profile; the old page closes and nothing it held carries over.
 - The control remembers your last choice for each Project, for pages you open.
   It never changes a page the agent opened.
@@ -112,7 +124,7 @@ parent domains', and leaves every other cookie unread.
 **Clear cookies…** removes a profile's cookies and keeps its other data.
 
 **What the agent may do on a signed-in page.** A Project or Personal page is
-treated as signed in, because Octant cannot tell. A Work agent can ask for one by
+treated as signed in, because Octant cannot tell. A Work or Code agent can ask for one by
 passing `profile` (`project` or `personal`) when it opens a page. Octant asks
 you first, naming the site and the profile: "Let the agent use github.com in
 the Personal profile?" Choosing **Always allow** remembers that site for that
@@ -123,8 +135,36 @@ cannot open a signed-in page, and neither can a paired phone or browser, which
 sees only "Signed-in page — open it on this Mac." If a turn you started from
 your phone needs such a site, its question waits for a window on this Mac. While
 the agent drives a signed-in page, the Browser's status label and the floating
-preview name the profile. Plan mode refuses the Browser as it always did, and
-password and one-time-code fields stay protected.
+preview name the profile. Plan mode allows only reads of the page already open,
+as above, and fixed readers keep password and one-time-code values protected.
+
+### Synchronous page scripts
+
+For a local native Code page already at **Full access**, the agent can use
+`run-script` when the fixed actions cannot express the task. It supplies source
+and the revision from a fresh page read. Existing site/profile approval still
+applies; no additional script prompt appears. Work, headless, paired, routine,
+subagent, terminal and Plan callers are refused. Scripts below Full access are
+currently unavailable because Octant cannot establish whether a Private page
+is signed in. Private means temporary storage, not a signed-out account.
+
+A script has normal page DOM and account access. It can read values a form
+populated or reflected and install callbacks that survive the call. Those
+values can reach the requesting provider. The fixed-reader and credential
+broker protections do not make arbitrary scripts unable to observe passwords.
+The page's main-world CSP does not constrain isolated-world script execution.
+
+Source is limited to 8KiB UTF-8 and native execution/serialization to 150ms.
+Results are synchronous and bounded, and may be truncated. Promises, functions
+and DOM handles are unsupported results. There is no Node, Electron IPC, host
+filesystem or raw debugging access. Scripts cannot run in batches or flows.
+Read the page again after possible effects before reusing refs or revisions.
+
+Fill/private credential use and scripts exclude each other while held. An
+uncertain result means execution could have affected the page; cancellation
+cannot undo it or remove callbacks. If a native connection failed, agent reads
+may remain held until the actual context ends. Stop that owned Browser page to
+retire it before opening another; this does not clear profile cookies or data.
 
 ### Browser extensions
 
@@ -172,8 +212,9 @@ appears in the conversation beside any generated images, newest first, each
 with the page title and its origin. Choose one to see it full size with its
 address and time. The strip is absent until the thread has a capture.
 
-- Only a screenshot is kept. The picture the agent receives after other actions,
-  such as clicking or scrolling, is not.
+- Only a screenshot, or a [recording](#browser-recordings) the agent asked for,
+  is kept. The picture the agent receives after other actions, such as clicking
+  or scrolling, is not.
 - A thread keeps its newest 32 captures; the oldest is dropped when a new one
   arrives. Deleting the thread deletes its captures.
 - Captures stay on this computer, in Octant's data folder. **Settings → Data &
@@ -193,6 +234,38 @@ address and time. The strip is absent until the thread has a capture.
 - A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
+#### Browser recordings
+
+To show what a change does, the agent can record a short check: it runs a few
+Browser steps, or replays a saved flow, and asks for a recording of that call.
+Octant keeps an animated picture of the page while the call ran, as a capture
+of the thread. Ask the agent to "record the check" when you want one; it never
+records on its own.
+
+- In the strip a recording shows its first frame with a play mark and its
+  length. Choose it to watch it play; **Stop** and **Play** sit under it. With
+  reduced motion turned on (in your system settings or in Octant), it waits
+  for **Play**.
+- A recording lasts at most 30 seconds, takes up to 4 frames a second, is at
+  most 800 pixels on its longer side, and at most 2 MB. It stops early at any
+  of these, when the page is resized, and when another tab comes to the front,
+  and says so under the picture. A recording shows only the tab it started on
+  and is listed under that tab's address.
+- A page with a password or other credential field on screen is never recorded:
+  its frames are left out, and a recording of nothing else keeps nothing.
+- Only the sites you approved for the agent's page are recorded. If the page
+  shows any other site (for example because you took it somewhere else while
+  the agent worked), a blank page, or an error page, those moments are left
+  out the same way.
+- If you take over the page, or the agent asks you to sign in, while it is
+  recording, nothing of what you do is kept.
+- Recordings follow every capture rule above: they stay on this computer, count
+  toward the thread's 32 captures, are not sent anywhere, and a paired device
+  cannot see them. The agent cannot record in Plan, and a recording already
+  running when Plan begins is stopped and not kept.
+- A thread keeps at most 8 recordings. A newer one replaces the oldest
+  recording; your screenshots are never dropped to make room.
+
 #### Browser proof
 
 Octant also keeps a short record of the steps the agent took in its Browser, at
@@ -210,7 +283,10 @@ that took it.
   is not sent anywhere, and a paired device cannot see it.
 - **Save screenshots…** (in the Octant desktop app) asks you for a folder and
   writes the thread's captures there as `browser-check-01.png`, `-02`, and so
-  on. It never replaces a file that is already there.
+  on. It never replaces a file that is already there. When the thread has a
+  recording the button reads **Save screenshots and recordings…**: a recording
+  is saved in the same numbered run as an animated `.png`, which GitHub plays
+  when you drag it into a pull request description.
 - To put the steps in a pull request, see [Code threads](../guide/code.md): the
   **Include Browser proof** choice there is off unless you turn it on.
 
@@ -240,7 +316,8 @@ a shell-launched browser. The tool can navigate, take a snapshot of the page,
 read page text, click and fill elements, hover over a menu, choose an option
 in a list, drag one element onto another, press a key or a shortcut such as
 Control+A, scroll horizontally or vertically, wait for an element, open and
-switch between tabs, take a screenshot, and stop its session.
+switch between tabs, take a screenshot, audit the page's accessibility or
+performance, and stop its session.
 
 The agent can also put files into a page's file field, for example to attach a
 report to a form. It may only send files from the thread's own folder (the
@@ -301,6 +378,21 @@ own page. Your own Browser window and your other pages keep their size and
 look, and a page you opened developer tools on keeps its touch and color
 scheme as they are. The agent is told what the page now reports.
 
+While you build a web app, the agent can audit the page it has open. An
+accessibility audit finds images without a text alternative, buttons, links,
+and form fields without a name, a missing page title or language, skipped
+heading levels, repeated ids that labels point at, text with too little
+contrast, focusable elements hidden from screen readers, and, after the agent
+switches the page to a phone, touch targets that are too small and too close
+together. Each problem names the element so the agent can go and fix it. A
+performance audit reports how the page loaded: time to first byte, first and
+largest paint, layout shift, and blocking time, each rated good, needs
+improvement, or poor, with the requests by type and the largest files (their
+addresses with secrets removed). An audit only reads the page: it never
+reloads it, so to measure a fresh load the agent opens the page again first.
+Audits run on this computer and send nothing anywhere, and Plan mode allows
+them, since an audit only reads the page already open.
+
 When a page needs you to sign in, the agent can hand it to you instead of
 giving up. A card in the thread says which site and why, with **Continue** and
 **Cancel**, and the Browser comes forward. Sign in on the page yourself; the
@@ -316,10 +408,44 @@ looked at the page afresh, so it never writes over what you were typing.
 To work on the page without the agent, press **Take over** in the Browser's
 toolbar. The agent's Browser calls are refused while you have the page, and the
 toolbar says "You have the page". Press **Hand back** when you are done; the
-agent's next step is answered with a fresh look at the page you left. Only you,
-at this computer, can take over or hand back: a turn started from your phone,
+agent's next step is answered with a fresh look at the page you left. These toolbar
+controls are local: a turn started from your phone,
 a routine, a subagent, or a program in a terminal cannot. If you walk away, a
 page you took over closes after 11 minutes without use, like any other page.
+
+### Use an open page from an owner browser
+
+An enrolled owner browser can control an already-open **Code Private** page on
+the host Mac. Keep that page visible in its original Octant window. Open that
+host's own web app and go to **Settings → Remote access → Hub**, then find
+**Owner Browser** for that host. This requires an owner identity and passkey
+already confirmed on the host; ordinary paired access is not enough.
+
+Choose **List open pages**, check the exact thread, site and Private profile,
+then **Unlock and take over** for that page. This always asks for a fresh owner
+unlock, even if you opened an administration session. Control lasts at most
+60 seconds and names the active owner on both screens.
+
+The frame is for you and may show account content or credentials. Octant does
+not save it as a screenshot, send it to the agent, or put it in the journal.
+Tap a point in the picture, use the key or scroll buttons, or type into the
+masked text box and choose **Type text**. The box clears after you send it.
+Each input needs a current frame. A changed page, tab or viewport ends that
+target's control; list and unlock the current page again.
+
+**Stop remote control** leaves the page held for a person. **Hand back to the
+agent** explicitly releases that hold, and the agent must read the page again
+before acting. At the host Mac, **Reclaim locally**, or local page input, stops
+remote control while preserving local use. An input already sent may have taken
+effect; Octant never retries it automatically or claims it was undone.
+
+Hiding or leaving the owner view aborts its pending requests and sends a stop
+without another unlock. If the host cannot be reached, its finite control lease
+can remain until expiry. The page still stays held for a person after expiry.
+An unsettled native input cannot be treated as a confirmed handback. Finish on
+the host Mac when a device-local authenticator, popup or unsupported form needs
+it. Work, stored profiles, embedded or hidden pages, headless pages, transfers,
+new tabs and address navigation are not part of this control path.
 
 To find out why a page misbehaves, the agent can read the page's console
 errors (and warnings if it asks), requests that failed, and requests that came
@@ -660,3 +786,22 @@ extension.
 - [Apple Development Workbench](/advanced/apple-workbench) for validation workflows
 - [Privacy and security](/advanced/privacy-and-security) for isolation and evidence policy
 - [Plugins and skills](/advanced/plugins-and-skills) for extension authority
+
+### Selected login-item permission
+
+A task's native Browser offers **Login permission** to review one explicitly
+selected 1Password account, vault and item while the page is held for the
+person. It records top-frame permission for the exact HTTPS site and port,
+profile and Project or task. It fills nothing and includes no iframe or page
+script access. Store unlock, saved permission and website sign-in are distinct.
+See [the secret-store steps](/guide/secret-stores#record-permission-for-a-browser-login-item)
+for scope, expiry, revocation and current limitations.
+
+For saved selected-item permission, **Review login form** gives a fresh field,
+site and profile review before **Fill selected fields**. **Submit sign-in form**
+is a separate approval. The page remains held throughout private read and each
+effect, including overlapping observations. Fill does not confirm sign-in;
+MFA/CAPTCHA and uncertain results remain yours to complete. The website can
+retain or reflect input, so check it before continuing. See
+[Secret stores](../guide/secret-stores.md#record-permission-for-a-browser-login-item)
+for custody, cancellation and exact SSO limits.

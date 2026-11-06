@@ -43,8 +43,8 @@ here is merged or being hardened for it.
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.
 - **Agent-to-agent messaging** — a Code thread's agent can leave a bounded
-  message for another thread of the same Project through
-  `octant_agent_message`; the host delivers it as framed, untrusted data at
+  message for another thread of the same Project through `send` on
+  `octant_threads`; the host delivers it as framed, untrusted data at
   the start of that thread's next turn, and the Agents center shows the
   bounds. Design and
   [threat model](security/agent-to-agent-messaging-threat-model.md) approved
@@ -74,7 +74,7 @@ here is merged or being hardened for it.
 - **Server Projects** — Code and Work Projects bound to a folder on a
   registered server over SSH ([Server Projects](design/server-projects.md)).
 - **Hub and spokes, language services, and disposable desktops** — built
-  slices of the post-preview tracks; what each still lacks is listed in
+  slices of tracks that are in scope for the first preview; what each still lacks is listed in
   [Decisions and requirements](design/decisions.md).
 - **Operations** — usage dashboard, optional Project and thread spend
   ceilings over tokens, turns, run time, and money, checked at turn admission
@@ -144,22 +144,20 @@ Hardening in progress for the preview:
     navigation remain separate follow-up deliveries.
 - **Dogfood-driven fixes** — whatever daily use of the preview surfaces first.
 
-## Later
+## Also in scope for the first preview
 
-Outside the technical preview. Except for Windows, which stays sequenced
-behind the preview, these are post-preview tracks the maintainer authorized on
-2026-10-26 under the
-[Current Release Boundary](architecture.md#current-release-boundary). Each is
-design-first: work starts only once its owning specification documents its
+Everything on the work board is in scope for the first proper preview release
+(maintainer decision, 2026-11-06), under the
+[Current Release Boundary](architecture.md#current-release-boundary). There is
+no post-preview track. Each item is design-first: work starts only once its owning specification documents its
 authority, privacy, and release boundaries.
 
 - **Windows desktop confinement, credentials, and packaging** — the identical
-  desktop app sequences Windows after the macOS technical preview and
-  Linux self-update evidence on a real image, per the
-  [release boundary](architecture.md#current-release-boundary); no Windows
-  work starts before both exist; Work/Code stay `incompatible` until an
-  approved Windows confinement design is documented in the architecture.
-- **Mobile maturity after internal TestFlight** — Android device builds, live
+  desktop app; Windows packaging, feed, and CI work may start now, per the
+  [release boundary](architecture.md#current-release-boundary); Work/Code stay
+  `incompatible` until an approved Windows confinement design is documented in
+  the architecture.
+- **Mobile maturity beyond internal TestFlight** — Android device builds, live
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
   [Mobile maturity](design/mobile-maturity.md).
@@ -182,9 +180,9 @@ authority, privacy, and release boundaries.
   built behind their seams; live provider smokes and wider placements remain
   ([disposable desktops](design/disposable-desktops.md),
   [outside provider drivers](design/outside-provider-drivers.md)).
-- **EU/GDPR compliance package** — pending legal review.
+- **EU/GDPR compliance package** — legal review is still required before it ships.
 - **Live guest sharing** — waits on the foundation named in its own design
-  note; not among the 2026-10-26 tracks.
+  note; not among the tracks named in the release boundary.
 
 ## Not planned
 

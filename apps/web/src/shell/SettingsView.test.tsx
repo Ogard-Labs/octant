@@ -17,6 +17,7 @@ import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
 import type { ProviderController } from "../providers/useProviderController";
+import type { OctantHostBridge } from "./hostBridge";
 
 const now = "2026-07-20T08:00:00.000Z";
 
@@ -120,6 +121,49 @@ function defaultProps(): SettingsViewProps {
 }
 
 describe("SettingsView", () => {
+  it.each([false, true])(
+    "keeps exactly one Nightly identity in standalone Settings (narrow: %s)",
+    (isNarrow) => {
+      const hostBridge: OctantHostBridge = {
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+        projectWindowCapability: "C".repeat(43),
+        clearProviderCredential: vi.fn(),
+        close: vi.fn(),
+        maximizeOrRestore: vi.fn(),
+        minimize: vi.fn(),
+        providerCredentialStatus: vi.fn(async () => "missing" as const),
+        resetBounds: vi.fn(),
+        selectProjectRoot: vi.fn(),
+        setProviderCredential: vi.fn(),
+        addProviderApiKey: vi.fn(),
+        listProviderApiKeys: vi.fn(async () => []),
+        renameProviderApiKey: vi.fn(),
+        replaceProviderApiKey: vi.fn(),
+        removeProviderApiKey: vi.fn(),
+        setActiveProviderApiKey: vi.fn(),
+        moveProviderApiKey: vi.fn(),
+        setSidebarMaterialPreference: vi.fn(),
+        subscribeResolvedMaterial: vi.fn(() => () => undefined),
+      };
+      const { container, rerender, props } = renderSettings({
+        hostBridge,
+        isNarrow,
+        reservesTitlebarInset: true,
+      });
+      expect(screen.getAllByLabelText("Octant Nightly")).toHaveLength(1);
+      const identity = screen.getByLabelText("Octant Nightly");
+      expect(
+        container.querySelector(
+          isNarrow ? ".settings-view__mobile-titlebar" : ".settings-view__sidebar",
+        ),
+      ).toContainElement(identity);
+      expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
+      const { hostBridge: _bridge, ...remote } = props;
+      rerender(<SettingsView {...remote} />);
+      expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
+    },
+  );
+
   it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
@@ -239,6 +283,24 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Pixelated" }));
 
     expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
+  });
+
+  it("shows replies at low detail until another level is chosen in Appearance", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    const replyDetail = screen.getByRole("group", { name: "Reply detail" });
+    expect(within(replyDetail).getByRole("button", { name: "Low" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
+      "Where every thread starts unless it sets its own. Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+    );
+    await user.click(within(replyDetail).getByRole("button", { name: "High" }));
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ replyDetail: "high" });
   });
 
   it("shows the stats line switch off when the saved preference is off", () => {
@@ -383,6 +445,22 @@ describe("SettingsView", () => {
       .getByRole("heading", { level: 1, name: "Remote access" })
       .closest("header")!;
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
+  });
+
+  it("shows one Managed in Octant line where a Nightly client's remote access would be", () => {
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      hostBridge: {
+        managedInOctant: true,
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+      } as never,
+    });
+
+    const section = screen.getByRole("region", { name: "Remote access" });
+    expect(section).toHaveTextContent(/^Managed in Octant\./);
+    expect(within(section).getAllByRole("paragraph")).toHaveLength(1);
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(section).not.toHaveTextContent(/happen on the host machine/);
   });
 
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./provider-cloud-sessions": "./src/providerCloudSessions.ts",
     "./git-history": "./src/gitHistory.ts",
     ".": "./src/index.ts",
     "./agent-profile": "./src/agentProfile.ts",
@@ -28,6 +29,7 @@
     "./code-operations": "./src/codeOperations.ts",
     "./code-debug": "./src/codeDebug.ts",
     "./code-language": "./src/codeLanguage.ts",
+    "./conversation-inputs": "./src/conversationInputs.ts",
     "./thread-board": "./src/threadBoard.ts",
     "./code-test-definitions": "./src/codeTestDefinitions.ts",
     "./context": "./src/context.ts",
@@ -142,6 +144,7 @@
     "./zen": "./src/zen.ts",
     "./project-terminals": "./src/projectTerminals.ts",
     "./terminal-browser-grants": "./src/terminalBrowserGrants.ts",
+    "./nightly-browser": "./src/nightlyBrowser.ts",
     "./project-browser": "./src/projectBrowser.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",
     "./github-issue-context": "./src/githubIssueContext.ts",
@@ -156,8 +159,12 @@
     "./desktop-lease": "./src/desktopLease.ts",
     "./simulator-device": "./src/simulatorDevice.ts",
     "./managed-tooling": "./src/managedTooling.ts",
+    "./browser-credential-use": "./src/browserCredentialUse.ts",
     "./credential-request": "./src/credentialRequest.ts",
-    "./provider-cloud-sessions": "./src/providerCloudSessions.ts"
+    "./command-credentials": "./src/commandCredentials.ts",
+    "./browser-page-script": "./src/browserPageScript.ts",
+    "./owner-browser": "./src/ownerBrowser.ts",
+    "./browser-presentation": "./src/browserPresentation.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

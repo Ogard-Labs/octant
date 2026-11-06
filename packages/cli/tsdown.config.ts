@@ -29,4 +29,20 @@ export default defineConfig([
     platform: "node",
     target: "es2024",
   },
+  // Octant Nightly ships this one file as `octant-nightly`, run by its worker
+  // runtime in Node mode. Nothing is vendored beside it, so every dependency
+  // is bundled in except the full-screen terminal library, whose native core
+  // is not shipped: `agent` falls back to its line mode, as it does wherever
+  // that library cannot load.
+  {
+    deps: {
+      alwaysBundle: [/^(?!@opentui\/core(?:\/|$))/],
+      neverBundle: [/^@opentui\/core(?:\/|$)/],
+      onlyBundle: false,
+    },
+    entry: { "octant-nightly": "src/nightly/bin.ts" },
+    format: ["esm"],
+    platform: "node",
+    target: "es2024",
+  },
 ]);

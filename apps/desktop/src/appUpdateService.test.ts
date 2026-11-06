@@ -1,13 +1,18 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { AppReleaseRing, AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
+import type {
+  AppReleaseRing,
+  AppUpdateProduct,
+  AppUpdateRelease,
+  AppVersion,
+} from "@octant/contracts/app-updates";
 import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
-import { canonicalReleaseBytes } from "@octant/domain";
-import { RELEASE_TRUSTED_KEYS } from "@octant/host-runtime";
+import { canonicalReleaseBytes, canonicalReleaseBytesWithoutProduct } from "@octant/domain";
+import { DESKTOP_FLAVOR_IDENTITIES, RELEASE_TRUSTED_KEYS } from "@octant/host-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
@@ -47,6 +52,7 @@ function served(bytes: Buffer): ArrayBuffer {
 }
 
 const release = {
+  product: "octant",
   version: "0.3.0",
   platform: "darwin",
   arch: "arm64",
@@ -92,10 +98,12 @@ function service(
     readonly trust?: RingKeys;
     readonly currentVersion?: string;
     readonly feedBaseUrl?: string;
-    readonly ring?: "stable" | "preview";
+    readonly ring?: AppReleaseRing;
+    readonly allowedRings?: ReadonlyArray<AppReleaseRing>;
     /** What the artifact host actually serves, when it disagrees with the signed hash. */
     readonly serves?: Buffer;
     readonly artifactUnreachable?: boolean;
+    readonly product?: AppUpdateProduct;
   } = {},
 ) {
   const port = updater();
@@ -123,8 +131,10 @@ function service(
       version: (options.currentVersion ?? "0.2.0") as AppVersion,
       platform: "darwin",
       arch: "arm64",
+      product: options.product ?? "octant",
     },
     ...(options.ring === undefined ? {} : { ring: options.ring }),
+    ...(options.allowedRings === undefined ? {} : { allowedRings: options.allowedRings }),
     automaticChecks: true,
     verifier: createFeedVerifier(
       options.trust ?? onEveryRing(options.publicKey ?? publicKeyBase64),
@@ -182,6 +192,15 @@ describe("update verification", () => {
     await updates.check();
     expect(updates.state().status).toBe("up-to-date");
     expect(updates.state().message).toBeUndefined();
+    vi.mocked(fetchImpl).mockRejectedValueOnce(new Error("offline"));
+    expect((await updates.check()).refusal).toBe("unreachable");
+    expect(updates.state().message).toBeDefined();
+    vi.mocked(fetchImpl).mockResolvedValueOnce(
+      new Response(JSON.stringify(signedFeed()), { status: 200 }),
+    );
+    expect((await updates.check()).status).toBe("available");
+    expect(updates.state().message).toBeUndefined();
+    expect(updates.state().refusal).toBeUndefined();
   });
 
   it("does not treat a release disguised as an empty channel as an empty response", async () => {
@@ -402,6 +421,49 @@ describe("per-ring signing keys", () => {
     expect(await updates.check()).toMatchObject({ status: "available" });
   });
 
+  it("refuses a genuine Octant Nightly build offered to Octant, and the reverse", async () => {
+    const nightlyBuild = { ...previewRelease, product: "octant-nightly" };
+    const octant = service({
+      trust,
+      ring: "preview",
+      document: signedBy(previewKeys, nightlyBuild),
+    });
+    expect(await octant.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "wrong-app",
+      message: "This update is for Octant Nightly, not Octant.",
+    });
+    expect(octant.port.calls.setFeedURL).toEqual([]);
+
+    const nightly = service({
+      trust,
+      ring: "preview",
+      product: "octant-nightly",
+      document: signedBy(previewKeys, previewRelease),
+    });
+    expect(await nightly.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "wrong-app",
+      message: "This update is for Octant, not Octant Nightly.",
+    });
+  });
+
+  it("refuses a signed feed that does not name its app", async () => {
+    const { product: _product, ...unnamed } = release;
+    const document = {
+      schemaVersion: 1,
+      release: unnamed,
+      signature: sign(
+        null,
+        canonicalReleaseBytesWithoutProduct(unnamed),
+        stableKeys.privateKey,
+      ).toString("base64"),
+    };
+    const { updates } = service({ trust, document });
+
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "malformed" });
+  });
+
   it("offers a preview feed signed by the preview key", async () => {
     const { updates } = service({
       trust,
@@ -420,6 +482,65 @@ describe("per-ring signing keys", () => {
     });
 
     expect(await updates.check()).toMatchObject({ status: "available" });
+  });
+
+  const candidateRelease = { version: "0.3.0-candidate.20261105.1", ring: "candidate" };
+  const octantRings = DESKTOP_FLAVOR_IDENTITIES.stable.rings;
+
+  it("lets Octant on Preview read the candidate feed signed by the preview key", async () => {
+    const { fetchImpl, updates } = service({
+      trust,
+      ring: "candidate",
+      allowedRings: octantRings,
+      document: signedBy(previewKeys, candidateRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "available", ring: "candidate" });
+    const [requested] = vi.mocked(fetchImpl).mock.calls[0] as [string];
+    expect(requested).toContain("/candidate/darwin-arm64.octant.json");
+  });
+
+  it("never accepts a preview-key signature for a stable release, even while Octant follows Preview", async () => {
+    const forged = signedBy(previewKeys);
+    const onStable = service({ trust, allowedRings: octantRings, document: forged });
+    const onPreview = service({
+      trust,
+      ring: "candidate",
+      allowedRings: octantRings,
+      document: forged,
+    });
+
+    expect(await onStable.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+    expect(await onPreview.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+  });
+
+  it("refuses a Nightly build in Octant's Preview feed", async () => {
+    const { updates } = service({
+      trust,
+      ring: "candidate",
+      allowedRings: octantRings,
+      document: signedBy(previewKeys, previewRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+  });
+
+  it("refuses a candidate build in Nightly's feed", async () => {
+    const { updates } = service({
+      trust,
+      ring: "preview",
+      allowedRings: DESKTOP_FLAVOR_IDENTITIES.nightly.rings,
+      currentVersion: "0.2.0-preview.20261101.1",
+      document: signedBy(previewKeys, candidateRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
   });
 
   it("refuses everything on a ring that has no usable key", async () => {
@@ -445,7 +566,7 @@ describe("release rings", () => {
     const [requested] = vi.mocked(fetchImpl).mock.calls[0] as [string];
 
     expect(updates.state().ring).toBe("preview");
-    expect(requested).toContain("/preview/darwin-arm64.preview-key.json");
+    expect(requested).toContain("/preview/darwin-arm64.octant-nightly.json");
   });
 
   it("refuses a stable feed's release while following preview", async () => {
@@ -453,6 +574,198 @@ describe("release rings", () => {
     const { updates } = service({ ring: "preview" });
 
     expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+  });
+
+  it("lets Octant choose Stable or Preview and keeps Nightly on its one ring", async () => {
+    const octant = service({ allowedRings: DESKTOP_FLAVOR_IDENTITIES.stable.rings }).updates;
+    expect(octant.setRing("preview")).toMatchObject({
+      ring: "stable",
+      status: "refused",
+      refusal: "wrong-ring",
+    });
+    expect(octant.setRing("candidate")).toMatchObject({ ring: "candidate", status: "idle" });
+    expect(octant.setRing("stable")).toMatchObject({ ring: "stable", status: "idle" });
+    const nightly = service({
+      ring: "preview",
+      allowedRings: DESKTOP_FLAVOR_IDENTITIES.nightly.rings,
+      currentVersion: "0.1.0-preview.20261103.1",
+    }).updates;
+    for (const other of ["stable", "candidate"] as const) {
+      expect(nightly.setRing(other)).toMatchObject({
+        ring: "preview",
+        status: "refused",
+        refusal: "wrong-ring",
+      });
+    }
+  });
+
+  it("refuses to start Octant on the Nightly ring or Nightly on an Octant ring", () => {
+    expect(() =>
+      service({ ring: "preview", allowedRings: DESKTOP_FLAVOR_IDENTITIES.stable.rings }),
+    ).toThrow();
+    expect(() =>
+      service({ ring: "candidate", allowedRings: DESKTOP_FLAVOR_IDENTITIES.nightly.rings }),
+    ).toThrow();
+  });
+
+  it("does not resurrect Stable's offer when its check finishes after Octant switched to Preview", async () => {
+    let answer: (response: Response) => void = () => {
+      throw new Error("No pending feed");
+    };
+    const response = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetchImpl = vi.fn(async () => response);
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64", product: "octant" },
+      automaticChecks: false,
+      ring: "stable",
+      allowedRings: DESKTOP_FLAVOR_IDENTITIES.stable.rings,
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+    });
+    const pending = updates.check();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    updates.setRing("candidate");
+    answer(new Response(JSON.stringify(signedFeed())));
+    expect(await pending).toMatchObject({ ring: "candidate", status: "idle" });
+    expect(updates.state().available).toBeUndefined();
+  });
+
+  it("does not resurrect an old ring's offer when its pending check finishes", async () => {
+    let answer: (response: Response) => void = () => {
+      throw new Error("No pending feed");
+    };
+    const response = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetchImpl = vi.fn(async () => response);
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64", product: "octant" },
+      automaticChecks: false,
+      ring: "stable",
+      allowedRings: ["stable"],
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+    });
+    const pending = updates.check();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    updates.setRing("preview");
+    answer(new Response(JSON.stringify(signedFeed())));
+    expect(await pending).toMatchObject({
+      ring: "stable",
+      status: "refused",
+      refusal: "wrong-ring",
+    });
+    expect(updates.state().available).toBeUndefined();
+  });
+
+  it("does not replace a ring refusal with an older hand-off failure", async () => {
+    const { updates, port } = service({ allowedRings: ["stable"] });
+    await updates.check();
+    const listen = vi.spyOn(Server.prototype, "listen").mockImplementation(function (this: Server) {
+      updates.setRing("preview");
+      this.emit("error", new Error("The older hand-off failed"));
+      return this;
+    });
+    try {
+      expect(await updates.download()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+      expect(port.calls.checkForUpdates).toBe(0);
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
+  it("does not replace a ring refusal with an older Linux launch refusal", async () => {
+    let answer: (location: { readonly kind: "not-portable" }) => void = () => {
+      throw new Error("No pending location");
+    };
+    const location = new Promise<{ readonly kind: "not-portable" }>((resolve) => {
+      answer = resolve;
+    });
+    const locate = vi.fn(async () => location);
+    const fetchImpl = vi.fn(async () => new Response());
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64", product: "octant" },
+      automaticChecks: false,
+      ring: "stable",
+      allowedRings: ["stable"],
+      fetchImpl,
+      portableImage: { locate, replaceAndRelaunch: async () => ({ kind: "relaunched" }) },
+    });
+    const pending = updates.check();
+    await vi.waitFor(() => expect(locate).toHaveBeenCalledOnce());
+    updates.setRing("preview");
+    answer({ kind: "not-portable" });
+    expect(await pending).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("ignores a native download's completion after its offer was withdrawn", async () => {
+    const { updates, port } = service({ allowedRings: ["stable"] });
+    await updates.check();
+    await updates.download();
+    updates.setRing("preview");
+    port.emit("update-downloaded");
+    expect(updates.state()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+    expect(updates.state().available).toBeUndefined();
+  });
+
+  it("closes an older native hand-off after a new check without replacing the newer offer", async () => {
+    const { updates, port } = service();
+    try {
+      await updates.check();
+      await updates.download();
+      const feed = port.calls.setFeedURL[0];
+      if (feed === undefined) throw new Error("No native hand-off was staged");
+      expect((await fetch(feed)).status).toBe(200);
+      await updates.check();
+      const current = updates.state();
+      port.emit("update-downloaded");
+      expect(updates.state()).toEqual(current);
+      await expect(fetch(feed)).rejects.toThrow();
+    } finally {
+      updates.dispose();
+    }
+  });
+
+  it("does not stage a pending download after the service is disposed", async () => {
+    let answer: (response: Response) => void = () => {
+      throw new Error("No pending artifact");
+    };
+    const artifact = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetchImpl = vi.fn(async (input: string | URL | Request) =>
+      String(input).includes("/stable/") ? new Response(JSON.stringify(signedFeed())) : artifact,
+    );
+    const port = updater();
+    const updates = createAppUpdateService({
+      updater: port,
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64", product: "octant" },
+      automaticChecks: false,
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+    });
+    try {
+      await updates.check();
+      const pending = updates.download();
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+      updates.dispose();
+      answer(new Response(served(artifactBytes)));
+      await pending;
+      expect(port.calls.setFeedURL).toEqual([]);
+      expect(port.calls.checkForUpdates).toBe(0);
+    } finally {
+      updates.dispose();
+    }
   });
 
   it("drops a verified offer when the ring changes", async () => {
@@ -486,8 +799,8 @@ describe("where the feed is", () => {
   });
 
   it("addresses a feed by ring and machine, so a ring is a directory rather than a rewrite", () => {
-    // Preview and candidate read a name the stable-signed bridge feed never
-    // occupies; the old name is left to installs that predate the preview key.
+    // Preview and candidate read names that carry the app; the older names
+    // are left to installs that predate the preview key or the product field.
     // The shape the publisher writes and the app reads. Adding a platform is a
     // new file at a known path, not a change to how anything is addressed.
     expect(
@@ -496,7 +809,7 @@ describe("where the feed is", () => {
         platform: "darwin",
         arch: "arm64",
       }),
-    ).toBe("https://octant.sh/updates/preview/darwin-arm64.preview-key.json");
+    ).toBe("https://octant.sh/updates/preview/darwin-arm64.octant-nightly.json");
     expect(
       updateFeedUrl("https://octant.sh/updates/", {
         ring: "stable",
@@ -510,14 +823,14 @@ describe("where the feed is", () => {
         platform: "linux",
         arch: "x64",
       }),
-    ).toBe("https://octant.sh/updates/preview/linux-x64.preview-key.json");
+    ).toBe("https://octant.sh/updates/preview/linux-x64.octant-nightly.json");
     expect(
       updateFeedUrl("https://octant.sh/updates", {
         ring: "candidate",
         platform: "darwin",
         arch: "arm64",
       }),
-    ).toBe("https://octant.sh/updates/candidate/darwin-arm64.preview-key.json");
+    ).toBe("https://octant.sh/updates/candidate/darwin-arm64.octant.json");
   });
 
   it("refuses a configured endpoint it cannot reach securely rather than falling back", () => {
@@ -627,7 +940,7 @@ describe("download hand-off", () => {
     const stale = createAppUpdateService({
       updater: port,
       feedBaseUrl: FEED_BASE_URL,
-      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64", product: "octant" },
       automaticChecks: false,
       verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
       fetchImpl: (() => {
@@ -728,7 +1041,7 @@ describe("applying an update", () => {
     const updates = createAppUpdateService({
       updater: updater(),
       feedBaseUrl: FEED_BASE_URL,
-      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64" },
+      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64", product: "octant" },
       automaticChecks: false,
       fetchImpl,
     });
@@ -809,7 +1122,7 @@ describe("portable image updates", () => {
       updater: port,
       portableImage: image.port,
       feedBaseUrl: FEED_BASE_URL,
-      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64" },
+      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64", product: "octant" },
       automaticChecks: false,
       verifier: createFeedVerifier(onEveryRing(options.publicKey ?? publicKeyBase64)),
       fetchImpl,
@@ -923,7 +1236,7 @@ describe("automatic checking", () => {
     const updates = createAppUpdateService({
       updater: port,
       feedBaseUrl: FEED_BASE_URL,
-      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
+      app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64", product: "octant" },
       automaticChecks,
       verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
       fetchImpl,

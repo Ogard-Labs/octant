@@ -62,8 +62,11 @@ it exactly that one tool family, as that thread, and nothing wider.
   chose to always allow is not asked again. A context a managed turn approved is
   asked about again, because the grant keeps its own approval bindings. A page
   read marks the thread `thread.external-content-ingested@1`, because the Browser
-  service records that on every observation whoever asked. An approval answered
-  after the thread moved into Plan is treated as cancelled.
+  service records that on every observation whoever asked. In Plan a call may
+  read the page already open and nothing else
+  ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). An
+  approval answered after the thread moved into Plan is treated as cancelled;
+  one asked in Plan, which can only be for a read, is the person's answer.
 - **No captures.** A screenshot through the endpoint is not kept as a thread
   Browser capture: no journal actor describes a hand-typed CLI, so `capturedBy`
   is never named and the service keeps nothing ([Browser captures](browser-captures.md)).
@@ -142,30 +145,31 @@ the grant is over.
 The packaged macOS app carries its own `octant`, so a person who installed only
 the app can point a CLI at `octant mcp`.
 
-- **What ships.** `Contents/Resources/terminal-launcher/` holds two files and
-  nothing else: `octant`, a `/bin/sh` script, and `octant.mjs`, a one-file
-  bundle of the command with every dependency inside it. This `octant` runs
-  `octant mcp` (and `octant mcp --help`); any other command prints what it is
-  and exits `1`. The full command's other verbs reach the data directory and
-  the desktop bridge secret, so they are not shipped to a terminal at all.
-- **The runtime.** The script runs the app's own executable in Node mode
-  (`ELECTRON_RUN_AS_NODE=1`), the runtime the packaged host already runs on. It
-  finds the executable relative to itself, because the app can be moved or
-  translocated. A runtime the person installed cannot be relied on, and Bun
-  started inside the terminal's profile failed before loading anything (it
-  lists the home folder, which the profile denies); the app's runtime started
-  there once it could be read (macOS 27, Electron 43.5, 2026-10-14). In this
-  mode Electron prints one line to stderr as it starts
-  (`task_name_for_pid: (os/kern) failure`), because the profile does not let it
-  look up its parent process; it then runs normally. stdout still carries
-  protocol frames only.
+- **What ships.** Stable's `Contents/Resources/terminal-launcher/` holds only
+  `octant`, a `/bin/sh` launcher, and `octant.mjs`, the standalone scoped CLI
+  bundle including its dependencies. The outer app's resource signature seals
+  both files. It runs `octant mcp` and help, and refuses other commands. The full
+  command's other verbs reach the data directory and desktop bridge secret, so
+  they are not lent to a terminal.
+- **The runtime.** The script starts the separate `Octant Runtime.app` in Node
+  mode with the fixed neighboring `octant.mjs` entry. It finds both relative to
+  itself so moving or translocating the app preserves the command. It never
+  imports the trusted GUI entry and cannot be admitted as a desktop peer. The
+  sealed GUI role aborts under the real Code profile during GUI registration;
+  using the Node command preserves the profile without new Mach permissions.
+  Nightly's existing fixed app role is a development foundation, not proof of
+  confined-terminal parity. See the owning
+  [fixed-entry rules](nightly-app.md#fixed-packaged-entry).
+
 - **Only a granted terminal gets it.** The desktop tells its packaged host where
   the folder is; a development run and a headless host are given none. When the
   host mints a grant it adds, for that terminal session only, the folder first
   on `PATH` (the person's own rc files run after and can still put another
-  `octant` ahead of it) and three read-only grants to the terminal's
-  confinement: the launcher folder, the app's executable, and the app's
-  `Contents/Frameworks`, which the executable loads. All three sit inside the
+  `octant` ahead of it) and read-only grants to the terminal's
+  confinement: the launcher folder, the nested Node runtime's executable,
+  and that runtime's `Contents/Frameworks`.
+  The host's actual nested worker path determines the primary app; the
+  supplied launcher cannot nominate another bundle. All these paths sit inside the
   app bundle and hold nothing private, and nothing becomes writable. Under
   `/Applications` the profile could read them already; the grant is what lets a
   terminal start the launcher from an app in the home folder or one macOS
@@ -276,18 +280,19 @@ loopback endpoint: no grant (missing, empty, and every refused address, with no
 host call), relaying with the bearer token and session, the `unauthorized`,
 unreachable, and unexpected-failure endings, and that neither the token nor the
 address reaches stdout or stderr.
-`scripts/package-desktop.test.ts` covers the launcher folder's two files and
-their modes, and that the script runs the bundle with the app's executable in
-Node mode from an app moved to another folder; `packages/cli/src/terminalLauncher.test.ts`
+`scripts/package-desktop.test.ts` covers the launcher's mode and that a moved
+app runs its fixed scoped terminal script through the separate runtime; `packages/cli/src/terminalLauncher.test.ts`
 that the shipped `octant` runs `octant mcp` and nothing else;
 `apps/server/src/code/terminalService.test.ts`,
 `apps/server/src/code/terminalProcessPort.test.ts`, and
 `apps/server/src/serverConfig.test.ts` that only a launch carrying the launcher
 gets the `PATH` entry and the read-only grants, and which grants those are.
-The packaged-app run that proves it under the real profile is recorded in the
-pull request that shipped it: a Code thread terminal of the packaged app, started
-with the grant, ran `octant mcp` and listed the Browser tool; one started without
-it found no `octant`.
+Native validation must exercise the current scoped command under the real Code
+terminal profile, including read-only launcher, nested worker executable and
+Frameworks access derived from the actual host runtime path. A mismatched
+launcher cannot nominate another app. The earlier primary-app Node-mode launcher result does not
+establish this separate-runtime path. A terminal with a Browser grant must list
+its granted tools; one without a grant gets no launcher.
 `apps/server/src/code/codeOperationService.test.ts` covers the start and switch-off
 commands, the launcher given only to a granted terminal, and the live grant an attach reports, `apps/server/src/codeRoutes.test.ts`
 that a paired device's start with a grant reaches the host as an agent (which the

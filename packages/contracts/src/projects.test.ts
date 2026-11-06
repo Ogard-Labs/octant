@@ -604,6 +604,21 @@ describe("Project actions", () => {
     ...overrides,
   });
 
+  it("keeps one reviewed worktree setup recipe and refuses multiple automatic recipes", () => {
+    const setup = action({ preparesWorktrees: true });
+    expect(decodeProjectActions([setup])).toMatchObject([{ preparesWorktrees: true }]);
+    expect(() =>
+      decodeProjectActions([
+        setup,
+        action({
+          id: "81000000-0000-4000-8000-000000000002",
+          name: "Other",
+          preparesWorktrees: true,
+        }),
+      ]),
+    ).toThrow();
+  });
+
   it("keeps a folder inside the Project root and a command on one line", () => {
     expect(decodeProjectAction(action())).toMatchObject({ directory: "apps/web" });
     for (const directory of ["../outside", "/etc", "a/../b", "a\\b", "a/"]) {

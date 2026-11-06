@@ -17,6 +17,8 @@ export interface CodeDirectoryStat {
   readonly device: string;
   readonly inode: string;
   readonly mode?: number;
+  /** Host metadata revision; never exposed over the wire. */
+  readonly changeStamp?: string;
 }
 
 /** One raw directory child, before any confinement or classification. */
@@ -128,6 +130,15 @@ const toStat = (info: LiveStat): CodeDirectoryStat => ({
   device: String(info.dev),
   inode: String(info.ino),
   mode: Number(info.mode),
+  changeStamp: [
+    info.dev,
+    info.ino,
+    info.size,
+    "mtimeNs" in info ? info.mtimeNs : info.mtimeMs,
+    "ctimeNs" in info ? info.ctimeNs : info.ctimeMs,
+  ]
+    .map(String)
+    .join(":"),
 });
 
 const livePathPort: CodePathPort = {

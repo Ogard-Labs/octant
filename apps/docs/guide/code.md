@@ -6,6 +6,23 @@ description: Code mode binds one folder for engineering work with approval-gated
 
 Code is the repository workspace. Each Code Project binds exactly one folder chosen through the native picker; when that folder is a Git repository, worktrees, branches, and pull-request tools become available. Code is always available; disabling it in Settings never deletes existing Code data.
 
+## Choose the task's working folder
+
+Before creating a task, choose **Task working folder** and, if needed, a relative
+subfolder. The list contains folders already approved for this Project. Adding or
+naming a folder does not change its permissions. The provider, terminal defaults,
+saved actions and new Work artifacts use the recorded choice. Choose another root
+or subfolder in a new task; an existing native conversation keeps its original root.
+
+The composer and Environment show the choice. A removed or unavailable folder
+stops the task rather than sending output elsewhere. Work artifacts retain their
+own original destination through revision, rename, conversion, export and replay.
+
+An extra working folder is **shared**, including for a task with its own worktree.
+Git, pull requests, changed files and Review still cover the Code checkout only.
+Choosing **Restart in** from a terminal asks before stopping its shell and running
+commands. Cancel keeps the process; **New terminal** opens a separate shell.
+
 ## Code Projects
 
 Create a Code Project from the sidebar:
@@ -67,22 +84,28 @@ optionally a folder inside the Project. Octant also looks in the Project's
 nothing is saved until you add one and choose **Save actions**.
 
 Each action becomes a button in the window header (the first three, with the
-rest under **More**) and an entry in the command palette. Choosing it types the
-command into the Project terminal and opens that terminal in Zen. It runs with
-the same sandbox and approvals as anything else you type there. If the terminal
-is already running a program, the command goes to that program, so stop it
-first. Actions are set from this computer's window, not from a paired device.
+rest under **More**) and an entry in the command palette. Choosing one previews
+its actual folder and branch. A thread defaults to its active checkout; use
+**Run in** to choose the Project folder or an approved extra folder explicitly.
+**Run action** starts a dedicated process and shows output, exit status and
+**Stop action** beside the task. **Open terminal** is an explicit Zen handoff.
+Closing the dialog leaves the run alone; reopening attaches to it. A lost reply
+is reported as unknown and never automatically launches a second command.
 
 ## Project planner
 
 Open a Code Project overview and find **Project planner**. Choose an existing
 thread in that Project and select **Designate planner**. Open that thread to ask
-it to survey the Project and propose work. Designation does not let it start
+it to survey the Project and propose work. Its agent reads the Project's board
+and offers each task it proposes the way any agent offers a side task, aimed at
+the board instead of a card in the thread. Designation does not let it start
 tasks by itself; you can remove the designation at any time.
 
 The overview lists each proposal's exact task, explanation and status. Choose
 **Decline proposal**, or **Review and approve** to choose the provider/model,
-checkout and access for the described work. The task text and Project stay fixed.
+checkout and access for the described work. The review opens under **Review the
+planner's proposal**, with the proposal's title and exact text below it; the
+task text and Project stay fixed.
 **Approve and start described task** creates its ordinary Code thread and sends
 that exact first message only after the host confirms creation. **Open created
 task** returns to its work. If its first turn fails, the task retains the prompt
@@ -145,13 +168,19 @@ its draft.
 
 ## Continue a terminal session
 
-If you started something in Claude Code or Codex in a terminal, you can carry
-it into a new thread. In a new Code thread with a Project, choose
-**Create from…**, then **Terminal**, and pick a session from that Project's
-folder. Octant reads the session from this Mac and never uploads it. The
-thread starts with the conversation as folded, read-only history, and the
-assistant reads it once at the start. Tool runs from the old session are left
-out, and the thread is marked as holding outside content.
+In a new Code thread with a Project, choose **Create from…**, then **Terminal**.
+The picker lists Claude Code and Codex sessions from the Project folder and
+its subfolders; a Code Project also includes its verified managed worktrees.
+Each session names its original working directory.
+
+Choosing one is a **text handoff into a new session**. The assistant reads the
+bounded visible conversation once as outside content; it also appears above
+the thread as folded, read-only history. Original inputs, tool activity,
+hidden reasoning and the provider's native session are omitted. The current
+adapters cannot prove the source account binding and exclusive native session
+ownership, so native adoption is unavailable. Octant never resumes that
+unverified session or changes its files. This step is available only from an
+Octant window on this computer.
 
 ## Modes
 
@@ -192,7 +221,11 @@ in the composer changes it in one click, for new and existing threads alike:
   Claude in Plan can run read-only commands such as `git log`, `git diff`,
   `rg`, `ls`, and `cat` without asking: the sandbox lets it start only a
   short list of reading tools, refuses every write they try outside a
-  scratch folder of its own, and gives them no network.
+  scratch folder of its own, and gives them no network. The agent may still
+  look at the page already open in the thread's Browser, propose a side task
+  or a routine for you to confirm, and write the plan as the thread's own
+  Canvas; it cannot publish or share that Canvas, and nothing in the checkout
+  changes.
 - **Full access**: no sandbox and no prompts, as in the providers' own apps.
   Agents can change any file and run any command without asking.
   [Protected files](../advanced/privacy-and-security.md#protected-files),
@@ -436,7 +469,7 @@ its folder. A card under it says whether the checkout has uncommitted changes
 (click it to open Review) and offers **Commit or push** and **Create pull
 request**. Below that, one list: local servers, subagents (opens the Agents
 tool), computer use, pull requests, what the thread delivers, the working folder
-(with **Change working folder**), and usage. Switching the active pane shows that pane's Environment instead of
+(with the chosen folder and the legacy **Change working folder** control for older tasks), and usage. Switching the active pane shows that pane's Environment instead of
 leaving the previous thread's facts in place.
 
 Local servers are compact rows grouped by process and port, with this checkout
@@ -453,7 +486,10 @@ in the thread, and you can create one yourself with **New routine** under
 Routines here, which lists all of this Project's routines; see
 [Routines from a thread](/guide/work#routines-from-a-thread). A Code routine
 runs in this thread's checkout, asks before effects, and cannot be proposed
-from Plan. A Code thread can also [follow up later](/guide/work#follow-up-later)
+from Plan. The agent can also read this Project's routines, ask you to pause
+or archive this thread's own, and report how a routine's run went; see
+[What the agent can do with routines](/guide/work#what-the-agent-can-do-with-routines).
+In Plan it can read routines but asks for no change. A Code thread can also [follow up later](/guide/work#follow-up-later)
 in the same thread; that turn asks before effects even if the thread has
 since been given more access, and does not run if the thread has Full access.
 
@@ -513,7 +549,11 @@ chooses another branch, and it never approves a pull request or deletes a
 branch. A thread that asks before acting
 shows you the exact change first; Full access goes ahead for the rest; Plan
 refuses. The thread's pull request shows in Review and on
-its card, stacked ones included.
+its card, stacked ones included. The agent can also ask to watch that pull
+request, so Octant starts a new turn when its checks finish or a review,
+comment, or conflict arrives; it asks you each time, and the watch ends on its
+own after ten wakes or three days
+([details](../advanced/git-worktrees.md#a-thread-watching-its-pull-request)).
 The **New pull request** form in Review has an **Include Browser proof**
 choice, off unless you turn it on. When the agent checked its work in the
 Browser, turning it on adds a **Browser check** section to the description with
@@ -522,7 +562,9 @@ without its query, and the result; never typed text or field values). GitHub
 cannot take pictures from here, so the screenshots are not uploaded: **Save
 screenshots…** in the Octant desktop app asks you for a folder and writes them
 as `browser-check-01.png`, `-02`, and so on, and the section names those files so
-you can drag them into the description. A paired device cannot read, include, or
+you can drag them into the description. A recording the agent kept of a check
+is saved the same way as an animated `.png`, and GitHub plays it in the
+description. A paired device cannot read, include, or
 save the proof. See [Browser proof](../advanced/browser-and-computer-use.md#browser-proof).
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
@@ -572,7 +614,8 @@ move while a turn is running or the agent is waiting on you.
 
 When several Code threads work in the same Project, each thread's agent can
 look at the others before it messages one or while it waits for one to finish.
-It has three read-only actions:
+Work threads in a Work Project can do the same with the other Work threads of
+their Project. It has three read-only actions:
 
 - **List** the other open threads of the Project, up to 32, with each title,
   whether the thread is working, waiting for you, or idle, and when that last
@@ -582,9 +625,9 @@ It has three read-only actions:
 - **Wait** for one to stop working, for up to two minutes. Waiting returns the
   state only.
 
-An agent sees only the open Code threads of its own Project. Threads in other
-Projects, put-away or archived threads, Chat and Work threads, and helper
-agents started by a thread are never listed or readable, and asking for one
+An agent sees only the open threads of its own Project. Threads in other
+Projects, put-away or archived threads, Chat threads, and helper agents
+started by a thread are never listed or readable, and asking for one
 gets the same refusal as asking for a thread that does not exist. Nothing the
 agent does here sends, changes, or stops another thread, so it works in Plan
 mode too.
@@ -599,13 +642,15 @@ The agent is offered these actions only on providers that can carry Octant's
 own tools: Claude, Codex, ACP agents that accept Octant's tools, OpenCode
 with Octant's isolated configuration, Pi, and direct endpoints for models
 you verified for tools. A profile whose tool list leaves out `octant_threads`
-does not offer them.
+does not offer them; messaging needs `octant_threads.send` in that list, and a
+planner's board needs `octant_threads.board`.
 
 ## Message receipts
 
 An agent can send a bounded message to another Code thread in the same Project.
 Sending queues it for that thread's next turn; it starts no turn there. The
-agent gets a durable message ID and can ask for its status later.
+agent gets a durable message ID and can ask for its status later. Work threads
+do not send or receive messages.
 
 **Queued** means the host admitted the message. **Delivered to provider** means
 the recipient's provider accepted the turn carrying it. **Acknowledged by
@@ -614,8 +659,8 @@ action are separate. Agents shows the recent receipt states and refusals.
 An acknowledgement is never inferred from delivery or completion.
 
 Only the actual recipient can acknowledge a delivered message. Receipt reads
-and retries use the same ID; retrying a send creates a new message. The
-messaging tool stays unavailable in Plan and where the profile excludes it.
+and retries use the same ID; retrying a send creates a new message. Messaging
+stays unavailable in Plan and where the profile excludes it.
 Queued messages currently have no expiry deadline.
 
 ## Next steps
@@ -648,3 +693,47 @@ Select text in one of the agent's replies and choose **New thread from
 selection**, from the small button under the reply or the right-click menu. A
 new Code draft opens in the same Project with your selection quoted at the top.
 Nothing is sent until you send it.
+
+### Preparing a new worktree
+
+In the Project overview's Actions list, write a setup command and a folder
+relative to each new worktree. Check the review statement on that action and
+save to enable it for future worktrees. Only one action can prepare worktrees.
+
+**Worktrees → Setup** in the task header shows the recorded recipe and its result;
+choose a child checkout there to inspect its preparation. The first agent task
+waits for setup. You can Cancel a running setup, explicitly Retry a failed or
+interrupted one, or Skip it. Plan cannot run setup. A host restart never repeats
+a potentially non-idempotent recipe automatically. Output is retained only for
+the current host session. Setup uses task access and does not copy secret files
+or the parent environment.
+
+### Giving a child current edits
+
+Children normally start from committed revision. To delegate unfinished edits,
+open **Worktrees → Child source** on the parent task and choose **Review current
+edits**. Inspect the base revision and every included path, then choose **Use
+this snapshot**. Capturing a preview alone does not change the source.
+
+Children prepared from that task now receive independent copies of that stable
+snapshot, including its staging state. Later parent edits and sibling edits do
+not change their files. The child details record the snapshot and committed
+base. Choose **Committed revision** to return to the default for future children.
+Ignored files are excluded; protected or incomplete captures are refused. A
+stale revision needs a new capture or the committed choice. An interrupted copy
+never starts a child or overwrites one on retry; prepare a new child instead.
+
+When a conversation starts a fresh session after a provider change, rewind or
+fork, original user inputs travel separately from the selected message text.
+Octant checks the original bytes and the receiving model's support before
+sending. If an original is unavailable or unsupported, the turn refuses with a
+reason; an explicit text-only continuation records what was omitted. Native
+session state and hidden reasoning remain separate from these inputs.
+
+Use **Continue elsewhere** beside the composer to choose another enabled
+provider or copy the same task's link for an already paired screen. It shows
+which host keeps executing and what stays on the source screen. Your draft and
+pending feedback are not sent by opening the flow or changing providers. Choose
+**Text only: omit files and images** only when you intend to leave originals out
+of the next continuation. **Original inputs** on the receiving turn shows the
+admitted files and omissions.

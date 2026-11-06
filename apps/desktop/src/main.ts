@@ -1,32 +1,65 @@
+import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
+import { createDesktopClientLifetime } from "./desktopClientLifetime";
+import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
+import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
+import { desktopWindowProtocol } from "./desktopPeerWindows";
+import {
+  createMainBrowserWindowOptions,
+  createTrustedRendererRequestRegistry,
+  decorateTrustedRendererHeaders,
+} from "./desktopWindowBootstrap";
+export {
+  createMainBrowserWindowOptions,
+  createTrustedRendererRequestRegistry,
+  decorateTrustedRendererHeaders,
+} from "./desktopWindowBootstrap";
+export type { TrustedRendererRequestContext } from "./desktopWindowBootstrap";
+import {
+  loadDesktopPeerStatus,
+  ownDesktopPeerStatus,
+  writeLinuxLauncherRecord,
+} from "./desktopPeerStatus";
+import {
+  createDesktopHostLaunch,
+  startDesktopHostServer,
+  type DesktopHostLaunch,
+} from "./desktopHostLaunch";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
-import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
-import { startSimulatorDeviceBroker, type SimulatorDeviceBroker } from "./simulatorDeviceBroker";
+import { startComputerUseBroker } from "./computerUseBroker";
+import { startSimulatorDeviceBroker } from "./simulatorDeviceBroker";
 import { createSimulatorDeviceHelpers } from "./simulatorDeviceHelper";
 import {
   createManagedSimulatorHelpers,
   createUnavailableSimulatorHelpers,
 } from "./managedSimulatorHelpers";
-import { startServeAvdBroker, type ServeAvdBroker } from "./serveAvdBroker";
+import { startServeAvdBroker } from "./serveAvdBroker";
 import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
-import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import {
+  CUA_DRIVER_FILENAME,
+  DEVICE_HELPER_FILENAME,
+  resolveDesktopNodeRuntime,
+  resolveDesktopHostRoot,
+} from "./runtimePaths";
 import { createWindowCapture } from "./windowCapture";
 import { grabWindowFrame } from "./windowFrameGrab";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   app,
   autoUpdater as electronAutoUpdater,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -41,20 +74,21 @@ import {
   systemPreferences,
   Tray,
   WebContentsView,
-  type BrowserWindowConstructorOptions,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
   type WebContents,
 } from "electron";
 import {
   CredentialStoreFailure,
+  desktopIdentity,
+  desktopIdentityForPackage,
+  desktopWindowStorageDirectory,
   deriveHostRuntimeHostId,
   isLinkedSecretMaterial,
   linkedSecretStoresStatePath,
   makeLinkedSecretStores,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
-  resolveHostRuntimePaths,
   ServicePolicyStore,
   addApiKey,
   ApiKeyPoolError,
@@ -89,10 +123,16 @@ import {
 import type {
   CodeCheckoutOpenRequest,
   CodeExternalEditorRequest,
-  CodeOperationApprovalAnchor,
   HostCapabilities,
 } from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
+import { createNightlyInstaller } from "./nightlyInstaller";
+import {
+  createNightlyDataControl,
+  createRelaunchIntent,
+  resolveHostOwningStartup,
+  resolveStartupHostRole,
+} from "./nightlyTestData";
 import {
   createPortableImagePort,
   defaultProcessIsAlive,
@@ -102,7 +142,11 @@ import {
   waitForReplacedProcessExit,
 } from "./portableImageUpdate";
 import { createQuitShortcutGuard } from "./quitShortcutGuard";
-import { buildApplicationMenuTemplate } from "./applicationMenu";
+import {
+  buildApplicationMenuTemplate,
+  buildStableMenuTemplate,
+  developerToolsAllowed,
+} from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
   acknowledgeWhatsNew,
@@ -145,17 +189,22 @@ import {
 } from "./codeOperationApproval";
 import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
+  codeApprovalBoundsForAnchor,
+  codeApprovalFallbackBounds,
   createCodeOperationApprovalViewController,
+  decodeCodeOperationApprovalAnchor,
   decodeCodeOperationApprovalPalette,
-  type CodeOperationApprovalBounds,
+  decodeCodeOperationApprovalPresentation,
+  decodeCodeOperationApprovalViewDecision,
   type CodeOperationApprovalPalette,
 } from "./codeOperationApprovalView";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
+import { validateExternalBrowserUrl } from "./externalBrowserUrl";
 import {
   resolveDesktopCredentialBackend,
   type DesktopCredentialBackend,
 } from "./desktopCredentialStore";
-import { browserProfilePartition } from "@octant/domain";
+import { browserProfilePartition, ringForVersion } from "@octant/domain";
 import { keyringAdvice } from "@octant/domain/keyring-advice";
 import {
   HostIdentitySigningFailure,
@@ -172,7 +221,6 @@ import {
   createNativeWindowStateStore,
   flushNativeWindowState,
   type NativeWindowStateStore,
-  type WindowBounds,
 } from "./nativeWindowState";
 import {
   createProjectRootPicker,
@@ -202,6 +250,7 @@ import {
 import {
   createHostLifecycleController,
   workInFlight,
+  type HostAdmission,
   type LocalHostDescriptor,
 } from "./hostLifecycle";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
@@ -234,6 +283,7 @@ import {
   DESKTOP_PRELOAD_FILENAME,
   EXTENSION_BRIDGE_PRELOAD_FILENAME,
   KEYCHAIN_HELPER_FILENAME,
+  resolveDesktopHostRuntimePaths,
   resolveDesktopNativeHelperPath,
   resolveManagedToolsDirectory,
   resolveTerminalLauncherDirectory,
@@ -245,7 +295,6 @@ import {
   observeThermalPerformance,
   resolveWindowPresentation,
   type ResolvedSidebarMaterial,
-  type WindowPresentation,
   type WindowPresentationController,
 } from "./windowPresentation";
 import {
@@ -315,47 +364,6 @@ type ProjectWindowTarget =
 interface DesktopWindowIdentity {
   readonly windowId: string;
   readonly capability: string;
-}
-
-const RENDERER_IDENTITY_HEADER = "x-octant-renderer-identity";
-
-export interface TrustedRendererRequestContext {
-  readonly serverOrigin: string;
-  readonly rendererIdentity: string;
-  readonly developmentOrigin?: string;
-}
-
-export function decorateTrustedRendererHeaders(input: {
-  readonly requestHeaders: Readonly<Record<string, string>>;
-  readonly requestUrl: string;
-  readonly frameUrl?: string;
-  readonly context?: TrustedRendererRequestContext;
-}): Record<string, string> {
-  const requestHeaders = { ...input.requestHeaders };
-  for (const name of Object.keys(requestHeaders)) {
-    if (name.toLowerCase() === RENDERER_IDENTITY_HEADER) delete requestHeaders[name];
-  }
-  if (
-    input.context !== undefined &&
-    isTrustedRendererShellRequest(input.requestUrl, input.frameUrl, input.context)
-  ) {
-    requestHeaders[RENDERER_IDENTITY_HEADER] = input.context.rendererIdentity;
-  }
-  return requestHeaders;
-}
-
-export function createTrustedRendererRequestRegistry() {
-  const contexts = new Map<number, TrustedRendererRequestContext>();
-  return Object.freeze({
-    get: (webContentsId: number): TrustedRendererRequestContext | undefined =>
-      contexts.get(webContentsId),
-    set: (webContentsId: number, context: TrustedRendererRequestContext): void => {
-      contexts.set(webContentsId, context);
-    },
-    remove: (webContentsId: number): void => {
-      contexts.delete(webContentsId);
-    },
-  });
 }
 
 export function createDesktopWindowContextRegistry<
@@ -1007,53 +1015,6 @@ interface DisposablePresentationController {
   readonly dispose: () => void;
 }
 
-interface ManagedBrokerResource {
-  readonly url: string;
-  readonly token: string;
-  readonly close: () => Promise<void>;
-}
-
-export async function startManagedServerResources<
-  TBroker extends ManagedBrokerResource,
-  TServer,
->(options: {
-  readonly startBroker: () => Promise<TBroker | undefined>;
-  readonly startServer: (broker: TBroker | undefined) => TServer;
-}): Promise<{ readonly broker: TBroker | undefined; readonly server: TServer }> {
-  let broker: TBroker | undefined;
-  try {
-    broker = await options.startBroker();
-    return { broker, server: options.startServer(broker) };
-  } catch {
-    try {
-      await broker?.close();
-    } catch {
-      // The fixed startup error remains sanitized even if broker cleanup also fails.
-    }
-    throw new Error("Octant could not start its managed server resources.");
-  }
-}
-
-export async function shutdownManagedServerResources<TServer>(options: {
-  readonly broker: ManagedBrokerResource | undefined;
-  readonly server: TServer | undefined;
-  readonly shutdownServer: (server: TServer) => Promise<void>;
-}): Promise<void> {
-  let failed = false;
-  try {
-    if (options.server !== undefined) await options.shutdownServer(options.server);
-  } catch {
-    failed = true;
-  } finally {
-    try {
-      await options.broker?.close();
-    } catch {
-      failed = true;
-    }
-  }
-  if (failed) throw new Error("Octant could not stop its managed server resources.");
-}
-
 export function createProjectWindowPreparationCleanup() {
   let controller: DisposablePresentationController | undefined;
   let stopThermal: (() => void) | undefined;
@@ -1220,44 +1181,6 @@ export function resolveDesktopDataDirectory(
     .dataDirectory;
 }
 
-function resolveDesktopHostRuntimePaths(
-  configuredDirectory: string | undefined,
-  appDataDirectory: string,
-  platform: NodeJS.Platform = process.platform,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): HostRuntimePaths {
-  if (platform !== "darwin" && platform !== "linux") {
-    throw new Error(`Octant desktop does not support host paths on ${platform}.`);
-  }
-  // Electron appData is ~/Library/Application Support on macOS and ~/.config on
-  // Linux; walk up to the home directory from that path so tests can inject a
-  // synthetic appData without depending on the process home.
-  const home =
-    platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(appDataDirectory, "..");
-  return resolveHostRuntimePaths({
-    env: {
-      OCTANT_DATA_DIR: configuredDirectory,
-      // Linux XDG overrides must reach the host-runtime resolver; otherwise a
-      // user with XDG_DATA_HOME set still lands under the default home path.
-      XDG_DATA_HOME: env.XDG_DATA_HOME,
-      XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
-      XDG_STATE_HOME: env.XDG_STATE_HOME,
-    },
-    platform,
-    home,
-    temporaryDirectory: canonicalTemporaryDirectory(),
-    uid: process.getuid?.() ?? 0,
-  });
-}
-
-function canonicalTemporaryDirectory(): string {
-  try {
-    return realpathSync(tmpdir());
-  } catch {
-    return resolve(tmpdir());
-  }
-}
-
 async function writeBridgeSecretFile(paths: HostRuntimePaths, secret: string): Promise<void> {
   await writeBridgeSecretProjection(paths, secret);
 }
@@ -1273,22 +1196,91 @@ function readStoredDesktopBridgeSecret(directory: string): string | undefined {
   }
 }
 
-app.setName("Octant");
+const applicationIdentity = app.isPackaged
+  ? desktopIdentityForPackage(
+      JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")),
+    )
+  : desktopIdentity("stable");
+app.setName(applicationIdentity.productName);
 isolateEachCanvasFrameDocument(app.commandLine);
+// Decided once here from Nightly's stored Data choice, never from a renderer.
+const desktopHostRole = resolveStartupHostRole({
+  identity: applicationIdentity,
+  windowStorageDirectory: desktopWindowStorageDirectory(
+    applicationIdentity,
+    "",
+    app.getPath("appData"),
+  ),
+  appDataDirectory: app.getPath("appData"),
+  platform: process.platform,
+  env: process.env,
+});
+const resolvedHostStartup = resolveHostOwningStartup({
+  identity: applicationIdentity,
+  role: desktopHostRole,
+  platform: process.platform,
+  appDataDirectory: app.getPath("appData"),
+  env: process.env,
+});
+// Refuses before any host path is resolved or created.
+if (resolvedHostStartup.kind === "refused") throw new Error(resolvedHostStartup.message);
+const desktopHostStartup = resolvedHostStartup;
+const desktopMayStartHost =
+  applicationIdentity.mayStartHost || desktopHostRole.kind === "test-host";
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
-  process.env.OCTANT_DATA_DIR,
+  desktopHostStartup.configuredDataDirectory,
   app.getPath("appData"),
+  process.platform,
+  desktopHostStartup.logsDirectory === undefined
+    ? process.env
+    : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
+const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
+// The relaunch quits through the same interactive path as Quit in the menu, so
+// running work is confirmed first and a cancelled confirmation cancels it.
+const nightlyRelaunch = createRelaunchIntent({
+  quit: requestInteractiveQuit,
+  relaunch: () => app.relaunch(),
+});
+const nightlyDataControl =
+  desktopHostRole.kind === "test-host"
+    ? createNightlyDataControl({
+        identity: applicationIdentity,
+        role: desktopHostRole,
+        platform: process.platform,
+        appDataDirectory: app.getPath("appData"),
+        windowStorageDirectory: desktopWindowStorageDirectory(
+          applicationIdentity,
+          "",
+          app.getPath("appData"),
+        ),
+        env: process.env,
+        trashItem: (path) => shell.trashItem(path),
+        requestRelaunch: () => nightlyRelaunch.request(),
+      })
+    : undefined;
+/** The Nightly label and its "Test data" label for the test host's windows. */
+const nightlyWindowIdentity =
+  desktopHostRole.kind === "test-host"
+    ? {
+        applicationFlavor: "nightly" as const,
+        productName: applicationIdentity.productName,
+        applicationData: "test-data" as const,
+      }
+    : {};
 const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
-app.setPath("userData", desktopDataDirectory);
+app.setPath(
+  "userData",
+  desktopWindowStorageDirectory(applicationIdentity, desktopDataDirectory, app.getPath("appData")),
+);
 
 let server: ChildProcess | undefined;
+let desktopHostLaunch: DesktopHostLaunch | undefined;
+let acceptedQuitLaunch: DesktopHostLaunch | undefined;
+let desktopQuitAccepted = false;
 let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
-let computerUseBroker: ComputerUseBroker | undefined;
-let simulatorDeviceBroker: SimulatorDeviceBroker | undefined;
-let serveAvdBroker: ServeAvdBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
@@ -1296,9 +1288,14 @@ let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | und
 let browserExtensionBridge: ReturnType<typeof createExtensionBridge> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
+let nightlyInstallerInstance: ReturnType<typeof createNightlyInstaller> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
   readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
+/** Stable's brokered host calls carry the bridge secret it holds now. */
+const desktopBrokerHeaders = (): Readonly<Record<string, string>> => ({
+  "x-octant-desktop-secret": desktopBridgeSecret,
+});
 let serverInstanceId: string | undefined;
 let mainWindow: BrowserWindow | undefined;
 let nativeStateStore: NativeWindowStateStore | undefined;
@@ -1310,6 +1307,7 @@ let hostTray: Tray | undefined;
 let hostStatusPoll: ReturnType<typeof setInterval> | undefined;
 const pendingCodeDeepLinks: CodeDeepLink[] = [];
 let quitPrepared = false;
+let quitAccepted = false;
 let preparingQuit = false;
 // The active-work confirmation only applies to quits the user starts inside
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
@@ -1337,55 +1335,8 @@ let codeOperationApprovalViews:
 // decoder accepted; a window that reported none keeps the system palette.
 const approvalPalettesByWindow = new Map<string, CodeOperationApprovalPalette>();
 
-function codeApprovalBoundsForAnchor(
-  window: BrowserWindow,
-  anchor: CodeOperationApprovalAnchor,
-  pendingCount: number,
-): CodeOperationApprovalBounds | undefined {
-  if (window.isDestroyed()) return undefined;
-  const content = window.getContentBounds();
-  const bounds = anchor.bounds;
-  if (
-    ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
-    bounds.width < 1 ||
-    bounds.height < 1 ||
-    bounds.x < 0 ||
-    bounds.y < 36 ||
-    bounds.x + bounds.width > content.width ||
-    bounds.y + bounds.height > content.height
-  ) {
-    return undefined;
-  }
-  const width = Math.min(560, Math.max(320, Math.floor(bounds.width)), content.width - 24);
-  const maxHeight = pendingCount > 1 ? 260 : 216;
-  const height = Math.min(maxHeight, Math.max(180, Math.floor(bounds.y - 44)));
-  if (width < 320 || height < 180) return undefined;
-  const x = Math.min(Math.max(12, Math.floor(bounds.x)), content.width - width - 12);
-  const y = Math.floor(bounds.y - height - 8);
-  if (y < 36) return undefined;
-  return { x, y, width, height };
-}
-
-function codeApprovalFallbackBounds(
-  window: BrowserWindow,
-  pendingCount: number,
-): CodeOperationApprovalBounds | undefined {
-  if (window.isDestroyed()) return undefined;
-  const content = window.getContentBounds();
-  const width = Math.min(560, content.width - 24);
-  const maxHeight = pendingCount > 1 ? 260 : 216;
-  const height = Math.min(maxHeight, content.height - 44);
-  if (width < 320 || height < 180) return undefined;
-  return {
-    x: content.width - width - 12,
-    y: Math.max(36, content.height - height - 12),
-    width,
-    height,
-  };
-}
-
 function installCodeOperationApprovalViews(): void {
-  codeOperationApprovalViews ??= createCodeOperationApprovalViewController({
+  codeOperationApprovalViews ??= createCodeOperationApprovalViewController<BrowserWindow>({
     host: {
       ...createNativeCodeApprovalViewHost(
         resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
@@ -1400,8 +1351,10 @@ function installCodeOperationApprovalViews(): void {
       if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
       return prepareCodeOperationApprovalChallengeFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability,
+        brokerHeaders: {
+          ...desktopBrokerHeaders(),
+          "x-octant-window-capability": windowCapability,
+        },
         request,
         fetch: globalThis.fetch,
       });
@@ -1410,8 +1363,10 @@ function installCodeOperationApprovalViews(): void {
       if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
       return confirmCodeOperationApprovalFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability,
+        brokerHeaders: {
+          ...desktopBrokerHeaders(),
+          "x-octant-window-capability": windowCapability,
+        },
         challengeId,
         fetch: globalThis.fetch,
       });
@@ -1420,8 +1375,10 @@ function installCodeOperationApprovalViews(): void {
       if (activeServerUrl === undefined) return Promise.resolve();
       return cancelCodeOperationApprovalFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability,
+        brokerHeaders: {
+          ...desktopBrokerHeaders(),
+          "x-octant-window-capability": windowCapability,
+        },
         challengeId,
         fetch: globalThis.fetch,
       });
@@ -1566,30 +1523,6 @@ function unregisterTrustedRendererRequestContext(window: BrowserWindow): void {
   trustedRendererRequests.remove(webContentsId);
 }
 
-function isTrustedRendererShellRequest(
-  requestUrl: string,
-  frameUrl: string | undefined,
-  context: TrustedRendererRequestContext,
-): boolean {
-  let parsedRequest: URL;
-  try {
-    parsedRequest = new URL(requestUrl);
-  } catch {
-    return false;
-  }
-  if (
-    parsedRequest.origin !== context.serverOrigin ||
-    (!parsedRequest.pathname.startsWith("/api/shell/") && parsedRequest.pathname !== "/api/shell")
-  ) {
-    return false;
-  }
-  if (frameUrl === undefined) return false;
-  if (context.developmentOrigin !== undefined) {
-    return safeOrigin(frameUrl) === context.developmentOrigin;
-  }
-  return isPackagedRendererUrl(frameUrl);
-}
-
 function repositoryRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 }
@@ -1600,56 +1533,6 @@ export function resolveKeychainHelperPath(options: DesktopNativeHelperPathOption
 
 export function resolveCodeFileHelperPath(options: DesktopNativeHelperPathOptions): string {
   return resolveDesktopNativeHelperPath(options, CODE_FILE_HELPER_FILENAME);
-}
-
-export function createMainBrowserWindowOptions(options: {
-  readonly bounds: WindowBounds;
-  readonly capability: string;
-  readonly windowId: string;
-  readonly initialProjectId?: string;
-  readonly initialThreadMode?: "code" | "work";
-  readonly initialThreadId?: string;
-  readonly preloadPath: string;
-  readonly browserWindow: WindowPresentation["browserWindow"];
-}): BrowserWindowConstructorOptions {
-  if ((options.initialThreadMode === undefined) !== (options.initialThreadId === undefined)) {
-    throw new Error("Octant received an incomplete initial thread target.");
-  }
-  if (options.initialThreadMode !== undefined && options.initialProjectId === undefined) {
-    throw new Error("Octant initial thread target requires a Project.");
-  }
-  return {
-    ...options.bounds,
-    minWidth: 900,
-    minHeight: 600,
-    ...options.browserWindow,
-    show: false,
-    title: "Octant",
-    // The glass stays lit when the window is not in front. Following the
-    // window let macOS swap in its inactive material, and behind the nearly
-    // clear sheet a thread then read as solid black beside a grey sidebar.
-    visualEffectState: "active",
-    webPreferences: {
-      contextIsolation: true,
-      additionalArguments: [
-        `--octant-project-capability=${options.capability}`,
-        `--octant-window-id=${options.windowId}`,
-        ...(options.initialProjectId === undefined
-          ? []
-          : [`--octant-initial-project-id=${options.initialProjectId}`]),
-        ...(options.initialThreadMode === undefined || options.initialThreadId === undefined
-          ? []
-          : [
-              `--octant-initial-thread-mode=${options.initialThreadMode}`,
-              `--octant-initial-thread-id=${options.initialThreadId}`,
-            ]),
-      ],
-      nodeIntegration: false,
-      preload: options.preloadPath,
-      sandbox: true,
-      webSecurity: true,
-    },
-  };
 }
 
 export function prepareDevelopmentRendererUrl(
@@ -1677,6 +1560,7 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
       moduleUrl: import.meta.url,
     }),
     storeScope: desktopHostId,
+    serviceFamily: desktopKeychainServiceFamily,
   }).then((backend) => {
     return backend;
   });
@@ -1720,6 +1604,9 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
   if (credentialBroker !== undefined) return credentialBroker;
   const backend = await getCredentialBackend();
   if (backend.store === undefined) return undefined;
+  const linkedStores = makeLinkedSecretStores({
+    statePath: linkedSecretStoresStatePath(desktopDataDirectory),
+  });
   return await startCredentialBroker(
     backend.store,
     backend.purgeStore,
@@ -1730,8 +1617,9 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
     backend.pushPlatformCredentials,
-    makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(desktopDataDirectory) }),
+    linkedStores,
     backend.sshKeys,
+    createDesktopBrowserCredentialFill({ stores: linkedStores, surface: () => browserSurfaceHost }),
   );
 }
 
@@ -1750,6 +1638,11 @@ async function resolveExistingHostAttachment() {
 }
 
 async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefined> {
+  if (!desktopMayStartHost) {
+    throw new Error(
+      "Needs a newer Octant. The stable desktop client bridge is not available in this build of Octant Nightly.",
+    );
+  }
   if (server !== undefined) return undefined;
   const attachment = await resolveExistingHostAttachment();
   if (attachment === undefined) return undefined;
@@ -1809,6 +1702,13 @@ function browserProfilesDirectory(): string {
 }
 
 async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
+  if (!desktopMayStartHost) {
+    throw new Error("Octant Nightly cannot start a host or migrate shared data.");
+  }
+  if (desktopHostLaunch !== undefined && desktopHostLaunch.state !== "closed") {
+    if (desktopHostLaunch.state !== "acquiring")
+      throw new Error("Octant still owns resources whose shutdown was not confirmed.");
+  }
   if (server !== undefined && activeServerUrl !== undefined && serverInstanceId !== undefined) {
     return {
       url: activeServerUrl,
@@ -1821,7 +1721,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   );
   await prepareHostRuntimePaths(desktopHostRuntimePaths);
   const root = repositoryRoot();
-  const portReservation = await reserveLoopbackPort(resolveConfiguredServerPort());
+  const portReservation = await reserveLoopbackPort(
+    resolveConfiguredServerPort(process.env, desktopHostStartup.serverPort),
+  );
   const serverUrl = resolveManagedServerUrl({
     needsServerStart: true,
     activeServerUrl: undefined,
@@ -1832,11 +1734,8 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   const serverStderr = createStderrTail();
-  let startingBrowserBroker: BrowserRuntimeBroker | undefined;
-  let startingComputerBroker: ComputerUseBroker | undefined;
-  let startingDeviceBroker: SimulatorDeviceBroker | undefined;
-  let startingServeAvdBroker: ServeAvdBroker | undefined;
-  let startingManagedToolService: ManagedToolService | undefined;
+  const launch = createDesktopHostLaunch({ shutdownServer: shutdownManagedServer });
+  desktopHostLaunch = launch;
   try {
     const instanceId = randomUUID();
     // Files held for the agent are cleared when the app starts; if the folder
@@ -1846,11 +1745,17 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     );
     browserSurfaceHost ??= createBrowserSurfaceHost({
       ...(browserDownloadRoot === undefined ? {} : { downloadRoot: browserDownloadRoot }),
-      isOwnerWindowAvailable: (windowId) => desktopWindows.hasWindowId(windowId),
-      createView: ({ partition, webPreferences }) =>
-        new WebContentsView({
-          webPreferences: { partition, ...webPreferences },
-        }) as unknown as BrowserSurfaceViewPort,
+      isOwnerWindowAvailable: (windowId) =>
+        desktopWindows.hasWindowId(windowId) || nightlyWindowLeases?.hasWindow(windowId) === true,
+      isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
+      clipboard: { writeText: (text) => clipboard.writeText(text) },
+      createView: (options) => {
+        if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
+          return createOffscreenBrowserSurface(options);
+        return new WebContentsView({
+          webPreferences: { partition: options.partition, ...options.webPreferences },
+        }) as unknown as BrowserSurfaceViewPort;
+      },
     });
     const surfaceHost = browserSurfaceHost;
     const profileStore = createBrowserProfileStore({
@@ -1878,7 +1783,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         popupViewOf(new WebContentsView({ webPreferences: { partition, ...webPreferences } })),
     });
     const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(surfaceHost, profileStore);
-    startingBrowserBroker = nextBrowserRuntimeBroker;
+    launch.acquired({ browserBroker: nextBrowserRuntimeBroker });
     const nextComputerService = createComputerUseDesktopService({
       bundledPath: resolveDesktopNativeHelperPath(
         {
@@ -1891,17 +1796,24 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       dataDirectory: desktopDataDirectory,
       isWindowAvailable: (windowId) => desktopWindows.hasWindowId(windowId),
     });
+    launch.acquired({ computerService: nextComputerService });
     const nextComputerBroker = await startComputerUseBroker(nextComputerService);
-    startingComputerBroker = nextComputerBroker;
-    startingManagedToolService = createManagedToolService({
+    launch.acquired({ computerBroker: nextComputerBroker });
+    const nextManagedToolService = createManagedToolService({
       bundledToolsDirectory: resolveManagedToolsDirectory({
         packaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
         moduleUrl: import.meta.url,
       }),
       dataDirectory: desktopDataDirectory,
-      execPath: process.execPath,
+      execPath: resolveDesktopNodeRuntime({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+        execPath: process.execPath,
+      }),
     });
+    launch.acquired({ managedTools: nextManagedToolService });
     const deviceHelperPath = resolveDesktopNativeHelperPath(
       {
         packaged: app.isPackaged,
@@ -1913,23 +1825,27 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     // Simulators exist on macOS only. The broker still starts when the native
     // helper binary is missing, so a managed serve-sim stream can drive the
     // pane. Without either, input is reported unavailable.
-    const nextDeviceBroker =
+    const nextSimulatorHelpers =
       process.platform === "darwin"
-        ? await startSimulatorDeviceBroker(
-            createManagedSimulatorHelpers(
-              existsSync(deviceHelperPath)
-                ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
-                : createUnavailableSimulatorHelpers(),
-              startingManagedToolService,
-              { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
-            ),
+        ? createManagedSimulatorHelpers(
+            existsSync(deviceHelperPath)
+              ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
+              : createUnavailableSimulatorHelpers(),
+            nextManagedToolService,
+            { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
           )
         : undefined;
-    startingDeviceBroker = nextDeviceBroker;
-    const nextServeAvdBroker = await startServeAvdBroker(startingManagedToolService);
-    startingServeAvdBroker = nextServeAvdBroker;
-    const resources = await startManagedServerResources({
-      startBroker: () => startDesktopCredentialBroker(),
+    if (nextSimulatorHelpers !== undefined)
+      launch.acquired({ simulatorHelpers: nextSimulatorHelpers });
+    const nextDeviceBroker =
+      nextSimulatorHelpers === undefined
+        ? undefined
+        : await startSimulatorDeviceBroker(nextSimulatorHelpers);
+    if (nextDeviceBroker !== undefined) launch.acquired({ simulatorBroker: nextDeviceBroker });
+    const nextServeAvdBroker = await startServeAvdBroker(nextManagedToolService);
+    launch.acquired({ avdBroker: nextServeAvdBroker });
+    const { broker, server: child } = await startDesktopHostServer(launch, {
+      startBroker: startDesktopCredentialBroker,
       startServer: (broker) => {
         const codeFileHelperPath = resolveCodeFileHelperPath({
           packaged: app.isPackaged,
@@ -1969,34 +1885,44 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
                 credentialBrokerUrl: broker.url,
               }),
           desktopBridgeSecret,
-          root,
+          root: resolveDesktopHostRoot({
+            packaged: app.isPackaged,
+            platform: process.platform,
+            resourcesPath: process.resourcesPath,
+            appRoot: root,
+          }),
           port,
           instanceId,
           packaged: app.isPackaged,
           ...(app.isPackaged ? { appVersion: app.getVersion() } : {}),
-          execPath: process.execPath,
-          env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
+          execPath: resolveDesktopNodeRuntime({
+            packaged: app.isPackaged,
+            platform: process.platform,
+            resourcesPath: process.resourcesPath,
+            execPath: process.execPath,
+          }),
+          env: {
+            ...process.env,
+            OCTANT_DATA_DIR: desktopDataDirectory,
+            ...desktopHostStartup.hostEnvironment,
+          },
         });
-        const child = spawn(spec.command, spec.args, {
+        return spawn(spec.command, spec.args, {
           env: spec.env,
           stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
         });
-        // pipe() honours backpressure from a slow parent stderr; the tail
-        // listener only keeps a bounded copy.
-        child.stderr.pipe(process.stderr, { end: false });
-        child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
-        child.stderr.once("end", serverStderr.end);
-        return child;
       },
     });
-    credentialBroker = resources.broker;
+    // pipe() honours backpressure from a slow parent stderr; the tail
+    // listener only keeps a bounded copy.
+    child.stderr.pipe(process.stderr, { end: false });
+    child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
+    child.stderr.once("end", serverStderr.end);
+    credentialBroker = broker;
     browserRuntimeBroker = nextBrowserRuntimeBroker;
-    computerUseBroker = nextComputerBroker;
     computerUseService = nextComputerService;
-    simulatorDeviceBroker = nextDeviceBroker;
-    serveAvdBroker = nextServeAvdBroker;
-    managedToolService = startingManagedToolService;
-    server = resources.server;
+    managedToolService = nextManagedToolService;
+    server = child;
     serverInstanceId = instanceId;
     activeServerUrl = serverUrl;
     const attached = await waitForStorageReady({
@@ -2024,67 +1950,45 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       ) {
         throw new Error("Octant could not load the attached host authority.");
       }
-      const child = server;
-      const broker = credentialBroker;
       desktopBackendSupervisor.release();
-      server = undefined;
-      credentialBroker = undefined;
-      browserRuntimeBroker = undefined;
-      await shutdownManagedServerResources({
-        broker,
-        server: child,
-        shutdownServer: shutdownManagedServer,
-      });
-      await nextBrowserRuntimeBroker.close();
-      await nextComputerBroker.close();
-      await nextDeviceBroker?.close();
-      await nextServeAvdBroker.close();
-      await startingManagedToolService?.close();
-      computerUseBroker = undefined;
-      computerUseService = undefined;
-      simulatorDeviceBroker = undefined;
-      serveAvdBroker = undefined;
-      managedToolService = undefined;
+      await closeDesktopHostLaunch(launch);
       desktopBridgeSecret = winningAttachment.bridgeSecret;
       serverInstanceId = attached.instanceId;
       activeServerUrl = attached.url;
       return { url: attached.url, instanceId: attached.instanceId, ownership: "managed" };
     }
-    if (server !== undefined) desktopBackendSupervisor.observe(server);
+    if (server !== undefined && !desktopQuitAccepted) desktopBackendSupervisor.observe(server);
     return { url: serverUrl, instanceId, ownership: "desktop-owned" };
   } catch (error) {
     if (desktopBackendSupervisor.snapshot().status !== "restarting") {
       desktopBackendSupervisor.release();
     }
-    const child = server;
-    const broker = credentialBroker;
-    const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
-    const computerBroker = computerUseBroker ?? startingComputerBroker;
-    const deviceBroker = simulatorDeviceBroker ?? startingDeviceBroker;
-    const avdBroker = serveAvdBroker ?? startingServeAvdBroker;
-    const managedTools = managedToolService ?? startingManagedToolService;
-    computerUseBroker = undefined;
-    computerUseService = undefined;
-    simulatorDeviceBroker = undefined;
-    serveAvdBroker = undefined;
-    managedToolService = undefined;
-    server = undefined;
-    credentialBroker = undefined;
-    browserRuntimeBroker = undefined;
-    serverInstanceId = undefined;
-    activeServerUrl = undefined;
-    await shutdownManagedServerResources({
-      broker,
-      server: child,
-      shutdownServer: shutdownManagedServer,
-    }).catch(() => undefined);
-    await browserBroker?.close().catch(() => undefined);
-    await computerBroker?.close().catch(() => undefined);
-    await deviceBroker?.close().catch(() => undefined);
-    await avdBroker?.close().catch(() => undefined);
-    await managedTools?.close().catch(() => undefined);
+    await closeDesktopHostLaunch(launch).catch((cleanupError: unknown) => {
+      // Cleanup errors contain only fixed stage names; preserve the original
+      // startup error so retry policy still sees its actual classification.
+      logQuitProblem(String(cleanupError));
+    });
     throw error;
   }
+}
+
+async function closeDesktopHostLaunch(launch: DesktopHostLaunch): Promise<void> {
+  const result = await launch.close();
+  if (result.status === "failed") {
+    throw new Error(`Octant could not close owned host resources: ${result.stages.join(", ")}.`);
+  }
+  if (desktopHostLaunch !== launch) return;
+  // Normal API closure does not prove tracked helper exit. Keep the one
+  // quit-owned launch reachable through the existing application deadline.
+  if (desktopQuitAccepted) acceptedQuitLaunch = launch;
+  desktopHostLaunch = undefined;
+  computerUseService = undefined;
+  managedToolService = undefined;
+  server = undefined;
+  credentialBroker = undefined;
+  browserRuntimeBroker = undefined;
+  serverInstanceId = undefined;
+  activeServerUrl = undefined;
 }
 
 async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
@@ -2094,33 +1998,8 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   if (desktopBackendSupervisor.snapshot().status !== "restarting") {
     desktopBackendSupervisor.release();
   }
-  const child = server;
-  const broker = credentialBroker;
-  const browserBroker = browserRuntimeBroker;
-  const computerBroker = computerUseBroker;
-  const deviceBroker = simulatorDeviceBroker;
-  const avdBroker = serveAvdBroker;
-  const managedTools = managedToolService;
-  computerUseBroker = undefined;
-  computerUseService = undefined;
-  simulatorDeviceBroker = undefined;
-  serveAvdBroker = undefined;
-  managedToolService = undefined;
-  server = undefined;
-  credentialBroker = undefined;
-  browserRuntimeBroker = undefined;
-  serverInstanceId = undefined;
-  activeServerUrl = undefined;
-  await shutdownManagedServerResources({
-    broker,
-    server: child,
-    shutdownServer: shutdownManagedServer,
-  });
-  await browserBroker?.close();
-  await computerBroker?.close();
-  await deviceBroker?.close();
-  await avdBroker?.close();
-  await managedTools?.close();
+  const launch = desktopHostLaunch;
+  if (launch !== undefined) await closeDesktopHostLaunch(launch);
 }
 
 const hostLifecycle = createHostLifecycleController({
@@ -2167,26 +2046,43 @@ export async function refreshProjectWindowAuthoritiesAfterHostRestart(
 }
 
 export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
-  readonly restart: () => Promise<LocalHostDescriptor>;
+  readonly restart: () => Promise<HostAdmission>;
   readonly refreshWindowAuthorities: (host: LocalHostDescriptor) => Promise<void>;
-}): Promise<{
-  readonly host: LocalHostDescriptor;
-  readonly windowAuthorities: "ready" | "attention-required";
-}> {
-  const host = await options.restart();
+}): Promise<
+  | { readonly status: "closing" }
+  | {
+      readonly status: "running";
+      readonly host: LocalHostDescriptor;
+      readonly windowAuthorities: "ready" | "attention-required";
+    }
+> {
+  const admission = await options.restart();
+  if (admission.status === "closing") return admission;
+  const host = admission.host;
   try {
     await options.refreshWindowAuthorities(host);
-    return Object.freeze({ host, windowAuthorities: "ready" });
+    return Object.freeze({ status: "running", host, windowAuthorities: "ready" });
   } catch {
-    return Object.freeze({ host, windowAuthorities: "attention-required" });
+    return Object.freeze({ status: "running", host, windowAuthorities: "attention-required" });
   }
 }
 
-async function restartDesktopHost(): Promise<LocalHostDescriptor> {
+async function restartDesktopHost(): Promise<HostAdmission> {
+  const finishRestart = desktopClientLifetime.beginHostRestart();
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
-    restart: () => hostLifecycle.restart(),
+    restart: async () => {
+      try {
+        const admission = await hostLifecycle.restart();
+        finishRestart(admission.status !== "closing");
+        return admission;
+      } catch (error) {
+        finishRestart(false);
+        throw error;
+      }
+    },
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
+  if (outcome.status === "closing") return outcome;
   if (outcome.windowAuthorities === "attention-required") {
     hostLifecycle.setActivity({
       activeAgentCount: 0,
@@ -2195,12 +2091,18 @@ async function restartDesktopHost(): Promise<LocalHostDescriptor> {
     });
     updateHostTray();
   }
-  return outcome.host;
+  return { status: "running", host: outcome.host };
 }
 
 const desktopBackendSupervisor = createDesktopBackendSupervisor({
   restart: async () => {
-    await restartDesktopHost();
+    const admission = await restartDesktopHost();
+    // An accepted quit ends supervision; releasing here makes the supervisor
+    // treat this refused restart as a stop rather than a crash to retry.
+    if (admission.status === "closing") {
+      desktopBackendSupervisor.release();
+      return undefined;
+    }
     return server;
   },
   reportFatal: (error) => {
@@ -2217,11 +2119,13 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
   },
 });
 
-async function createWindow(): Promise<void> {
+async function createWindow(stillRequested: () => boolean): Promise<void> {
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   const root = repositoryRoot();
   markHostInteraction("host", "window-create-start");
-  const host = await hostLifecycle.ensureRunning();
+  const admission = await hostLifecycle.ensureRunning();
+  if (admission.status === "closing") return;
+  const host = admission.host;
   markHostInteraction("server", "host-running");
   const serverUrl = host.url;
   activeServerUrl = serverUrl;
@@ -2273,12 +2177,14 @@ async function createWindow(): Promise<void> {
       return authority;
     },
     construct: (capability) => {
+      if (!stillRequested()) throw new Error("Octant replaced this local window request.");
       stableWindowCapability = capability;
       const window = new BrowserWindow(
         createMainBrowserWindowOptions({
           bounds: state.bounds,
           capability,
           windowId: state.windowId,
+          ...nightlyWindowIdentity,
           preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
           browserWindow: presentation.browserWindow,
         }),
@@ -2299,7 +2205,7 @@ async function createWindow(): Promise<void> {
       mainWindow = window;
       if (state.maximized) window.maximize();
       projectRootPicker = createProjectRootPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2312,7 +2218,7 @@ async function createWindow(): Promise<void> {
         windowId: state.windowId,
       });
       const localPluginFolderPicker = createLocalPluginFolderPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2325,7 +2231,7 @@ async function createWindow(): Promise<void> {
         windowId: state.windowId,
       });
       const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2339,7 +2245,7 @@ async function createWindow(): Promise<void> {
       });
 
       const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showSaveDialog: async (owner, options) => {
             const chosen = await dialog.showSaveDialog(owner, {
@@ -2465,7 +2371,8 @@ async function createWindow(): Promise<void> {
           closeAuthority(),
         ]).finally(() => {
           if (!window.isDestroyed()) window.destroy();
-          recoverWindowAfterRendererExit(details.reason);
+          if (desktopClientLifetime.localWindowAdmission()())
+            recoverWindowAfterRendererExit(details.reason);
         });
       });
       window.once("ready-to-show", () => {
@@ -2522,6 +2429,8 @@ async function createWindow(): Promise<void> {
 }
 
 async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<void> {
+  const stillRequested = desktopClientLifetime.localWindowAdmission();
+  if (!stillRequested()) return;
   const serverUrl = activeServerUrl;
   const initialAuthorityInstanceId = serverInstanceId;
   if (serverUrl === undefined || initialAuthorityInstanceId === undefined) {
@@ -2558,6 +2467,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         return authority;
       },
       construct: (capability) => {
+        if (!stillRequested()) throw new Error("Octant replaced this local window request.");
         windowCapability = capability;
         const window = new BrowserWindow(
           createMainBrowserWindowOptions({
@@ -2568,6 +2478,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             ...(target.kind === "project-thread"
               ? { initialThreadMode: target.mode, initialThreadId: target.threadId }
               : {}),
+            ...nightlyWindowIdentity,
             preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
             browserWindow: presentation.browserWindow,
           }),
@@ -2589,7 +2500,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           throw new Error("Octant Project window capability is unavailable.");
         }
         const picker = createProjectRootPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2602,7 +2513,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const localPluginFolderPicker = createLocalPluginFolderPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2615,7 +2526,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2628,7 +2539,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showSaveDialog: async (owner, options) => {
               const chosen = await dialog.showSaveDialog(owner, {
@@ -2786,7 +2697,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
     });
   } catch (error) {
     secondaryWindowLifecycles.delete(lifecycle);
-    throw error;
+    if (stillRequested()) throw error;
   }
 }
 
@@ -3017,7 +2928,9 @@ async function openLocalWebApp(): Promise<void> {
 }
 
 async function startHostFromMenu(): Promise<void> {
-  const host = await hostLifecycle.ensureRunning();
+  const admission = await hostLifecycle.ensureRunning();
+  if (admission.status === "closing") return;
+  const host = admission.host;
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   if (host.ownership === "desktop-owned") {
@@ -3037,7 +2950,9 @@ async function stopHostFromMenu(): Promise<void> {
 }
 
 async function restartHostFromMenu(): Promise<void> {
-  const host = await restartDesktopHost();
+  const admission = await restartDesktopHost();
+  if (admission.status === "closing") return;
+  const host = admission.host;
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
@@ -3075,8 +2990,7 @@ async function runMenuBarAction(
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
     } else if (action === "fully-quit") {
-      quitCanPrompt = true;
-      app.quit();
+      requestInteractiveQuit();
     }
   } catch {
     dialog.showErrorBox(
@@ -3088,9 +3002,10 @@ async function runMenuBarAction(
 
 export function resolveConfiguredServerPort(
   environment: Readonly<Record<string, string | undefined>> = process.env,
+  defaultPort = 13_773,
 ): number {
   const value = environment.OCTANT_SERVER_PORT;
-  if (value === undefined) return 13_773;
+  if (value === undefined) return defaultPort;
   const port = Number(value);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error("OCTANT_SERVER_PORT must be an integer between 1 and 65535");
@@ -3132,7 +3047,7 @@ function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
-    { storeScope: desktopHostId },
+    { storeScope: desktopHostId, serviceFamily: desktopKeychainServiceFamily },
   );
   return ownerUnlockKeyService;
 }
@@ -3146,6 +3061,7 @@ function getHostIdentitySigningService(): HostIdentitySigningService {
     }),
     {
       storeScope: desktopHostId,
+      serviceFamily: desktopKeychainServiceFamily,
       expectedLegacyFingerprint: readPersistedHostIdentityFingerprint,
     },
   );
@@ -3342,7 +3258,7 @@ function installIpcHandlers(): void {
     }
     await openCodeExternalEditorFromServer({
       serverUrl: activeServerUrl,
-      desktopBridgeSecret,
+      brokerHeaders: desktopBrokerHeaders,
       windowId: context.windowId,
       request: editorRequest,
       fetch: globalThis.fetch,
@@ -3370,7 +3286,7 @@ function installIpcHandlers(): void {
     }
     await openCodeCheckoutInApplicationFromServer({
       serverUrl: activeServerUrl,
-      desktopBridgeSecret,
+      brokerHeaders: desktopBrokerHeaders,
       windowId: context.windowId,
       request: openRequest,
       fetch: globalThis.fetch,
@@ -3417,7 +3333,7 @@ function installIpcHandlers(): void {
     try {
       await openPreviewHandoffFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         windowId: context.windowId,
         request: {
           target: {
@@ -3706,6 +3622,40 @@ function installIpcHandlers(): void {
     if (!isAppReleaseRing(value)) throw new Error("Octant rejected an unknown release ring.");
     return appUpdates().setRing(value);
   });
+  // The renderer only asks. Each request carries nothing: the install
+  // location, the feed and the ring are main's own, never a caller's choice.
+  for (const [channel, request] of [
+    [IPC_CHANNELS.nightlyInstallState, () => nightlyInstaller().state()],
+    [IPC_CHANNELS.nightlyInstall, () => nightlyInstaller().install()],
+    [IPC_CHANNELS.nightlyInstallOpen, () => nightlyInstaller().open()],
+    [IPC_CHANNELS.nightlyInstallRemove, () => nightlyInstaller().remove()],
+  ] as const) {
+    ipcMain.handle(channel, (event, ...rest: ReadonlyArray<unknown>) => {
+      ownedTopLevelWindowContext(event);
+      if (rest.length !== 0) throw new Error("Octant rejected an Octant Nightly request.");
+      return request();
+    });
+  }
+  // Nightly's test host keeps its Data setting here; the choice, relaunch and
+  // removal requests carry nothing but the fixed choice values.
+  if (nightlyDataControl !== undefined) {
+    const data = nightlyDataControl;
+    for (const [channel, request] of [
+      [IPC_CHANNELS.nightlyDataState, () => data.state()],
+      [IPC_CHANNELS.nightlyDataRemove, () => data.remove()],
+      [IPC_CHANNELS.nightlyDataRelaunch, () => data.relaunch()],
+    ] as const) {
+      ipcMain.handle(channel, (event, ...rest: ReadonlyArray<unknown>) => {
+        ownedTopLevelWindowContext(event);
+        if (rest.length !== 0) throw new Error("Octant Nightly rejected a Data request.");
+        return request();
+      });
+    }
+    ipcMain.handle(IPC_CHANNELS.nightlyDataChoose, (event, value: unknown) => {
+      ownedTopLevelWindowContext(event);
+      return data.choose(value);
+    });
+  }
   ipcMain.handle(IPC_CHANNELS.appUpdateWhatsNew, async (event) => {
     ownedTopLevelWindowContext(event);
     return await loadBundledWhatsNew(bundledWhatsNewOptions());
@@ -3986,6 +3936,19 @@ function bundledWhatsNewOptions(): {
   };
 }
 
+/**
+ * The ring a packaged build follows before the person's choice arrives: the
+ * one its version was built on. An Octant installed from a candidate build
+ * would otherwise start on Stable and see nothing until the next stable
+ * release; a version outside this app's rings falls back to its default.
+ */
+function packagedUpdateRing(): (typeof applicationIdentity.rings)[number] {
+  const built = ringForVersion(app.getVersion() as AppVersion);
+  return (
+    applicationIdentity.rings.find((ring) => ring === built) ?? applicationIdentity.defaultRing
+  );
+}
+
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,
@@ -3995,7 +3958,11 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
       version: app.getVersion() as AppVersion,
       platform: process.platform,
       arch: process.arch,
+      product: applicationIdentity.updateProduct,
     },
+    ...(app.isPackaged
+      ? { ring: packagedUpdateRing(), allowedRings: applicationIdentity.rings }
+      : {}),
     // Starts off, and stays off until the renderer reports the persisted
     // preference. A default of "on" would mean a host that had been told not to
     // check still checked once on every launch, in the window before the
@@ -4011,23 +3978,33 @@ function appUpdates(): ReturnType<typeof createAppUpdateService> {
   return appUpdateService;
 }
 
-function validateExternalBrowserUrl(value: unknown): string {
-  if (typeof value !== "string" || value.length > 4_096) {
-    throw new Error("Octant rejected an invalid external Browser URL.");
-  }
-  try {
-    const url = new URL(value);
-    if (
-      (url.protocol !== "https:" && url.protocol !== "http:") ||
-      url.username !== "" ||
-      url.password !== ""
-    ) {
-      throw new Error();
-    }
-    return url.toString();
-  } catch {
-    throw new Error("Octant rejected an invalid external Browser URL.");
-  }
+function nightlyInstaller(): ReturnType<typeof createNightlyInstaller> {
+  nightlyInstallerInstance ??= createNightlyInstaller({
+    role: () => ({
+      packaged: app.isPackaged,
+      flavor: applicationIdentity.flavor,
+      platform: process.platform,
+      ring: appUpdates().state().ring,
+    }),
+    executablePath: process.execPath,
+    feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
+    app: {
+      version: app.getVersion() as AppVersion,
+      platform: process.platform,
+      arch: process.arch,
+    },
+    temporaryDirectory: app.getPath("temp"),
+    // The same signed native component that already authenticates Nightly
+    // peers; it is absent outside packaged macOS, which refuses the check.
+    native: () =>
+      loadDesktopPeerStatus({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+      }),
+    trash: (path) => shell.trashItem(path),
+  });
+  return nightlyInstallerInstance;
 }
 
 function validateBrowserSurfaceBounds(
@@ -4056,103 +4033,6 @@ function isStrictRecord(value: unknown, keys: readonly string[]): value is Recor
       .sort()
       .join("\0") === [...keys].sort().join("\0")
   );
-}
-
-function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprovalAnchor {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    !("kind" in value) ||
-    (value.kind !== "thread" && value.kind !== "draft")
-  ) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  const record = value as Record<string, unknown>;
-  const expectedKeys =
-    record.kind === "thread"
-      ? ["bounds", "kind", "projectId", "threadId"]
-      : ["bounds", "composerId", "kind", "projectId"];
-  if (!isStrictRecord(record, expectedKeys)) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  const bounds = record.bounds;
-  if (!isStrictRecord(bounds, ["height", "width", "x", "y"])) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  const { x, y, width, height } = bounds;
-  if (
-    typeof x !== "number" ||
-    typeof y !== "number" ||
-    typeof width !== "number" ||
-    typeof height !== "number" ||
-    ![x, y, width, height].every(Number.isFinite) ||
-    [x, y, width, height].some((entry) => entry < 0 || entry > 32_768) ||
-    typeof record.projectId !== "string" ||
-    !UUID_PATTERN.test(record.projectId) ||
-    (record.kind === "thread" &&
-      (typeof record.threadId !== "string" || !UUID_PATTERN.test(record.threadId))) ||
-    (record.kind === "draft" &&
-      (typeof record.composerId !== "string" || !UUID_PATTERN.test(record.composerId)))
-  ) {
-    throw new Error("Octant rejected invalid Code approval anchor bounds.");
-  }
-  return {
-    projectId: record.projectId,
-    ...(record.kind === "thread"
-      ? { kind: "thread" as const, threadId: record.threadId as string }
-      : { kind: "draft" as const, composerId: record.composerId as string }),
-    bounds: {
-      x,
-      y,
-      width,
-      height,
-    },
-  };
-}
-
-function decodeCodeOperationApprovalViewDecision(value: unknown): {
-  readonly token: string;
-  readonly challengeId: string;
-  readonly decision: "approve" | "cancel" | "next" | "previous";
-} {
-  if (!isStrictRecord(value, ["challengeId", "decision", "token"])) {
-    throw new Error("Octant rejected invalid Code approval decision.");
-  }
-  if (
-    typeof value.token !== "string" ||
-    value.token.length < 32 ||
-    value.token.length > 128 ||
-    typeof value.challengeId !== "string" ||
-    !UUID_PATTERN.test(value.challengeId) ||
-    (value.decision !== "approve" &&
-      value.decision !== "cancel" &&
-      value.decision !== "next" &&
-      value.decision !== "previous")
-  ) {
-    throw new Error("Octant rejected invalid Code approval decision.");
-  }
-  return {
-    token: value.token,
-    challengeId: value.challengeId,
-    decision: value.decision,
-  };
-}
-
-function decodeCodeOperationApprovalPresentation(value: unknown): {
-  readonly projectId: string;
-  readonly composerId: string;
-} {
-  if (
-    !isStrictRecord(value, ["composerId", "projectId"]) ||
-    typeof value.projectId !== "string" ||
-    !UUID_PATTERN.test(value.projectId) ||
-    typeof value.composerId !== "string" ||
-    !UUID_PATTERN.test(value.composerId)
-  ) {
-    throw new Error("Octant rejected invalid Code approval presentation.");
-  }
-  return { projectId: value.projectId, composerId: value.composerId };
 }
 
 function ownedWindow(event: IpcMainInvokeEvent): BrowserWindow {
@@ -4418,6 +4298,34 @@ async function flushWindowState(): Promise<void> {
   await flushNativeWindowState(mainWindow, stableWindowId, nativeStateStore);
 }
 
+async function closeLocalWindowsForRetainedHost(): Promise<"closed" | "failed"> {
+  await saveWindowStateWithoutBlocking({ flushWindowState, log: logQuitProblem });
+  const outcomes = await Promise.all(
+    desktopWindows.active().map(
+      ({ window }) =>
+        new Promise<boolean>((resolveClosed) => {
+          let settled = false;
+          const finish = (didClose: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeListener("closed", closed);
+            resolveClosed(didClose);
+          };
+          const closed = () => finish(true);
+          const timer = setTimeout(() => finish(window.isDestroyed()), WINDOW_CLOSE_GRACE_MS);
+          window.once("closed", closed);
+          try {
+            window.close();
+          } catch {
+            finish(false);
+          }
+        }),
+    ),
+  );
+  return outcomes.every(Boolean) ? "closed" : "failed";
+}
+
 async function shutdownSecondaryProjectWindows(): Promise<void> {
   const lifecycles = [...secondaryWindowLifecycles];
   await Promise.all(lifecycles.map((lifecycle) => lifecycle.shutdown(async () => undefined)));
@@ -4449,38 +4357,72 @@ function logQuitProblem(message: string): void {
 }
 
 // Ends the app when graceful shutdown stalls. It first kills the processes the
-// quit started with: stopping the host clears the module references to them,
-// and a broker's own close can be waiting out a launch, so an exit would
-// otherwise orphan children that hold the data directory or a port.
-function forceExitAfterStalledQuit(owned: {
-  readonly server: ChildProcess | undefined;
-  readonly managedTools: ManagedToolService | undefined;
-}): () => void {
+// current launch owns, including acquisitions completed after quit acceptance.
+// Failed cleanup keeps that owner reachable until the deadline fires.
+function forceExitAfterStalledQuit(): () => void {
   let exiting = false;
   return () => {
     if (exiting) return;
     exiting = true;
     logQuitProblem("Octant quit did not finish in time; ending the application.");
-    try {
-      owned.server?.kill("SIGKILL");
-    } catch {
-      // The server already exited or cannot be signalled; the exit proceeds.
-    }
-    try {
-      owned.managedTools?.terminateTrackedProcesses();
-    } catch {
-      // The exit proceeds; the tool processes are the last thing to clean up.
-    }
+    desktopHostLaunch?.forceStop();
+    if (acceptedQuitLaunch !== desktopHostLaunch) acceptedQuitLaunch?.forceStop();
     app.exit(0);
   };
 }
 
+let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
+let nightlyWindowLeases: ReturnType<typeof ownNightlyWindowLeases> | undefined;
+const desktopClientLifetime = createDesktopClientLifetime({
+  currentNightlyWindows: () => nightlyWindowLeases?.activeWindowCount() ?? 0,
+  closeLocalWindows: closeLocalWindowsForRetainedHost,
+  quitHost: quitHostAfterLastClient,
+});
+
+async function quitHostAfterLastClient(
+  stillRequested: () => boolean = () => (nightlyWindowLeases?.activeWindowCount() ?? 0) === 0,
+): Promise<"accepted" | "cancelled"> {
+  if (quitPrepared) return "accepted";
+  if (preparingQuit) return "cancelled";
+  quitCanPrompt = true;
+  preparingQuit = true;
+  await prepareToQuit(stillRequested);
+  return quitAccepted ? "accepted" : "cancelled";
+}
+
 async function stopHostForQuit(): Promise<void> {
-  await shutdownSecondaryProjectWindows();
-  await projectWindowLifecycle.shutdown(async () => {
-    const result = await hostLifecycle.prepareQuit(() => true);
-    if (result === "cancelled") throw new Error("Octant quit was cancelled.");
-  });
+  const prototypesStopped = canvasPrototypeSurface?.stop();
+  const hostStopped = (async () => {
+    await shutdownSecondaryProjectWindows();
+    await projectWindowLifecycle.shutdown(async () => {
+      const result = await hostLifecycle.prepareQuit(() => true);
+      if (result === "cancelled") throw new Error("Octant quit was cancelled.");
+      const retained = desktopHostLaunch;
+      if (retained !== undefined) await closeDesktopHostLaunch(retained);
+    });
+  })();
+  const native = desktopPeerStatusOwner?.close();
+  const windows = nightlyWindowLeases?.close();
+  const [hostResult, prototypeResult, nativeResult, windowsResult] = await Promise.allSettled([
+    hostStopped,
+    prototypesStopped,
+    native,
+    windows,
+  ]);
+  const windowsFailed =
+    windowsResult.status === "rejected" || windowsResult.value?.kind === "failed";
+  const nativeFailed = nativeResult.status === "rejected" || nativeResult.value?.kind === "failed";
+  if (windowsFailed) logQuitProblem("Octant could not finish closing its Nightly window leases.");
+  if (nativeFailed) logQuitProblem("Octant could not finish closing its desktop status endpoint.");
+  if (hostResult.status === "rejected") throw hostResult.reason;
+  if (prototypeResult.status === "rejected") throw prototypeResult.reason;
+  if (prototypeResult.value?.status === "failed") {
+    throw new Error(`Canvas prototype shutdown failed: ${prototypeResult.value.reason}.`);
+  }
+  // Native close can retain an OS launch after its deadline. Report failure
+  // only after every sibling has settled, so quit never records it as clean.
+  if (windowsFailed || nativeFailed)
+    throw new Error("Octant could not finish closing its native desktop owners.");
 }
 
 function finishQuit(): void {
@@ -4492,13 +4434,13 @@ function finishQuit(): void {
   quitPrepared = true;
   preparingQuit = false;
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit({ server: undefined, managedTools: managedToolService }),
+    forceExit: forceExitAfterStalledQuit(),
     boundMs: WINDOW_CLOSE_GRACE_MS,
   });
   app.quit();
 }
 
-async function prepareToQuit(): Promise<void> {
+async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   const interactive = quitCanPrompt;
   quitCanPrompt = false;
   let accepted = true;
@@ -4516,14 +4458,21 @@ async function prepareToQuit(): Promise<void> {
       accepted = false;
     }
   }
-  if (!accepted) {
+  if (!accepted || stillRequested?.() === false) {
     preparingQuit = false;
+    nightlyRelaunch.quitCancelled();
     return;
   }
+  desktopQuitAccepted = true;
+  nightlyRelaunch.quitAccepted();
+  hostLifecycle.acceptQuit();
+  desktopBackendSupervisor.release();
+  // Closing admission here fences a client arriving during the later flush.
+  quitAccepted = true;
   // Armed only once the quit is accepted, so the time a person spends on the
   // confirmation does not count against it.
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
+    forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
     flushWindowState,
@@ -4535,9 +4484,12 @@ async function prepareToQuit(): Promise<void> {
 
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
+  desktopQuitAccepted = true;
+  hostLifecycle.acceptQuit();
+  desktopBackendSupervisor.release();
   dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
+    forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
     flushWindowState: async () => undefined,
@@ -4547,8 +4499,9 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   finishQuit();
 }
 
-const requestWindow = createSingleFlight(createWindow);
+const requestWindow = createSingleFlight(() => desktopClientLifetime.openLocalWindow(createWindow));
 async function ensureMenuWindow(): Promise<void> {
+  if (!(await desktopClientLifetime.reopen())) throw new Error("Octant is closing.");
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   if (preparingQuit || quitPrepared) {
     throw new Error("Octant is closing.");
@@ -4556,12 +4509,14 @@ async function ensureMenuWindow(): Promise<void> {
   await requestWindow();
 }
 
-const requestActiveWindow = () =>
+const requestActiveWindow = async () => {
+  if (!(await desktopClientLifetime.reopen())) return;
   requestProjectWindowWhileRunning({
     isTearingDown: () => preparingQuit || quitPrepared,
     request: requestWindow,
     handleFailure: handleFatalStartup,
   });
+};
 
 // An unexpected renderer exit should not leave the running app headless, but a
 // renderer that keeps dying must not reopen forever: allow at most two
@@ -4596,18 +4551,31 @@ const quitShortcutGuard = createQuitShortcutGuard({
     window.webContents.send(IPC_CHANNELS.quitShortcutHint);
     return true;
   },
-  quit: () => {
-    quitCanPrompt = true;
-    app.quit();
-  },
+  quit: requestInteractiveQuit,
 });
 
+/** A person's quit: it may close only local windows, and asks before stopping running work. */
+function requestInteractiveQuit(): void {
+  quitCanPrompt = true;
+  app.quit();
+}
+
 function installApplicationMenu(): void {
-  if (process.platform !== "darwin") return;
+  const developerTools = developerToolsAllowed({
+    packaged: app.isPackaged,
+    version: app.getVersion(),
+  });
+  if (process.platform !== "darwin") {
+    // Electron's default menu carries Toggle Developer Tools and its shortcut;
+    // replace it with the same menu minus those items, not with no menu.
+    if (!developerTools) Menu.setApplicationMenu(Menu.buildFromTemplate(buildStableMenuTemplate()));
+    return;
+  }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate({
         appName: app.name,
+        developerTools,
         onQuit: (request) => quitShortcutGuard.request(request),
         onOpenSettings: () => {
           const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -4621,11 +4589,28 @@ function installApplicationMenu(): void {
 
 function acceptCodeDeepLink(value: string): void {
   try {
-    const target = parseCodeDeepLink(value);
+    const target = parseCodeDeepLink(value, applicationIdentity.scheme);
     if (mainWindow === undefined || mainWindow.isDestroyed()) pendingCodeDeepLinks.push(target);
     else mainWindow.webContents.send(IPC_CHANNELS.codeDeepLink, target);
   } catch {
     // Invalid or authority-bearing links are ignored without changing application state.
+  }
+}
+
+/**
+ * Packaged Linux Octant listens in its private runtime folder, and each launch
+ * from an AppImage records that image so a Nightly can start this Octant's
+ * host later. A failure leaves Nightly refused, never Octant unable to start.
+ */
+async function prepareLinuxPeerEndpoint(): Promise<void> {
+  try {
+    await prepareHostRuntimePaths(desktopHostRuntimePaths);
+    await writeLinuxLauncherRecord({
+      recordPath: desktopHostRuntimePaths.launcherRecordPath,
+      appImage: process.env.APPIMAGE,
+    });
+  } catch (error) {
+    logQuitProblem(`Octant could not record its launcher for Octant Nightly: ${String(error)}`);
   }
 }
 
@@ -4635,24 +4620,74 @@ function startDesktopInstance(): void {
     app.quit();
     return;
   }
-  app.setAsDefaultProtocolClient("octant");
+  app.setAsDefaultProtocolClient(applicationIdentity.scheme);
   app.on("open-url", (event, url) => {
     event.preventDefault();
     acceptCodeDeepLink(url);
     requestActiveWindow();
   });
+  const hostOnly = (args: ReadonlyArray<string>) =>
+    app.isPackaged &&
+    (process.platform === "darwin" || process.platform === "linux") &&
+    resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
+    // A concurrent Nightly launch joins this owner without opening its shell.
+    if (hostOnly(commandLine.slice(1))) return;
     for (const argument of commandLine)
-      if (argument.startsWith("octant://")) acceptCodeDeepLink(argument);
+      if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
     requestActiveWindow();
   });
   for (const argument of process.argv)
-    if (argument.startsWith("octant://")) acceptCodeDeepLink(argument);
+    if (argument.startsWith(`${applicationIdentity.scheme}://`)) acceptCodeDeepLink(argument);
   void app
     .whenReady()
-    .then(() => {
+    .then(async () => {
+      const withoutWindow = hostOnly(process.argv.slice(1));
+      if (withoutWindow) {
+        const waitForFirstNightlyWindow = desktopClientLifetime.firstNightlyWindowWait();
+        await startHostFromMenu();
+        waitForFirstNightlyWindow();
+      }
+      if (!preparingQuit && !quitPrepared && applicationIdentity.flavor === "stable") {
+        const linux = app.isPackaged && process.platform === "linux";
+        if (linux) await prepareLinuxPeerEndpoint();
+        const native = loadDesktopPeerStatus({
+          packaged: app.isPackaged,
+          platform: process.platform,
+          resourcesPath: process.resourcesPath,
+          ...(linux
+            ? {
+                linux: {
+                  windowsSocketPath: desktopHostRuntimePaths.windowsSocketPath,
+                  launcherRecordPath: desktopHostRuntimePaths.launcherRecordPath,
+                  version: app.getVersion(),
+                },
+              }
+            : {}),
+        });
+        if (native !== undefined) {
+          desktopPeerStatusOwner = ownDesktopPeerStatus(native);
+          const protocol = desktopWindowProtocol(native);
+          if (protocol !== undefined)
+            nightlyWindowLeases = ownNightlyWindowLeases({
+              native: protocol,
+              host: () =>
+                quitAccepted || activeServerUrl === undefined || serverInstanceId === undefined
+                  ? undefined
+                  : {
+                      origin: new URL(activeServerUrl).origin,
+                      instanceId: serverInstanceId,
+                      desktopBridgeSecret,
+                    },
+              onActiveWindowCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
+              closeOwnerContexts: async (windowId) => {
+                await browserSurfaceHost?.closeOwnerContexts(windowId);
+              },
+            });
+        }
+      }
       installApplicationMenu();
-      return requestActiveWindow();
+      if (!withoutWindow) await requestActiveWindow();
     })
     .catch(handleFatalStartup);
 }
@@ -4687,6 +4722,17 @@ app.on("before-quit", (event) => {
   if (quitPrepared) return;
   event.preventDefault();
   if (preparingQuit) return;
+  if (quitCanPrompt) {
+    quitCanPrompt = false;
+    void desktopClientLifetime.requestLocalQuit().then((result) => {
+      if (result === "quit-required") return quitHostAfterLastClient();
+      // Only the windows closed; the app keeps running, so no relaunch.
+      nightlyRelaunch.quitCancelled();
+      if (result === "failed") logQuitProblem("Octant could not finish closing its local windows.");
+    });
+    return;
+  }
   preparingQuit = true;
   void prepareToQuit();
 });
+app.on("will-quit", () => desktopClientLifetime.dispose());

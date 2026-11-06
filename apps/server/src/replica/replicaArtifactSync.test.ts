@@ -163,6 +163,7 @@ function computer(
     readonly disk?: Disk;
     readonly stopAfter?: { readonly eventName: string; readonly times: number };
     readonly planMode?: boolean;
+    readonly publicationAllowed?: () => boolean;
   } = {},
 ) {
   const saved = options.disk ?? disk();
@@ -287,6 +288,9 @@ function computer(
     },
     projectName: (projectId) => projects.get(projectId),
     planMode: () => options.planMode === true,
+    ...(options.publicationAllowed === undefined
+      ? {}
+      : { publicationAllowed: options.publicationAllowed }),
   });
   syncSlot.service = sync;
   const library = new ArtifactLibraryService({
@@ -756,6 +760,403 @@ describe.each(STORES)("artifact sync between two computers through %s", (_label,
 });
 
 describe("artifact sync", () => {
+  it("previews existing versions without contacting the store and publishes only the person's reviewed selection", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    const first = canvasVersion({
+      versionId: ids.v1,
+      sequence: 1,
+      text: "First historical version",
+    });
+    const second = canvasVersion({
+      versionId: ids.v2a,
+      sequence: 2,
+      text: "Second historical version",
+    });
+    studio.canvases.set(String(ids.canvas), [first, second]);
+    const slotsBefore = memory.files.size;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    expect(preview?.versions.map((version) => version.status)).toEqual(["eligible", "eligible"]);
+    expect(memory.files.size).toBe(slotsBefore);
+    if (preview === undefined) throw new Error("Missing reviewed publication preview");
+    expect(
+      studio.sync.startBackfill({
+        canvasId: ids.canvas,
+        backfillId: nextUuid(),
+        previewToken: preview.previewToken,
+        versionIds: [second.versionId],
+      }),
+    ).toEqual({ status: "accepted" });
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    expect(
+      laptop.artifactProjection
+        .state()
+        .artifact(ids.canvas)
+        ?.versions.map((version) => String(version.versionId)),
+    ).toEqual([ids.v2a]);
+  });
+
+  it("keeps a stopped historical publication stopped after restart and resumes without duplicate entries", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    const versions = [
+      canvasVersion({ versionId: ids.v1, sequence: 1, text: "Historical first" }),
+      canvasVersion({ versionId: ids.v2a, sequence: 2, text: "Historical second" }),
+    ];
+    studio.canvases.set(String(ids.canvas), versions);
+    memory.state.offline = true;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    const request = {
+      canvasId: ids.canvas,
+      backfillId: nextUuid(),
+      previewToken: preview.previewToken,
+      versionIds: versions.map((version) => version.versionId),
+    };
+    expect(studio.sync.startBackfill(request)).toEqual({ status: "accepted" });
+    await studio.sync.drain();
+    expect(studio.sync.controlBackfill(ids.canvas, request.backfillId, false)).toBe(true);
+    const restarted = computer(studio.name, shared, { disk: studio.disk });
+    restarted.canvases.set(String(ids.canvas), versions);
+    memory.state.offline = false;
+    await restarted.sync.drain();
+    expect(restarted.sync.publicationPreview(ids.canvas)?.backfill).toMatchObject({
+      state: "stopped",
+      done: 0,
+      total: 2,
+    });
+    expect(restarted.sync.controlBackfill(ids.canvas, request.backfillId, true)).toBe(true);
+    await restarted.sync.drain();
+    expect(restarted.sync.startBackfill(request)).toEqual({ status: "accepted" });
+    await restarted.sync.drain();
+    await laptop.sync.pull();
+    expect(laptop.artifactProjection.state().artifact(ids.canvas)?.versions).toHaveLength(2);
+    expect(restarted.sync.publicationPreview(ids.canvas)?.backfill).toMatchObject({
+      state: "finished",
+      done: 2,
+    });
+    expect(eventsNamed(restarted, REPLICA_ARTIFACT_EVENT_NAMES.backfillQueued)).toHaveLength(2);
+  });
+
+  it("refuses a changed preview and excludes content that cannot safely leave this computer", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio } = await pair(shared);
+    const first = canvasVersion({ versionId: ids.v1, sequence: 1, text: "Historical first" });
+    studio.canvases.set(String(ids.canvas), [first]);
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    const unsafe = canvasVersion({
+      versionId: ids.v2a,
+      sequence: 2,
+      text: "/Users/person/private/account.txt",
+    });
+    studio.canvases.set(String(ids.canvas), [first, unsafe]);
+    const before = memory.files.size;
+    expect(
+      studio.sync.startBackfill({
+        canvasId: ids.canvas,
+        backfillId: nextUuid(),
+        previewToken: preview.previewToken,
+        versionIds: [first.versionId],
+      }),
+    ).toMatchObject({ status: "refused", reason: "stale-preview" });
+    expect(studio.sync.publicationPreview(ids.canvas)?.versions[1]).toMatchObject({
+      status: "excluded",
+    });
+    expect(memory.files.size).toBe(before);
+    expect(studio.artifactProjection.state().outbox).toHaveLength(0);
+  });
+
+  it("publishes a deliberate deletion without erasing local history and refuses to resume older publication", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(
+      canvasVersion({ versionId: ids.v1, sequence: 1, text: "Current published artifact" }),
+    );
+    const historical = canvasVersion({ versionId: ids.v2a, sequence: 2, text: "Only queued here" });
+    studio.canvases.set(String(ids.canvas), [
+      ...(studio.canvases.get(String(ids.canvas)) ?? []),
+      historical,
+    ]);
+    memory.state.offline = true;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    const batchId = nextUuid();
+    expect(
+      studio.sync.startBackfill({
+        canvasId: ids.canvas,
+        backfillId: batchId,
+        previewToken: preview.previewToken,
+        versionIds: [historical.versionId],
+      }),
+    ).toEqual({ status: "accepted" });
+    await studio.sync.drain();
+    const deletion = studio.sync.publicationPreview(ids.canvas);
+    if (deletion === undefined) throw new Error("Missing deletion preview");
+    expect(studio.sync.deleteSynced(ids.canvas, preview.previewToken)).toMatchObject({
+      status: "refused",
+      reason: "stale-preview",
+    });
+    expect(studio.sync.deleteSynced(ids.canvas, deletion.previewToken)).toEqual({
+      status: "accepted",
+    });
+    memory.state.offline = false;
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    const synced = laptop.artifactProjection.state().artifact(ids.canvas);
+    expect(synced === undefined ? false : replicaArtifactHidden(synced)).toBe(true);
+    expect(studio.canvases.get(String(ids.canvas))).toHaveLength(2);
+    expect(studio.sync.controlBackfill(ids.canvas, batchId, true)).toBe(false);
+  });
+
+  it("keeps consecutive historical versions in one history across separate publication requests", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    const versions = [
+      canvasVersion({ versionId: ids.v1, sequence: 1, text: "First historical version" }),
+      canvasVersion({ versionId: ids.v2a, sequence: 2, text: "Second historical version" }),
+    ];
+    studio.canvases.set(String(ids.canvas), versions);
+    for (const version of versions) {
+      const preview = studio.sync.publicationPreview(ids.canvas);
+      if (preview === undefined) throw new Error("Missing preview");
+      expect(
+        studio.sync.startBackfill({
+          canvasId: ids.canvas,
+          backfillId: nextUuid(),
+          previewToken: preview.previewToken,
+          versionIds: [version.versionId],
+        }),
+      ).toEqual({ status: "accepted" });
+      await studio.sync.drain();
+    }
+    await laptop.sync.pull();
+    const artifact = laptop.artifactProjection.state().artifact(ids.canvas);
+    if (artifact === undefined) throw new Error("Missing published history");
+    expect(replicaArtifactHeads(artifact)).toEqual([
+      { kind: "version", versionId: versions[1]?.versionId },
+    ]);
+  });
+
+  it("stops an already running publication when the next pull learns a deletion", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(
+      canvasVersion({ versionId: ids.v1, sequence: 1, text: "Shared initial version" }),
+    );
+    await laptop.sync.pull();
+    const historical = canvasVersion({
+      versionId: ids.v2a,
+      sequence: 2,
+      text: "Historical version waiting here",
+    });
+    studio.canvases.set(String(ids.canvas), [
+      ...(studio.canvases.get(String(ids.canvas)) ?? []),
+      historical,
+    ]);
+    memory.state.offline = true;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    studio.sync.startBackfill({
+      canvasId: ids.canvas,
+      backfillId: nextUuid(),
+      previewToken: preview.previewToken,
+      versionIds: [historical.versionId],
+    });
+    await studio.sync.drain();
+    memory.state.offline = false;
+    const deletion = laptop.sync.publicationPreview(ids.canvas);
+    if (deletion === undefined) throw new Error("Missing deletion preview");
+    expect(laptop.sync.deleteSynced(ids.canvas, deletion.previewToken)).toEqual({
+      status: "accepted",
+    });
+    await laptop.sync.drain();
+    await studio.sync.sync();
+    expect(studio.sync.publicationPreview(ids.canvas)?.backfill).toMatchObject({
+      state: "stopped",
+      done: 0,
+    });
+    expect(
+      studio.artifactProjection
+        .state()
+        .artifact(ids.canvas)
+        ?.versions.some((version) => String(version.versionId) === ids.v2a),
+    ).toBe(false);
+    studio.threads.push({ ...workThread(ids.thread), projectId: ids.studioProject });
+    expect(studio.sync.publicationPreview(ids.canvas)?.backfill?.restoreAvailable).toBe(true);
+    expect(
+      await studio.syncedArtifacts.execute({ kind: "restore", canvasId: ids.canvas }),
+    ).toMatchObject({ kind: "artifact-synced-published", published: true });
+    const batch = studio.sync.publicationPreview(ids.canvas)?.backfill;
+    if (batch === undefined) throw new Error("Missing stopped batch");
+    expect(studio.sync.controlBackfill(ids.canvas, batch.id, true)).toBe(true);
+    await studio.sync.drain();
+    expect(studio.sync.publicationPreview(ids.canvas)?.backfill).toMatchObject({
+      state: "finished",
+      done: 1,
+    });
+  });
+
+  it("resumes a stopped historical publication after its explicit restore publishes and survives restart", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    studio.threads.push({ ...workThread(ids.thread), projectId: ids.studioProject });
+    await studio.commit(
+      canvasVersion({ versionId: ids.v1, sequence: 1, text: "Shared first version" }),
+    );
+    const historical = canvasVersion({
+      versionId: ids.v2a,
+      sequence: 2,
+      text: "Selected historical version",
+    });
+    studio.canvases.set(String(ids.canvas), [
+      ...(studio.canvases.get(String(ids.canvas)) ?? []),
+      historical,
+    ]);
+    memory.state.offline = true;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    const batchId = nextUuid();
+    studio.sync.startBackfill({
+      canvasId: ids.canvas,
+      backfillId: batchId,
+      previewToken: preview.previewToken,
+      versionIds: [historical.versionId],
+    });
+    await studio.sync.drain();
+    const deletion = studio.sync.publicationPreview(ids.canvas);
+    if (deletion === undefined) throw new Error("Missing deletion preview");
+    studio.sync.deleteSynced(ids.canvas, deletion.previewToken);
+    memory.state.offline = false;
+    await studio.sync.drain();
+    expect(studio.sync.controlBackfill(ids.canvas, batchId, true)).toBe(false);
+    memory.state.offline = true;
+    expect(
+      await studio.syncedArtifacts.execute({ kind: "restore", canvasId: ids.canvas }),
+    ).toMatchObject({ kind: "artifact-synced-published", published: false });
+    expect(studio.sync.controlBackfill(ids.canvas, batchId, true)).toBe(false);
+    const restarted = computer(studio.name, shared, { disk: studio.disk });
+    restarted.canvases.set(String(ids.canvas), [
+      ...(studio.canvases.get(String(ids.canvas)) ?? []),
+    ]);
+    expect(restarted.sync.controlBackfill(ids.canvas, batchId, true)).toBe(false);
+    memory.state.offline = false;
+    await restarted.sync.drain();
+    expect(restarted.sync.controlBackfill(ids.canvas, batchId, true)).toBe(true);
+    await restarted.sync.drain();
+    await laptop.sync.pull();
+    expect(restarted.sync.publicationPreview(ids.canvas)?.backfill).toMatchObject({
+      state: "finished",
+      done: 1,
+    });
+    const artifact = laptop.artifactProjection.state().artifact(ids.canvas);
+    expect(artifact === undefined ? true : replicaArtifactHidden(artifact)).toBe(false);
+  });
+
+  it("rechecks current write authority before sending reviewed historical versions", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio } = await pair(shared);
+    const version = canvasVersion({
+      versionId: ids.v1,
+      sequence: 1,
+      text: "Reviewed historical version",
+    });
+    studio.canvases.set(String(ids.canvas), [version]);
+    memory.state.offline = true;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    studio.sync.startBackfill({
+      canvasId: ids.canvas,
+      backfillId: nextUuid(),
+      previewToken: preview.previewToken,
+      versionIds: [version.versionId],
+    });
+    await studio.sync.drain();
+    const revoked = computer(studio.name, shared, {
+      disk: studio.disk,
+      publicationAllowed: () => false,
+    });
+    revoked.canvases.set(String(ids.canvas), [version]);
+    memory.state.offline = false;
+    const before = memory.files.size;
+    await revoked.sync.drain();
+    expect(memory.files.size).toBe(before);
+    expect(revoked.sync.publicationPreview(ids.canvas)).toMatchObject({
+      available: false,
+      backfill: { state: "stopped", done: 0 },
+    });
+  });
+
+  it("erases queued historical bundles during a local purge without publishing a deletion", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio } = await pair(shared);
+    const version = canvasVersion({
+      versionId: ids.v1,
+      sequence: 1,
+      text: "Private historical salary notes",
+    });
+    studio.canvases.set(String(ids.canvas), [version]);
+    memory.state.offline = true;
+    const preview = studio.sync.publicationPreview(ids.canvas);
+    if (preview === undefined) throw new Error("Missing preview");
+    studio.sync.startBackfill({
+      canvasId: ids.canvas,
+      backfillId: nextUuid(),
+      previewToken: preview.previewToken,
+      versionIds: [version.versionId],
+    });
+    await studio.sync.drain();
+    expect(JSON.stringify(studio.events())).toContain("Private historical salary notes");
+    erasePurgedProjectData({
+      connection: studio.connection,
+      projectId: ids.studioProject,
+      canvasIds: [ids.canvas],
+    });
+    studio.artifactProjection.evict([ids.canvas]);
+    const restarted = computer(studio.name, shared, { disk: studio.disk });
+    expect(JSON.stringify(restarted.events())).not.toContain("Private historical salary notes");
+    expect(restarted.artifactProjection.state().outbox).toHaveLength(0);
+    expect(restarted.artifactProjection.state().backfills).toHaveLength(0);
+    expect(studio.artifactProjection.state().backfills).toHaveLength(0);
+  });
+
   it("rebuilds the same state after a restart in the middle of a pull", async () => {
     const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
     const { studio, laptop } = await pair(shared);

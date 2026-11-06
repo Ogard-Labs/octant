@@ -5,6 +5,8 @@ import {
   decodeExtensionCommandResult,
   decodeUserAddedMcpServerRequest,
   decodeExtensionSnapshot,
+  decodeMcpServerSignInView,
+  decodeMcpReportedAccount,
 } from "./extensionRpc";
 import { ExtensionProvenance } from "./extensions";
 import { Schema } from "effect";
@@ -46,6 +48,66 @@ const packageId = "20000000-0000-4000-8000-000000000001";
 const digest = `sha256:${"a".repeat(64)}`;
 
 describe("extension RPC contracts", () => {
+  it("decodes local Paper setup without inventing a hosted connector or executable grant", () => {
+    const request = {
+      name: "Paper",
+      localSetupId: "paper",
+      server: {
+        type: "streamable-http",
+        url: "http://127.0.0.1:29979/mcp",
+        headers: [],
+      },
+    };
+    expect(decodeUserAddedMcpServerRequest(request).localSetupId).toBe("paper");
+    expect(() =>
+      decodeUserAddedMcpServerRequest({ ...request, localSetupId: "unknown" }),
+    ).toThrow();
+    expect(() =>
+      decodeUserAddedMcpServerRequest({ ...request, executableTrusted: true }),
+    ).toThrow();
+  });
+
+  it("keeps reported MCP account facts bounded and separate from secret or identity-token fields", () => {
+    const account = {
+      workspaceId: "TTEST001",
+      userId: "UTEST001",
+      grantedScopes: ["search:read.public"],
+    };
+    expect(
+      decodeMcpServerSignInView({ kind: "signed-in", issuer: "https://mcp.slack.com", account }),
+    ).toMatchObject({ account });
+    expect(
+      decodeMcpServerSignInView({
+        kind: "client-setup-required",
+        message: "Set up your app first.",
+      }),
+    ).toMatchObject({ kind: "client-setup-required" });
+    for (const value of [
+      { ...account, accessToken: "synthetic-token" },
+      { ...account, id_token: "unverified" },
+      { workspaceId: "https://not-an-id.example" },
+      { userId: "x".repeat(129) },
+      { grantedScopes: ["bad scope"] },
+    ])
+      expect(() => decodeMcpReportedAccount(value)).toThrow();
+  });
+
+  it("keeps completed sign-out recovery bounded and free of credential fields", () => {
+    expect(
+      decodeMcpServerSignInView({ kind: "sign-out-pending", message: "Finish signing out." }),
+    ).toEqual({ kind: "sign-out-pending", message: "Finish signing out." });
+    expect(() =>
+      decodeMcpServerSignInView({ kind: "sign-out-pending", message: "x".repeat(513) }),
+    ).toThrow();
+    expect(() =>
+      decodeMcpServerSignInView({
+        kind: "sign-out-pending",
+        message: "Finish signing out.",
+        credentialRef: "55000000-0000-4000-8000-000000000002",
+      }),
+    ).toThrow();
+  });
+
   it.each([
     { kind: "search-catalog", query: "build", cursor: "next-1" },
     { kind: "search-skills", query: "review", cursor: "next-1" },

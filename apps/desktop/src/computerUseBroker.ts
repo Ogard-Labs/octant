@@ -117,15 +117,29 @@ export async function startComputerUseBroker(service: ComputerUseDesktopService)
   const address = server.address();
   if (address === null || typeof address === "string")
     throw new Error("Computer-use broker did not bind.");
+  let closing: Promise<void> | undefined;
   return {
     token,
     url: `http://127.0.0.1:${address.port}/v1/computer-use`,
-    close: async () => {
-      await service.close();
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error === undefined ? resolve() : reject(error))),
-      );
+    close: () => {
+      closing ??= (async () => {
+        let failed = false;
+        try {
+          await service.close();
+        } catch {
+          failed = true;
+        }
+        server.closeAllConnections();
+        try {
+          await new Promise<void>((resolve, reject) =>
+            server.close((error) => (error === undefined ? resolve() : reject(error))),
+          );
+        } catch {
+          failed = true;
+        }
+        if (failed) throw new Error("Octant could not close computer-use broker resources.");
+      })();
+      return closing;
     },
   };
 }

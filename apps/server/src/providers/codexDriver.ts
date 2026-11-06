@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   decodeProviderFailure,
@@ -9,6 +10,7 @@ import {
   type ProviderFailure,
   type ProviderAccountAuthentication,
   type ProviderCapabilities,
+  type ProviderContextBlock,
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelOptionValues,
@@ -17,6 +19,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderRateLimitWindow,
   type ProviderServiceLimits,
+  type ProviderResumeCursor,
   type ProviderSessionId,
   type ProviderToolDefinition,
   type ProviderTurnInput,
@@ -32,6 +35,10 @@ import type {
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   attachmentMediaTypeToModality,
+  isOctantInstructionContext,
+  PROVIDER_CONTEXT_RESTATED,
+  renderOctantInstructions,
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -50,8 +57,8 @@ import {
 } from "./codexEventMapper";
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { isAtLeastRelease } from "./releaseVersion";
 import {
-  isAtLeastRelease,
   type CodexAppServerConnection,
   type CodexLaunchAuthority,
   type CodexProcessPort,
@@ -345,9 +352,23 @@ export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly url: string };
 
+/** One entry of `turn/start.additionalContext`, rendered by Codex under a tag named by its key. */
+export interface CodexAdditionalContextEntry {
+  /** `application` becomes a developer message; `untrusted` a user message tagged as external. */
+  readonly kind: "application" | "untrusted";
+  readonly value: string;
+}
+
 export interface CodexTurnStartInput {
   readonly threadId: string;
   readonly input: readonly CodexTurnInputItem[];
+  /**
+   * Octant's context for this turn, apart from the person's request. Codex
+   * places each entry ahead of the request as its own message and records it
+   * in the thread's history, so the request reads as typed in Codex's own
+   * transcript and thread titles.
+   */
+  readonly additionalContext?: Readonly<Record<string, CodexAdditionalContextEntry>>;
   /** Restated per turn, because a turn without it falls back to the thread's. */
   readonly environments?: readonly [];
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
@@ -435,6 +456,12 @@ interface SessionState {
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
+  /**
+   * The app tools the thread started with, which Codex keeps for good: a
+   * resume that offers others is accepted and ignored (measured on 0.164.0).
+   * Undefined when a resumed cursor predates the record.
+   */
+  readonly carriedTools: ReadonlySet<string> | undefined;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -527,8 +554,61 @@ function codexChatCapabilities(
   };
 }
 
-function codexTurnInput(input: ProviderTurnInput): readonly CodexTurnInputItem[] {
-  const items: CodexTurnInputItem[] = [{ type: "text", text: renderProviderTurnPrompt(input) }];
+/**
+ * The turn without rules about app tools the thread cannot call. Octant builds
+ * those rules from the tools each turn offers, but a Codex thread keeps the
+ * tools it started with, so a tool first offered later would otherwise be
+ * described to a model that cannot call it.
+ */
+function withCarriedToolRules(
+  input: ProviderTurnInput,
+  carried: ReadonlySet<string> | undefined,
+): ProviderTurnInput {
+  if (carried === undefined || input.context === undefined) return input;
+  return {
+    ...input,
+    context: input.context.filter((block) => block.tool === undefined || carried.has(block.tool)),
+  };
+}
+
+function carriedToolsOf(cursor: ProviderResumeCursor): ReadonlySet<string> | undefined {
+  return cursor.tools === undefined ? undefined : new Set(cursor.tools);
+}
+
+/**
+ * The first release measured to take `turn/start.additionalContext` and record
+ * each entry as its own message (0.140.0, 0.150.0, 0.155.1, 0.159.3, 0.162.1
+ * and 0.164.0 against a local stand-in endpoint). 0.130.0 accepted the field
+ * and dropped it without a word, so an older install keeps the context framed
+ * inside the request rather than losing it.
+ */
+const CODEX_TURN_CONTEXT_RELEASE = [0, 140, 0] as const;
+
+/**
+ * Keys name the tag Codex wraps each entry in, so they read as what they hold.
+ * Codex sends an entry only when its value differs from the last one under its
+ * key; Octant sends standing context only when the session lacks it, so a
+ * skipped value is already the latest message of its kind in the thread. A
+ * compaction drops both the entries and Codex's memory of them (measured on
+ * 0.164.0), and Octant then sends them again.
+ */
+const CODEX_INSTRUCTIONS_KEY = "octant_instructions";
+const CODEX_MATERIAL_KEY = "octant_context";
+
+/**
+ * The turn's input and its Octant context. Octant's own rules go as developer
+ * context; skills, memory, files, and earlier messages keep the user-level
+ * authority they had inside the request, so third-party text is never lifted
+ * into Codex's developer channel.
+ */
+function codexTurnRequest(
+  input: ProviderTurnInput,
+  version: string,
+): Pick<CodexTurnStartInput, "input" | "additionalContext"> {
+  const context = input.context ?? [];
+  const separate = context.length > 0 && isAtLeastRelease(version, CODEX_TURN_CONTEXT_RELEASE);
+  const text = separate ? input.prompt : renderProviderTurnPrompt(input);
+  const items: CodexTurnInputItem[] = [{ type: "text", text }];
   for (const attachment of input.attachments) {
     const modality = attachmentMediaTypeToModality(attachment.mediaType);
     if (modality !== "image") continue;
@@ -538,7 +618,54 @@ function codexTurnInput(input: ProviderTurnInput): readonly CodexTurnInputItem[]
       url: `data:${attachment.mediaType};base64,${base64}`,
     });
   }
-  return items;
+  if (!separate) return { input: items };
+  const instructions = context.filter(isOctantInstructionContext);
+  const material = context.filter((block) => !isOctantInstructionContext(block));
+  const restated = context.some(
+    (block) => block.kind === "instructions" && block.text === PROVIDER_CONTEXT_RESTATED,
+  );
+  const materialValue = restated
+    ? codexRestatedMaterial(context, material)
+    : material.length === 0
+      ? undefined
+      : renderProviderContextSections(material);
+  return {
+    input: items,
+    additionalContext: {
+      ...(instructions.length === 0
+        ? {}
+        : {
+            [CODEX_INSTRUCTIONS_KEY]: {
+              kind: "application",
+              value: renderOctantInstructions(instructions),
+            },
+          }),
+      ...(materialValue === undefined
+        ? {}
+        : { [CODEX_MATERIAL_KEY]: { kind: "untrusted", value: materialValue } }),
+    },
+  };
+}
+
+/**
+ * The material entry of a turn that restates Octant's context. Codex skips an
+ * entry whose value matches the last one under its key, so a restatement that
+ * left the entry out, or sent the same material again, left the earlier copy
+ * as the latest; that copy came before the restatement, which withdrew it, so
+ * a skill deselected and then selected again was never delivered a second
+ * time. The entry is therefore always sent, and it names the revision of the
+ * whole context, which differs between any two restatements because each one
+ * withdraws something the previous held.
+ */
+function codexRestatedMaterial(
+  context: ReadonlyArray<ProviderContextBlock>,
+  material: ReadonlyArray<ProviderContextBlock>,
+): string {
+  const revision = createHash("sha256").update(JSON.stringify(context)).digest("hex").slice(0, 12);
+  const heading = `Octant's context changed (revision ${revision}). This replaces every earlier ${CODEX_MATERIAL_KEY} entry in this conversation.`;
+  return material.length === 0
+    ? `${heading} No other Octant context applies.`
+    : `${heading}\n\n${renderProviderContextSections(material)}`;
 }
 
 function codexDynamicTools(
@@ -859,6 +986,36 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
   };
 }
 
+function canonicalToolValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalToolValue).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalToolValue(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function toolDefinitionDigest(tool: ProviderToolDefinition): string {
+  return createHash("sha256").update(canonicalToolValue(tool)).digest("hex");
+}
+
+function toolCatalogContinuation(input: {
+  readonly resumeCursor: ProviderResumeCursor;
+  readonly tools: ReadonlyArray<ProviderToolDefinition>;
+}): "unchanged" | "handoff-required" {
+  // Withdrawing a tool keeps the cached native session; the host refuses its
+  // later calls. New or changed definitions cannot reach that saved session.
+  const recorded = new Map(
+    input.resumeCursor.toolDefinitions?.map((tool) => [tool.name, tool.digest]),
+  );
+  return input.tools.every((tool) => recorded.get(tool.name) === toolDefinitionDigest(tool))
+    ? "unchanged"
+    : "handoff-required";
+}
+
 export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
   // Codex's own subagent threads outlive the turn and connection that started them.
@@ -873,6 +1030,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   return {
     kind: "codex",
     conversationOwnership: "provider",
+    toolCatalogContinuation,
     contextFacts,
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
@@ -1848,6 +2006,7 @@ function makeConnection(
       },
       thread: CodexThreadResult,
       modelId: string,
+      carriedTools: ReadonlySet<string> | undefined,
       turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
     ) => {
       const previous = sessions.get(input.sessionId);
@@ -1866,6 +2025,7 @@ function makeConnection(
         autoApprove: input.autoApprove,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
+        carriedTools,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
         terminal: false,
@@ -1933,12 +2093,18 @@ function makeConnection(
                 failure("unauthorized", "Codex thread belongs to a different Project root."),
               );
             }
-            register(input, thread, input.modelId);
+            const toolNames = (input.tools ?? []).map((tool) => tool.name);
+            register(input, thread, input.modelId, new Set(toolNames));
             return {
               sessionId: input.sessionId,
               resumeCursor: {
                 driverKind: "codex" as const,
                 value: thread.thread.id,
+                tools: toolNames,
+                toolDefinitions: (input.tools ?? []).map((tool) => ({
+                  name: tool.name,
+                  digest: toolDefinitionDigest(tool),
+                })),
                 binding: providerResumeBinding({
                   instanceId: options.instanceId,
                   sessionId: input.sessionId,
@@ -1970,6 +2136,20 @@ function makeConnection(
         ) {
           return Effect.fail(
             failure("stale-resume", "The saved Codex thread belongs to another task or Project."),
+          );
+        }
+        if (
+          input.tools !== undefined &&
+          toolCatalogContinuation({ resumeCursor: input.resumeCursor, tools: input.tools }) ===
+            "handoff-required"
+        ) {
+          return Effect.fail(
+            decodeProviderFailure({
+              category: "stale-resume",
+              toolCatalogHandoffRequired: true,
+              message:
+                "The saved native session has a different tool catalogue. Choose Continue with updated tools to start a new session with the conversation handed over as text. The saved session and conversation have been preserved.",
+            }),
           );
         }
         return withPendingLifecycle(() =>
@@ -2039,7 +2219,7 @@ function makeConnection(
             // so the new model and its reasoning ride on every turn instead.
             const modelId = input.modelId === undefined ? thread.model : String(input.modelId);
             if (modelId === thread.model) {
-              register(input, thread, thread.model);
+              register(input, thread, thread.model, carriedToolsOf(input.resumeCursor));
               return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
             }
             const switchedModel = options.runtimeRegistry
@@ -2058,7 +2238,7 @@ function makeConnection(
                 ? undefined
                 : codexModelOptionSettings(switchedModel, input.modelOptionValues).config
                     ?.model_reasoning_effort;
-            register(input, thread, modelId, {
+            register(input, thread, modelId, carriedToolsOf(input.resumeCursor), {
               model: modelId,
               ...(effort === undefined ? {} : { effort }),
             });
@@ -2093,7 +2273,7 @@ function makeConnection(
                   try {
                     const turn = await client.turnStart({
                       threadId: state.threadId,
-                      input: codexTurnInput(input),
+                      ...codexTurnRequest(withCarriedToolRules(input, state.carriedTools), version),
                       ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
                       ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),

@@ -9,6 +9,7 @@ import {
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import { prepareConfinedReadinessProbe } from "../process/confinedReadinessProbe";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -43,8 +44,7 @@ export interface OhMyPiProcessOptions {
   readonly versionTimeoutMs?: number;
   readonly readyTimeoutMs?: number;
   /**
-   * Confinement for the version read only. The declaration
-   * probe itself is not wrapped, so this never names that launch.
+   * Shared confinement for the version and credential-reading declaration probes.
    */
   readonly versionProbeConfinement?: ProcessConfinementPort;
 }
@@ -300,16 +300,31 @@ export function makeOhMyPiProcessLive(options: OhMyPiProcessOptions = {}): OhMyP
               },
             } satisfies ProviderFailure);
           }
+          const probe = prepareConfinedReadinessProbe({
+            family: "oh-my-pi",
+            binaryPath: input.binaryPath,
+            args: ohMyPiProbeArguments(),
+            environment,
+            ...(options.versionProbeConfinement === undefined
+              ? {}
+              : { confinement: options.versionProbeConfinement }),
+          });
+          if (probe.status === "refused")
+            return yield* Effect.fail(failure(probe.reason, probe.message));
+          yield* Effect.addFinalizer(() => Effect.sync(probe.launch.release));
           const child = yield* Effect.try({
             try: () =>
-              spawn(input.binaryPath, [...ohMyPiProbeArguments()], {
-                cwd: input.managedHome,
-                env: environment,
+              spawn(probe.launch.command, [...probe.launch.args], {
+                cwd: probe.launch.workingDirectory,
+                env: probe.launch.environment,
                 detached: true,
                 stdio: ["pipe", "pipe", "pipe"],
               }),
             catch: () => failure("unavailable", "Oh My Pi process could not be started."),
           });
+          yield* Effect.addFinalizer(() =>
+            Effect.promise(() => terminate(child, shutdownTimeoutMs)),
+          );
           if (child.pid === undefined || child.stdin === null || child.stdout === null) {
             yield* Effect.promise(() => terminate(child, shutdownTimeoutMs));
             return yield* Effect.fail(

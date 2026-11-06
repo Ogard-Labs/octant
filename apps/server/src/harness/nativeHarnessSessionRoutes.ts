@@ -3,6 +3,7 @@ import {
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
+  type NativeHarnessChildRequestsView,
   type NativeHarnessSessionView,
   type NativeHarnessSteeringNote,
   type SteerNativeHarnessSession,
@@ -27,6 +28,11 @@ const PREFIX = "/api/native-harness/sessions/";
 
 export interface NativeHarnessSessionRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly mayAnswerChildFromDevice?: (input: {
+    readonly runId: string;
+    readonly parentThreadId: string;
+    readonly deviceId: string;
+  }) => boolean;
   readonly store: Pick<NativeHarnessSessionStore, "read" | "pause" | "resume" | "turnInFlight">;
   /** The thread's follow-up suggestions, which the session view shows but does not own. */
   readonly followUps: FollowUpSuggestionActionDependencies;
@@ -92,7 +98,7 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly questionId: string;
     readonly answer: string;
-  }) => "answered" | "question-not-found" | "already-settled";
+  }) => "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   readonly now?: () => number;
 }
 
@@ -158,12 +164,47 @@ export function createNativeHarnessSessionRouteHandler(
     }
     const [threadId = "", action = ""] = url.pathname.slice(PREFIX.length).split("/");
     if (threadId.length === 0) return failure("Thread id is required.", 400, origin);
-    if (!(await dependencies.authorizeThread({ threadId, windowId }))) {
+    if (
+      person.kind !== "remote-device" &&
+      !(await dependencies.authorizeThread({ threadId, windowId }))
+    ) {
       return failure("Native harness session request is unauthorized.", 403, origin);
     }
-    const view = dependencies.store.read(threadId);
+    const rawView = dependencies.store.read(threadId);
+    const eligibleChild = (item: {
+      readonly source?: { readonly runId: unknown } | undefined;
+    }): boolean =>
+      person.kind !== "remote-device" ||
+      (item.source !== undefined &&
+        dependencies.mayAnswerChildFromDevice?.({
+          runId: String(item.source.runId),
+          parentThreadId: threadId,
+          deviceId: person.deviceId,
+        }) === true);
+    const approvals =
+      person.kind === "remote-device" ? (rawView?.approvals ?? []).filter(eligibleChild) : [];
+    const questions =
+      person.kind === "remote-device" ? (rawView?.questions ?? []).filter(eligibleChild) : [];
+    const view = rawView;
+    if (
+      person.kind === "remote-device" &&
+      action !== "" &&
+      action !== "approvals" &&
+      action !== "questions"
+    )
+      return failure("A paired device may answer only its own child requests here.", 403, origin);
 
     if (request.method === "GET" && action === "") {
+      if (person.kind === "remote-device") {
+        const pending =
+          approvals.some((item) => item.status === "pending") ||
+          questions.some((item) => item.status === "pending");
+        const childView: NativeHarnessChildRequestsView | null =
+          !pending || rawView === undefined
+            ? null
+            : { kind: "child-requests", approvals, questions };
+        return json({ view: childView }, 200, origin);
+      }
       return view === undefined ? json({ view: null }, 200, origin) : json({ view }, 200, origin);
     }
     if (request.method !== "POST") return failure("Method not allowed.", 405, origin);
@@ -268,6 +309,18 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness approval decision is invalid.", 400, origin);
       }
+      if (
+        person.kind === "remote-device" &&
+        (decision.decision === "approve-always" ||
+          !approvals.some(
+            (item) => String(item.id) === String(decision.approvalId) && item.status === "pending",
+          ))
+      )
+        return failure(
+          "This child request does not belong to this device's turn, or is no longer pending.",
+          403,
+          origin,
+        );
       const outcome = dependencies.decideApproval?.({
         threadId,
         approvalId: String(decision.approvalId),
@@ -341,6 +394,17 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness question answer is invalid.", 400, origin);
       }
+      if (
+        person.kind === "remote-device" &&
+        !questions.some(
+          (item) => String(item.id) === String(answer.questionId) && item.status === "pending",
+        )
+      )
+        return failure(
+          "This child request does not belong to this device's turn, or is no longer pending.",
+          403,
+          origin,
+        );
       const outcome = dependencies.answerQuestion?.({
         threadId,
         questionId: String(answer.questionId),
@@ -355,11 +419,18 @@ export function createNativeHarnessSessionRouteHandler(
           : {
               kind: "question-refused",
               questionId: answer.questionId,
-              reason: outcome === "already-settled" ? "already-settled" : "question-not-found",
+              reason:
+                outcome === "invalid-answer"
+                  ? "invalid-answer"
+                  : outcome === "already-settled"
+                    ? "already-settled"
+                    : "question-not-found",
               message:
-                outcome === "already-settled"
-                  ? "That question was already answered."
-                  : "No pending question has that id on this thread.",
+                outcome === "invalid-answer"
+                  ? "The questionnaire answer is incomplete or contains invalid choices."
+                  : outcome === "already-settled"
+                    ? "That question was already answered."
+                    : "No pending question has that id on this thread.",
             };
       return json(result, result.kind === "question-answered" ? 200 : 409, origin);
     }

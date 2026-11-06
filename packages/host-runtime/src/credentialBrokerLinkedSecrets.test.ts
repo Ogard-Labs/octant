@@ -1,12 +1,21 @@
+import { decodeBrowserCredentialHostResult } from "@octant/contracts/browser-credential-use";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
+import {
+  startCredentialBroker,
+  type CredentialBroker,
+  type BrowserCredentialFillHostPort,
+} from "./credentialBroker";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { makeFakeOnePassword, type FakeOnePassword } from "./fakeOnePassword.test-support";
-import { makeLinkedSecretStores, makeOnePasswordAdapter } from "./linkedSecretStores";
+import {
+  type LinkedSecretStoreAdapter,
+  makeLinkedSecretStores,
+  makeOnePasswordAdapter,
+} from "./linkedSecretStores";
 
 const REFERENCE = "op://Private/Provider key/credential";
 const VALUE = "fixture-linked-value-91be";
@@ -43,7 +52,10 @@ afterEach(async () => {
   await Promise.all(brokers.splice(0).map((broker) => broker.close()));
 });
 
-async function harness(): Promise<Harness> {
+async function harness(
+  adapter?: LinkedSecretStoreAdapter,
+  fill?: BrowserCredentialFillHostPort,
+): Promise<Harness> {
   const op = makeFakeOnePassword();
   op.addItem(REFERENCE, VALUE);
   const provider = memoryStore();
@@ -51,7 +63,9 @@ async function harness(): Promise<Harness> {
   const others = memoryStore();
   const linked = makeLinkedSecretStores({
     statePath: join(mkdtempSync(join(tmpdir(), "octant-broker-linked-")), "state.json"),
-    adapters: [makeOnePasswordAdapter({ executablePath: op.executablePath, env: op.env })],
+    adapters: [
+      adapter ?? makeOnePasswordAdapter({ executablePath: op.executablePath, env: op.env }),
+    ],
   });
   const broker = await startCredentialBroker(
     provider,
@@ -64,6 +78,8 @@ async function harness(): Promise<Harness> {
     others,
     others,
     linked,
+    undefined,
+    fill,
   );
   brokers.push(broker);
   return {
@@ -97,6 +113,126 @@ const point = (id = instanceId, namespace = "provider", reference = REFERENCE) =
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("credential broker linked secret stores", { timeout: 30_000 }, () => {
+  it("resolves a card reference privately without storing a reusable credential", async () => {
+    const h = await harness();
+    const path = "/v1/secret-stores/request-card-read";
+    const reference = { store: "onepassword", reference: REFERENCE };
+    const unauthenticated = await h.broker.fetchForTest(
+      new Request(new URL(path, h.broker.url), { method: "POST", body: JSON.stringify(reference) }),
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(JSON.parse((await h.post(path, reference)).text)).toEqual({ status: "not-linked" });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    expect(JSON.parse((await h.post(path, reference)).text)).toEqual({
+      status: "read",
+      value: VALUE,
+    });
+    expect(h.provider.entries.size + h.connectors.entries.size + h.others.entries.size).toBe(0);
+    expect(
+      (await h.post(path, { ...reference, destination: "https://evil.test" })).text,
+    ).not.toContain(VALUE);
+    await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
+    expect(JSON.parse((await h.post(path, reference)).text)).toEqual({ status: "not-linked" });
+  });
+  it("discards a late card lookup after the store is unlinked and linked again", async () => {
+    const read = Promise.withResolvers<{ status: "read"; value: string }>();
+    const started = Promise.withResolvers<void>();
+    const h = await harness({
+      kind: "onepassword",
+      label: "Fixture",
+      probe: async () => "ready",
+      isValidReference: () => true,
+      read: () => {
+        started.resolve();
+        return read.promise;
+      },
+    });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    const pending = h.post("/v1/secret-stores/request-card-read", {
+      store: "onepassword",
+      reference: REFERENCE,
+    });
+    await started.promise;
+    await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    read.resolve({ status: "read", value: VALUE });
+    expect(JSON.parse((await pending).text)).toEqual({ status: "changed" });
+  });
+
+  it("authenticates fixed fill commands and refuses secret-bearing requests and responses", async () => {
+    const ready = decodeBrowserCredentialHostResult({ status: "ready", custodyId: randomUUID() });
+    const execute = vi.fn(async () => ready);
+    const h = await harness(undefined, { execute, close: () => undefined });
+    const command = {
+      kind: "cancel-browser-credential-fill",
+      contextId: randomUUID(),
+      planId: randomUUID(),
+      owner: { windowId: randomUUID(), threadId: randomUUID() },
+    };
+    const unauthenticated = await h.broker.fetchForTest(
+      new Request(new URL("/v1/secret-stores/browser-fill", h.broker.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      }),
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(
+      (await h.post("/v1/secret-stores/browser-fill", { ...command, password: "fixture-private" }))
+        .status,
+    ).toBe(400);
+    expect(execute).not.toHaveBeenCalled();
+    expect(await h.post("/v1/secret-stores/browser-fill", command)).toEqual({
+      status: 200,
+      text: JSON.stringify(ready),
+    });
+    execute.mockImplementationOnce(async () => ({ ...ready, password: "fixture-private" }));
+    const refused = await h.post("/v1/secret-stores/browser-fill", command);
+    expect(JSON.parse(refused.text)).toEqual({ status: "refused", reason: "unavailable" });
+    expect(refused.text).not.toContain("fixture-private");
+  });
+
+  it("returns selected-item metadata through the authenticated broker without changing legacy pointers", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const metadata = vi.fn(async () => ({
+      status: "described" as const,
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+    }));
+    const h = await harness({
+      kind: "onepassword",
+      label: "Fixture",
+      isValidReference: () => true,
+      probe: async () => "ready",
+      read: async () => ({ status: "unavailable" }),
+      browserMetadata: metadata,
+    });
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    const answer = await h.post("/v1/secret-stores/browser-metadata", item);
+    expect(answer.status).toBe(200);
+    expect(JSON.parse(answer.text)).toMatchObject({
+      status: "described",
+      item,
+      title: "Fixture",
+      version: 1,
+      storeRevision: expect.any(String),
+    });
+    expect(metadata).toHaveBeenCalledWith(item);
+    const invalid = await h.post("/v1/secret-stores/browser-metadata", {
+      ...item,
+      password: "fixture",
+    });
+    expect(invalid.status).toBe(400);
+    expect(metadata).toHaveBeenCalledOnce();
+  });
+
   it("follows a pointer at use and keeps only the pointer in the credential store", async () => {
     const h = await harness();
     expect((await h.post("/v1/secret-stores/link", { store: "onepassword" })).text).toBe(

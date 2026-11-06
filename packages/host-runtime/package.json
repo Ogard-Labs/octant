@@ -10,6 +10,9 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@octant/contracts": "workspace:*"
+  },
   "devDependencies": {
     "tsdown": "0.22.5",
     "typescript": "catalog:",

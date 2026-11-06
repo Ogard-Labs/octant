@@ -1,3 +1,4 @@
+export * from "./questionnaire";
 export * from "./chat";
 export * from "./code";
 export * from "./codePlanner";
@@ -199,4 +200,12 @@ export * from "./hostAnswer";
 export * from "./terminalSessions";
 
 export * from "./providerCloudSessions";
+export * from "./sideChatReturn";
 export * from "./gitHunks";
+export * from "./browserCredentialUse";
+
+export * from "./browserPageScript";
+
+export * from "./ownerBrowser";
+
+export * from "./childWorktreeSources";

@@ -1,3 +1,4 @@
+import type { ChildWorktreeSourceService } from "./childWorktreeSourceService";
 import {
   ActorId,
   AggregateId,
@@ -15,6 +16,9 @@ import {
   type BoundProject,
   type CodeTerminalId,
   type ProjectAction,
+  type CodeThreadId,
+  type CodeCheckoutId,
+  type ProviderExecutionPolicy,
   type ProjectActionSuggestion,
   type EventActor as EventActorValue,
   type Project,
@@ -35,6 +39,7 @@ import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
 import { defaultTerminalShell } from "./terminalShell";
+import type { WorktreePreparationService } from "./worktreePreparationService";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -50,7 +55,41 @@ export const PROJECT_TERMINAL_AGGREGATE = "project-terminal";
 /** Who is asking. Only the person at a local window may drive a Project terminal. */
 export type ProjectTerminalCaller = "local-window" | "remote-device";
 
+interface ActionCheckout {
+  readonly workingRoot?: string;
+  readonly preparationAccess?: { readonly commands: boolean; readonly network: boolean };
+  readonly receiptId?: string;
+  readonly preparationThread?: { readonly threadId: string; readonly checkoutId: string };
+  readonly root: string;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly branch?: string;
+  readonly head?: string;
+  readonly current: () => boolean;
+  readonly active?: () => boolean;
+}
+type ActionReceipt = NonNullable<
+  Extract<ProjectTerminalResult, { kind: "project-terminal" }>["terminal"]["action"]
+>;
+
 export interface ProjectTerminalServiceOptions {
+  readonly worktreePreparation?: WorktreePreparationService;
+  readonly childWorktreeSources?: ChildWorktreeSourceService;
+  readonly resolveActionWorkThread?: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    threadId: import("@octant/contracts").WorkThreadId,
+  ) => Promise<ActionCheckout | undefined>;
+  readonly resolveActionCheckout?: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    thread: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly head?: string | undefined;
+    },
+    childRequestId?: string,
+  ) => Promise<ActionCheckout | undefined>;
+
   readonly terminals: Pick<
     TerminalService,
     "launch" | "observe" | "readSince" | "write" | "resize" | "terminate"
@@ -102,6 +141,8 @@ interface Owner {
   stopObserving: (() => void) | undefined;
   /** Set once the end is journaled, so an exit racing a stop is recorded once. */
   ended: boolean;
+  readonly action?: ActionReceipt;
+  readonly actionAuthorized?: () => boolean;
 }
 
 type Authority =
@@ -175,6 +216,10 @@ export class ProjectTerminalService {
       );
     }
     if (command.kind === "start") return this.#start(windowId, command);
+    if (command.kind === "preview-action") return this.#previewAction(windowId, command);
+    if (command.kind === "start-action") return this.#startAction(windowId, command);
+    if (command.kind === "child-worktree-source") return this.#childSource(windowId, command);
+    if (command.kind === "worktree-preparation") return this.#preparation(windowId, command);
     if (command.kind === "suggest-actions") return this.#suggest(windowId, command.projectId);
 
     const owner = this.#owners.get(String(command.terminalId));
@@ -186,6 +231,10 @@ export class ProjectTerminalService {
       String(owner.projectId) !== String(command.projectId)
     ) {
       return refused("unauthorized", "This terminal belongs to another window or Project.");
+    }
+    if (owner.actionAuthorized?.() === false) {
+      await this.#end(command.terminalId, owner, "authority-revoked");
+      return refused("authority-revoked", "This task no longer authorizes its action.");
     }
     const authority = this.#authority(windowId, command.projectId);
     if (authority.kind === "refused") {
@@ -214,50 +263,94 @@ export class ProjectTerminalService {
         case "stop":
           await this.#end(command.terminalId, owner, "stopped");
           return this.#view(command.terminalId, owner);
-        case "run-action": {
-          // A server Project saves no actions.
-          if (authority.kind === "allowed-on-server") {
-            return refused("unavailable", "This Project has no such action.");
-          }
-          // The line comes from the Project record read now, never from the
-          // caller, so a window can only type what the person saved.
-          const action = authority.project.actions?.find(
-            (candidate) => String(candidate.id) === String(command.actionId),
+        case "run-action":
+          return refused(
+            "unavailable",
+            "Review the action and start a dedicated run. Saved commands are never typed into an existing shell.",
           );
-          if (action === undefined) {
-            return refused("unavailable", "This Project has no such action.");
-          }
-          const root = await this.#options.resolveRoot(authority.project);
-          if (root === undefined) {
-            return refused(
-              "unavailable",
-              "This Project's folder is unavailable. Relink the Project.",
-            );
-          }
-          // The root was resolved across an await. Switching the window to
-          // another Project, or a relink or archive, in between must not type
-          // into a shell the window no longer holds.
-          const settled = this.#authority(windowId, command.projectId);
-          if (
-            settled.kind !== "allowed" ||
-            owner.ended ||
-            String(settled.bindingRevisionId) !== String(owner.bindingRevisionId)
-          ) {
-            return refused(
-              "authority-revoked",
-              "This Project changed while its action was starting.",
-            );
-          }
-          const folder = this.#folderRoot(authority.project, root, command.folder);
-          if (folder === undefined) {
-            return refused("unavailable", "That folder is not one of this Project's folders.");
-          }
-          this.#options.terminals.write(String(command.terminalId), actionLine(folder, action));
-          return this.#view(command.terminalId, owner);
-        }
       }
     } catch {
       return refused("unavailable", "This terminal is no longer running.");
+    }
+  }
+
+  async #childSource(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "child-worktree-source" }>,
+  ): Promise<ProjectTerminalResult> {
+    const authority = this.#authority(windowId, command.projectId);
+    if (authority.kind !== "allowed" || authority.project.type !== "code")
+      return refused(
+        "unauthorized",
+        "Child source review requires this Code Project's local window.",
+      );
+    const checkout = await this.#options
+      .resolveActionCheckout?.(windowId, command.projectId, command.thread)
+      .catch(() => undefined);
+    const service = this.#options.childWorktreeSources;
+    if (service === undefined || checkout?.head === undefined || !checkout.current())
+      return refused("unavailable", "This checkout cannot capture an authorized committed base.");
+    try {
+      const result = await service.command(
+        {
+          threadId: String(command.thread.threadId),
+          checkoutId: String(command.thread.checkoutId),
+          bindingRevisionId: String(authority.bindingRevisionId),
+          root: checkout.root,
+          head: checkout.head,
+          executionPolicy: checkout.executionPolicy,
+          current: checkout.current,
+        },
+        command.action,
+        command.snapshotId,
+      );
+      return result.status === "refused"
+        ? refused("unavailable", result.message)
+        : decodeProjectTerminalResult({ kind: "child-worktree-source", review: result.review });
+    } catch {
+      return refused(
+        "unavailable",
+        "Child source could not be recorded. Inspect the checkout and review the source again.",
+      );
+    }
+  }
+
+  async #preparation(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "worktree-preparation" }>,
+  ): Promise<ProjectTerminalResult> {
+    const authority = this.#authority(windowId, command.projectId);
+    if (authority.kind !== "allowed")
+      return refused("unauthorized", "Worktree setup requires this Project's local window.");
+    const service = this.#options.worktreePreparation;
+    const checkout = await this.#options
+      .resolveActionCheckout?.(windowId, command.projectId, command.thread, command.childRequestId)
+      .catch(() => undefined);
+    if (service === undefined || checkout?.receiptId === undefined || !checkout.current())
+      return refused("unavailable", "This checkout has no available managed preparation.");
+    const context = await service.context({
+      commandAccess: checkout.preparationAccess?.commands ?? true,
+      networkAllowed: checkout.preparationAccess?.network ?? true,
+      receiptId: checkout.receiptId,
+      root: checkout.root,
+      executionPolicy: checkout.executionPolicy,
+      current: checkout.active ?? checkout.current,
+      threadId: checkout.preparationThread?.threadId ?? String(command.thread.threadId),
+      checkoutId: checkout.preparationThread?.checkoutId ?? String(command.thread.checkoutId),
+      projectId: String(command.projectId),
+    });
+    if (context === undefined)
+      return refused("authority-revoked", "Worktree preparation ownership changed.");
+    try {
+      const result = await service.command(context, command.action, command.attemptId);
+      return result.status === "refused"
+        ? refused("unavailable", result.message)
+        : decodeProjectTerminalResult({ kind: "worktree-preparation", ...result.view });
+    } catch {
+      return refused(
+        "unavailable",
+        "Setup cannot perform that action. Cancel a running preparation first; retry needs the reviewed recipe, write access, and confirmed process cleanup.",
+      );
     }
   }
 
@@ -282,6 +375,14 @@ export class ProjectTerminalService {
    * the journal commits a Project lifecycle or binding change, so a shell does
    * not keep running in a folder the Project no longer names.
    */
+  async settleActionAuthorities(): Promise<void> {
+    await Promise.allSettled(
+      [...this.#owners.values()]
+        .filter((owner) => !owner.ended && owner.actionAuthorized?.() === false)
+        .map((owner) => this.#end(owner.terminalId, owner, "authority-revoked")),
+    );
+  }
+
   async settleProject(projectId: ProjectId): Promise<void> {
     const project = this.#options.readProject(projectId);
     const current =
@@ -343,9 +444,130 @@ export class ProjectTerminalService {
       : undefined;
   }
 
+  async #previewAction(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "preview-action" }>,
+  ): Promise<ProjectTerminalResult> {
+    const placed = await this.#placeAction(windowId, command);
+    if (placed.kind === "project-terminal-refused") return placed;
+    return decodeProjectTerminalResult({
+      kind: "project-action-preview",
+      projectId: command.projectId,
+      projectVersion: placed.project.version,
+      action: placed.receipt,
+    });
+  }
+
+  async #placeAction(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "preview-action" | "start-action" }>,
+  ) {
+    const authority = this.#authority(windowId, command.projectId);
+    if (authority.kind !== "allowed")
+      return refused("unauthorized", "Open a local Project to run its action.");
+    const action = authority.project.actions?.find(
+      (candidate) => String(candidate.id) === String(command.actionId),
+    );
+    if (action === undefined) return refused("unavailable", "This Project has no such action.");
+    if (command.thread !== undefined && command.workThreadId !== undefined)
+      return refused("unauthorized", "Choose one task for this action.");
+    const checkout =
+      command.workThreadId !== undefined
+        ? await this.#options
+            .resolveActionWorkThread?.(windowId, command.projectId, command.workThreadId)
+            .catch(() => undefined)
+        : command.thread === undefined
+          ? undefined
+          : await (
+              this.#options.resolveActionCheckout?.(windowId, command.projectId, command.thread) ??
+              Promise.resolve(undefined)
+            ).catch(() => undefined);
+    if (
+      (command.thread !== undefined || command.workThreadId !== undefined) &&
+      (checkout === undefined ||
+        !checkout.current() ||
+        (command.kind === "start-action" && checkout.executionPolicy === "plan"))
+    )
+      return refused(
+        "authority-revoked",
+        "This checkout changed or cannot run an action. Review it again.",
+      );
+    const projectRoot = await this.#options.resolveRoot(authority.project);
+    if (projectRoot === undefined)
+      return refused("unavailable", "This Project's folder is unavailable.");
+    const folder =
+      command.folder === undefined
+        ? (checkout?.workingRoot ?? checkout?.root ?? projectRoot)
+        : this.#folderRoot(authority.project, projectRoot, command.folder);
+    const settled = this.#authority(windowId, command.projectId);
+    if (folder === undefined)
+      return refused("unavailable", "That folder is not one of this Project's folders.");
+    if (
+      settled.kind !== "allowed" ||
+      settled.project.version !== authority.project.version ||
+      checkout?.current() === false
+    )
+      return refused("authority-revoked", "This Project changed. Review its action again.");
+    const receipt: ActionReceipt = {
+      actionId: action.id,
+      ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
+      name: action.name,
+      folder: action.directory === "." ? folder : `${folder}/${action.directory}`,
+      ...(checkout?.branch === undefined || folder !== checkout.root
+        ? {}
+        : { branch: checkout.branch }),
+      ...(command.thread === undefined
+        ? {}
+        : {
+            thread: {
+              threadId: command.thread.threadId,
+              checkoutId: command.thread.checkoutId,
+              ...(checkout?.head === undefined ? {} : { head: checkout.head }),
+            },
+          }),
+    };
+    return {
+      kind: "placed" as const,
+      project: authority.project,
+      action,
+      checkout,
+      folder,
+      receipt,
+    };
+  }
+
+  async #startAction(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
+  ): Promise<ProjectTerminalResult> {
+    const placed = await this.#placeAction(windowId, command);
+    if (placed.kind === "project-terminal-refused") return placed;
+    if (
+      placed.action.preparesWorktrees === true &&
+      placed.checkout?.receiptId !== undefined &&
+      command.folder === undefined
+    )
+      return refused(
+        "unavailable",
+        "Open Worktrees → Setup to run this recipe through its recorded preparation lifecycle.",
+      );
+    if (
+      command.projectVersion !== undefined &&
+      String(command.projectVersion) !== String(placed.project.version)
+    )
+      return refused("authority-revoked", "This action changed. Review it again.");
+    return this.#start(windowId, { ...command, kind: "start" }, placed.action, placed);
+  }
+
   async #start(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
+    action?: ProjectAction,
+    placed?: {
+      readonly checkout: ActionCheckout | undefined;
+      readonly folder: string;
+      readonly receipt: ActionReceipt;
+    },
   ): Promise<ProjectTerminalResult> {
     const authority = this.#authority(windowId, command.projectId);
     if (authority.kind === "refused") return refused(authority.reason, authority.message);
@@ -367,27 +589,89 @@ export class ProjectTerminalService {
     ) {
       return refused("authority-revoked", "This Project changed while its terminal was starting.");
     }
-    const folder = this.#folderRoot(authority.project, root, command.folder);
+    const workThread =
+      placed?.checkout ??
+      (command.workThreadId === undefined
+        ? undefined
+        : await this.#options
+            .resolveActionWorkThread?.(windowId, command.projectId, command.workThreadId)
+            .catch(() => undefined));
+    if (command.workThreadId !== undefined && (workThread === undefined || !workThread.current()))
+      return refused(
+        "unavailable",
+        "This task's working folder is unavailable. Nothing was redirected.",
+      );
+    const folder =
+      placed?.folder ??
+      (command.folder === undefined && workThread !== undefined
+        ? (workThread.workingRoot ?? workThread.root)
+        : this.#folderRoot(authority.project, root, command.folder));
     if (folder === undefined) {
       return refused("unavailable", "That folder is not one of this Project's folders.");
     }
     // A Work Project's terminal is confined as a Code Project's is when the
     // Project remembers no Full access; Work Projects remember none.
     const posture: ProjectTerminalPosture =
-      authority.project.type === "code" &&
-      authority.project.codeAccessPersistence === "project-default"
-        ? "full-access"
-        : "approval-gated";
+      workThread !== undefined
+        ? workThread.executionPolicy === "full-access"
+          ? "full-access"
+          : "approval-gated"
+        : authority.project.type === "code" &&
+            authority.project.codeAccessPersistence === "project-default"
+          ? "full-access"
+          : "approval-gated";
+    if (action !== undefined) {
+      try {
+        this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
+          kind: "project-terminal-started",
+          projectId: command.projectId,
+          terminalId: command.terminalId,
+          windowId,
+          bindingRevisionId: authority.bindingRevisionId,
+          posture,
+          startedAt: this.#options.clock(),
+          action: placed?.receipt,
+        });
+      } catch {
+        return refused(
+          "unavailable",
+          "This action request was already recorded or could not be saved. Inspect its run before trying again.",
+        );
+      }
+    }
     try {
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
+        ...(action === undefined
+          ? workThread === undefined
+            ? {}
+            : { admit: () => workThread.current() }
+          : {
+              command: actionShellCommand(folder, action),
+              admit: () => {
+                const current = this.#authority(windowId, command.projectId);
+                return (
+                  current.kind === "allowed" &&
+                  placed?.checkout?.current() !== false &&
+                  String(current.bindingRevisionId) === String(authority.bindingRevisionId) &&
+                  current.project.actions?.some(
+                    (candidate) =>
+                      candidate.id === action.id &&
+                      candidate.command === action.command &&
+                      candidate.directory === action.directory,
+                  ) === true
+                );
+              },
+            }),
         shell: this.#options.shell ?? defaultTerminalShell(),
         cwd: folder,
         // Every folder of the Project is bound like the main one, so the
         // shell can move between them; the pick only chooses where it starts.
         // One missing on disk is left out, as from a runtime's profile.
         extraFolders: [
-          root,
+          ...(command.workThreadId !== undefined
+            ? [root, ...(workThread === undefined ? [] : [workThread.root])]
+            : [workThread?.root ?? root]),
           ...projectExtraFolderRoots(authority.project).filter(isDirectory),
         ].filter((candidate) => candidate !== folder),
         // Its own shell history and state, apart from every thread's shells in
@@ -396,9 +680,11 @@ export class ProjectTerminalService {
         columns: command.columns,
         rows: command.rows,
         credentialReferences: [],
-        executionPolicy: posture,
+        executionPolicy: workThread?.executionPolicy ?? posture,
       });
     } catch (error) {
+      if (action !== undefined)
+        this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
       console.warn(
         `Octant Project terminal could not start: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -411,7 +697,15 @@ export class ProjectTerminalService {
           : "The terminal could not start.",
       );
     }
-    return this.#own(windowId, command, authority.bindingRevisionId, posture);
+    return this.#own(
+      windowId,
+      command,
+      authority.bindingRevisionId,
+      posture,
+      placed?.receipt,
+      action !== undefined,
+      workThread?.active,
+    );
   }
 
   /**
@@ -459,6 +753,9 @@ export class ProjectTerminalService {
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
     bindingRevisionId: BindingRevisionId,
     posture: ProjectTerminalPosture,
+    action?: ActionReceipt,
+    recorded = false,
+    actionAuthorized?: () => boolean,
   ): Promise<ProjectTerminalResult> {
     const owner: Owner = {
       terminalId: command.terminalId,
@@ -468,17 +765,20 @@ export class ProjectTerminalService {
       posture,
       stopObserving: undefined,
       ended: false,
+      ...(action === undefined ? {} : { action }),
+      ...(actionAuthorized === undefined ? {} : { actionAuthorized }),
     };
     try {
-      this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
-        kind: "project-terminal-started",
-        projectId: command.projectId,
-        terminalId: command.terminalId,
-        windowId,
-        bindingRevisionId,
-        posture,
-        startedAt: this.#options.clock(),
-      });
+      if (!recorded)
+        this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
+          kind: "project-terminal-started",
+          projectId: command.projectId,
+          terminalId: command.terminalId,
+          windowId,
+          bindingRevisionId,
+          posture,
+          startedAt: this.#options.clock(),
+        });
     } catch {
       // A shell nobody can find in the journal is a shell nobody can account
       // for, so it does not keep running.
@@ -500,6 +800,19 @@ export class ProjectTerminalService {
         );
       },
     );
+    // A command can exit before its receipt is persisted. Terminal observers
+    // start at the launch snapshot, so that already-exited snapshot has no
+    // status delta to emit; settle it explicitly before returning the run.
+    const snapshot = this.#options.terminals.readSince(String(command.terminalId), 0).snapshot;
+    if (snapshot.status !== "running" && !owner.ended) {
+      owner.ended = true;
+      this.#safeJournalEnded(command.projectId, command.terminalId, "exited", snapshot.exitCode);
+    }
+    if (owner.ended) owner.stopObserving?.();
+    if (owner.actionAuthorized?.() === false && !owner.ended) {
+      await this.#end(command.terminalId, owner, "authority-revoked");
+      return refused("authority-revoked", "This task changed while its action was starting.");
+    }
     // The launch awaited the process receipt, and an archive or relink that
     // committed meanwhile settled the Project before this shell had an owner
     // to find. Checked again now that it has one, so that end is not missed.
@@ -654,6 +967,7 @@ export class ProjectTerminalService {
         state: snapshot.status,
         ...(snapshot.exitCode === undefined ? {} : { exitCode: snapshot.exitCode }),
         posture: owner.posture,
+        ...(owner.action === undefined ? {} : { action: owner.action }),
       },
       ...(afterCharacters === undefined
         ? {}
@@ -672,21 +986,14 @@ function isDirectory(path: string): boolean {
   }
 }
 
-function refused(reason: ProjectTerminalRefusalReason, message: string): ProjectTerminalResult {
+function refused(
+  reason: ProjectTerminalRefusalReason,
+  message: string,
+): Extract<ProjectTerminalResult, { kind: "project-terminal-refused" }> {
   return { kind: "project-terminal-refused", reason, message };
 }
 
-/**
- * The line typed for an action: clear whatever half-typed input the shell
- * holds, enter the action's folder from the Project root (so one action does
- * not inherit the folder an earlier one left the shell in), and run the
- * command. The path is single-quoted, so a name cannot be read as an option or
- * split into words. The whole command sits in a group behind the folder change,
- * so a folder that has gone away stops every statement of it (`a; b` would
- * otherwise run `b` in the old folder); the group's closing brace is on its own
- * line so a trailing comment in the command cannot swallow it.
- */
-function actionLine(root: string, action: ProjectAction): string {
-  const folder = action.directory === "." ? root : `${root}/${action.directory}`;
-  return `\u0015cd '${folder.replaceAll("'", "'\\''")}' && { ${action.command}\r}\r`;
+function actionShellCommand(folder: string, action: ProjectAction): string {
+  const directory = action.directory === "." ? folder : `${folder}/${action.directory}`;
+  return `cd '${directory.replaceAll("'", "'\\''")}' && { ${action.command}\n}`;
 }

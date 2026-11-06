@@ -1,5 +1,5 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type { HostRuntimeServiceMode } from "@octant/host-runtime";
 import type { TerminalLauncher } from "./code/terminalService";
 
@@ -37,16 +37,7 @@ export function parseCodeFileHelperPath(value: string | undefined): string | und
   return value;
 }
 
-/**
- * The packaged macOS app's terminal launcher. Its `octant` runs the app's own
- * executable in Node mode, which is the runtime this host itself runs under,
- * so a terminal with a Browser grant may read the launcher folder, that
- * executable, and the frameworks it loads. All three sit inside the app
- * bundle and hold nothing private; where the app is installed under
- * `/Applications` the terminal could read them already, and the grant matters
- * for an app the confinement otherwise hides (in the home folder, or
- * translocated under `/private`).
- */
+/** A Browser-granted terminal reads only its scoped CLI and the Node runtime it uses. */
 export function parseTerminalLauncher(
   value: string | undefined,
   runtime: {
@@ -65,6 +56,35 @@ export function parseTerminalLauncher(
   // A folder whose path holds the separator cannot be one PATH entry; such a
   // terminal gets no launcher rather than a broken PATH.
   if (value.includes(delimiter)) return undefined;
+  const workerSuffix = "/Contents/Frameworks/Octant Runtime.app/Contents/MacOS/Octant Runtime";
+  if (runtime.execPath.endsWith(workerSuffix)) {
+    // The actual host executable determines the primary bundle. A supplied
+    // launcher path cannot nominate another bundle or add arbitrary read roots.
+    const primary = runtime.execPath.slice(0, -workerSuffix.length);
+    const directory = join(primary, "Contents/Resources/terminal-launcher");
+    if (!primary.endsWith(".app") || resolve(value) !== directory) {
+      throw new Error("The terminal launcher does not match its packaged desktop runtime.");
+    }
+    return {
+      directory,
+      readRoots: [
+        directory,
+        runtime.execPath,
+        join(dirname(dirname(runtime.execPath)), "Frameworks"),
+      ],
+    };
+  }
+  const legacySuffix = "/Contents/MacOS/Octant";
+  const primary = runtime.execPath.endsWith(legacySuffix)
+    ? runtime.execPath.slice(0, -legacySuffix.length)
+    : undefined;
+  if (
+    primary === undefined ||
+    !primary.endsWith(".app") ||
+    resolve(value) !== join(primary, "Contents/Resources/terminal-launcher")
+  ) {
+    throw new Error("The terminal launcher does not match its packaged desktop runtime.");
+  }
   return {
     directory: value,
     readRoots: [value, runtime.execPath, join(dirname(dirname(runtime.execPath)), "Frameworks")],

@@ -1,8 +1,11 @@
 import type {
   ArtifactSyncedDetail,
+  ArtifactPublicationPreview,
   ArtifactSyncedThread,
   ArtifactSyncedVersion,
 } from "@octant/contracts/artifact-library";
+import { MAX_ARTIFACT_BACKFILL_VERSIONS } from "@octant/contracts/artifact-library";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { artifactEditedAgo } from "@octant/domain";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -23,6 +26,12 @@ export interface SyncedArtifactDialogProps {
   readonly onOpenIn: (threadId: string) => void;
   /** Starts a thread; absent on a host that cannot, which hides the choice. */
   readonly onCreate?: () => void;
+  readonly onBackfill?: (
+    versionIds: ReadonlyArray<ArtifactSyncedVersion["versionId"]>,
+    previewToken: string,
+  ) => void;
+  readonly onBackfillControl?: (backfillId: string, running: boolean) => void;
+  readonly onDeleteSynced?: (previewToken: string) => void;
   readonly onClose: () => void;
 }
 
@@ -79,6 +88,20 @@ export function SyncedArtifactDialog(props: SyncedArtifactDialogProps) {
             </p>
           )}
 
+          {detail.publication === undefined ? null : (
+            <PublicationChoices
+              key={detail.publication.previewToken}
+              preview={detail.publication}
+              versions={detail.versions}
+              onRestore={props.onRestore}
+              busy={props.busy}
+              {...(props.onBackfill === undefined ? {} : { onBackfill: props.onBackfill })}
+              {...(props.onBackfillControl === undefined
+                ? {}
+                : { onControl: props.onBackfillControl })}
+              {...(props.onDeleteSynced === undefined ? {} : { onDelete: props.onDeleteSynced })}
+            />
+          )}
           {detail.status === "two-versions" ? (
             <section aria-labelledby="synced-artifact-two" className="synced-artifact__section">
               <h3 className="oct-section-label" id="synced-artifact-two">
@@ -289,5 +312,200 @@ function ThreadChoice(props: {
         <span className="oct-meta">{props.actionDetail}</span>
       </div>
     </div>
+  );
+}
+
+function PublicationChoices(props: {
+  readonly preview: ArtifactPublicationPreview;
+  readonly versions: ReadonlyArray<ArtifactSyncedVersion>;
+  readonly onRestore: () => void;
+  readonly busy: boolean;
+  readonly onBackfill?: SyncedArtifactDialogProps["onBackfill"];
+  readonly onControl?: SyncedArtifactDialogProps["onBackfillControl"];
+  readonly onDelete?: SyncedArtifactDialogProps["onDeleteSynced"];
+}) {
+  const { preview } = props;
+  const [selected, setSelected] = useState<ReadonlyArray<string>>([]);
+  const [consented, setConsented] = useState(false);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const chosen = preview.versions.filter(
+    (version) => version.status === "eligible" && selected.includes(String(version.versionId)),
+  );
+  const batch = preview.backfill;
+  const activeBatch = batch !== undefined && batch.state !== "finished";
+  return (
+    <section className="synced-artifact__section" aria-labelledby="artifact-publication-title">
+      <h3 className="oct-section-label" id="artifact-publication-title">
+        Publish existing versions
+      </h3>
+      <p className="oct-row-detail">Destination: {preview.destination}</p>
+      <p className="oct-row-detail">
+        Selected versions include their full artifact text and previews, Project name and computer
+        identity. The store provider and anyone with access to this location can read them. Thread
+        messages, credentials and files are excluded.
+      </p>
+      {!preview.available ? (
+        <p className="oct-row-detail">
+          {preview.deletionPending
+            ? "Synchronized deletion is queued; it will be sent when this computer can reach the store."
+            : "Turn sync on and check this task’s write authority to publish."}
+        </p>
+      ) : null}
+      <ul className="synced-artifact__versions">
+        {preview.versions.map((version) => (
+          <li className="synced-artifact__version" key={String(version.versionId)}>
+            {props.versions.find((held) => String(held.versionId) === String(version.versionId))
+              ?.preview === undefined ? null : (
+              <span aria-hidden="true" className="synced-artifact__preview">
+                <span
+                  className="artifact-card__preview-svg"
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      props.versions.find(
+                        (held) => String(held.versionId) === String(version.versionId),
+                      )?.preview?.markup ?? "",
+                  }}
+                />
+              </span>
+            )}
+            <label className="synced-artifact__row">
+              <OctantCheckbox
+                checked={selected.includes(String(version.versionId))}
+                disabled={
+                  props.busy ||
+                  !preview.available ||
+                  activeBatch ||
+                  version.status !== "eligible" ||
+                  (!selected.includes(String(version.versionId)) &&
+                    chosen.length >= MAX_ARTIFACT_BACKFILL_VERSIONS)
+                }
+                onChange={(event) => {
+                  setSelected((held) =>
+                    event.target.checked
+                      ? [...held, String(version.versionId)]
+                      : held.filter((id) => id !== String(version.versionId)),
+                  );
+                  setConsented(false);
+                }}
+              />
+              <span className="oct-row-label">
+                Version {version.sequence} · {version.byteLength.toLocaleString()} bytes ·{" "}
+                {version.status}
+              </span>
+            </label>
+            {version.reason === undefined ? null : (
+              <span className="oct-meta">{version.reason}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {preview.truncated ? (
+        <p className="oct-meta">Showing the latest 200 local versions.</p>
+      ) : null}
+      <p className="oct-meta">
+        Choose up to {MAX_ARTIFACT_BACKFILL_VERSIONS} versions per publication. Unselected history
+        stays here.
+      </p>
+      <label className="synced-artifact__row oct-row-detail">
+        <OctantCheckbox
+          checked={consented}
+          disabled={props.busy || chosen.length === 0 || activeBatch}
+          onChange={(event) => setConsented(event.target.checked)}
+        />
+        I have reviewed these versions and consent to publishing them to this destination.
+      </label>
+      <OctantButton
+        type="button"
+        size="sm"
+        variant="secondary"
+        disabled={
+          props.busy ||
+          !preview.available ||
+          !consented ||
+          chosen.length === 0 ||
+          activeBatch ||
+          props.onBackfill === undefined
+        }
+        onClick={() => {
+          props.onBackfill?.(
+            chosen.map((version) => version.versionId),
+            preview.previewToken,
+          );
+          setConsented(false);
+        }}
+      >
+        Publish selected versions
+      </OctantButton>
+      {batch === undefined ? null : (
+        <div className="synced-artifact__section" role="status">
+          <p className="oct-row-detail">
+            {batch.done} of {batch.total} versions published · {batch.state}
+          </p>
+          {batch.message === undefined ? null : <p className="oct-row-detail">{batch.message}</p>}
+          {batch.restoreAvailable === true ? (
+            <OctantButton
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={props.busy}
+              onClick={props.onRestore}
+            >
+              Restore artifact
+            </OctantButton>
+          ) : null}
+          {batch.state === "finished" ? null : (
+            <div className="synced-artifact__row">
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={props.busy || props.onControl === undefined}
+                onClick={() => props.onControl?.(batch.id, batch.state === "stopped")}
+              >
+                {batch.state === "running" ? "Stop publication" : "Resume publication"}
+              </OctantButton>
+              <span className="oct-meta">
+                Stopping takes effect after the current upload and survives a restart.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+      {preview.deletionAvailable ? (
+        <div className="synced-artifact__section">
+          <h3 className="oct-section-label">Delete from synced library</h3>
+          <p className="oct-row-detail">
+            Publishes a deletion for every currently known version on your other computers. Local
+            history stays here. This does not erase copies from the store provider.
+          </p>
+          {preview.deletionConflict ? (
+            <p className="oct-row-detail">
+              A deletion and a revision both stand. This action explicitly deletes the known
+              revision; Restore keeps it instead.
+            </p>
+          ) : null}
+          <label className="synced-artifact__row oct-row-detail">
+            <OctantCheckbox
+              checked={deleteConfirmed}
+              disabled={props.busy}
+              onChange={(event) => setDeleteConfirmed(event.target.checked)}
+            />
+            Delete these known versions from my synced library.
+          </label>
+          <OctantButton
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={props.busy || !deleteConfirmed || props.onDelete === undefined}
+            onClick={() => {
+              props.onDelete?.(preview.previewToken);
+              setDeleteConfirmed(false);
+            }}
+          >
+            Delete from synced library
+          </OctantButton>
+        </div>
+      ) : null}
+    </section>
   );
 }

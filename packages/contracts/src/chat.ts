@@ -1,3 +1,10 @@
+import {
+  ConversationInputReceipt,
+  ConversationInputPolicy,
+  ConversationInputReference,
+} from "./conversationInputs";
+import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
+import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
@@ -127,6 +134,7 @@ export type ChatQuestionOption = typeof ChatQuestionOption.Type;
  * each carrying its place in the set.
  */
 export const ChatAttemptQuestion = Schema.Struct({
+  questionnaire: Schema.optional(Questionnaire),
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
@@ -145,12 +153,13 @@ export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
 
 /** A question the person answered, kept on the attempt that asked it. */
 export const ChatAttemptAnsweredQuestion = Schema.Struct({
+  questionnaire: Schema.optional(Questionnaire),
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
-  answer: ChatQuestionText,
+  answer: QuestionnaireAnswerText,
   answeredAt: UtcTimestamp,
 })
   .annotations(strict)
@@ -276,6 +285,7 @@ export const ChatBranchConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type ChatBranchConversationHandoff = typeof ChatBranchConversationHandoff.Type;
 
@@ -298,6 +308,8 @@ export const ChatAttempt = Schema.Struct({
   providerSessionId: ProviderSessionId,
   modelId: ProviderModelId,
   contextManifestId: ContextManifestId,
+  inputReceipt: Schema.optional(ConversationInputReceipt),
+  sideChatSourceReceipt: Schema.optional(SideChatSourceReceipt),
   outcome: ChatAttemptOutcome,
   responseRefs: Schema.Array(ChatContentReference),
   researchRef: Schema.optional(ChatContentReference),
@@ -379,13 +391,18 @@ export const ChatTurnRewound = Schema.Struct({
 export type ChatTurnRewound = typeof ChatTurnRewound.Type;
 
 export const ChatTurn = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   id: ChatTurnId,
   threadId: ChatThreadId,
   /** Stable client submission identity used to reconcile an unknown response. */
   submissionId: Schema.optional(ChatSubmissionId),
   sequence: PositiveInt,
   userMessageRef: ChatContentReference,
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   attachmentIds: Schema.Array(ChatAttachmentId),
+  originalInputs: Schema.optional(
+    Schema.Array(ConversationInputReference).pipe(Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+  ),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   attempts: Schema.Array(ChatAttempt),
   /**
@@ -630,6 +647,9 @@ export const ChangeChatInstructionsCommand = Schema.Struct({
 
 export const SendChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("send-chat-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   prompt: PromptText,
   /** Optional for older clients; new clients preserve it across retry after an unknown outcome. */
@@ -660,6 +680,7 @@ export const SendChatTurnCommand = Schema.Struct({
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
 }).annotations(strict);
 
 /**
@@ -695,6 +716,7 @@ export const BranchChatThreadCommand = Schema.Struct({
 
 export const RetryChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("retry-chat-turn"),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
@@ -702,6 +724,7 @@ export const RetryChatTurnCommand = Schema.Struct({
 
 export const ResumeChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("resume-chat-turn"),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
@@ -759,7 +782,7 @@ export const AnswerChatTurnQuestionCommand = Schema.Struct({
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  answer: QuestionnaireAnswerText,
 }).annotations(strict);
 
 export const DeleteChatThreadCommand = Schema.Struct({
@@ -936,6 +959,7 @@ export type ChatCommand = typeof ChatCommand.Type;
 
 export const ChatFailureCategory = Schema.Literal(
   "unavailable",
+  "tools-changed",
   "unauthorized",
   "unsupported",
   "waiting",

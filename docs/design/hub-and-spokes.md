@@ -78,13 +78,12 @@ view of the provider's own app, never against a real provider sign-in. After thi
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub, a real Claude or Codex sign-in on a
-second computer started from the hub), Windows, and the post-preview
-tracks.
+second computer started from the hub) and Windows.
 The hub uses only the Roster and Status grant items, the Owners item for
 owner devices, the Standby item for naming a standby, the Wake item for the
 wake service, the Push item for push, the Provision item for offers, and the Sign-in item for sign-in requests. The maintainer
-asked for this design and authorized it as post-preview, design-first work on
-2026-10-28, and set its shape the same day: a running instance enabled as hub,
+asked for this design and authorized it as design-first work on
+2026-10-28 (in scope for the first preview since 2026-11-06), and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
 a standby hub for failover, personal devices only, phones as guests that run
 no agents, and a hub that runs as a server without the desktop app and serves
@@ -508,6 +507,16 @@ from their phone or laptop what they could do sitting at any of them. An
   says. An owner device reads them from the spoke it concerns; the hub holds no
   alert and cannot clear or write one. Rationale: the party that might be
   compromised cannot be the one that reports.
+- **Browser control is its own finite action.** Selecting an already-open Code
+  Private page is an owner administration read. Taking control requires a fresh
+  own-class unlock even when an administration session is open. The resulting
+  target-bound controller lasts at most 60 seconds and authorizes only signed,
+  sequenced person frames and fixed inputs for that exact native resource.
+  It cannot administer the host, select a profile, create a page or lend a local
+  window capability. Stop/reclaim/expiry leave the agent's person hold in place;
+  only explicit Hand back releases it. See [Owner control of an open Code
+  page](browser-agent-tool.md#owner-control-of-an-open-code-page) for the supported
+  resource, volatile credential-bearing frames, cancellation and audit rules.
 - **Confirming a new member is signed by the unlock key.** The owner's unlock
   key signs a note naming the spoke, the member, its identity-key fingerprint,
   the owner, and the unlock key's fingerprint, and the spoke checks it against

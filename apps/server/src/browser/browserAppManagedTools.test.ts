@@ -6,8 +6,13 @@ import {
 } from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
-import { browserToolInputRecord, flowDecision } from "./browserFlows";
-import { parseBrowserToolInput, runBrowserToolSteps } from "./browserToolOperations";
+import { BrowserFlowRecorder, browserToolInputRecord, flowDecision } from "./browserFlows";
+import {
+  BROWSER_OPERATION_EFFECT,
+  parseBrowserToolInput,
+  runBrowserToolSteps,
+} from "./browserToolOperations";
+import { BROWSER_CALL_OF_EACH_OPERATION } from "./browserToolPlanCalls.test-support";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
 const threadId = "20000000-0000-4000-8000-000000000001" as never;
@@ -766,6 +771,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       "flow-run": { name: "Check the form" },
       resize: { width: 390, height: 844 },
       "sign-in": { reason: "The dashboard needs your account." },
+      "run-script": { source: "42", expectedObservationRevision: 1 },
       "download-save": { downloadId: "d1" },
       "read-page": {},
       click: { selector: "#go" },
@@ -775,6 +781,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       wait: { selector: "#go" },
       screenshot: {},
       diagnostics: {},
+      audit: { kind: "accessibility" },
       stop: {},
       help: {},
     };
@@ -791,6 +798,97 @@ describe("browser diagnostics reach the provider-facing result", () => {
         result: { error: "invalid-browser-input" },
       });
     }
+  });
+
+  it("asks the page for the audit it names and passes the shaped answer through", async () => {
+    const audit = {
+      kind: "accessibility",
+      findings: [
+        {
+          rule: "field-name",
+          severity: "serious",
+          message: "Form field has no label.",
+          ref: "e3",
+          role: "textbox",
+        },
+      ],
+      found: [{ rule: "field-name", count: 1 }],
+      notRun: [],
+      contrastNotMeasured: 0,
+      framesNotAudited: 0,
+      truncated: false,
+    };
+    const running = snapshot({
+      status: "running",
+      context: activeContext(),
+      observation: { revision: 4, audit } as never,
+    });
+    const act = vi.fn(async () => running);
+    const result = await toolsFor({ revision: 4, audit }, act).execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "audit", kind: "accessibility" }),
+    });
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ kind: "audit", auditKind: "accessibility" }),
+      }),
+    );
+    expect(result).toMatchObject({ isError: false, result: { page: { audit } } });
+  });
+
+  it("refuses an audit that names no known audit or asks for more than the audit", async () => {
+    const act = vi.fn();
+    const tools = toolsFor({ revision: 1 }, act);
+    for (const input of [
+      { operation: "audit" },
+      { operation: "audit", kind: "seo" },
+      { operation: "audit", kind: "performance", include: ["snapshot"] },
+      { operation: "audit", kind: "performance", reload: true },
+    ]) {
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify(input),
+      });
+      expect(result.result).toEqual({ error: "invalid-browser-input" });
+    }
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("admits an audit in Plan exactly as it admits diagnostics, since both only read the open page", async () => {
+    const act = vi.fn(async () => snapshot());
+    const running = snapshot({ status: "running", context: activeContext() });
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "plan",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act,
+        releaseThread: vi.fn(async () => running),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    for (const input of [
+      { operation: "diagnostics" },
+      { operation: "audit", kind: "performance" },
+    ]) {
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify(input),
+      });
+      expect(result.isError).toBe(false);
+    }
+    expect(act.mock.calls.map((call) => (call as unknown[])[0])).toMatchObject([
+      { request: { kind: "observe-diagnostics" } },
+      { request: { kind: "audit", auditKind: "performance" } },
+    ]);
   });
 
   it("omits the diagnostics rather than inventing an empty list", async () => {
@@ -842,6 +940,8 @@ describe("octant_browser profile argument", () => {
 
   function fixture(
     options: {
+      readonly defaultProfile?: "private" | "project" | "personal";
+      readonly paired?: boolean;
       readonly remembered?: (origin: string, profile: unknown) => boolean;
       readonly unattended?: boolean;
       readonly profileCaller?: "terminal-grant";
@@ -863,6 +963,7 @@ describe("octant_browser profile argument", () => {
       modelId,
       resolveModelId: () => modelId,
       modelBindings: options.modelBindings ?? new Map(),
+      resolveTaskProfile: () => options.defaultProfile,
       executionPolicy: "approval-gated",
       resolveAuthority: () => workAuthority,
       browser: {
@@ -876,6 +977,7 @@ describe("octant_browser profile argument", () => {
         isRemembered: (origin: string, profile: unknown) =>
           options.remembered?.(origin, profile) === true,
         isUnattendedScope: () => options.unattended === true,
+        isPairedDevice: () => options.paired === true,
       } as never,
       ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
       uuid: () => "80000000-0000-4000-8000-000000000001",
@@ -892,6 +994,65 @@ describe("octant_browser profile argument", () => {
 
     expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
     expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
+  });
+
+  it("uses the task default without granting it, and lets an explicit Private override it", async () => {
+    const selected = fixture({ defaultProfile: "personal" });
+    await selected.run({ operation: "navigate", url: "https://example.com" });
+    expect(selected.request).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: { kind: "personal" } }),
+    );
+    expect(selected.create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "personal" });
+    const explicit = fixture({ defaultProfile: "personal" });
+    await explicit.run({ operation: "navigate", url: "https://example.com", profile: "private" });
+    expect(explicit.create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
+  });
+
+  it.each([{ unattended: true }, { profileCaller: "terminal-grant" as const }, { paired: true }])(
+    "refuses an inherited stored default for excluded callers instead of opening Private: %j",
+    async (caller) => {
+      const f = fixture({ ...caller, defaultProfile: "personal" });
+      const answer = await f.run({ operation: "navigate", url: "https://example.com" });
+      expect(answer.isError).toBe(true);
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.request).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["same", "model", "authority"] as const)(
+    "checks a person-switched pending binding before exposing page content: %s",
+    async (change) => {
+      const active = activeContext({ kind: "personal" });
+      const bindings = new Map([
+        [
+          String(active.context!.contextId),
+          {
+            approval: "pending" as const,
+            modelId: change === "model" ? "old-model" : modelId,
+            authority:
+              change === "authority"
+                ? { ...workAuthority, rootId: "different" as never }
+                : workAuthority,
+          },
+        ],
+      ]);
+      const f = fixture({ inspect: active, modelBindings: bindings, remembered: () => true });
+      await f.run({ operation: "snapshot" });
+      expect(f.request).toHaveBeenCalledTimes(change === "same" ? 0 : 1);
+      expect(bindings.get(String(active.context!.contextId))).not.toHaveProperty("approval");
+    },
+  );
+
+  it("keeps a live explicit Private page when a later navigate omits its Project default", async () => {
+    const active = activeContext();
+    const bindings = new Map([
+      [String(active.context!.contextId), { modelId, authority: workAuthority }],
+    ]);
+    const f = fixture({ defaultProfile: "project", inspect: active, modelBindings: bindings });
+    expect((await f.run({ operation: "navigate", url: "https://example.com/next" })).isError).toBe(
+      false,
+    );
+    expect(f.create).not.toHaveBeenCalled();
   });
 
   it("asks the person about the site and names the profile", async () => {
@@ -1349,6 +1510,7 @@ describe("octant_browser flow operations", () => {
     for (const operation of ["snapshot", "screenshot", "read-page", "diagnostics", "tab-list"]) {
       expect(decide({ operation })).toBe("unstored");
     }
+    expect(decide({ operation: "audit", kind: "accessibility" })).toBe("unstored");
     expect(decide({ operation: "click", selector: "#go" })).toBe("stored");
     expect(decide({ operation: "upload", selector: "#f", files: ["a.pdf"] })).toBe(
       "needs-a-person",
@@ -1368,5 +1530,458 @@ describe("octant_browser flow operations", () => {
     expect(decide({ operation: "navigate", url: "https://example.com/?page=2#top" })).toBe(
       "stored",
     );
+  });
+});
+
+describe("bounded page script input", () => {
+  it("requires an observed revision and bounds source bytes while refusing script batches", () => {
+    const parse = (input: unknown) =>
+      parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+    expect(
+      parse({ operation: "run-script", source: "document.title", expectedObservationRevision: 1 }),
+    ).toEqual({
+      operation: "run-script",
+      source: "document.title",
+      expectedObservationRevision: 1,
+    });
+    for (const input of [
+      { operation: "run-script", source: "42" },
+      { operation: "run-script", source: "😀".repeat(2049), expectedObservationRevision: 1 },
+      {
+        operation: "run-script",
+        source: "42",
+        expectedObservationRevision: 1,
+        profile: "personal",
+      },
+      {
+        operation: "steps",
+        steps: [{ operation: "run-script", source: "42", expectedObservationRevision: 1 }],
+      },
+    ])
+      expect(parse(input)).toBeUndefined();
+  });
+});
+
+describe("octant_browser recording", () => {
+  const context = {
+    contextId: "50000000-0000-4000-8000-000000000001" as never,
+    threadId,
+    actionId: "60000000-0000-4000-8000-000000000001" as never,
+    correlationId: "70000000-0000-4000-8000-000000000001" as never,
+    authority,
+    policy: {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 8,
+      sessionTimeoutMs: 600_000,
+    },
+    state: "active" as const,
+    createdAt: "2026-09-09T10:00:00.000Z" as never,
+  };
+  const captureId = "6f1c2f0e-8a58-4c53-9a1b-3a4f0f6f7a10";
+  const recording = { frames: 9, durationMs: 2_250 };
+
+  function recordingTools(
+    answer: (kind: string) => BrowserAutomationSnapshot,
+    posture: "approval-gated" | "plan" | (() => "approval-gated" | "plan") = "approval-gated",
+  ) {
+    const running = snapshot({ status: "running", context, observation: { revision: 4 } as never });
+    const act = vi.fn(async (input: { readonly request: { readonly kind: string } }) =>
+      answer(input.request.kind),
+    );
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      // Read at each check, as a posture that changes while a call runs is.
+      get executionPolicy() {
+        return typeof posture === "function" ? posture() : posture;
+      },
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act: act as never,
+        releaseThread: vi.fn(async () => running),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const kinds = () =>
+      act.mock.calls.map((call) => (call[0] as { request: { kind: string } }).request.kind);
+    return { act, tools, kinds };
+  }
+
+  const kept = (kind: string) =>
+    snapshot({
+      status: "running",
+      context,
+      observation: {
+        revision: 5,
+        ...(kind === "record-stop"
+          ? { capture: { status: "kept", captureId, recording } }
+          : { change: "The page's text changed." }),
+      } as never,
+    });
+
+  it("records the page around a batch and answers with the recording the thread kept", async () => {
+    const { act, tools, kinds } = recordingTools(kept);
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [{ operation: "click", selector: "#save" }],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start", "click", "record-stop"]);
+    for (const call of act.mock.calls) {
+      expect(call[0]).toMatchObject({ capturedBy: "agent" });
+    }
+    expect(result).toMatchObject({
+      isError: false,
+      result: { recording: { captureId, ...recording }, steps: [{ step: 1, operation: "click" }] },
+    });
+  });
+
+  it("records a flow replay the same way", async () => {
+    const { kinds, tools } = recordingTools(kept);
+    await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "flow-run", name: "Check the form", record: true }),
+    });
+    // This host keeps no flows, so the replay itself is refused; the recording
+    // around it still starts and ends.
+    expect(kinds()).toEqual(["record-start", "record-stop"]);
+  });
+
+  it("still ends the recording when a step fails, and says why none was kept", async () => {
+    const { tools, kinds } = recordingTools((kind) =>
+      kind === "click"
+        ? snapshot({
+            status: "failed",
+            context,
+            failure: { category: "failed", message: "The browser action failed." },
+          })
+        : kind === "record-stop"
+          ? snapshot({
+              status: "running",
+              context,
+              observation: {
+                revision: 5,
+                capture: { status: "not-kept", reason: "no-picture" },
+              } as never,
+            })
+          : kept(kind),
+    );
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [
+          { operation: "click", selector: "#save" },
+          { operation: "click", selector: "#next" },
+        ],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start", "click", "record-stop"]);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { failedStep: { step: 1 }, recordingNotKept: "no-picture" },
+    });
+  });
+
+  it("runs nothing when the Browser cannot record", async () => {
+    const { tools, kinds } = recordingTools((kind) =>
+      kind === "record-start"
+        ? snapshot({
+            status: "failed",
+            context,
+            failure: { category: "unavailable", message: "This Browser cannot record the page." },
+          })
+        : kept(kind),
+    );
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [{ operation: "click", selector: "#save" }],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start"]);
+    expect(result).toMatchObject({
+      isError: true,
+      result: {
+        error: "recording-refused",
+        answer: { failure: { category: "unavailable" } },
+      },
+    });
+  });
+
+  it("stops a recording that began before Plan and keeps nothing when the thread moves into Plan mid-batch", async () => {
+    let posture: "approval-gated" | "plan" = "approval-gated";
+    const { act, tools, kinds } = recordingTools(
+      (kind) => {
+        if (kind === "wait") posture = "plan";
+        return kept(kind === "record-stop" ? "wait" : kind);
+      },
+      () => posture,
+    );
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [
+          { operation: "wait", selector: "main" },
+          { operation: "click", selector: "#save" },
+        ],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start", "wait", "record-stop"]);
+    expect(act.mock.calls[2]?.[0]).toMatchObject({ discardRecording: true });
+    expect(result).toMatchObject({
+      isError: true,
+      result: { failedStep: { step: 2 }, recordingNotKept: "plan-mode-read-only" },
+    });
+    expect(result.result).not.toHaveProperty("recording");
+  });
+
+  it("refuses a recording in Plan, even around a batch of reads, and runs none of it", async () => {
+    const { act, tools } = recordingTools(kept, "plan");
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [{ operation: "screenshot" }],
+      }),
+    });
+    expect(result.result).toEqual({
+      error: "recording-refused",
+      answer: { error: "plan-mode-read-only" },
+    });
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("reads record only as a boolean on steps and flow-run, and never as an operation", () => {
+    const parse = (input: unknown) =>
+      parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+    expect(
+      parse({ operation: "steps", record: true, steps: [{ operation: "snapshot" }] }),
+    ).toMatchObject({ record: true });
+    expect(
+      parse({ operation: "steps", record: false, steps: [{ operation: "snapshot" }] }),
+    ).not.toHaveProperty("record");
+    expect(parse({ operation: "flow-run", name: "Check", record: true })).toMatchObject({
+      record: true,
+    });
+    for (const input of [
+      { operation: "steps", record: "yes", steps: [{ operation: "snapshot" }] },
+      { operation: "steps", steps: [{ operation: "snapshot", record: true }] },
+      { operation: "flow-save", name: "Check", record: true },
+      { operation: "screenshot", record: true },
+      { operation: "record-start" },
+      { operation: "record-stop" },
+      { operation: "steps", steps: [{ operation: "record-start" }] },
+    ])
+      expect(parse(input), JSON.stringify(input)).toBeUndefined();
+  });
+});
+
+describe("octant_browser in Plan mode", () => {
+  const contextId = "50000000-0000-4000-8000-000000000031";
+  // Flows belong to a Project, so this thread's authority names one.
+  const planAuthority = {
+    ...authority,
+    projectId: "80000000-0000-4000-8000-000000000031",
+  } as ToolActionAuthority;
+  const page = snapshot({
+    status: "running",
+    context: {
+      contextId: contextId as never,
+      threadId,
+      actionId: "60000000-0000-4000-8000-000000000031" as never,
+      correlationId: "70000000-0000-4000-8000-000000000031" as never,
+      authority: planAuthority,
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 8,
+        sessionTimeoutMs: 600_000,
+      },
+      state: "active",
+      createdAt: "2026-09-09T10:00:00.000Z" as never,
+    },
+    observation: { revision: 4, screenshotDataUrl: "data:image/png;base64,aGVsbG8=" } as never,
+  });
+
+  /** A Plan turn whose page is already open and approved for model-a. */
+  function planTools(options: { readonly modelId?: string } = {}) {
+    const turnModel = options.modelId ?? modelId;
+    const act = vi.fn(async () => page);
+    const create = vi.fn(async () => page);
+    const releaseThread = vi.fn(async () => snapshot());
+    const saveDownload = vi.fn();
+    const request = vi.fn(async () => "denied" as const);
+    const save = vi.fn();
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId: turnModel,
+      resolveModelId: () => turnModel,
+      modelBindings: new Map<string, BrowserModelBinding>([
+        [contextId, { modelId, authority: planAuthority }],
+      ]),
+      executionPolicy: "plan",
+      resolveAuthority: () => planAuthority,
+      browser: {
+        inspectThread: () => page,
+        create,
+        act,
+        saveDownload: saveDownload as never,
+        releaseThread,
+        snapshotRefs: () => [],
+        holdForPerson: vi.fn(),
+      },
+      flows: {
+        service: { list: () => [], get: () => undefined, save: save as never },
+        recorder: new BrowserFlowRecorder(),
+        caller: () => "person",
+      },
+      approvals: { request } as never,
+      uploadRoot: () => "/tmp/octant-plan-workspace",
+      uuid: () => crypto.randomUUID(),
+    });
+    return { tools, act, create, releaseThread, saveDownload, request, save };
+  }
+  const call = (tools: ReturnType<typeof planTools>["tools"], input: unknown) =>
+    tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+  const operations = Object.keys(BROWSER_OPERATION_EFFECT) as ReadonlyArray<
+    keyof typeof BROWSER_OPERATION_EFFECT
+  >;
+  const withEffect = (effect: string) =>
+    operations.filter((operation) => BROWSER_OPERATION_EFFECT[operation] === effect);
+
+  it.each(withEffect("reads"))(
+    "admits %s in Plan, which only reads, and asks no one",
+    async (operation) => {
+      const { tools, act, create, request } = planTools();
+      const answer = await call(tools, BROWSER_CALL_OF_EACH_OPERATION[operation]);
+      expect(answer.isError).toBe(false);
+      // help and flow-list touch no page; every other read reaches it once.
+      expect(act).toHaveBeenCalledTimes(operation === "help" || operation === "flow-list" ? 0 : 1);
+      expect(create).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(withEffect("changes"))(
+    "refuses %s before anything reaches the page, the workspace, or the person",
+    async (operation) => {
+      const { tools, act, create, request, saveDownload, save } = planTools();
+      const answer = await call(tools, BROWSER_CALL_OF_EACH_OPERATION[operation]);
+      // A recording is refused at its start, so the call it wraps never runs.
+      const refusal = { error: "plan-mode-read-only" };
+      expect(answer).toEqual({
+        result: operation.startsWith("record-")
+          ? { error: "recording-refused", answer: refusal }
+          : refusal,
+        isError: true,
+      });
+      expect(act).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+      expect(saveDownload).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still lets stop release the thread's own Browser", async () => {
+    const { tools, releaseThread } = planTools();
+    expect((await call(tools, BROWSER_CALL_OF_EACH_OPERATION.stop)).isError).toBe(false);
+    expect(releaseThread).toHaveBeenCalledOnce();
+  });
+
+  it("runs the reads of a batch and stops at its first step that changes the page", async () => {
+    const { tools, act } = planTools();
+    const answer = await call(tools, {
+      operation: "steps",
+      steps: [
+        { operation: "snapshot" },
+        { operation: "click", ref: "e1" },
+        { operation: "snapshot" },
+      ],
+    });
+    expect(act).toHaveBeenCalledOnce();
+    expect(answer.result).toMatchObject({
+      failedStep: { step: 2, operation: "click", answer: { error: "plan-mode-read-only" } },
+    });
+  });
+
+  it("still asks the person before another model reads the page, and reads nothing they decline", async () => {
+    const { tools, act, request } = planTools({ modelId: "model-b" });
+    expect(await call(tools, { operation: "snapshot" })).toEqual({
+      result: { error: "browser-approval-denied" },
+      isError: true,
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a read while the person holds the page", async () => {
+    const act = vi.fn(async () => page);
+    const held = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map<string, BrowserModelBinding>([
+        [contextId, { modelId, authority: planAuthority }],
+      ]),
+      executionPolicy: "plan",
+      resolveAuthority: () => planAuthority,
+      browser: {
+        inspectThread: () => ({ ...page, waitingForPerson: "sign-in" as const }),
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+      },
+      uuid: () => crypto.randomUUID(),
+    });
+    expect((await call(held, { operation: "snapshot" })).isError).toBe(true);
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a read once the turn's model is no longer the thread's", async () => {
+    const act = vi.fn(async () => page);
+    const stale = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => "model-b",
+      modelBindings: new Map<string, BrowserModelBinding>([
+        [contextId, { modelId, authority: planAuthority }],
+      ]),
+      executionPolicy: "plan",
+      resolveAuthority: () => planAuthority,
+      browser: { inspectThread: () => page, create: vi.fn(), act, releaseThread: vi.fn() },
+      uuid: () => crypto.randomUUID(),
+    });
+    expect(await call(stale, { operation: "snapshot" })).toEqual({
+      result: { error: "browser-model-stale" },
+      isError: true,
+    });
+    expect(act).not.toHaveBeenCalled();
   });
 });

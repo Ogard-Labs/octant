@@ -12,6 +12,13 @@ import {
 const home = "/Users/ada";
 
 describe("the default folder", () => {
+  it("gives Octant Nightly's test host the folder its desktop names, never Octant's", () => {
+    expect(hostDefaultFolder(home, { OCTANT_DEFAULT_FOLDER: "/Users/ada/Octant Nightly" })).toBe(
+      "/Users/ada/Octant Nightly",
+    );
+    expect(hostDefaultFolder(home, {})).toBe("/Users/ada/Octant");
+  });
+
   it("falls back to Octant at the top of the home folder until someone names one", () => {
     expect(hostDefaultFolder(home)).toBe("/Users/ada/Octant");
     expect(effectiveDefaultFolder({}, home)).toBe("/Users/ada/Octant");

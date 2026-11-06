@@ -13,7 +13,11 @@ import {
   executeHostSigningHelper,
   type KeychainHelperExecutor,
 } from "./hostIdentityKeychain";
-import { KEYCHAIN_STORE_SCOPE_PATTERN } from "./keychainCredentialStore";
+import {
+  KEYCHAIN_STORE_SCOPE_PATTERN,
+  keychainHelperArguments,
+  type KeychainServiceFamily,
+} from "./keychainCredentialStore";
 
 export const OWNER_UNLOCK_KEYCHAIN_NAMESPACE = "app.octant.owner-unlock.v1" as const;
 
@@ -157,7 +161,11 @@ const REFUSALS: Readonly<Record<string, OwnerUnlockRefusal>> = {
 
 export function makeOwnerUnlockKeyService(
   helperPath: string,
-  options: { readonly storeScope: string; readonly execute?: KeychainHelperExecutor },
+  options: {
+    readonly storeScope: string;
+    readonly serviceFamily?: KeychainServiceFamily;
+    readonly execute?: KeychainHelperExecutor;
+  },
 ): OwnerUnlockKeyService {
   if (!isAbsolute(helperPath) || !KEYCHAIN_STORE_SCOPE_PATTERN.test(options.storeScope)) {
     throw new TypeError("The owner unlock key needs an absolute helper path and a store scope.");
@@ -179,7 +187,7 @@ export function makeOwnerUnlockKeyService(
     let result;
     try {
       result = await execute(
-        { command: helperPath, args: [], stdin },
+        { command: helperPath, args: keychainHelperArguments(options.serviceFamily), stdin },
         { maxBytes: HOST_IDENTITY_HELPER_MAX_BYTES, timeoutMs },
       );
     } catch {

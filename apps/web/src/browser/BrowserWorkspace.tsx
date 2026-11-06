@@ -1,9 +1,11 @@
+import { BrowserCredentialBindingControl } from "./BrowserCredentialBindingControl";
 import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
 import type {
   BrowserAutomationSnapshot,
+  BrowserTaskProfileState,
   BrowserThreadScope,
   BrowserWorkspaceStatus,
 } from "@octant/contracts/browser-automation-rpc";
@@ -41,6 +43,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
@@ -138,6 +141,76 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ? "private"
       : readRememberedProfileChoice(String(props.projectId)),
   );
+  const [taskProfileReadState, setTaskProfileReadState] = useState<{
+    readonly client: BrowserAutomationClient;
+    readonly threadId: BrowserTaskProfileState["threadId"];
+    readonly mode: BrowserTaskProfileState["mode"];
+    readonly status: "pending" | "ready" | "error";
+    readonly selection?: BrowserTaskProfileState;
+  }>();
+  const currentTaskProfileScope = useRef({
+    client: props.client,
+    threadId: props.tab.threadId,
+    mode: props.tab.mode,
+  });
+  currentTaskProfileScope.current = {
+    client: props.client,
+    threadId: props.tab.threadId,
+    mode: props.tab.mode,
+  };
+  const scopedTaskProfileRead =
+    taskProfileReadState?.client === props.client &&
+    taskProfileReadState.threadId === props.tab.threadId &&
+    taskProfileReadState.mode === props.tab.mode
+      ? taskProfileReadState
+      : undefined;
+  const taskProfile = scopedTaskProfileRead?.selection;
+  const taskProfileRead = scopedTaskProfileRead?.status ?? "pending";
+  const [taskProfileRetry, setTaskProfileRetry] = useState(0);
+  const [pendingTaskProfile, setPendingTaskProfile] = useState<BrowserProfileChoice>();
+  const [selectingTaskProfile, setSelectingTaskProfile] = useState(false);
+  const taskProfileSupported =
+    props.tab.threadId !== undefined &&
+    props.client.readTaskProfile !== undefined &&
+    props.client.selectTaskProfile !== undefined;
+  const taskProfileApplies =
+    taskProfileSupported &&
+    taskProfileRead === "ready" &&
+    !props.startFresh &&
+    (snapshot?.context === undefined || snapshot.context.contextId === taskProfile?.contextId);
+  useEffect(() => {
+    const read = props.client.readTaskProfile;
+    const threadId = props.tab.threadId;
+    const mode = props.tab.mode;
+    if (!taskProfileSupported || read === undefined || threadId === undefined) return;
+    const controller = new AbortController();
+    const scope = { client: props.client, threadId, mode };
+    setTaskProfileReadState({ ...scope, status: "pending" });
+    void read
+      .call(props.client, { threadId, mode }, controller.signal)
+      .then((selection) => {
+        if (selection.threadId !== threadId || selection.mode !== mode)
+          throw new Error("Task Browser profile scope changed.");
+        if (!controller.signal.aborted) {
+          setTaskProfileReadState({ ...scope, status: "ready", selection });
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setTaskProfileReadState({ ...scope, status: "error" });
+      });
+    return () => controller.abort();
+  }, [
+    props.client,
+    props.tab.threadId,
+    props.tab.mode,
+    snapshot?.context?.contextId,
+    taskProfileSupported,
+    taskProfileRetry,
+  ]);
+  useEffect(() => {
+    setPendingTaskProfile(undefined);
+    setSelectingTaskProfile(false);
+  }, [props.client, props.tab.threadId, props.tab.mode]);
   const chosenByPerson = useRef(false);
   // The context a profile switch created for a tab that was bound to another one.
   const [replacementContextId, setReplacementContextId] = useState<BrowserContextId>();
@@ -255,7 +328,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // they hand it back. The server decides; this only shows it.
   const personHasPage = activeContext && snapshot?.waitingForPerson === "take-over";
   const driverLabel = personHasPage
-    ? "You have the page"
+    ? snapshot?.ownerController === undefined
+      ? "You have the page"
+      : `Owner: ${snapshot.ownerController.name}`
     : !nativeContext
       ? "Preview"
       : nativeSurface.failed
@@ -405,9 +480,25 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   async function start(
     address: string = url,
     prepared?: LocalServerOpenTarget,
-    choice: BrowserProfileChoice = profileChoice,
+    choice: BrowserProfileChoice = taskProfileApplies
+      ? (taskProfile?.profile ?? "private")
+      : profileChoice,
+    explicitPrivate = false,
   ): Promise<void> {
     if (startInFlight.current) return;
+    if (
+      taskProfileSupported &&
+      !props.startFresh &&
+      taskProfileRead !== "ready" &&
+      !(taskProfileRead === "error" && explicitPrivate && choice === "private")
+    ) {
+      setMessage(
+        taskProfileRead === "error"
+          ? "The task’s default could not be loaded. Retry, or explicitly open a Private page below."
+          : "The task’s Browser profile is loading. Try again shortly.",
+      );
+      return;
+    }
     startInFlight.current = true;
     localFailure.current = false;
     setStarting(true);
@@ -676,7 +767,87 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
    * the same address opens again as a new browsing context in the chosen profile
    * and the old context closes; nothing it held carries over.
    */
+  async function selectTaskProfile(choice: BrowserProfileChoice): Promise<void> {
+    const select = props.client.selectTaskProfile;
+    const selection = taskProfile;
+    if (
+      select === undefined ||
+      selection === undefined ||
+      taskProfileRead !== "ready" ||
+      selectingTaskProfile
+    )
+      return;
+    const sameScope = () =>
+      currentTaskProfileScope.current.client === props.client &&
+      currentTaskProfileScope.current.threadId === props.tab.threadId &&
+      currentTaskProfileScope.current.mode === props.tab.mode;
+    const acceptSelection = (next: BrowserTaskProfileState) => {
+      if (!sameScope()) return;
+      setTaskProfileReadState({
+        client: props.client,
+        threadId: next.threadId,
+        mode: next.mode,
+        status: "ready",
+        selection: next,
+      });
+    };
+    setSelectingTaskProfile(true);
+    try {
+      const address = committedAddress ?? validTargetUrl(url);
+      const result = await select.call(props.client, {
+        threadId: selection.threadId,
+        mode: selection.mode,
+        expectedVersion: selection.version,
+        profile: choice,
+        ...(selection.contextId === undefined ? {} : { expectedContextId: selection.contextId }),
+        ...(activeContext && address !== undefined ? { url: address } : {}),
+      });
+      if (!sameScope()) return;
+      acceptSelection(result.selection);
+      update(result.browser);
+      if (result.browser.context?.state === "active") {
+        if (props.startFresh) setOwnedContextId(result.browser.context.contextId);
+        if (props.tab.contextId !== undefined)
+          setReplacementContextId(result.browser.context.contextId);
+        if (props.startFresh || props.tab.contextId !== undefined)
+          props.onContextCreated?.(result.browser.context.contextId);
+      }
+      setMessage(
+        "Default Browser profile saved for this task. Agents still need permission to use a signed-in profile.",
+      );
+    } catch (error) {
+      if (!sameScope()) return;
+      localFailure.current = true;
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "The task’s Browser profile could not be changed. The original page was kept.",
+      );
+      // A version conflict must be retryable without replacing the held page.
+      try {
+        const refreshed = await props.client.readTaskProfile?.({
+          threadId: selection.threadId,
+          mode: selection.mode,
+        });
+        if (refreshed !== undefined) acceptSelection(refreshed);
+      } catch {
+        /* Keep the last choice visible while the host is unavailable. */
+      }
+    } finally {
+      if (sameScope()) {
+        setSelectingTaskProfile(false);
+        setPendingTaskProfile(undefined);
+      }
+    }
+  }
+
   async function chooseProfile(choice: BrowserProfileChoice): Promise<void> {
+    if (taskProfileApplies) {
+      if (choice === taskProfile?.profile) return;
+      if (activeContext) setPendingTaskProfile(choice);
+      else await selectTaskProfile(choice);
+      return;
+    }
     chosenByPerson.current = true;
     if (profileKey !== undefined) writeRememberedProfileChoice(profileKey, choice);
     setProfileChoice(choice);
@@ -743,6 +914,19 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       aria-label="Browser automation"
       className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}`}
     >
+      {pendingTaskProfile === undefined ? null : (
+        <OctantConfirmDialog
+          title="Change this task’s default Browser profile?"
+          confirmLabel="Change profile"
+          pending={selectingTaskProfile}
+          onCancel={() => setPendingTaskProfile(undefined)}
+          onConfirm={() => void selectTaskProfile(pendingTaskProfile)}
+        >
+          The current address opens in a fresh page in the chosen profile. Unsaved form entries on
+          this page will be lost. Your task, conversation, and message draft stay open. The original
+          page stays open if the switch fails.
+        </OctantConfirmDialog>
+      )}
       <header className="browser-workspace__chrome">
         <div className="browser-workspace__history" aria-label="Browser history controls">
           <OctantButton
@@ -794,19 +978,43 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           </OctantButton>
         </div>
         <BrowserProfileControl
-          disabled={starting}
+          disabled={
+            starting ||
+            selectingTaskProfile ||
+            (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
+          }
+          {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
           onChange={(choice) => void chooseProfile(choice)}
           profile={
-            activeContext
-              ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
-              : profileChoice
+            taskProfileApplies
+              ? (taskProfile?.profile ?? "private")
+              : activeContext
+                ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
+                : profileChoice
           }
           projectProfileAvailable
           signedInPagesAvailable={nativeSupported}
-          {...(props.client.manageProfiles === undefined
+          {...(taskProfileApplies || props.client.manageProfiles === undefined
             ? {}
             : { onSignOut: () => signOutOfProfile() })}
         />
+        {nativeContext &&
+        activeContext &&
+        snapshot?.context !== undefined &&
+        (snapshot.context.authority.mode === "work" ||
+          snapshot.context.authority.mode === "code") ? (
+          <BrowserCredentialBindingControl
+            key={String(snapshot.context.contextId)}
+            client={props.client}
+            context={{
+              contextId: snapshot.context.contextId,
+              threadId: snapshot.context.threadId,
+              mode: snapshot.context.authority.mode,
+            }}
+            profile={snapshot.context.policy.profile ?? { kind: "private" }}
+            held={snapshot.waitingForPerson !== undefined}
+          />
+        ) : null}
         {nativeContext && activeContext ? (
           <BrowserExtensionsButton
             agentDriving={nativeState?.control === "agent"}
@@ -906,6 +1114,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           </OctantButton>
         ) : null}
         {activeContext &&
+        snapshot?.ownerController !== undefined &&
+        props.client.takeOver !== undefined ? (
+          <OctantButton
+            aria-label="Reclaim locally"
+            className="browser-workspace__take-over"
+            onClick={() => void holdPage("take-over")}
+            size="xs"
+            title="Stop remote owner control and keep the page held locally"
+            type="button"
+            variant="secondary"
+          >
+            Reclaim locally
+          </OctantButton>
+        ) : null}
+        {activeContext &&
         snapshot?.waitingForPerson === undefined &&
         props.client.takeOver !== undefined ? (
           <OctantButton
@@ -990,6 +1213,33 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           )}
         </span>
       </header>
+      {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
+        <OctantAlert tone="warning">
+          The task’s default could not be loaded. Its saved choice has not changed.
+          <OctantButton
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setTaskProfileReadState(undefined);
+              setTaskProfileRetry((value) => value + 1);
+            }}
+          >
+            Retry task default
+          </OctantButton>
+          {!activeContext ? (
+            <OctantButton
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={starting || url.trim() === ""}
+              onClick={() => void start(url, undefined, "private", true)}
+            >
+              Open Private page
+            </OctantButton>
+          ) : null}
+        </OctantAlert>
+      ) : null}
       {notice === undefined ? null : (
         <OctantAlert className="browser-workspace__message" tone="warning">
           {notice}
@@ -1113,6 +1363,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           className="browser-workspace__native"
           ref={nativeSurface.mount}
         >
+          {nativeSurface.embedded}
           {nativeSurface.failed ? (
             <OctantAlert className="browser-workspace__native-error" tone="danger">
               <p>The live Chromium page could not attach to this pane.</p>

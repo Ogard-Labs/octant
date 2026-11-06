@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeFakeOnePassword } from "./fakeOnePassword.test-support";
 import {
   decodeLinkedSecretPointer,
@@ -27,6 +27,118 @@ function fixture() {
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("linked secret stores", { timeout: 30_000 }, () => {
+  it("never consumes a credential from an item read that overlapped unlink and same-time relink", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const answer = {
+      status: "described" as const,
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+    };
+    let finish: (() => void) | undefined;
+    const stores = makeLinkedSecretStores({
+      statePath: join(mkdtempSync(join(tmpdir(), "octant-browser-consume-")), "state.json"),
+      now: () => "2026-11-03T10:00:00.000Z",
+      adapters: [
+        {
+          kind: "onepassword",
+          label: "Fixture",
+          probe: async () => "ready",
+          isValidReference: () => true,
+          read: async () => ({ status: "missing" }),
+          browserMetadata: async () => answer,
+          consumeBrowserCredential: async (_metadata, consume) => {
+            await new Promise<void>((resolve) => {
+              finish = resolve;
+            });
+            await consume({ username: "fixture-user", password: "fixture-private" });
+            return { status: "consumed" };
+          },
+        },
+      ],
+    });
+    await stores.link("onepassword");
+    const metadata = await stores.browserMetadata?.(item);
+    if (metadata?.status !== "described") throw new Error("Expected selected metadata");
+    const use = vi.fn(async () => undefined);
+    const pending = stores.consumeBrowserCredential?.(metadata, use);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await stores.unlink("onepassword");
+    await stores.link("onepassword");
+    finish?.();
+    expect(await pending).toEqual({ status: "changed" });
+    expect(use).not.toHaveBeenCalled();
+    expect(stores.browserRevisionCurrent?.(metadata.storeRevision)).toBe(false);
+  });
+  it("refuses delayed metadata after unlink and relink even at the same recorded link time", async () => {
+    const item = {
+      store: "onepassword" as const,
+      accountId: "a".repeat(26),
+      vaultId: "v".repeat(26),
+      itemId: "i".repeat(26),
+    };
+    const answer = {
+      status: "described" as const,
+      item,
+      title: "Fixture",
+      version: 1,
+      websiteOrigins: ["https://login.example"],
+    };
+    const metadata = vi.fn(async () => answer);
+    const stores = makeLinkedSecretStores({
+      statePath: join(mkdtempSync(join(tmpdir(), "octant-browser-link-")), "state.json"),
+      now: () => "2026-11-03T10:00:00.000Z",
+      adapters: [
+        {
+          kind: "onepassword",
+          label: "Fixture",
+          probe: async () => "ready",
+          isValidReference: () => true,
+          read: async () => ({ status: "unavailable" }),
+          browserMetadata: metadata,
+        },
+      ],
+    });
+    await stores.link("onepassword");
+    const first = await stores.browserMetadata?.(item);
+    let finish: (() => void) | undefined;
+    let started: (() => void) | undefined;
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    metadata.mockImplementationOnce(async () => {
+      started?.();
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return answer;
+    });
+    const pending = stores.browserMetadata?.(item);
+    await begun;
+    await stores.unlink("onepassword");
+    await stores.link("onepassword");
+    finish?.();
+    expect(await pending).toEqual({ status: "changed" });
+    const after = await stores.browserMetadata?.(item);
+    expect(first).toMatchObject({ status: "described" });
+    expect(after).toMatchObject({ status: "described" });
+    if (first?.status !== "described" || after?.status !== "described")
+      throw new Error("Missing metadata fixture");
+    expect(after.storeRevision).not.toBe(first.storeRevision);
+    expect(
+      decodeLinkedSecretPointer(
+        "octant-linked-secret:v1:" +
+          JSON.stringify({ store: "onepassword", reference: REFERENCE, accountId: item.accountId }),
+      ),
+    ).toBeUndefined();
+  });
+
   it("links the 1Password CLI only while it is unlocked, and reports why otherwise", async () => {
     const { op, stores } = fixture();
     op.setMode("locked");

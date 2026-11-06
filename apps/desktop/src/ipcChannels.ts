@@ -17,6 +17,7 @@ export const DESKTOP_IPC_CHANNELS = {
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
+  browserHumanPresentation: "octant:browser:human-presentation",
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
   browserSurfaceCommand: "octant:browser-surface:command",
@@ -50,6 +51,14 @@ export const DESKTOP_IPC_CHANNELS = {
   appUpdateRing: "octant:app-update:ring",
   appUpdateWhatsNew: "octant:app-update:whats-new",
   appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
+  nightlyInstallState: "octant:nightly-install:state",
+  nightlyInstall: "octant:nightly-install:install",
+  nightlyInstallOpen: "octant:nightly-install:open",
+  nightlyInstallRemove: "octant:nightly-install:remove",
+  nightlyDataState: "octant:nightly-data:state",
+  nightlyDataChoose: "octant:nightly-data:choose",
+  nightlyDataRemove: "octant:nightly-data:remove",
+  nightlyDataRelaunch: "octant:nightly-data:relaunch",
   approvalSurfacePalette: "octant:window:approval-surface-palette",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
@@ -133,6 +142,16 @@ export const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
  * sentences it recognises from the same table.
  */
 export const KEYRING_ADVICE_MARKER = "keyring-advice: ";
+
+/**
+ * What Nightly says when its matching Octant does not broker a flow the window
+ * asks for: the host's feature list lacks it, or the window has no main-only
+ * token. Nightly refuses before any dialog opens or any host route is called.
+ * The preload passes exactly this sentence to the window, never another
+ * main-process message.
+ */
+export const NEEDS_NEWER_OCTANT =
+  "Needs a newer Octant. Update Octant to use this in Octant Nightly.";
 
 /** Provider instance ids as the bridge accepts them: a plain UUID, any version bits. */
 export const PROVIDER_INSTANCE_ID_PATTERN =

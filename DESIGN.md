@@ -357,7 +357,8 @@ sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Look & feel holds Appearance (theme, window glass, background,
-text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
+text, accessibility, and Reading: transcript text size and width, Reply detail,
+the stats line and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
@@ -634,6 +635,14 @@ folder.", rather than greying out with no reason. Every
 start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
 
+The question belongs to a new task only. When the same composer serves a
+decision, such as reviewing a planner's proposal, the caller replaces the mark,
+question, and quiet line with a heading that names the decision ("Review the
+planner's proposal") and the proposal's title, set at the dialog's top-left with
+the fixed proposal text directly under them in the composer. Rendered review
+showed the question above a fixed proposal read as an invitation to write a
+different task.
+
 Every composer has one shape, on a start screen or under a thread, in Chat,
 Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
 mid shadow, a prompt two lines tall before it grows with the same insets, and
@@ -890,9 +899,9 @@ disabled and checked states, and nested actions. Native menus dismiss after
 a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
 receive the platform editing/copy menu. The Code editor and both diff sides
 use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
-Base UI menus. Native menus rely on macOS accessibility and get no automated
-check, because the OS draws them and a test cannot reach them; only the
-browser menus are covered by automated keyboard and role checks. Searchable pickers and popovers with embedded controls remain
+Base UI menus. Native menus use macOS accessibility. Verify their actual presentation and
+selection through native accessibility in an isolated desktop fixture; renderer
+keyboard and role checks cover the browser fallback. Searchable pickers and popovers with embedded controls remain
 renderer surfaces.
 
 ### Turn header
@@ -929,8 +938,9 @@ as the composer; markdown headings inside it are labels
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
-mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". An approval Octant Shield
+mark (spinner, check, cross), parted by hairlines and indented together; at
+the default Reply detail (below) a settled turn folds them behind "N tool
+calls". An approval Octant Shield
 answered is a 28px line among them, not a disclosure: a 14px shield mark
 (check, alert, or cross, the cross in the danger ink), "Octant Shield
 allowed", "asked you", or "denied", the call in detail-size mono, the
@@ -951,6 +961,93 @@ diff values stay blank, and unavailable checkout actions are not shown. Input gr
 extra typed lines and visible notices is intentional. Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
+
+**Reply detail** chooses how much of a turn's work the transcript shows open.
+Settings › Appearance › Reading › Reply detail (`replyDetail`) is the default
+every thread starts at: one `OctantToggleGroup` of three levels whose
+description reads "Where every thread starts unless it sets its own." followed
+by the chosen level's sentence. A thread may set its own level, which then
+stays with that thread: it survives a reload, every window and paired device
+of the host draws it, and changing the default never moves it. A thread that
+never chose follows the default. The levels apply the same in Chat, Work, and
+Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
+
+- **Low** (default): "Thinking stays folded, and a finished turn's tool calls
+  fold behind one line." Thinking is shut, tool rows are listed while the turn
+  runs and fold behind "N tool calls" once it settles, and each row's detail is
+  shut. This is the transcript as it was before the setting.
+- **Medium**: "Thinking stays folded with its first line showing, and tool
+  calls stay listed." A shut Thinking row carries the reasoning's first line
+  after its name, as plain words in the muted ink, clipped to the row with an
+  ellipsis; it goes away while Thinking is open. A settled turn's "N tool
+  calls" fold starts open, and each row's detail stays shut.
+- **High**: "Thinking, tool calls, and each call's recorded result stay open."
+  Thinking, the fold and every row start open on the summary the transcript
+  already holds, still clipped behind Show all past 1,200 characters. While a
+  reply streams, its thinking is open and grows as it arrives, and a running
+  turn's tool rows are open; Settings › Chat › Stream replies still alone
+  decides whether the partial answer shows, at every level.
+
+The thread's own choice is a menu beside the thread's other actions: in Chat's
+header just before Thread actions, and among the leading controls of the Work and
+Code composer row. Its trigger is the shared `shell-icon-button` (`ListCollapse`) whose
+name says the level in effect and whose it is ("Reply detail: High, this
+thread's own" or "Reply detail: Low, the default"), because a menu trigger
+cannot otherwise show its selection. Its radio items are **Use default (Low)**
+(naming the current default; "Follow the level in Settings") and the three
+levels, with short descriptions that fit a phone-width menu: "Thinking and
+finished tool calls folded", "Thinking's first line, tool calls listed",
+"Thinking, tool calls, and results open". A client that cannot change the
+level, a paired browser, shows no menu.
+
+**Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
+default, remappable in Settings › Keyboard shortcuts) steps the thread in front
+through Low, Medium, High and back to Low, setting its own level, and says so
+in a status toast ("Reply detail: Medium" over "This thread:" and the level's
+sentence). A thread is in front only while it is on screen: behind Settings,
+Usage, Review, Zen, or any other page that covers the workspace, the chord does
+nothing and is left to the browser, and the palette offers only the default's
+commands. Mod+Shift+D is held by no other default, no desktop menu item, and no
+macOS or Windows system chord; in a browser it is Bookmark all tabs (Safari:
+Add to Reading List), which the page takes only when it changes a thread. The
+command palette offers the same cycle (showing the chord), each level not in
+effect for this thread, **Use the default reply detail in this thread** when the
+thread has its own, and **Set the default reply detail to …** for the default.
+
+The level is presentation only. It never changes what a model is asked or what
+a client fetches, and a row with no recorded summary says so rather than
+showing more. Every disclosure stays native, with `open` and `aria-expanded` in
+step, so a person can open or close any one by hand; that choice holds for that
+disclosure while the turn stays mounted and the thread's level is unchanged,
+and a change of that level (its own, or the default it follows) puts every
+disclosure where the new level puts it. The first line beside Thinking is
+hidden from assistive technology: the button's name stays "Thinking", and the
+same words are read from the body once it opens. Nothing animates beyond the
+chevron's turn, which reduced motion stills.
+
+The default and the threads' own levels live in the host's shell settings
+(`replyDetail`, `threadReplyDetail`), the document that already holds every
+other per-person presentation choice, keyed maps included. That is the
+narrowest home that keeps it a preference: it is written only by the shell
+route, which only a window on the host reaches; it is not part of any thread's
+journal, so forks, exports and provider context never see it; and host export
+does not carry it. Code's pin is the one per-thread presentation choice kept on
+a thread's own record, and Chat and Work have no such record to share, so a
+level on three mode journals would have put a presentation choice where thread
+authority lives. Purging a thread, alone, with its Project, or past the
+retention window, removes its level in the same pass, so no level outlives its
+thread; the host writes that change itself, with no window to name. The list
+also holds at most 500 threads, and setting one more drops the longest-standing
+choice, a backstop should that write lose a race. The host has no settings push,
+so another open window picks up a change when it regains focus: it re-reads the
+shell settings behind any edit it is still saving. The phone and a paired browser read the two fields, and nothing
+else from the settings document, through `GET /api/reply-detail`
+(`settings.read-non-secret`, read-only, at most 128 KiB): the phone when a
+thread opens and when the app returns to the foreground, a paired browser when
+its workspace opens, when the mode changes, and when the window regains focus.
+Until an answer arrives, or if none can, they draw Low. On the phone the
+reasoning panel opens at High and shows its first line at Medium, and a
+finished tool card opens at High; a change of level remounts them.
 
 The displayed partial answer coalesces updates on a fifty-millisecond beat, or
 one hundred milliseconds for long answers (at least sixteen thousand text
@@ -994,7 +1091,13 @@ section label (`oct-section-label`, "Browser captures"), not a card group: each
 row is a hairline-ringed object with a 72 x 48 picture, the page title in the
 medium weight, and the origin as mono meta, and the whole row is one `bare`
 button that opens the full picture. It uses the neutral hairline and surface
-tokens only, adds no colour, and draws no fill on hover or when open.
+tokens only, adds no colour, and draws no fill on hover or when open. A
+recording's picture is its first frame, still, with a play mark in its lower
+left corner: a filled triangle and the length ("2.5 s") in extra-small
+tabular figures on a pill of the card surface with a hairline ring, so it
+reads by shape and word, never by colour. It moves only once opened, where a
+ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
+its first frame.
 
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact

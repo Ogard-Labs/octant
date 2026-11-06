@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { AutomationEventSourceWindow } from "./automationEvents";
 import { describe, expect, it } from "vitest";
 import {
   AutomationDefinition,
@@ -8,7 +10,10 @@ import {
   decodeAutomationEvent,
   decodeAutomationQuery,
   decodeAutomationRun,
+  decodeAutomationRunReportedResult,
   decodeAutomationTrigger,
+  decodeRoutineChangeRequest,
+  decodeRoutineProposalList,
 } from "./automation";
 
 const ids = {
@@ -1317,5 +1322,69 @@ describe("automation contracts", () => {
         origin: { kind: "interactive" },
       }),
     ).toThrow();
+  });
+});
+
+describe("what a thread's agent asks about routines and reports from a run", () => {
+  const result = {
+    outcome: "needs-attention",
+    summary: "Two invoices lack a total.",
+    reportedAt: at,
+  };
+
+  it("journals a run's reported result with a known outcome and a summary of at most 1 KB", () => {
+    expect(
+      decodeAutomationEvent({
+        eventName: "automation-run-result-reported@1",
+        payload: { automationId: ids.automation, runId: ids.run, result },
+      }).payload,
+    ).toMatchObject({ result });
+    expect(
+      decodeAutomationRunReportedResult({ ...result, summary: "a".repeat(1_024) }),
+    ).toBeDefined();
+    for (const invalid of [
+      { ...result, summary: "a".repeat(1_025) },
+      // Characters under the bound can still be over it in bytes.
+      { ...result, summary: "é".repeat(513) },
+      { ...result, summary: "   " },
+      { ...result, outcome: "completed" },
+      { ...result, extra: true },
+    ]) {
+      expect(() => decodeAutomationRunReportedResult(invalid)).toThrow();
+    }
+  });
+
+  it("lists a change request beside proposals and keeps it strict", () => {
+    const request = {
+      kind: "routine-change-request",
+      proposalId: ids.request,
+      threadId: ids.actor,
+      mode: "work",
+      projectId: ids.project,
+      automationId: ids.automation,
+      change: "archive",
+      displayName: "Weekly research",
+      expectedVersion: 4,
+      requestedAt: at,
+    };
+    expect(
+      decodeRoutineProposalList({ kind: "routine-proposal-list", proposals: [request] }).proposals,
+    ).toEqual([request]);
+    expect(() => decodeRoutineChangeRequest({ ...request, change: "resume" })).toThrow();
+    expect(() => decodeRoutineChangeRequest({ ...request, mode: "chat" })).toThrow();
+    expect(() => decodeRoutineChangeRequest({ ...request, principal: {} })).toThrow();
+  });
+});
+
+describe("integration source coverage receipts", () => {
+  it("accepts bounded unique window identities and refuses ambiguous coverage", () => {
+    const decode = Schema.decodeUnknownSync(AutomationEventSourceWindow);
+    expect(decode({ ids: ["matching", "unmatched"], atLimit: true }).ids).toHaveLength(2);
+    for (const window of [
+      { ids: ["duplicate", "duplicate"], atLimit: true },
+      { ids: [], atLimit: true },
+      { ids: Array.from({ length: 257 }, (_, index) => `run-${index}`), atLimit: false },
+    ])
+      expect(() => decode(window)).toThrow();
   });
 });

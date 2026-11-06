@@ -15,8 +15,10 @@ roots included), short results, hover, select, drag, key chords, upload,
 download (behind a person-only switch and an answer for every file), tabs,
 batched steps, waits, settling, dialogs, viewport size and device emulation
 (presets, touch, color scheme), the sign-in handoff, person and agent together
-(the person's input kept, Take over and Hand back), and diagnostics with a
-cursor are built on the headless and desktop Browsers. Flows (recording a run,
+(the person's input kept, Take over and Hand back), diagnostics with a
+cursor, and accessibility and performance audits are built on the headless
+and desktop Browsers, and so is recording a call as an animated PNG. Flows
+(recording a run,
 saving it in the Project, and replaying it by name) are built in Work and Code;
 the person can list and delete a Project's flows in Settings, and runs one by
 asking the agent.
@@ -28,14 +30,58 @@ asking the agent.
   Code thread and a Work thread read an operation's arguments and shape its
   answer the same way; they differ only in who approves and how a page opens.
 - The always-visible description tells the model to take a snapshot after it
-  navigates and to act by ref. The full usage stays behind `help`.
-- Stored-profile selection through `navigate` is currently wired in Work's
-  adapter only. Code's separate adapter still rejects that argument and opens
-  new pages Private; the shared description is not proof that Code selection
-  is built. See [Browser profiles](browser-profiles.md#choosing-a-profile).
+  navigates and to act by ref, and, to show a reviewer a UI change, to run the
+  short flow as `steps` with `record: true`. The full usage stays behind `help`.
+- Stored-profile selection through `navigate`, and a task's default Browser
+  profile, are wired in both Work's and Code's adapters, each through the
+  stored-profile site approval. See
+  [Browser profiles](browser-profiles.md#choosing-a-profile).
 - Every operation runs on the server's admission path: the thread's authority,
   the model binding, the origin approval, Plan mode, the stale check, and the
   credential check. No operation adds authority a page did not already have.
+
+## Plan mode
+
+Plan may look and propose but changes nothing
+([Architecture: principles](../architecture.md#overview-and-principles)). In
+both adapters (Code's, and Work's, which a terminal grant also uses), Plan
+admits a Browser operation that only reads the page
+already open in the thread's own Browser, or the Project's saved flows, and
+sends no request; it refuses every other one as `plan-mode-read-only` before
+the page, the workspace, or the person is reached.
+
+| Verdict in Plan   | Operations                                                                                             | Why                                                                                                                                                                                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Admitted: reads   | `snapshot`, `read-page`, `screenshot`, `diagnostics`, `audit`, `tab-list`, `wait`, `flow-list`, `help` | Each reads what the open page or the Project already holds: the outline, text, pixels (kept as this thread's own capture), what the page already logged, accessibility findings or the browser's own record of the load, the tab list, a state the page reaches by itself, the saved flows, or static usage. |
+| Admitted          | `stop`                                                                                                 | It closes only this thread's own Browser.                                                                                                                                                                                                                                                                    |
+| Each step         | `steps`                                                                                                | Each step is admitted as a call of its own, so a batch of reads runs and the first step that would change something ends it.                                                                                                                                                                                 |
+| Refused           | `navigate`, `tab-open`                                                                                 | A request, a new page.                                                                                                                                                                                                                                                                                       |
+| Refused           | `click`, `type`, `press`, `select`, `drag`, `hover`                                                    | Input reaches the page; hover runs its handlers and opens menus.                                                                                                                                                                                                                                             |
+| Refused           | `scroll`, `resize`                                                                                     | The page moves or changes size and emulation, which it may answer with requests (more of the page, other images).                                                                                                                                                                                            |
+| Refused           | `tab-switch`, `tab-close`                                                                              | Which page is shown changes, or a page closes.                                                                                                                                                                                                                                                               |
+| Refused           | `upload`, `download-save`, `sign-in`, `run-script`                                                     | Files leave the workspace or enter it, the person acts on the page, or arbitrary JavaScript runs.                                                                                                                                                                                                            |
+| Refused           | `flow-save`, `flow-run`                                                                                | A save writes the Project's flows; a replay acts.                                                                                                                                                                                                                                                            |
+| Refused           | `record-start` (host-issued for `record: true`)                                                        | A recording is an artifact the thread keeps, and Plan only reads, so a `steps` with `record: true` answers `recording-refused` and runs nothing; a recorded `flow-run` is refused as a replay.                                                                                                               |
+| Admitted: cleanup | `record-stop` (host-issued)                                                                            | It ends a recording a call started before Plan began. It reaches the runtime in every posture, so the screencast never runs on to its own bound, and in Plan it keeps nothing: the answer says `recordingNotKept: plan-mode-read-only`.                                                                      |
+
+- Every other gate applies to an admitted read unchanged: the thread's
+  authority and model binding, the origin approval (a page this model or
+  thread was not approved for still asks, and a declined answer reads
+  nothing), the person's hold, the stale check, and outside-content taint. A
+  read never opens a page: with none open it answers `browser-navigation-required`.
+- Code re-asks after every wait (an approval, the action itself), so a thread
+  that moves into Plan while a click is in flight is still refused it and the
+  page released, while a read in flight finishes. A terminal grant decides Plan
+  once per call; an approval answered for an effect after its thread moved into
+  Plan is still cancelled.
+- The rule is one table, `BROWSER_OPERATION_EFFECT` in
+  `apps/server/src/browser/browserToolOperations.ts`, keyed by the operations
+  the definition advertises and the two the host issues around a recorded
+  call, so a new operation does not compile until it takes a row. `audit`,
+  admitted exactly where `diagnostics` is, takes the `reads` row. A recording
+  does not follow `screenshot`: the thread keeps it as an artifact, so its
+  start is refused in Plan and the call it wraps never runs. A recording
+  already running when Plan begins is stopped and discarded.
 
 ## Page snapshot
 
@@ -106,9 +152,10 @@ asking the agent.
 - Rationale: refs are checked by role and name, not by a page revision, so a
   ref survives an action that leaves its element as it was (typing into one
   field, then clicking the button beside it) and is refused only when the
-  element it named changed. Withholding every value on a page with a credential
-  field keeps the rule the rest of the Browser follows, which is to show such a
-  page's structure at most and never what was typed into it.
+  element it named changed. Detected credential fields never expose field
+  values in the outline. This does not prove that the site's own text or
+  callbacks cannot reflect input; brokered use therefore holds observations
+  during the effect and requires a person to check the page before resuming.
 
 ## Results
 
@@ -128,7 +175,21 @@ asking the agent.
   nor the desktop Browser captures the page after an agent's action unless the
   call is a `screenshot` or includes one, and neither returns the page's text
   unless it is a `read-page` or includes it. Each still reads the page's text
-  for the hash.
+  for the hash. Neither records the page unless the call is a `steps` or
+  `flow-run` that asks with `record: true`, and then only while that call runs.
+- **Recording a call.** `record: true` on `steps` or `flow-run` keeps a short
+  animated PNG of the page while the call runs, as a thread capture the person
+  can attach to a pull request; the model never receives the animation. It
+  needs a page already open and is admitted like a `screenshot`, except that
+  Plan refuses it ([Plan mode](#plan-mode)); a start that is refused answers `recording-refused` with the refusal, and the call does
+  not run. The call's answer carries `recording` (`captureId`, `frames`,
+  `durationMs`, and `truncated` when a bound cut it short) or
+  `recordingNotKept` with the reason. Starting and ending a recording leave
+  the observation revision where it was, so a batch's first step may name the
+  revision the call before it returned, and the next call may name the one the
+  batch returned. The bounds, the frames, the credential rule, and the
+  rationale for one recording per call are in
+  [Browser captures: Recordings](browser-captures.md#recordings).
 - **The person keeps their picture.** The activity preview takes its own
   picture through the host's peek, which now runs right after an agent action
   that took none (at most once per 1.5 seconds), so the preview shows the page
@@ -343,6 +404,9 @@ turned on a switch, and then only after they answer for that file.
   before any step runs.
 - A batch is a list of fixed operations, never a script: nothing an agent
   writes runs in the page.
+- `record: true` on the batch records the page while it runs
+  ([Results](#results)). A step cannot carry it, and the start and end of a
+  recording are never steps a model can write or a flow can store.
 - An agent's action that names an `expectedObservationRevision` the page has
   moved past is refused as `stale` and does not run, so a batch stops there
   rather than carrying on as if the step had run. The person's pane, which
@@ -361,7 +425,7 @@ runs, not when it was recorded.
   successful operations since the page opened, at most 50. Each is stored as the
   operation would be written as a call (without the `expectedObservationRevision`
   and `include` that belong to one call). `snapshot`, `screenshot`, `read-page`,
-  `diagnostics`, `tab-list`, and `help` are not stored, and a failed or refused
+  `diagnostics`, `audit`, `tab-list`, and `help` are not stored, and a failed or refused
   operation is not stored. A ref is stored as the element's role and accessible
   name, with the snapshot's selector as a hint for a reader; the ref id is never
   stored, because it means nothing on a fresh page.
@@ -391,11 +455,13 @@ runs, not when it was recorded.
   element it could not find, or the refusal) and lists the steps that ran with
   what each changed; a replay that finishes answers as a `steps` batch does. A
   replayed navigation still raises its origin approval, and the replay's own
-  steps are recorded like any other operation of the agent.
+  steps are recorded like any other operation of the agent. `flow-run` with
+  `record: true` keeps an animated recording of the replay, as a `steps` batch
+  does ([Results](#results)); a saved flow never holds a recording.
 - **Who may.** The thread's own agent in Work and Code saves, lists, and runs. A
   paired device may not save or run (a flow navigates and types, which it may
-  not), and Plan mode refuses every flow operation like every other Browser
-  operation. A routine or a subagent may run a flow, on a Private page only,
+  not), and Plan mode lists but refuses to save or run
+  ([Plan mode](#plan-mode)). A routine or a subagent may run a flow, on a Private page only,
   because the profile rules apply to each replayed step as to any call; it may
   not save one. A terminal grant has no flows. Chat has no Browser.
 - **Where flows live.** Flows are host data per Project, journaled as
@@ -497,7 +563,7 @@ runs, not when it was recorded.
     color scheme are refused there (`Browser automation control is already in
 use`), a size still applies. The person sees the page at the emulated size
     until it is restored. A paired device cannot resize or emulate, and Plan
-    mode refuses it like any other operation.
+    mode refuses it ([Plan mode](#plan-mode)).
 - Rationale: emulation is optional fields on `resize` rather than a separate
   operation. The operation already means "change how the page is sized, and
   restore it", it keeps one restore that undoes everything, and the model learns
@@ -529,7 +595,7 @@ made active.
   renews the interval after authority, policy, revision/ref and credential
   checks, immediately before it reaches the runtime, and again when it finishes
   while the context is still live. Intentional agent reads, snapshots,
-  screenshots, waits, tab operations and diagnostics count, as navigation and
+  screenshots, waits, tab operations, diagnostics and audits count, as navigation and
   input do. A runtime failure after true admission is still a recent attempt;
   a refusal, a held call or a call waiting in the queue is not activity.
 - **The person's input counts.** Native keys and clicks, and the existing
@@ -592,9 +658,12 @@ needed.
   [Page lifetime](#page-lifetime): eleven minutes from the hold, then the later
   of its ordinary idle deadline and two minutes after the card is answered so
   the agent can read it.
-- The person signs in by typing into the page themselves. Octant saves no
-  password and fills none, and the agent never sees what they typed: a
-  credential field never shows a value.
+- The person signs in manually or explicitly approves a selected 1Password
+  binding and reviewed login form. Ordinary agent typing into credential
+  fields still refuses. Brokered filling keeps values in host custody and
+  holds agent actions/observations during private read, fill and submit;
+  overlapping observations cannot publish after release. The website's own
+  code can retain or reflect input, so later page content may disclose it.
 - On **Continue** the agent gets a fresh snapshot of whatever page the person
   left. If that site is unapproved, the refusal says plainly that the person
   left the page on an unapproved site after Continue; it reads nothing there
@@ -605,8 +674,25 @@ needed.
   CLI in a thread terminal (`sign-in-needs-a-person`), and on a paired device's
   turn (`sign-in-needs-this-computer`): nobody there can sign in, or the person
   there cannot see the page.
-- Rationale: the hand-off fits the rule that a person's sign-ins are never read
-  by an agent. The page keeps its profile; a Private page's sign-in lasts as
+- While a native page is held for sign-in or take-over, **Login permission**
+  lets the person review one 1Password account/vault/item by immutable IDs.
+  The review names the exact HTTPS origin and port, top frame, profile and
+  Project/task scope before **Allow selected item** records permission.
+  **Revoke permission** removes it. This records no authentication result,
+  grants no iframe or script access. Saving permission fills nothing.
+  **Review login form** names the selected fields and exact submission/return
+  sites before separate **Fill selected fields** and **Submit sign-in form**
+  actions. Filled/authentication-required outcomes do not mean signed-in.
+  MFA, CAPTCHA, passkeys and ambiguous forms remain manual. Cancellation before
+  native commit prevents it; after start, the receipt states possible/completed
+  effect, not undo. Exact approved SSO hops keep the same task/profile with a
+  bounded top-frame/view-only admission, without widening agent origins. Its
+  reference-only host-session/eight-hour lifecycle and per-use validation
+  follow [the credential boundary](../architecture.md#linked-secret-stores).
+
+- Rationale: the handoff keeps credential resolution outside the agent and
+  holds its page access during use. The person checks what the site shows
+  before continuing because site code may reflect credentials. The page keeps its profile; a Private page's sign-in lasts as
   long as the page, and a Project or Personal page keeps it for the next page
   in that profile ([Browser profiles](browser-profiles.md#profiles)).
 
@@ -638,8 +724,8 @@ other without saying so, and the server, not the pane, decides.
   agent action that clicks, types, presses a key, hovers, chooses, drags, or
   uploads is refused as `stale` and does not run, whether it names a ref or a
   selector, until the agent has taken a snapshot (a `snapshot` operation or an
-  `include` of one). Reading, waiting, scrolling, screenshots, diagnostics, tab
-  listing, and navigating still run. A snapshot that was already in flight when
+  `include` of one). Reading, waiting, scrolling, screenshots, diagnostics,
+  audits, tab listing, and navigating still run. A snapshot that was already in flight when
   the person typed does not clear it: it began before their input.
 - The desktop Browser enforces the same rule at its own action boundary, where
   the person's key is known the moment it lands, not a poll later: it refuses an
@@ -701,6 +787,70 @@ other without saying so, and the server, not the pane, decides.
   window's, adds no remote surface for the gateway to list, and means a phone
   can never lock the agent out of the desktop's page. A paired device that
   wants the agent to stop can stop the turn, as it can today.
+
+### Owner control of an open Code page
+
+An enrolled owner has a separate signed control path. It does not widen the
+ordinary paired-device routes above. The first supported resource is an
+already-open, visible native Code Private page in its original local window.
+Work, Chat, dedicated pages, routine/subagent scopes, stored profiles, embedded
+or hidden views, and headless pages are refused. Listing targets exposes only
+the exact thread, site and controller metadata, under owner administration
+consent. It exposes neither page content nor a local window capability.
+
+Taking over always needs a fresh own-class unlock bound to that selected host,
+thread, context, document and origin-policy version. An administration session
+cannot authorize it. One controller receives at most 60 seconds, measured from
+admission with an absolute native deadline. Every subsequent request is signed
+by that original owner identity, uses a one-use sequence, and revalidates owner
+list/key/device status, task/window authority and the native target. A control
+ID alone grants nothing. A changed document, active tab or viewport refuses
+old coordinates; the person must select and unlock the current target again.
+
+The owner uses a closed touch-tap/touch-scroll/key/text operation set. Native
+mouse dispatch cannot stand in for a tap: the supported Electron runtime emits
+the same reclaim event for a dispatched mouse click as for local mouse input.
+Fixed touch dispatch preserves local mouse/key reclaim without suppressing it.
+There is no URL,
+selector, JavaScript, arbitrary protocol, transfer, profile or credential-broker
+operation. Page navigation remains inside the task's existing reviewed origins;
+owner input does not add origins. Device-local authenticators, popups, unsupported
+pages and cross-origin sign-in paths may require **Finish on the host Mac**.
+
+Frames are volatile, person-only JPEG responses, at most 1920 by 1200 and
+4 MiB of JPEG bytes, with bounded base64/JSON transport. They can contain credentials.
+They never enter agent observations, captures, artifacts, journal, export or
+logs. The native source must still be visible and current after capture.
+Private fill/script custody blocks owner frame/input admission, including an
+acquire-and-release interval overlapping a late frame. Owner control likewise
+blocks private fill/script acquisition and agent observations; an earlier
+agent capture cannot publish after a control interval has ended.
+
+The local toolbar names the active owner and offers **Reclaim locally**. Local
+input immediately invalidates remote control at the native boundary. **Stop
+remote control**, lease expiry and disconnect do not resume the agent: the
+existing person hold remains. Closing or hiding the owner view aborts pending
+requests and sends a bounded, signed stop without another unlock. An unreachable
+host may retain its finite lease until expiry; instantaneous network-disconnect
+revocation is not promised. A sent input can have a possible effect and is never
+automatically retried. Only an explicitly confirmed **Hand back** releases the
+person hold and requires the agent's fresh reading before acting again.
+A handback is confirmed only while the native controller is still current, so
+after local input reclaims the page a remote **Hand back** is refused and the
+person hold stays. An input still awaiting its native result prevents a
+confirmed handback, another controller and agent observations on that page. A transport failure is not proof
+that input stopped; an unsettled native input keeps those operations refused.
+Host-observed membership and journaled device/resource changes revalidate the
+current controller and abort its queued requests before input admission. This
+does not promise atomic revocation across a disconnected host or an effect that
+has already started.
+
+The journal records only bounded authority/effect metadata with the actual
+`owner-unlock` petitioner. Its service envelope is `system`, not a fabricated
+local user. Typed values, origins, frames and signing material are absent, and
+thread purge removes these thread-owned records. The live controller and
+frames are not recovered after host restart.
+
 - Rationale: reusing the sign-in hold keeps one place that decides the page is
   the person's, so every agent path (Work, Code, a batch's steps, an action
   that waited on an approval) already checks it. The refusal names a different
@@ -728,6 +878,160 @@ other without saying so, and the server, not the pane, decides.
 - Rationale: a read that cleared made the second reader see nothing, and a
   cursor answers the agent's real question, "what happened since I last
   looked", without that.
+
+## Page audits
+
+`audit` checks the open page the way a developer does while building it:
+`{"operation":"audit","kind":"accessibility"}` or `"kind":"performance"`.
+
+- **A read.** An audit reads the page in front and never navigates, reloads,
+  or changes it; it takes no other argument, so no option can make it act. It
+  is admitted exactly where `diagnostics` is: the thread's authority, the
+  model binding, the origin approval, the person's hold, and Plan, which
+  admits it as it admits every read of the open page
+  ([Plan mode](#plan-mode)). It may be a
+  step of a batch, a flow does not store it, and its answer carries no
+  `changed` line. The page's address and title come back with it, so a
+  snapshot's refs stay good. Like every read, it marks the thread as having
+  read outside content, and its result stays on this computer: no telemetry,
+  no upload.
+- **The same reader in both Browsers.** The checks run in the shared page
+  reader (`readBrowserPage`), in the desktop Browser's isolated world and in
+  the headless page, and the server shapes what it read, so both Browsers
+  answer with the same rules, words, bounds, and redaction. A Browser that
+  cannot audit (an older desktop app) refuses with `unavailable` ("This
+  Browser cannot audit pages."), never an empty result that would read as a
+  clean page.
+- **Scope.** The top document and its open shadow roots. Frames are not
+  audited; the answer counts them in `framesNotAudited`.
+
+### Accessibility
+
+- Each finding has a `rule`, a `severity` (`serious` or `moderate`), the
+  host's own `message` (with the WCAG criterion), and the element: its `ref`
+  when the latest snapshot of this page gave it one, otherwise its `selector`
+  (left out when longer than 256 characters rather than shortened into
+  another), with its role and accessible name as the snapshot names them, or
+  its first 80 characters of text when it has no role. No field value is
+  read, so a credential field is named, never valued.
+- The rules:
+
+  | Rule                | Finds                                                                                                                     |
+  | ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+  | `image-alt`         | An image, image button, or `role="img"` with no text alternative; `alt=""` is decorative and passes                       |
+  | `button-name`       | A button with no accessible name                                                                                          |
+  | `link-name`         | A link with no accessible name                                                                                            |
+  | `field-name`        | A form field or custom field role with no label, `aria-label`, `aria-labelledby`, title, or placeholder                   |
+  | `document-title`    | A page with no title                                                                                                      |
+  | `document-lang`     | An `<html>` with no `lang`                                                                                                |
+  | `heading-order`     | A heading more than one level below the heading before it                                                                 |
+  | `duplicate-id-aria` | An id used more than once in its root when a label or an aria attribute points at it                                      |
+  | `color-contrast`    | Text under 4.5:1, or 3:1 for large text (24 px, or 18.66 px bold), over a background it can know                          |
+  | `focusable-hidden`  | An element in the tab order inside `aria-hidden="true"`                                                                   |
+  | `target-size`       | A touch target under 24 by 24 CSS pixels whose 24 px circle reaches another target, only while the page is a touch device |
+
+- A name counts from every source a browser uses that the reader can see:
+  `aria-labelledby`, `aria-label`, labels, title, placeholder, the default
+  name of a submit or reset button, the text of the content, alt text and
+  labels of descendants, an SVG's title, and CSS-generated text. Content that
+  is not drawn (`hidden`, `display: none`, `visibility: hidden`) or is
+  `aria-hidden` names nothing, so `<button><span hidden>Save</span></button>`
+  is unnamed; a label or `aria-labelledby` target that is itself hidden still
+  names, as browsers name from it. A finding is made only when every source
+  is empty, so the rule errs toward silence.
+- Elements not drawn, and elements hidden from assistive technology
+  (`aria-hidden`, or inside an `inert` subtree), are not checked for names,
+  heading order, or target size. Inline links in a sentence and browser-drawn checkboxes
+  and radios are exempt from target size, as WCAG 2.5.8 exempts them.
+- Contrast is judged only where the colours are known: solid background
+  colours composited up the element's ancestors onto the white page. Text over
+  a background image or gradient, with a text shadow, inside a positioned
+  element with no background of its own, on a dark page canvas, or with
+  colours in a space other than sRGB is counted in `contrastNotMeasured` and
+  not judged. So is text under a filter, blend mode, or partial opacity on
+  itself or on any ancestor, even when its own background is opaque: the
+  effect changes text and background together.
+  Disabled controls are exempt.
+- `target-size` runs only while the page reports a coarse pointer; otherwise
+  `notRun` names it with how to run it (`resize` with `preset` `phone` or
+  `touch` true).
+- **Bounds.** The reader reads at most 6,000 elements, in tree order, and
+  every rule looks only at those: an id or reference past the bound is not
+  read, so `duplicate-id-aria` counts holders among the elements read. At most 10 findings per
+  rule and 25 in all are listed, serious rules first; `found` counts every
+  rule's findings, listed or not, and `truncated` says when more exist or the
+  page was larger than the reader reads.
+
+### Performance
+
+- **What is measured.** The browser's own record of the load that made this
+  document: the navigation timing (`domContentLoadedMs`, `loadMs`, the type),
+  first contentful paint, the largest contentful paint and the element it
+  drew (by ref or selector, and its resource's address), layout shifts, long
+  tasks, and the resources the page fetched, all read through `buffered`
+  performance observers by fixed code; nothing is installed in the page. The
+  answer's `documentAgeMs` says how long ago that load began.
+- **Vitals.** `ttfb`, `fcp`, `lcp`, `cls` (the largest burst of shifts: less
+  than a second apart, at most five seconds, shifts after input left out), and
+  `tbt` (each long task after first contentful paint, past its first 50 ms,
+  up to the audit). Each is rated `good`, `needs-improvement`, or `poor`:
+
+  | Metric | Good up to | Poor above |
+  | ------ | ---------- | ---------- |
+  | TTFB   | 800 ms     | 1,800 ms   |
+  | FCP    | 1,800 ms   | 3,000 ms   |
+  | LCP    | 2,500 ms   | 4,000 ms   |
+  | CLS    | 0.1        | 0.25       |
+  | TBT    | 200 ms     | 600 ms     |
+
+- **Requests.** The count and transfer size of the document and every
+  resource, by type (`document`, `script`, `stylesheet`, `image`, `font`,
+  `fetch`, `media`, `other`), and the five largest by transfer size. A
+  resource's address is redacted exactly as diagnostics redacts one (no user
+  or password, no fragment, a secret-named query value reads `redacted`) and
+  capped at 1,024 characters. A cache hit, or a resource from another origin
+  that does not allow timing, transfers 0 bytes as the browser reports it.
+  Chromium keeps 250 resource entries; a list that full says `listFull`.
+- **The page now.** Live DOM nodes, script heap in use, and event listeners,
+  read with the debugging protocol's `Performance.getMetrics`, which the
+  audit enables and disables around the read. Its duration counters start when
+  the domain is enabled, so they are not reported. While someone else holds
+  the desktop page's developer tools these are not read.
+- **What is not measured,** in `notMeasured` with the reason: a metric the
+  page has not produced yet (no paint, load not finished), one the browser
+  does not report, the page counters when they could not be read, and always
+  `inp`.
+- **A fresh load is a navigation.** An audit never reloads. To measure a fresh
+  load the agent navigates to the page again, which the navigation rules
+  admit, and then audits.
+- Rationale: the browser already buffers every one of these entries from the
+  document's start, so reading them back measures the real load without
+  injecting an observer into every page or giving a read the power to reload.
+  INP is left out because Chromium does not record input sent through the
+  debugging protocol as interactions (measured: a 180 ms click handler driven
+  this way left no `event` or `first-input` entry), so it would read as "no
+  interaction" after the agent clicked; TBT is the lab stand-in. The protocol's
+  duration counters are left out because they read zero when enabled at the
+  audit (measured on headless Chromium 1243).
+
+### Rationale
+
+- One operation with a `kind` keeps the verb list short and the authority one
+  rule: both audits are reads of the page in front.
+- The accessibility checks run in the shared page reader rather than over the
+  browser's accessibility tree (`Accessibility.getFullAXTree`). A finding is
+  only actionable with the element's ref, and the reader computes the same
+  selector the snapshot keeps for each ref, so the server names a finding by
+  ref with no extra round trip. Mapping accessibility-tree nodes back to
+  snapshot refs needs a protocol round trip per node that differs between the
+  two Browsers, and the desktop Browser cannot reach the protocol while
+  someone else holds the page's developer tools. The reader instead looks
+  wider than the snapshot's own naming and reports only when every source is
+  empty.
+- Not shipped as unreliable: contrast over images, gradients, and layered
+  elements (counted, not guessed); the validity of a `lang` value; landmark
+  and region rules, which are advice rather than failures; INP and the
+  protocol's duration counters (above).
 
 ## Parallel threads
 
@@ -764,13 +1068,88 @@ Several threads of one Project may each drive their own page at the same time.
   promise true on both Browsers. The 15-second linger keeps the mark steady
   while a model thinks between steps.
 
+## Bounded page scripts
+
+`run-script` reaches the same owned native page as the fixed actions when a
+local Code thread already has Full access. It takes `source` and the
+`expectedObservationRevision` from a fresh page read. It opens no page or
+profile and takes no additional script approval at Full access. Existing site,
+profile, model, window, Project and thread authority still apply. Work,
+headless, paired, routine, managed-subagent and terminal-grant callers are
+currently refused. Scripts cannot enter `steps` or saved/replayed flows.
+
+The accepted permission matrix also permits one exact-source approval for a
+proved non-signed-in Private page below Full access. That part is not built:
+Private describes storage lifetime, not authentication. The server currently
+has no general evidence that a Private page is not signed in, so unknown
+session eligibility refuses below Full access. Known signed-in pages require
+Full access even in Private, and Project/Personal pages always count as signed
+in. A clear credential-field scan or source consent cannot override this rule.
+Plan refuses arbitrary JavaScript. Below-Full credential or uncertain frame/
+shadow inspection also refuses; presence-only closed-shadow detection is not
+proof of complete credential or authentication coverage.
+
+Source has the page's normal DOM and account authority, including same-origin
+frame access and page API effects. The dispatch target is its current top
+document, not a caller-selected native frame or debugger session. It has no
+Node, Electron IPC, host filesystem or raw debugging API. The isolated world
+is separate from fixed-reader/fill world `1001`. Page main-world CSP does not
+constrain isolated-world evaluation; no CSP preservation guarantee is made.
+No browser CSP bypass or universal-access setting is enabled.
+
+Execution and fixed serialization have a native 150ms deadline. Only
+synchronous results are supported. Promises, functions, DOM and remote-object
+handles are unsupported results, not asynchronous work that was stopped.
+Callbacks and page changes may survive the call. Source is at most 8KiB UTF-8;
+fixed traversal bounds depth 5, 128 nodes, 64 keys, 2048 code units per string
+and 6000 content units, with explicit truncation including shortened or colliding
+keys. Returned value JSON is at most 24KiB UTF-8, the actual private broker
+response is at most 32KiB, and the provider tool result is at most 24KiB after
+escaping. These are return bounds, not renderer allocation or memory bounds.
+Pristine serializer intrinsics stay in a private closure across calls; source
+runs through indirect evaluation outside that closure.
+
+The private native path prepares the exact source/document/owner without
+executing source, expires that one-use preparation after 2s on a monotonic
+clock, then executes only after a fresh server policy/caller check. At most 32
+preparations/runs are retained. Source, values and exception stacks are not
+added to lifecycle journal events. Source and the allowed result naturally
+reach the requesting provider through the tool conversation.
+
+A script and private credential use cannot acquire each other's native hold.
+Agent actions and observations refuse while script custody is held. A result
+that began before hold acquisition and finishes after release still needs the
+observation epoch check. Human page presentation and input remain available;
+focus or input during a script does not mint a person-origin grant for script
+navigation. Point cancellation cannot release script or fill custody.
+
+Cancellation before dispatch prevents script execution and reports no page effect. After dispatch, receipts retain
+possible effects and withhold stale/cancelled values. A 2s request timeout or an
+arbitrary transport failure does not prove native execution stopped: an
+uncertain reservation remains until known native completion or actual exact
+execution-context/webContents destruction. Navigation start, committed
+navigation, BFCache and a no-longer-current page do not establish destruction.
+Unknown retained worlds are capped at 32; further script preparation refuses
+instead of accumulating state or inferring destruction. The person can stop
+that owned Browser page to retire it; no profile storage is cleared.
+
+This narrows the credential guarantee. Fixed readers redact credential fields
+and the broker never returns credential values. A Full-access script can read
+populated or reflected DOM values and install callbacks that observe later
+changes, including after a failed submit or resumed page. A saved credential
+permission does not authorize scripts, and holds do not claim to remove older
+callbacks or erase values already received by the website. After a script
+attempt with possible effects, old refs are dropped and its observation is
+stale until the page is read again.
+
 ## What the tool never does
 
-- It saves no password and fills none. The person signs in by typing into the
-  page themselves ([Browser profiles](browser-profiles.md#profiles)).
-- It runs no script an agent wrote inside the page. Every operation is a fixed
-  host action, so authority checks stay on the server and never move into page
-  code.
+- Fixed actions and broker APIs never return or type an agent-supplied password. The person signs in
+  manually or separately approves brokered form fill and submit under the
+  [held sign-in boundary](#asking-the-person-to-sign-in).
+- Arbitrary source never runs through a fixed action or a public renderer
+  action route. The separate bounded script operation keeps authorization on
+  the server and has the explicit DOM/account authority described above.
 - It saves no file from a page unless the person turned on "Let agents
   download files" and answers for that file ([Download](#download)); every
   other download stays blocked on every page
@@ -798,11 +1177,50 @@ Several threads of one Project may each drive their own page at the same time.
   Playwright download stands in for Electron's `will-download` item. The cap
   while a file is still arriving is covered against a fake session item
   (`browserDownloadHold.test.ts`) because Electron is not present there.
+- Page audits: `packages/domain/src/browserPageAudit.test.ts` covers the
+  answer's shaping (refs by selector, per-rule and total caps with counts and
+  truncation, ratings at the boundaries, layout-shift windows, blocking time,
+  request types, address redaction, and what is not measured);
+  `browserAppManagedTools.test.ts` the arguments, their refusals, and Plan
+  admitting an audit as it admits diagnostics; `browserAutomationService.test.ts`
+  findings named by the latest snapshot's refs and a Browser that cannot audit
+  refusing; and `browserRuntimeBroker.test.ts` the desktop broker admitting only
+  a known audit. Against real Chromium, the smoke test above audits a fixture
+  page (an unlabelled field found by its ref, contrast of 2.32:1, target size
+  only under the phone preset, a ref still acting afterwards) and a fixture
+  load (rated vitals, a long task, a layout shift, a redacted largest resource,
+  Plan not refusing it), and the desktop real-page test finds each planted problem and
+  nothing on the clean elements, reads the load without reloading the
+  document, and leaves the counters unread while someone else holds the
+  developer tools.
+- Recording runs against real Chromium in both Browsers: the smoke test above
+  records a batch into an animated PNG with the frame count its answer names,
+  keeps the revision the batch answered with current, withholds a page with a
+  password field, keeps no frame of the error and blank pages a refused
+  off-origin link leaves, and refuses Plan and a page that is not open; the
+  desktop real-page test records the desktop Browser's actions through its own
+  debugger attachment, lets the attachment go when the recording ends,
+  withholds a credential page, and keeps no frame of a site the person took
+  the view to that the thread did not approve (both read each kept frame's
+  pixels). `browserAppManagedTools.test.ts` covers the start, the stop after a
+  failed step, a Browser that cannot record, and the `record` argument;
+  `browserRecording.test.ts` covers the animated PNG, its bounds, and which
+  frames may be kept.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
   page being out of reach of another thread, a subagent, and another thread's
   terminal grant, and the Project's page list.
 - The smoke test also records, saves, and replays a flow on a fresh page, stops
   at a renamed button, a different title, and an ambiguous element, asks again
-  for an origin a replay opens, and refuses Plan mode and a paired device.
+  for an origin a replay opens, refuses a save or a run in Plan mode and for a
+  paired device, and lists in Plan mode.
+- `browserAppManagedTools.test.ts` (Work) and `codeAppManagedTools.test.ts`
+  (Code) run one call of every operation in Plan from
+  `browserToolPlanCalls.test-support.ts`, keyed like `BROWSER_OPERATION_EFFECT`:
+  each read (`audit` included) runs on the open page without asking, each
+  refused operation reaches neither the page nor the person, a recorded batch
+  or replay is refused before anything runs, a recording started before the
+  thread moved into Plan is stopped and keeps nothing, a batch stops at its first refused
+  step, and a read of a page the model was not approved for still asks.
+  `terminalBrowserGrantService.test.ts` covers a terminal read in Plan.
   `browserFlowService.test.ts` covers saving, replacing, listing, deleting,
   limits, replay of the journal, and erasing a Project.

@@ -401,17 +401,265 @@ Extension packages by the service's name, as **Connector**. **Hide** keeps
 an entry out of sight on this computer; **Show hidden** brings them back.
 Connecting works only from the Octant window on this host.
 
+### Paper Desktop
+
+In the **Library**, search for **Paper**, choose **Set up…**, read the local
+access notice, then choose **Add local server**. This adds Paper through the
+same installed-package flow as Add MCP server, with its local address
+`http://127.0.0.1:29979/mcp`. No hosted connector or OAuth sign-in is required.
+Keep Paper Desktop running with a file open on the same host. Installation
+alone does not check whether that file or its tools are available.
+
+Paper recommends the CLI installed by Paper Desktop: copy its absolute path
+from Paper's MCP panel and use the argument `mcp`. The CLI can expose its tool
+list even when Desktop is closed; actual reads and writes still require
+Desktop and an open file. Octant's confined app-managed command runtime does
+not grant Desktop access, so this Library setup explicitly uses Paper's
+still-supported local HTTP path. It does not run the CLI or widen its sandbox.
+If `paper` is not on your PATH, this local-address setup still works without
+the CLI. For a provider's own native MCP setup, use Paper's copied executable
+path rather than guessing a global installation path.
+
+If tools are unavailable, open Desktop and a file, then retry in your task.
+Restart the agent session if that provider needs to reload its tool list; keep
+the existing task and draft. A Desktop-closed or no-file condition is not
+inferred from installation or a tool list. Trust, turning on, selecting the
+server and the task's usual tool permissions still apply. Turn off or remove
+the package in **Installed** to stop offering its tools. See
+[Paper's current setup instructions](https://paper.design/docs/mcp).
+
+### GitHub with your OAuth App
+
+**GitHub** keeps its personal access token connection. **GitHub OAuth App** is a
+separate setup path for an OAuth App you own. Connect it, copy the exact callback
+address into that app, and save its Client ID and a linked-store client secret
+reference before choosing **Sign in**. Octant does not register an app for you.
+This profile requests `read:user` and `offline_access`, for profile read access
+and expiring token rotation. It requests no private repository, private email or
+write access. Available MCP tools still depend on what GitHub permits with that
+connection; signing in alone does not prove repository tool availability.
+
+The connected row shows only a reported numeric user ID and last-reported
+permissions; organization and repository reach are unknown. A changed account,
+missing required permission, broader inherited permission or failed account
+verification asks you to review the app permissions and sign in again. Restore
+your linked secret store if rotation cannot access the app secret. Sign-out
+retains app setup and leaves an independently added PAT connection intact.
+
+### GitHub repository read and write
+
+Choose **GitHub repositories** separately when you need repository work. This
+preset requests `repo`, `read:user` and `offline_access`. GitHub's OAuth App
+`repo` permission allows reading and writing public and private repositories and
+related organization resources your account can access. It does not select
+individual repositories, and it is not a private-repository read-only grant.
+The app setup and sign-in controls show this before you save or consent.
+Use the existing PAT path if you prefer a separately configured credential.
+
+Saving app setup still starts no consent or task action. Choose **Sign in**
+explicitly, then select and approve the actually available tools in your task.
+Your profile-read and PAT entries stay in place. Reusing the same OAuth App
+can change permissions GitHub returns to other connections: if an old
+profile-read connection receives broader access during refresh, Octant asks
+you to reconnect instead of using it. Review app permissions in GitHub before
+signing in again. Separate Octant entries do not guarantee separate vendor
+consent. Organization policy and tool eligibility still apply; an OAuth token
+alone does not prove every private repository or write tool is available.
+No failed or uncertain tool call is automatically replayed.
+
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a
 key. Its component in **Extension packages** then shows **Sign in**. Octant
-reads where the server sends people to sign in, registers itself there,
-opens that page in your browser, and keeps the grant in this computer's
+reads where the server sends people to sign in, uses its configured OAuth
+client or registers a public client there, and opens that page in your browser, and keeps the grant in this computer's
 credential store (the Keychain on a Mac); the row says **Signed in through**
 the issuer, with **Sign out**. If the grant stops working you see **Sign in
 again**. A server whose sign-in needs a client id Octant cannot register for
-itself says so; you can still add that server with a key in a header. Signing
-in and out work only from the Octant window on this host.
+itself needs application setup before account consent; you can still add that
+server with a key in a header. Support for each service's setup and account
+eligibility is added separately. Signing in and out work only from the Octant
+window on this host.
+
+If sign-out cannot be confirmed, the row offers **Finish signing out**. Restore
+the connection to this host and its credential store, then choose that action
+to retry cleanup. Octant keeps the cleanup reference and blocks further use of
+that connection and replacement sign-in meanwhile. Signing out keeps your app
+registration, so you can sign in again without setting it up again. A tool call
+already sent before sign-out may have completed even if its answer was lost;
+check its outcome before trying again. Octant does not replay that call.
+Finish any unconfirmed sign-out before removing that server; Octant keeps it
+installed so the cleanup action stays available.
+
+Before using a hosted connection, Octant checks its stored credential and
+refreshes an expired grant when possible. If authentication changed, Octant
+refreshes the task's connection on a subsequent request rather than sending
+the tool call with the old credential. If the server rejects authentication,
+restore the credential store or sign in again before asking the task to retry.
+A failed tool call is not replayed by the connection; check its outcome first.
+
+Choose **Client setup** to use an app identity you registered yourself. The dialog
+shows the server and authorization server and an exact **Callback address** you
+can copy into your app registration. Enter the public **Client ID**, or choose
+**Client metadata URL** only when the authorization server supports it. A public
+client needs no client secret. For a confidential client, choose the advertised
+POST or Basic authentication method and an item reference from your linked
+1Password store; link the store in Settings first. This form takes the item
+address, never the secret value, and a locked or missing item must be restored
+before saving. An unchanged saved identity can keep its existing secret.
+**Save client setup** saves only the app identity; choose **Sign in** separately
+to consent to account access. If the server's addresses change while the dialog
+is open, reopen setup and check them before saving. Setup cannot change while a
+sign-in is pending, and sign-out preserves the app identity. Each service still
+needs its supported client type, callback policy, app eligibility and permissions;
+this form does not register an app with the service.
+
+For an integration configured with a registered client, its callback address
+stays the same after restarting Octant or signing out. If another program uses
+that callback port, close the conflicting listener and try again; Octant does
+not silently change the address registered with the service. A confidential
+client's secret stays in the credential broker. If that secret or its linked
+store is unavailable, restore it before retrying. Application setup never
+replaces your account consent or expands what a task may do. GitHub continues
+to accept personal access tokens.
+
+Choose **Atlassian** for a new v2 connection to your Atlassian Cloud account.
+Sign in and review the sites and permissions. Your organization may need to
+allowlist the local client, approve the integration or permit this host's IP.
+A permission error is not a reason to switch to an older endpoint or bypass
+admin controls. Sign out and reconnect after restoring access; check failed
+operations before retrying.
+
+Choose **Airtable** to sign in and select the bases the connection can access.
+Manage that selection in Airtable under **Integrations → Third-party
+integrations**. For a manually registered app, use **Client setup** and register
+the shown exact callback before separately signing in. **Airtable personal
+token** is a separate option: create a token with only the bases and scopes you
+need, then use **Add key**. Read-only tokens should include only read scopes
+such as `data.records:read` and `schema.bases:read`; omit write scopes. Octant
+stores the token through its credential broker. Ask an authorized task to list
+accessible bases; the Library does not infer their names from a credential.
+Admin restrictions and your normal base/workspace permissions still apply.
+Replace a revoked personal token explicitly; reconnect a revoked OAuth grant.
+Neither route automatically repeats a failed tool operation.
+
+Choose **HubSpot** in Library or Connectors. **Connect** opens **Client setup**
+before account consent. Follow the linked HubSpot guide to create an MCP
+connector in your account. Copy Octant's exact **Callback address** into that
+connector's redirect URLs. Enter its client ID, select POST authentication, and
+link its client secret from your linked secret store. Save setup, then choose
+**Sign in** and review the account and permissions in HubSpot. Consent may allow
+both reading and updating CRM data; it does not bypass task approvals.
+
+Available tools depend on your subscription, user permissions and account
+configuration. Sensitive Data settings can block activities and conversations.
+Ask an authorized task to run `get_user_details` to inspect reported access.
+New vendor scopes may require reconnecting and consenting again. If a grant
+expires or is revoked, restore the linked store or sign in again; check the
+outcome of any failed tool before explicitly retrying it. Octant never replays
+that call automatically.
+
+Choose **Slack** in Library or Connectors to add its local setup entry.
+**Connect** opens client setup first; saving your app identity does not start
+account consent. Follow the linked Slack setup guide with an eligible app you
+register, save its client ID and linked secret item, then choose **Sign in**.
+Its registered app must name exactly `http://localhost:<saved-port>/oauth/callback`.
+An earlier setup using `127.0.0.1` must be updated explicitly before sign-in.
+The callback must be available on both local IP families at that saved port;
+the host refuses if another app uses it. Its dedicated metadata advertises a
+registered client with a secret sent by POST; general public-PKCE guidance is
+not proof that a public client works through this endpoint. The closed wire
+support selects only `search:read.public`, and refuses when it is not
+advertised. It requests no write permission.
+Client setup shows this exact callback and saves it separately from consent.
+While a browser sign-in is pending, **Cancel sign-in** closes that attempt. If
+cancellation cannot be confirmed, restore the credential broker and use that
+same button to retry; a new consent attempt stays blocked. If status cannot be
+read, **Check sign-in** collects that existing attempt again, or use **Cancel
+sign-in**. A background status check does not disable cancellation. A slow or
+lost host reply stops waiting after thirty seconds and keeps these recovery
+actions; it does not start consent again. If a setup save reply is lost, reopen
+**Client setup** to check the saved identity before saving again. Removing a server
+waits for pending cancellation before removing your local retry access.
+Application setup remains after cancellation or sign-out.
+
+After sign-in, the detail shows workspace and user IDs only when Slack reports
+them, and **Not reported** otherwise. Permissions are the last reported values,
+not a guarantee that a tool is available now. Tools are checked when selected
+for an authorized task. If a refresh reports a different known account or omits
+the required public-search permission from its reported permissions, reconnect
+explicitly; Octant does not keep using the old bearer. Missing metadata stays
+unknown. Real app eligibility, consent, refresh and tool access still need live
+verification with your app and account.
+
+### Recover retired client-secret references
+
+A failed or slow broker point or deletion can leave a retired reference whose
+outcome Octant cannot safely infer. Each waits at most ten seconds; a delayed
+point cannot configure an app after timeout. A lost point reply may precede a
+late write, so even a later absence reply is not proof that it finished. Octant keeps it across restarts and never reuses it.
+A definitive reply can release it; signing out does not repair an uncertain
+reply. Owned and reserved client-secret references share a limit of 256. At
+the limit, linking another secret is refused before the secret store is touched;
+existing accounts and public client setup remain usable. Relinking the same
+external item creates a new reference.
+
+This is operator maintenance when cleanup or local storage has failed, not a
+normal sign-in step. Do not clear the entire MCP credential namespace: other
+servers and account grants may still need its entries.
+
+1. Fully quit Octant and stop its host **and credential broker**, allowing their
+   existing child operations to finish or stop. Keep them stopped throughout
+   recovery, so an old request cannot delete an item after it is reclaimed.
+   Unlock the operating system credential store if necessary.
+2. Back up `extensions/mcp-server-sign-ins.json` beneath this host's provider
+   data directory, preserving its owner-only permissions. Read the
+   `retiredClientSecrets` UUIDs. Exclude any UUID still named by
+   `registrations[*].clientAuthentication.secretRef` or
+   `signIns[*].descriptor.clientAuthentication.secretRef`, or an
+   `${OCTANT_SECRET:UUID}` reference in a generated MCP package's headers or
+   environment. Never delete an owned pointer or infer that an unavailable broker means it is absent.
+3. Delete only the proven unowned UUID from this host's MCP namespace, using
+   the existing credential-store backend. This deletes Octant's pointer, not
+   the external 1Password item, and must not resolve or print its value.
+   On macOS the installed `OctantKeychainHelper` accepts this request on stdin:
+
+   ```json
+   {
+     "version": 1,
+     "storeScope": "HOST_STORE_UUID",
+     "namespace": "mcp-server-credential",
+     "operation": "delete",
+     "secretId": "RETIRED_UUID"
+   }
+   ```
+
+   Use the same host/store scope as that installation, derived by
+   `deriveHostRuntimeHostId` for its data directory, not a guessed UUID. Only
+   an `ok: true` reply proves completion. On Linux the same backend uses
+   `secret-tool clear service octant.mcp-server-credentials.v1 account RETIRED_UUID`;
+   require successful completion. These exact backend operations are local
+   and do not contact the vendor or change the external item.
+
+4. Only after confirmed deletion, with host and broker still stopped, remove
+   that UUID from `retiredClientSecrets` in the backed-up state file's active
+   copy. Keep every other field and unknown reservation, preserve mode `0600`,
+   and check that the file remains valid JSON. A failed or unknown deletion
+   leaves its reservation in place; do not make room by dropping it.
+5. Restart Octant and its host. Choose the external item again in Client setup
+   if needed; it gets a fresh UUID. If the operator cannot prove completion or
+   storage is still unavailable, keep the refusal and repair that concrete
+   backend/storage failure before linking more secrets.
+
+### Google Workspace preview
+
+Gmail, Google Drive and Google Calendar have separate read-only preview
+connections using your own agentic Desktop OAuth client. Their setup explains
+the enrolled-account and project requirements, the exact permissions and the
+actions each connection refuses. They are not generally available; Google's
+preview terms and public-distribution restrictions still apply. Follow the
+[Google Workspace preview guide](/advanced/google-workspace) before attempting
+account consent.
 
 ### Found on this computer
 
@@ -669,3 +917,21 @@ optional extension.
 - [Browser and computer use](/advanced/browser-and-computer-use) for related host-owned surfaces
 - [Apple Development Workbench](/advanced/apple-workbench) for the extension-independent core path
 - [Privacy and security](/advanced/privacy-and-security) for quarantine, provenance, and host-initiated network
+
+## When a saved session has different tools
+
+Some providers fix the tool list when a session starts. Reconnecting a connector
+with the same tools keeps that session. If a tool is added or its definition
+changes, Octant preserves your draft and conversation instead of silently
+continuing with tools the provider cannot call.
+
+Choose **Continue with updated tools** to send the current draft in a fresh
+session. Recent conversation carries over as text; the transcript shows any
+omissions. Hidden reasoning and tool activity stay in the old session, and the
+full task history remains available. A failed connector call is never replayed.
+The new session still uses the task's existing mode, folder and approval rules.
+Removing a tool keeps the session, and the host refuses further calls to it.
+
+Older saved sessions without definition fingerprints need this explicit choice
+once before receiving tools. You can leave the draft untouched and defer the
+choice; reconnecting or refreshing status does not send it.

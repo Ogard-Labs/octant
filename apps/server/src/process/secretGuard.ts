@@ -195,17 +195,19 @@ export function secretGuardSearchRefusal(
   const own = uniqueForms(options.ownAccountPaths ?? []);
   const roots = pathForms(root);
   const inside = protectedEntryFor(roots, entries, own);
-  if (inside !== undefined) return protectedFileRefusal(inside, homeDirectory);
+  const explain = (entry: ResolvedProtectedEntry) =>
+    [
+      protectedFileRefusal(entry, homeDirectory),
+      `This search would read it from ${JSON.stringify(root)}. The native search cannot enforce protected-file exclusions, so no search results were returned. Search an ordinary subfolder with no protected entry instead; use the named authorized channel for the protected material.`,
+    ].join(" ");
+  if (inside !== undefined) return explain(inside);
   const covered = secretGuardLinuxPaths({ entries, ownAccountPaths: own, withinRoots: roots })
     .filter((path) => roots.some((form) => isSameOrInside(path, form)))
     .sort();
   for (const path of covered) {
     const entry = protectedEntryFor([path], entries, own);
     if (entry === undefined) continue;
-    return [
-      protectedFileRefusal(entry, homeDirectory),
-      "This search would read it: search a folder that holds no protected file.",
-    ].join(" ");
+    return explain(entry);
   }
   return undefined;
 }
@@ -494,7 +496,8 @@ function escapeSeatbeltString(path: string): string {
 /** The lexical path and the one the kernel resolves it to, when they differ. */
 function pathForms(path: string): ReadonlyArray<string> {
   const lexical = normalizePosix(path);
-  const resolved = realPathOfExistingPrefix(lexical);
+  // Normalizing `link/..` first can erase the symlink the kernel traverses.
+  const resolved = realPathOfExistingPrefix(path);
   return resolved === lexical ? [lexical] : [lexical, resolved];
 }
 
@@ -513,7 +516,7 @@ function realPathOfExistingPrefix(path: string): string {
     const prefix = `/${segments.slice(0, index).join("/")}`;
     try {
       if (index < segments.length && !statSync(prefix).isDirectory()) return path;
-      const real = realpathSync(prefix);
+      const real = realpathSync.native(prefix);
       const rest = segments.slice(index);
       return normalizePosix(rest.length === 0 ? real : `${real}/${rest.join("/")}`);
     } catch {

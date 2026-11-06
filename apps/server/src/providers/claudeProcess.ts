@@ -27,6 +27,7 @@ import {
   prepareConfinedVersionProbe,
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
+import { prepareConfinedReadinessProbe } from "../process/confinedReadinessProbe";
 import {
   confinedExecutableExecPaths,
   DEFAULT_SANDBOX_PATH,
@@ -288,11 +289,8 @@ function runProbe(
   const invalid = validateBinaryPath(binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  // The version read is always confined. The authentication probe reaches the
-  // provider's own control plane out of the user's credential home, which is a
-  // readiness check rather than a local string read, so on its own
-  // it runs unconfined. A caller about to start a confined launch passes that
-  // launch's confinement, and the probe then runs inside it.
+  // A turn-specific check attests that turn's boundary. A standalone status
+  // check instead gets only the account's status files and Keychain read.
   // Preparing inside the suspend keeps one scratch directory per run: an
   // Effect a caller holds and never runs leaves nothing behind, and one it runs
   // twice does not hand the second run a directory the first already released.
@@ -308,7 +306,16 @@ function runProbe(
             // The same port the runtime launch uses: one builder, two launches.
             confinement: options.confinement,
           })
-        : undefined;
+        : confinement !== undefined &&
+            CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)
+          ? undefined
+          : prepareConfinedReadinessProbe({
+              family: "claude",
+              binaryPath,
+              args,
+              environment,
+              confinement: options.confinement,
+            });
     if (probe?.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
     let launch: ConfinedVersionProbeLaunch | undefined =
       probe?.status === "prepared" ? probe.launch : undefined;

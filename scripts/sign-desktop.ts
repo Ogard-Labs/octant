@@ -13,6 +13,12 @@
  * exercised on hosts that hold no certificate.
  */
 
+import { desktopIdentity, type DesktopIdentity } from "@octant/host-runtime";
+import {
+  DESKTOP_NODE_RUNTIME_APP,
+  DESKTOP_NODE_RUNTIME_NAME,
+} from "../apps/desktop/src/runtimePaths";
+import { packagedNativePath } from "./desktop-client-runtime";
 import { open, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -23,6 +29,8 @@ export const SIGNING_ORDER = [
   "Contents/Resources/native/octant-keychain-helper",
   "Contents/Resources/native/octant-code-file-helper",
   "Contents/Resources/native/octant-device-helper",
+  "Contents/Resources/native/octant-desktop-peer-status.node",
+  "Contents/Resources/native/octant-browser-text-input.node",
   "Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
   "Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
@@ -282,10 +290,29 @@ export async function signAndNotarizeDesktop(input: {
   readonly appPath: string;
   readonly archivePath: string;
   readonly credentials: SigningCredentials;
+  readonly identity?: DesktopIdentity;
   readonly run: CommandRunner;
   readonly runForOutput: CommandOutputRunner;
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
+  const identity = input.identity ?? desktopIdentity("stable");
+  // Both apps carry the worker runtime; it is signed before the app that seals it.
+  {
+    const runtime = `${input.appPath}/${DESKTOP_NODE_RUNTIME_APP}`;
+    for (const path of SIGNING_ORDER.filter((path) => path.startsWith("Contents/Frameworks/"))) {
+      await input.run(
+        createCodesignArgv({
+          identity: input.credentials.identity,
+          target: `${runtime}/${path.replace("Octant Helper", `${DESKTOP_NODE_RUNTIME_NAME} Helper`)}`,
+          entitlements,
+        }),
+      );
+    }
+    await input.run(
+      createCodesignArgv({ identity: input.credentials.identity, target: runtime, entitlements }),
+    );
+  }
+
   // Vendored tools are signed without Octant's entitlements: JIT, unsigned
   // executable memory, and audio input are exceptions Electron and dictation
   // need, not these helpers.
@@ -295,14 +322,14 @@ export async function signAndNotarizeDesktop(input: {
   await input.run(
     createCodesignArgv({
       identity: input.credentials.identity,
-      target: `${input.appPath}/${BUNDLED_LANGUAGE_SERVER_SIGNING_PATH}`,
+      target: `${input.appPath}/${packagedNativePath(BUNDLED_LANGUAGE_SERVER_SIGNING_PATH)}`,
     }),
   );
   for (const relativePath of SIGNING_ORDER) {
     await input.run(
       createCodesignArgv({
         identity: input.credentials.identity,
-        target: `${input.appPath}/${relativePath}`,
+        target: `${input.appPath}/${packagedNativePath(relativePath).replace("Contents/Frameworks/Octant Helper", `Contents/Frameworks/${identity.productName} Helper`)}`,
         entitlements,
       }),
     );

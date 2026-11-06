@@ -17,6 +17,7 @@ type Props = Pick<
   | "windowCapability"
   | "agentRunClient"
   | "requestedAgentReview"
+  | "requestedCodeReviewFile"
   | "onAgentReviewBack"
 >;
 
@@ -27,6 +28,9 @@ export default function ReviewModule(props: Props) {
   return (
     <Suspense fallback={<ShellState state="loading" title="Loading review" />}>
       <ReviewWorkspace
+        {...(props.requestedCodeReviewFile === undefined
+          ? {}
+          : { requestedCodeReviewFile: props.requestedCodeReviewFile })}
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
         {...(props.requestedAgentReview === undefined
           ? {}
