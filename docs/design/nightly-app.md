@@ -378,7 +378,11 @@ person input, so the agent must read the page again before its next keystroke
 or click. Releases match an accepted
 hold in the same presentation epoch, including across frame advance. New stale
 coordinate actions refuse. The renderer remembers each physical key's original
-down value so a modifier change cannot strand its release. Enter sends its
+down value so a modifier change cannot strand its release. The Stable source
+adapter translates DOM ArrowLeft, ArrowRight, ArrowUp and ArrowDown to Electron's
+Left, Right, Up and Down key names for native presses and releases, including
+hide cleanup. Wire identities and held-key matching keep the original DOM names;
+character input is not translated. Enter sends its
 required carriage-return character only while Enter or Return is held. Tab stays
 inside the page; Control-Escape moves focus out and retires the presentation to
 release held inputs. Normal pointer-capture completion keeps the presentation

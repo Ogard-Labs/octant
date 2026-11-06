@@ -113,7 +113,8 @@ Quitting cancels recovery; failure explains why Nightly closed. A recovered wind
 keeps its normal bounds, but does not transfer unsaved layout or drafts to its
 new window identity. A connected Browser can display Stable-owned page images and
 forward ordinary pointer, text and keyboard input inside the Nightly window.
-Control-Escape leaves the page; Tab moves among its controls. Nightly’s own
+Control-Escape leaves the page; Tab moves among its controls. Directional keys
+retain their native key identity in the Stable-owned page, including releases. Nightly’s own
 dropdown, context and local text-editing menus use native macOS menus. These
 local menus act on Nightly itself. An already focused standard text field in the
 Stable-owned page also supports a native editing menu through pointer right-click
