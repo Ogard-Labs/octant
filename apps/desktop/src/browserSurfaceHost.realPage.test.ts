@@ -1,4 +1,9 @@
 import { observeBrowserEditableTarget } from "./browserEditableObservation";
+import { observeBrowserSelectPopup } from "./browserSelectObservation";
+import {
+  decodeHumanBrowserRequest,
+  type HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
 import { readBrowserEditableTarget } from "./browserEditableTarget";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
@@ -49,6 +54,11 @@ const pages: Record<string, string> = {
     <div id="done" style="width:60px;height:30px;margin-top:40px" onpointerup="if (window.dragging) document.title = 'Dropped card'">Done</div>
     <form onsubmit="event.preventDefault(); document.title = 'Submitted'"><input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key"></form>
     <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+  "/popups": `<!doctype html><title>Popups</title>
+    <select id="size" style="width:160px" oninput="window.inputs = (window.inputs ?? 0) + 1" onchange="document.title = 'Size ' + this.value">
+      <option value="s">Small</option><optgroup label="Big"><option value="l">Large</option><option value="x" disabled>Huge</option></optgroup>
+    </select>
+    <button id="hello" style="display:block;margin-top:40px;width:120px;height:30px" onclick="alert('Hello from the page'); document.title = 'Greeted'">Hello</button>`,
   "/greets": `<!doctype html><title>Greeting</title><script>alert("Welcome"); document.title = "Greeted";</script>`,
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
@@ -167,9 +177,15 @@ async function pageView(): Promise<{
     deviceSessionOpened ??= page.context().newCDPSession(page);
     return deviceSessionOpened;
   };
+  let opening: Promise<CDPSession> | undefined;
   const openSession = async (): Promise<CDPSession> => {
     if (session !== undefined) return session;
-    const opened = await page.context().newCDPSession(page);
+    // Electron's debugger is one attachment: two commands sent together share it.
+    if (opening !== undefined) return opening;
+    opening = page.context().newCDPSession(page);
+    const opened = await opening.finally(() => {
+      opening = undefined;
+    });
     opened.on("Page.javascriptDialogOpening", (params) => {
       for (const listener of messageListeners) listener({}, "Page.javascriptDialogOpening", params);
     });
@@ -557,6 +573,149 @@ describe.skipIf(chrome === undefined)(
         ).toEqual({ status: "cancelled", effect: "none" });
       } finally {
         await host.closeAll();
+        await page.context().close();
+      }
+    });
+
+    it("offers a person's select list and page alert to the presentation and applies the answers", async () => {
+      const { view, page } = await pageView();
+      let receive:
+        | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+        | undefined;
+      try {
+        await page.addInitScript(
+          `globalThis.octantBrowserSelect = (${observeBrowserSelectPopup.toString()})();`,
+        );
+        await page.goto(origin + "/popups");
+        let pointer: Promise<void> = Promise.resolve();
+        const host = createBrowserSurfaceHost({
+          isEmbeddedOwner: () => true,
+          isOwnerWindowAvailable: () => true,
+          createView: () => ({
+            ...view,
+            human: {
+              visible: () => undefined,
+              bounds: () => undefined,
+              frames: (listener) => {
+                receive = listener;
+                return () => undefined;
+              },
+              // The person's press arrives as trusted Chromium input, as
+              // Electron's sendInputEvent delivers it.
+              input: (input) => {
+                if (input.type === "mouseDown")
+                  pointer = pointer
+                    .then(() => page.mouse.move(input.x, input.y))
+                    .then(() => page.mouse.down());
+                // A release that opens a page dialog settles only once it is answered.
+                if (input.type === "mouseUp") pointer = pointer.then(() => void page.mouse.up());
+              },
+            },
+          }),
+        });
+        const contextId = crypto.randomUUID();
+        const threadId = crypto.randomUUID();
+        await host.createContext({
+          contextId,
+          owner: { windowId: "window-a", threadId },
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: [origin],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 2,
+            sessionTimeoutMs: 300_000,
+          },
+        });
+        const attached = await host.humanPresentation(
+          decodeHumanBrowserRequest({ contextId, threadId, kind: "attach" }),
+          "window-a",
+        );
+        if (attached.status !== "attached") throw new Error("Expected a presentation");
+        const send = (raw: Readonly<Record<string, unknown>>): Promise<HumanBrowserResult> =>
+          host.humanPresentation(
+            decodeHumanBrowserRequest({
+              contextId,
+              threadId,
+              presentationId: attached.presentationId,
+              ...raw,
+            }),
+            "window-a",
+          );
+        await send({ kind: "layout", layout: { width: 1280, height: 720, visible: true } });
+        receive?.({
+          getSize: () => ({ width: 1280, height: 720 }),
+          toJPEG: () => new Uint8Array([1]),
+        });
+        await send({ kind: "frame", acknowledgement: 0 });
+        const click = async (selector: string) => {
+          const box = await page.locator(selector).boundingBox();
+          if (box === null) throw new Error("No element.");
+          const at = { x: Math.round(box.x + 10), y: Math.round(box.y + box.height / 2) };
+          for (const type of ["mouseDown", "mouseUp"])
+            expect(
+              await send({
+                kind: "input",
+                frameSequence: 1,
+                input: { type, ...at, button: "left", clickCount: 1 },
+              }),
+            ).toMatchObject({ status: "accepted" });
+          await pointer;
+        };
+        const popup = async () => {
+          for (let attempt = 0; attempt < 10; attempt += 1) {
+            const result = await send({ kind: "popup" });
+            if (result.status === "popup") return result.popup;
+          }
+          throw new Error("No popup.");
+        };
+
+        await click("#size");
+        const list = await popup();
+        expect(list).toMatchObject({
+          kind: "select",
+          selectedIndex: 0,
+          options: [
+            { label: "Small", disabled: false },
+            { label: "Large", disabled: false, group: "Big" },
+            { label: "Huge", disabled: true, group: "Big" },
+          ],
+        });
+        expect(
+          await send({
+            kind: "popup-answer",
+            popupId: list.id,
+            answer: { kind: "select", index: 2 },
+          }),
+        ).toEqual({ status: "refused" });
+        await click("#size");
+        const again = await popup();
+        expect(
+          await send({
+            kind: "popup-answer",
+            popupId: again.id,
+            answer: { kind: "select", index: 1 },
+          }),
+        ).toEqual({ status: "accepted" });
+        expect(await page.title()).toBe("Size l");
+        expect(await page.evaluate(() => (window as { inputs?: number }).inputs)).toBe(1);
+
+        await click("#hello");
+        const alert = await popup();
+        expect(alert).toMatchObject({
+          kind: "dialog",
+          dialog: "alert",
+          message: "Hello from the page",
+        });
+        expect(
+          await send({
+            kind: "popup-answer",
+            popupId: alert.id,
+            answer: { kind: "dialog", accept: true },
+          }),
+        ).toEqual({ status: "accepted" });
+        await expect.poll(() => page.evaluate(() => document.title)).toBe("Greeted");
+        host.closeContext(contextId);
+      } finally {
         await page.context().close();
       }
     });

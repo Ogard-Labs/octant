@@ -14,9 +14,18 @@ import { BrowserPageEditMenu } from "./browserPageEditMenu";
 import { BrowserTextComposition, type BrowserTextSource } from "./browserTextComposition";
 import { readBrowserEditableTarget, type BrowserEditableTarget } from "./browserEditableTarget";
 import { BrowserPresentation, type HumanBrowserSource } from "./browserPresentation";
+import { BrowserPagePopups } from "./browserPagePopups";
+import {
+  answerBrowserHeldSelect,
+  dismissBrowserHeldSelect,
+  readBrowserHeldSelect,
+} from "./browserSelectPopup";
+import { lstat } from "node:fs/promises";
 import {
   decodeBrowserEditMenuId,
+  MAX_BROWSER_DIALOG_TEXT,
   type BrowserEditMenuId,
+  type HumanBrowserPopupAnswer,
   type HumanBrowserRequest,
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
@@ -254,6 +263,8 @@ export interface BrowserSurfaceViewPort {
       goForward(): void;
     };
     on(event: string, listener: (...args: readonly unknown[]) => void): void;
+    /** Electron copies the image under a page point to the system clipboard. */
+    copyImageAt?(x: number, y: number): void;
     undo?(): void;
     redo?(): void;
     cut?(): void;
@@ -285,6 +296,8 @@ export interface BrowserSurfaceHostOptions {
     };
   }) => BrowserSurfaceViewPort;
   readonly isEmbeddedOwner?: (windowId: string) => boolean;
+  /** Stable's system clipboard, for a person's Copy Link or Copy Image Address. */
+  readonly clipboard?: { readonly writeText: (text: string) => void };
   readonly stateChannel?: string;
   readonly isOwnerWindowAvailable?: (windowId: string) => boolean;
 }
@@ -296,6 +309,10 @@ interface OwnedTab {
   /** Electron may remove the view getter before the WebContents destroyed callback. */
   readonly contents: BrowserSurfaceViewPort["webContents"];
   readonly contentsId: number | undefined;
+  /** The page popup this tab captured for the person's presentation. */
+  readonly popups: BrowserPagePopups;
+  /** Ends the main-only page popup watch on this tab's debugger. */
+  releasePopups: () => void;
 }
 
 interface KeyboardEditingMenu {
@@ -382,6 +399,12 @@ interface OwnedSurface {
   personInputs: number;
   /** `personInputs` as of the start of the agent's last snapshot or navigation. */
   snapshotPersonInputs: number;
+  /**
+   * When the person's presentation last delivered a key or button press. A
+   * select list or link menu is offered only right after one, so an agent's
+   * click never opens a menu in front of the person.
+   */
+  lastHumanPress: number;
 }
 
 /**
@@ -945,6 +968,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     for (const tab of closing) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
+      tab.releasePopups();
       forgetWebContents(tab);
       closeSurfaceView(tab.view, tab.contents);
     }
@@ -1000,6 +1024,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     owned.tabs.splice(index, 1);
     tab.view.setVisible(false);
     owned.shellWindow?.contentView.removeChildView(tab.view);
+    tab.releasePopups();
     forgetWebContents(tab);
     closeSurfaceView(tab.view, tab.contents);
     if (owned.tabs.length === 0) return markGone(contextId, owned);
@@ -1036,6 +1061,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       },
     });
     view.setVisible(false);
+    const popups = new BrowserPagePopups();
     view.webContents.session.setPermissionCheckHandler(() => false);
     view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
@@ -1078,6 +1104,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           void owned.textComposition.close();
           closeEditingMenu(owned);
           owned.presentation.close();
+          popups.close();
         }
         publish(contextId, owned);
       });
@@ -1137,6 +1164,15 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     });
     view.webContents.on("context-menu", (_event: unknown, raw?: unknown) => {
       if (
+        contentsView(owned) === view &&
+        typeof raw === "object" &&
+        raw !== null &&
+        (!("isEditable" in raw) || raw.isEditable !== true)
+      ) {
+        offerLinkMenu(contextId, owned, view, popups, raw);
+        return;
+      }
+      if (
         contentsView(owned) !== view ||
         typeof raw !== "object" ||
         raw === null ||
@@ -1192,7 +1228,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       view,
       contents: view.webContents,
       contentsId: view.webContents.id,
+      popups,
+      releasePopups: () => popups.close(),
     };
+    // Only Stable's hidden window for a native client presents through
+    // human frames; its page popups have no visible window of their own.
+    if (view.human !== undefined)
+      tab.releasePopups = watchHumanPagePopups(contextId, owned, view, popups);
     owned.tabs.push(tab);
     view.webContents.on("render-process-gone", () => forgetTab(String(contextId), owned, tab));
     view.webContents.on("did-start-navigation", () => {
@@ -1203,6 +1245,262 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       forgetTab(String(contextId), owned, tab);
     });
     return tab;
+  };
+
+  /** The person pressed in their presentation just now, and no agent action holds the page. */
+  const humanPressRecent = (owned: OwnedSurface): boolean =>
+    Date.now() - owned.lastHumanPress < HUMAN_POPUP_PRESS_MS &&
+    owned.control !== "agent" &&
+    owned.presentation.visible &&
+    options.isEmbeddedOwner?.(owned.owner.windowId) === true;
+
+  const openLinkInTab = (
+    contextId: BrowserContextId | string,
+    owned: OwnedSurface,
+    url: string,
+  ): Promise<boolean> =>
+    queueSurfaceAction(owned, async () => {
+      if (surfaces.get(contextId) !== owned || owned.control === "agent") return false;
+      if (owned.tabs.length >= owned.policy.maxConcurrentTabs) return false;
+      // A person's chosen link is their own browsing, as following it would be.
+      owned.control = "user";
+      if (!admitNavigation(owned, url)) return false;
+      const opened = openTabView(
+        contextId,
+        owned,
+        `${String(contextId)}:${owned.nextTabOrdinal++}`,
+      );
+      showTab(owned, opened);
+      publish(String(contextId), owned);
+      await opened.view.webContents.loadURL(url).catch(() => undefined);
+      return true;
+    });
+
+  /**
+   * A person's right-click on a link or image in Stable's hidden window opens
+   * no menu there; its menu is offered to the person's presentation. The page
+   * addresses stay in Stable, which performs the chosen action itself.
+   */
+  const offerLinkMenu = (
+    contextId: BrowserContextId | string,
+    owned: OwnedSurface,
+    view: BrowserSurfaceViewPort,
+    popups: BrowserPagePopups,
+    raw: object,
+  ): void => {
+    if (view.human === undefined || !humanPressRecent(owned)) return;
+    const field = (name: string): unknown =>
+      name in raw ? (raw as Record<string, unknown>)[name] : undefined;
+    const link = webAddress(field("linkURL"));
+    const isImage = field("mediaType") === "image";
+    const imageAddress = isImage ? webAddress(field("srcURL")) : undefined;
+    const x = field("x");
+    const y = field("y");
+    const point =
+      typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)
+        ? { x: Math.round(x), y: Math.round(y) }
+        : undefined;
+    const image = isImage && (imageAddress !== undefined || point !== undefined);
+    if (link === undefined && !image) return;
+    const generation = scriptGenerations.get(view);
+    popups.offer(
+      { kind: "context", link: link !== undefined, image },
+      {
+        current: () =>
+          surfaces.get(contextId) === owned &&
+          contentsView(owned) === view &&
+          !view.webContents.isDestroyed() &&
+          scriptGenerations.get(view) === generation,
+        dismiss: () => undefined,
+        answer: async (answer: HumanBrowserPopupAnswer) => {
+          if (answer.kind !== "context") return false;
+          if (answer.action === "open-link")
+            return link !== undefined && openLinkInTab(contextId, owned, link);
+          if (answer.action === "copy-image") {
+            if (point === undefined || view.webContents.copyImageAt === undefined) return false;
+            view.webContents.copyImageAt(point.x, point.y);
+            return true;
+          }
+          const text = answer.action === "copy-link" ? link : imageAddress;
+          if (text === undefined || options.clipboard === undefined) return false;
+          options.clipboard.writeText(text);
+          return true;
+        },
+      },
+    );
+  };
+
+  /**
+   * Hold the hidden window's page dialogs and file choosers for the person.
+   * The watch shares Octant's own protocol attachment with agent actions: while
+   * an agent action runs, its fixed dialog policy answers instead, and a
+   * debugger someone else attached leaves the page's dialogs theirs.
+   */
+  const watchHumanPagePopups = (
+    contextId: BrowserContextId | string,
+    owned: OwnedSurface,
+    view: BrowserSurfaceViewPort,
+    popups: BrowserPagePopups,
+  ): (() => void) => {
+    const client = view.webContents.debugger;
+    const unwatched = () => popups.close();
+    if (client.on === undefined || view.webContents.isDestroyed()) return unwatched;
+    if (client.isAttached() && !agentDebuggers.has(client)) return unwatched;
+    try {
+      if (!client.isAttached()) {
+        client.attach("1.3");
+        agentDebuggers.add(client);
+      }
+    } catch {
+      return unwatched;
+    }
+    humanDebuggers.add(client);
+    const live = () =>
+      surfaces.get(contextId) === owned &&
+      !view.webContents.isDestroyed() &&
+      client.isAttached() &&
+      humanDebuggers.has(client);
+    const listener: SurfaceProtocolListener = (_event, method, params, sessionId) => {
+      if (sessionId !== undefined) return;
+      if (method === "Page.javascriptDialogClosed") return popups.retire("dialog");
+      if ((agentDialogGuards.get(client) ?? 0) > 0) return;
+      const opened = (params ?? {}) as {
+        readonly type?: unknown;
+        readonly message?: unknown;
+        readonly mode?: unknown;
+        readonly backendNodeId?: unknown;
+      };
+      if (method === "Page.javascriptDialogOpening") {
+        const type = dialogType(typeof opened.type === "string" ? opened.type : "alert");
+        let settled = false;
+        const handle = async (accept: boolean): Promise<boolean> => {
+          if (settled) return false;
+          settled = true;
+          return client.sendCommand("Page.handleJavaScriptDialog", { accept }).then(
+            () => true,
+            () => false,
+          );
+        };
+        // Electron offers no page prompt, so Stable's own Browser answers none.
+        if (type === "prompt") return void handle(false);
+        popups.offer(
+          {
+            kind: "dialog",
+            dialog: type,
+            message: boundedPageText(
+              typeof opened.message === "string" ? opened.message : "",
+              MAX_BROWSER_DIALOG_TEXT,
+            ),
+          },
+          {
+            current: live,
+            answer: async (answer) => answer.kind === "dialog" && handle(answer.accept),
+            dismiss: () => void handle(false),
+          },
+        );
+        return;
+      }
+      if (method !== "Page.fileChooserOpened") return;
+      const node = opened.backendNodeId;
+      if (typeof node !== "number" || !Number.isInteger(node) || !humanPressRecent(owned)) return;
+      const generation = scriptGenerations.get(view);
+      popups.offer(
+        { kind: "file", multiple: opened.mode === "selectMultiple" },
+        {
+          current: () =>
+            live() && contentsView(owned) === view && scriptGenerations.get(view) === generation,
+          dismiss: () => undefined,
+          answer: async (answer) => {
+            if (answer.kind !== "file") return false;
+            // Only existing regular files the person picked reach the page.
+            for (const path of answer.paths) {
+              const info = await lstat(path).catch(() => undefined);
+              if (info?.isFile() !== true) return false;
+            }
+            if (!live() || scriptGenerations.get(view) !== generation) return false;
+            owned.control = "user";
+            owned.personInputs += 1;
+            await client.sendCommand("DOM.setFileInputFiles", {
+              files: [...answer.paths],
+              backendNodeId: node,
+            });
+            return true;
+          },
+        },
+      );
+    };
+    client.on("message", listener);
+    void client.sendCommand("Page.enable").catch(() => undefined);
+    // Chromium opens no file panel for this hidden window while intercepted.
+    void client
+      .sendCommand("Page.setInterceptFileChooserDialog", { enabled: true })
+      .catch(() => undefined);
+    return () => {
+      popups.close();
+      client.removeListener?.("message", listener);
+      if (!humanDebuggers.delete(client) || view.webContents.isDestroyed()) return;
+      void client
+        .sendCommand("Page.setInterceptFileChooserDialog", { enabled: false })
+        .catch(() => undefined);
+      if (!emulationOf(client).held && (agentDialogGuards.get(client) ?? 0) === 0)
+        detachAgentDebugger(client);
+    };
+  };
+
+  const heldSelectTokens = new WeakMap<BrowserPagePopups, string>();
+  /** Read the select list a person's press held, and offer it once. */
+  const offerHeldSelect = async (
+    contextId: BrowserContextId | string,
+    owned: OwnedSurface,
+    view: BrowserSurfaceViewPort,
+    popups: BrowserPagePopups,
+  ): Promise<void> => {
+    // A newer press holds a newer list; a pending dialog or menu is left alone.
+    const pending = () => {
+      const popup = popups.read();
+      return popup !== undefined && popup.kind !== "select";
+    };
+    if (view.human === undefined || pending() || !humanPressRecent(owned)) return;
+    const evaluate = (world: number, scripts: ReadonlyArray<{ readonly code: string }>) =>
+      view.webContents.executeJavaScriptInIsolatedWorld(world, scripts);
+    const held = await readBrowserHeldSelect(evaluate);
+    if (
+      held === undefined ||
+      pending() ||
+      contentsView(owned) !== view ||
+      (popups.read() !== undefined && heldSelectTokens.get(popups) === held.token)
+    )
+      return;
+    if (held.status === "too-many") return void dismissBrowserHeldSelect(evaluate, held.token);
+    const generation = scriptGenerations.get(view);
+    const { status: _status, token, ...popup } = held;
+    heldSelectTokens.set(popups, token);
+    popups.offer(
+      { kind: "select", ...popup },
+      {
+        current: () =>
+          contentsView(owned) === view &&
+          !view.webContents.isDestroyed() &&
+          scriptGenerations.get(view) === generation,
+        answer: async (answer) => {
+          if (answer.kind !== "select" || owned.control === "agent") return false;
+          const applied = await answerBrowserHeldSelect(evaluate, token, answer.index);
+          if (applied) {
+            owned.control = "user";
+            owned.personInputs += 1;
+            for (const listener of personInputListeners) {
+              try {
+                listener(String(contextId));
+              } catch {
+                /* Isolate observers. */
+              }
+            }
+          }
+          return applied;
+        },
+        dismiss: () => void dismissBrowserHeldSelect(evaluate, token),
+      },
+    );
   };
 
   return Object.freeze({
@@ -1333,6 +1631,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         downloads: new DesktopDownloadHold(options.downloadRoot),
         personInputs: 0,
         snapshotPersonInputs: 0,
+        lastHumanPress: 0,
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
@@ -1391,6 +1690,38 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         };
       }
       if (!owned.presentation.current(request.presentationId)) return { status: "refused" };
+      if (
+        request.kind === "popup" ||
+        request.kind === "popup-answer" ||
+        request.kind === "popup-dismiss"
+      ) {
+        const tab = activeTab(owned);
+        const stillCurrent = () =>
+          current() &&
+          !signal?.aborted &&
+          activeTab(owned) === tab &&
+          owned.presentation.current(request.presentationId);
+        if (request.kind === "popup-dismiss")
+          return { status: tab.popups.dismiss(request.popupId) ? "accepted" : "refused" };
+        if (request.kind === "popup-answer") {
+          if (owned.control === "agent") return { status: "refused" };
+          const applied = await tab.popups.answer(
+            request.popupId,
+            request.answer,
+            () => stillCurrent() && owned.control !== "agent",
+          );
+          return { status: applied && stillCurrent() ? "accepted" : "refused" };
+        }
+        await offerHeldSelect(request.contextId, owned, tab.view, tab.popups);
+        const deadline = Date.now() + 1_000;
+        let next = await tab.popups.next(signal, 100);
+        // A held select is read from the page, so it is sampled while the press is recent.
+        while (next.status === "idle" && Date.now() < deadline && stillCurrent()) {
+          await offerHeldSelect(request.contextId, owned, tab.view, tab.popups);
+          next = await tab.popups.next(signal, humanPressRecent(owned) ? 100 : 400);
+        }
+        return stillCurrent() ? next : { status: "refused" };
+      }
       if (request.kind === "edit-menu") {
         const menu = await owned.pageEditMenu.read();
         return current() && !signal?.aborted && owned.presentation.current(request.presentationId)
@@ -1564,6 +1895,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             }
             if (!current() || signal?.aborted || contentsView(owned) !== view) return false;
             const delivered = dispatch();
+            if (
+              delivered &&
+              (request.input.type === "mouseDown" || request.input.type === "keyDown")
+            )
+              owned.lastHumanPress = Date.now();
             if (
               delivered &&
               request.input.type === "keyUp" &&
@@ -2334,6 +2670,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     for (const tab of closing) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
+      tab.releasePopups();
       forgetWebContents(tab);
       closeSurfaceView(tab.view, tab.contents);
     }
@@ -3325,6 +3662,31 @@ async function measureEmulation(
  */
 const agentDebuggers = new WeakSet<object>();
 
+/**
+ * Octant's own attachments a person's page popup watch also holds. Agent
+ * actions reuse them; ending an action leaves them attached for the watch.
+ */
+const humanDebuggers = new WeakSet<object>();
+/** Agent actions whose fixed dialog policy is answering on an attachment now. */
+const agentDialogGuards = new WeakMap<object, number>();
+/** How soon after a person's press a select list, link menu or file chooser counts as theirs. */
+const HUMAN_POPUP_PRESS_MS = 1_500;
+
+function webAddress(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 8_192 || !URL.canParse(value)) return undefined;
+  const protocol = new URL(value).protocol;
+  return protocol === "https:" || protocol === "http:" ? value : undefined;
+}
+
+/** Bound page text by UTF16 units without splitting a surrogate pair. */
+function boundedPageText(text: string, maximum: number): string {
+  const whole = text.toWellFormed();
+  if (whole.length <= maximum) return whole;
+  let end = maximum - 1;
+  if (/[\uD800-\uDBFF]/.test(whole[end - 1] ?? "")) end -= 1;
+  return `${whole.slice(0, end)}\u2026`;
+}
+
 /** The frame targets each of the agent's attachments has been told of. */
 const frameTargets = new WeakMap<object, SurfaceFrameTargets>();
 
@@ -3341,6 +3703,7 @@ function frameTargetsOf(client: BrowserSurfaceViewPort["webContents"]["debugger"
 
 /** Detach the agent's attachment, forgetting the frame sessions that ended with it. */
 function detachAgentDebugger(client: BrowserSurfaceViewPort["webContents"]["debugger"]): void {
+  if (humanDebuggers.has(client)) return;
   agentDebuggers.delete(client);
   frameTargets.get(client)?.stop();
   frameTargets.delete(client);
@@ -3370,7 +3733,7 @@ async function guardDialogs(
   // listens on it and leaves it attached when the action ends.
   // Read first: it drops what an attachment that is gone used to hold.
   const emulation = emulationOf(client);
-  const reused = client.isAttached() && emulation.held;
+  const reused = client.isAttached() && (emulation.held || humanDebuggers.has(client));
   if ((client.isAttached() && !reused) || client.on === undefined) return async () => undefined;
   if (!reused) {
     try {
@@ -3400,6 +3763,7 @@ async function guardDialogs(
       .catch(() => undefined);
   };
   client.on("message", listener);
+  agentDialogGuards.set(client, (agentDialogGuards.get(client) ?? 0) + 1);
   // Bounded: a view with no document yet may answer late, and the guard must
   // never hold the action it exists to keep moving.
   await Promise.race([
@@ -3408,8 +3772,10 @@ async function guardDialogs(
   ]);
   return async () => {
     client.removeListener?.("message", listener);
-    // The attachment holds the page's touch or color scheme: it outlives the action.
-    if (emulation.held) return;
+    agentDialogGuards.set(client, Math.max(0, (agentDialogGuards.get(client) ?? 1) - 1));
+    // The attachment holds the page's touch or color scheme, or the person's
+    // popup watch: it outlives the action.
+    if (emulation.held || humanDebuggers.has(client)) return;
     detachAgentDebugger(client);
   };
 }
