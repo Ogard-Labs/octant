@@ -272,6 +272,7 @@ export function EmbeddedBrowserAccessibility(props: {
     if (node.role === "textbox" || node.role === "searchbox") {
       if (node.secure === true)
         return (
+          /* ui-boundary-exception: native-platform-control */
           <input
             key={node.id}
             {...common}
@@ -309,9 +310,13 @@ export function EmbeddedBrowserAccessibility(props: {
           act(node.id, { action: "set-value", value: event.currentTarget.value.slice(0, 1_024) });
         },
       };
+      // Mirrored page fields must be native controls so assistive technology
+      // reads and edits them as the page's own fields.
       return node.multiline === true ? (
+        /* ui-boundary-exception: native-platform-control */
         <textarea key={node.id} {...field} />
       ) : (
+        /* ui-boundary-exception: native-platform-control */
         <input key={node.id} {...field} type="text" />
       );
     }
