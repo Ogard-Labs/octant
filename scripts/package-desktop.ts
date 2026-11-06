@@ -1932,7 +1932,8 @@ function containsForbiddenIdentity(content: string): boolean {
 
 export function validateDarwinBundleIdentity(
   value: unknown,
-  identity: Pick<DesktopIdentity, "bundleId" | "productName">,
+  identity: Pick<DesktopIdentity, "bundleId" | "productName"> &
+    Partial<Pick<DesktopIdentity, "scheme">>,
 ): void {
   const metadata =
     typeof value === "object" && value !== null && !Array.isArray(value)
@@ -1958,11 +1959,34 @@ export function validateDarwinBundleIdentity(
     metadata.OctantHostLaunchPolicy !== "host-only-v1"
   )
     throw new Error("Packaged Stable is missing its host launch policy.");
+  // Without its URL type, macOS never sends the app its own Code links:
+  // `setAsDefaultProtocolClient` cannot register a scheme the bundle omits.
+  if (
+    identity.scheme !== undefined &&
+    !declaresUrlScheme(metadata.CFBundleURLTypes, identity.scheme)
+  )
+    throw new Error(`Packaged app bundle does not declare its ${identity.scheme}:// Code links.`);
+}
+
+function declaresUrlScheme(value: unknown, scheme: string): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some(
+      (entry: unknown) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        Array.isArray((entry as { readonly CFBundleURLSchemes?: unknown }).CFBundleURLSchemes) &&
+        (
+          entry as { readonly CFBundleURLSchemes: ReadonlyArray<unknown> }
+        ).CFBundleURLSchemes.includes(scheme),
+    )
+  );
 }
 
 export async function validateBundleIdentity(
   appPath: string,
-  identity: Pick<DesktopIdentity, "bundleId" | "productName">,
+  identity: Pick<DesktopIdentity, "bundleId" | "productName"> &
+    Partial<Pick<DesktopIdentity, "scheme">>,
 ): Promise<void> {
   const metadata: unknown = JSON.parse(
     execFileSync(

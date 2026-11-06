@@ -8,6 +8,7 @@ describe("native application menu", () => {
       appName: "Octant",
       onOpenSettings,
       onQuit: vi.fn(),
+      developerTools: true,
     });
     const appMenu = template[0];
 
@@ -32,6 +33,7 @@ describe("native application menu", () => {
       appName: "Octant",
       onOpenSettings: vi.fn(),
       onQuit,
+      developerTools: true,
     });
     const appMenu = template[0];
     const quit = Array.isArray(appMenu?.submenu)
@@ -49,6 +51,7 @@ describe("native application menu", () => {
       appName: "Octant",
       onOpenSettings: vi.fn(),
       onQuit: vi.fn(),
+      developerTools: true,
     });
     expect(template.slice(1).map((item) => item.role)).toEqual([
       "fileMenu",
@@ -56,5 +59,22 @@ describe("native application menu", () => {
       "viewMenu",
       "windowMenu",
     ]);
+  });
+
+  it("leaves Reload and developer tools out of View when they are not offered", () => {
+    const template = buildApplicationMenuTemplate({
+      appName: "Octant Nightly",
+      onOpenSettings: vi.fn(),
+      onQuit: vi.fn(),
+      developerTools: false,
+    });
+    expect(template[0]?.label).toBe("Octant Nightly");
+    const view = template.find((item) => item.label === "View");
+    expect(view?.role).toBeUndefined();
+    const roles = Array.isArray(view?.submenu) ? view.submenu.map((item) => item.role) : [];
+    expect(roles).toContain("togglefullscreen");
+    for (const role of ["toggleDevTools", "reload", "forceReload"])
+      expect(roles).not.toContain(role);
+    expect(template.map((item) => item.role)).not.toContain("viewMenu");
   });
 });

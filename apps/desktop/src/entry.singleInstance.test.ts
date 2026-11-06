@@ -4,6 +4,7 @@ const fixture = vi.hoisted(() => ({ status: vi.fn(), client: vi.fn(), quit: vi.f
 vi.mock("electron", () => ({
   app: {
     isPackaged: true,
+    on: vi.fn(),
     getAppPath: () => "/fixture",
     getPath: () => "/fixture/Library/Application Support",
     setName: vi.fn(),

@@ -77,7 +77,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   openCodeExternalEditor: "brokered",
   listOpenInApplications: "local",
   openCodeCheckoutInApplication: "brokered",
-  openInNewWindow: "local",
+  openInNewWindow: "brokered",
   openSettings: "local",
   quitShortcutHint: "local",
   previewHandoff: "brokered",
@@ -146,6 +146,46 @@ const CLASS_BY_CHANNEL: ReadonlyMap<string, NightlyChannelClass> = new Map(
     NIGHTLY_CLIENT_CHANNELS[key],
   ]),
 );
+
+/**
+ * Local channels Nightly's main sends to the renderer rather than answers:
+ * menu commands, Code links, the resolved sidebar material and a menu-bar task.
+ */
+export const NIGHTLY_CLIENT_PUSH_CHANNELS: ReadonlySet<string> = new Set([
+  DESKTOP_IPC_CHANNELS.menuBarTask,
+  DESKTOP_IPC_CHANNELS.openSettings,
+  DESKTOP_IPC_CHANNELS.quitShortcutHint,
+  DESKTOP_IPC_CHANNELS.startNewAgent,
+  DESKTOP_IPC_CHANNELS.codeDeepLink,
+  DESKTOP_IPC_CHANNELS.resolvedMaterial,
+  DESKTOP_IPC_CHANNELS.resolvedSidebarVibrancy,
+]);
+
+/**
+ * Where Nightly's answered channels and its table disagree: an answered
+ * channel the table does not mark local, or a local channel that is neither
+ * answered, sent to the renderer, nor withheld on purpose (Data on a platform
+ * that does not offer it). Nightly refuses to start while either list is
+ * non-empty.
+ */
+export function nightlyClientChannelGaps(
+  answered: ReadonlySet<string>,
+  withheld: ReadonlySet<string>,
+): { readonly unmarked: ReadonlyArray<string>; readonly unanswered: ReadonlyArray<string> } {
+  const channels = Object.values(DESKTOP_IPC_CHANNELS);
+  return {
+    unmarked: channels.filter(
+      (channel) => answered.has(channel) && nightlyClientChannelClass(channel) !== "local",
+    ),
+    unanswered: channels.filter(
+      (channel) =>
+        nightlyClientChannelClass(channel) === "local" &&
+        !answered.has(channel) &&
+        !NIGHTLY_CLIENT_PUSH_CHANNELS.has(channel) &&
+        !withheld.has(channel),
+    ),
+  };
+}
 
 /** The class of a channel value; an unlisted channel is treated as Octant-only. */
 export function nightlyClientChannelClass(channel: string): NightlyChannelClass {

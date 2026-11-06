@@ -128,6 +128,14 @@ other native brokers and full lifecycle acceptance remain
 unfinished, so this is not a usable Nightly release. Installation and
 publication remain pending.
 
+Nightly has its own application menu, with **Settings…** (⌘,) and the same
+press-twice ⌘Q as Octant. Sign-in and other web links open in your default
+browser, attention notifications and the Dock badge work, and
+`octant-nightly://` links open in Nightly. Reset window size, the sidebar
+material, window capture for the composer (under Nightly's own Screen Recording
+permission) and saving Browser screenshots also work. Opening a Project in a new
+window or a checkout in another app is not available in Nightly yet.
+
 ### Separate test data in Nightly
 
 For development and testing on macOS, Nightly can run a host of its own on data

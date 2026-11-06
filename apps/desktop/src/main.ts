@@ -188,6 +188,7 @@ import {
   type CodeOperationApprovalPalette,
 } from "./codeOperationApprovalView";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
+import { validateExternalBrowserUrl } from "./externalBrowserUrl";
 import {
   resolveDesktopCredentialBackend,
   type DesktopCredentialBackend,
@@ -4068,25 +4069,6 @@ function nightlyInstaller(): ReturnType<typeof createNightlyInstaller> {
   return nightlyInstallerInstance;
 }
 
-function validateExternalBrowserUrl(value: unknown): string {
-  if (typeof value !== "string" || value.length > 4_096) {
-    throw new Error("Octant rejected an invalid external Browser URL.");
-  }
-  try {
-    const url = new URL(value);
-    if (
-      (url.protocol !== "https:" && url.protocol !== "http:") ||
-      url.username !== "" ||
-      url.password !== ""
-    ) {
-      throw new Error();
-    }
-    return url.toString();
-  } catch {
-    throw new Error("Octant rejected an invalid external Browser URL.");
-  }
-}
-
 function validateBrowserSurfaceBounds(
   bounds: BrowserSurfaceRequest["bounds"],
   window: BrowserWindow,
@@ -4743,6 +4725,7 @@ function installApplicationMenu(): void {
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate({
         appName: app.name,
+        developerTools: true,
         onQuit: (request) => quitShortcutGuard.request(request),
         onOpenSettings: () => {
           const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
