@@ -1319,6 +1319,10 @@ let nightlyInstallerInstance: ReturnType<typeof createNightlyInstaller> | undefi
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
   readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
+/** Stable's brokered host calls carry the bridge secret it holds now. */
+const desktopBrokerHeaders = (): Readonly<Record<string, string>> => ({
+  "x-octant-desktop-secret": desktopBridgeSecret,
+});
 let serverInstanceId: string | undefined;
 let mainWindow: BrowserWindow | undefined;
 let nativeStateStore: NativeWindowStateStore | undefined;
@@ -2268,7 +2272,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       mainWindow = window;
       if (state.maximized) window.maximize();
       projectRootPicker = createProjectRootPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2281,7 +2285,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         windowId: state.windowId,
       });
       const localPluginFolderPicker = createLocalPluginFolderPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2294,7 +2298,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         windowId: state.windowId,
       });
       const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showOpenDialog: (owner, options) =>
             dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2308,7 +2312,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       });
 
       const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         dialog: {
           showSaveDialog: async (owner, options) => {
             const chosen = await dialog.showSaveDialog(owner, {
@@ -2563,7 +2567,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           throw new Error("Octant Project window capability is unavailable.");
         }
         const picker = createProjectRootPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2576,7 +2580,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const localPluginFolderPicker = createLocalPluginFolderPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2589,7 +2593,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showOpenDialog: (owner, options) =>
               dialog.showOpenDialog(owner, { properties: [...options.properties] }),
@@ -2602,7 +2606,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
-          desktopBridgeSecret,
+          brokerHeaders: desktopBrokerHeaders,
           dialog: {
             showSaveDialog: async (owner, options) => {
               const chosen = await dialog.showSaveDialog(owner, {
@@ -3321,7 +3325,7 @@ function installIpcHandlers(): void {
     }
     await openCodeExternalEditorFromServer({
       serverUrl: activeServerUrl,
-      desktopBridgeSecret,
+      brokerHeaders: desktopBrokerHeaders,
       windowId: context.windowId,
       request: editorRequest,
       fetch: globalThis.fetch,
@@ -3349,7 +3353,7 @@ function installIpcHandlers(): void {
     }
     await openCodeCheckoutInApplicationFromServer({
       serverUrl: activeServerUrl,
-      desktopBridgeSecret,
+      brokerHeaders: desktopBrokerHeaders,
       windowId: context.windowId,
       request: openRequest,
       fetch: globalThis.fetch,
@@ -3396,7 +3400,7 @@ function installIpcHandlers(): void {
     try {
       await openPreviewHandoffFromServer({
         serverUrl: activeServerUrl,
-        desktopBridgeSecret,
+        brokerHeaders: desktopBrokerHeaders,
         windowId: context.windowId,
         request: {
           target: {

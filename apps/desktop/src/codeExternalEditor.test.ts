@@ -60,7 +60,7 @@ describe("launchCodeExternalEditor", () => {
     const spawn = vi.fn(() => ({ unref: vi.fn() }));
     await openCodeExternalEditorFromServer({
       serverUrl: "http://127.0.0.1:13773/",
-      desktopBridgeSecret: "private-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
       windowId: "10000000-0000-4000-8000-000000000001",
       request: {
         threadId: "20000000-0000-4000-8000-000000000001",

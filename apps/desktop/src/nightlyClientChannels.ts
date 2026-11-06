@@ -74,24 +74,24 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   projectWindowCapability: "local",
   maximizeOrRestore: "local",
   minimize: "local",
-  openCodeExternalEditor: "brokered",
+  openCodeExternalEditor: "local",
   listOpenInApplications: "local",
-  openCodeCheckoutInApplication: "brokered",
+  openCodeCheckoutInApplication: "local",
   openInNewWindow: "brokered",
   openSettings: "local",
   quitShortcutHint: "local",
-  previewHandoff: "brokered",
+  previewHandoff: "local",
   requestCodeOperationApproval: "brokered",
   updateCodeOperationApprovalAnchor: "brokered",
   cancelCodeOperationApproval: "brokered",
   startNewAgent: "local",
   providerCredentialStatus: "brokered",
   resetBounds: "local",
-  selectProjectRoot: "brokered",
-  selectLocalPluginFolder: "brokered",
-  selectSkillFolder: "brokered",
-  selectRuntimeBinary: "brokered",
-  saveSupportBundle: "brokered",
+  selectProjectRoot: "local",
+  selectLocalPluginFolder: "local",
+  selectSkillFolder: "local",
+  selectRuntimeBinary: "local",
+  saveSupportBundle: "local",
   saveBrowserProofScreenshots: "local",
   windowCaptureList: "local",
   windowCapturePermission: "local",
@@ -193,9 +193,15 @@ export function nightlyClientChannelClass(channel: string): NightlyChannelClass 
 }
 
 /**
+ * What Nightly says when its matching Octant does not broker a flow the window
+ * asks for: the host's feature list lacks it, or the window has no main-only
+ * token. Nightly refuses before any dialog opens or any host route is called.
+ */
+export const NEEDS_NEWER_OCTANT = "Needs a newer Octant. Update Octant to use this in Octant Nightly.";
+
+/**
  * What a Nightly client says when it refuses a channel it does not answer.
- * "Needs a newer Octant" is kept for a host that lacks a feature Nightly
- * asks for; none of these refusals is that case.
+ * None of these refusals is the missing-feature case above.
  */
 export function nightlyClientRefusal(channelClass: NightlyChannelClass): string {
   switch (channelClass) {

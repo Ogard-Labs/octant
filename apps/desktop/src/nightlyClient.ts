@@ -10,12 +10,16 @@ import {
   session,
   shell,
 } from "electron";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DesktopIdentity } from "@octant/host-runtime";
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
+import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
@@ -161,8 +165,28 @@ export async function runNightlyClient(
   }
   const capabilities = new Map<number, string>();
   const bootstraps = new Map<number, NightlyWindowBootstrap>();
-  // Later brokered pickers and handoffs read their host headers from here.
+  // Brokered pickers, handoffs, credentials and approvals read their host
+  // headers from here, for the one window they act for.
   const nativeMain = createNativeMainAuthority();
+  installNightlyBrokeredFlows({
+    register,
+    owns,
+    bootstrap: (id) => bootstraps.get(id),
+    nativeMain,
+    dialog: {
+      showOpenDialog: (owner, options) => dialog.showOpenDialog(owner, options),
+      showSaveDialog: (owner, options) => dialog.showSaveDialog(owner, options),
+    },
+    downloadsDirectory: () => app.getPath("downloads"),
+    fetch: globalThis.fetch,
+    shell,
+    spawn: (executable, arguments_, options) => spawn(executable, arguments_, options),
+    spawnQuickLook: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
+    exists: existsSync,
+    homeDirectory: homedir(),
+    platform: process.platform,
+    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
+  });
   let updates: Awaited<ReturnType<typeof createNightlyAppUpdates>> | undefined;
   const appUpdates = () => {
     if (updates === undefined) throw new Error("Nightly updates are not ready.");
