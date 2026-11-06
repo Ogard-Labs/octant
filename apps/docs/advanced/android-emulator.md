@@ -23,6 +23,14 @@ attach in time, or this host is not running in the Octant desktop app.
 `serve-avd` uses the same SDK and `adb` that Octant found, and runs with
 `ADB_MDNS=0` like Octant's own `adb` commands.
 
+The managed stream runs in a native sandbox with its SDK, Android device
+authentication and private temporary state. It cannot read your Projects or
+provider sign-ins. If that sandbox cannot start, Octant keeps its native
+snapshot/input fallback. On macOS the stream reaches only local services;
+Linux retains the host network for the shared adb server and browser. Automatic
+device-tool updates remain off until you turn them on in **Settings › Device tools**;
+the same page shows installed versions and offers a manual check.
+
 ## What you can do
 
 - Discover AVDs the SDK reports (`emulator -list-avds`) and which ones `adb`

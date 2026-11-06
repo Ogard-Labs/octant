@@ -1355,7 +1355,7 @@ Core capabilities (browser and computer use, tests, Apple validation, approvals,
 - The computer-use driver is a bundled, pinned, publisher-verified copy. It is accepted on the same contract minor, and updates only when the person turns on automatic updates.
 - Driver startup verifies the driver-reported host bundle identity and protocol and binary versions, and a failed check refuses admission. _Here only._
 - A screenshot alone never authorizes input; revalidation must resolve that exact window first. Interrupted work cancels pending approval and input. _Here only._
-- Managed device tools are pinned, integrity-verified releases run with an allowlisted environment, auto-update is off by default, and no upstream installer script runs.
+- Managed device tools are pinned, integrity-verified releases run with an allowlisted environment and a device-scoped native sandbox; auto-update is off by default, and no upstream installer script runs. The sandbox grants device state, SDK and runtime files, private transient state and the native services the tool needs, never a Project or provider account. macOS limits networking to loopback; Linux retains the host network for its shared adb server and browser listeners. A missing sandbox keeps the existing native device fallback instead of launching the npm tool unconfined. Detail: [Managed device tools](device-workbench.md#managed-device-tools).
 
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
@@ -1500,9 +1500,9 @@ A version read launches confined, with no root, no home, no network and one thro
 - Its environment is an allowlist, so provider credentials and config-home variables are dropped, and its process group is killed when the read settles.
 - A version read may exec and fork because launchers start the real program; the child inherits the profile and its read roots are the program's install tree, dropping any computed root that is the home folder or an ancestor. _Here only._
 - Discovery re-allowances name exact literal nodes, use the weakest verb that works, and form a closed set that rides only the launch that needs it.
-- Credential-reading readiness probes are not version reads and still run unconfined (a standing gap, not closed yet).
+- Credential-reading status probes use the shared confinement builder with their actual account files, a private working directory and no network. Codex reads its auth/config files; Claude reads its status/config files and on macOS the login Keychain through its security service; Oh My Pi reads its isolated account directory with tools, skills, extensions and sessions disabled. Missing confinement refuses the probe; an incomplete discovery check reports unknown, never inferred sign-out.
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
 
 ### Provider runtime confinement matrix
 
@@ -1510,7 +1510,7 @@ A provider runtime launch is wrapped when the process carries exactly one thread
 
 - ACP agents and several other provider runtimes are wrapped in Plan and the prompting postures; an app-server runtime is wrapped too, with a lease keyed by root, mode and posture.
 - One key provider's runtime is wrapped in Plan but keeps its own sandbox outside Plan; closing that gap is not an open goal.
-- A runtime used only for a readiness probe is unwrapped and starts no turn.
+- A runtime used only for a readiness probe is wrapped with its account-read boundary and starts no turn.
 - At Full access Octant wraps no provider runtime, so only the operating system's own protections remain; Plan's read-only enforcement is the same at every level.
 - A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS and Linux, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; OpenCode on Linux still materializes it as plain network allow.
 - A new module may not launch a provider process without the shared confinement builder unless the matrix names it.
