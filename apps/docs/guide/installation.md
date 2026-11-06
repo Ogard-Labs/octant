@@ -140,8 +140,11 @@ takes effect on that relaunch.
   port `13774`, and its log is in `~/Library/Logs/Octant Nightly`. It never
   reads or changes Octant's data, never connects to Octant's host, and Octant
   and Nightly can both run.
-- Sign-ins are kept apart: you sign in to providers again for test data, and
-  those items are stored under Nightly's own Keychain names.
+- Keys and secrets Octant keeps in the Keychain are kept apart: you enter them
+  again for test data, and they are stored under Nightly's own Keychain names.
+  Provider command-line tools keep their own sign-ins in your home folder
+  (such as `~/.claude` and `~/.codex`), and those are shared with Octant.
+- Work and Code without a Project use `~/Octant Nightly` instead of `~/Octant`.
 - The window shows a **Test data** label beside the Nightly label.
 - To go back, set **Data** to **Octant's data** and relaunch. While Nightly uses
   Octant's data, **Remove test data** moves the test data folder to the Trash.

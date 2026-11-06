@@ -1,9 +1,12 @@
-import { closeSync, constants, openSync, readSync } from "node:fs";
-import { lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
+  DEFAULT_FOLDER_ENVIRONMENT,
   DESKTOP_DATA_CHOICE_FILE,
+  decodeOwnerReceipt,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   decodeDesktopDataChoice,
   desktopDataDirectoriesOverlap,
   encodeDesktopDataChoice,
@@ -19,19 +22,21 @@ const MAX_CHOICE_BYTES = 1_024;
 
 /**
  * Reads the Data choice from Nightly's window storage at startup. A missing,
- * oversized, linked or unreadable file is Octant's data, the safe default.
+ * oversized, linked, non-regular or unreadable file is Octant's data, the safe
+ * default. It opens without blocking, so a FIFO put there cannot hang launch.
  */
 export function readStoredDesktopDataChoice(windowStorageDirectory: string): DesktopDataChoice {
   let descriptor: number;
   try {
     descriptor = openSync(
       join(windowStorageDirectory, DESKTOP_DATA_CHOICE_FILE),
-      constants.O_RDONLY | constants.O_NOFOLLOW,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
   } catch {
     return "octant";
   }
   try {
+    if (!fstatSync(descriptor).isFile()) return "octant";
     const bytes = Buffer.alloc(MAX_CHOICE_BYTES + 1);
     const read = readSync(descriptor, bytes, 0, bytes.length, 0);
     if (read > MAX_CHOICE_BYTES) return "octant";
@@ -94,6 +99,8 @@ export type HostOwningStartup =
       readonly serverPort: number | undefined;
       readonly logsDirectory: string | undefined;
       readonly keychainServiceFamily: KeychainServiceFamily;
+      /** Added to the host child's environment; empty for Octant. */
+      readonly hostEnvironment: Readonly<Record<string, string>>;
     }
   | { readonly kind: "refused"; readonly message: string };
 
@@ -120,6 +127,7 @@ export function resolveHostOwningStartup(options: {
       serverPort: undefined,
       logsDirectory: undefined,
       keychainServiceFamily: "octant",
+      hostEnvironment: {},
     };
   if (options.role.kind !== "test-host")
     return {
@@ -143,12 +151,20 @@ export function resolveHostOwningStartup(options: {
       message:
         "Octant Nightly refused to start its test host: its test data folder overlaps Octant's data folder.",
     };
+  const logsDirectory = join(home, "Library", "Logs", options.identity.productName);
   return {
     kind: "start",
     configuredDataDirectory: explicit ?? options.role.dataDirectory,
     serverPort: options.role.serverPort,
-    logsDirectory: join(home, "Library", "Logs", options.identity.productName),
+    logsDirectory,
     keychainServiceFamily: options.role.keychainServiceFamily,
+    // Its service log, Keychain names and default folder (`~/Octant Nightly`
+    // for Work and Code without a Project and the artifact mirror) are its own.
+    hostEnvironment: {
+      OCTANT_LOGS_DIR: logsDirectory,
+      [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: options.role.keychainServiceFamily,
+      [DEFAULT_FOLDER_ENVIRONMENT]: join(home, options.identity.productName),
+    },
   };
 }
 
@@ -203,7 +219,8 @@ export async function removeNightlyTestData(options: {
   });
   if (target.kind !== "test-host") return { kind: "refused", reason: "not-nightly" };
   const home = desktopHomeDirectory(options.appDataDirectory, options.platform);
-  if (desktopDataDirectoriesOverlap(target.dataDirectory, octantDefaultDataDirectory(home)))
+  const octant = octantDefaultDataDirectory(home);
+  if (desktopDataDirectoriesOverlap(target.dataDirectory, octant))
     return { kind: "refused", reason: "unsafe-folder" };
   let metadata;
   try {
@@ -213,12 +230,69 @@ export async function removeNightlyTestData(options: {
   }
   if (!metadata.isDirectory() || metadata.isSymbolicLink())
     return { kind: "refused", reason: "unsafe-folder" };
+  // A linked ancestor would make the fixed name reach another folder.
+  let real: string;
+  try {
+    real = await realpath(target.dataDirectory);
+  } catch {
+    return { kind: "refused", reason: "unsafe-folder" };
+  }
+  if (
+    real !== resolve(target.dataDirectory) ||
+    desktopDataDirectoriesOverlap(real, await realpath(octant).catch(() => octant))
+  )
+    return { kind: "refused", reason: "unsafe-folder" };
+  // A client and the test host exclude each other through the single-instance
+  // lock; a live owner receipt still refuses, for a host started another way.
+  if (await testHostOwnerAlive(real)) return { kind: "refused", reason: "test-host-running" };
   try {
     await options.trashItem(target.dataDirectory);
     return { kind: "removed" };
   } catch {
     return { kind: "failed" };
   }
+}
+
+async function testHostOwnerAlive(dataDirectory: string): Promise<boolean> {
+  let pid: number;
+  try {
+    pid = decodeOwnerReceipt(await readFile(join(dataDirectory, "run", "owner.json"), "utf8")).pid;
+  } catch {
+    // No receipt, or one no host could have written: nothing owns the folder.
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * A relaunch asked for from Settings applies only to the quit it starts:
+ * `app.relaunch()` runs once that quit is certain, and a cancelled quit
+ * forgets the request, so a later ordinary quit does not relaunch.
+ */
+export function createRelaunchIntent(options: {
+  readonly quit: () => void;
+  readonly relaunch: () => void;
+}) {
+  let requested = false;
+  return {
+    request: () => {
+      requested = true;
+      options.quit();
+    },
+    quitAccepted: () => {
+      if (!requested) return;
+      requested = false;
+      options.relaunch();
+    },
+    quitCancelled: () => {
+      requested = false;
+    },
+  };
 }
 
 /**
@@ -234,7 +308,8 @@ export function createNightlyDataControl(options: {
   readonly windowStorageDirectory: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly trashItem: (path: string) => Promise<void>;
-  readonly relaunch: () => void;
+  /** Starts a quit that relaunches once it is certain. */
+  readonly requestRelaunch: () => void;
 }) {
   const running: DesktopDataChoice = options.role.kind === "test-host" ? "test-data" : "octant";
   const testDataDirectory = (): string | undefined => {
@@ -278,7 +353,7 @@ export function createNightlyDataControl(options: {
     relaunch: (): { readonly kind: "relaunching" | "unchanged" } => {
       if (readStoredDesktopDataChoice(options.windowStorageDirectory) === running)
         return { kind: "unchanged" };
-      options.relaunch();
+      options.requestRelaunch();
       return { kind: "relaunching" };
     },
   };

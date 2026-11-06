@@ -7,6 +7,7 @@ import {
   type CredentialPurgeResult,
   type CredentialPurgeStore,
   type CredentialStore,
+  type KeychainServiceFamily,
 } from "@octant/host-runtime";
 
 export const KEYCHAIN_HELPER_MAX_BYTES = 16 * 1_024;
@@ -79,7 +80,7 @@ const NAMESPACE_ID_FIELD = {
  * data never reads or replaces one of Octant's, and the helper's re-scoping of
  * Octant's unscoped legacy items can never claim one for test data.
  */
-export type KeychainServiceFamily = "octant" | "octant-nightly-test-data";
+export type { KeychainServiceFamily };
 
 /** The helper's only argument; Octant's own services take none. */
 export function keychainHelperArguments(family: KeychainServiceFamily = "octant"): string[] {

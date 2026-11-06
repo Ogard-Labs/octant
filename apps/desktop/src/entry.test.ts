@@ -15,6 +15,7 @@ vi.mock("electron", () => ({
     setName: vi.fn(),
     setPath: fixture.setPath,
     whenReady: () => fixture.ready,
+    requestSingleInstanceLock: () => true,
     exit: vi.fn(),
     quit: vi.fn(),
   },

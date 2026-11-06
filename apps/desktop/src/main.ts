@@ -126,6 +126,7 @@ import { createAppUpdateService } from "./appUpdateService";
 import { createNightlyInstaller } from "./nightlyInstaller";
 import {
   createNightlyDataControl,
+  createRelaunchIntent,
   resolveHostOwningStartup,
   resolveStartupHostRole,
 } from "./nightlyTestData";
@@ -1262,6 +1263,10 @@ const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
 );
 const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
 const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
+const nightlyRelaunch = createRelaunchIntent({
+  quit: () => app.quit(),
+  relaunch: () => app.relaunch(),
+});
 const nightlyDataControl =
   desktopHostRole.kind === "test-host"
     ? createNightlyDataControl({
@@ -1276,10 +1281,7 @@ const nightlyDataControl =
         ),
         env: process.env,
         trashItem: (path) => shell.trashItem(path),
-        relaunch: () => {
-          app.relaunch();
-          app.quit();
-        },
+        requestRelaunch: () => nightlyRelaunch.request(),
       })
     : undefined;
 /** The Nightly label and its "Test data" label for the test host's windows. */
@@ -1962,9 +1964,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           env: {
             ...process.env,
             OCTANT_DATA_DIR: desktopDataDirectory,
-            ...(desktopHostStartup.logsDirectory === undefined
-              ? {}
-              : { OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory }),
+            ...desktopHostStartup.hostEnvironment,
           },
         });
         return spawn(spec.command, spec.args, {
@@ -4636,9 +4636,11 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   }
   if (!accepted || stillRequested?.() === false) {
     preparingQuit = false;
+    nightlyRelaunch.quitCancelled();
     return;
   }
   desktopQuitAccepted = true;
+  nightlyRelaunch.quitAccepted();
   hostLifecycle.acceptQuit();
   desktopBackendSupervisor.release();
   // Closing admission here fences a client arriving during the later flush.
@@ -4859,6 +4861,8 @@ app.on("before-quit", (event) => {
     quitCanPrompt = false;
     void desktopClientLifetime.requestLocalQuit().then((result) => {
       if (result === "quit-required") return quitHostAfterLastClient();
+      // Only the windows closed; the app keeps running, so no relaunch.
+      nightlyRelaunch.quitCancelled();
       if (result === "failed") logQuitProblem("Octant could not finish closing its local windows.");
     });
     return;

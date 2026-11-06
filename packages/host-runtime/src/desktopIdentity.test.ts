@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeDesktopDataChoice,
+  decodeKeychainServiceFamily,
+  keychainServicePrefix,
   desktopDataDirectoriesOverlap,
   desktopIdentity,
   desktopIdentityForPackage,
@@ -151,5 +153,17 @@ describe("desktop application identity", () => {
         ),
       ).toBe(false);
     });
+  });
+
+  it("names Keychain services by family and refuses an unknown family", () => {
+    expect(decodeKeychainServiceFamily(undefined)).toBe("octant");
+    expect(decodeKeychainServiceFamily("octant-nightly-test-data")).toBe(
+      "octant-nightly-test-data",
+    );
+    expect(decodeKeychainServiceFamily("app.octant.")).toBeUndefined();
+    expect(keychainServicePrefix("octant")).toBe("app.octant.");
+    expect(keychainServicePrefix("octant-nightly-test-data")).toBe(
+      "app.octant.desktop.nightly.test-data.",
+    );
   });
 });

@@ -9,7 +9,7 @@ private let maximumMessageBytes = 16 * 1_024
 // exactly one, so its items live under service names of their own: a sign-in
 // made for test data never reads or replaces one of Octant's, and the legacy
 // re-scoping below only ever sees Nightly's own services. Any other argument
-// refuses before a request is read.
+// makes the request guard below refuse before any Keychain item is touched.
 private let servicePrefix: String? = {
     let arguments = Array(CommandLine.arguments.dropFirst())
     if arguments.isEmpty { return "app.octant." }

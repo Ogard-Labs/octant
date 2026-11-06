@@ -1,6 +1,6 @@
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
+import { hostDefaultFolder } from "../defaultFolder";
 import { join } from "node:path";
 import { ReplayCursor, type WindowId } from "@octant/contracts";
 import { Effect, Schema } from "effect";
@@ -71,7 +71,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
   return Effect.gen(function* () {
     const projectRootPort = new ProjectRootPort();
     const managedRepositoryInventory = new ManagedRepositoryInventory({
-      inventoryPath: join(homedir(), "Octant", "Repositories"),
+      inventoryPath: join(hostDefaultFolder(), "Repositories"),
     });
     const managedCloneProcessPort = new ManagedCloneProcessPort({
       ghExecutable: options.ghExecutable ?? "gh",

@@ -36,7 +36,11 @@ import {
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
-import { createNightlyDataControl, nightlyTestDataSupported } from "./nightlyTestData";
+import {
+  createNightlyDataControl,
+  createRelaunchIntent,
+  nightlyTestDataSupported,
+} from "./nightlyTestData";
 
 /** Ordinary client entry: this module never imports the host-owning main. */
 export async function runNightlyClient(
@@ -191,6 +195,12 @@ export async function runNightlyClient(
   });
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNew, () => loadBundledWhatsNew(notesOptions()));
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNewAck, () => acknowledgeWhatsNew(notesOptions()));
+  // The client's quit always completes once asked, so the relaunch is armed
+  // only when its cleanup finishes and the quit is accepted.
+  const relaunch = createRelaunchIntent({
+    quit: () => app.quit(),
+    relaunch: () => app.relaunch(),
+  });
   const offersTestData = nightlyTestDataSupported(identity, process.platform);
   if (offersTestData) {
     const data = createNightlyDataControl({
@@ -201,10 +211,7 @@ export async function runNightlyClient(
       windowStorageDirectory: app.getPath("userData"),
       env: process.env,
       trashItem: (path) => shell.trashItem(path),
-      relaunch: () => {
-        app.relaunch();
-        app.quit();
-      },
+      requestRelaunch: () => relaunch.request(),
     });
     register(DESKTOP_IPC_CHANNELS.nightlyDataState, () => data.state());
     register(DESKTOP_IPC_CHANNELS.nightlyDataRemove, () => data.remove());
@@ -260,8 +267,16 @@ export async function runNightlyClient(
           "Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.",
         );
       acceptedQuit = true;
+      relaunch.quitAccepted();
       app.quit();
     })();
+  });
+  app.on("second-instance", () => {
+    const window = [...windows.values()].find((candidate) => !candidate.isDestroyed());
+    if (window === undefined) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
   });
   app.on("window-all-closed", () => {
     if (!recovery.recovering() && !updating) app.quit();

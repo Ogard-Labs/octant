@@ -1,11 +1,13 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopIdentity } from "@octant/host-runtime";
 import {
   readStoredDesktopDataChoice,
   createNightlyDataControl,
+  createRelaunchIntent,
   resolveHostOwningStartup,
   removeNightlyTestData,
   resolveStartupHostRole,
@@ -21,7 +23,8 @@ let storage: string;
 let testData: string;
 
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), "octant-nightly-test-data-"));
+  // Real path: removal compares the test folder with its real path.
+  home = await realpath(await mkdtemp(join(tmpdir(), "octant-nightly-test-data-")));
   appData = join(home, "Library", "Application Support");
   storage = join(appData, "Octant Nightly");
   testData = join(storage, "Test Data");
@@ -70,6 +73,11 @@ describe("Nightly's stored Data choice", () => {
     expect(startupRole()).toEqual({ kind: "octant-client" });
   });
 
+  it("reads a FIFO in place of the choice as Octant's data without waiting on it", () => {
+    execFileSync("/usr/bin/mkfifo", [join(storage, "data-choice.json")]);
+    expect(startupRole()).toEqual({ kind: "octant-client" });
+  });
+
   it("leaves Octant the owner of its host whatever Nightly's storage says", async () => {
     await storeDesktopDataChoice(storage, "test-data");
     expect(startupRole(stable)).toEqual({ kind: "octant-host" });
@@ -115,6 +123,11 @@ describe("what the host-owning desktop may start", () => {
       serverPort: 13_774,
       logsDirectory: join(home, "Library", "Logs", "Octant Nightly"),
       keychainServiceFamily: "octant-nightly-test-data",
+      hostEnvironment: {
+        OCTANT_LOGS_DIR: join(home, "Library", "Logs", "Octant Nightly"),
+        OCTANT_KEYCHAIN_SERVICE_FAMILY: "octant-nightly-test-data",
+        OCTANT_DEFAULT_FOLDER: join(home, "Octant Nightly"),
+      },
     });
   });
 
@@ -125,6 +138,7 @@ describe("what the host-owning desktop may start", () => {
       serverPort: undefined,
       logsDirectory: undefined,
       keychainServiceFamily: "octant",
+      hostEnvironment: {},
     });
   });
 
@@ -198,6 +212,42 @@ describe("removing Nightly's test data", () => {
     expect(trashItem).not.toHaveBeenCalled();
   });
 
+  it("refuses a test folder reached through a linked parent", async () => {
+    const elsewhere = join(home, "elsewhere");
+    await mkdir(join(elsewhere, "Test Data"), { recursive: true });
+    await rm(storage, { recursive: true });
+    await symlink(elsewhere, storage);
+    const { trashItem, result } = remove({ kind: "octant-client" });
+    await expect(result).resolves.toEqual({ kind: "refused", reason: "unsafe-folder" });
+    expect(trashItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses while a live host owns the test folder, and removes it once that owner is gone", async () => {
+    await mkdir(join(testData, "run"), { recursive: true });
+    const receipt = (pid: number) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        hostId: "00000000-0000-4000-8000-000000000001",
+        instanceId: "00000000-0000-4000-8000-000000000002",
+        endpoint: "/private/tmp/octant-501/fixture.sock",
+        pid,
+        processStart: "fixture",
+        serverVersion: "0.1.0",
+        wireVersion: "1",
+        serviceMode: "desktop",
+        nonceDigest: "a".repeat(64),
+        createdAt: "2026-11-06T00:00:00.000Z",
+      });
+    await writeFile(join(testData, "run", "owner.json"), receipt(process.pid));
+    const live = remove({ kind: "octant-client" });
+    await expect(live.result).resolves.toEqual({ kind: "refused", reason: "test-host-running" });
+    expect(live.trashItem).not.toHaveBeenCalled();
+    // A pid no running process has.
+    await writeFile(join(testData, "run", "owner.json"), receipt(2_147_483_646));
+    const gone = remove({ kind: "octant-client" });
+    await expect(gone.result).resolves.toEqual({ kind: "removed" });
+  });
+
   it("reports nothing to remove when there is no test data", async () => {
     await expect(remove({ kind: "octant-client" }).result).resolves.toEqual({ kind: "absent" });
   });
@@ -218,7 +268,7 @@ describe("Nightly's Data control", () => {
         windowStorageDirectory: storage,
         env: {},
         trashItem,
-        relaunch,
+        requestRelaunch: relaunch,
       }),
     };
   }
@@ -251,5 +301,24 @@ describe("Nightly's Data control", () => {
       removal: "test-host-running",
     });
     expect(trashItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("a relaunch asked for from Settings", () => {
+  it("relaunches only when its quit is accepted, and a cancelled quit forgets it", () => {
+    const quit = vi.fn();
+    const relaunch = vi.fn();
+    const intent = createRelaunchIntent({ quit, relaunch });
+    intent.request();
+    expect(quit).toHaveBeenCalledOnce();
+    expect(relaunch).not.toHaveBeenCalled();
+    intent.quitCancelled();
+    intent.quitAccepted();
+    expect(relaunch).not.toHaveBeenCalled();
+    intent.request();
+    intent.quitAccepted();
+    expect(relaunch).toHaveBeenCalledOnce();
+    intent.quitAccepted();
+    expect(relaunch).toHaveBeenCalledOnce();
   });
 });

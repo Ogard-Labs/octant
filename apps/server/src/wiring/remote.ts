@@ -113,6 +113,8 @@ import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListen
 import {
   boundHostRuntimeDiagnostics,
   createReleaseFeedVerifier,
+  decodeKeychainServiceFamily,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   type HostRuntimeDiagnostics,
 } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -1261,7 +1263,12 @@ export function wireRemote(deps: RemoteDependencies) {
               ? {}
               : { browserProfilesDirectory: process.env.OCTANT_BROWSER_PROFILES_DIRECTORY }),
             ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
-              ? { credentialStore: desktopCredentialStore() }
+              ? {
+                  credentialStore: desktopCredentialStore(
+                    decodeKeychainServiceFamily(process.env[KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]) ??
+                      "octant",
+                  ),
+                }
               : {}),
             listProjects: () =>
               persistence.readProjects().map((project) => ({

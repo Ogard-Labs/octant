@@ -221,7 +221,12 @@ export {
   type BrowserDownloadHoldKind,
 } from "./browserDownloadHold";
 export {
+  DEFAULT_FOLDER_ENVIRONMENT,
   DESKTOP_DATA_CHOICE_FILE,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+  decodeKeychainServiceFamily,
+  keychainServicePrefix,
+  type KeychainServiceFamily,
   DESKTOP_FLAVOR_IDENTITIES,
   decodeDesktopDataChoice,
   desktopDataDirectoriesOverlap,

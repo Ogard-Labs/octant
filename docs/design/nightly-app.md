@@ -107,10 +107,12 @@ never Octant's:
   locks or migrates Octant's data folder, never connects to Octant's host, and
   never asks Octant to start one. Octant and Nightly can both run, each with
   its own host.
-- Credentials stay apart: the test host's credential broker stores its items
-  under Nightly's own Keychain service names, so a sign-in made for test data
-  never replaces or reads one of Octant's. A person signs in again for test
-  data.
+- Credentials Octant keeps in the Keychain stay apart: the test host's
+  credential broker stores its items under Nightly's own Keychain service
+  names, so a key or secret saved for test data never replaces or reads one of
+  Octant's, and a person enters them again for test data. Provider command-line
+  tools keep their own sign-ins in the home folder (`~/.claude`, `~/.codex` and
+  the like), and those are shared with Octant.
 - New host behavior (agents, providers, tools, persistence) from `main` runs
   here, which the client mode cannot test. The test data is disposable:
   Nightly's Settings can remove it (moved to the Trash) when its host is
@@ -139,6 +141,20 @@ never Octant's:
   refuses and quits; it never falls back to Octant's folder or port `13773`.
 - The test host's service log is `~/Library/Logs/Octant Nightly/service.log`,
   passed to its host as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
+- Its default folder is `~/Octant Nightly` rather than `~/Octant`, passed as
+  `OCTANT_DEFAULT_FOLDER`, so Work and Code without a Project, the artifact
+  mirror and managed repository clones never touch Octant's files. Its Keychain
+  family reaches the host as `OCTANT_KEYCHAIN_SERVICE_FAMILY`, so the data map
+  names the services it really uses; any other value refuses host startup.
+- Still shared with Octant, as for any second host on the same account:
+  provider command-line configuration and sign-ins in the home folder, and
+  developer toolchains such as the Android SDK and Xcode.
+- A Nightly client and the test host take the same single-instance lock in
+  Nightly's window storage, so only one runs at a time and a second launch
+  focuses the first. Removal also refuses while the test folder's owner receipt
+  names a live process, and when the folder's real path is not its fixed path.
+- A relaunch asked for from Settings arms only once its quit is accepted; a
+  cancelled quit forgets it.
 - The test host's macOS Keychain services are named
   `app.octant.desktop.nightly.test-data.*` rather than `app.octant.*`. Because
   Octant's unscoped legacy items live only under Octant's names, the helper's

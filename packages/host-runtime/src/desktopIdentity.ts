@@ -90,6 +90,31 @@ export function resolveDesktopPackageFlavor(
   return identity.flavor;
 }
 
+/**
+ * Which set of macOS Keychain service names a host's credentials live under.
+ * Nightly's own test host keeps its items apart from Octant's.
+ */
+export type KeychainServiceFamily = "octant" | "octant-nightly-test-data";
+
+/** Set by the desktop for its host child; absent means Octant's own services. */
+export const KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT = "OCTANT_KEYCHAIN_SERVICE_FAMILY";
+
+/** Set by the desktop for its host child; absent means `~/Octant`. */
+export const DEFAULT_FOLDER_ENVIRONMENT = "OCTANT_DEFAULT_FOLDER";
+
+/** An unset value is Octant's family; any value but the two names is refused. */
+export function decodeKeychainServiceFamily(
+  value: string | undefined,
+): KeychainServiceFamily | undefined {
+  if (value === undefined || value === "octant") return "octant";
+  return value === "octant-nightly-test-data" ? value : undefined;
+}
+
+/** The prefix every Keychain service name of a family starts with. */
+export function keychainServicePrefix(family: KeychainServiceFamily): string {
+  return family === "octant" ? "app.octant." : "app.octant.desktop.nightly.test-data.";
+}
+
 /** Nightly's window-storage file that holds the Data choice. */
 export const DESKTOP_DATA_CHOICE_FILE = "data-choice.json";
 

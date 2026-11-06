@@ -91,6 +91,13 @@ async function launchDesktop(): Promise<void> {
       }
       return;
     }
+    // The client holds Nightly's single-instance lock in the same window
+    // storage the test host locks, so a client and a test host never run
+    // together; a second launch focuses the first, as Octant's does.
+    if (!app.requestSingleInstanceLock()) {
+      app.quit();
+      return;
+    }
   }
   const native =
     identity.flavor === "nightly"
