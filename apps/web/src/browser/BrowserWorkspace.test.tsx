@@ -116,6 +116,31 @@ describe("BrowserWorkspace", () => {
   // Opening a page records it as recent; a later test must not start from it.
   afterEach(() => globalThis.localStorage.clear());
 
+  it("discards a prior host's availability before the replacement host answers", async () => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue(
+      decodeBrowserAutomationSnapshot({
+        status: "ready",
+        threadId,
+        evidence: [],
+        agentAvailability: { status: "available", readOnly: false },
+      }),
+    );
+    const tab = {
+      kind: "browser",
+      id: "90000000-0000-4000-8000-000000000010",
+      mode: "work",
+      title: "Browser",
+      threadId,
+    } as const;
+    const view = render(<BrowserWorkspace client={browser} tab={tab as never} />);
+    expect(await screen.findByText("Agent can use this Browser.")).toBeVisible();
+    const disconnected = client();
+    vi.mocked(disconnected.inspectThread).mockRejectedValue(new Error("disconnected"));
+    view.rerender(<BrowserWorkspace client={disconnected} tab={tab as never} />);
+    expect(screen.queryByText("Agent can use this Browser.")).toBeNull();
+    expect(screen.getByText("Browser availability is unknown.")).toBeVisible();
+  });
   it("keeps compact browser chrome ahead of the live or remote page surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 

@@ -2426,6 +2426,8 @@ Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-capt
 
 ### Browser for agents
 
+- Idle Browser panes and thread docks report the same server availability decision as tool composition, with a specific omission/remedy or Unknown. Plan reads as read-only; the 720px layout keeps an accessible icon. This does not grant a site approval or change Take over/Hand back.
+
 The agent's Browser tool reads a page as an outline with element refs and acts by ref, with every operation admitted on the server and the same tool for every provider.
 
 - A snapshot lists headings, text, and controls with refs, states, and values. A credential field reads protected with no value, and a page that holds one shows no field values.

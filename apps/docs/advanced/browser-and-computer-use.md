@@ -805,3 +805,15 @@ MFA/CAPTCHA and uncertain results remain yours to complete. The website can
 retain or reflect input, so check it before continuing. See
 [Secret stores](../guide/secret-stores.md#record-permission-for-a-browser-login-item)
 for custody, cancellation and exact SSO limits.
+
+## Browser availability
+
+When the agent is not driving, its Browser shows whether the selected task can
+use it. A provider without tool transport, task tool constraints or a host that
+lends no Browser produces a specific reason and a recovery link. Provider recovery
+opens the task's model picker. Tool constraints open the task access report;
+start a task with a permitting profile if its saved constraints exclude Browser.
+Host omissions link to the existing host Settings.
+An unreported or disconnected host shows Unknown. Plan can read an already-open
+page; it cannot navigate or change it. The status does not replace site approvals or
+the page's Take over and Hand back controls.

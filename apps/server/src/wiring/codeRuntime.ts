@@ -1,3 +1,4 @@
+import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
@@ -845,12 +846,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
-          return (
-            observed?.capabilities.appManagedTools === "supported" ||
-            observed?.verifiedToolModelIds?.some(
-              (candidate) => String(candidate) === String(thread.modelId),
-            ) === true
-          );
+          return browserToolTransport(observed, String(thread.modelId)) === true;
         },
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities

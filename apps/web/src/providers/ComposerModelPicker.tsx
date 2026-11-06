@@ -1,3 +1,4 @@
+import { useThreadControlNavigation } from "../composer/threadControlNavigation";
 import type {
   ProviderInstanceId,
   ProviderModelId,
@@ -55,6 +56,7 @@ export function isComposerReasoningOption(option: {
 const DEFAULT_LEVEL_ID = "__default__";
 
 export interface ComposerModelPickerProps {
+  readonly threadId?: string;
   readonly rememberChoice?: boolean;
   readonly groups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
@@ -189,6 +191,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       return stillAvailable ? current : (railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
     });
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
+
+  useThreadControlNavigation(props.threadId, "provider", () => {
+    if (controlsDisabled) return;
+    setQuery("");
+    setCatalogFilter(undefined);
+    setFavorites(readModelFavorites());
+    setRecentModels(readRecentModels());
+    setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
+    setOpen(true);
+  });
 
   if (!pickerHasListedModel(props.groups) && !pickerHasBoundCurrent(props.groups)) {
     const offerSetup =
