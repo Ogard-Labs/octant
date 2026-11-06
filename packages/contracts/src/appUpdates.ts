@@ -83,6 +83,19 @@ export const PREVIEW_PRERELEASE_TAG = "preview";
 export const CANDIDATE_PRERELEASE_TAG = "candidate";
 
 /**
+ * Which app a release is for.
+ *
+ * Octant and Octant Nightly are two apps, and each updater installs only its
+ * own. The ring already separates them (Octant follows `stable` and
+ * `candidate`, Nightly only `preview`), but Octant builds were once published
+ * on `preview`, and on Linux nothing below the feed checks which app a
+ * portable image is. Naming the app inside the signature makes the refusal
+ * the feed's own, on every platform.
+ */
+export const AppUpdateProduct = Schema.Literal("octant", "octant-nightly");
+export type AppUpdateProduct = typeof AppUpdateProduct.Type;
+
+/**
  * The release a feed offers.
  *
  * These are exactly the fields that are signed. Anything the app decides from
@@ -90,6 +103,12 @@ export const CANDIDATE_PRERELEASE_TAG = "candidate";
  * the signature, or the signature is decoration.
  */
 export const AppUpdateRelease = Schema.Struct({
+  /**
+   * The app this release is. Signed, and required: a feed without it is
+   * malformed, because every signer has emitted it since the field was added
+   * and nothing published before then is read at a name that carries it.
+   */
+  product: AppUpdateProduct,
   version: AppVersion,
   platform: AppUpdatePlatform,
   arch: AppUpdateArchitecture,
@@ -161,6 +180,11 @@ export const AppUpdateRefusal = Schema.Literal(
    */
   "wrong-ring",
   /**
+   * The release is genuine, but it is the other app: an Octant Nightly build
+   * offered to Octant, or the reverse.
+   */
+  "wrong-app",
+  /**
    * The running launch is not a portable image this app can replace. A
    * package or an unpacked archive has to be replaced by hand.
    */
@@ -220,6 +244,8 @@ export const NightlyInstallRefusal = Schema.Literal(
   "untrusted-signature",
   "wrong-platform",
   "wrong-ring",
+  /** The Nightly feed held a build of Octant rather than Octant Nightly. */
+  "wrong-app",
   "corrupt-artifact",
   /** The preview feed holds no published Nightly build. */
   "no-release",

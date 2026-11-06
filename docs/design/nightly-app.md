@@ -69,9 +69,10 @@ Nightly publication still needs.
 3. **Linux Nightly stays in scope.** It needs its own Linux client trust design,
    because Linux has no code-signature check or audit-token peer identity to
    admit a Nightly main by. Designed, not built; the design comes first.
-4. **The signed feed names its app.** The signed update feed will name the app
-   it is for (Octant or Octant Nightly), and each app refuses a feed for the
-   other with a clear message, beside the existing ring check. Planned.
+4. **The signed feed names its app.** The signed update feed names the app it
+   is for (Octant or Octant Nightly), and each app refuses a feed for the
+   other with a clear message, beside the existing ring check. Built; see
+   [Which build is which](#which-build-is-which).
 
 ## Two apps, one set of data
 
@@ -569,7 +570,7 @@ evidence; the preflight that replaces the early gate checks them:
 - [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
       an unsigned packaged Nightly smoke.
 - [ ] The full `octant-nightly` command.
-- [ ] Roll-forward rollback, a published host feature list and the app named
+- [x] Roll-forward rollback, a published host feature list and the app named
       in the signed feed (decision 4).
 - [ ] Linux client trust, designed and built (decision 3).
 - [ ] The usable-client preflight in place of the early gate, with no secrets,
@@ -856,7 +857,9 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
   "Install Octant Nightly" downloads the newest Nightly (`preview` ring) build
   and places it beside Octant after three checks:
   - The feed signature, against the preview ring's trust set (the preview key
-    and the stable key). This installer is the only part of Octant that reads
+    and the stable key), and a signed release that names Octant Nightly as its
+    app; an Octant build on the preview ring refuses as the wrong app. This
+    installer is the only part of Octant that reads
     a `preview` feed; Octant's own updater checks only `stable` or
     `candidate`.
   - The artifact hash inside that signed feed.
@@ -950,12 +953,67 @@ Synthetic updater/feed tests establish ordering and preference separation, not
 a signed installed update, OS replacement, rollback or publication. Those
 remain separate packaged acceptance.
 
+**Rollback is a roll-forward.** Every updater accepts only a strictly newer
+version, so a bad Nightly cannot be withdrawn by republishing an older one:
+installs that took it would call the older one not newer and stay. A
+maintainer instead dispatches `Release (preview)` from `main` with
+`rollback_ref` set to a known-good Nightly tag. The run builds that tag as
+Octant Nightly on `preview` under a new version made from the dispatching
+workflow's declared version, today's date and the run number, so it is newer
+than every earlier Nightly, and signs and publishes it with the workflow's
+current scripts. The tag must already read the app-named Nightly feed; an older
+one would decode it as malformed and never update again, so the run refuses it.
+The run passes the same publication gate as a scheduled one.
+
+Building runs the source's own code (install scripts, build, packaging) in the
+job that holds the Developer ID and notary credentials, so the rollback source
+must be code that was reviewed and shipped: a published `v*-preview.*` release
+tag whose commit is on `main`. Scheduled Nightly tags are built from `main`;
+candidate tags are refused because a candidate may be built from any ref. A
+branch or bare commit is refused before anything is checked out. The feed key
+is never in that job: a separate `feed` job checks out the workflow's own
+commit, downloads the uploaded archive, hashes it into the signature and
+publishes, without running any of the built source's code.
+
+The code rolls back; test data does not. A Nightly running its own host on
+separate test data may have migrated that data, and the host of the older
+build it is rolled forward to refuses to open data a newer schema wrote, as
+every host refuses a downgrade. The way out is **Remove test data** in
+Nightly's Settings › Updates, which moves it to the Trash so the next start
+begins clean.
+Octant's own data is never migrated by Nightly, so a rollback never touches
+it.
+
+**Octant publishes what its host offers Nightly.** Each Octant release, stable
+and candidate, carries `octant-host-features.json` beside its archives:
+
+```json
+{
+  "schemaVersion": 1,
+  "octantVersion": "0.1.0-candidate.20261106.81",
+  "nativeClientProtocol": 1,
+  "hostFeatures": ["project-root-receipts", "…"]
+}
+```
+
+`scripts/write-host-features.ts` writes it from the contracts the host
+advertises from (`NIGHTLY_NATIVE_CLIENT_PROTOCOL`, `NIGHTLY_HOST_FEATURES`), and
+decodes it with `OctantHostFeaturesDocument`. The Nightly preflight compares a
+Nightly build's needs with the published Octant's document before publishing.
+The document reads whatever protocol a newer Octant names, and
+`readPublishedHostFeatures` reports a different protocol as a mismatch rather
+than an unreadable file. It is advisory: the asset is unsigned and rides on a
+release any repository writer can change, so it must be signed or hash-pinned
+before it is ever used as a release gate outside CI.
+
 ## Which build is which
 
 - A build's flavor follows its ring: a `stable` or `candidate` release
   packages as Octant; a `preview` release packages as Octant Nightly. The
   release workflows pass the flavor with the version: the scheduled run builds
-  Nightly on `preview`, and a dispatched run builds Octant on `candidate`.
+  Nightly on `preview`, a dispatched run builds Octant on `candidate`, and a
+  dispatched run with `rollback_ref` rebuilds a known-good Nightly on
+  `preview` ([rollback](#nightlys-own-updates)).
   Packaging refuses a stable or candidate version under the Nightly identity,
   and a preview version under Octant's.
 - A local `bun run package:desktop` builds Octant unless
@@ -965,12 +1023,36 @@ remain separate packaged acceptance.
   `candidate` and `preview` trust the preview key and the stable key. Octant
   on Preview therefore accepts a preview-key signature only for a release
   signed for `candidate`, never for `stable`. An update for one app can never
-  install the other: the signed ring
-  must equal a ring the app follows, and on macOS the platform updater's
-  code-signature check also requires the running app's bundle id. An update
-  check or download that finishes after its ring was changed or refused cannot
-  restore the older offer, failure or native download result.
-- Nothing has shipped on any ring, so no install needs moving between apps.
+  install the other: the signed release names its app (`product`: `octant` or
+  `octant-nightly`, set by `scripts/sign-update-feed.ts` from the build's
+  flavor, which must own the ring), and an app refuses the other's release as
+  the wrong app ("This update is for Octant Nightly, not Octant."). The signed
+  ring must also equal a ring the app follows, and on macOS the platform
+  updater's code-signature check also requires the running app's bundle id. An
+  update check or download that finishes after its ring was changed or refused
+  cannot restore the older offer, failure or native download result.
+- The field is required from its first release: every signer emits it, and a
+  feed without it is malformed. Builds made before it decode a feed strictly
+  and call a document carrying it malformed, so current feeds live at new
+  names: `candidate/<platform>-<arch>.octant.json` and
+  `preview/<platform>-<arch>.octant-nightly.json` (`stable` keeps its name; it
+  has published nothing).
+- Octant builds were published on `preview` up to `0.1.0-preview.20261104.71`,
+  before Nightly took the ring. Those installs read
+  `preview/<platform>-<arch>.preview-key.json` (or the bare `.json` before the
+  preview key), and cannot read the app name. On macOS the platform updater's
+  bundle-id check would refuse Nightly, but a Linux AppImage replacement has
+  no such check. So nothing writes those names again: they keep the last
+  Octant preview build, those installs see no update, and they move on by
+  choosing Preview in **Settings › Updates** (the `candidate` ring). A
+  product-bearing document placed there by mistake would still be refused as
+  malformed. Candidate installs made before the field read
+  `candidate/<platform>-<arch>.preview-key.json`; each candidate run writes an
+  old-shape document there (no `product`, signed over the old encoding)
+  offering the same build, which then reads the new name. That is safe because
+  `candidate` is Octant's alone. The stable-signed bridge at
+  `candidate/<platform>-<arch>.json` keeps the old shape and accepts only
+  candidate tags.
 - **Release order.** A person's first install is Octant, so it has a host.
   Octant on Preview may publish before the first stable release. Octant
   Nightly is published only once an Octant build (Stable or Preview) exists

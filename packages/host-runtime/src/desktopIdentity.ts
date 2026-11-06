@@ -6,6 +6,8 @@ export const DESKTOP_FLAVOR_IDENTITIES = {
   stable: {
     flavor: "stable",
     productName: "Octant",
+    /** The app its signed update feeds name. */
+    updateProduct: "octant",
     bundleId: "app.octant.desktop",
     scheme: "octant",
     commandName: "octant",
@@ -18,6 +20,7 @@ export const DESKTOP_FLAVOR_IDENTITIES = {
   nightly: {
     flavor: "nightly",
     productName: "Octant Nightly",
+    updateProduct: "octant-nightly",
     bundleId: "app.octant.desktop.nightly",
     scheme: "octant-nightly",
     commandName: "octant-nightly",
