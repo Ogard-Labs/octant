@@ -1001,6 +1001,11 @@ export function validatePackagedPayload(
     if (entry.content !== undefined && containsForbiddenIdentity(entry.content)) {
       throw new Error(`Packaged payload contains forbidden product identity in ${entry.path}.`);
     }
+    if (isNightlyClientHarness(entry)) {
+      throw new Error(
+        `Packaged payload contains the Nightly client smoke harness in ${entry.path}.`,
+      );
+    }
   }
   validateBundledInternalRuntime(entries);
   validateSandboxedPreloads(entries);
@@ -1997,6 +2002,20 @@ function isForbiddenPath(path: string): boolean {
     fileName.endsWith(".key") ||
     fileName.endsWith(".p12") ||
     fileName.endsWith(".mobileprovision")
+  );
+}
+
+/**
+ * The Nightly client smoke stands in for the signed native window binding and
+ * answers pickers and menus itself, so no build of it may ship. Each harness
+ * entry carries this marker, and a bundle that inlined one carries it too.
+ */
+export const NIGHTLY_CLIENT_HARNESS_MARKER = "octant-nightly-client-harness@1";
+
+function isNightlyClientHarness(entry: PackagedPayloadEntry): boolean {
+  return (
+    basename(entry.path).toLowerCase().startsWith("nightly-client-harness") ||
+    entry.content?.includes(NIGHTLY_CLIENT_HARNESS_MARKER) === true
   );
 }
 

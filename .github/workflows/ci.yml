@@ -183,6 +183,16 @@ jobs:
       # app pins. Electron's package downloads its binary only on demand, not
       # at install, so it is fetched here; without it that case would skip.
       - run: node node_modules/electron/install.js
+      # The ordinary Nightly client, in this Electron, against a development
+      # host on a throwaway folder and port that a synthetic Stable owns with
+      # Stable's own lease owner and client lifetime: the renderer, a Chat
+      # turn, brokered pickers, keys and approvals, the embedded Browser,
+      # lease loss, a host restart, two separate hosts, and quit-one and
+      # quit-last. Only the signed native binding is stood in for, so it needs
+      # no signing secret; the harness it builds is never packaged.
+      - name: Nightly client smoke
+        timeout-minutes: 10
+        run: bun scripts/smoke-nightly-client.ts
       # An outside provider driver runs under its own Seatbelt profile and
       # Linux refuses to start one, so its escape tests (network, files
       # outside its package, the home folder, exec, host variables) skip on
