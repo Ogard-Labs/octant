@@ -13268,7 +13268,15 @@ cards; general Azure CLI credentials remain unavailable by design.
   where the runtime runs outside Octant's profile (approval-gated,
   auto-accept-edits, and Full access), run in its unwrapped process, so a search rooted at or
   above an existing protected file, or inside a protected folder, is refused
-  whole (`secretGuardSearchRefusal`); its own sandbox cannot carry the list,
+  whole (`secretGuardSearchRefusal`). The refusal names the resolved search
+  root and protected rule/channel, explicitly says no results were returned,
+  and suggests an ordinary subfolder with no protected entry. It never claims
+  partial results or recommends bypassing the protected entry through another
+  tool. Relative roots and a relative Glob's fixed `..` prefix are resolved
+  against the bound search folder before the same lexical/real-path check.
+  Parent traversals retain both lexical and kernel symlink interpretations;
+  direct file-tool paths are resolved against the bound Project root too.
+  Its own sandbox cannot carry the list,
   because its `allowRead` takes precedence over `denyRead`. Protected entries
   are matched in their lexical and resolved forms, so a linked folder's target
   is refused too. In the Seatbelt profiles each exception follows only its own

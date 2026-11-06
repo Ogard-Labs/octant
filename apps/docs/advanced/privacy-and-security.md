@@ -300,6 +300,16 @@ keeps working:
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.
 
+Claude Code's native Grep, Glob and listing tools can refuse a whole search
+when its folder contains a protected entry, including at Full access. The row
+names the search folder and protected rule, and says that no results were
+returned. Narrow that search to an ordinary subfolder containing no protected
+entry; use the named credential channel for the protected material. Relative
+folder names and Glob patterns that leave a folder are checked against their
+resolved location, and linked folders are checked again if their target changes.
+A refused search is not a partial result with safe exclusions. The Octant
+Harness's own search already skips protected entries without opening them.
+
 Octant Shield watches for this too. Any call of Octant's own tools that names
 a protected file, refused or not, gets an "Outside content" tag on its tool
 row saying it reached for a protected secret file, and the thread is marked.

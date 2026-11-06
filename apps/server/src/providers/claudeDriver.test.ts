@@ -16,7 +16,7 @@ import {
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -461,6 +461,63 @@ describe("Claude file tools and the secret guard", () => {
     it("lets a search run where no protected file lies beneath it", () => {
       expect(search("Grep", { pattern: "export" })).toBeUndefined();
       expect(search("Glob", { pattern: "src/**/*.ts" })).toBeUndefined();
+    });
+
+    it.each(["Grep", "Glob", "LS"])(
+      "refuses a relative %s root that contains a protected entry",
+      (tool) => {
+        expect(search(tool, { path: ".", pattern: "**/*" }, fakeHome)).toContain(
+          "Cloud command-line credentials",
+        );
+        expect(search(tool, { path: "src", pattern: "**/*" })).toBeUndefined();
+      },
+    );
+
+    it("checks the resolved prefix of a relative Glob that leaves the search folder", () => {
+      expect(search("Glob", { pattern: "../.aws/*" })).toContain("Cloud command-line credentials");
+      expect(search("Glob", { path: "src", pattern: "../../.aws/*" })).toContain(
+        "Cloud command-line credentials",
+      );
+      expect(search("Glob", { pattern: "src/**/*.ts" })).toBeUndefined();
+    });
+
+    it("distinguishes an explicit protected relative read from a mixed-root search", () => {
+      const direct = search("Read", { file_path: ".aws/credentials" }, fakeHome);
+      expect(direct).toContain("Cloud command-line credentials");
+      expect(direct).not.toContain("This search");
+    });
+
+    it("checks a parent traversal after resolving the symlink it follows", async () => {
+      const link = join(fakeHome, "project", "mixed-target");
+      await symlink(join(fakeHome, ".aws"), link);
+      try {
+        expect(search("Grep", { path: "mixed-target/../.aws", pattern: "." })).toContain(
+          "Cloud command-line credentials",
+        );
+        expect(search("Glob", { pattern: "mixed-target/../.aws/*" })).toContain(
+          "Cloud command-line credentials",
+        );
+        expect(search("Read", { file_path: "mixed-target/../.aws/credentials" })).toContain(
+          "Cloud command-line credentials",
+        );
+      } finally {
+        await unlink(link);
+      }
+    });
+
+    it("rechecks a linked search folder after its target changes", async () => {
+      const shortcut = join(fakeHome, "shortcut");
+      await symlink(join(fakeHome, "project", "src"), shortcut);
+      try {
+        expect(search("Grep", { path: "shortcut", pattern: "export" }, fakeHome)).toBeUndefined();
+        await unlink(shortcut);
+        await symlink(join(fakeHome, ".aws"), shortcut);
+        expect(search("Grep", { path: "shortcut", pattern: "key" }, fakeHome)).toContain(
+          "Cloud command-line credentials",
+        );
+      } finally {
+        await unlink(shortcut);
+      }
     });
 
     it("leaves searches to the OS rule only where the runtime runs inside Octant's profile", () => {
