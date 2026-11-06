@@ -1251,6 +1251,8 @@ One journaled session per thread is the only state, and every surface reads and 
 
 - After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it. Lost turns and dead approvals are journaled.
 - The lead's approvals and questions block until any surface answers, expire after ten minutes, and are capped at 32 waiting. A pending one marks the thread as needing the person.
+- Built: the provider-neutral app-owned `ask-user` tool can collect up to four related single-choice or multiple-choice questions inline in Chat, Work and Code, with selection limits, unselected recommendations, written alternatives and an optional comment. It creates no Canvas and grants no permissions.
+- The host validates the complete questionnaire response against the journaled ask before accepting it once. Another window's answer withdraws the pending card, and the originating thread retains an expandable submitted-answer summary after reopening. [Workspace: Inline questionnaires](workspace.md#inline-questionnaires) owns the presentation and answer contract.
 - A goal completes only on evidence from a criterion check or a person; a model saying it is done completes nothing.
 - A goal loop's budgets are its stopping condition. A loop that would exceed a token, time or turn ceiling does not start the next iteration and moves to budget-limited, which only a person resumes. _Here only._
 - An unattended iteration runs under a ceiling declared at loop start, clamped to the thread's authority, which can only narrow. An effect needing an approval no person can give suspends the loop and is never auto-approved. _Here only._
