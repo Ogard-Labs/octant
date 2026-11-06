@@ -165,10 +165,10 @@ Every link page has a report form. A report names a reason from a list and can
 add a note of up to 1,000 characters. It is stored without the reporter's
 address. The operator can take a link down. A removed link answers "removed".
 
-::: warning Draft
-The abuse contact address shown on link pages, and the legal wording for
-takedown, are not final. The maintainer sets them before the service launches.
-:::
+The abuse contact shown on link pages is `hello@octant.sh` (Ogard Labs,
+organisation number 996 198 510, Stavanger, Norway). The service is hosted in
+Norway (EEA) on Ogard Labs' own infrastructure (Gigahost AS), with encrypted
+offsite backups in Finland (Hetzner, EU).
 
 ## Run your own service
 

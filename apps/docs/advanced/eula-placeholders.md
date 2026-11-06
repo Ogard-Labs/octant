@@ -26,28 +26,32 @@ under the [DPA template](/advanced/dpa-template).
 
 ## Placeholders
 
-Copy these into the counsel-drafted EULA. Replace every bracketed token.
+Copy these into the counsel-drafted EULA. The proposed values below mirror
+the standard already published for Ogard Labs' other products (Norwegian law,
+Stavanger venue, `hello@octant.sh`); counsel confirms or amends them before
+any EULA ships, and replaces the remaining bracketed tokens.
 
 ```text
-Governing law. This Agreement is governed by the laws of
-[GOVERNING LAW JURISDICTION, e.g. COUNTRY / STATE], excluding its
-conflict-of-law rules, except that mandatory consumer-protection rules of
-the licensee's country of habitual residence continue to apply where they
-cannot be waived.
+Governing law. This Agreement is governed by the laws of Norway,
+excluding its conflict-of-law rules, except that mandatory
+consumer-protection rules of the licensee's country of habitual residence
+continue to apply where they cannot be waived.
 
-Exclusive jurisdiction. The courts of [VENUE, CITY / COURTS]
-have exclusive jurisdiction over disputes arising out of or relating to
-this Agreement, subject to mandatory consumer venue rights that cannot be
-waived and subject to any arbitration clause counsel adds below.
+Exclusive jurisdiction. The parties agree that Stavanger District Court
+(Stavanger tingrett) is the agreed venue, subject to mandatory consumer
+venue rights that cannot be waived and subject to any arbitration clause
+counsel adds below.
 
-Arbitration (optional). [ARBITRATION RULES / SEAT / LANGUAGE, or "None"].
+Arbitration (optional). None.
 
-Notices. Legal notices to Ogard Labs go to [LEGAL NOTICE ADDRESS / EMAIL].
+Notices. Legal notices to Ogard Labs (organisation number 996 198 510,
+Stavanger, Norway) go to hello@octant.sh.
 Legal notices to the licensee go to the contact on file or, for software
 used without an Octant account, to the contact the licensee provides when
 making a claim.
 
-Language. The controlling language of this Agreement is [LANGUAGE].
+Language. The controlling language of this Agreement is English; a
+Norwegian translation is provided for convenience and does not control.
 ```
 
 ## Consumer and B2B forks
