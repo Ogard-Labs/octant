@@ -592,7 +592,7 @@ and Keychain sharing for the notification service extension), testers are
 maintainer-controlled App Store Connect users, and external groups, public
 links, and store listing stay closed until
 [public store distribution](design/mobile-maturity.md#phase-e-public-store-distribution),
-an authorized post-preview track, opens with a separate maintainer action for
+a track in scope for the first preview, opens with a separate maintainer action for
 submission. A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
 Apple finishes processing it. Internal Android builds carry the same client
@@ -4849,8 +4849,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; the catalog lists effective outside drivers in their own group from
-  the registry snapshot. Third-party provider-driver plugins are an authorized
-  post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  the registry snapshot. Third-party provider-driver plugins are in scope for the
+  first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -8803,8 +8803,8 @@ same. This holds in Chat, Work, and Code.
   observe/execute/cleanup. A host with no destination reports the capability
   absent and refuses actions as a value rather than throwing.
   Thread-leased disposable Linux desktops, their provider seam, artifact
-  transfer, and verified lease teardown are post-preview design, accepted on
-  2026-10-26, in
+  transfer, and verified lease teardown are in scope for the first preview
+  (design accepted on 2026-10-26), in
   [Disposable desktops](design/disposable-desktops.md). The lease contract,
   the `desktop-provider` seam with its conformance suite, the host lease
   service, the host-local provider (a virtual X display in a dedicated
@@ -13709,14 +13709,15 @@ signing credentials a maintainer holds is unsigned.
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and
 Windows Work and Code only after an explicitly approved Windows confinement
-design is documented. The following are authorized as post-preview work
-(maintainer decision, 2026-10-26) and are not part of the technical preview:
-mobile maturity (Android internal builds, redacted push, capture and voice,
-public store distribution), a full LSP /
+design is documented. Everything on the work board is in scope for the first
+proper preview release (maintainer decision, 2026-11-06, which replaces the
+2026-10-26 post-preview track): mobile maturity (Android internal builds,
+redacted push, capture and voice, public store distribution), a full LSP /
 extension host / debugger companion, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, third-party
-provider-driver plugins, and the EU/GDPR compliance package (pending legal
-review). Public store distribution, the Windows sequence below, and the full
+provider-driver plugins, and the EU/GDPR compliance package (legal review is
+still required before it ships). There is no separate post-preview track.
+Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
 maintainers schedule, not safety rules; none of them protects an invariant by
 itself.
@@ -13784,21 +13785,16 @@ architecture.
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
-server on every OS. The sequence is the Linux desktop shell, then the Linux
-AppImage with its signed feed, then Windows. Windows comes after the macOS
-technical preview has shipped and a Linux self-update from the signed feed
-has been seen on a real image; until both exist, no Windows packaging,
-installer, feed, packaging CI, or confinement work starts (maintainer
-decision, 2026-10-16). This is a release-scope choice a maintainer may
-change, not a safety rule. The reason is sequencing, not a technical
-dependency: one person is today both the only maintainer and the only acceptance
-tester, the macOS preview has waited on acceptance since September, and a third
-platform's packaging and confinement questions would compete for the same
-sittings. The Linux self-update gate exists because the signed-feed update
-path is the shared trust root for every non-macOS platform and has never
-been exercised on a real image, so Windows should not build on it until it
-has. Windows Work and Code stay unavailable until an
-approved Windows confinement design is documented: the confinement port
+server on every OS. server. The sequence is the Linux desktop shell, then the Linux
+AppImage with its signed feed, then Windows. Windows packaging, installer,
+feed, and packaging CI work may start now (maintainer decision, 2026-11-06,
+which lifts the 2026-10-16 ordering gate that held Windows until the macOS
+preview had shipped and a Linux self-update from the signed feed had been seen
+on a real image). That ordering was a release-scope choice, not a safety
+rule. The Linux signed-feed update path is still the shared trust root for
+every non-macOS platform, so a Windows feed builds on it and is not trusted
+before the path has been exercised on a real image. Windows Work and Code stay
+unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.

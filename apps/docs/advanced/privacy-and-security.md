@@ -551,7 +551,7 @@ no request is made. Octant runs a tool's own updater only when you click
 There is no app-level database encryption in the current preview; Octant
 relies on owner-only filesystem permissions plus host storage protection.
 Provider secrets are explicitly outside the journal. The multi-host
-federation and hosted relay models are post-preview.
+federation and hosted relay models are not built.
 
 ## Next steps
 

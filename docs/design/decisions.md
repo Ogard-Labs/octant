@@ -305,26 +305,26 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
-### Post-preview tracks are design-first
+### First-preview tracks are design-first
 
-Mobile maturity, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package, and the hub-and-spoke topology are authorized post-preview work, each built only once its specification documents its boundaries.
+Everything on the work board is in scope for the first proper preview release (maintainer decision, 2026-11-06; there is no separate post-preview track). That covers mobile maturity, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package (legal review still required before it ships), and the hub-and-spoke topology, each built only once its specification documents its boundaries.
 
 - The authorization covers design and implementation; creating an account, spending money, submitting to a store, deploying a hosted service, or weakening an invariant each needs a separate maintainer action.
 - Remote SSH development environments are in scope; a Code or Work Project on a registered server is built ([Server Projects](server-projects.md)).
 - Release-scope choices (public store distribution, the Windows sequence, the full language-services companion) are the maintainers' to schedule and protect no invariant by themselves.
 
-Status: Partly built. Since: 2026-10-26. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+Status: Partly built. Since: 2026-10-26; scope widened to the first preview 2026-11-06. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ### One desktop app, Linux next, Windows later
 
 Desktop is one product on macOS, Linux and Windows, and platform differences are fail-closed posture, never a second app.
 
 - The sequence is the Linux desktop shell, then the Linux AppImage with its signed feed, then Windows.
-- No Windows packaging, installer, feed or confinement work starts until the macOS preview has shipped and a Linux self-update has been seen on a real image.
+- Windows packaging, installer, feed and packaging CI work may start now (maintainer decision, 2026-11-06, lifting the 2026-10-16 ordering gate on the macOS preview and a Linux self-update); a Windows feed is not trusted before the Linux signed-feed path has been exercised on a real image.
 - Work and Code stay unavailable on Windows until an approved Windows confinement design is documented.
 - The simulator, the Apple development workbench and window vibrancy stay macOS-only.
 
-Status: Partly built. Since: 2026-10-16. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+Status: Partly built. Since: 2026-10-16; ordering gate lifted 2026-11-06. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ### Person-controlled update install
 

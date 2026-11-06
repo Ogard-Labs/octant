@@ -14,8 +14,9 @@ uses the existing plugin ladder or a distinct host, and that language services
 and debugger actions cannot escalate mode, Project, or thread authority or go
 around sandbox and approval policy.
 
-**Scope and delivery state.** The maintainer authorized this scope as
-post-preview work on 2026-10-26, when parked backlog work was unlocked. That
+**Scope and delivery state.** The maintainer authorized this scope on
+2026-10-26, when parked backlog work was unlocked, and brought it into the first
+preview on 2026-11-06. That
 authorizes the design and the slices below; the release-boundary statement in
 the architecture is updated separately. The maintainer
 accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.

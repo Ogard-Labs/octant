@@ -12,7 +12,7 @@ packaging; a Linux x64 AppImage can be built locally as an unsigned dogfood
 artifact. An AppImage launch can update itself from the signed feed when the
 file is writable. A package, archive, or non-writable location cannot.
 TestFlight and public store distribution of the mobile client are
-post-preview. This page records what that means for compatibility and
+not available yet. This page records what that means for compatibility and
 migration.
 
 ## Data location
@@ -22,7 +22,7 @@ overridable with the `OCTANT_DATA_DIR` environment variable. The directory
 and its database are created owner-only (mode 0700). Releases on other
 platforms are not shipped in the preview. The source headless runtime now uses
 safe XDG defaults on Linux, but signed or maintainer-published Linux release
-artifacts and real-host release validation remain post-preview work. The local
+artifacts and real-host release validation are not done yet. The local
 unsigned x64 AppImage is a dogfood exception: it is not code-signed, and
 in-app update applies only when that image was launched from a writable path
 and the signed feed verifies.
@@ -74,7 +74,7 @@ and the signed feed verifies.
   the host is running
 - Connector/OAuth marketplace and data migration from current Octant
 
-These are tracked on the post-preview roadmap; nothing on this page is a
+These are tracked on the roadmap; nothing on this page is a
 commitment that a deferred capability will ship.
 
 ## Next steps
