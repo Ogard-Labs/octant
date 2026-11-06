@@ -158,6 +158,7 @@ struct TestServer {
   std::condition_variable changed;
   std::vector<std::string> exited;
   unsigned requests = 0;
+  bool silent_once = false;
   TestServer() {
     owned->status_enabled = true;
     owned->windows_enabled = true;
@@ -166,6 +167,8 @@ struct TestServer {
       std::lock_guard guard(self->lock);
       if (notice->exited)
         self->exited.push_back(notice->peer);
+      else if (self->silent_once)
+        self->silent_once = false;
       else {
         ++self->requests;
         std::lock_guard server_guard(self->owned->lock);
@@ -338,6 +341,29 @@ void socket_tests() {
     kill(holder, SIGKILL);
     waitpid(holder, nullptr, 0);
 
+    // A late answer refuses only its own call: the connection and the
+    // client's other leases stay.
+    window_client.reset();
+    check(call_window(policy::operation_register, std::string(36, 'd'), 3,
+                      Clock::now() + operation_bound)
+                  .find("registered") != std::string::npos,
+          "registers before a slow call" + mode);
+    {
+      std::lock_guard guard(server.lock);
+      server.silent_once = true;
+    }
+    const auto late = call_window(policy::operation_renew, std::string(36, 'd'), 3,
+                                  Clock::now() + std::chrono::milliseconds(300));
+    check(late.find("deadline-exceeded") != std::string::npos,
+          "a slow answer times out its own call" + mode + ": " + late);
+    const auto after = call_window(policy::operation_renew, std::string(36, 'd'), 3,
+                                   Clock::now() + std::chrono::seconds(5));
+    check(after.find("registered") != std::string::npos,
+          "the next call is answered on the same connection" + mode + ": " + after);
+    {
+      std::lock_guard guard(server.lock);
+      check(server.exited.size() == 1, "a timeout revokes no lease" + mode);
+    }
     // EOF on a window connection ends that peer's leases too.
     window_client.reset();
     const auto own = call_window(policy::operation_register, std::string(36, 'c'), 2,
