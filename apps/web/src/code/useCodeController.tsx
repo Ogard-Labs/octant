@@ -306,6 +306,8 @@ function readsConversationWindow(
  */
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
+  /** Window-owned metadata; a thread slot waits for it instead of bootstrapping. */
+  readonly navigation?: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client?: CodeClient;
   readonly draftStore?: ComposerThreadDraftStore;
   readonly readCursorStore?: CodeReadCursorStore;
@@ -322,6 +324,7 @@ export interface CodeControllerOptions {
 }
 
 export function useCodeController(options: CodeControllerOptions) {
+  const ownsNavigation = options.navigation === undefined;
   const reconnectDelayMs = options.reconnectDelayMs ?? 250;
   const navigationRefreshMs = options.navigationRefreshMs ?? 2_000;
   const readCursorStore = useMemo(
@@ -364,16 +367,20 @@ export function useCodeController(options: CodeControllerOptions) {
   composerDraftRef.current = composerDraft;
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
-  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
-    if (knownDraftThreads.current === undefined) {
-      composerDraftRef.current.dropUnknown(threadIds);
-    } else {
-      for (const threadId of knownDraftThreads.current) {
-        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+  const reconcileDrafts = useCallback(
+    (threadIds: ReadonlyArray<string>) => {
+      if (!ownsNavigation) return;
+      if (knownDraftThreads.current === undefined) {
+        composerDraftRef.current.dropUnknown(threadIds);
+      } else {
+        for (const threadId of knownDraftThreads.current) {
+          if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+        }
       }
-    }
-    knownDraftThreads.current = new Set(threadIds);
-  }, []);
+      knownDraftThreads.current = new Set(threadIds);
+    },
+    [ownsNavigation],
+  );
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   // The transcript as last set, and whose it is, for the window reads that
   // join a page onto it. A render keeps it level with live updates.
@@ -1878,11 +1885,14 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const followUpThreadKey = useMemo(
     () =>
-      (bootstrap?.threads ?? [])
-        .filter((thread) => thread.lifecycle !== "archived")
-        .map((thread) => String(thread.id))
-        .join(","),
-    [bootstrap],
+      options.activeThreadId !== undefined
+        ? ""
+        : (bootstrap?.threads ?? [])
+            .filter((thread) => thread.lifecycle !== "archived")
+            .map((thread) => String(thread.id))
+            .sort()
+            .join(","),
+    [bootstrap, options.activeThreadId],
   );
 
   useEffect(() => {
@@ -1914,9 +1924,18 @@ export function useCodeController(options: CodeControllerOptions) {
     };
   }, [client, followUpThreadKey]);
 
+  const windowBootstrap = options.navigation?.bootstrap;
+  useEffect(() => {
+    if (ownsNavigation || windowBootstrap === undefined) return;
+    bootstrapRef.current = windowBootstrap;
+    setBootstrap(windowBootstrap);
+    // Window metadata neither reconciles a tab's drafts nor recovers a failed
+    // thread read. Only installing a successfully read view clears that failure.
+  }, [ownsNavigation, windowBootstrap]);
+
   useEffect(() => {
     mounted.current = true;
-    void loadBootstrap("bootstrap");
+    if (ownsNavigation) void loadBootstrap("bootstrap");
     return () => {
       mounted.current = false;
       bootstrapGeneration.current += 1;
@@ -1925,7 +1944,7 @@ export function useCodeController(options: CodeControllerOptions) {
       streamAbort.current?.abort();
       turnAbort.current?.abort();
     };
-  }, [loadBootstrap]);
+  }, [loadBootstrap, ownsNavigation]);
 
   useEffect(() => {
     activeThreadId.current = options.activeThreadId;

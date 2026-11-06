@@ -4246,7 +4246,11 @@ or .zip>` write the same files, built by one host command
   stays `lost-in-restart` in the harness session: only Resume is offered, and
   the call it guarded never runs.
 
-- **Fast thread reads.** A thread paints from an authoritative snapshot before
+- **Fast thread reads.** A window owns Code navigation bootstrap and the
+  follow-up navigation list. Its open thread controllers consume that metadata
+  while keeping independent transcripts, streams and active-thread follow-up
+  reads; opening another tab does not bootstrap the window's list again.
+  A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
@@ -4269,7 +4273,9 @@ or .zip>` write the same files, built by one host command
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
-  timers. An image job queued or finished journals on its own `image-jobs`
+  timers. Chat navigation selects active threads before reading their activity
+  through thread indexes, so archived history is not scanned during sidebar
+  refreshes. Hidden-thread filtering still precedes the service's result limit. An image job queued or finished journals on its own `image-jobs`
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
   approvals, follow-up offers and message queues use their own metadata-only
