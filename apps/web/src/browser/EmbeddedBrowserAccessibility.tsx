@@ -351,6 +351,7 @@ export function EmbeddedBrowserAccessibility(props: {
       >
         {polite}
       </div>
+      {/* ui-boundary-exception: screen-reader-announcement */}
       <div
         role="alert"
         aria-live="assertive"
