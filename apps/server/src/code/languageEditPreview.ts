@@ -36,6 +36,7 @@ export async function languageEditPreview(input: {
   readonly openText: (uri: string) => string | undefined;
   readonly openVersion?: (uri: string) => number | undefined;
   readonly current: () => boolean;
+  readonly originalFiles?: ReadonlyMap<string, string>;
 }): Promise<
   Failure | { readonly status: "preview"; readonly files: ReadonlyArray<CodeLanguageEditFile> }
 > {
@@ -91,6 +92,13 @@ export async function languageEditPreview(input: {
       maximumBytes: 256 * 1024,
     });
     if (read.status !== "read") return unsafe;
+    if (!input.current()) return invalid;
+    if (input.originalFiles !== undefined) {
+      const beforeRequest = input.originalFiles.get(entry.uri);
+      const afterResponse = await input.port.lstat(absolute).catch(() => undefined);
+      if (beforeRequest === undefined || afterResponse?.changeStamp !== beforeRequest)
+        return invalid;
+    }
     let before: string;
     try {
       before = new TextDecoder("utf-8", { fatal: true }).decode(read.bytes);

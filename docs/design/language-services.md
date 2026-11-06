@@ -2176,3 +2176,5 @@ the editor working when the companion is off or refused.
 Documentation only: formatter, path and decision checks, and `git diff
 --check`. The 2026-10-26 binary smoke above is design evidence, not
 implementation evidence. Slice 2 repeats it as a test.
+
+For reviewed rename and quick fixes, the host takes a bounded confined source listing and retains file metadata revisions before asking the server. A returned target absent from that snapshot, replaced or changed while the request was in flight is refused; the preview never treats post-response bytes as the original baseline. This metadata scan reads no file content. Existing listing depth/entry bounds apply. Quick-fix context uses current pull diagnostics when the server advertises that path, otherwise its current pushed diagnostics.

@@ -35,6 +35,7 @@ import {
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
 import { languageEditPreview } from "./languageEditPreview";
+import { CodeFileListingService } from "./codeFileListingService";
 import { boundedDiagnosticMessage } from "./languageServerResults";
 import { foldersHoldCoveredFile } from "./codeLanguageCoverage";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
@@ -675,6 +676,40 @@ export class CodeLanguageService {
           request.kind === "rename" ? record.renameSupport : record.quickFixesSupport;
         if (editSupport !== "supported")
           return { status: "unsupported", capability: request.kind, support: editSupport };
+        // A language response can name a previously closed file. Retain bounded
+        // metadata before asking; post-response contents cannot establish its baseline.
+        const listing = await new CodeFileListingService().list({
+          threadId: request.threadId,
+          checkoutId: request.checkoutId,
+          rootPath: record.rootPath,
+          signal: controller.signal,
+        });
+        if (listing.status !== "listed")
+          return { status: "edit-unavailable", reason: "unsafe-edit" };
+        const originalFiles = new Map<string, string>();
+        for (const entry of listing.listing.entries) {
+          if (!current()) return { status: "stale" };
+          if (entry.kind !== "file") continue;
+          const path = join(record.rootPath, String(entry.path));
+          const placed = await resolveContainedPath(this.#files, record.rootPath, path);
+          const facts = placed?.canonical === path ? placed.stat : undefined;
+          if (facts?.changeStamp !== undefined && !facts.isSymbolicLink)
+            originalFiles.set(pathToFileURL(path).href, facts.changeStamp);
+        }
+        let diagnostics = record.pushed.get(document.uri) ?? [];
+        if (request.kind === "quick-fixes" && record.pullsDiagnostics) {
+          const pulled = await connection.request(
+            "textDocument/diagnostic",
+            { textDocument: { uri: document.uri } },
+            Math.max(1, deadline - performance.now()),
+          );
+          if (!current()) return { status: "stale" };
+          if (pulled.status !== "answered") return unavailable(pulled);
+          diagnostics =
+            isRecord(pulled.result) && Array.isArray(pulled.result.items)
+              ? pulled.result.items
+              : [];
+        }
         const response = await connection.request(
           request.kind === "rename" ? "textDocument/rename" : "textDocument/codeAction",
           request.kind === "rename"
@@ -687,7 +722,7 @@ export class CodeLanguageService {
                 textDocument: { uri: document.uri },
                 range: { start: request.position, end: request.position },
                 context: {
-                  diagnostics: (record.pushed.get(document.uri) ?? []).slice(0, 1000),
+                  diagnostics: diagnostics.slice(0, 1000),
                   only: ["quickfix"],
                 },
               },
@@ -728,6 +763,7 @@ export class CodeLanguageService {
             current,
             openText: (uri) => record.documents.get(uri)?.text,
             openVersion: (uri) => record.documents.get(uri)?.version,
+            originalFiles,
           });
           if (preview.status === "refused")
             return { status: "edit-unavailable", reason: preview.reason };
@@ -744,6 +780,7 @@ export class CodeLanguageService {
             files: preview.files,
           });
         }
+        if (!current()) return { status: "stale" };
         editPreviews = previews;
       }
       if (request.kind === "references" && support === "supported") {

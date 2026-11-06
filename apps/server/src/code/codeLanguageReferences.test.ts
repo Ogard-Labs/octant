@@ -47,6 +47,41 @@ describe("current document references through real companion and controlled stdi
     };
     expect(await f.edits()).toEqual({ status: "edit-unavailable", reason: "unsafe-edit" });
   });
+  it("refuses a closed rename target changed while the server calculates its edits", async () => {
+    const f = fixture({ editCapabilities: true });
+    await f.open();
+    const uri = pathToFileURL(join(f.checkout, "a.ts")).href;
+    f.state.controls.result = {
+      changes: {
+        [uri]: [
+          {
+            range: { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } },
+            newText: "renamed",
+          },
+        ],
+      },
+    };
+    f.state.controls.beforeEdit = async () => {
+      writeFileSync(join(f.checkout, "a.ts"), "unrelated replacement contents\n");
+    };
+    expect(await f.edits()).toMatchObject({ status: "edit-unavailable", reason: "invalid-edit" });
+  });
+  it("includes current pull diagnostics when requesting a quick fix", async () => {
+    const f = fixture({ editCapabilities: true, pullsDiagnostics: true });
+    await f.open();
+    f.state.controls.diagnostics = [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+        message: "Missing import",
+        code: 321,
+      },
+    ];
+    f.state.controls.result = [];
+    await f.edits("quick-fixes");
+    expect(
+      f.received.find((call) => call.method === "textDocument/codeAction")?.params,
+    ).toMatchObject({ context: { diagnostics: [expect.objectContaining({ code: 321 })] } });
+  });
   it("prepares rename independently of reference support and rejects an old document revision", async () => {
     const f = fixture({ editCapabilities: true, capability: false });
     const opened = await f.open();

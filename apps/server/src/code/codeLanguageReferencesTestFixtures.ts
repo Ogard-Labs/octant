@@ -31,6 +31,7 @@ export function codeLanguageReferencesFixture(
   options: {
     readonly capability?: unknown;
     readonly editCapabilities?: boolean;
+    readonly pullsDiagnostics?: boolean;
     readonly requestDeadlineMs?: number;
     readonly extraFolder?: boolean;
   } = {},
@@ -84,6 +85,8 @@ export function codeLanguageReferencesFixture(
   };
   const controls: {
     beforeReferences?: () => Promise<void>;
+    beforeEdit?: () => Promise<void>;
+    diagnostics?: ReadonlyArray<unknown>;
     result?: unknown;
     beforeRoot?: (count: number) => Promise<void>;
     root?: string;
@@ -192,6 +195,7 @@ export function codeLanguageReferencesFixture(
               send(message.id, {
                 capabilities: {
                   textDocumentSync: 1,
+                  ...(options.pullsDiagnostics ? { diagnosticProvider: {} } : {}),
                   definitionProvider: true,
                   referencesProvider: state.support.value,
                   ...(options.editCapabilities
@@ -209,7 +213,12 @@ export function codeLanguageReferencesFixture(
               message.method === "textDocument/rename" ||
               message.method === "textDocument/codeAction"
             )
-              send(message.id, controls.result);
+              void (async () => {
+                await controls.beforeEdit?.();
+                send(message.id, controls.result);
+              })();
+            else if (message.method === "textDocument/diagnostic")
+              send(message.id, { kind: "full", items: controls.diagnostics ?? [] });
             else if (message.method === "textDocument/references")
               void (async () => {
                 await controls.beforeReferences?.();
