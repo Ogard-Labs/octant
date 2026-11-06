@@ -49,6 +49,7 @@ export const NIGHTLY_HOST_FEATURES = [
   "support-bundle-save",
   "code-operation-approval",
   "provider-credentials",
+  "provider-api-keys",
 ] as const;
 export const NightlyHostFeature = Schema.Literal(...NIGHTLY_HOST_FEATURES);
 export type NightlyHostFeature = typeof NightlyHostFeature.Type;

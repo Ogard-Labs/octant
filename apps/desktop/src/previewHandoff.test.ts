@@ -38,7 +38,7 @@ describe("openPreviewHandoffFromServer", () => {
     const execute = mockExecute();
     await openPreviewHandoffFromServer({
       serverUrl: "http://127.0.0.1:13773/",
-      desktopBridgeSecret: "private-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
       windowId: request.target.targetId,
       request,
       fetch,
@@ -68,7 +68,7 @@ describe("openPreviewHandoffFromServer", () => {
     const execute = mockExecute();
     await openPreviewHandoffFromServer({
       serverUrl: "http://127.0.0.1:13773",
-      desktopBridgeSecret: "private-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
       windowId: request.target.targetId,
       request: { ...request, kind: "quick-look" },
       fetch,
@@ -83,7 +83,7 @@ describe("openPreviewHandoffFromServer", () => {
     const execute = mockExecute();
     await openPreviewHandoffFromServer({
       serverUrl: "http://127.0.0.1:13773",
-      desktopBridgeSecret: "private-secret",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
       windowId: request.target.targetId,
       request,
       fetch,
@@ -101,7 +101,7 @@ describe("openPreviewHandoffFromServer", () => {
     await expect(
       openPreviewHandoffFromServer({
         serverUrl: "http://127.0.0.1:13773",
-        desktopBridgeSecret: "private-secret",
+        brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
         windowId: request.target.targetId,
         request,
         fetch,
@@ -111,7 +111,7 @@ describe("openPreviewHandoffFromServer", () => {
     await expect(
       openPreviewHandoffFromServer({
         serverUrl: "http://127.0.0.1:13773",
-        desktopBridgeSecret: "private-secret",
+        brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
         windowId: request.target.targetId,
         request,
         fetch,
@@ -128,7 +128,7 @@ describe("openPreviewHandoffFromServer", () => {
     await expect(
       openPreviewHandoffFromServer({
         serverUrl: "http://127.0.0.1:13773",
-        desktopBridgeSecret: "private-secret",
+        brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
         windowId: request.target.targetId,
         request,
         fetch,
@@ -149,7 +149,7 @@ describe("openPreviewHandoffFromServer", () => {
     await expect(
       openPreviewHandoffFromServer({
         serverUrl: "http://127.0.0.1:13773",
-        desktopBridgeSecret: "private-secret",
+        brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
         windowId: request.target.targetId,
         request,
         fetch,

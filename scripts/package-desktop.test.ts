@@ -573,6 +573,16 @@ describe("desktop packaging boundary", () => {
         ),
       ).toThrow(`missing ${missing}`);
     }
+    // Nightly's client shows Code approvals in the same native view as Octant,
+    // so its package carries that view's preload too.
+    const approvalPreload = `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`;
+    expect(() =>
+      validatePackagedPayload(
+        nightly.filter(({ path }) => path !== approvalPreload),
+        target,
+        identity,
+      ),
+    ).toThrow(`missing ${approvalPreload}`);
     expect(
       createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0-preview.20261104.1", target, identity)
         .icon,

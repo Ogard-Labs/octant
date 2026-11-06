@@ -36,6 +36,15 @@ const NATIVE_MAIN_BROKERED_ROUTES = {
     "/api/desktop/provider-credentials/set",
     "/api/desktop/provider-credentials/remove",
   ],
+  "provider-api-keys": [
+    "/api/desktop/provider-credentials/keys/list",
+    "/api/desktop/provider-credentials/keys/add",
+    "/api/desktop/provider-credentials/keys/rename",
+    "/api/desktop/provider-credentials/keys/replace",
+    "/api/desktop/provider-credentials/keys/remove",
+    "/api/desktop/provider-credentials/keys/set-active",
+    "/api/desktop/provider-credentials/keys/move",
+  ],
 } as const satisfies Record<NightlyHostFeature, ReadonlyArray<string>>;
 
 /** Every admitted route is a POST; the path alone never admits another method. */

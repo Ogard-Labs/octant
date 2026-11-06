@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { nightlyClientChannelClass } from "./nightlyClientChannels";
+import { NEEDS_NEWER_OCTANT, nightlyClientChannelClass } from "./nightlyClientChannels";
 
 vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
 
@@ -227,6 +227,71 @@ describe("desktop preload bridge", () => {
       }
     },
   );
+
+  it("tells a Nightly window that its Octant is too old for a brokered flow, in every wrapper", async () => {
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async (channel: string) => {
+        throw new Error(`Error invoking remote method '${channel}': Error: ${NEEDS_NEWER_OCTANT}`);
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const bridge = createHostBridge(
+      ipc,
+      projectWindowCapability,
+      undefined,
+      "darwin",
+      undefined,
+      true,
+      { flavor: "nightly", productName: "Octant Nightly", data: "octant" },
+      true,
+    );
+    const instance = "80000000-0000-4000-8000-000000000401";
+    const uuid = "10000000-0000-4000-8000-000000000001";
+    const calls: ReadonlyArray<() => Promise<unknown>> = [
+      () => bridge.selectProjectRoot("work"),
+      () => bridge.selectLocalPluginFolder(),
+      () => bridge.selectSkillFolder(),
+      () => bridge.selectRuntimeBinary(),
+      () => bridge.saveSupportBundle(),
+      () =>
+        bridge.openCodeExternalEditor({
+          threadId: uuid,
+          checkoutId: uuid,
+          fileId: uuid,
+          line: 1,
+          column: 1,
+        } as never),
+      () =>
+        bridge.openCodeCheckoutInApplication({ threadId: uuid, applicationId: "finder" } as never),
+      () =>
+        bridge.previewHandoff({
+          target: {
+            targetId: uuid,
+            projectId: uuid,
+            hostId: uuid,
+            kind: "file",
+            opaqueRef: "ref",
+            displayName: "a.png",
+          },
+          kind: "quick-look",
+        } as never),
+      () => bridge.requestCodeOperationApproval({} as never),
+      () => bridge.providerCredentialStatus(instance),
+      () => bridge.setProviderCredential(instance, "sk-test"),
+      () => bridge.clearProviderCredential(instance),
+      () => bridge.listProviderApiKeys(instance),
+      () => bridge.addProviderApiKey(instance, "sk-test"),
+      () => bridge.removeProviderApiKey(instance, "default"),
+    ];
+    for (const call of calls) {
+      const message = await call().then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      expect(message).toBe(NEEDS_NEWER_OCTANT);
+    }
+  });
 
   it("surfaces an allowlisted remote-device failure without the wrapper, and refuses anything else", async () => {
     const known = "Octant local device controls are unavailable.";

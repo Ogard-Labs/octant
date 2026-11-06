@@ -27,7 +27,8 @@ interface DialogPort<TWindow extends OwnedWindowPort> {
 }
 
 interface LocalPluginFolderPickerOptions<TWindow extends OwnedWindowPort> {
-  readonly desktopBridgeSecret: string;
+  /** Stable's bridge secret, or a native Nightly main's own window authority. */
+  readonly brokerHeaders: () => Readonly<Record<string, string>>;
   readonly dialog: DialogPort<TWindow>;
   readonly fetch?: (input: string, init: RequestInit) => Promise<Response>;
   readonly resolveOwnedWindow: (sender: unknown) => TWindow | undefined;
@@ -89,7 +90,7 @@ export function createLocalPluginFolderPicker<TWindow extends OwnedWindowPort>(
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-octant-desktop-secret": options.desktopBridgeSecret,
+            ...options.brokerHeaders(),
           },
           body: JSON.stringify({
             windowId: options.windowId,

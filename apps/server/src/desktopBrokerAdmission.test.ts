@@ -131,6 +131,13 @@ describe("Native main admission to brokered host routes", () => {
       "/api/desktop/provider-credentials/status",
       "/api/desktop/provider-credentials/set",
       "/api/desktop/provider-credentials/remove",
+      "/api/desktop/provider-credentials/keys/list",
+      "/api/desktop/provider-credentials/keys/add",
+      "/api/desktop/provider-credentials/keys/rename",
+      "/api/desktop/provider-credentials/keys/replace",
+      "/api/desktop/provider-credentials/keys/remove",
+      "/api/desktop/provider-credentials/keys/set-active",
+      "/api/desktop/provider-credentials/keys/move",
     ]);
     expect(NATIVE_MAIN_HOST_FEATURES).toEqual(NIGHTLY_HOST_FEATURES);
   });
@@ -570,7 +577,7 @@ describe("Native main admission to brokered host routes", () => {
       expect(cancel).toHaveBeenCalledTimes(1);
     });
 
-    it("reads, sets and clears a provider key", async () => {
+    it("reads, sets and clears a provider key and edits its key pool", async () => {
       const f = fixture();
       const handle = createProviderCredentialRouteHandler({
         desktopBridgeSecret: secret,
@@ -587,6 +594,13 @@ describe("Native main admission to brokered host routes", () => {
         ["status", { instance: "openai" }],
         ["set", { instance: "openai", credential: "key", replace: false }],
         ["remove", { instance: "openai" }],
+        ["keys/list", { instance: "openai" }],
+        ["keys/add", { instance: "openai", credential: "key" }],
+        ["keys/rename", { instance: "openai", keyId: "default", label: "Work" }],
+        ["keys/replace", { instance: "openai", keyId: "default", credential: "key" }],
+        ["keys/remove", { instance: "openai", keyId: "default" }],
+        ["keys/set-active", { instance: "openai", keyId: "default" }],
+        ["keys/move", { instance: "openai", keyId: "default", direction: "up" }],
       ] as const) {
         // Past admission, this host has no credential store to answer with.
         expect(
