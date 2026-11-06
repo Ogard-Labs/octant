@@ -144,7 +144,12 @@ export class CredentialRequests {
           signal: entry.controller.signal,
         }),
       );
-      const body = await boundedJson(response);
+      let body: unknown;
+      if (entry.operation.response === "status-only") {
+        await response.body?.cancel().catch(() => undefined);
+      } else {
+        body = await boundedJson(response);
+      }
       if (entry.state !== "using") return true;
       if (!entry.current()) this.#settle(entry, "cancelled");
       else this.#settle(entry, response.ok && entry.operation.accepted(body) ? "used" : "failed");

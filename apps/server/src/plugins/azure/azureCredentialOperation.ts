@@ -13,6 +13,6 @@ export const azureCredentialOperation: CredentialOperation = {
     url: "https://management.azure.com/subscriptions?api-version=2022-12-01",
     authorization: "bearer",
   },
-  accepted: (body) =>
-    typeof body === "object" && body !== null && "value" in body && Array.isArray(body.value),
+  response: "status-only",
+  accepted: () => true,
 };

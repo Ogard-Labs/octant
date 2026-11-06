@@ -12152,7 +12152,8 @@ access` agree); a thread's own change is journaled as
   A bundled Azure integration also registers `azure-subscriptions-check`: one
   fixed HTTPS GET to `https://management.azure.com/subscriptions?api-version=2022-12-01`,
   using the person's unexpired short-lived Resource Manager bearer. The card
-  displays the entire approved URL and returns only status; subscription data
+  displays the entire approved URL and returns only HTTP status, cancelling the
+  response body without parsing it so a large subscription list stays valid; subscription data
   and token material never reach the agent. The token's actual account and RBAC
   can be broader than this request; Octant neither guesses nor narrows those
   claims. The descriptor admits GET without a body or the existing fixed POST

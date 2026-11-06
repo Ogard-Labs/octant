@@ -8,6 +8,16 @@ import { azureCredentialOperation } from "./azureCredentialOperation";
 describe("Azure fixed credential reads", () => {
   it.each([
     [200, '{"value":[{"subscriptionId":"private-account-fixture"}]}', "used"],
+    [
+      200,
+      JSON.stringify({
+        value: Array.from({ length: 60 }, (_, index) => ({
+          subscriptionId: `subscription-${index}`,
+          displayName: "private-account-fixture".repeat(20),
+        })),
+      }),
+      "used",
+    ],
     [401, '{"error":{"message":"expired-token-fixture"}}', "failed"],
     [302, '{"value":[]}', "failed"],
   ])(

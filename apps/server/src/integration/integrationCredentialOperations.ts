@@ -27,6 +27,7 @@ export class IntegrationCredentialOperations {
         [operation.label, operation.reason, operation.consumer, operation.actionLabel].some(
           (value) => typeof value !== "string" || value.length === 0 || value.length > 512,
         ) ||
+        (operation.response !== undefined && operation.response !== "status-only") ||
         typeof operation.accepted !== "function"
       )
         return { kind: "refused" };
@@ -37,6 +38,7 @@ export class IntegrationCredentialOperations {
         consumer: operation.consumer,
         actionLabel: operation.actionLabel,
         request: Object.freeze({ ...operation.request }),
+        ...(operation.response === undefined ? {} : { response: operation.response }),
         accepted: operation.accepted,
       });
       this.#operations.set(captured.id, captured);

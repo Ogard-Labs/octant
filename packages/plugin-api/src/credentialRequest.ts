@@ -16,6 +16,8 @@ export interface CredentialOperation {
     | { readonly method: "GET"; readonly body?: never }
     | { readonly method?: "POST"; readonly body: string }
   );
+  /** Status checks cancel the response body; otherwise bounded JSON reaches accepted. */
+  readonly response?: "status-only";
   /** Only a non-sensitive status is returned to the agent in this first slice. */
   readonly accepted: (body: unknown) => boolean;
 }
