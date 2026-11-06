@@ -212,8 +212,12 @@ Create from an issue frames redacted issue text through
 The list reads `projects/<folder>` under `CLAUDE_CONFIG_DIR` (default
 `~/.claude`) and the newest day folders of `sessions` under `CODEX_HOME`
 (default `~/.codex`), the head and tail of each file only, and keeps a session
-whose recorded working directory is the Project's bound root. Codex titles come
-from its `session_index.jsonl` when it names the session.
+whose recorded working directory resolves inside the Project's canonical bound
+root, or a server-verified managed worktree of that Code Project. Subfolders
+retain their exact canonical provenance. A symlink outside the admitted root is
+refused. The scan is bounded to 400 candidate files per provider and at most
+64 additional managed scopes; it never accepts a client-supplied source path.
+Codex titles come from its `session_index.jsonl` when it names the session.
 
 A create command's `terminalSession` is refused when it comes from a paired
 device or arrives together with an issue context (one outside source per
@@ -223,7 +227,12 @@ marked under the source label `terminal-session` in the creation's journal
 unit, `thread.terminal-session-imported@1` holds the bounded history on the
 `thread-terminal-session` aggregate (erased with the thread), and
 `thread.terminal-session-delivered@1` records the first admitted turn that
-carried it, so a restart before that turn still delivers it.
+carried it, so a restart before that turn still delivers it. New imports include
+the original working directory and an explicit text-handoff continuity receipt.
+A requested native adoption fails before reading or creating anything when
+historical account binding and exclusive session ownership cannot be proved;
+current adapters report `account-binding-unavailable`. Neither a source folder
+nor a currently logged-in account is substituted for that missing evidence.
 
 ## Linear issues
 

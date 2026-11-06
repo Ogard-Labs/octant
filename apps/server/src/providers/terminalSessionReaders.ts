@@ -1,3 +1,4 @@
+import { constants } from "node:fs";
 import {
   MAX_IMPORTED_TERMINAL_ENTRIES,
   MAX_IMPORTED_TERMINAL_ENTRY_LENGTH,
@@ -7,8 +8,8 @@ import {
   type ImportedTerminalEntry,
   type TerminalSessionProvider,
 } from "@octant/contracts";
-import { open, readdir, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { open, readdir, realpath, lstat } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
 
 /**
  * Reads the sessions the Claude Code and Codex command-line tools keep on
@@ -33,6 +34,7 @@ export interface TerminalSessionListing {
   readonly provider: TerminalSessionProvider;
   readonly sessionId: string;
   readonly title: string;
+  readonly workingDirectory: string;
   readonly updatedAt: string;
 }
 
@@ -40,6 +42,7 @@ export interface TerminalSessionTranscript {
   readonly provider: TerminalSessionProvider;
   readonly sessionId: string;
   readonly title: string;
+  readonly workingDirectory: string;
   readonly updatedAt: string;
   readonly entries: ReadonlyArray<ImportedTerminalEntry>;
   readonly truncated: boolean;
@@ -74,10 +77,11 @@ const INJECTED_INSTRUCTIONS = /^\s*# AGENTS\.md instructions/;
 export async function listTerminalSessions(input: {
   readonly roots: TerminalSessionRoots;
   readonly folder: string;
+  readonly additionalFolders?: ReadonlyArray<string>;
 }): Promise<ReadonlyArray<TerminalSessionListing>> {
   const [claude, codex] = await Promise.all([
-    listClaudeSessions(input.roots, input.folder),
-    listCodexSessions(input.roots, input.folder),
+    listClaudeSessions(input.roots, [input.folder, ...(input.additionalFolders ?? [])]),
+    listCodexSessions(input.roots, [input.folder, ...(input.additionalFolders ?? [])]),
   ]);
   return [...claude, ...codex]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -94,11 +98,15 @@ export async function readTerminalSession(input: {
   readonly folder: string;
   readonly provider: TerminalSessionProvider;
   readonly sessionId: string;
+  readonly additionalFolders?: ReadonlyArray<string>;
 }): Promise<TerminalSessionRead> {
   if (!SESSION_ID.test(input.sessionId)) return { status: "refused", reason: "not-found" };
+  const folders = [input.folder, ...(input.additionalFolders ?? [])];
   const file =
     input.provider === "claude"
-      ? join(input.roots.claudeProjects, claudeFolderName(input.folder), `${input.sessionId}.jsonl`)
+      ? (await claudeSessionFiles(input.roots, folders)).find(
+          (candidate) => candidate.sessionId === input.sessionId,
+        )?.path
       : (await codexSessionFiles(input.roots.codexSessions)).find(
           (candidate) => candidate.sessionId === input.sessionId,
         )?.path;
@@ -110,7 +118,7 @@ export async function readTerminalSession(input: {
     return { status: "refused", reason: "not-found" };
   }
   const parsed = input.provider === "claude" ? parseClaude(read, true) : parseCodex(read, true);
-  if (parsed.cwd === undefined || !(await sameFolder(parsed.cwd, input.folder))) {
+  if (parsed.cwd === undefined || !(await withinFolders(parsed.cwd, folders))) {
     return { status: "refused", reason: "other-folder" };
   }
   const bounded = boundEntries(parsed.entries);
@@ -127,6 +135,7 @@ export async function readTerminalSession(input: {
       provider: input.provider,
       sessionId: input.sessionId,
       title: titleOf(title),
+      workingDirectory: await realpath(parsed.cwd),
       updatedAt: read.modifiedAt,
       entries: bounded.entries,
       truncated: read.tailOnly || bounded.truncated,
@@ -144,40 +153,64 @@ export function claudeFolderName(folder: string): string {
 
 async function listClaudeSessions(
   roots: TerminalSessionRoots,
-  folder: string,
+  folders: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<TerminalSessionListing>> {
-  const directory = join(roots.claudeProjects, claudeFolderName(folder));
-  let names: ReadonlyArray<string>;
-  try {
-    names = await readdir(directory);
-  } catch {
-    return [];
-  }
-  const files = await newestFiles(
-    names
-      .filter((name) => name.endsWith(".jsonl"))
-      .map((name) => ({ sessionId: name.slice(0, -".jsonl".length), path: join(directory, name) }))
-      .filter((file) => SESSION_ID.test(file.sessionId)),
-  );
+  const files = await newestFiles(await claudeSessionFiles(roots, folders));
   const listed: TerminalSessionListing[] = [];
   for (const file of files) {
     if (listed.length >= MAX_TERMINAL_SESSIONS_LISTED) break;
-    const summary = await summarize(file, "claude", folder, undefined);
+    const summary = await summarize(file, "claude", folders, undefined);
     if (summary !== undefined) listed.push(summary);
   }
   return listed;
 }
 
+/** Folder names narrow the scan; canonical cwd metadata alone admits a session. */
+async function claudeSessionFiles(
+  roots: TerminalSessionRoots,
+  folders: ReadonlyArray<string>,
+): Promise<ReadonlyArray<SessionFile>> {
+  const files: SessionFile[] = [];
+  const keys = folders.map(claudeFolderName);
+  let directories;
+  try {
+    directories = await readdir(roots.claudeProjects, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const directory of directories
+    .filter(
+      (item) =>
+        item.isDirectory() &&
+        keys.some((key) => item.name === key || item.name.startsWith(`${key}-`)),
+    )
+    .slice(0, MAX_CODEX_FILES_SCANNED)) {
+    let names;
+    try {
+      names = await readdir(join(roots.claudeProjects, directory.name), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const file of names) {
+      if (files.length >= MAX_CODEX_FILES_SCANNED) return files;
+      const sessionId = file.name.slice(0, -".jsonl".length);
+      if (file.isFile() && file.name.endsWith(".jsonl") && SESSION_ID.test(sessionId))
+        files.push({ sessionId, path: join(roots.claudeProjects, directory.name, file.name) });
+    }
+  }
+  return files;
+}
+
 async function listCodexSessions(
   roots: TerminalSessionRoots,
-  folder: string,
+  folders: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<TerminalSessionListing>> {
   const files = await newestFiles(await codexSessionFiles(roots.codexSessions));
   const names = await codexSessionNames(roots.codexSessionIndex);
   const listed: TerminalSessionListing[] = [];
   for (const file of files) {
     if (listed.length >= MAX_TERMINAL_SESSIONS_LISTED) break;
-    const summary = await summarize(file, "codex", folder, names.get(file.sessionId));
+    const summary = await summarize(file, "codex", folders, names.get(file.sessionId));
     if (summary !== undefined) listed.push(summary);
   }
   return listed;
@@ -186,7 +219,7 @@ async function listCodexSessions(
 async function summarize(
   file: SessionFile,
   provider: TerminalSessionProvider,
-  folder: string,
+  folders: ReadonlyArray<string>,
   indexedTitle: string | undefined,
 ): Promise<TerminalSessionListing | undefined> {
   let read: FileSlices;
@@ -196,7 +229,7 @@ async function summarize(
     return undefined;
   }
   const parsed = provider === "claude" ? parseClaude(read, false) : parseCodex(read, false);
-  if (parsed.cwd === undefined || !(await sameFolder(parsed.cwd, folder))) return undefined;
+  if (parsed.cwd === undefined || !(await withinFolders(parsed.cwd, folders))) return undefined;
   const title = indexedTitle ?? parsed.title;
   // A session with nothing the person asked (a tool that opened and closed)
   // has nothing to continue.
@@ -205,6 +238,7 @@ async function summarize(
     provider,
     sessionId: file.sessionId,
     title: titleOf(title),
+    workingDirectory: await realpath(parsed.cwd),
     updatedAt: read.modifiedAt,
   };
 }
@@ -272,7 +306,7 @@ async function newestFiles(
   const stamped = await Promise.all(
     files.map(async (file) => {
       try {
-        const info = await stat(file.path);
+        const info = await lstat(file.path);
         return info.isFile() ? { ...file, modifiedMs: info.mtimeMs } : undefined;
       } catch {
         return undefined;
@@ -294,7 +328,7 @@ interface FileSlices {
 }
 
 async function readSlices(path: string, tailBytes: number): Promise<FileSlices> {
-  const handle = await open(path, "r");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new Error("not a file");
@@ -468,10 +502,17 @@ function boundEntries(entries: ReadonlyArray<ImportedTerminalEntry>): {
   return { entries: kept, truncated };
 }
 
-async function sameFolder(cwd: string, folder: string): Promise<boolean> {
-  if (cwd === folder) return true;
+async function withinFolders(cwd: string, folders: ReadonlyArray<string>): Promise<boolean> {
+  for (const folder of folders) if (await withinFolder(cwd, folder)) return true;
+  return false;
+}
+
+async function withinFolder(cwd: string, folder: string): Promise<boolean> {
   try {
-    return (await realpath(cwd)) === folder;
+    const [source, root] = await Promise.all([realpath(cwd), realpath(folder)]);
+    if (root !== folder) return false;
+    const path = relative(root, source);
+    return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith("../"));
   } catch {
     return false;
   }

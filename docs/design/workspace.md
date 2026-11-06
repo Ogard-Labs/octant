@@ -1044,20 +1044,28 @@ journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
 Refusal fails creation visibly. No Linear write-back path exists.
 
 Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
-Project, for a local window. It lists the newest sessions the Claude Code and
-Codex command-line tools kept on this Mac for the Project's bound folder, with
-their title and last activity. Selecting one attaches only
-`{ provider, sessionId }`. At creation the server reads the session again,
-refuses one started in another folder, keeps the person's and the assistant's
-words (no tool calls, results, thinking, or text the tool injected), bounds
-them to the recent part of the conversation, marks the thread with outside
-content before it exists, and journals the history on the thread
-([details](host-reads-and-commands.md#terminal-sessions)). The thread shows it
-folded and read-only above its own turns. Its first admitted turn hands the
-history to the model once, framed as outside data. The provider's native
-session is not resumed: a resumed session would hold the earlier conversation
-unframed, and the Claude runtime refuses a session id Octant did not record.
-Nothing is uploaded or written back to the tool's files.
+Project, for a local window. It lists the newest Claude Code and Codex sessions
+in the Project's canonical bound root and its subfolders. A Code Project also
+includes available managed worktrees whose ready ownership receipt matches its
+current binding, thread, repository and checkout. Clients supply no source
+folder: the server resolves eligible scopes and verifies the session's own
+canonical working directory at listing and again at creation. Symlink escapes
+and foreign scopes are refused; the picker and imported history name the exact
+original working directory.
+
+Selecting a session explicitly chooses a **text handoff**. The server rereads
+bounded visible user/assistant words, excludes original inputs, tool activity,
+hidden reasoning and injected tool text, marks the new thread with outside
+content before it exists, and journals the framed read-only history on that
+thread ([details](host-reads-and-commands.md#terminal-sessions)). Its first
+admitted turn reads this snapshot once. The receipt and UI distinguish that new
+session from native adoption. Native adoption is refused while the adapter
+cannot prove historical account binding, runtime compatibility and exclusive
+session ownership: a folder, filename or current provider login is not proof of
+the account that created an external session. The current adapters cannot
+supply that proof and offer only the labeled text handoff. They never resume
+an unverified native session or clone its writer. Nothing is uploaded or written
+back to the command-line tool's files.
 
 ## Context and usage
 

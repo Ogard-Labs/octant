@@ -37,11 +37,21 @@ const TerminalSessionTitle = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_TERMINAL_SESSION_TITLE_LENGTH),
 );
 
+export const TerminalSessionContinuity = Schema.Struct({
+  kind: Schema.Literal("text-handoff"),
+  native: Schema.Literal("unavailable"),
+  reason: Schema.Literal("account-binding-unavailable"),
+}).annotations(strict);
+export type TerminalSessionContinuity = typeof TerminalSessionContinuity.Type;
+const TerminalSessionWorkingDirectory = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096));
+
 /** One session in a Project's folder, as the picker lists it. */
 export const TerminalSessionSummary = Schema.Struct({
   provider: TerminalSessionProvider,
   sessionId: TerminalSessionId,
   title: TerminalSessionTitle,
+  workingDirectory: Schema.optional(TerminalSessionWorkingDirectory),
+  continuity: Schema.optional(TerminalSessionContinuity),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type TerminalSessionSummary = typeof TerminalSessionSummary.Type;
@@ -62,6 +72,7 @@ export type TerminalSessionListResponse = typeof TerminalSessionListResponse.Typ
 export const TerminalSessionImportRequest = Schema.Struct({
   provider: TerminalSessionProvider,
   sessionId: TerminalSessionId,
+  continuation: Schema.optional(Schema.Literal("native", "text-handoff")),
 }).annotations(strict);
 export type TerminalSessionImportRequest = typeof TerminalSessionImportRequest.Type;
 
@@ -79,6 +90,8 @@ export const ImportedTerminalSession = Schema.Struct({
   provider: TerminalSessionProvider,
   sessionId: TerminalSessionId,
   title: TerminalSessionTitle,
+  workingDirectory: Schema.optional(TerminalSessionWorkingDirectory),
+  continuity: Schema.optional(TerminalSessionContinuity),
   updatedAt: UtcTimestamp,
   importedAt: UtcTimestamp,
   entries: Schema.Array(ImportedTerminalEntry).pipe(

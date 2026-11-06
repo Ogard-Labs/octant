@@ -70,11 +70,19 @@ Turn on **Developer tools** in the Work Project's overview (under Access and lim
 
 ## Continue a terminal session
 
-A new Work task can start from a Claude Code or Codex session you had in a
-terminal in the same folder. Choose **Create from…**, then **Terminal**, and
-pick the session. The task shows that conversation as folded, read-only
-history, and the assistant reads it once at the start. The session stays on
-this Mac, and the task is marked as holding outside content.
+In a new Work task with a Project, choose **Create from…**, then **Terminal**.
+The picker lists Claude Code and Codex sessions from the Project folder and
+its subfolders; a Code Project also includes its verified managed worktrees.
+Each session names its original working directory.
+
+Choosing one is a **text handoff into a new session**. The assistant reads the
+bounded visible conversation once as outside content; it also appears above
+the thread as folded, read-only history. Original inputs, tool activity,
+hidden reasoning and the provider's native session are omitted. The current
+adapters cannot prove the source account binding and exclusive native session
+ownership, so native adoption is unavailable. Octant never resumes that
+unverified session or changes its files. This step is available only from an
+Octant window on this computer.
 
 ## Work settings
 

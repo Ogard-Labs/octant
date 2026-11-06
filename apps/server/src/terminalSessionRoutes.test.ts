@@ -47,7 +47,7 @@ describe("terminal session routes", () => {
     const response = await handler(listRequest());
 
     expect(response?.status).toBe(200);
-    expect(list).toHaveBeenCalledWith("/repo");
+    expect(list).toHaveBeenCalledWith("/repo", projectId);
     expect(await response?.json()).toMatchObject({
       sessions: [{ provider: "claude", title: "Upload test flake" }],
     });

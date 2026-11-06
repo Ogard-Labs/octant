@@ -325,6 +325,7 @@ export function startOctantServer(
       safeNetworkRoutes,
       safeNetworkStore,
     } = yield* wireIntegrations({
+      managedWorktreeReceipts,
       codeActiveTurns,
       externalContentIngestionStore,
       options,

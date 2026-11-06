@@ -4074,7 +4074,11 @@ export class CodeService {
     if (this.#terminalSessions === undefined || project?.type !== "code") {
       throw this.#failure("unavailable", "Terminal sessions are unavailable for this Project.");
     }
-    const prepared = await this.#terminalSessions.prepare(request, project.binding.canonicalRoot);
+    const prepared = await this.#terminalSessions.prepare(
+      request,
+      project.binding.canonicalRoot,
+      projectId,
+    );
     if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
     return prepared.prepared;
   }

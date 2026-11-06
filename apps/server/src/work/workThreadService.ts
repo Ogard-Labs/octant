@@ -570,6 +570,7 @@ export class WorkThreadService {
           const prepared = await this.#terminalSessions.prepare(
             command.terminalSession,
             project.binding.canonicalRoot,
+            project.id,
           );
           if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
           terminalSession = prepared.prepared;

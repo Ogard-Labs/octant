@@ -1629,7 +1629,11 @@ describe("DraftThreadWorkspace", () => {
         undefined,
         undefined,
         undefined,
-        { provider: "codex", sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a" },
+        {
+          provider: "codex",
+          sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a",
+          continuation: "text-handoff",
+        },
       );
     } finally {
       vi.unstubAllGlobals();

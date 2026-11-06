@@ -68,6 +68,16 @@ export function ImportedTerminalHistory(props: {
         it is not a message anyone sent here.
         {imported.truncated ? " Older messages were left out." : ""}
       </p>
+      {imported.workingDirectory === undefined ? null : (
+        <p className="imported-history__note">Original folder: {imported.workingDirectory}</p>
+      )}
+      {imported.continuity === undefined ? null : (
+        <p className="imported-history__note">
+          Text handoff into a new session. Native session, original inputs, tool activity and hidden
+          reasoning were not transferred. Native adoption requires verifiable account binding and
+          exclusive session ownership, which this runtime cannot prove.
+        </p>
+      )}
       <ol aria-label={`Imported ${tool} conversation`} className="imported-history__entries">
         {imported.entries.map((entry, index) => (
           <li className="imported-history__entry" data-role={entry.role} key={index}>

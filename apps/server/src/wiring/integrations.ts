@@ -1,3 +1,4 @@
+import { eligibleTerminalSessionFolders } from "../terminalSessions/terminalSessionScopes";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -75,7 +76,7 @@ import { threadOfActiveSession } from "../code/codeOperationRuntime";
 
 export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore" | "codeActiveTurns"> &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<HarnessStateWiring, "shieldHolder">;
 
@@ -83,6 +84,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
   const {
     codeActiveTurns,
     externalContentIngestionStore,
+    managedWorktreeReceipts,
     options,
     persistence,
     shieldHolder,
@@ -424,6 +426,14 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
         codexSessions: join(codexHome, "sessions"),
         codexSessionIndex: join(codexHome, "session_index.jsonl"),
       }),
+      eligibleFolders: (folder, projectId) =>
+        eligibleTerminalSessionFolders({
+          project: projectId === undefined ? undefined : persistence.readProject(projectId),
+          projectFolder: folder,
+          threads: persistence.readCodeThreads(),
+          readCheckout: (threadId) => persistence.readCodeThreadView(threadId)?.checkout,
+          loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+        }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
