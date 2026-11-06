@@ -94,10 +94,11 @@ export type BrowserToolOperationName =
  * What each operation does, which is what Plan mode decides on. Plan may look
  * and propose but changes nothing, so it admits an operation that only
  * `reads` the page already open in this thread's own Browser (or the
- * Project's saved flows) and sends no request, and `releases`, which closes
- * only this thread's own Browser. It refuses every operation that `changes`
- * something: a request, input, the page's state or size, a tab, the
- * workspace, the Project's flows, or a recording the thread would keep.
+ * Project's saved flows) and sends no request, `releases`, which closes only
+ * this thread's own Browser, and `cleanup`, which ends what a call started
+ * before Plan began. It refuses every operation that `changes` something: a
+ * request, input, the page's state or size, a tab, the workspace, the
+ * Project's flows, or a recording the thread would keep.
  * `each-step` is a batch whose steps are each admitted as a call of their
  * own. The table is keyed by the advertised operations and the two the host
  * issues for a recording, so a new operation does not compile until it takes
@@ -159,10 +160,13 @@ export const BROWSER_OPERATION_EFFECT = {
   // Host-issued around a call with `record`: the thread keeps the recording
   // as an artifact, which Plan does not make, so a recorded call does not run.
   "record-start": "changes",
-  "record-stop": "changes",
+  // Ends a recording already running. It must reach the runtime in every
+  // posture, or the screencast runs on to its own bound holding frames and
+  // the page's debugger; in Plan the adapters stop it keeping nothing.
+  "record-stop": "cleanup",
 } as const satisfies Record<
   BrowserToolOperationName | BrowserToolRecordingOperation,
-  "reads" | "releases" | "changes" | "each-step"
+  "reads" | "releases" | "cleanup" | "changes" | "each-step"
 >;
 
 /** Whether Plan mode refuses this operation; see `BROWSER_OPERATION_EFFECT`. */
@@ -219,7 +223,15 @@ export type BrowserToolInput = {
       /** Record the page while the batch runs; see `runRecordedBrowserCall`. */
       readonly record?: true;
     }
-  | { readonly operation: BrowserToolRecordingOperation }
+  | { readonly operation: "record-start" }
+  | {
+      readonly operation: "record-stop";
+      /**
+       * End the recording and keep nothing: the thread moved into Plan while
+       * the recorded call ran, and Plan keeps no artifact.
+       */
+      readonly discard?: true;
+    }
   | { readonly operation: "sign-in"; readonly reason?: string }
   | {
       readonly operation: "run-script";
@@ -938,10 +950,12 @@ export async function runBrowserToolSteps(
  * screenshot: the thread's authority, the model binding, the origin approval,
  * and the person's hold. Plan refuses the start, because the recording is an
  * artifact the thread keeps (see `BROWSER_OPERATION_EFFECT`). A start that is
- * refused runs nothing. The stop
- * always follows, whether the call succeeded, failed, or was interrupted, and
- * the answer is the call's own with the recording's capture id and facts, or
- * why it was not kept.
+ * refused runs nothing. The stop always follows, whether the call succeeded,
+ * failed, or was interrupted, and in every posture: a thread that moved into
+ * Plan while the call ran has its recording stopped and discarded by the
+ * adapter, which answers the stop as `plan-mode-read-only`. The answer is the
+ * call's own with the recording's capture id and facts, or why it was not
+ * kept.
  *
  * Rationale: tying a recording to one call bounds it by that call as well as
  * by its own limits, so a recording cannot outlive the turn or be left running

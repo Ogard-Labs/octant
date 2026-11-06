@@ -527,6 +527,8 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
+      /** On a `record-stop`: end the recording and keep nothing; see the service. */
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
@@ -1211,9 +1213,15 @@ async function browserTool(
 ): Promise<BrowserToolAnswer> {
   if (input === undefined || options.browser === undefined) return failure("invalid-browser-input");
   // The stop runs without the turn's signal, so a turn that ends mid-call
-  // still ends its recording and keeps what was recorded; see Work's tool.
-  const record = (operation: BrowserToolRecordingOperation) =>
-    browserToolOne(options, { operation }, operation === "record-stop" ? undefined : signal);
+  // still ends its recording and keeps what was recorded; see Work's tool. A
+  // thread that moved into Plan while the call ran (a read in flight finishes
+  // there) still stops it, keeping nothing.
+  const record = async (operation: BrowserToolRecordingOperation) => {
+    if (operation === "record-start") return browserToolOne(options, { operation }, signal);
+    if (currentPosture(options) !== "plan") return browserToolOne(options, { operation });
+    const stopped = await browserToolOne(options, { operation, discard: true });
+    return stopped.isError ? stopped : failure("plan-mode-read-only");
+  };
   if (input.operation === "steps") {
     const batch = () =>
       runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
@@ -1571,6 +1579,9 @@ async function browserToolOne(
       threadId,
       request,
       capturedBy: "agent",
+      ...(input.operation === "record-stop" && input.discard === true
+        ? { discardRecording: true }
+        : {}),
       refuseStaleRevision: true,
       // Held only where the question about saving one can be answered.
       ...(options.browserDownload === undefined ||

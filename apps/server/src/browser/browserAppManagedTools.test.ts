@@ -1584,7 +1584,7 @@ describe("octant_browser recording", () => {
 
   function recordingTools(
     answer: (kind: string) => BrowserAutomationSnapshot,
-    executionPolicy: "approval-gated" | "plan" = "approval-gated",
+    posture: "approval-gated" | "plan" | (() => "approval-gated" | "plan") = "approval-gated",
   ) {
     const running = snapshot({ status: "running", context, observation: { revision: 4 } as never });
     const act = vi.fn(async (input: { readonly request: { readonly kind: string } }) =>
@@ -1597,7 +1597,10 @@ describe("octant_browser recording", () => {
       modelId,
       resolveModelId: () => modelId,
       modelBindings: new Map(),
-      executionPolicy,
+      // Read at each check, as a posture that changes while a call runs is.
+      get executionPolicy() {
+        return typeof posture === "function" ? posture() : posture;
+      },
       resolveAuthority: () => authority,
       browser: {
         inspectThread: () => running,
@@ -1719,6 +1722,35 @@ describe("octant_browser recording", () => {
         answer: { failure: { category: "unavailable" } },
       },
     });
+  });
+
+  it("stops a recording that began before Plan and keeps nothing when the thread moves into Plan mid-batch", async () => {
+    let posture: "approval-gated" | "plan" = "approval-gated";
+    const { act, tools, kinds } = recordingTools(
+      (kind) => {
+        if (kind === "wait") posture = "plan";
+        return kept(kind === "record-stop" ? "wait" : kind);
+      },
+      () => posture,
+    );
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        record: true,
+        steps: [
+          { operation: "wait", selector: "main" },
+          { operation: "click", selector: "#save" },
+        ],
+      }),
+    });
+    expect(kinds()).toEqual(["record-start", "wait", "record-stop"]);
+    expect(act.mock.calls[2]?.[0]).toMatchObject({ discardRecording: true });
+    expect(result).toMatchObject({
+      isError: true,
+      result: { failedStep: { step: 2 }, recordingNotKept: "plan-mode-read-only" },
+    });
+    expect(result.result).not.toHaveProperty("recording");
   });
 
   it("refuses a recording in Plan, even around a batch of reads, and runs none of it", async () => {

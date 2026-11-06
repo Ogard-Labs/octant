@@ -261,7 +261,8 @@ records on its own.
   recording, nothing of what you do is kept.
 - Recordings follow every capture rule above: they stay on this computer, count
   toward the thread's 32 captures, are not sent anywhere, and a paired device
-  cannot see them. The agent cannot record in Plan.
+  cannot see them. The agent cannot record in Plan, and a recording already
+  running when Plan begins is stopped and not kept.
 - A thread keeps at most 8 recordings. A newer one replaces the oldest
   recording; your screenshots are never dropped to make room.
 

@@ -1891,6 +1891,31 @@ describe("BrowserAutomationService", () => {
         expect(captures.recordStep).toHaveBeenCalledOnce();
       });
 
+      it("ends a recording the agent discards and keeps nothing of it", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/start",
+          title: "Thread one",
+          recording: recorded,
+        });
+        const stopped = await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+          discardRecording: true,
+        });
+
+        // The stop reached the runtime, so the screencast ended.
+        expect(vi.mocked(runtime.act).mock.calls.at(-1)?.[1]).toMatchObject({
+          kind: "record-stop",
+        });
+        expect(stopped.failure).toBeUndefined();
+        expect(captures.keep).not.toHaveBeenCalled();
+        expect(stopped.observation?.capture).toBeUndefined();
+      });
+
       it("keeps a recording under the address of the tab it recorded, not the tab in front", async () => {
         const captures = { keep: keep() };
         const { runtime, service } = harness({ captures });

@@ -678,8 +678,8 @@ profile), never one without the other
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
 other one as `plan-mode-read-only`, a recording included, from one table of
-operations
-([Browser for agents: Plan mode](design/browser-agent-tool.md#plan-mode)).
+operations; a recording already running when Plan begins is stopped and
+discarded ([Browser for agents: Plan mode](design/browser-agent-tool.md#plan-mode)).
 Downloads in the agent's Browser
 are blocked on every page unless the person turns on "Let agents download
 files" in Settings (a shell setting only a local window writes, off by

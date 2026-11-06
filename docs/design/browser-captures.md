@@ -371,7 +371,8 @@ attached the same way.
   origin approval, the person's hold) applies to starting and ending it. Plan
   admits a screenshot but refuses a recording, because the thread keeps the
   recording as an artifact and Plan only reads; a recorded call in Plan runs
-  nothing ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). The
+  nothing, and a recording already running when Plan begins is stopped and
+  discarded ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). The
   recorded observation marks the thread as having read outside content, as a
   screenshot's does. Only the agent tool records: the service refuses a
   recording from the pane, a paired device, a terminal CLI, and any caller that

@@ -1254,7 +1254,7 @@ describe("Code app-managed tools", () => {
       } = {},
     ) {
       let current = thread({ executionPolicy: options.startsAt ?? "plan" });
-      const act = vi.fn(async () => page);
+      const act = vi.fn(async (_input: { readonly request: { readonly kind: string } }) => page);
       const create = vi.fn(async () => page);
       const releaseThread = vi.fn(async () => page);
       const saveDownload = vi.fn();
@@ -1358,6 +1358,36 @@ describe("Code app-managed tools", () => {
       });
       expect(ask).toHaveBeenCalledOnce();
       expect(act).not.toHaveBeenCalled();
+    });
+
+    it("stops a recording that began before Plan and keeps nothing when the thread moves into Plan mid-batch", async () => {
+      const { tools, act, switchTo, releaseThread } = planTools({ startsAt: "approval-gated" });
+      act.mockImplementation(async (input) => {
+        // The thread moves into Plan while a read of the recorded batch waits.
+        if (input.request.kind === "wait") switchTo("plan");
+        return page;
+      });
+      const answer = await call(tools, {
+        operation: "steps",
+        record: true,
+        steps: [
+          { operation: "wait", selector: "main" },
+          { operation: "click", ref: "e1" },
+        ],
+      });
+      const acted = act.mock.calls.map(([input]) => input);
+      expect(acted.map((input) => input.request.kind)).toEqual([
+        "record-start",
+        "wait",
+        "record-stop",
+      ]);
+      expect(acted[2]).toMatchObject({ discardRecording: true });
+      expect(answer).toMatchObject({
+        isError: true,
+        result: { failedStep: { step: 2 }, recordingNotKept: "plan-mode-read-only" },
+      });
+      expect(answer.result).not.toHaveProperty("recording");
+      expect(releaseThread).not.toHaveBeenCalled();
     });
 
     it("reads after the thread switches to Plan, and refuses what would change the page", async () => {

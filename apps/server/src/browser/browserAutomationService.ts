@@ -984,6 +984,13 @@ export class BrowserAutomationService {
     /** Trusted caller attribution for admission/idle only; never keeps a capture. */
     readonly activityBy?: BrowserCaptureTaker;
     /**
+     * On the agent's `record-stop`: end the recording and keep nothing. The
+     * agent tool asks for it when its thread moved into Plan while the
+     * recorded call ran, because Plan keeps no artifact; the stop still has
+     * to reach the runtime, or the screencast runs on to its own bound.
+     */
+    readonly discardRecording?: true;
+    /**
      * For an upload: the absolute paths of the files the request names, as the
      * agent tool resolved them inside the thread's workspace after the person
      * approved. Nothing else supplies a path to a runtime.
@@ -1107,6 +1114,7 @@ export class BrowserAutomationService {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
       readonly activityBy?: BrowserCaptureTaker;
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
@@ -1713,6 +1721,7 @@ export class BrowserAutomationService {
     input: {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly discardRecording?: true;
     },
     observed: {
       readonly screenshotDataUrl?: string;
@@ -1724,6 +1733,7 @@ export class BrowserAutomationService {
     const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
     if (takenBy === undefined || this.#captures === undefined) return undefined;
     const stopping = input.request.kind === "record-stop";
+    if (stopping && input.discardRecording === true) return undefined;
     const recording =
       stopping && observed.recording?.status === "recorded" ? observed.recording : undefined;
     const dataUrl = stopping ? recording?.dataUrl : observed.screenshotDataUrl;
