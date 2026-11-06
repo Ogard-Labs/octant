@@ -246,6 +246,7 @@ export {
   type DesktopHostRole,
   type DesktopIdentity,
 } from "./desktopIdentity";
+export { readStoredDesktopDataChoice } from "./desktopDataChoice";
 
 export {
   SLACK_MCP_USER_OAUTH,

@@ -364,6 +364,15 @@ export const REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES = [
   `Octant.app/Contents/Resources/${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant.mjs`,
 ] as const;
 
+/** Nightly's full command-line tool: kept apart from the terminal folder a Code thread gets. */
+export const NIGHTLY_COMMAND_DIRECTORY_NAME = "command-line" as const;
+
+/** Octant Nightly's `octant-nightly`: a shell launcher and the one-file full command. */
+export const REQUIRED_DARWIN_NIGHTLY_COMMAND_FILES = [
+  `Octant.app/Contents/Resources/${NIGHTLY_COMMAND_DIRECTORY_NAME}/octant-nightly`,
+  `Octant.app/Contents/Resources/${NIGHTLY_COMMAND_DIRECTORY_NAME}/octant-nightly.mjs`,
+] as const;
+
 /** Full darwin-arm64 checklist (staged payload + PTY helper + Keychain/code-file helpers). */
 export const REQUIRED_PACKAGED_FILES = [
   ...REQUIRED_STAGED_PACKAGED_FILES,
@@ -408,6 +417,60 @@ export function terminalLauncherScript(identity: DesktopIdentity): string {
         ]),
     "",
   ].join("\n");
+}
+
+/**
+ * Nightly's full `octant-nightly`. It runs only the bundled command beside it
+ * with the app's worker runtime in Node mode, never the sealed GUI main, and
+ * passes every argument to that command rather than to the runtime, so no
+ * caller selects a script or runtime option. A person links it onto `PATH`, so
+ * it follows that link back to the app before finding its bundle.
+ */
+export function nightlyCommandLauncherScript(identity: DesktopIdentity, version: string): string {
+  if (identity.flavor !== "nightly") throw new Error("Only Octant Nightly ships octant-nightly.");
+  // The release version is validated before packaging; refuse anything that
+  // could leave its quotes.
+  if (!/^[0-9A-Za-z.+-]{1,64}$/.test(version)) throw new Error("Invalid release version.");
+  return [
+    "#!/bin/sh",
+    `# Octant Nightly's \`${identity.commandName}\`, run with the app's own worker runtime.`,
+    "command_path=$0",
+    "link_hops=0",
+    'while [ -L "$command_path" ]; do',
+    "  link_hops=$((link_hops + 1))",
+    `  if [ "$link_hops" -gt 40 ]; then echo "${identity.commandName}: too many links" >&2; exit 1; fi`,
+    '  link_target=$(readlink -- "$command_path")',
+    "  case $link_target in",
+    "    /*) command_path=$link_target ;;",
+    '    *) command_path=$(dirname -- "$command_path")/$link_target ;;',
+    "  esac",
+    "done",
+    'command_directory=$(dirname -- "$command_path")',
+    "export ELECTRON_RUN_AS_NODE=1",
+    `export OCTANT_CLI_VERSION='${version}'`,
+    `exec "$command_directory/../../Frameworks/${DESKTOP_NODE_RUNTIME_NAME}.app/Contents/MacOS/${DESKTOP_NODE_RUNTIME_NAME}" "$command_directory/${identity.commandName}.mjs" "$@"`,
+    "",
+  ].join("\n");
+}
+
+/** Writes Nightly's full command into its own Resources folder. */
+export async function installNightlyCommand(
+  repositoryRoot: string,
+  directory: string,
+  identity: DesktopIdentity,
+  version: string,
+): Promise<void> {
+  const bundle = "packages/cli/dist/octant-nightly.mjs";
+  if (!existsSync(resolve(repositoryRoot, bundle)))
+    throw new Error(`Required built output is missing: ${bundle}. Run bun run build first.`);
+  const script = nightlyCommandLauncherScript(identity, version);
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory, { recursive: true });
+  const command = join(directory, identity.commandName);
+  await cp(resolve(repositoryRoot, bundle), `${command}.mjs`);
+  await chmod(`${command}.mjs`, 0o644);
+  await writeFile(command, script, { mode: 0o755 });
+  await chmod(command, 0o755);
 }
 
 /** Writes only the scoped command; it is not a desktop peer or full CLI. */
@@ -1234,6 +1297,11 @@ async function packageDarwinDesktop(
     join(finalApp, "Contents/Resources", TERMINAL_LAUNCHER_DIRECTORY_NAME),
     identity,
   );
+  if (identity.flavor === "nightly") {
+    const commandDirectory = join(finalApp, "Contents/Resources", NIGHTLY_COMMAND_DIRECTORY_NAME);
+    await installNightlyCommand(repositoryRoot, commandDirectory, identity, version);
+    await access(join(commandDirectory, identity.commandName), 1);
+  }
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
     resolve(repositoryRoot, "apps/desktop/native/keychain-helper/OctantKeychainHelper.swift"),
@@ -1307,6 +1375,13 @@ async function packageDarwinDesktop(
       continue;
     if (!bundlePaths.has(packagedBundlePath(flavorIconPath(requiredPath, identity), identity)))
       throw new Error(`Packaged bundle is missing ${requiredPath}.`);
+  }
+  for (const commandPath of REQUIRED_DARWIN_NIGHTLY_COMMAND_FILES) {
+    const present = bundlePaths.has(packagedBundlePath(commandPath, identity));
+    if (identity.flavor === "nightly" && !present)
+      throw new Error(`Packaged bundle is missing ${commandPath}.`);
+    if (identity.flavor === "stable" && present)
+      throw new Error(`Octant must not ship ${commandPath}.`);
   }
   for (const forbiddenPath of FORBIDDEN_PACKAGED_FILES) {
     if (bundlePaths.has(packagedBundlePath(forbiddenPath, identity)))

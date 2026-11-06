@@ -1,0 +1,867 @@
+import { runStatusCommand } from "./status";
+import { runWebCommand } from "./web";
+import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
+import {
+  resolveHostRuntimePaths,
+  ServicePolicyStore,
+  type DesktopIdentity,
+} from "@octant/host-runtime";
+import { hostNotRunningMessage, resolveCliHostTarget, type CliHostTarget } from "./cliHostTarget";
+import { homedir, networkInterfaces, tmpdir, userInfo } from "node:os";
+import { readDiskEncryption } from "./diskEncryption";
+import { resolveHubCliCommand, runHubCliCommand, type HubCliCommand } from "./hubCommand";
+import {
+  createHubBootService,
+  createUserServiceManager,
+  nodeServiceCommandRunner,
+  type HubBootService,
+  type ServiceCommandRunner,
+  type UserServiceManager,
+} from "./serviceManager";
+import { createInterface } from "node:readline/promises";
+import { formatMissingLinuxHostTools, missingLinuxHostTools } from "./linuxHostTools";
+import { runServerLifecycleCommand, type ServerLifecycleAction } from "./serverLifecycle";
+import {
+  createHostHeadlessUpgradePorts,
+  resolveHeadlessArtifactCliCommand,
+  runHeadlessArtifactCliCommand,
+} from "./artifactCommand";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
+import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import { resolvePluginCliCommand, runPluginCliCommand } from "./pluginCommand";
+import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
+import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
+import { runMcpCliCommand } from "./mcpCommand";
+import {
+  readAllStdin,
+  readHiddenLineFromTerminal,
+  resolveProviderKeyCliCommand,
+  runProviderKeyCliCommand,
+} from "./providerKeyCommand";
+import {
+  resolveProviderSignInCliCommand,
+  runProviderSignInCliCommand,
+  type ProviderSignInCliCommand,
+} from "./providerSignInCommand";
+import {
+  resolveAuthCliCommand,
+  resolveListenerCliCommand,
+  resolvePairCliCommand,
+  resolveServerPairingFlags,
+  runRemoteAccessCliCommand,
+  runServerPairing,
+  type ServerPairingOptions,
+  type RemoteAccessCliCommand,
+} from "./remoteAccessCommand";
+
+interface ParsedArgs {
+  readonly command: string;
+  readonly flags: Readonly<Record<string, string | boolean>>;
+  readonly positional: readonly string[];
+}
+
+export function parseArgs(argv: readonly string[]): ParsedArgs | undefined {
+  const [command, ...rest] = argv;
+  if (command === undefined) return undefined;
+  const flags: Record<string, string | boolean> = {};
+  const positional: string[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === undefined) continue;
+    if (arg.startsWith("--")) {
+      const name = arg.slice(2);
+      const next = rest[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        flags[name] = next;
+        i += 1;
+      } else {
+        flags[name] = true;
+      }
+    } else {
+      positional.push(arg);
+    }
+  }
+  return { command, flags, positional };
+}
+
+/** What every command of one run reads instead of the process's own identity and environment. */
+interface CliContext {
+  readonly identity: DesktopIdentity;
+  /** The environment with the host selection applied; overrides pass through. */
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly target: Exclude<CliHostTarget, { readonly kind: "refused" }>;
+  /** Only `octant` starts its own host; `octant-nightly` never does. */
+  readonly mayStartHost: boolean;
+  readonly version: string;
+}
+
+/**
+ * Runs one command for the command-line tool the identity names. `octant` and
+ * `octant-nightly` are this one function; only the identity record and the
+ * host it selects differ.
+ */
+export async function runCli(
+  argv: ReadonlyArray<string>,
+  identity: DesktopIdentity,
+): Promise<number> {
+  const args = parseArgs(argv);
+  if (args === undefined) {
+    printUsage(identity);
+    return 1;
+  }
+  if (args.command === "mcp") {
+    // Before anything that resolves a data directory or opens a host session:
+    // this command's only inputs are the two grant variables.
+    return await runMcpCliCommand(argv.slice(1), {
+      environment: process.env,
+      input: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    });
+  }
+  if (args.command === "--version" || args.command === "version") {
+    process.stdout.write(`${identity.commandName} ${cliVersion(process.env)}\n`);
+    return 0;
+  }
+  if (args.command === "--help" || args.command === "help") {
+    printUsage(identity);
+    return 0;
+  }
+  const target = resolveCliHostTarget(identity, {
+    platform: process.platform,
+    home: homedir(),
+    env: process.env,
+  });
+  if (target.kind === "refused") {
+    process.stderr.write(`${target.message}\n`);
+    return 1;
+  }
+  const context: CliContext = {
+    identity,
+    environment: target.environment,
+    target,
+    mayStartHost: target.kind === "own-host",
+    version: cliVersion(process.env),
+  };
+  const refusal = refusesHostAdministration(context, args);
+  if (refusal !== undefined) {
+    process.stderr.write(`${refusal}\n`);
+    return 1;
+  }
+  if (hasInvalidLifecyclePositionals(args.command, args.positional)) {
+    printUsage(identity);
+    return 1;
+  }
+  if (args.command === "web") {
+    const result = await runWebCommand({
+      bridgeSecret: context.environment.OCTANT_DESKTOP_BRIDGE_SECRET,
+      bridgeSecretInput: {
+        env: context.environment,
+        platform: process.platform,
+        home: homedir(),
+      },
+      mayStartHost: context.mayStartHost,
+      hostNotRunning: hostNotRunningMessage(context.identity, context.target),
+      hostname: typeof args.flags.hostname === "string" ? args.flags.hostname : undefined,
+      port:
+        typeof args.flags.port === "string"
+          ? Number(args.flags.port)
+          : context.target.kind === "test-host"
+            ? context.target.serverPort
+            : undefined,
+      noOpen: args.flags["no-open"] === true,
+      dev: args.flags.dev === true,
+      servicePolicyStore: new ServicePolicyStore({
+        path: resolveCliHostRuntimePaths(context).servicePolicyPath,
+      }),
+    });
+    return result.kind === "opened" || result.kind === "served" || result.kind === "dev" ? 0 : 1;
+  }
+  if (
+    args.command === "server" &&
+    isLifecycleAction(args.positional[0]) &&
+    args.positional.length === 1 &&
+    !(args.positional[0] === "status" && ("hostname" in args.flags || "port" in args.flags))
+  ) {
+    const action = args.positional[0];
+    // `--pair` belongs to `start` alone; anywhere else it stays an unknown flag.
+    const split = action === "start" ? resolveServerPairingFlags(args.flags) : { rest: args.flags };
+    if (split === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    const lifecycleFlags = split.rest;
+    const logs = action === "logs" ? parseLogOptions(lifecycleFlags) : undefined;
+    if (action === "logs" && logs === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    if (action !== "logs" && Object.keys(lifecycleFlags).length > 0) {
+      printUsage(context.identity);
+      return 1;
+    }
+    if (action === "start" || action === "restart" || action === "enable")
+      warnAboutLinuxHostTools();
+    try {
+      const paths = resolveCliHostRuntimePaths(context);
+      const followAbortController = logs?.follow === true ? new AbortController() : undefined;
+      const stopFollowing = () => followAbortController?.abort();
+      if (followAbortController !== undefined) {
+        process.once("SIGINT", stopFollowing);
+        process.once("SIGTERM", stopFollowing);
+      }
+      let report;
+      try {
+        report = await runServerLifecycleCommand({
+          action,
+          paths,
+          policyStore: new ServicePolicyStore({ path: paths.servicePolicyPath }),
+          stdout: process.stdout,
+          ...(logs === undefined ? {} : { logs }),
+          ...(followAbortController === undefined ? {} : { signal: followAbortController.signal }),
+        });
+      } finally {
+        if (followAbortController !== undefined) {
+          process.removeListener("SIGINT", stopFollowing);
+          process.removeListener("SIGTERM", stopFollowing);
+        }
+      }
+      const succeeded =
+        action === "logs" ||
+        report.state === "ready" ||
+        report.state === "stopped" ||
+        report.state === "disabled";
+      if (!succeeded) return 1;
+      return split.pairing === undefined ? 0 : await runPairFlow(context, split.pairing);
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+  if (args.command === "server" && args.positional[0] === "status") {
+    const report = await runStatusCommand({
+      hostname: typeof args.flags.hostname === "string" ? args.flags.hostname : undefined,
+      port:
+        typeof args.flags.port === "string"
+          ? Number(args.flags.port)
+          : context.target.kind === "test-host"
+            ? context.target.serverPort
+            : undefined,
+    });
+    return report.status === "ready" ? 0 : 1;
+  }
+  if (
+    args.command === "server" &&
+    (args.positional[0] === "install" ||
+      args.positional[0] === "upgrade" ||
+      args.positional[0] === "uninstall")
+  ) {
+    // `--pair` is `install`'s alone; `upgrade` and `uninstall` keep it unknown.
+    const split =
+      args.positional[0] === "install"
+        ? resolveServerPairingFlags(args.flags)
+        : { rest: args.flags };
+    if (split === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    if (args.positional[0] !== "uninstall") warnAboutLinuxHostTools();
+    try {
+      const paths = resolveCliHostRuntimePaths(context);
+      const artifactCommand = resolveHeadlessArtifactCliCommand(args.positional, split.rest, {
+        installRoot:
+          context.environment.OCTANT_INSTALL_ROOT ?? join(paths.stateDirectory, "install"),
+        dataDirectory: paths.dataDirectory,
+      });
+      if (artifactCommand === undefined) {
+        printUsage(context.identity);
+        return 1;
+      }
+      const installed = await runHeadlessArtifactCliCommand({
+        command: artifactCommand,
+        runtime: {
+          platform: process.platform,
+          arch: process.arch,
+          wireVersion: "1",
+        },
+        dataDirectory: paths.dataDirectory,
+        stateDirectory: paths.stateDirectory,
+        ports: createHostHeadlessUpgradePorts(paths),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      });
+      if (installed !== 0 || split.pairing === undefined) return installed;
+      // The service must run the installed copy, not the unpacked download this
+      // process came from: the managed unit records the CLI that writes it.
+      const started = await startInstalledHost(artifactCommand.installRoot);
+      if (started !== 0) return started;
+      return await runPairFlow(context, split.pairing);
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+  if (args.command === "server" && args.positional[0] === "run") {
+    const options = resolveServerRunOptions(args.flags, args.positional);
+    if (options === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await runServerRunCommand(options);
+  }
+  if (args.command === "agent" || args.command === "harness") {
+    const command = resolveAgentCliCommand(args.command, args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(
+      context,
+      (session) =>
+        runAgentCliCommand({
+          command,
+          session,
+          stdin: process.stdin,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          interactive: process.stdout.isTTY === true && process.stdin.isTTY === true,
+        }),
+      { startHost: true },
+    );
+  }
+  if (args.command === "diagnostics") {
+    const command = resolveDiagnosticsCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runDiagnosticsCliCommand({
+        command,
+        session,
+        cwd: process.cwd(),
+        home: homedir(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "project") {
+    const command = resolveProjectCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runProjectCliCommand({
+        command,
+        session,
+        cwd: process.cwd(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "plugin") {
+    const command = resolvePluginCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runPluginCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "provider" && args.positional[0] === "sign-in") {
+    const command = resolveProviderSignInCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await runProviderSignInFlow(context, command);
+  }
+  if (args.command === "provider") {
+    const command = resolveProviderKeyCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runProviderKeyCliCommand({
+        command,
+        session,
+        key: {
+          interactive: process.stdin.isTTY === true,
+          readHidden: (prompt) => readHiddenLineFromTerminal(process.stdin, process.stderr, prompt),
+          readStdin: () => readAllStdin(process.stdin),
+        },
+        platform: process.platform,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "pair" || args.command === "auth" || args.command === "listener") {
+    const command: RemoteAccessCliCommand | undefined =
+      args.command === "pair"
+        ? resolvePairCliCommand(args.positional, args.flags)
+        : args.command === "listener"
+          ? resolveListenerCliCommand(args.positional, args.flags)
+          : resolveAuthCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runRemoteAccessCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "hub") {
+    const command = resolveHubCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await runHubFlow(context, command);
+  }
+  if (args.command === "status") {
+    const report = await runStatusCommand({
+      hostname: typeof args.flags.hostname === "string" ? args.flags.hostname : undefined,
+      port:
+        typeof args.flags.port === "string"
+          ? Number(args.flags.port)
+          : context.target.kind === "test-host"
+            ? context.target.serverPort
+            : undefined,
+    });
+    return report.status === "ready" ? 0 : 1;
+  }
+  printUsage(context.identity);
+  return 1;
+}
+
+/** Missing host programs are told once, up front, and never installed or fatal. */
+function warnAboutLinuxHostTools(): void {
+  const notice = formatMissingLinuxHostTools(missingLinuxHostTools());
+  if (notice !== undefined) process.stderr.write(notice);
+}
+
+function isNotRunning(reason: string): boolean {
+  return reason.startsWith("Octant is not running");
+}
+
+/** Starts the host the way `octant server start` does; the message says why it could not. */
+async function startHostForCommand(context: CliContext): Promise<string | undefined> {
+  try {
+    const paths = resolveCliHostRuntimePaths(context);
+    const report = await runServerLifecycleCommand({
+      action: "start",
+      paths,
+      policyStore: new ServicePolicyStore({ path: paths.servicePolicyPath }),
+      stdout: { write: () => undefined },
+    });
+    return report.state === "ready" ? undefined : report.message;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function withLocalControlSession(
+  context: CliContext,
+  run: (session: OpenedLocalControlSession) => Promise<number>,
+  options: { readonly startHost?: boolean } = {},
+): Promise<number> {
+  const host = { env: context.environment, platform: process.platform, home: homedir() };
+  let session = await openLocalControlSession({ host });
+  if (
+    session.kind === "refuses" &&
+    options.startHost === true &&
+    context.mayStartHost &&
+    isNotRunning(session.reason)
+  ) {
+    // The same start `octant server start` performs, then a short wait for
+    // the host to write its local control files.
+    process.stderr.write("Octant is not running here; starting it…\n");
+    const started = await startHostForCommand(context);
+    if (started !== undefined) {
+      process.stderr.write(`${started}\n`);
+      return 1;
+    }
+    for (let attempt = 0; attempt < 40 && session.kind === "refuses"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      session = await openLocalControlSession({ host });
+    }
+  }
+  if (session.kind === "refuses") {
+    // `octant-nightly` names the host it attaches to and never offers to
+    // start one; `octant` keeps its own wording.
+    const reason =
+      !context.mayStartHost && isNotRunning(session.reason)
+        ? hostNotRunningMessage(context.identity, context.target)
+        : session.reason;
+    process.stderr.write(`${reason}\n`);
+    return 1;
+  }
+  try {
+    return await run(session);
+  } finally {
+    await session.close();
+  }
+}
+
+/** Runs `server start` from `<install-root>/current`, so the service records that copy. */
+function startInstalledHost(installRoot: string): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(join(installRoot, "current", "bin", "octant"), ["server", "start"], {
+      stdio: "inherit",
+    });
+    child.once("error", (error) => {
+      process.stderr.write(`${error.message}\n`);
+      resolve(1);
+    });
+    child.once("exit", (code) => resolve(code ?? 1));
+  });
+}
+
+/** The host half of `--pair`, once the service is running. */
+async function runPairFlow(context: CliContext, options: ServerPairingOptions): Promise<number> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  // Closing the input without an answer ends the question rather than hanging it.
+  const closed = new Promise<undefined>((resolve) =>
+    prompt.once("close", () => resolve(undefined)),
+  );
+  try {
+    return await withLocalControlSession(
+      context,
+      (session) =>
+        runServerPairing({
+          options,
+          session,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          networkInterfaces,
+          ask: (question) => Promise.race([prompt.question(question), closed]),
+        }),
+      { startHost: true },
+    );
+  } finally {
+    prompt.close();
+  }
+}
+
+/** `octant hub`: questions need a terminal; the administrator step runs only when asked for. */
+async function runHubFlow(context: CliContext, command: HubCliCommand): Promise<number> {
+  const paths = resolveCliHostRuntimePaths(context);
+  const uid = process.getuid?.() ?? 0;
+  const serviceOptions = { paths, uid };
+  const prompt =
+    process.stdin.isTTY === true
+      ? createInterface({ input: process.stdin, output: process.stdout })
+      : undefined;
+  const closed =
+    prompt === undefined
+      ? undefined
+      : new Promise<undefined>((resolve) => prompt.once("close", () => resolve(undefined)));
+  try {
+    let bootService: HubBootService | undefined;
+    let loginService: UserServiceManager | undefined;
+    // A boot or login service records the command that writes it as the host
+    // to run, so only `octant`, which owns its host, ever plans one.
+    if (context.mayStartHost && (process.platform === "darwin" || process.platform === "linux")) {
+      bootService = createHubBootService({ ...serviceOptions, userName: userInfo().username });
+      loginService = createUserServiceManager(serviceOptions);
+    }
+    return await withLocalControlSession(context, (session) =>
+      runHubCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+        platform: process.platform,
+        ...(bootService === undefined ? {} : { bootService }),
+        loginService: {
+          install: async () => await loginService?.install(),
+          enable: async () => await loginService?.enable(),
+        },
+        administrator: administratorRunner,
+        diskEncryption: () =>
+          readDiskEncryption({
+            platform: process.platform,
+            dataDirectory: paths.dataDirectory,
+            runner: nodeServiceCommandRunner,
+          }),
+        ...(prompt === undefined || closed === undefined
+          ? {}
+          : { ask: (question: string) => Promise.race([prompt.question(question), closed]) }),
+      }),
+    );
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  } finally {
+    prompt?.close();
+  }
+}
+
+/** Runs an administrator command with the terminal attached, so the password prompt works. */
+const administratorRunner: ServiceCommandRunner = {
+  run: (command, args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(command, [...args], { stdio: "inherit" });
+      child.once("error", reject);
+      child.once("exit", (code) =>
+        code === 0 ? resolve({ stdout: "", stderr: "" }) : reject(new Error(`exit ${code}`)),
+      );
+    }),
+};
+
+/** `octant provider sign-in`: the terms question needs a terminal; the code does not. */
+async function runProviderSignInFlow(
+  context: CliContext,
+  command: ProviderSignInCliCommand,
+): Promise<number> {
+  const interactive = process.stdin.isTTY === true;
+  const prompt = interactive
+    ? createInterface({ input: process.stdin, output: process.stdout })
+    : undefined;
+  const closed =
+    prompt === undefined
+      ? undefined
+      : new Promise<undefined>((resolve) => prompt.once("close", () => resolve(undefined)));
+  try {
+    return await withLocalControlSession(context, (session) =>
+      runProviderSignInCliCommand({
+        command,
+        session,
+        ask:
+          prompt === undefined || closed === undefined
+            ? undefined
+            : (question) => Promise.race([prompt.question(question), closed]),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  } finally {
+    prompt?.close();
+  }
+}
+
+function resolveCliHostRuntimePaths(context: CliContext) {
+  return resolveHostRuntimePaths({
+    env: context.environment,
+    platform: process.platform,
+    home: homedir(),
+    temporaryDirectory: tmpdir(),
+    uid: process.getuid?.() ?? 0,
+  });
+}
+
+/**
+ * Each command after the tool's name. A `nightly` of null is `octant`'s alone:
+ * `octant-nightly` never starts, stops, installs or upgrades a host, and never
+ * writes a service that would run itself as Octant's host.
+ */
+const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string | null }> = [
+  {
+    octant: "web [--no-open] [--dev] [--hostname <host>] [--port <port>]",
+    nightly: "web [--no-open] [--hostname <host>] [--port <port>]",
+  },
+  { octant: "server status [--hostname <host>] [--port <port>]" },
+  { octant: "server run [--port <port>]", nightly: null },
+  {
+    octant:
+      "server start [--pair [--hostname <address>] [--port <port>] [--cert <path> --key <path>]]",
+    nightly: null,
+  },
+  { octant: "server stop|restart|enable|disable", nightly: null },
+  { octant: "server logs [--since <ISO-8601>] [--limit <n>] [--follow]" },
+  {
+    octant:
+      "server install --artifact <path> [--install-root <path>] [--pair [--hostname <address>] [--port <port>] [--cert <path> --key <path>]]",
+    nightly: null,
+  },
+  { octant: "server upgrade --artifact <path> [--install-root <path>]", nightly: null },
+  {
+    octant:
+      "server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",
+    nightly: null,
+  },
+  {
+    octant:
+      "agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+  },
+  { octant: "harness slots [--json]" },
+  { octant: "harness session <thread-id> [--json]" },
+  { octant: "harness agents <thread-id> [<n>|<id>] [--json]" },
+  { octant: "diagnostics export (--out <folder or .zip> | --list)" },
+  { octant: "project add <path> [--type work|code] [--name <name>]" },
+  { octant: "project remove <name>" },
+  { octant: "project rename <name> <new name>" },
+  { octant: "project access <name> full-access|approval-gated" },
+  { octant: "plugin install npm:<package>[@<version or range>]" },
+  { octant: "plugin check-update <package>" },
+  { octant: "provider key set <instance> [--replace] [--stdin]" },
+  { octant: "provider key status|remove <instance>" },
+  { octant: "provider remove <instance>" },
+  { octant: "provider sign-in <instance>" },
+  { octant: "listener [status]" },
+  {
+    octant:
+      "listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
+  },
+  { octant: "listener disable" },
+  { octant: "hub status" },
+  { octant: "hub enable [--install-service]", nightly: "hub enable" },
+  { octant: "hub disable [--remove-service]", nightly: "hub disable" },
+  { octant: "hub certificate [--enable --acknowledge-transparency | --disable | --status]" },
+  { octant: "hub join-code [--owner]" },
+  {
+    octant:
+      "hub join <code> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
+  },
+  { octant: "hub grant [--items <list>|none]" },
+  { octant: "hub leave" },
+  { octant: "hub remove <member-id-or-name>" },
+  { octant: "hub standby [<member-id-or-name>... | --clear]" },
+  { octant: "hub promote [--confirm]" },
+  { octant: "hub accept-hub <member-id-or-name>" },
+  { octant: "hub stand-in join-code" },
+  { octant: "hub stand-in remove <member-id-or-name>" },
+  { octant: "hub wake on|off" },
+  { octant: "hub push on|off" },
+  { octant: "hub provision on|off" },
+  { octant: "hub offer update-channel stable|preview|candidate [--mirror <signed-feed.json>]" },
+  { octant: "hub offer plugin <catalog-id> <entry-id> <sha256:digest>" },
+  { octant: "hub offer agent-profile|model-endpoint|routine <fields.json>" },
+  { octant: "hub offer-withdraw <offer-id>" },
+  { octant: "hub apply <offer-id> [--project <project-id>]" },
+  { octant: "hub dismiss <offer-id>" },
+  { octant: "hub auto-apply update-channel|plugin|agent-profile on|off" },
+  { octant: "pair [--source loopback|lan-private|tailscale]" },
+  { octant: "pair requests" },
+  { octant: "pair approve|deny <ticket-id>" },
+  { octant: "auth list" },
+  { octant: "auth revoke <device-id> | --all" },
+  { octant: "status [--hostname <host>] [--port <port>]" },
+  { octant: "mcp" },
+];
+
+function printUsage(identity: DesktopIdentity): void {
+  const lines = USAGE.flatMap((entry) => {
+    const line =
+      identity.mayStartHost || entry.nightly === undefined ? entry.octant : entry.nightly;
+    return line === null ? [] : [`  ${identity.commandName} ${line}`];
+  });
+  process.stdout.write(
+    [
+      `${identity.productName} CLI`,
+      "",
+      "Usage:",
+      ...lines,
+      `  ${identity.commandName} --version`,
+      "",
+    ].join("\n"),
+  );
+  process.stdout.write("\n");
+}
+
+/** Packaging stamps the release version beside the bundled command; a source run says so. */
+function cliVersion(environment: Readonly<Record<string, string | undefined>>): string {
+  const stamped = environment.OCTANT_CLI_VERSION;
+  return stamped !== undefined && /^[0-9A-Za-z.+-]{1,64}$/.test(stamped) ? stamped : "development";
+}
+
+const HOST_ADMINISTRATION_ACTIONS = new Set([
+  "start",
+  "stop",
+  "restart",
+  "enable",
+  "disable",
+  "run",
+  "install",
+  "upgrade",
+  "uninstall",
+]);
+
+/**
+ * The commands that would start, stop, install or upgrade a host, or write a
+ * login service that runs this tool as the host. `octant-nightly` refuses
+ * them before anything runs, so it can never own or migrate Octant's data.
+ */
+function refusesHostAdministration(context: CliContext, args: ParsedArgs): string | undefined {
+  if (context.mayStartHost) return undefined;
+  const administers =
+    (args.command === "server" && HOST_ADMINISTRATION_ACTIONS.has(args.positional[0] ?? "")) ||
+    (args.command === "web" && args.flags.dev === true) ||
+    (args.command === "hub" &&
+      ((args.positional[0] === "enable" && "install-service" in args.flags) ||
+        (args.positional[0] === "disable" && "remove-service" in args.flags)));
+  const { commandName, productName } = context.identity;
+  // Octant's login service is the only service these read, and it is not the
+  // test host's: the test host runs inside Nightly with no service of its own.
+  if (
+    !administers &&
+    context.target.kind === "test-host" &&
+    args.command === "server" &&
+    (args.positional[0] === "logs" ||
+      (args.positional[0] === "status" && !("hostname" in args.flags || "port" in args.flags)))
+  )
+    return `${productName}'s test host has no service. Use \`${commandName} status\` for its state; its log is ${context.environment.OCTANT_LOGS_DIR ?? "in the logs folder"}/service.log.`;
+  if (!administers) return undefined;
+  return context.target.kind === "test-host"
+    ? `${commandName} never starts, stops, installs or upgrades a host. ${productName}'s test host starts and stops with ${productName}.`
+    : `${commandName} never starts, stops, installs or upgrades a host. Manage Octant's host with \`octant\` or the Octant app.`;
+}
+
+export function hasInvalidLifecyclePositionals(
+  command: string,
+  positional: readonly string[],
+): boolean {
+  return command === "server" && isLifecycleAction(positional[0]) && positional.length !== 1;
+}
+
+function isLifecycleAction(value: string | undefined): value is ServerLifecycleAction {
+  return (
+    value === "start" ||
+    value === "stop" ||
+    value === "restart" ||
+    value === "status" ||
+    value === "enable" ||
+    value === "disable" ||
+    value === "logs"
+  );
+}
+
+function parseLogOptions(
+  flags: Readonly<Record<string, string | boolean>>,
+): { readonly since?: string; readonly limit?: number; readonly follow?: boolean } | undefined {
+  for (const name of Object.keys(flags)) {
+    if (name !== "since" && name !== "limit" && name !== "follow") return undefined;
+  }
+  if (flags.since !== undefined && typeof flags.since !== "string") return undefined;
+  const rawLimit = flags.limit;
+  if (rawLimit !== undefined && (typeof rawLimit !== "string" || !/^\d+$/.test(rawLimit))) {
+    return undefined;
+  }
+  const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)) {
+    return undefined;
+  }
+  return {
+    ...(typeof flags.since === "string" ? { since: flags.since } : {}),
+    ...(limit === undefined ? {} : { limit }),
+    ...(flags.follow === true ? { follow: true } : {}),
+  };
+}

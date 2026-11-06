@@ -92,8 +92,9 @@ script paths, runtime loader options and remote-debugging flags. Their terminal
 Browser command, `octant mcp`, accepts only its existing MCP/help commands.
 Stable runs its fixed scoped CLI script through a separately identified bundled
 Node runtime, preserving Code confinement without GUI-service permissions.
-Octant's host and approved executable tools use that same separate runtime. This does not yet provide the full
-`octant-nightly` command or a functional Nightly desktop bridge.
+Octant's host and approved executable tools use that same separate runtime.
+Nightly's full `octant-nightly` command runs with that runtime too (see
+[below](#the-octant-nightly-command)).
 
 Nightly's separate application identity and packaging foundation are available
 for development. It is not yet a usable second app. On macOS, ordinary Nightly
@@ -159,6 +160,36 @@ the same approval panel as in Octant, and only your click on **Allow** there
 approves one. When your Octant is too old to do one of these for Nightly,
 Nightly says "Needs a newer Octant" instead. Opening a Project in a new window
 is not available in Nightly yet.
+
+### The `octant-nightly` command
+
+Octant Nightly carries `octant-nightly`, the Nightly build of the `octant`
+command, so you can try a newer command against your real work without
+replacing `octant`. Put it on your `PATH` once with a link (use `~/.local/bin`
+or another folder on your `PATH` if you prefer):
+
+```sh
+sudo ln -sf "/Applications/Octant Nightly.app/Contents/Resources/command-line/octant-nightly" /usr/local/bin/octant-nightly
+octant-nightly --version
+octant-nightly --help
+```
+
+- It works with the Octant that is running: the same Projects, threads and
+  settings as `octant`. For example, `octant-nightly harness slots` or
+  `octant-nightly project add ~/Code/app --type code`.
+- When Nightly's **Data** is **Separate test data**, it works with Nightly's
+  test host instead (port `13774`).
+- It never starts, stops, installs or upgrades a host. If Octant is not
+  running, it says so: open Octant, or run `octant server start`. With test
+  data, open Octant Nightly. The `server start`, `stop`, `restart`, `enable`,
+  `disable`, `run`, `install`, `upgrade` and `uninstall` commands, `web --dev`,
+  and the hub's service options stay with `octant`.
+- When your Octant is too old for a command, it says "Needs a newer Octant".
+- `octant-nightly agent` uses its line view; the full-screen view needs
+  `octant`.
+- `OCTANT_DATA_DIR` chooses another data folder's host, as for `octant`;
+  `OCTANT_SERVER_PORT` moves the test host's port.
+- The command is available on macOS only.
 
 ### Separate test data in Nightly
 
