@@ -652,7 +652,8 @@ evidence; the preflight that replaces the early gate checks them:
 
 - [x] Every desktop channel classified; Octant-only administration hidden in
       the Nightly client.
-- [ ] A synthetic Nightly client smoke that runs in CI, never packaged.
+- [x] A synthetic Nightly client smoke that runs in CI, never packaged (see
+      [synthetic client smoke](#synthetic-client-smoke)).
 - [x] Nightly's local native surfaces: app menu without developer tools,
       external links, notifications and badge, `octant-nightly://` links,
       reset bounds, sidebar material, window capture and the Open in list.
@@ -667,8 +668,9 @@ evidence; the preflight that replaces the early gate checks them:
 - [ ] The rest of embedded Browser parity: password and other secure input,
       nested frames, custom editors, multiline caret and accessibility
       (decision 2).
-- [ ] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
-      an unsigned packaged Nightly smoke.
+- [x] Lifecycle and coexistence evidence: quit-one, quit-last, reconnect and
+      an unsigned packaged Nightly smoke, run locally rather than in CI. The
+      signed pair's own run stays with the maintainer checks below.
 - [ ] The full `octant-nightly` command.
 - [ ] Roll-forward rollback, a published host feature list and the app named
       in the signed feed (decision 4).
@@ -678,6 +680,49 @@ evidence; the preflight that replaces the early gate checks them:
 - [ ] Maintainer checks: a signed pair, a signed install from Settings,
       real-account sign-ins, physical IME and VoiceOver checks, and approval of
       the first scheduled publication.
+
+### Synthetic client smoke
+
+`scripts/smoke-nightly-client.ts` runs on every pull request in the macOS
+desktop CI job and needs no secret. It runs the ordinary Nightly client entry,
+`runNightlyClient` with the Nightly identity, in the Electron the desktop app
+pins, against a development host on a throwaway 0700 data folder and a free
+port. A synthetic Stable process owns that host and its bridge secret, the real
+Browser surface host and runtime broker, an in-memory credential broker, and
+Stable's real lease owner and client lifetime. Only the signed native window
+binding is stood in for: one private local socket per Nightly process carries
+register, renew and revoke, and its close is the peer's exit. The host's
+admission, leases, native-main token routes and Browser presentation are the
+shipped code.
+
+It checks, each timed: the renderer loads with the Nightly label; an API key
+added through Nightly main reaches a local OpenAI-compatible endpoint during a
+Chat turn; a Project folder pick, an API key list and a Code approval prepared
+and cancelled through native-main admission; an embedded Browser page that
+draws frames, receives typed text and answers a select list chosen from
+Nightly's native menu; lease loss that destroys the renderer before a fresh
+registration; a host restart after which Nightly reconnects on the same data;
+two hosts on separate folders and ports that each refuse the other's thread;
+and quit-one (the host stays) and quit-last (Stable's UI quit retains the host
+until the last Nightly leaves, then stops it).
+
+The harness answers what no unattended run can: the folder picker returns the
+smoke's folder, a native menu chooses the named item instead of running its
+own event loop, and the harness's windows count as focused so the desktop is
+never taken from whoever is using it. It does not establish the signed native
+binding's audit-token admission, a real Keychain, the signed launch of a closed
+Stable, or physical input and VoiceOver; those stay with the maintainer
+checks. Packaging refuses any payload with a harness entry or its marker.
+
+`scripts/smoke-packaged-nightly-unsigned.ts` is run locally: it packages
+Nightly with a dated preview version and no signing identity, checks the
+bundle's identity and version, that an ordinary launch refuses as a
+development build, and that the packaged bundle starts its own test host on a
+throwaway home's test data, then deletes what it built and unregisters the
+staged copy from Launch Services. It reads the refusal through System Events,
+so without Accessibility access it reports that check unverified (on
+2026-11-06 the alert was read with another accessibility client instead). It
+is not part of CI.
 
 ## Fixed packaged entry
 
@@ -1127,6 +1172,9 @@ remain separate packaged acceptance.
 - With separate test data, Nightly's host runs beside Octant's, each on its own
   folder and port; Octant's data, Keychain items and host are untouched, and
   switching back to Octant's data after a relaunch reconnects as a client.
+- The [synthetic client smoke](#synthetic-client-smoke) passes on every pull
+  request, standing in only for the signed native binding; the signed pair's
+  own quit-one, quit-last and reconnect run is a maintainer check.
 
 ## Rationale: whose host owns the data
 
