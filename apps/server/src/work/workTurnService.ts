@@ -1370,14 +1370,18 @@ export class WorkTurnService {
         ? undefined
         : this.#workingDirectories.current?.(selectedRoot, projectRoot);
     const folderCurrent = () => {
-      if (command.authority.workingFolderId === undefined || project === undefined) return true;
-      const latest = this.#persistence.readProject(project.id);
-      return (
-        latest?.type === "work" &&
-        latest.lifecycle === "active" &&
-        approvedWorkingFolderRoot(latest, command.authority.workingFolderId) === selectedRoot &&
-        physicalCurrent?.() !== false
-      );
+      try {
+        if (command.authority.workingFolderId === undefined || project === undefined) return true;
+        const latest = this.#persistence.readProject(project.id);
+        return (
+          latest?.type === "work" &&
+          latest.lifecycle === "active" &&
+          approvedWorkingFolderRoot(latest, command.authority.workingFolderId) === selectedRoot &&
+          physicalCurrent?.() !== false
+        );
+      } catch {
+        return false;
+      }
     };
     const folderWatch =
       command.authority.workingFolderId === undefined

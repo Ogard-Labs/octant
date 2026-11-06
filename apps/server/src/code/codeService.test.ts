@@ -2975,7 +2975,11 @@ describe("CodeService managed thread creation", () => {
   });
 
   it("refuses an unrecognized approved-folder identity before creating a managed worktree", async () => {
-    const port = mockCreationPort();
+    const port = {
+      prepare: vi.fn<ManagedCodeThreadCreationPort["prepare"]>(),
+      commit: vi.fn<ManagedCodeThreadCreationPort["commit"]>(),
+      cleanup: vi.fn<ManagedCodeThreadCreationPort["cleanup"]>(),
+    };
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port });
     const command = managedCommand;
     await expect(

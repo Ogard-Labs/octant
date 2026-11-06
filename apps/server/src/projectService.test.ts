@@ -65,6 +65,24 @@ it("issues stable folder choices and refuses removed or relinked choices without
   ).toBeUndefined();
 });
 
+it("disambiguates approved folders that have the same final name", () => {
+  const base = workProject();
+  if (base.type !== "work") throw new Error("Expected Work Project");
+  const folder = decodeProjectExtraFolder({
+    canonicalRoot: "/approved/one/notes",
+    addedAt: now,
+    addedBy: base.bindingHistory[0]?.actor,
+  });
+  const project = {
+    ...base,
+    extraFolders: [folder, { ...folder, canonicalRoot: "/approved/two/notes" }],
+  };
+  const choices = approvedWorkingFolderChoices(project);
+  expect(choices.filter((choice) => choice.kind === "extra").map((choice) => choice.label)).toEqual(
+    ["/approved/one/notes", "/approved/two/notes"],
+  );
+});
+
 describe("a thread started without a Project", () => {
   const defaultProjectId = decodeProjectId("00000000-0000-4000-8000-000000000620");
 

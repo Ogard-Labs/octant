@@ -2923,7 +2923,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           fork: input.thread,
           origin: forkOrigin,
           sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.checkoutRoot,
+          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
           secrets,
         })
         .catch(() => undefined);
@@ -2952,7 +2952,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           fork: input.thread,
           origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
           sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.checkoutRoot,
+          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
           secrets,
         })
         .catch(() => undefined);
@@ -4689,7 +4689,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.folderCurrent === undefined
         ? undefined
         : setInterval(() => {
-            if (active.folderCurrent?.() === false) {
+            let revoked: boolean;
+            try {
+              revoked = active.folderCurrent?.() === false;
+            } catch {
+              revoked = true;
+            }
+            if (revoked) {
               active.interruptMessage =
                 "The working folder became unavailable. Nothing was redirected.";
               active.abort.abort();

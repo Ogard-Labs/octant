@@ -35,7 +35,7 @@ export type ProjectWorkingFolderId = typeof ProjectWorkingFolderId.Type;
 export const decodeProjectWorkingFolderId = Schema.decodeUnknownSync(ProjectWorkingFolderId);
 export const ApprovedWorkingFolder = Schema.Struct({
   id: ProjectWorkingFolderId,
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_THREAD_WORKING_DIRECTORY_BYTES)),
   kind: Schema.Literal("main", "extra"),
 }).annotations({ parseOptions: { onExcessProperty: "error" as const } });
 export type ApprovedWorkingFolder = typeof ApprovedWorkingFolder.Type;

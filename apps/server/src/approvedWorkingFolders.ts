@@ -29,10 +29,18 @@ function folders(project: BoundProject) {
 export function approvedWorkingFolderChoices(
   project: BoundProject,
 ): ReadonlyArray<ApprovedWorkingFolder> {
-  return folders(project).map((folder) => ({
+  const choices = folders(project);
+  return choices.map((folder) => ({
     id: folder.id,
     kind: folder.kind,
-    label: folder.kind === "main" ? "Main folder" : basename(folder.root),
+    label:
+      folder.kind === "main"
+        ? "Main folder"
+        : choices.filter(
+              (other) => other.kind === "extra" && basename(other.root) === basename(folder.root),
+            ).length > 1
+          ? folder.root
+          : basename(folder.root),
   }));
 }
 

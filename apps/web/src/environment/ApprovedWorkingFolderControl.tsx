@@ -1,3 +1,4 @@
+import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   decodeThreadWorkingDirectory,
   type ApprovedWorkingFolder,
@@ -57,9 +58,9 @@ export function ApprovedWorkingFolderControl(props: {
         }}
       />
       {!valid ? (
-        <small role="alert">
+        <OctantAlert tone="danger">
           Use . or a relative subfolder without .. before starting this task.
-        </small>
+        </OctantAlert>
       ) : null}
       <small>
         {selected === undefined

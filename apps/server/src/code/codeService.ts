@@ -4153,6 +4153,12 @@ export class CodeService {
         projectId: source.projectId,
         bindingRevisionId: source.bindingRevisionId,
         title: command.title,
+        ...(source.workingFolderId === undefined
+          ? {}
+          : {
+              workingFolderId: source.workingFolderId,
+              workingDirectory: source.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            }),
         providerInstanceId: source.providerInstanceId,
         modelId: source.modelId,
         ...(source.modelOptionValues === undefined
