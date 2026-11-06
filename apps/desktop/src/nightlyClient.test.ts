@@ -7,6 +7,7 @@ import { beforeAll, beforeEach, afterEach, expect, it, vi } from "vitest";
 import { desktopIdentity } from "@octant/host-runtime";
 import type { NativeMenuOutcome } from "@octant/contracts/shell";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import { createNightlyLaunchLinks, type NightlyLaunchLinks } from "./nightlyLaunchLinks";
 
 class Contents extends EventEmitter {
   readonly id = 101;
@@ -143,27 +144,34 @@ const menu = {
   y: 60,
   items: [{ kind: "item", id: "0", label: "Synthetic choice", enabled: true }],
 };
-async function open(platform: NodeJS.Platform = process.platform) {
+async function open(
+  platform: NodeJS.Platform = process.platform,
+  launchLinks: NightlyLaunchLinks = createNightlyLaunchLinks("octant-nightly"),
+) {
   Object.defineProperty(process, "platform", { value: platform });
   const { runNightlyClient } = await import("./nightlyClient");
-  const result = await runNightlyClient(desktopIdentity("nightly"), {
-    listenWindows: async () => ({ kind: "started" }),
-    replyWindow: () => false,
-    stopWindows: async () => ({ kind: "closed" }),
-    openWindow: async () => ({
-      kind: "registered",
-      protocol: 1,
-      windowId: "00000000-0000-4000-8000-000000000936",
-      generation: 1,
-      hostOrigin: "http://127.0.0.1:13773",
-      hostInstance: "00000000-0000-4000-8000-000000000937",
-      capability: "A".repeat(43),
-      rendererIdentity: "B".repeat(42) + "A",
-      leaseMs: 15_000,
-    }),
-    renewWindow: async () => ({ kind: "renewed", leaseMs: 15_000 }),
-    revokeWindow: async () => ({ kind: "revoked" }),
-  });
+  const result = await runNightlyClient(
+    desktopIdentity("nightly"),
+    {
+      listenWindows: async () => ({ kind: "started" }),
+      replyWindow: () => false,
+      stopWindows: async () => ({ kind: "closed" }),
+      openWindow: async () => ({
+        kind: "registered",
+        protocol: 1,
+        windowId: "00000000-0000-4000-8000-000000000936",
+        generation: 1,
+        hostOrigin: "http://127.0.0.1:13773",
+        hostInstance: "00000000-0000-4000-8000-000000000937",
+        capability: "A".repeat(43),
+        rendererIdentity: "B".repeat(42) + "A",
+        leaseMs: 15_000,
+      }),
+      renewWindow: async () => ({ kind: "renewed", leaseMs: 15_000 }),
+      revokeWindow: async () => ({ kind: "revoked" }),
+    },
+    launchLinks,
+  );
   expect(result).toEqual({ kind: "started" });
   const window = fixture.windows[0],
     handler = fixture.handlers.get(DESKTOP_IPC_CHANNELS.nativeMenu);
@@ -307,21 +315,24 @@ it("opens only plain web pages in the default browser", async () => {
   expect(fixture.openExternal).toHaveBeenCalledOnce();
 });
 
-it("claims its own link scheme and hands a Code link to the loaded window", async () => {
-  const f = await open();
-  expect(fixture.app.setAsDefaultProtocolClient).toHaveBeenCalledWith("octant-nightly");
+it("claims its own link scheme and routes a link that arrived before the client once its window loads", async () => {
+  const launchLinks = createNightlyLaunchLinks("octant-nightly");
   const thread = "00000000-0000-4000-8000-000000000123";
-  const link = (url: string) => fixture.app.emit("open-url", { preventDefault() {} }, url);
-  link(`octant-nightly://code/thread/${thread}`);
-  link(`octant://code/thread/${thread}`);
+  // Delivered while the entry was still checking Octant's host.
+  launchLinks.receive(`octant-nightly://code/thread/${thread}`);
+  launchLinks.receive(`octant://code/thread/${thread}`);
+  launchLinks.receive("octant-nightly://code/thread/not-a-thread");
+  const f = await open(process.platform, launchLinks);
+  expect(fixture.app.setAsDefaultProtocolClient).toHaveBeenCalledWith("octant-nightly");
   const delivered = () =>
     f.window.webContents.sent.filter(([channel]) => channel === DESKTOP_IPC_CHANNELS.codeDeepLink);
   expect(delivered()).toEqual([]);
   f.window.webContents.emit("did-finish-load");
+  f.window.webContents.emit("did-finish-load");
   expect(delivered()).toEqual([
     [DESKTOP_IPC_CHANNELS.codeDeepLink, { kind: "thread", threadId: thread }],
   ]);
-  link(`octant-nightly://code/project/${thread}`);
+  launchLinks.receive(`octant-nightly://code/project/${thread}`);
   expect(delivered()).toHaveLength(2);
 });
 

@@ -132,6 +132,53 @@ describe("Nightly native window lease ownership", () => {
     }
   });
 
+  it("registers the original way with an older host and opens the window without brokered fields", async () => {
+    const f = fixture();
+    const normal = f.fetch.getMockImplementation();
+    f.fetch.mockImplementationOnce(async (input, init) => {
+      const body: unknown = JSON.parse(String(init?.body));
+      if (typeof body === "object" && body !== null && "nativeMainToken" in body)
+        return Response.json(
+          { category: "invalid", message: "Request body is invalid." },
+          { status: 400 },
+        );
+      return normal === undefined ? new Response(null, { status: 500 }) : normal(input, init);
+    });
+    try {
+      const reply = await f.send(1, "register");
+      if (reply.kind !== "registered") throw new Error("Fixture registration failed");
+      const posts = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+      expect(posts).toHaveLength(2);
+      expect(Object.keys(JSON.parse(String(posts[0]?.[1]?.body)))).toContain("nativeMainToken");
+      expect(Object.keys(JSON.parse(String(posts[1]?.[1]?.body))).sort()).toEqual(
+        ["capability", "rendererIdentity", "source", "windowId"].sort(),
+      );
+      expect(reply.nativeMainToken).toBeUndefined();
+      expect(reply.hostFeatures).toBeUndefined();
+      expect(f.owner.hasWindow(reply.windowId)).toBe(true);
+    } finally {
+      await f.owner.close();
+    }
+  });
+
+  it("does not retry a registration the host refused for any other reason", async () => {
+    for (const refusal of [
+      new Response(null, { status: 409 }),
+      new Response(null, { status: 500 }),
+      Response.json({ category: "unauthorized" }, { status: 400 }),
+      new Response("not json", { status: 400 }),
+    ]) {
+      const f = fixture();
+      f.fetch.mockImplementationOnce(async () => refusal);
+      try {
+        expect((await f.send(1, "register")).kind).toBe("refused");
+        expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+      } finally {
+        await f.owner.close();
+      }
+    }
+  });
+
   it("drops native availability and closes the issued context on local expiry", async () => {
     const f = fixture();
     try {

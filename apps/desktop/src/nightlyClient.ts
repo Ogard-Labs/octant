@@ -31,6 +31,7 @@ import {
   nightlyClientRefusal,
 } from "./nightlyClientChannels";
 import { installNightlyClientSurfaces } from "./nightlyClientSurfaces";
+import type { NightlyLaunchLinks } from "./nightlyLaunchLinks";
 import {
   createMainBrowserWindowOptions,
   createTrustedRendererRequestRegistry,
@@ -60,6 +61,7 @@ import {
 export async function runNightlyClient(
   identity: DesktopIdentity,
   native: unknown,
+  launchLinks: Pick<NightlyLaunchLinks, "handOff">,
 ): Promise<{ readonly kind: "started" } | { readonly kind: "refused"; readonly message: string }> {
   const protocol = desktopWindowProtocol(native);
   if (protocol === undefined)
@@ -67,14 +69,6 @@ export async function runNightlyClient(
       kind: "refused",
       message: "Needs a newer Octant. Native window registration is unavailable.",
     };
-  // macOS delivers a link that launched Nightly before the app is ready, so
-  // links are held until the window surfaces exist.
-  const earlyLinks: string[] = [];
-  let acceptCodeLink: (url: string) => void = (url) => void earlyLinks.push(url);
-  app.on("open-url", (event, url) => {
-    event.preventDefault();
-    acceptCodeLink(url);
-  });
   const linkArguments = (args: ReadonlyArray<string>) =>
     args.filter((argument) => argument.startsWith(`${identity.scheme}://`));
   await app.whenReady();
@@ -129,9 +123,8 @@ export async function runNightlyClient(
     owns,
     quit: () => app.quit(),
   });
-  acceptCodeLink = surfaces.acceptCodeLink;
-  for (const url of [...earlyLinks.splice(0), ...linkArguments(process.argv)])
-    surfaces.acceptCodeLink(url);
+  // The inbox holds each link until the first window has loaded.
+  launchLinks.handOff(surfaces.acceptCodeLink);
   register(DESKTOP_IPC_CHANNELS.minimize, (event) => owns(event).minimize());
   register(DESKTOP_IPC_CHANNELS.maximizeOrRestore, (event) => {
     const window = owns(event);

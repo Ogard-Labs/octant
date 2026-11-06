@@ -527,8 +527,11 @@ channel is missing from it:
     credentials leave the app.
   - Attention notifications and the Dock badge, summed across Nightly's
     windows.
-  - `octant-nightly://` Code links. Nightly claims the scheme, holds a link
-    until a window has loaded, and drops any link Octant would drop.
+  - `octant-nightly://` Code links. Nightly claims the scheme. Its entry
+    holds the newest eight links from its first step, because macOS delivers
+    a launch link while Nightly is still checking Octant's host and the link
+    is not in the launch arguments. The client keeps each link until a window
+    has loaded, and drops any link Octant would drop.
   - Resetting the window's bounds, and the sidebar material and vibrancy Octant
     uses, from the same window presentation.
   - Window capture for the composer, under Nightly's own Screen Recording
