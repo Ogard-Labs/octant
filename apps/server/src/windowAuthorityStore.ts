@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { uptime } from "node:os";
 import type { WindowId } from "@octant/contracts";
 
@@ -39,6 +40,8 @@ interface AuthorityRecord {
   readonly expiresAt: number;
   readonly native?: NativeLease;
   readonly rendererIdentity?: string;
+  /** Main-only token of a native window; never sent to or by its renderer. */
+  readonly nativeMainToken?: string;
 }
 
 export interface WindowAuthorityStoreOptions {
@@ -160,6 +163,7 @@ export class WindowAuthorityStore {
     readonly windowId: WindowId;
     readonly capability: string;
     readonly rendererIdentity: string;
+    readonly nativeMainToken?: string;
     readonly source: NativeWindowSource;
     readonly now: number;
   }): { readonly expiresAt: number; readonly generation: number } {
@@ -171,7 +175,11 @@ export class WindowAuthorityStore {
     validateNativeSource(input.source);
     if (
       !isCanonical256BitToken(input.capability) ||
-      !isCanonical256BitToken(input.rendererIdentity)
+      !isCanonical256BitToken(input.rendererIdentity) ||
+      (input.nativeMainToken !== undefined &&
+        (!isCanonical256BitToken(input.nativeMainToken) ||
+          input.nativeMainToken === input.capability ||
+          input.nativeMainToken === input.rendererIdentity))
     ) {
       throw new WindowAuthorityError("invalid", "Native window authority is invalid.");
     }
@@ -184,7 +192,13 @@ export class WindowAuthorityStore {
     ) {
       throw new WindowAuthorityError("unavailable", "Native window authority is at capacity.");
     }
-    const record = this.#nativeRecord(input.windowId, input.rendererIdentity, input.source, now);
+    const record = this.#nativeRecord(
+      input.windowId,
+      input.rendererIdentity,
+      input.nativeMainToken,
+      input.source,
+      now,
+    );
     this.#byCapability.set(input.capability, record);
     this.#capabilityByWindow.set(input.windowId, input.capability);
     this.#scheduleExpiry(input.capability, record);
@@ -217,6 +231,7 @@ export class WindowAuthorityStore {
     const replacement = this.#nativeRecord(
       existing.windowId,
       existing.rendererIdentity,
+      existing.nativeMainToken,
       source,
       now,
       existing.native?.lifetime,
@@ -275,6 +290,26 @@ export class WindowAuthorityStore {
     return record.windowId;
   }
 
+  /**
+   * Admit a native window's main process. The token is valid only with the
+   * live native lease of exactly the window it was registered with: expiry,
+   * revocation and lease loss delete that record and the token with it.
+   */
+  authenticateNativeMain(capability: string, nativeMainToken: string, rawNow: number): WindowId {
+    if (!isCanonical256BitToken(nativeMainToken)) {
+      throw new WindowAuthorityError("unauthorized", "Native main authority is invalid.");
+    }
+    const record = this.#authenticateRecord(capability, this.#clampNow(rawNow));
+    if (
+      record.native === undefined ||
+      record.nativeMainToken === undefined ||
+      !tokensEqual(record.nativeMainToken, nativeMainToken)
+    ) {
+      throw new WindowAuthorityError("unauthorized", "Native main authority is invalid.");
+    }
+    return record.windowId;
+  }
+
   #authenticateRecord(capability: string, now: number): AuthorityRecord {
     if (!isCanonical256BitToken(capability)) {
       throw new WindowAuthorityError("unauthorized", "Window authority is invalid.");
@@ -290,6 +325,7 @@ export class WindowAuthorityStore {
   #nativeRecord(
     windowId: WindowId,
     rendererIdentity: string,
+    nativeMainToken: string | undefined,
     source: NativeWindowSource,
     now: number,
     lifetime = new AbortController(),
@@ -301,6 +337,7 @@ export class WindowAuthorityStore {
     return {
       windowId,
       rendererIdentity,
+      ...(nativeMainToken === undefined ? {} : { nativeMainToken }),
       expiresAt: now + NATIVE_WINDOW_LEASE_MS,
       native: {
         source: Object.freeze({ ...source }),
@@ -430,6 +467,13 @@ export class WindowAuthorityStore {
       console.warn("Octant could not finish cleaning up a revoked native window.");
     }
   }
+}
+
+function tokensEqual(expected: string, actual: string): boolean {
+  return timingSafeEqual(
+    createHash("sha256").update(expected, "utf8").digest(),
+    createHash("sha256").update(actual, "utf8").digest(),
+  );
 }
 
 function validateRendererIdentity(rendererIdentity: string | undefined): void {

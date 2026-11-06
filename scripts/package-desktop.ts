@@ -41,12 +41,14 @@ import {
   DESKTOP_NODE_RUNTIME_NAME,
   DESKTOP_NODE_RUNTIME_BUNDLE_ID,
   DESKTOP_PEER_STATUS_FILENAME,
+  DESKTOP_PEER_LINUX_FILENAME,
   BROWSER_TEXT_INPUT_FILENAME,
 } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
 import { buildBrowserTextInput } from "./build-browser-text-input";
 import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
+import { buildDesktopPeerLinux } from "./build-desktop-peer-linux";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import { prepareManagedTools } from "./prepare-managed-tools";
@@ -362,6 +364,15 @@ export const REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES = [
   `Octant.app/Contents/Resources/${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant.mjs`,
 ] as const;
 
+/** Nightly's full command-line tool: kept apart from the terminal folder a Code thread gets. */
+export const NIGHTLY_COMMAND_DIRECTORY_NAME = "command-line" as const;
+
+/** Octant Nightly's `octant-nightly`: a shell launcher and the one-file full command. */
+export const REQUIRED_DARWIN_NIGHTLY_COMMAND_FILES = [
+  `Octant.app/Contents/Resources/${NIGHTLY_COMMAND_DIRECTORY_NAME}/octant-nightly`,
+  `Octant.app/Contents/Resources/${NIGHTLY_COMMAND_DIRECTORY_NAME}/octant-nightly.mjs`,
+] as const;
+
 /** Full darwin-arm64 checklist (staged payload + PTY helper + Keychain/code-file helpers). */
 export const REQUIRED_PACKAGED_FILES = [
   ...REQUIRED_STAGED_PACKAGED_FILES,
@@ -408,6 +419,60 @@ export function terminalLauncherScript(identity: DesktopIdentity): string {
   ].join("\n");
 }
 
+/**
+ * Nightly's full `octant-nightly`. It runs only the bundled command beside it
+ * with the app's worker runtime in Node mode, never the sealed GUI main, and
+ * passes every argument to that command rather than to the runtime, so no
+ * caller selects a script or runtime option. A person links it onto `PATH`, so
+ * it follows that link back to the app before finding its bundle.
+ */
+export function nightlyCommandLauncherScript(identity: DesktopIdentity, version: string): string {
+  if (identity.flavor !== "nightly") throw new Error("Only Octant Nightly ships octant-nightly.");
+  // The release version is validated before packaging; refuse anything that
+  // could leave its quotes.
+  if (!/^[0-9A-Za-z.+-]{1,64}$/.test(version)) throw new Error("Invalid release version.");
+  return [
+    "#!/bin/sh",
+    `# Octant Nightly's \`${identity.commandName}\`, run with the app's own worker runtime.`,
+    "command_path=$0",
+    "link_hops=0",
+    'while [ -L "$command_path" ]; do',
+    "  link_hops=$((link_hops + 1))",
+    `  if [ "$link_hops" -gt 40 ]; then echo "${identity.commandName}: too many links" >&2; exit 1; fi`,
+    '  link_target=$(readlink -- "$command_path")',
+    "  case $link_target in",
+    "    /*) command_path=$link_target ;;",
+    '    *) command_path=$(dirname -- "$command_path")/$link_target ;;',
+    "  esac",
+    "done",
+    'command_directory=$(dirname -- "$command_path")',
+    "export ELECTRON_RUN_AS_NODE=1",
+    `export OCTANT_CLI_VERSION='${version}'`,
+    `exec "$command_directory/../../Frameworks/${DESKTOP_NODE_RUNTIME_NAME}.app/Contents/MacOS/${DESKTOP_NODE_RUNTIME_NAME}" "$command_directory/${identity.commandName}.mjs" "$@"`,
+    "",
+  ].join("\n");
+}
+
+/** Writes Nightly's full command into its own Resources folder. */
+export async function installNightlyCommand(
+  repositoryRoot: string,
+  directory: string,
+  identity: DesktopIdentity,
+  version: string,
+): Promise<void> {
+  const bundle = "packages/cli/dist/octant-nightly.mjs";
+  if (!existsSync(resolve(repositoryRoot, bundle)))
+    throw new Error(`Required built output is missing: ${bundle}. Run bun run build first.`);
+  const script = nightlyCommandLauncherScript(identity, version);
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory, { recursive: true });
+  const command = join(directory, identity.commandName);
+  await cp(resolve(repositoryRoot, bundle), `${command}.mjs`);
+  await chmod(`${command}.mjs`, 0o644);
+  await writeFile(command, script, { mode: 0o755 });
+  await chmod(command, 0o755);
+}
+
 /** Writes only the scoped command; it is not a desktop peer or full CLI. */
 export async function installTerminalLauncher(
   repositoryRoot: string,
@@ -442,6 +507,7 @@ export const PACKAGED_ARM64_FILES = [
   DARWIN_LANGUAGE_SERVER_BINARY,
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
+  `native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   LINUX_LANGUAGE_SERVER_BINARY,
@@ -494,6 +560,8 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
 ]);
 
 const ALLOWED_LINUX_NATIVE_SUFFIXES = [
+  // The Linux client trust binding, outside the app payload like the macOS one.
+  `/resources/native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
 ] as const;
@@ -526,7 +594,8 @@ export function validateNativePayloadAllowlist(
 
 /**
  * Linux portable trees and AppDirs may only carry the rebuilt SQLite and PTY
- * natives under resources/app — never Darwin Keychain/code-file helpers.
+ * natives under resources/app and the client trust binding under
+ * resources/native — never Darwin Keychain/code-file helpers.
  */
 export function validateLinuxNativePayloadAllowlist(paths: ReadonlyArray<string>): void {
   for (const path of paths) {
@@ -744,12 +813,10 @@ export function createPackagerOptions(
     appVersion: version,
     arch: target.arch,
     asar:
-      target.platform === "darwin"
-        ? { unpack: `**/{${desktopUnpackedFiles(identity).join(",")}}` }
-        : false,
-    ...(target.platform === "darwin" && identity.flavor === "stable"
-      ? { ignore: /^\/apps\/server(?:\/|$)/ }
-      : {}),
+      target.platform === "darwin" ? { unpack: `**/{${desktopUnpackedFiles().join(",")}}` } : false,
+    // Both apps keep the worker host tree out of the trusted archive: Nightly
+    // runs this same host for its own test data.
+    ...(target.platform === "darwin" ? { ignore: /^\/apps\/server(?:\/|$)/ } : {}),
     dir,
     electronVersion: ELECTRON_VERSION,
     // macOS terminates a process that opens the microphone without this
@@ -877,13 +944,18 @@ async function rebuildNativeModules(
     await rebuild(options);
     return;
   }
+  await withLinuxNativeToolchain(() => rebuild(options));
+}
+
+/** Runs a node-gyp build with the C/C++ pair Electron's V8 headers accept. */
+async function withLinuxNativeToolchain(build: () => Promise<void>): Promise<void> {
   const toolchain = resolveLinuxNativeToolchain();
   const previousCC = process.env.CC;
   const previousCXX = process.env.CXX;
   process.env.CC = toolchain.CC;
   process.env.CXX = toolchain.CXX;
   try {
-    await rebuild(options);
+    await build();
   } finally {
     if (previousCC === undefined) {
       delete process.env.CC;
@@ -939,6 +1011,11 @@ export function validatePackagedPayload(
     }
     if (entry.content !== undefined && containsForbiddenIdentity(entry.content)) {
       throw new Error(`Packaged payload contains forbidden product identity in ${entry.path}.`);
+    }
+    if (isNightlyClientHarness(entry)) {
+      throw new Error(
+        `Packaged payload contains the Nightly client smoke harness in ${entry.path}.`,
+      );
     }
   }
   validateBundledInternalRuntime(entries);
@@ -1191,19 +1268,19 @@ async function packageDarwinDesktop(
   const packagedApp = join(packagedDirectories[0]!, `${identity.productName}.app`);
   await rename(packagedApp, finalApp);
   await rm(packagerRoot, { recursive: true, force: true });
-  if (identity.flavor === "stable") {
-    await packageDesktopNodeRuntime({
-      primaryApp: finalApp,
-      temporaryRoot: join(outRoot, ".node-runtime"),
-      version,
-      electronVersion: ELECTRON_VERSION,
-    });
-    await stageStableHostPayload(stageRoot, finalApp);
-    await validateBundleIdentity(join(finalApp, DESKTOP_NODE_RUNTIME_APP), {
-      bundleId: DESKTOP_NODE_RUNTIME_BUNDLE_ID,
-      productName: DESKTOP_NODE_RUNTIME_NAME,
-    });
-  }
+  // Nightly carries the host payload and its worker runtime as Octant does;
+  // its host role starts only from its stored Data choice.
+  await packageDesktopNodeRuntime({
+    primaryApp: finalApp,
+    temporaryRoot: join(outRoot, ".node-runtime"),
+    version,
+    electronVersion: ELECTRON_VERSION,
+  });
+  await stageHostPayload(stageRoot, finalApp);
+  await validateBundleIdentity(join(finalApp, DESKTOP_NODE_RUNTIME_APP), {
+    bundleId: DESKTOP_NODE_RUNTIME_BUNDLE_ID,
+    productName: DESKTOP_NODE_RUNTIME_NAME,
+  });
 
   const nativeResources = join(finalApp, "Contents/Resources/native");
   await mkdir(nativeResources, { recursive: true });
@@ -1220,6 +1297,11 @@ async function packageDarwinDesktop(
     join(finalApp, "Contents/Resources", TERMINAL_LAUNCHER_DIRECTORY_NAME),
     identity,
   );
+  if (identity.flavor === "nightly") {
+    const commandDirectory = join(finalApp, "Contents/Resources", NIGHTLY_COMMAND_DIRECTORY_NAME);
+    await installNightlyCommand(repositoryRoot, commandDirectory, identity, version);
+    await access(join(commandDirectory, identity.commandName), 1);
+  }
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
     resolve(repositoryRoot, "apps/desktop/native/keychain-helper/OctantKeychainHelper.swift"),
@@ -1235,21 +1317,16 @@ async function packageDarwinDesktop(
     join(nativeResources, "octant-device-helper"),
   );
   for (const relativePath of PACKAGED_EXECUTABLE_FILES) {
-    await access(
-      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`, identity)),
-      1,
-    );
+    await access(join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`)), 1);
   }
   for (const relativePath of PACKAGED_ARM64_FILES) {
     await validatePackagedArm64(
-      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`, identity)),
+      join(finalApp, packagedNativePath(`Contents/Resources/${relativePath}`)),
     );
   }
 
   const packagedPayload = join(finalApp, "Contents/Resources/app");
   const archive = join(finalApp, "Contents/Resources/app.asar");
-  if (identity.flavor === "nightly" && existsSync(packagedPayload))
-    throw new Error("Nightly contains an unsealed application directory.");
   if (existsSync(join(packagedPayload, "apps/desktop")))
     throw new Error("Physical host payload contains a loose desktop entry.");
   const archiveEntries = readDesktopArchive(
@@ -1268,17 +1345,13 @@ async function packageDarwinDesktop(
         { encoding: "utf8" },
       ),
     ),
-    identity,
   );
-  const payloadEntries =
-    identity.flavor === "stable"
-      ? [
-          ...archiveEntries,
-          ...(await collectPayloadEntries(packagedPayload)).filter((entry) =>
-            entry.path.startsWith("apps/server/"),
-          ),
-        ]
-      : archiveEntries;
+  const payloadEntries = [
+    ...archiveEntries,
+    ...(await collectPayloadEntries(packagedPayload)).filter((entry) =>
+      entry.path.startsWith("apps/server/"),
+    ),
+  ];
   validatePackagedPayload(payloadEntries, target, identity);
   const bundleEntries = await collectPayloadEntries(outRoot);
   const bundlePaths = new Set([
@@ -1286,7 +1359,7 @@ async function packageDarwinDesktop(
       const prefix = `${identity.productName}.app/Contents/Resources/app.asar.unpacked/`;
       if (entry.path.startsWith(prefix)) {
         const payload = entry.path.slice(prefix.length);
-        if (!new Set(desktopUnpackedFiles(identity)).has(payload))
+        if (!new Set(desktopUnpackedFiles()).has(payload))
           throw new Error(`Unexpected loose desktop native payload: ${payload}.`);
         return entry.path.replace("/app.asar.unpacked/", "/app/");
       }
@@ -1303,6 +1376,13 @@ async function packageDarwinDesktop(
     if (!bundlePaths.has(packagedBundlePath(flavorIconPath(requiredPath, identity), identity)))
       throw new Error(`Packaged bundle is missing ${requiredPath}.`);
   }
+  for (const commandPath of REQUIRED_DARWIN_NIGHTLY_COMMAND_FILES) {
+    const present = bundlePaths.has(packagedBundlePath(commandPath, identity));
+    if (identity.flavor === "nightly" && !present)
+      throw new Error(`Packaged bundle is missing ${commandPath}.`);
+    if (identity.flavor === "stable" && present)
+      throw new Error(`Octant must not ship ${commandPath}.`);
+  }
   for (const forbiddenPath of FORBIDDEN_PACKAGED_FILES) {
     if (bundlePaths.has(packagedBundlePath(forbiddenPath, identity)))
       throw new Error(`Packaged bundle contains duplicate helper path ${forbiddenPath}.`);
@@ -1310,13 +1390,10 @@ async function packageDarwinDesktop(
   validatePackagedRendererPolicy(
     archiveEntries.find((entry) => entry.path === "apps/web/dist/index.html")?.content ?? "",
   );
-  if (identity.flavor === "stable")
-    await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+  await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
   await prepareDesktopRuntimeFuses(finalApp);
-  if (identity.flavor === "stable") {
-    await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
-    await validateNodeRuntimeFuses(join(finalApp, DESKTOP_NODE_RUNTIME_APP));
-  }
+  await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
+  await validateNodeRuntimeFuses(join(finalApp, DESKTOP_NODE_RUNTIME_APP));
   await validateBundleIdentity(finalApp, identity);
   return finalApp;
 }
@@ -1364,6 +1441,9 @@ async function packageLinuxDesktop(
 
   const resourcesRoot = join(finalPackageDir, "resources");
   await prepareManagedTools(repositoryRoot, join(resourcesRoot, "managed-tools"), "linux");
+  await withLinuxNativeToolchain(() =>
+    buildDesktopPeerLinux(join(resourcesRoot, "native", DESKTOP_PEER_LINUX_FILENAME), target.arch),
+  );
   for (const relativePath of PACKAGED_LINUX_EXECUTABLE_FILES) {
     await access(join(resourcesRoot, relativePath), 1);
   }
@@ -1892,7 +1972,9 @@ async function copyRuntimeDirectory(source: string, destination: string): Promis
   });
 }
 
-async function collectPayloadEntries(root: string): Promise<ReadonlyArray<PackagedPayloadEntry>> {
+export async function collectPayloadEntries(
+  root: string,
+): Promise<ReadonlyArray<PackagedPayloadEntry>> {
   const entries: PackagedPayloadEntry[] = [];
   await collect(root, root, entries);
   return entries.sort((left, right) => left.path.localeCompare(right.path));
@@ -1939,6 +2021,20 @@ function isForbiddenPath(path: string): boolean {
   );
 }
 
+/**
+ * The Nightly client smoke stands in for the signed native window binding and
+ * answers pickers and menus itself, so no build of it may ship. Each harness
+ * entry carries this marker, and a bundle that inlined one carries it too.
+ */
+export const NIGHTLY_CLIENT_HARNESS_MARKER = "octant-nightly-client-harness@1";
+
+export function isNightlyClientHarness(entry: PackagedPayloadEntry): boolean {
+  return (
+    basename(entry.path).toLowerCase().startsWith("nightly-client-harness") ||
+    entry.content?.includes(NIGHTLY_CLIENT_HARNESS_MARKER) === true
+  );
+}
+
 function containsForbiddenIdentity(content: string): boolean {
   const forbidden = new RegExp(`\\b(?:${"syn" + "ara"}|${"openor" + "bit"})(?:\\b|[._-])`, "i");
   return forbidden.test(content);
@@ -1946,7 +2042,8 @@ function containsForbiddenIdentity(content: string): boolean {
 
 export function validateDarwinBundleIdentity(
   value: unknown,
-  identity: Pick<DesktopIdentity, "bundleId" | "productName">,
+  identity: Pick<DesktopIdentity, "bundleId" | "productName"> &
+    Partial<Pick<DesktopIdentity, "scheme">>,
 ): void {
   const metadata =
     typeof value === "object" && value !== null && !Array.isArray(value)
@@ -1972,11 +2069,34 @@ export function validateDarwinBundleIdentity(
     metadata.OctantHostLaunchPolicy !== "host-only-v1"
   )
     throw new Error("Packaged Stable is missing its host launch policy.");
+  // Without its URL type, macOS never sends the app its own Code links:
+  // `setAsDefaultProtocolClient` cannot register a scheme the bundle omits.
+  if (
+    identity.scheme !== undefined &&
+    !declaresUrlScheme(metadata.CFBundleURLTypes, identity.scheme)
+  )
+    throw new Error(`Packaged app bundle does not declare its ${identity.scheme}:// Code links.`);
+}
+
+function declaresUrlScheme(value: unknown, scheme: string): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some(
+      (entry: unknown) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        Array.isArray((entry as { readonly CFBundleURLSchemes?: unknown }).CFBundleURLSchemes) &&
+        (
+          entry as { readonly CFBundleURLSchemes: ReadonlyArray<unknown> }
+        ).CFBundleURLSchemes.includes(scheme),
+    )
+  );
 }
 
 export async function validateBundleIdentity(
   appPath: string,
-  identity: Pick<DesktopIdentity, "bundleId" | "productName">,
+  identity: Pick<DesktopIdentity, "bundleId" | "productName"> &
+    Partial<Pick<DesktopIdentity, "scheme">>,
 ): Promise<void> {
   const metadata: unknown = JSON.parse(
     execFileSync(
@@ -2072,7 +2192,7 @@ async function runCommandForOutput(argv: ReadonlyArray<string>): Promise<{
 }
 
 /** Keep Node consumers on physical files; no loose desktop module may be staged here. */
-export async function stageStableHostPayload(stageRoot: string, appPath: string): Promise<void> {
+export async function stageHostPayload(stageRoot: string, appPath: string): Promise<void> {
   const root = join(appPath, "Contents/Resources/app");
   await mkdir(join(root, "apps"), { recursive: true });
   for (const app of ["server", "web"])

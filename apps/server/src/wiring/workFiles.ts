@@ -397,6 +397,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   const previewRoutes = createPreviewRouteHandler(previewRouteDependencies);
   const previewHandoffBridgeRoutes = createPreviewHandoffBridgeRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
     resolve: async ({ windowId, target, kind, signal }) => {
       const authority = await resolvePreviewAuthority(previewRouteDependencies, windowId, target);
       if (authority.kind !== "ok") {

@@ -27,7 +27,10 @@ import { createSignInHostPorts } from "../hub/signInHostPorts";
 import { SignInService } from "../hub/signInService";
 import { SpokeSignInService } from "../hub/spokeSignInService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
-import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
+import {
+  makeProviderKeyReferenceReader,
+  makePushPlatformCredentialBrokerClient,
+} from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
@@ -113,6 +116,8 @@ import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListen
 import {
   boundHostRuntimeDiagnostics,
   createReleaseFeedVerifier,
+  decodeKeychainServiceFamily,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   type HostRuntimeDiagnostics,
 } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -996,6 +1001,14 @@ export function wireRemote(deps: RemoteDependencies) {
         ? undefined
         : { store: credentialResolver, readStored: (id) => credentialBroker.resolve(id) },
     journal: providerKeyChangeJournal,
+    ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? {}
+      : {
+          readKeyReference: makeProviderKeyReferenceReader({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+        }),
     reprobe: async (windowId, instance) => {
       await providerService.probe(windowId, instance.id, { fresh: true });
     },
@@ -1277,7 +1290,12 @@ export function wireRemote(deps: RemoteDependencies) {
               ? {}
               : { browserProfilesDirectory: process.env.OCTANT_BROWSER_PROFILES_DIRECTORY }),
             ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
-              ? { credentialStore: desktopCredentialStore() }
+              ? {
+                  credentialStore: desktopCredentialStore(
+                    decodeKeychainServiceFamily(process.env[KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]) ??
+                      "octant",
+                  ),
+                }
               : {}),
             listProjects: () =>
               persistence.readProjects().map((project) => ({

@@ -1243,7 +1243,11 @@ export function startOctantServer(
       windowAuthorityStore,
       options.allowedRendererHttpOrigin,
     );
-    const credentialRequests = new CredentialRequests();
+    const credentialRequests = new CredentialRequests(
+      commandBroker?.requestCardRead === undefined
+        ? {}
+        : { resolveLinked: commandBroker.requestCardRead },
+    );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
     const credentialRequestRoutes = createCredentialRequestRoutes(
       credentialRequests,

@@ -400,6 +400,57 @@ export type HubState = typeof HubState.Type;
 
 const decodeState = Schema.decodeUnknownSync(HubState);
 
+/**
+ * Drop a stored update feed whose release does not name its app.
+ *
+ * A feed saved before releases carried `product` no longer decodes, and the
+ * state is decoded as one document: without this, one old mirror would lose
+ * the whole hub link on load. No current install accepts such a feed, so
+ * there is nothing left to serve or verify in it.
+ */
+function withoutFeedsMissingTheirApp(raw: unknown): unknown {
+  if (!isObject(raw)) return raw;
+  const named = (feed: unknown): boolean =>
+    isObject(feed) && isObject(feed.release) && "product" in feed.release;
+  const hub = raw.hub;
+  const link = raw.link;
+  return {
+    ...raw,
+    ...(isObject(hub) && isObject(hub.provision) && Array.isArray(hub.provision.offers)
+      ? {
+          hub: {
+            ...hub,
+            provision: {
+              ...hub.provision,
+              offers: hub.provision.offers.map((offer: unknown) => {
+                if (!isObject(offer) || !("mirrorFeed" in offer) || named(offer.mirrorFeed)) {
+                  return offer;
+                }
+                const { mirrorFeed: _unnamed, ...kept } = offer;
+                return kept;
+              }),
+            },
+          },
+        }
+      : {}),
+    ...(isObject(link) &&
+    isObject(link.provision) &&
+    "verifiedFeed" in link.provision &&
+    !named(link.provision.verifiedFeed)
+      ? {
+          link: {
+            ...link,
+            provision: (({ verifiedFeed: _unnamed, ...kept }) => kept)(link.provision),
+          },
+        }
+      : {}),
+  };
+}
+
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface HubStatePort {
   readonly load: () => HubState;
   readonly save: (state: HubState) => void;
@@ -411,7 +462,7 @@ export function createHubStateStore(dataDirectory: string): HubStatePort {
   return {
     load: () => {
       try {
-        return decodeState(JSON.parse(readFileSync(path, "utf8")));
+        return decodeState(withoutFeedsMissingTheirApp(JSON.parse(readFileSync(path, "utf8"))));
       } catch {
         return {};
       }

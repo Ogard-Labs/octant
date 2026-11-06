@@ -600,7 +600,10 @@ export function SettingsView(props: SettingsViewProps) {
           ) : null}
           {props.hostBridge?.applicationIdentity !== undefined ? (
             <div className="sidebar__application-identity">
-              <ApplicationIdentity productName={props.hostBridge.applicationIdentity.productName} />
+              <ApplicationIdentity
+                productName={props.hostBridge.applicationIdentity.productName}
+                testData={props.hostBridge.applicationIdentity.data === "test-data"}
+              />
             </div>
           ) : null}
           <div className="settings-view__sidebar-content">
@@ -661,6 +664,7 @@ export function SettingsView(props: SettingsViewProps) {
                     </span>
                     <ApplicationIdentity
                       productName={props.hostBridge.applicationIdentity.productName}
+                      testData={props.hostBridge.applicationIdentity.data === "test-data"}
                     />
                   </>
                 ) : (
@@ -1257,6 +1261,15 @@ function ActiveSectionContent({
         />
       ) : null;
     case "remote-access": {
+      if (props.hostBridge?.managedInOctant === true)
+        return (
+          <section aria-label="Remote access" id="settings-remote-access">
+            <p className="settings-managed-in-octant">
+              Managed in Octant. Remote access, paired computers and hubs are set up in the Octant
+              app.
+            </p>
+          </section>
+        );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
       return administration !== undefined ? (
         <RemoteAccessSettingsSection
@@ -1979,7 +1992,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             onAutomaticChecksChange={(enabled) =>
               props.onSettingsChange({ automaticUpdateChecks: enabled })
             }
-            onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
+            updateChannel={props.settings.updateChannel}
+            onUpdateChannelChange={(updateChannel, releaseRing) =>
+              props.onSettingsChange({ updateChannel, releaseRing })
+            }
           />
         </div>
       </SettingsSection>

@@ -1,5 +1,6 @@
 import { createBrowserPresentationClient } from "@octant/client-runtime";
 import { NightlyBrowserPresentation } from "./nightlyBrowserPresentation";
+import { presentNightlyPagePopup } from "./nightlyPagePopups";
 import {
   app,
   autoUpdater as electronAutoUpdater,
@@ -8,14 +9,30 @@ import {
   dialog,
   ipcMain,
   session,
+  shell,
 } from "electron";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DesktopIdentity } from "@octant/host-runtime";
+import { clearSecretServiceTestData, type DesktopIdentity } from "@octant/host-runtime";
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
+import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
+import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
+import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
+import { installNightlyCodeApprovals } from "./nightlyCodeApprovals";
+import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import {
+  nightlyClientChannelClass,
+  nightlyClientChannelGaps,
+  nightlyClientRefusal,
+} from "./nightlyClientChannels";
+import { installNightlyClientSurfaces } from "./nightlyClientSurfaces";
+import type { NightlyLaunchLinks } from "./nightlyLaunchLinks";
 import {
   createMainBrowserWindowOptions,
   createTrustedRendererRequestRegistry,
@@ -33,21 +50,46 @@ import {
   resolveWhatsNewStatePath,
 } from "./bundledWhatsNew";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
+import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
-import { DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
+import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
+import {
+  createNightlyDataControl,
+  createRelaunchIntent,
+  nightlyTestDataSupported,
+} from "./nightlyTestData";
 
 /** Ordinary client entry: this module never imports the host-owning main. */
 export async function runNightlyClient(
   identity: DesktopIdentity,
   native: unknown,
+  launchLinks: Pick<NightlyLaunchLinks, "handOff">,
 ): Promise<{ readonly kind: "started" } | { readonly kind: "refused"; readonly message: string }> {
+  // The entry already refused this before any status check; repeated here so
+  // no later path can register a window from unsandboxed renderers.
+  if (
+    process.platform === "linux" &&
+    linuxRendererSandboxDisabled({
+      hasSwitch: (name) => app.commandLine.hasSwitch(name),
+      argv: process.argv,
+      env: process.env,
+    })
+  )
+    return {
+      kind: "refused",
+      message:
+        "Octant Nightly connects to Octant only while Chromium's sandbox protects its windows. Start it without --no-sandbox or ELECTRON_DISABLE_SANDBOX.",
+    };
   const protocol = desktopWindowProtocol(native);
   if (protocol === undefined)
     return {
       kind: "refused",
       message: "Needs a newer Octant. Native window registration is unavailable.",
     };
+  const linkArguments = (args: ReadonlyArray<string>) =>
+    args.filter((argument) => argument.startsWith(`${identity.scheme}://`));
   await app.whenReady();
+  app.setAsDefaultProtocolClient(identity.scheme);
   const windows = new Map<number, BrowserWindow>();
   const trusted = createTrustedRendererRequestRegistry();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -81,13 +123,25 @@ export async function runNightlyClient(
     return window;
   };
   const supported = new Set<string>();
-  const register = (channel: string, handler: (event: Electron.IpcMainInvokeEvent) => unknown) => {
+  const register = (
+    channel: string,
+    handler: (event: Electron.IpcMainInvokeEvent, ...values: unknown[]) => unknown,
+  ) => {
     supported.add(channel);
-    ipcMain.handle(channel, (event) => {
+    ipcMain.handle(channel, (event, ...values: unknown[]) => {
       owns(event);
-      return handler(event);
+      return handler(event, ...values);
     });
   };
+  const surfaces = installNightlyClientSurfaces({
+    identity,
+    platform: process.platform,
+    register,
+    owns,
+    quit: () => app.quit(),
+  });
+  // The inbox holds each link until the first window has loaded.
+  launchLinks.handOff(surfaces.acceptCodeLink);
   register(DESKTOP_IPC_CHANNELS.minimize, (event) => owns(event).minimize());
   register(DESKTOP_IPC_CHANNELS.maximizeOrRestore, (event) => {
     const window = owns(event);
@@ -96,7 +150,7 @@ export async function runNightlyClient(
   });
   register(DESKTOP_IPC_CHANNELS.close, (event) => owns(event).close());
   register(DESKTOP_IPC_CHANNELS.hostCapabilities, () => ({
-    sidebarVibrancySupported: false,
+    sidebarVibrancySupported: process.platform === "darwin",
     liveBrowserSupported: true,
     embeddedBrowserSupported: true,
     liveSimulatorFrameSupported: false,
@@ -124,6 +178,46 @@ export async function runNightlyClient(
   }
   const capabilities = new Map<number, string>();
   const bootstraps = new Map<number, NightlyWindowBootstrap>();
+  // Brokered pickers, handoffs, credentials and approvals read their host
+  // headers from here, for the one window they act for.
+  const nativeMain = createNativeMainAuthority();
+  installNightlyBrokeredFlows({
+    register,
+    owns,
+    bootstrap: (id) => bootstraps.get(id),
+    nativeMain,
+    dialog: {
+      showOpenDialog: (owner, options) => dialog.showOpenDialog(owner, options),
+      showSaveDialog: (owner, options) => dialog.showSaveDialog(owner, options),
+    },
+    downloadsDirectory: () => app.getPath("downloads"),
+    fetch: globalThis.fetch,
+    shell,
+    spawn: (executable, arguments_, options) => spawn(executable, arguments_, options),
+    spawnQuickLook: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
+    exists: existsSync,
+    homeDirectory: homedir(),
+    platform: process.platform,
+    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
+  });
+  installNightlyProviderCredentials({
+    register,
+    bootstrap: (id) => bootstraps.get(id),
+    nativeMain,
+    fetch: globalThis.fetch,
+  });
+  const approvals = installNightlyCodeApprovals({
+    register,
+    handleViewDecision: (channel, handler) => ipcMain.handle(channel, handler),
+    owns,
+    bootstrap: (id) => bootstraps.get(id),
+    nativeMain,
+    views: createNativeCodeApprovalViewHost(
+      resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
+      (id) => approvals.viewDestroyed(id),
+    ),
+    fetch: globalThis.fetch,
+  });
   let updates: Awaited<ReturnType<typeof createNightlyAppUpdates>> | undefined;
   const appUpdates = () => {
     if (updates === undefined) throw new Error("Nightly updates are not ready.");
@@ -189,15 +283,50 @@ export async function runNightlyClient(
   });
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNew, () => loadBundledWhatsNew(notesOptions()));
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNewAck, () => acknowledgeWhatsNew(notesOptions()));
-  // The shared renderer's other native contributions are still awaiting their
-  // typed owning broker. Refusal is explicit; no arbitrary channel is proxied.
+  // The client's quit always completes once asked, so the relaunch is armed
+  // only when its cleanup finishes and the quit is accepted.
+  const relaunch = createRelaunchIntent({
+    quit: () => app.quit(),
+    relaunch: () => app.relaunch(),
+  });
+  const offersTestData = nightlyTestDataSupported(identity, process.platform);
+  const dataChannels = [
+    DESKTOP_IPC_CHANNELS.nightlyDataState,
+    DESKTOP_IPC_CHANNELS.nightlyDataChoose,
+    DESKTOP_IPC_CHANNELS.nightlyDataRemove,
+    DESKTOP_IPC_CHANNELS.nightlyDataRelaunch,
+  ];
+  if (offersTestData) {
+    const data = createNightlyDataControl({
+      identity,
+      role: { kind: "octant-client" },
+      platform: process.platform,
+      appDataDirectory: app.getPath("appData"),
+      windowStorageDirectory: app.getPath("userData"),
+      env: process.env,
+      trashItem: (path) => shell.trashItem(path),
+      clearTestDataSecrets: () => clearSecretServiceTestData(),
+      requestRelaunch: () => relaunch.request(),
+    });
+    register(DESKTOP_IPC_CHANNELS.nightlyDataState, () => data.state());
+    register(DESKTOP_IPC_CHANNELS.nightlyDataRemove, () => data.remove());
+    register(DESKTOP_IPC_CHANNELS.nightlyDataRelaunch, () => data.relaunch());
+    register(DESKTOP_IPC_CHANNELS.nightlyDataChoose, (_event, value) => data.choose(value));
+  }
+  // Every other channel refuses by its class in the closed table: Octant-only
+  // administration says where it lives, and a feature awaiting its broker says
+  // it is not here yet. No arbitrary channel is proxied.
+  const gaps = nightlyClientChannelGaps(supported, new Set(offersTestData ? [] : dataChannels));
+  if (gaps.unmarked.length > 0)
+    throw new Error("Octant Nightly answers a channel its table does not mark local.");
+  if (gaps.unanswered.length > 0)
+    throw new Error("Octant Nightly leaves a channel its table marks local unanswered.");
   for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {
     if (supported.has(channel)) continue;
+    const message = nightlyClientRefusal(nightlyClientChannelClass(channel));
     ipcMain.handle(channel, (event) => {
       owns(event);
-      throw new Error(
-        "Needs a newer Octant. This Nightly native feature is not available in this build.",
-      );
+      throw new Error(message);
     });
   }
   let acceptedQuit = false;
@@ -234,8 +363,17 @@ export async function runNightlyClient(
           "Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.",
         );
       acceptedQuit = true;
+      relaunch.quitAccepted();
       app.quit();
     })();
+  });
+  app.on("second-instance", (_event, commandLine: ReadonlyArray<string>) => {
+    for (const url of linkArguments(commandLine.slice(1))) surfaces.acceptCodeLink(url);
+    const window = [...windows.values()].find((candidate) => !candidate.isDestroyed());
+    if (window === undefined) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
   });
   app.on("window-all-closed", () => {
     if (!recovery.recovering() && !updating) app.quit();
@@ -261,7 +399,9 @@ export async function runNightlyClient(
               createMainBrowserWindowOptions({
                 bounds,
                 localUpdatePreferences: true,
+                nightlyClient: true,
                 applicationFlavor: identity.flavor,
+                ...(offersTestData ? { applicationData: "octant" as const } : {}),
                 productName: identity.productName,
                 capability: bootstrap.capability,
                 windowId: bootstrap.windowId,
@@ -269,10 +409,11 @@ export async function runNightlyClient(
                   dirname(fileURLToPath(import.meta.url)),
                   DESKTOP_PRELOAD_FILENAME,
                 ),
-                browserWindow: { backgroundColor: "#101013", frame: true },
+                browserWindow: surfaces.presentation().browserWindow,
               }),
             );
             const id = window.webContents.id;
+            surfaces.attach(window, bootstrap.windowId);
             installNativeEditingMenus(window);
             const rememberBounds = () => {
               if (!window.isDestroyed()) bounds = window.getNormalBounds();
@@ -289,6 +430,9 @@ export async function runNightlyClient(
               current: () => windows.get(id) === window && !window.isDestroyed(),
               visible: () => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
               focused: () => !window.isDestroyed() && window.isFocused(),
+              // Chromium turns this on when VoiceOver or another assistive
+              // technology starts reading the app.
+              assistiveTechnology: () => app.accessibilitySupportEnabled,
               popupMenu: (request, signal) => {
                 if (window.isDestroyed()) return Promise.resolve({ kind: "refused" });
                 const point = screen.getCursorScreenPoint();
@@ -303,6 +447,8 @@ export async function runNightlyClient(
                   signal,
                 );
               },
+              pagePopup: (popup, placement, signal) =>
+                presentNightlyPagePopup(window, popup, placement, signal),
               execute: browserClient.execute,
             });
             presentations.set(id, presentation);
@@ -323,6 +469,7 @@ export async function runNightlyClient(
             windows.set(id, window);
             capabilities.set(id, bootstrap.capability);
             bootstraps.set(id, bootstrap);
+            nativeMain.remember(id, bootstrap);
             trusted.set(id, {
               serverOrigin: bootstrap.hostOrigin,
               rendererIdentity: bootstrap.rendererIdentity,
@@ -348,8 +495,12 @@ export async function runNightlyClient(
                   closingPresentations.delete(closing);
                 },
               );
+              // While the window's token is still held, so a pending
+              // challenge is cancelled on the host rather than left to expire.
+              approvals.closeWindow(String(bootstrap.windowId));
               capabilities.delete(id);
               bootstraps.delete(id);
+              nativeMain.forget(id);
               trusted.remove(id);
             });
             return {

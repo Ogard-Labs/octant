@@ -5,6 +5,12 @@ export interface ApplicationMenuOptions {
   readonly onOpenSettings: () => void;
   /** `viaShortcut` is true when the ⌘Q accelerator, not a pointer click, chose Quit. */
   readonly onQuit: (request: { readonly viaShortcut: boolean }) => void;
+  /**
+   * Whether View keeps Reload and Toggle Developer Tools. A packaged Octant
+   * Nightly client passes false: its window holds a host lease, and those
+   * items would let anyone at the keyboard reload it away or script it.
+   */
+  readonly developerTools: boolean;
 }
 
 /** Standard macOS application menu plus Octant's shared Settings surface. */
@@ -42,7 +48,18 @@ export function buildApplicationMenuTemplate(
     },
     { role: "fileMenu" },
     { role: "editMenu" },
-    { role: "viewMenu" },
+    options.developerTools
+      ? { role: "viewMenu" }
+      : {
+          label: "View",
+          submenu: [
+            { role: "resetZoom" },
+            { role: "zoomIn" },
+            { role: "zoomOut" },
+            { type: "separator" },
+            { role: "togglefullscreen" },
+          ],
+        },
     { role: "windowMenu" },
   ];
 }

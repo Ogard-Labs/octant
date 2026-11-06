@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AppReleaseRing } from "./appUpdates";
+
 import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
 import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
@@ -26,6 +27,9 @@ import { ImageGenerationSettings } from "./imageGeneration";
 import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
+
+export const AppUpdateChannel = Schema.Literal("stable", "preview", "nightly");
+export type AppUpdateChannel = typeof AppUpdateChannel.Type;
 
 /** Native menu contributions carry presentation and opaque action IDs only. */
 export type NativeMenuEntry =
@@ -679,6 +683,13 @@ export const ShellSettings = Schema.Struct({
    * were built for".
    */
   releaseRing: Schema.optional(AppReleaseRing),
+  /**
+   * The update channel chosen in Settings. Two choices follow the same ring
+   * (Preview and Nightly both sit on `candidate`), so the ring alone cannot
+   * say which one was picked. Absent means "derive it from the ring":
+   * `stable` is Stable and `candidate` is Preview.
+   */
+  updateChannel: Schema.optional(AppUpdateChannel),
   /** Enabled Open in applications, in the order shown by the native shell. */
   openInApplications: Schema.optionalWith(OpenInApplicationOrder, {
     default: () => [...DEFAULT_OPEN_IN_APPLICATIONS],

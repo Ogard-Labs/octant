@@ -1,9 +1,16 @@
-import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
+import type { AppUpdateChannel } from "@octant/contracts/shell";
+import type {
+  AppReleaseRing,
+  AppUpdateState,
+  NightlyDataChoice,
+  NightlyDataState,
+  NightlyInstallState,
+} from "@octant/contracts/app-updates";
 import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -20,7 +27,13 @@ export interface AppUpdateSettingsProps {
   readonly hostBridge?: OctantHostBridge;
   readonly automaticChecks: boolean;
   readonly onAutomaticChecksChange: (enabled: boolean) => void;
-  readonly onReleaseRingChange: (ring: AppReleaseRing) => void;
+  /** The channel chosen in Settings, when one has been stored. */
+  readonly updateChannel?: AppUpdateChannel | undefined;
+  /**
+   * Stores the channel with the ring it follows. Preview and Nightly both
+   * follow `candidate`; Octant itself never follows `preview`.
+   */
+  readonly onUpdateChannelChange: (channel: AppUpdateChannel, ring: AppReleaseRing) => void;
   /** A deep link landed on the Updates group. */
   readonly focused?: boolean;
 }
@@ -37,13 +50,17 @@ export interface AppUpdateSettingsProps {
 export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const bridge = props.hostBridge;
   const localPreferences = bridge?.appUpdatePreferenceScope === "local";
-  const productName = localPreferences ? "Octant Nightly" : "Octant";
+  // Nightly's own test host keeps its preferences on that host, but it is
+  // still Nightly: it follows Nightly's ring and never offers to install itself.
+  const nightly = localPreferences || bridge?.applicationIdentity?.flavor === "nightly";
+  const productName = nightly ? "Octant Nightly" : "Octant";
   const [state, setState] = useState<AppUpdateState>();
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState<Extract<AppUpdateInstallOutcome, { kind: "wait" }>>();
   const [failure, setFailure] = useState<string>();
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [whatsNew, setWhatsNew] = useState<BundledWhatsNew>();
+  const [chosenChannel, setChosenChannel] = useState<AppUpdateChannel>();
 
   useEffect(() => {
     if (bridge?.subscribeAppUpdateState === undefined) return;
@@ -92,8 +109,15 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   }
 
   const status = state?.status ?? "idle";
-  const allowedRings =
-    state?.allowedRings ?? (localPreferences ? ["preview", "candidate"] : undefined);
+  // Nightly follows its one ring and Octant chooses between Stable and
+  // Preview. The switch waits for the host's first state: before it, a
+  // packaged Octant would offer Nightly's ring and a click would store a ring
+  // its host refuses on every launch. Only a development build, whose state
+  // names no rings, offers all three.
+  const allowedRings = state?.allowedRings;
+  const offersRingChoice =
+    state !== undefined && !nightly && (allowedRings === undefined || allowedRings.length > 1);
+  const channel = effectiveChannel(chosenChannel ?? props.updateChannel, state?.ring);
   const offeredNotes =
     status === "available" && state?.available?.notes !== undefined && state.available.notes !== ""
       ? state.available.notes
@@ -199,43 +223,53 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         </p>
       )}
 
-      <SettingRow
-        description={
-          localPreferences
-            ? "Nightly follows scheduled builds; Preview is a one-off build. These choices only affect Octant Nightly."
-            : allowedRings?.length === 1
-              ? "Octant follows stable releases. Octant Nightly updates separately."
-              : "Stable is the released build; Preview is a one-off build run by hand; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
-        }
-        label="Release ring"
-        scope="app"
-        settingId="app-update-ring"
-      >
-        <OctantToggleGroup<AppReleaseRing>
-          aria-label="Release ring"
-          onValueChange={(value) => {
-            const selected = value[0];
-            if (selected === undefined) return;
-            if (!localPreferences) props.onReleaseRingChange(selected);
-            if (setRing !== undefined) void run(() => setRing(selected));
-          }}
-          value={[state?.ring ?? "stable"]}
+      {offersRingChoice ? (
+        <SettingRow
+          description={
+            allowedRings === undefined || allowedRings.includes("candidate")
+              ? "Stable is the released build. Preview tests the next release. Nightly adds Octant Nightly, a separate app with what is being built now. Switching takes effect at the next check, and going back to Stable waits for a stable release newer than this one."
+              : "Stable is the released build. Switching takes effect at the next check."
+          }
+          label="Update channel"
+          scope="app"
+          settingId="app-update-ring"
         >
-          {allowedRings?.includes("stable") !== false ? (
-            <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
-          ) : null}
-          {/* The labels are not the ring ids: the scheduled `preview` ring reads
-              as Nightly and the hand-run `candidate` ring as Preview. The ids
-              stay, because they name the update feed paths and version tags
-              that installed builds already follow. */}
-          {allowedRings?.includes("candidate") !== false ? (
-            <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
-          ) : null}
-          {allowedRings?.includes("preview") !== false ? (
-            <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
-          ) : null}
-        </OctantToggleGroup>
-      </SettingRow>
+          <OctantToggleGroup<AppUpdateChannel>
+            aria-label="Update channel"
+            onValueChange={(value) => {
+              const selected = value[0];
+              if (selected === undefined) return;
+              // Octant follows `candidate` for both Preview and Nightly; the
+              // preview ring is read only by the Octant Nightly installer.
+              const ring: AppReleaseRing = selected === "stable" ? "stable" : "candidate";
+              setChosenChannel(selected);
+              props.onUpdateChannelChange(selected, ring);
+              if (setRing !== undefined) void run(() => setRing(ring));
+            }}
+            value={[channel]}
+          >
+            {allowedRings?.includes("stable") !== false ? (
+              <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
+            ) : null}
+            {allowedRings?.includes("candidate") !== false ? (
+              <OctantToggleGroupItem value="preview">Preview</OctantToggleGroupItem>
+            ) : null}
+            {allowedRings?.includes("candidate") !== false ? (
+              <OctantToggleGroupItem value="nightly">Nightly</OctantToggleGroupItem>
+            ) : null}
+          </OctantToggleGroup>
+        </SettingRow>
+      ) : null}
+
+      {nightly ? (
+        <p className="app-update__offer-notes">
+          Octant Nightly gets a new build of what is being built every night.
+        </p>
+      ) : (
+        <NightlyInstallRow bridge={bridge} channel={channel} ring={state?.ring} />
+      )}
+
+      <NightlyDataRow bridge={bridge} />
 
       <SettingRow
         description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}
@@ -291,9 +325,311 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   );
 }
 
+/**
+ * The channel the switch shows. A stored channel counts only while it agrees
+ * with the ring the host follows (a hub's offer can move the ring without
+ * naming a channel); otherwise it is derived from the ring.
+ */
+function effectiveChannel(
+  stored: AppUpdateChannel | undefined,
+  ring: AppReleaseRing | undefined,
+): AppUpdateChannel {
+  if (stored === "stable" && ring !== "candidate") return "stable";
+  if ((stored === "preview" || stored === "nightly") && ring === "candidate") return stored;
+  return ring === "candidate" ? "preview" : "stable";
+}
+
 function describeWaiting(work: Extract<AppUpdateInstallOutcome, { kind: "wait" }>): string {
   if (work.activeAgentCount > 0) {
     return `Octant will not relaunch while ${work.activeAgentCount} ${work.activeAgentCount === 1 ? "agent is" : "agents are"} still working. Let the work finish or checkpoint it, then relaunch.`;
   }
   return "Octant could not check what is running, so it did not relaunch. Try again in a moment.";
+}
+
+const NIGHTLY_IN_FLIGHT_READ_MS = 2_000;
+const NIGHTLY_IN_FLIGHT_READS = 600;
+
+/**
+ * The Octant Nightly row below the ring switch.
+ *
+ * It shows on the Nightly channel, and on any channel while Octant Nightly is
+ * installed; the host still refuses an install unless Octant follows
+ * `candidate`. Octant Nightly itself has no such row. Read again whenever the ring changes, because the
+ * answer depends on it.
+ */
+function NightlyInstallRow(props: {
+  readonly bridge: OctantHostBridge | undefined;
+  readonly channel: AppUpdateChannel;
+  readonly ring: AppReleaseRing | undefined;
+}) {
+  const read = props.bridge?.readNightlyInstall;
+  const installNightly = props.bridge?.installNightly;
+  const openNightly = props.bridge?.openNightly;
+  const removeNightly = props.bridge?.removeNightly;
+  const [nightly, setNightly] = useState<NightlyInstallState>();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  useEffect(() => {
+    if (read === undefined || props.ring === undefined) return;
+    let active = true;
+    void read().then(
+      (next) => {
+        if (active) setNightly(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [read, props.ring]);
+
+  // A row mounted while main is installing or removing (Settings reopened
+  // mid-install) has no pending request of its own to settle it, so it reads
+  // again until main finishes. Bounded by the download deadline main applies,
+  // plus room for extraction and the signature check.
+  const inFlightReads = useRef(0);
+  const inFlight = nightly?.status === "installing" || nightly?.status === "removing";
+  useEffect(() => {
+    if (!inFlight) {
+      inFlightReads.current = 0;
+      return;
+    }
+    if (busy || read === undefined || inFlightReads.current >= NIGHTLY_IN_FLIGHT_READS) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      inFlightReads.current += 1;
+      void read().then(
+        (next) => {
+          if (active) setNightly(next);
+        },
+        () => undefined,
+      );
+    }, NIGHTLY_IN_FLIGHT_READ_MS);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [nightly, inFlight, busy, read]);
+
+  if (nightly === undefined || nightly.status === "unavailable") return null;
+  // Visible on the Nightly channel, or whenever Octant Nightly is on disk so
+  // it can still be opened or removed.
+  if (props.channel !== "nightly" && nightly.status === "not-installed") return null;
+
+  async function act(action: (() => Promise<NightlyInstallState>) | undefined): Promise<void> {
+    if (action === undefined) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      setNightly(await action());
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Octant could not reach Octant Nightly.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const installed = nightly.status === "installed" || nightly.status === "removing";
+  const working = busy || nightly.status === "installing" || nightly.status === "removing";
+  const alert = failure ?? nightly.message;
+  return (
+    <>
+      <SettingRow
+        description={
+          installed
+            ? "Installed beside Octant and sharing its data. Removing it moves the app to the Trash and leaves that data alone."
+            : "A second app with builds of what has been merged, beside Octant and sharing its data. It is checked against Octant's own signature before it is placed."
+        }
+        label="Octant Nightly"
+        scope="app"
+        settingId="app-update-nightly"
+      >
+        <div className="app-update__actions">
+          {installed ? (
+            <>
+              <OctantButton
+                disabled={working}
+                onClick={() => void act(openNightly)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Open Octant Nightly
+              </OctantButton>
+              <OctantButton
+                disabled={working}
+                onClick={() => void act(removeNightly)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {nightly.status === "removing" ? "Removing…" : "Remove Octant Nightly"}
+              </OctantButton>
+            </>
+          ) : (
+            <OctantButton
+              disabled={working}
+              onClick={() => void act(installNightly)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              {working ? "Installing…" : "Install Octant Nightly"}
+            </OctantButton>
+          )}
+        </div>
+      </SettingRow>
+      {alert === undefined ? null : <OctantAlert tone="danger">{alert}</OctantAlert>}
+    </>
+  );
+}
+
+const NIGHTLY_DATA_LABELS: Readonly<Record<NightlyDataChoice, string>> = {
+  octant: "Octant's data",
+  "test-data": "Separate test data",
+};
+
+const NIGHTLY_DATA_REMOVAL_MESSAGES: Readonly<
+  Record<NonNullable<NightlyDataState["removal"]>, string | undefined>
+> = {
+  removed: undefined,
+  absent: undefined,
+  "test-host-running":
+    "Octant Nightly is running on its test data. Switch to Octant's data and relaunch before removing it.",
+  "unsafe-folder": "Octant Nightly did not remove the test data: its folder is not one it made.",
+  "not-nightly": "Only Octant Nightly removes its test data.",
+  failed: "Octant Nightly could not move the test data to the Trash.",
+};
+
+/**
+ * Nightly's Data row: Octant's data through Octant's host (the default), or a
+ * host of Nightly's own on separate test data for development and testing.
+ * A change applies on the next launch, so the row says so and offers the
+ * relaunch. The test data can be moved to the Trash while Nightly is not
+ * running on it.
+ */
+function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }) {
+  const read = props.bridge?.readNightlyData;
+  const choose = props.bridge?.chooseNightlyData;
+  const remove = props.bridge?.removeNightlyTestData;
+  const relaunch = props.bridge?.relaunchNightly;
+  const [data, setData] = useState<NightlyDataState>();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  useEffect(() => {
+    if (read === undefined) return;
+    let active = true;
+    void read().then(
+      (next) => {
+        if (active) setData(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [read]);
+
+  if (read === undefined || choose === undefined || data === undefined) return null;
+
+  async function act(action: (() => Promise<NightlyDataState>) | undefined): Promise<void> {
+    if (action === undefined) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      setData(await action());
+    } catch (error) {
+      setFailure(
+        error instanceof Error ? error.message : "Octant Nightly could not change its data.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pending = data.chosen !== data.running;
+  const removalMessage =
+    data.removal === undefined ? undefined : NIGHTLY_DATA_REMOVAL_MESSAGES[data.removal];
+  return (
+    <>
+      <SettingRow
+        description="Octant's data uses Octant's host and your real work. Separate test data runs Nightly's own host on data that is never Octant's, for development and testing; you sign in again there. A change applies when Octant Nightly relaunches."
+        label="Data"
+        scope="app"
+        settingId="app-nightly-data"
+      >
+        <OctantToggleGroup<NightlyDataChoice>
+          aria-label="Data"
+          disabled={busy}
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected === undefined || selected === data.chosen) return;
+            void act(() => choose(selected));
+          }}
+          value={[data.chosen]}
+        >
+          <OctantToggleGroupItem value="octant">{NIGHTLY_DATA_LABELS.octant}</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="test-data">
+            {NIGHTLY_DATA_LABELS["test-data"]}
+          </OctantToggleGroupItem>
+        </OctantToggleGroup>
+      </SettingRow>
+      {pending ? (
+        <OctantAlert tone="neutral">
+          <span>
+            Octant Nightly uses {NIGHTLY_DATA_LABELS[data.chosen].toLowerCase()} after it
+            relaunches.
+          </span>{" "}
+          <OctantButton
+            disabled={busy || relaunch === undefined}
+            onClick={() => {
+              if (relaunch === undefined) return;
+              setBusy(true);
+              void relaunch().then(
+                () => setBusy(false),
+                (error: unknown) => {
+                  setBusy(false);
+                  setFailure(
+                    error instanceof Error ? error.message : "Octant Nightly could not relaunch.",
+                  );
+                },
+              );
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Relaunch Octant Nightly
+          </OctantButton>
+        </OctantAlert>
+      ) : null}
+      {data.testDataPresent ? (
+        <SettingRow
+          description={
+            data.running === "test-data"
+              ? "Octant Nightly is running on its test data. Switch to Octant's data and relaunch before removing it."
+              : "Moves Octant Nightly's test data to the Trash. Octant's data is not touched."
+          }
+          label="Test data"
+          scope="app"
+          settingId="app-nightly-test-data"
+        >
+          <OctantButton
+            disabled={busy || data.running === "test-data" || remove === undefined}
+            onClick={() => void act(remove)}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Remove test data
+          </OctantButton>
+        </SettingRow>
+      ) : null}
+      {failure === undefined && removalMessage === undefined ? null : (
+        <OctantAlert tone="danger">{failure ?? removalMessage}</OctantAlert>
+      )}
+    </>
+  );
 }

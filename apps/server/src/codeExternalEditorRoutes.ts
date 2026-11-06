@@ -1,5 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import type { CodeCheckoutIdentity, CodeFileReference, CodeThread } from "@octant/contracts";
+import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
+import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -50,6 +51,9 @@ export function isCodeExternalEditorTargetCurrent(input: {
 
 export function createCodeExternalEditorRouteHandler(options: {
   readonly desktopBridgeSecret: string | undefined;
+  /** Admits a native window's main for its own window; absent, only Stable's main. */
+  readonly windowAuthorityStore?: WindowAuthorityStore;
+  readonly now?: () => number;
   readonly resolve: (input: TargetRequest) => Promise<
     | {
         readonly file: string;
@@ -61,11 +65,18 @@ export function createCodeExternalEditorRouteHandler(options: {
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (url.pathname !== "/api/desktop/code-external-editor-target") return undefined;
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      ...(options.windowAuthorityStore === undefined
+        ? {}
+        : { windowAuthorityStore: options.windowAuthorityStore }),
+      now: (options.now ?? Date.now)(),
+    });
     if (
       options.desktopBridgeSecret === undefined ||
       url.hostname !== "127.0.0.1" ||
-      request.headers.has("origin") ||
-      !equal(options.desktopBridgeSecret, request.headers.get("x-octant-desktop-secret") ?? "")
+      admission.status !== "admitted"
     )
       return failure("unauthorized", 401);
     if (request.method !== "POST" || url.search !== "") return failure("invalid", 400);
@@ -84,6 +95,7 @@ export function createCodeExternalEditorRouteHandler(options: {
     for (const key of ["windowId", "threadId", "checkoutId", "fileId"] as const) {
       if (typeof body[key] !== "string" || !UUID.test(body[key])) return failure("invalid", 400);
     }
+    if (!admitsWindow(admission, body.windowId)) return failure("unauthorized", 401);
     if (!positive(body.line) || !positive(body.column)) return failure("invalid", 400);
 
     let target:
@@ -112,6 +124,9 @@ export function createCodeExternalEditorRouteHandler(options: {
 
 export function createCodeCheckoutOpenRouteHandler(options: {
   readonly desktopBridgeSecret: string | undefined;
+  /** Admits a native window's main for its own window; absent, only Stable's main. */
+  readonly windowAuthorityStore?: WindowAuthorityStore;
+  readonly now?: () => number;
   readonly resolve: (
     input: CheckoutTargetRequest,
   ) => Promise<{ readonly checkoutRoot: string } | undefined>;
@@ -119,11 +134,18 @@ export function createCodeCheckoutOpenRouteHandler(options: {
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (url.pathname !== "/api/desktop/code-checkout-open-target") return undefined;
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      ...(options.windowAuthorityStore === undefined
+        ? {}
+        : { windowAuthorityStore: options.windowAuthorityStore }),
+      now: (options.now ?? Date.now)(),
+    });
     if (
       options.desktopBridgeSecret === undefined ||
       url.hostname !== "127.0.0.1" ||
-      request.headers.has("origin") ||
-      !equal(options.desktopBridgeSecret, request.headers.get("x-octant-desktop-secret") ?? "")
+      admission.status !== "admitted"
     ) {
       return failure("unauthorized", 401);
     }
@@ -138,6 +160,7 @@ export function createCodeCheckoutOpenRouteHandler(options: {
     for (const key of ["windowId", "threadId"] as const) {
       if (typeof body[key] !== "string" || !UUID.test(body[key])) return failure("invalid", 400);
     }
+    if (!admitsWindow(admission, body.windowId)) return failure("unauthorized", 401);
     try {
       const target = await options.resolve({
         windowId: body.windowId as string,
@@ -160,11 +183,6 @@ function exact(value: Record<string, unknown>, keys: readonly string[]): boolean
 }
 function positive(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-function equal(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 function failure(category: string, status: number): Response {
   return Response.json(

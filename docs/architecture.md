@@ -271,8 +271,9 @@ entries are excluded.
 ## Process topology
 
 On macOS, both trusted desktop executables use sealed ASAR entries and fixed
-launch roles. Stable's separately identified, same-version bundled runtime runs
-its host, managed tools, scoped terminal CLI and executable extensions as Node. The worker runtime is
+launch roles. Each app's separately identified, same-version bundled runtime runs
+its host, managed tools and executable extensions as Node (Stable's also runs its
+scoped terminal CLI; Nightly's host is only its test-data host). The worker runtime is
 not a trusted desktop peer, and Node consumers keep physical server files and
 stdin supervision. The runtime has independent Framework/fuse bytes; no arbitrary
 script runs under the trusted desktop executable's identity. See the owning
@@ -302,6 +303,17 @@ authority; it never changes Stable's channel or stops Stable's host. See
 Lease loss destroys the old Nightly renderer before a bounded fresh native
 registration retry; only an already retained current client receives managed
 restart grace. See [reconnect rules](design/nightly-app.md#reconnecting-after-host-loss).
+Packaged Linux has no signature or audit token, so the same status and window
+protocols run over a `0600` `SOCK_SEQPACKET` path socket in the private
+per-user runtime folder. Each side admits the other only for the same user, a
+pidfd-held process incarnation with the same mount, user and PID namespaces
+and root, and a kernel credential on every message; pidfd exit or EOF revokes
+leases. Executable paths and `$APPIMAGE` grant nothing, and a Nightly whose
+renderers run unsandboxed registers no window. A closed Linux Octant starts
+only from the launcher record its last packaged launch wrote, by descriptor,
+with the host-only role and a minimal environment. Same-user unconfined code
+can pass this check, an accepted limit. See
+[Linux client trust](design/nightly-app.md#linux-client-trust).
 Full IME reconversion, accessibility, native popups and full lifecycle
 acceptance remain unfinished. See
 [native client window leases](design/nightly-app.md#native-client-window-leases) and
@@ -9796,6 +9808,30 @@ mechanisms are:
   the person proves presence, or for a short administration window after one
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
   Paired remote clients keep their own device-session path, unchanged.
+  **A native Nightly main is admitted per window.** Octant Nightly never holds
+  the bridge secret. Its window registration adds a main-only token, distinct
+  from the window capability and renderer identity, that Stable's main hands
+  only to the registered Nightly main and to the host. With that window's
+  capability and token, the Nightly main may call a closed list of brokered
+  routes in place of the secret, for that window alone: Project, plugin, skill
+  and runtime-binary picker receipts, the Code external editor and checkout
+  open targets, preview handoff, support bundle save, Code operation approval
+  prepare, confirm and cancel, provider key status, set and clear, and the
+  API key pool's list, add, rename, replace, remove, set active and move. The
+  host keeps the list in one place and advertises its features in the window
+  bootstrap. The token is valid only while that window's native lease lives:
+  expiry, revocation and lease loss end it. A request with a renderer origin,
+  a forwarded remote principal, an ordinary local window's capability, or
+  another window's capability or window ID is refused. Administrative routes
+  (hub, private listener, remote devices and pairing, launch sessions, owner
+  unlock, host identity, window registration, provider sign-in and provider
+  removal) stay secret-only. Ordinary renderer requests have the token header
+  stripped, and the Nightly main keeps the token in memory only
+  ([Octant Nightly](design/nightly-app.md)). On Linux the window registration
+  that carries the token is admitted by kernel peer checks on a private path
+  socket instead of code signatures, and any same-user unconfined process can
+  pass them, the same reach it already has to the bridge secret
+  ([Linux client trust](design/nightly-app.md#linux-client-trust)).
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority
@@ -12026,7 +12062,11 @@ access` agree); a thread's own change is journaled as
     `secret-tool` on standard input. It is never in a process argument, the
     environment, the journal, logs, diagnostics, a provider child, or a
     response; the routes answer only `stored`, `missing`, `removed`, or a
-    typed refusal.
+    typed refusal. They refuse to set or clear a key that points into a
+    linked secret store; that pointer changes only through the secret-store
+    routes. Key-pool routes under `keys/` (list, add, rename, replace,
+    remove, set active, move) serve Octant Nightly's Settings the same way
+    and answer only labels; the command line does not use them yet.
   - **Not the browser.** The loopback browser client cannot save a key, even
     on the host itself. The host cannot tell who is behind a loopback
     connection: the local session (`/api/shell/local-session`) is granted to
@@ -12191,8 +12231,15 @@ access` agree); a thread's own change is journaled as
     tool. A future credential-bearing command needs a separate consumer and
     its ordinary execution approval; it cannot reuse this card's grant.
     Administrator passwords and arbitrary command/file delivery are not
-    supported. Linked-store selection is a separate follow-up; this card does
-    not widen the existing linked-store or provider-credential interfaces.
+    supported. The person may instead submit a field reference from an already
+    linked 1Password store. The authenticated broker reads that exact reference
+    once, checks its link revision before and after lookup, and returns transient
+    material only to the host's already claimed card operation. The host rechecks
+    expiry and authority after lookup and before network dispatch. No reusable
+    slot or reference is saved. Lookup failures consume the card and show a
+    bounded actionable cause; a new card requires new consent. There is no
+    automatic linking, unlocking, fallback or retry. Item references resolve at
+    use, including rotated values, under the existing linked-store rules.
 
 <a id="linked-secret-stores"></a>
 
@@ -12911,13 +12958,22 @@ access` agree); a thread's own change is journaled as
   meaningless. The stable key may sign previews because its holder can already
   sign stable, and it is how installs that predate the preview key reach a
   build that knows it. Those installs read `<ring>/<platform>-<arch>.json`;
-  key-aware builds read preview and candidate feeds at
-  `<ring>/<platform>-<arch>.preview-key.json`, which is all the preview
-  workflow writes. The old name holds a bridge feed that the
+  key-aware builds before the release named its app read
+  `<ring>/<platform>-<arch>.preview-key.json`, and current builds read the
+  app-named files above. Installs built before `product` existed decode a feed
+  strictly and call a document carrying it malformed, so no product-bearing
+  document is written at a name they read. Each candidate run also writes an
+  old-shape document (no `product`, signed over the old encoding) at
+  `candidate/<platform>-<arch>.preview-key.json`, moving those Octant installs
+  to a build that reads the new name. The old preview names are left as last
+  published (the last Octant preview build), because the installs reading them
+  are Octant and the ring now carries Nightly: they are offered nothing and
+  move on by choosing Octant's Preview channel (`candidate`). The bare
+  `candidate/<platform>-<arch>.json` holds an old-shape bridge feed that the
   approval-gated `release-preview-bridge.yml` signs once with the stable key,
-  pointing at a published build that ships the preview key and reads the new
-  name. Nothing overwrites it, so an install offline for any length of time
-  still finds a release it can verify. The release wizard mints a ring's key
+  pointing at a published candidate build that ships the preview key; it
+  refuses preview tags. Nothing overwrites it, so an install offline for any
+  length of time still finds a release it can verify. The release wizard mints a ring's key
   only when the app ships none for it: replacing a deployed key strands every
   install that trusts it, and rotation would need a staged overlap. The private
   halves are environment secrets:
@@ -13723,12 +13779,17 @@ nothing first-party.
 This section is the one statement of what the first release includes and
 defers, and it owns the architectural rules behind it.
 
-**Where the release stands (2026-11-02).** The first release is the Apple
+**Where the release stands (2026-11-05).** The first release is the Apple
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
-Builds of `main` publish daily on the `preview` ring as the second app Octant
-Nightly, and on-demand builds publish on the `candidate` ring, as GitHub
-pre-releases named `v0.1.0-preview.<date>.<build>`; each carries a macOS zip
-and a linux-x64 AppImage. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
+Builds of `main` are meant to publish daily on the `preview` ring as the second
+app Octant Nightly, and on-demand pre-releases of the next stable on the
+`candidate` ring as Octant's Preview channel, as GitHub pre-releases named
+`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip and a linux-x64
+AppImage. Nightly is a usable client; a scheduled or rollback Nightly run is
+built and published only after its secret-free
+[usable-client preflight](design/nightly-app.md#the-usable-client-preflight)
+passes, and the first scheduled publication still needs a maintainer's
+approval. The stable ring (a `vMAJOR.MINOR.PATCH` tag, approved
 in the `stable` environment) has not been used, so Octant itself has not
 shipped. The first release counts as shipped when a maintainer approves the
 first stable version; daily builds stay previews. That first stable release is
@@ -13845,7 +13906,12 @@ macOS-only.
   Ed25519 signature over the canonical encoding of the feed's `release`
   object (the wrapper's `schemaVersion` is validated, not signed) against a
   public key compiled into the app, then requires the offered release to be strictly newer and to name
-  this platform, architecture, and the ring the app asked for. The artifact's
+  this app (`product`: `octant` or `octant-nightly`), platform, architecture,
+  and the ring the app asked for. A release for the other app is refused as
+  `wrong-app` ("This update is for Octant Nightly, not Octant."), on Linux
+  too, where nothing after the feed checks which app an image is. Every
+  signer emits `product` and every reader requires it; a feed without it is
+  malformed. The artifact's
   SHA-256 is inside the signature and the downloaded bytes are hashed before
   anything installs.
 - On macOS the platform updater is then handed the verified bytes through a
@@ -13863,25 +13929,39 @@ macOS-only.
   with no signed channel (`supportsSignedDesktopUpdateChannel`:
   macOS and Linux today) refuses with "untrusted-signature".
 - Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
-  version that is not strictly newer, wrong platform or ring, unreachable
+  version that is not strictly newer, wrong app, platform or ring, unreachable
   service, or mismatched artifact yields no install, no override, and a
   refusal naming the check. The exact two-field empty document
   (`"status": "empty"`, schema version 1) means no release in this channel,
   not that the build is current.
 - Rings are `stable` (tags), `preview` (scheduled `main` builds), and
   `candidate` (on-demand builds of a chosen ref, so a test install exercises
-  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. Settings labels
+  the real update path) at `<base>/stable/<platform>-<arch>.json`,
+  `<base>/candidate/<platform>-<arch>.octant.json` and
+  `<base>/preview/<platform>-<arch>.octant-nightly.json`. Settings labels
   the rings Stable, Preview (`candidate`), and Nightly (`preview`); the ids
   stay, since feed paths and version tags that installed builds follow carry
   them. A build's default ring is read from
   its version; the signed ring field is what separates the streams. The base
-  is overridable but must be HTTPS. Stable ships as Octant; preview and
-  candidate ship as a second app, Octant Nightly, with its own bundle id, link
-  scheme, command-line name, and icon. Nightly shares Octant's data through
-  Octant's running host and never runs a host of its own on that folder, so the
-  journal keeps one writer and no nightly migrates data Octant must still open.
-  The first technical preview therefore ships as Octant on `stable`
-  ([Octant Nightly](design/nightly-app.md)). Identity and packaging foundations
+  is overridable but must be HTTPS. Stable and candidate ship as Octant, one
+  binary whose ring is the person's in-app channel choice (Stable or Preview);
+  preview ships as a second app, Octant Nightly, with its own bundle id, link
+  scheme, command-line name, and icon (maintainer decision, 2026-11-05). Nightly
+  shares Octant's data through Octant's running host and never runs a host on
+  that folder, so the journal keeps one writer and no nightly migrates data
+  Octant must still open. For development and testing it can instead run its
+  own host on separate test data. Its command-line tool, `octant-nightly`,
+  follows the same rule: it attaches to Octant's host (or, with test data,
+  Nightly's test host) and never starts or migrates one
+  ([the `octant-nightly` command](design/nightly-app.md#the-octant-nightly-command)). A person's first install is therefore Octant
+  ([Octant Nightly](design/nightly-app.md)). The channel split and the
+  Nightly-channel install row (packaged macOS Octant, person-started,
+  feed signature, artifact hash and a Nightly-specific code requirement) are
+  built; a signed install from a published Nightly build has not been
+  exercised. Nightly's own host on separate test data (macOS and Linux: its own
+  folder, port, logs and Keychain service names or Secret Service `service`
+  values, chosen in Settings and decided once at launch) is built; a signed Nightly running it has not been
+  exercised. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load
   Nightly's own renderer with a short server-enforced lease. It never loads
@@ -13899,6 +13979,20 @@ macOS-only.
   evidence that a signed Nightly peer or embedded Browser bridge is usable;
   the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
   preserve authenticated registration and the functional publication gate.
+- Rollback is a roll-forward. The updater accepts only a strictly newer
+  version, so a bad Nightly is replaced by dispatching the preview workflow
+  from `main` with `rollback_ref`: it rebuilds a published `v*-preview.*` tag
+  whose commit is on `main` as Nightly under a new version from the workflow's
+  own date and run number. Any other ref is refused before checkout, because
+  the build runs the source's own code beside the Apple credentials. The feed
+  key lives only in a separate `feed` job that runs the workflow's own commit
+  against the uploaded archive. Each published Octant release
+  (stable and candidate) also carries `octant-host-features.json`: the native
+  client protocol and the brokered features its host offers a Nightly window
+  (`NIGHTLY_HOST_FEATURES`), for the Nightly preflight's compatibility check
+  ([Octant Nightly](design/nightly-app.md#nightlys-own-updates)). It is
+  unsigned and advisory; it must be signed or hash-pinned before it gates a
+  release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.

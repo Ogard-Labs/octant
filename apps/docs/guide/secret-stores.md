@@ -212,9 +212,14 @@ retry automatically. A token already sent cannot be recalled.
 
 This card is available at the originating local window, outside Plan mode, for
 providers that support app-managed tools. It does not accept administrator
-passwords or hand credentials to arbitrary shell commands. Choosing a linked
-1Password item is not yet available in this card; existing Settings bindings
-continue to work separately.
+passwords or hand credentials to arbitrary shell commands. Choose **Use 1Password reference** to enter an `op://vault/item/field` reference
+from a store you already linked in Settings. Review the destination and choose
+**Check access**. Octant reads that field for this operation only and saves
+neither its value nor the reference. Switching input methods clears your entry.
+Octant does not link or unlock the store for you. If the store is locked,
+unlinked, unavailable or changes during lookup, or the field is missing, the
+card explains what to fix. Request a new card after fixing it; the failed card
+is never retried automatically.
 
 Agents see `octant_credential` only in Code, and only when there is something
 to use: a supported check like the one above, or a command saved for the Project

@@ -23,10 +23,10 @@ import {
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { decodeWindowId, SkillFolderPath } from "@octant/contracts";
 import { Schema } from "effect";
 import { AgentPluginsError } from "@octant/plugin-host/agent-plugins";
+import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
 import { ClientPrincipalError, resolveLocalWindowPrincipal } from "./clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
@@ -141,15 +141,17 @@ export function createExtensionRouteHandler(options: {
       return response(failure("invalid", "Extension API requires loopback."), 400, origin);
     }
     if (url.pathname === "/api/extensions/import-local-receipts") {
+      const admission = admitDesktopBroker({
+        request,
+        desktopBridgeSecret: options.desktopBridgeSecret,
+        windowAuthorityStore: options.windowAuthorityStore,
+        now: now(),
+      });
       if (
         request.method !== "POST" ||
-        origin !== null ||
         options.desktopBridgeSecret === undefined ||
         options.localPluginImportReceipts === undefined ||
-        !secretsEqual(
-          options.desktopBridgeSecret,
-          request.headers.get("x-octant-desktop-secret") ?? "",
-        )
+        admission.status !== "admitted"
       ) {
         return response(
           failure("unauthorized", "Local plugin folder receipt is unauthorized."),
@@ -174,6 +176,13 @@ export function createExtensionRouteHandler(options: {
       const absolutePath = body.value.absolutePath;
       if (typeof absolutePath !== "string" || !isAbsolute(absolutePath)) {
         return response(failure("invalid", "Local plugin path must be absolute."), 400, null);
+      }
+      if (!admitsWindow(admission, body.value.windowId)) {
+        return response(
+          failure("unauthorized", "Local plugin folder receipt is unauthorized."),
+          401,
+          null,
+        );
       }
       try {
         const receipt = options.localPluginImportReceipts.issue({
@@ -880,12 +889,6 @@ function corsHeaders(origin: string | null): Record<string, string> {
     "access-control-allow-methods": "POST, OPTIONS",
     "access-control-allow-headers": "content-type, x-octant-window-capability",
   };
-}
-
-function secretsEqual(expected: string, actual: string): boolean {
-  const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
-  const actualDigest = createHash("sha256").update(actual, "utf8").digest();
-  return timingSafeEqual(expectedDigest, actualDigest);
 }
 
 function hasExactKeys(

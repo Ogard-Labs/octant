@@ -149,6 +149,22 @@ describe("attachOrCreateHost", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("attaches only and never spawns a host for a tool that may not start one", async () => {
+    const fetch = mockFetch(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    const spawn = vi.fn();
+
+    const result = await attachOrCreateHost({
+      ...deps({ fetch, spawn }),
+      mayStartHost: false,
+      hostNotRunning: "Octant is not running on this host.",
+    });
+
+    expect(result).toEqual({ kind: "start-failed", reason: "Octant is not running on this host." });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("does not automatically spawn when the persisted service policy is disabled", async () => {
     const fetch = mockFetch(async () => {
       throw new Error("ECONNREFUSED");

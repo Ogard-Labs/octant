@@ -561,6 +561,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     const codeExternalEditorRoutes = createCodeExternalEditorRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
       resolve: async (input) => {
         const editor = persistence.readCodeSettings()?.settings.externalEditor;
         if (editor === undefined) return undefined;
@@ -591,6 +592,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     const codeCheckoutOpenRoutes = createCodeCheckoutOpenRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
       resolve: async (input) => {
         const windowId = decodeWindowId(input.windowId);
         const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));

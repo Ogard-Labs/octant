@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { uptime } from "node:os";
 import { decodeWindowId } from "@octant/contracts";
 import {
+  decodeAdvertisedHostFeatures,
   decodeNightlyWindowBootstrap,
   type NightlyWindowBootstrap,
   type NativeWindowSource,
@@ -14,6 +15,8 @@ export interface NativeWindowRequest {
   readonly windowId: string;
   readonly generation: number;
   readonly operation: "register" | "renew" | "revoke";
+  /** The client accepts the native-main bootstrap fields; an older client does not. */
+  readonly nativeMain: boolean;
 }
 
 export type NativeWindowEvent =
@@ -47,6 +50,11 @@ interface OwnedWindow {
   cleanup?: Promise<void>;
   readonly capability: string;
   readonly rendererIdentity: string;
+  /** Main-only: goes to the host and the native reply, never a renderer. */
+  readonly nativeMainToken: string;
+  hostFeatures: ReadonlyArray<string>;
+  /** The host predates native-main admission and holds no token for this window. */
+  legacyHost: boolean;
   readonly source: NativeWindowSource;
 }
 
@@ -136,8 +144,26 @@ export function ownNightlyWindowLeases(options: {
         capability: owned.capability,
         source: owned.source,
         ...(method === "POST" ? { rendererIdentity: owned.rendererIdentity } : {}),
+        ...(method === "POST" && !owned.legacyHost
+          ? { nativeMainToken: owned.nativeMainToken }
+          : {}),
       }),
     });
+    // Stable's main may attach to an already running older host, whose strict
+    // decoder answers the unknown token key with 400 invalid. Register once
+    // more the original way; that window then brokers nothing.
+    if (method === "POST" && !owned.legacyHost && response.status === 400) {
+      const refusal: unknown = await response.json().catch(() => undefined);
+      if (
+        typeof refusal === "object" &&
+        refusal !== null &&
+        "category" in refusal &&
+        refusal.category === "invalid"
+      ) {
+        owned.legacyHost = true;
+        return request(host, method, owned);
+      }
+    }
     if (response.status !== (method === "POST" ? 201 : method === "PUT" ? 200 : 204))
       throw new Error("Nightly window authority is unavailable.");
     if (method !== "DELETE") {
@@ -151,6 +177,11 @@ export function ownNightlyWindowLeases(options: {
         value.leaseMs !== 15_000
       )
         throw new Error("Nightly window authority returned an invalid lease.");
+      if (method === "POST")
+        // A newer host may name features this build does not know; the
+        // Nightly main ignores those rather than refusing the window.
+        owned.hostFeatures =
+          "hostFeatures" in value ? decodeAdvertisedHostFeatures(value.hostFeatures) : [];
     }
   };
   const closeOwned = async (key: string, owned: OwnedWindow): Promise<void> => {
@@ -225,6 +256,9 @@ export function ownNightlyWindowLeases(options: {
         cancelExpiry: () => {},
         capability: randomBytes(32).toString("base64url"),
         rendererIdentity: randomBytes(32).toString("base64url"),
+        nativeMainToken: randomBytes(32).toString("base64url"),
+        hostFeatures: [],
+        legacyHost: false,
         source: {
           kind: "native-nightly",
           processRegistration: registration,
@@ -234,7 +268,7 @@ export function ownNightlyWindowLeases(options: {
       };
       windows.set(key, owned);
       try {
-        const bootstrap = decodeNightlyWindowBootstrap({
+        const registered = decodeNightlyWindowBootstrap({
           kind: "registered",
           protocol: 1,
           windowId: owned.windowId,
@@ -243,10 +277,19 @@ export function ownNightlyWindowLeases(options: {
           hostInstance: host.instanceId,
           capability: owned.capability,
           rendererIdentity: owned.rendererIdentity,
+          nativeMainToken: owned.nativeMainToken,
           leaseMs: 15_000,
         });
         owned.acquisition = request(host, "POST", owned);
         await owned.acquisition;
+        // The host, not this main, names what it brokers for a native main.
+        // An older client decodes the bootstrap strictly, so it gets the
+        // original fields only and keeps working without brokered features.
+        const { nativeMainToken: _withheld, ...original } = registered;
+        const bootstrap: NightlyWindowBootstrap =
+          input.nativeMain && !owned.legacyHost
+            ? { ...registered, hostFeatures: owned.hostFeatures }
+            : original;
         owned.active = true;
         armExpiry(key, owned);
         if (
@@ -408,6 +451,7 @@ function decodeEvent(value: unknown): NativeWindowEvent | undefined {
       windowId: request.windowId,
       generation: request.generation,
       operation: request.operation,
+      nativeMain: "nativeMain" in request && request.nativeMain === true,
     },
   };
 }

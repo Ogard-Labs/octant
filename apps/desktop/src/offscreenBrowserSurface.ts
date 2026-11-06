@@ -7,7 +7,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BROWSER_EDITABLE_PRELOAD_FILENAME } from "./runtimePaths";
 import { ownBrowserTextInput } from "./browserTextInput";
-import { readBrowserEditableTarget } from "./browserEditableTarget";
 import type { BrowserSurfaceHostOptions, BrowserSurfaceViewPort } from "./browserSurfaceHost";
 import type { HumanBrowserSource } from "./browserPresentation";
 
@@ -25,6 +24,9 @@ export function createOffscreenBrowserSurface(
       partition: options.partition,
       ...options.webPreferences,
       preload: resolve(dirname(fileURLToPath(import.meta.url)), BROWSER_EDITABLE_PRELOAD_FILENAME),
+      // The sandboxed observer preload runs in every frame, so a field in a
+      // nested frame is observed from document start like one in the page.
+      nodeIntegrationInSubFrames: true,
       offscreen: false,
       backgroundThrottling: false,
     },
@@ -106,29 +108,9 @@ export function createOffscreenBrowserSurface(
         capture();
       } else release();
     },
-    async editor() {
+    caret(start, end) {
       if (!shown || window.isDestroyed() || window.webContents.isDestroyed()) return undefined;
-      const epoch = generation;
-      const target = await readBrowserEditableTarget((world, scripts) =>
-        window.webContents.executeJavaScriptInIsolatedWorld(world, [...scripts]),
-      );
-      if (target === undefined || epoch !== generation || !shown) return undefined;
-      const rect = caret.read(target.selectionStart, target.selectionEnd);
-      // The public range lookup can round-trip through Chromium. Re-observe
-      // the same field and selection after it, without reading field contents.
-      const after = await readBrowserEditableTarget((world, scripts) =>
-        window.webContents.executeJavaScriptInIsolatedWorld(world, [...scripts]),
-      );
-      if (
-        rect === undefined ||
-        after?.id !== target.id ||
-        after.selectionStart !== target.selectionStart ||
-        after.selectionEnd !== target.selectionEnd ||
-        epoch !== generation ||
-        !shown
-      )
-        return undefined;
-      return { ...target, caret: rect };
+      return caret.read(start, end);
     },
     bounds(nextWidth, nextHeight) {
       generation++;
