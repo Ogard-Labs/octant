@@ -17,7 +17,8 @@
 //     native picker, an API key added and listed, and a Code approval
 //     prepared and cancelled;
 //  4. the embedded Browser: a local page opens, a frame arrives, typed text
-//     reaches a text field, and a select list's popup round-trips;
+//     reaches a text field, directional key presses and releases retain their
+//     identity, and a select list's popup round-trips;
 //  5. lease loss destroys the renderer and recovery registers a fresh window;
 //  6. a host restart, after which Nightly reconnects on the same data;
 //  7. two hosts on separate folders and ports never see each other's data;
@@ -194,9 +195,11 @@ async function startPageFixture(): Promise<{
 <script>
 let presses = 0;
 let keys = 0;
-const report = () => { const state = "field=" + document.getElementById("field").value + ";choice=" + document.getElementById("choice").value + ";presses=" + presses + ";keys=" + keys; document.title = state; fetch("/report?" + encodeURIComponent(state)).catch(() => {}); };
+const arrows = [];
+const report = () => { const state = "field=" + document.getElementById("field").value + ";choice=" + document.getElementById("choice").value + ";presses=" + presses + ";keys=" + keys + ";arrows=" + arrows.join(","); document.title = state; fetch("/report?" + encodeURIComponent(state)).catch(() => {}); };
 addEventListener("mousedown", () => { presses++; report(); }, true);
-addEventListener("keydown", () => { keys++; report(); }, true);
+addEventListener("keydown", (event) => { keys++; if (event.key.startsWith("Arrow")) arrows.push("down:" + event.key); report(); }, true);
+addEventListener("keyup", (event) => { if (event.key.startsWith("Arrow")) arrows.push("up:" + event.key); report(); }, true);
 document.getElementById("field").addEventListener("input", report);
 document.getElementById("choice").addEventListener("change", report);
 </script></body></html>`;
@@ -1052,6 +1055,15 @@ try {
             throw new Error(`${String(error)} Last page report: ${lastReport()}`);
           },
         );
+        const arrowEvents: Array<string> = [];
+        for (const keyCode of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+          await input({ type: "keyDown", keyCode });
+          await input({ type: "keyUp", keyCode });
+          arrowEvents.push(`down:${keyCode}`, `up:${keyCode}`);
+        }
+        await waitFor("Native directional presses and releases", 15_000, () =>
+          reported(`arrows=${arrowEvents.join(",")}`),
+        );
         const menuMark = nightly.events.mark();
         await nextFrame();
         await click(120, 120);
@@ -1063,8 +1075,14 @@ try {
         ).catch((error: unknown) => {
           throw new Error(`${String(error)} Last page report: ${lastReport()}`);
         });
+        await nextFrame();
+        await input({ type: "keyDown", keyCode: "ArrowDown" });
         await present({ kind: "detach", presentationId });
-        return `${frames} frames; typed text and select choice reached the page`;
+        arrowEvents.push("down:ArrowDown", "up:ArrowDown");
+        await waitFor("Native held-arrow release on detach", 15_000, () =>
+          reported(`arrows=${arrowEvents.join(",")}`),
+        );
+        return `${frames} frames; typed text, native directional presses/releases, detach release and select choice reached the page`;
       },
     ],
     [
