@@ -1,8 +1,9 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import { decodeSupportBundleExportRequest, type SupportBundleSaveOutcome } from "@octant/contracts";
 import { authorizeDiagnosticsExportActor, buildSupportBundleZip } from "@octant/domain";
+import { admitDesktopBroker } from "./desktopBrokerAdmission";
 import { isAllowedOrigin } from "./diagnosticsExportRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -61,13 +62,6 @@ function json(body: unknown, status: number, origin: string | null): Response {
   });
 }
 
-function secretsEqual(expected: string, actual: string): boolean {
-  return timingSafeEqual(
-    createHash("sha256").update(expected, "utf8").digest(),
-    createHash("sha256").update(actual, "utf8").digest(),
-  );
-}
-
 /** Writes the zip beside its destination first and moves it into place on commit. */
 function stageZipAt(path: string, modifiedAt: Date): StageSupportBundleDelivery {
   return (files) => {
@@ -97,9 +91,13 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
     }
     if (
       request.method !== "POST" ||
-      request.headers.get("origin") !== null ||
       secret === undefined ||
-      !secretsEqual(secret, request.headers.get("x-octant-desktop-secret") ?? "")
+      admitDesktopBroker({
+        request,
+        desktopBridgeSecret: secret,
+        windowAuthorityStore: dependencies.windowAuthorityStore,
+        now: now(),
+      }).status !== "admitted"
     ) {
       return json({ error: "Support bundle save is unauthorized." }, 401, null);
     }

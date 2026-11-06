@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { uptime } from "node:os";
 import { decodeWindowId } from "@octant/contracts";
 import {
+  decodeAdvertisedHostFeatures,
   decodeNightlyWindowBootstrap,
   type NightlyWindowBootstrap,
   type NativeWindowSource,
@@ -47,6 +48,9 @@ interface OwnedWindow {
   cleanup?: Promise<void>;
   readonly capability: string;
   readonly rendererIdentity: string;
+  /** Main-only: goes to the host and the native reply, never a renderer. */
+  readonly nativeMainToken: string;
+  hostFeatures: ReadonlyArray<string>;
   readonly source: NativeWindowSource;
 }
 
@@ -135,7 +139,9 @@ export function ownNightlyWindowLeases(options: {
         windowId: owned.windowId,
         capability: owned.capability,
         source: owned.source,
-        ...(method === "POST" ? { rendererIdentity: owned.rendererIdentity } : {}),
+        ...(method === "POST"
+          ? { rendererIdentity: owned.rendererIdentity, nativeMainToken: owned.nativeMainToken }
+          : {}),
       }),
     });
     if (response.status !== (method === "POST" ? 201 : method === "PUT" ? 200 : 204))
@@ -151,6 +157,11 @@ export function ownNightlyWindowLeases(options: {
         value.leaseMs !== 15_000
       )
         throw new Error("Nightly window authority returned an invalid lease.");
+      if (method === "POST")
+        // A newer host may name features this build does not know; the
+        // Nightly main ignores those rather than refusing the window.
+        owned.hostFeatures =
+          "hostFeatures" in value ? decodeAdvertisedHostFeatures(value.hostFeatures) : [];
     }
   };
   const closeOwned = async (key: string, owned: OwnedWindow): Promise<void> => {
@@ -225,6 +236,8 @@ export function ownNightlyWindowLeases(options: {
         cancelExpiry: () => {},
         capability: randomBytes(32).toString("base64url"),
         rendererIdentity: randomBytes(32).toString("base64url"),
+        nativeMainToken: randomBytes(32).toString("base64url"),
+        hostFeatures: [],
         source: {
           kind: "native-nightly",
           processRegistration: registration,
@@ -234,7 +247,7 @@ export function ownNightlyWindowLeases(options: {
       };
       windows.set(key, owned);
       try {
-        const bootstrap = decodeNightlyWindowBootstrap({
+        const registered = decodeNightlyWindowBootstrap({
           kind: "registered",
           protocol: 1,
           windowId: owned.windowId,
@@ -243,10 +256,16 @@ export function ownNightlyWindowLeases(options: {
           hostInstance: host.instanceId,
           capability: owned.capability,
           rendererIdentity: owned.rendererIdentity,
+          nativeMainToken: owned.nativeMainToken,
           leaseMs: 15_000,
         });
         owned.acquisition = request(host, "POST", owned);
         await owned.acquisition;
+        // The host, not this main, names what it brokers for a native main.
+        const bootstrap: NightlyWindowBootstrap = {
+          ...registered,
+          hostFeatures: owned.hostFeatures,
+        };
         owned.active = true;
         armExpiry(key, owned);
         if (

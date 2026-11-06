@@ -26,6 +26,7 @@ import {
   listApiKeys,
   type CredentialStoreFailureCause,
 } from "@octant/host-runtime";
+import { admitDesktopBroker, admitsWindow } from "../desktopBrokerAdmission";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderCredentialStore } from "./credentialBrokerClient";
@@ -132,14 +133,16 @@ export function createProviderCredentialRouteHandler(
     if (!Object.values(ROUTES).includes(url.pathname as Route)) return undefined;
     const route = url.pathname as Route;
 
+    const admission = admitDesktopBroker({
+      request,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore: options.windowAuthorityStore,
+      now: now(),
+    });
     if (
       options.desktopBridgeSecret === undefined ||
       !isLoopbackHostname(url.hostname) ||
-      request.headers.has("origin") ||
-      !secretsEqual(
-        options.desktopBridgeSecret,
-        request.headers.get("x-octant-desktop-secret") ?? "",
-      )
+      admission.status !== "admitted"
     ) {
       return refuse("unauthorized");
     }
@@ -153,6 +156,7 @@ export function createProviderCredentialRouteHandler(
       if (error instanceof WindowAuthorityError) return refuse("unauthorized");
       throw error;
     }
+    if (!admitsWindow(admission, windowId)) return refuse("unauthorized");
     if (request.method !== "POST" || url.search !== "") return refuse("invalid");
     if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
       return refuse("invalid");

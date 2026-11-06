@@ -7,6 +7,8 @@ import {
 
 const clientHandle = "00000000-0000-4000-8000-000000000593";
 const peer = "a".repeat(64);
+const hostFeatures = ["project-root-receipts", "a-feature-from-a-newer-host"];
+
 function fixture(onCount?: (count: number) => void) {
   let receive: (event: unknown) => void = () => {};
   let elapsed = 0;
@@ -30,7 +32,7 @@ function fixture(onCount?: (count: number) => void) {
     return init?.method === "DELETE"
       ? new Response(null, { status: 204 })
       : Response.json(
-          { expiresAt: 15_000, generation: 1, leaseMs: 15_000 },
+          { expiresAt: 15_000, generation: 1, leaseMs: 15_000, hostFeatures },
           { status: init?.method === "POST" ? 201 : 200 },
         );
   });
@@ -90,6 +92,13 @@ describe("Nightly native window lease ownership", () => {
       expect(f.owner.hasWindow(reply.windowId)).toBe(true);
       expect(JSON.stringify(reply)).not.toContain("private-admin");
       expect(f.requests[0]?.body.windowId).toBe(reply.windowId);
+      // The host learns the main-only token; the reply carries it and the
+      // host's brokered features, and it is never the renderer identity.
+      expect(reply.nativeMainToken).toBeDefined();
+      expect(f.requests[0]?.body.nativeMainToken).toBe(reply.nativeMainToken);
+      expect(reply.nativeMainToken).not.toBe(reply.rendererIdentity);
+      expect(reply.nativeMainToken).not.toBe(reply.capability);
+      expect(reply.hostFeatures).toEqual(hostFeatures);
       f.replaceHost();
       expect(f.owner.hasWindow(reply.windowId)).toBe(false);
     } finally {
@@ -137,7 +146,10 @@ describe("Nightly native window lease ownership", () => {
         finish = resolve;
       });
       acquired = true;
-      return Response.json({ expiresAt: 15_000, generation: 1, leaseMs: 15_000 }, { status: 201 });
+      return Response.json(
+        { expiresAt: 15_000, generation: 1, leaseMs: 15_000, hostFeatures },
+        { status: 201 },
+      );
     });
     f.fetch.mockImplementation(async (input, init) => {
       if (init?.method === "DELETE") expect(acquired).toBe(true);
@@ -198,7 +210,7 @@ it("counts only acknowledged current-host leases and not pending registration", 
   );
   const pending = f.send(1, "register");
   expect(f.owner.activeWindowCount()).toBe(0);
-  settle(Response.json({ generation: 1, leaseMs: 15_000 }, { status: 201 }));
+  settle(Response.json({ generation: 1, leaseMs: 15_000, hostFeatures }, { status: 201 }));
   await pending;
   expect(f.owner.activeWindowCount()).toBe(1);
   f.replaceHost();

@@ -6,6 +6,7 @@ import {
   authenticateProjectRequest,
   createProjectBindingRouteHandler,
 } from "./projectBindingRoutes";
+import { NATIVE_MAIN_HOST_FEATURES } from "./desktopBrokerAdmission";
 import { ProjectRootError } from "./projectRootPort";
 import { WindowAuthorityError, WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -57,14 +58,32 @@ describe("project binding routes", () => {
       incarnation: "a".repeat(64),
       generation: 3,
     };
-    const body = { windowId, capability, rendererIdentity, source };
+    const nativeMainToken = randomBytes(32).toString("base64url");
+    const body = { windowId, capability, rendererIdentity, nativeMainToken, source };
     const denied = await handle(
       desktopRequest("/api/desktop/native-window-authorities", body, "wrong"),
     );
     expect(denied?.status).toBe(401);
+    const withoutMainToken = await handle(
+      desktopRequest("/api/desktop/native-window-authorities", {
+        windowId,
+        capability,
+        rendererIdentity,
+        source,
+      }),
+    );
+    expect(withoutMainToken?.status).toBe(400);
     const minted = await handle(desktopRequest("/api/desktop/native-window-authorities", body));
     expect(minted?.status).toBe(201);
-    expect(await minted?.json()).toEqual({ expiresAt: 16_000, generation: 3, leaseMs: 15_000 });
+    expect(await minted?.json()).toEqual({
+      expiresAt: 16_000,
+      generation: 3,
+      leaseMs: 15_000,
+      hostFeatures: NATIVE_MAIN_HOST_FEATURES,
+    });
+    expect(
+      dependencies.windowAuthorityStore.authenticateNativeMain(capability, nativeMainToken, 15_999),
+    ).toBe(windowId);
     const renewal = new Request("http://127.0.0.1:13773/api/desktop/native-window-authorities", {
       method: "PUT",
       headers: { "content-type": "application/json", "x-octant-desktop-secret": secret },
