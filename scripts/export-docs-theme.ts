@@ -6,14 +6,20 @@ import {
   THEME_TOKEN_ROLE_IDS,
 } from "@octant/theme/tokens";
 
-const sourceRevision = execFileSync(
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const themeChanges = execFileSync(
   "git",
-  ["log", "-1", "--format=%H", "--", "packages/theme/src/tokens.ts"],
-  {
-    cwd: fileURLToPath(new URL("../", import.meta.url)),
-    encoding: "utf8",
-  },
+  ["status", "--porcelain", "--untracked-files=all", "--", "packages/theme"],
+  { cwd: repositoryRoot, encoding: "utf8" },
 ).trim();
+if (themeChanges !== "") {
+  console.error("Commit theme sources before exporting their immutable reference.");
+  process.exit(1);
+}
+const sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: repositoryRoot,
+  encoding: "utf8",
+}).trim();
 
 console.log(
   JSON.stringify(

@@ -15,7 +15,9 @@ unmerged behavior paired with its product PR rather than claiming it shipped.
 Existing in-flight guide edits must be transferred to that repository before
 their product PR lands; do not recreate `apps/docs`.
 
-For semantic theme changes, generate the guide's checked-in data projection:
+For semantic theme changes, commit the theme package changes first, then generate
+the guide's checked-in data projection. The exporter refuses uncommitted theme
+sources so its immutable source URL always describes the exported values:
 
 ```sh
 bun run docs:theme > /path/to/octant-site/docs/.vitepress/theme/theme-tokens.json
