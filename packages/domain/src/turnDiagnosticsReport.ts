@@ -397,8 +397,11 @@ export function likelyCacheMisses(
 
 /** Nearest-rank percentile; undefined over no values. */
 export function percentile(values: ReadonlyArray<number>, fraction: number): number | undefined {
-  if (values.length === 0) return undefined;
-  const sorted = [...values].sort((left, right) => left - right);
+  return rank([...values].sort((left, right) => left - right), fraction);
+}
+
+function rank(sorted: ReadonlyArray<number>, fraction: number): number | undefined {
+  if (sorted.length === 0) return undefined;
   const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1));
   return sorted[index];
 }
@@ -407,9 +410,10 @@ function percentiles(
   values: ReadonlyArray<number>,
   round: (value: number) => number = Math.round,
 ): DiagnosticsPercentiles | undefined {
-  const p50 = percentile(values, 0.5);
-  const p95 = percentile(values, 0.95);
-  const max = percentile(values, 1);
+  const sorted = [...values].sort((left, right) => left - right);
+  const p50 = rank(sorted, 0.5);
+  const p95 = rank(sorted, 0.95);
+  const max = rank(sorted, 1);
   if (p50 === undefined || p95 === undefined || max === undefined) return undefined;
   return { count: values.length, p50: round(p50), p95: round(p95), max: round(max) };
 }
