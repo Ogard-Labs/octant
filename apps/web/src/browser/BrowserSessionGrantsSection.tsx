@@ -28,7 +28,7 @@ export function BrowserSessionGrantsSection(props: {
   const [targetId, setTargetId] = useState("");
   const [profileId, setProfileId] = useState("");
   const [origins, setOrigins] = useState("");
-  const [duration, setDuration] = useState<15 | 60 | 480>(15);
+  const [duration, setDuration] = useState(15);
   const [review, setReview] =
     useState<Extract<BrowserSessionGrantsResult, { readonly kind: "browser-session-review" }>>();
   const [pending, setPending] = useState(false);
@@ -82,6 +82,22 @@ export function BrowserSessionGrantsSection(props: {
 
   if (manage === undefined) return null;
   const chosenTarget = targets.find((target) => JSON.stringify(target.grantee) === targetId);
+  const recurring = chosenTarget?.grantee.kind === "routine";
+  const durationChoices = recurring
+    ? [
+        { id: "10080", label: "7 days" },
+        { id: "43200", label: "30 days" },
+      ]
+    : [
+        { id: "15", label: "15 minutes" },
+        { id: "60", label: "1 hour" },
+        { id: "480", label: "8 hours" },
+      ];
+  const selectedDuration = durationChoices.some((choice) => choice.id === String(duration))
+    ? duration
+    : recurring
+      ? 10080
+      : 15;
   const chosenProfile = props.profiles.find(
     (profile) => browserProfileKey(profile.profile) === profileId,
   );
@@ -137,7 +153,7 @@ export function BrowserSessionGrantsSection(props: {
           props.profiles.length === 0
             ? "No Browser profiles are available on this host. Check Browser profiles above, then reopen this page to reload them."
             : loaded && targets.length === 0
-              ? "No eligible managed child in this Project. A local Work or Code child needs tool authority and a supported provider. Queued and waiting children can be reviewed without starting them."
+              ? "No eligible routine or managed child in this Project. A caller needs current tool authority and a supported provider. Reviewing a permission starts nothing."
               : "Choose the caller and profile explicitly, then review sites and expiry."
         }
       >
@@ -224,11 +240,15 @@ export function BrowserSessionGrantsSection(props: {
                 grantee: chosenTarget.grantee,
                 profile: chosenProfile.profile,
                 origins: origins.split(/[\s,]+/).filter(Boolean),
-                durationMinutes: duration,
+                durationMinutes: selectedDuration,
               });
           }}
           details={
             <>
+              <p>
+                Permissions end at the displayed expiry, on revocation or when this host restarts.
+                Granting starts no task or routine.
+              </p>
               {review === undefined ? (
                 <div className="flex flex-col gap-3">
                   <label className="field">
@@ -276,15 +296,9 @@ export function BrowserSessionGrantsSection(props: {
                     <span className="field__label">Expires after</span>
                     <OctantSelectField
                       aria-label="Permission duration"
-                      value={String(duration)}
-                      onValueChange={(value) =>
-                        setDuration(value === "480" ? 480 : value === "60" ? 60 : 15)
-                      }
-                      options={[
-                        { id: "15", label: "15 minutes" },
-                        { id: "60", label: "1 hour" },
-                        { id: "480", label: "8 hours" },
-                      ]}
+                      value={String(selectedDuration)}
+                      onValueChange={(value) => setDuration(Number(value))}
+                      options={durationChoices}
                     />
                   </label>
                 </div>

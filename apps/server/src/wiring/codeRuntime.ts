@@ -1,3 +1,4 @@
+import { decodeBrowserThreadId } from "@octant/contracts";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
@@ -328,6 +329,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     BrowserWiring,
+    | "routineBrowserTools"
     | "browserAutomationService"
     | "browserFlows"
     | "browserToolApprovalService"
@@ -371,6 +373,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     bindDeviceApprovals,
     browserAuthority,
     browserModelBindings,
+    routineBrowserTools,
     browserAutomationService,
     browserFlows,
     browserToolApprovalService,
@@ -909,6 +912,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               model.inputModalities.includes("image"),
           );
         },
+        routineBrowserTools: ({ thread, readThread, routineRun }) =>
+          routineBrowserTools({
+            routineRun,
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            currentAuthority: () =>
+              readThread() === undefined
+                ? undefined
+                : browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
+            currentModelId: () => {
+              const current = readThread();
+              return current === undefined || current.executionPolicy !== thread.executionPolicy
+                ? undefined
+                : String(current.modelId);
+            },
+          }),
         browserAutomation: {
           runScript: (input) => browserAutomationService.runScript(input),
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),

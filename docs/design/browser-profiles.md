@@ -316,10 +316,9 @@ thread made.
   the phone that started the turn neither sees nor answers a profile approval,
   and a window that can see the thread does. An approval for a page outside a
   profile is answered as every Browser approval is.
-- **Unattended turns.** A routine's turn is refused on profile pages
-  (`profile-needs-a-person`). A managed child uses a stored profile only with
+- **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit [delegated session permission](#delegated-sessions) below; it
-  never inherits its parent's page, sign-in permission or authority.
+  never inherits another caller's page, sign-in permission or authority.
 - **Terminal Browser grant.** A CLI in a thread terminal may drive the thread's
   Private pages only; a profile page refuses it (`profile-needs-a-person`).
 - **Taint.** What the agent reads on a profile page taints the thread as any
@@ -339,11 +338,13 @@ a paired device cannot, signed in or not.
 
 ## Delegated sessions
 
-A local person may review and grant a same-Project managed child permission to
-use an existing sign-in. Settings › Data & storage › Browser session permissions
-lists eligible children and current permissions. The person explicitly chooses
-the child, stored profile, exact HTTPS origins (including any non-default port)
-and a duration of 15 minutes, one hour or eight hours. A second review shows the
+A local person may review and grant a same-Project managed child or named
+routine permission to use an existing sign-in. Settings › Data & storage › Browser session permissions
+lists eligible callers and current permissions. The person explicitly chooses
+the caller, stored profile and exact HTTPS origins (including any non-default port).
+Child permissions last 15 minutes, one hour or eight hours. Routine permissions
+default to seven days, with an explicit duration capped at 30 days; Settings
+offers seven and 30 days. Every review shows the absolute expiry. A second review shows the
 host-derived caller, account label, model, host and expiry before Grant. The
 review is bound to that local window and expires after two minutes. Profile
 choice, a remembered origin, parentage and an unlocked vault grant nothing.
@@ -357,8 +358,21 @@ ambient `network: false`: the explicit site-limited host Browser permission
 allows only this Browser context, without granting network access to the
 child process or other tools. Completed, failed or cancelled
 children, Chat children, provider-native children and unavailable or unverified
-workspaces are not eligible. Routine and terminal-session caller grants are not
-yet available; their existing refusals remain.
+workspaces are not eligible. Terminal-session caller grants are not yet
+available; their existing refusal remains.
+A routine permission binds its definition revision, execution profile/model,
+Project binding and effective authority. Only enabled local Work/Code routines
+with current Project/provider/profile receipts and managed-tool support are
+offered. A run must carry the dispatcher's exact run reference, current thread,
+matching definition and authority snapshots, and no cancellation or terminal
+state. The run owns an independent context, separate from earlier runs and
+ordinary turns in the same thread. Reading its page taints the actual run's
+thread. A changed definition, model, task posture, authority, Project binding,
+profile or provider refuses further effects and observations. Run end closes
+that run's context without revoking the permission for future unchanged runs.
+Granting starts no run. No eligible native owner means unavailable on every
+platform; there is no profile copy or headless fallback.
+
 Only children admitted to this execution host with current managed-tool support
 are offered; a permission never redirects a remote child to the local account.
 
@@ -384,12 +398,16 @@ caller, authority, model or workspace refuses and invalidates it. Profile clear
 invalidates its reviews and permissions. A child end, cancellation or failure
 closes only that child's contexts, with bounded cleanup and an honest interrupted
 outcome if cleanup cannot be confirmed. The shared native engine and other
-threads stay owned by the host. A host restart restores no session permission.
+threads stay owned by the host. A host restart restores no session permission, including routine permissions.
+The person must review again; the displayed duration is an upper bound within
+the current host lifetime. Replaying audit history cannot safely distinguish
+a committed grant from a later revocation whose durable write failed, so it
+never revives account authority.
 Journal records retain permission and revocation metadata, never cookies or
 credential values, and cannot reactivate a permission on replay.
 
 Credential fill/submit, sign-in, page scripts, uploads and download saves retain
-their separate gates. A child session permission authorizes none of them. Plan
+their separate gates. A delegated session permission authorizes none of them. Plan
 still refuses new pages and effects; credential-field, origin, stale-ref,
 concurrency and account-store protections still apply. The child must explicitly
 retry or resume after a person grants permission; granting alone starts nothing.

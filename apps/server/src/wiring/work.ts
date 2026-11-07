@@ -1,3 +1,4 @@
+import { decodeBrowserThreadId } from "@octant/contracts";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
@@ -186,6 +187,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<
     BrowserWiring,
+    | "routineBrowserTools"
     | "browserAutomationService"
     | "browserFlows"
     | "browserToolApprovalService"
@@ -224,6 +226,7 @@ export function wireWork(deps: WorkDependencies) {
     authorizeWorkThreadForWindow,
     automationEventStore,
     browserAuthority,
+    routineBrowserTools,
     browserAutomationService,
     browserCaptures,
     browserModelBindings,
@@ -450,40 +453,57 @@ export function wireWork(deps: WorkDependencies) {
             (candidate) => String(candidate) === String(input.thread.modelId),
           ) === true;
         const native = nativeHarnessComposition?.forWork(input);
-        const browser = !browserSupported
-          ? undefined
-          : createBrowserAppManagedTools({
-              windowId: input.windowId,
-              threadId: input.thread.id as never,
-              mode: "work",
-              modelId: String(input.thread.modelId),
-              resolveModelId: (threadId) => {
-                const current = workThreadProjection.read(threadId as never);
-                return current === undefined ? undefined : String(current.modelId);
-              },
-              modelBindings: browserModelBindings,
-              resolveTaskProfile: () =>
-                workThreadProjection.read(input.thread.id)?.browserTaskProfile,
-              executionPolicy: "approval-gated",
-              resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
-              browser: {
-                inspectThread: (ownerWindowId, threadId) =>
-                  browserAutomationService.inspectThread(ownerWindowId, threadId),
-                create: (command) => browserAutomationService.create(command),
-                act: (command) => browserAutomationService.act(command),
-                saveDownload: (command) => browserAutomationService.saveDownload(command),
-                releaseThread: (ownerWindowId, threadId) =>
-                  browserAutomationService.releaseThread(ownerWindowId, threadId),
-                holdForPerson: (ownerWindowId, threadId) =>
-                  browserAutomationService.holdForPerson(ownerWindowId, threadId),
-                snapshotRefs: (ownerWindowId, threadId) =>
-                  browserAutomationService.snapshotRefs(ownerWindowId, threadId),
-              },
-              flows: browserFlows,
-              approvals: browserToolApprovalService,
-              uploadRoot: () => input.projectRoot,
-              uuid: randomUUID,
-            });
+        const routineBrowser =
+          input.routineRun === undefined
+            ? undefined
+            : routineBrowserTools({
+                routineRun: input.routineRun,
+                threadId: decodeBrowserThreadId(String(input.thread.id)),
+                currentAuthority: () =>
+                  browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
+                currentModelId: () => {
+                  const current = workThreadProjection.read(input.thread.id);
+                  return current === undefined || current.access !== input.thread.access
+                    ? undefined
+                    : String(current.modelId);
+                },
+              });
+        const browser =
+          routineBrowser ??
+          (!browserSupported
+            ? undefined
+            : createBrowserAppManagedTools({
+                windowId: input.windowId,
+                threadId: input.thread.id as never,
+                mode: "work",
+                modelId: String(input.thread.modelId),
+                resolveModelId: (threadId) => {
+                  const current = workThreadProjection.read(threadId as never);
+                  return current === undefined ? undefined : String(current.modelId);
+                },
+                modelBindings: browserModelBindings,
+                resolveTaskProfile: () =>
+                  workThreadProjection.read(input.thread.id)?.browserTaskProfile,
+                executionPolicy: "approval-gated",
+                resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+                browser: {
+                  inspectThread: (ownerWindowId, threadId) =>
+                    browserAutomationService.inspectThread(ownerWindowId, threadId),
+                  create: (command) => browserAutomationService.create(command),
+                  act: (command) => browserAutomationService.act(command),
+                  saveDownload: (command) => browserAutomationService.saveDownload(command),
+                  releaseThread: (ownerWindowId, threadId) =>
+                    browserAutomationService.releaseThread(ownerWindowId, threadId),
+                  holdForPerson: (ownerWindowId, threadId) =>
+                    browserAutomationService.holdForPerson(ownerWindowId, threadId),
+                  snapshotRefs: (ownerWindowId, threadId) =>
+                    browserAutomationService.snapshotRefs(ownerWindowId, threadId),
+                },
+                flows: browserFlows,
+                approvals: browserToolApprovalService,
+                uploadRoot: () => input.projectRoot,
+                uuid: randomUUID,
+              }));
         const sideTaskTools = !browserSupported
           ? undefined
           : createSideTaskTools({

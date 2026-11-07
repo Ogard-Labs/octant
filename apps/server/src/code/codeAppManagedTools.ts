@@ -500,6 +500,7 @@ export interface CodeAppManagedToolsOptions {
       },
     ) => Promise<CodeOperationTerminalSnapshot>;
   };
+  readonly delegatedBrowserTools?: AppManagedToolSet;
   readonly browser?: {
     readonly runScript?: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
     readonly resolveAuthority: (
@@ -625,12 +626,20 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
     definitions: [
       // A family whose capability this host did not lend is omitted, not
       // advertised only to be refused on every call.
-      ...(options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION]),
+      ...(options.delegatedBrowserTools?.definitions ??
+        (options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION])),
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
       ...(options.pullRequestApproval === undefined ? [] : [pullRequestDefinition]),
     ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
+    ...(options.delegatedBrowserTools?.close === undefined
+      ? {}
+      : {
+          close: async () => {
+            await options.delegatedBrowserTools?.close?.();
+          },
+        }),
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
       const stalenessFailure = currentThreadIdentityFailure(options);
@@ -638,6 +647,17 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       const profileFailure = profileToolConstraintFailure(options.thread, name);
       if (profileFailure !== undefined) {
         return failure("profile-tool-refused", profileFailure);
+      }
+      if (name === CODE_BROWSER_TOOL_NAME && options.delegatedBrowserTools !== undefined) {
+        const operation = parseBrowserToolInput(inputJson, { allowProfile: true });
+        if (operation === undefined) return failure("invalid-browser-input");
+        const refused = browserAuthorityFailure(options, operation.operation);
+        if (refused !== undefined) return failure(refused);
+        return options.delegatedBrowserTools.execute({
+          name,
+          inputJson,
+          ...(signal === undefined ? {} : { signal }),
+        });
       }
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(

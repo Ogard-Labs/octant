@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+import {
+  BROWSER_ROUTINE_SESSION_DEFAULT_MINUTES,
+  BROWSER_ROUTINE_SESSION_MAX_MINUTES,
+  BROWSER_SESSION_PERMISSION_LIMIT,
+} from "@octant/contracts/browser-session-grants";
 import {
   decodeUtcTimestamp,
   sameToolActionAuthority,
@@ -47,7 +53,10 @@ interface BrowserSessionGrantsOptions {
   readonly onRevoked: (grantId: string) => void;
 }
 
-const MAX_PERMISSIONS = 256;
+const MAX_PERMISSIONS = BROWSER_SESSION_PERMISSION_LIMIT;
+const MAX_TIMER_MS = 2_147_483_647;
+const recipientDigest = (revision: string) =>
+  `sha256:${createHash("sha256").update(revision).digest("hex")}`;
 const REVIEW_MS = 2 * 60_000;
 
 function refused(
@@ -88,7 +97,7 @@ function httpsOrigins(values: ReadonlyArray<string>): ReadonlyArray<string> | un
   return origins.size > 0 && origins.size <= 16 ? [...origins].sort() : undefined;
 }
 
-/** Host-lifetime permissions; a restart deliberately restores none of them. */
+/** Host-lifetime permissions; restart requires another explicit review. */
 export class BrowserSessionGrants {
   readonly #options: BrowserSessionGrantsOptions;
   readonly #grants = new Map<string, SavedPermission>();
@@ -167,10 +176,19 @@ export class BrowserSessionGrants {
       )
         return refused("stale", "The caller or local window changed. Review the session again.");
       const now = this.#options.now();
-      const expires = Math.min(
-        now + command.durationMinutes * 60_000,
-        current.notAfter ?? Infinity,
-      );
+      const duration =
+        command.durationMinutes ??
+        (command.grantee.kind === "routine" ? BROWSER_ROUTINE_SESSION_DEFAULT_MINUTES : undefined);
+      if (
+        duration === undefined ||
+        !Number.isSafeInteger(duration) ||
+        duration < 1 ||
+        (command.grantee.kind === "routine"
+          ? duration > BROWSER_ROUTINE_SESSION_MAX_MINUTES
+          : ![15, 60, 480].includes(duration))
+      )
+        return refused("invalid", "Choose a duration within this caller's session limit.");
+      const expires = Math.min(now + duration * 60_000, current.notAfter ?? Infinity);
       if (expires <= now) return refused("expired", "That caller's session has ended.");
       const grant: BrowserSessionGrant = {
         grantId: decodeBrowserSessionGrantId(this.#options.uuid()),
@@ -178,6 +196,7 @@ export class BrowserSessionGrants {
         profile: command.profile,
         profileLabel: label,
         origins,
+        recipientRevisionDigest: recipientDigest(current.revision),
         grantedAt: decodeUtcTimestamp(new Date(now).toISOString()),
         expiresAt: decodeUtcTimestamp(new Date(expires).toISOString()),
       };
@@ -226,12 +245,7 @@ export class BrowserSessionGrants {
       return refused("record-failed", "The permission could not be recorded. Nothing was granted.");
     }
     this.#grants.set(review.grant.grantId, review);
-    const timer = setTimeout(
-      () => this.#remove(review, "expired"),
-      Math.max(1, Date.parse(review.grant.expiresAt) - this.#options.now()),
-    );
-    timer.unref?.();
-    this.#timers.set(review.grant.grantId, timer);
+    this.#scheduleExpiry(review);
     return { kind: "browser-session-granted", grant: review.grant };
   }
 
@@ -285,6 +299,10 @@ export class BrowserSessionGrants {
       .map((row) => row.grant);
   }
 
+  revalidate(): void {
+    this.#prune();
+  }
+
   invalidateProfile(profile: StoredBrowserProfile): void {
     for (const row of this.#grants.values())
       if (browserProfileKey(row.grant.profile) === browserProfileKey(profile))
@@ -302,6 +320,31 @@ export class BrowserSessionGrants {
   close(): void {
     this.#reviews.clear();
     for (const row of this.#grants.values()) this.#remove(row, "revoked");
+  }
+
+  #scheduleExpiry(row: SavedPermission): void {
+    const remaining = Date.parse(row.grant.expiresAt) - this.#options.now();
+    if (remaining <= 0) {
+      this.#remove(row, "expired");
+      return;
+    }
+    // Native timers clamp a delay over 2^31-1 milliseconds to one millisecond.
+    // Long routine grants keep their absolute deadline across bounded chunks.
+    const timer = setTimeout(
+      () => {
+        this.#timers.delete(row.grant.grantId);
+        if (!this.#grants.has(row.grant.grantId)) return;
+        if (!this.#current(row))
+          this.#remove(
+            row,
+            Date.parse(row.grant.expiresAt) <= this.#options.now() ? "expired" : "changed",
+          );
+        else this.#scheduleExpiry(row);
+      },
+      Math.min(remaining, MAX_TIMER_MS),
+    );
+    timer.unref?.();
+    this.#timers.set(row.grant.grantId, timer);
   }
 
   #current(row: SavedPermission): boolean {

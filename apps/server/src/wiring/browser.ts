@@ -1,3 +1,14 @@
+import {
+  currentRoutineBrowserTarget,
+  routineBrowserExecutionIsCurrent,
+} from "../browser/browserRoutineSessions";
+import { deriveToolHostId } from "../browser/browserAuthorityResolver";
+import type {
+  AutomationRunReference,
+  AutomationId,
+  ToolActionAuthority,
+  BrowserThreadId,
+} from "@octant/contracts";
 import type { BrowserRuntimePort } from "../browser/browserRuntimePort";
 import { createNativeBrowserPresentationRoutes } from "../browser/nativeBrowserPresentationRoutes";
 import { randomUUID } from "node:crypto";
@@ -244,9 +255,47 @@ export function wireBrowser(deps: BrowserDependencies) {
           );
         },
       });
+    const routineSessionTarget = (
+      routineId: AutomationId,
+    ): CurrentBrowserSessionTarget | undefined => {
+      const definition = persistence.automationProjection.getDefinition(routineId);
+      if (definition === undefined) return undefined;
+      const provider = persistence.readProviderInstance(
+        definition.executionProfile.providerInstanceId,
+      );
+      const observed = providerRuntimeRegistry.observedState(
+        definition.executionProfile.providerInstanceId,
+      );
+      const profile = persistence.readAgentProfile(definition.executionProfile.profileId);
+      const binding = definition.binding;
+      const checkout =
+        binding.kind === "code" ? persistence.readCodeCheckout(binding.checkoutId) : undefined;
+      if (
+        binding.kind === "code" &&
+        (checkout?.availability !== "available" ||
+          String(checkout.repositoryId) !== String(binding.repositoryId))
+      )
+        return undefined;
+      return currentRoutineBrowserTarget({
+        definition,
+        project: persistence.readProject(definition.projectId),
+        toolHostId: deriveToolHostId(persistence.dataDirectory),
+        providerEligible:
+          provider?.enabled === true &&
+          (observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (id) => String(id) === String(definition.executionProfile.modelId),
+            ) === true),
+        executionProfileCurrent:
+          profile !== undefined &&
+          profile.version === definition.executionProfile.profileVersion &&
+          profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
+      });
+    };
     const currentSessionTarget = (
       grantee: BrowserSessionGrantee,
     ): CurrentBrowserSessionTarget | undefined => {
+      if (grantee.kind === "routine") return routineSessionTarget(grantee.routineId);
       if (grantee.kind !== "child") return undefined;
       const run = persistence.agentRunProjection.getById(grantee.runId);
       return run === undefined ? undefined : childSessionTarget(run);
@@ -258,6 +307,11 @@ export function wireBrowser(deps: BrowserDependencies) {
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       localWindows: () => windowAuthorityStore.listWindowIds(),
       canReview: (windowId, target) => {
+        if (target.grantee.kind === "routine")
+          return (
+            target.authority.mode !== "chat" &&
+            windowHoldsProject(windowId, target.authority.projectId, target.authority.mode)
+          );
         if (target.grantee.kind !== "child") return false;
         const run = persistence.agentRunProjection.getById(target.grantee.runId);
         return (
@@ -269,13 +323,18 @@ export function wireBrowser(deps: BrowserDependencies) {
           )
         );
       },
-      targets: () =>
-        persistence.agentRunProjection
+      targets: () => [
+        ...persistence.automationProjection.listDefinitions().flatMap((definition) => {
+          const row = routineSessionTarget(definition.id);
+          return row === undefined ? [] : [row];
+        }),
+        ...persistence.agentRunProjection
           .listCenterCandidates({ status: "all", mode: "all" })
           .flatMap(({ run }) => {
             const target = childSessionTarget(run);
             return target === undefined ? [] : [target];
           }),
+      ],
       current: currentSessionTarget,
       profileLabel: async (profile) =>
         (await browserRuntime.profiles?.list(false).catch(() => undefined))?.find(
@@ -302,6 +361,40 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: Date.now,
     });
     const browserDelegatedChildren = delegatedChildren;
+    const routineBrowserTools = (input: {
+      readonly routineRun: AutomationRunReference;
+      readonly threadId: BrowserThreadId;
+      readonly currentAuthority: () => ToolActionAuthority | undefined;
+      readonly currentModelId: () => string | undefined;
+    }) => {
+      const initial = routineSessionTarget(input.routineRun.automationId);
+      if (initial === undefined) return undefined;
+      const current = () => {
+        const definition = persistence.automationProjection.getDefinition(
+          input.routineRun.automationId,
+        );
+        const target = routineSessionTarget(input.routineRun.automationId);
+        if (String(input.currentModelId()) !== String(target?.target.modelId)) return undefined;
+        return routineBrowserExecutionIsCurrent({
+          run: persistence.automationProjection.getRun(input.routineRun.runId),
+          definition,
+          target,
+          threadId: input.threadId,
+          authority: input.currentAuthority(),
+        })
+          ? target?.target
+          : undefined;
+      };
+      return browserDelegatedChildren.tools({
+        target: initial.target,
+        executionId: String(input.routineRun.runId),
+        contentThreadId: input.threadId,
+        executionPolicy:
+          persistence.automationProjection.getDefinition(input.routineRun.automationId)
+            ?.executionProfile.executionPolicy ?? "plan",
+        current,
+      });
+    };
     contributeChildTools(({ run, authority }) => {
       const target = childSessionTarget(run)?.target;
       if (target === undefined || !authority.tools) return undefined;
@@ -315,6 +408,28 @@ export function wireBrowser(deps: BrowserDependencies) {
             : undefined,
       });
     });
+    const unsubscribeSessionAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (
+        !append.events.some((event) =>
+          [
+            "automation-definition",
+            "automation-run",
+            "project",
+            "provider-instance",
+            "agent-profile",
+            "code-thread",
+            "work-thread",
+          ].includes(event.aggregateType),
+        )
+      )
+        return;
+      // Automation's in-memory projection is applied after its journal append.
+      queueMicrotask(() => {
+        browserSessionGrants.revalidate();
+        void browserDelegatedChildren.settle();
+      });
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeSessionAuthority));
     onWindowRevoked((windowId) => {
       browserSessionGrants.revokeWindow(windowId);
       void browserDelegatedChildren.closeWindow(windowId);
@@ -611,6 +726,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     return {
       nativeBrowserPresentationRoutes,
       browserSessionGrants,
+      routineBrowserTools,
       browserDelegatedChildren,
       browserAutomationService,
       browserCredentialUseService,
