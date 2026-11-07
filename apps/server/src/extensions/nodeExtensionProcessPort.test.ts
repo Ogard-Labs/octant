@@ -903,7 +903,7 @@ describe("node extension process port", () => {
   });
 });
 
-it("keeps a Canvas export worker offline and permits only its host-owned entry file", async () => {
+it("stages only the trusted Canvas bootstrap without exposing its host directory", async () => {
   const root = await mkdtemp(join(tmpdir(), "octant-export-profile-"));
   receiptDirectories.push(root);
   const packageRoot = join(root, "package");
@@ -920,6 +920,7 @@ it("keeps a Canvas export worker offline and permits only its host-owned entry f
     throw new Error("Profile inspection only.");
   };
   const worker = join(root, "host-worker.mjs");
+  await writeFile(worker, "// trusted bootstrap\n");
   const port = createNodeExtensionProcessPort({
     platform: "darwin",
     sandboxPath: process.execPath,
@@ -945,7 +946,10 @@ it("keeps a Canvas export worker offline and permits only its host-owned entry f
   ).rejects.toThrow();
   const profile = observed[1] ?? "";
   expect(profile).toContain("(deny default)");
-  expect(profile).toContain(`(allow file-read* (literal "${worker}"))`);
+  expect(profile).not.toContain(`(allow file-read* (literal "${worker}"))`);
+  const staged = join(temporaryDirectory, "canvas-export-bootstrap.mjs");
+  expect(observed).toContain(staged);
+  expect(await readFile(staged, "utf8")).toBe("// trusted bootstrap\n");
   expect(profile).not.toContain(`(allow file-read* (subpath "${root}"))`);
   expect(profile).not.toContain("(allow network");
   expect(profile).not.toContain("(allow process-fork)");

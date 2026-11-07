@@ -4,6 +4,7 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:ch
 import {
   access,
   chmod,
+  copyFile,
   lstat,
   mkdir,
   readdir,
@@ -534,6 +535,18 @@ async function prepareOutsideDriverLaunch(
     throw new Error("Extension sandbox paths must be absolute.");
   }
   await assertOwnTemporaryFolder(sandbox, homeDirectory);
+  let args = input.args;
+  if (sandbox.kind === "canvas-export") {
+    if (args[0] !== sandbox.workerEntryPoint)
+      throw new Error("Canvas export bootstrap does not match its launch.");
+    // Bun enumerates the entry's directory before loading it. Stage only the
+    // trusted bootstrap in the already-private scratch folder; never grant a
+    // read of the host checkout to satisfy module discovery.
+    const stagedWorker = join(sandbox.temporaryDirectory, "canvas-export-bootstrap.mjs");
+    await copyFile(sandbox.workerEntryPoint, stagedWorker, constants.COPYFILE_EXCL);
+    await chmod(stagedWorker, 0o400);
+    args = [stagedWorker, ...args.slice(1)];
+  }
   const runtime = await realpath(input.command).catch(() => input.command);
   const readRoots = uniqueAbsolutePaths([
     sandbox.packageRoot,
@@ -547,7 +560,6 @@ async function prepareOutsideDriverLaunch(
     "/",
     ...OUTSIDE_DRIVER_DEVICE_READS,
     ...OUTSIDE_DRIVER_SYSTEM_FILE_READS,
-    ...(sandbox.kind === "canvas-export" ? [sandbox.workerEntryPoint] : []),
     ...(runtime === input.command ? [] : [input.command]),
   ]);
   const metadataLiterals = uniqueAbsolutePaths(
@@ -561,7 +573,7 @@ async function prepareOutsideDriverLaunch(
     ...(homeDirectory === undefined ? {} : { homeDirectory }),
   }).prepare({
     executable: input.command,
-    args: input.args,
+    args,
     boundRoot: sandbox.packageRoot,
     writeBoundRoot: false,
     temporaryDirectory: sandbox.temporaryDirectory,
