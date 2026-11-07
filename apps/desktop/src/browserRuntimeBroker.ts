@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import {
   decodeOwnerBrowserNativeCommand,
   decodeOwnerBrowserNativeResult,
@@ -28,6 +29,10 @@ import {
   decodeStoredBrowserProfile,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_COOKIES_PER_IMPORT_BATCH,
+  decodeBrowserContextId,
+  decodeBrowserContextPolicy,
+  decodePersistentBrowserLeaseBinding,
+  PersistentBrowserLeaseId,
 } from "@octant/contracts";
 import type { BrowserProfileStore } from "./browserProfileStore";
 import {
@@ -42,6 +47,11 @@ import {
 const BODY_LIMIT = 96 * 1_024;
 const TOKEN_HEADER = "x-octant-browser-broker-token";
 const ROUTES = new Set([
+  "/v1/persistent-owner/status",
+  "/v1/persistent-owner/configure",
+  "/v1/persistent-owner/create",
+  "/v1/persistent-owner/release",
+  "/v1/persistent-owner/release-context",
   "/v1/contexts/human-presentation",
   "/v1/available",
   "/v1/contexts/create",
@@ -83,6 +93,7 @@ export async function startBrowserRuntimeBroker(
   host: ReturnTypeOfBrowserSurfaceHost,
   profiles?: BrowserProfileStore,
 ): Promise<BrowserRuntimeBroker> {
+  await host.persistentOwner?.restart();
   const token = randomBytes(32).toString("base64url");
   const events: BrokerEvents = { gone: new Set<string>(), personInput: new Set<string>() };
   const removeGoneListener = host.onContextGone((contextId) => events.gone.add(contextId));
@@ -116,12 +127,17 @@ export async function startBrowserRuntimeBroker(
   const address = server.address() as AddressInfo | null;
   if (address === null) throw new Error("Octant Browser runtime broker is unavailable.");
   brokerUrl = `http://127.0.0.1:${address.port}/`;
+  const sweep = setInterval(() => {
+    void host.persistentOwner?.sweep();
+  }, 1000);
+  sweep.unref();
   let closing: Promise<void> | undefined;
   return Object.freeze({
     url: brokerUrl,
     token,
     close: () => {
       closing ??= (async () => {
+        clearInterval(sweep);
         removeGoneListener();
         removePersonInputListener();
         await host.closeAll();
@@ -214,6 +230,49 @@ async function handleBrokerRequest(
   const body = await jsonBody(request);
   if (body === undefined) return failure("invalid-request", 400);
   try {
+    if (url.pathname.startsWith("/v1/persistent-owner/")) {
+      const owner = host.persistentOwner;
+      if (owner === undefined) return Response.json({ status: "unavailable" });
+      if (url.pathname === "/v1/persistent-owner/status") {
+        if (Object.keys(body).length !== 0) return failure("invalid-request", 400);
+        return Response.json(owner.status());
+      }
+      if (url.pathname === "/v1/persistent-owner/configure") {
+        if (Object.keys(body).length !== 1 || typeof body.enabled !== "boolean")
+          return failure("invalid-request", 400);
+        return Response.json(await owner.configure(body.enabled));
+      }
+      if (url.pathname === "/v1/persistent-owner/release") {
+        if (Object.keys(body).length !== 1) return failure("invalid-request", 400);
+        return Response.json({
+          status: await owner.release(
+            Schema.decodeUnknownSync(PersistentBrowserLeaseId)(body.leaseId),
+          ),
+        });
+      }
+      if (url.pathname === "/v1/persistent-owner/release-context") {
+        if (Object.keys(body).length !== 2 || !isUuid(body.contextId))
+          return failure("invalid-request", 400);
+        return Response.json({
+          status: await owner.releaseContext(
+            body.contextId,
+            decodePersistentBrowserLeaseBinding(body.binding),
+          ),
+        });
+      }
+      if (url.pathname === "/v1/persistent-owner/create") {
+        if (Object.keys(body).length !== 3 || !isPolicy(body.policy))
+          return failure("invalid-request", 400);
+        return Response.json(
+          await owner.createContext(
+            decodeBrowserContextId(body.contextId),
+            decodeBrowserContextPolicy(body.policy),
+            signal ?? request.signal,
+            decodePersistentBrowserLeaseBinding(body.binding),
+          ),
+        );
+      }
+    }
     if (url.pathname === "/v1/contexts/human-presentation") {
       if (
         !isUuid(body.windowId) ||

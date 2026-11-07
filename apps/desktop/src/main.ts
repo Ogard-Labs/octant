@@ -1758,7 +1758,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         );
         if (stored?.kind === "account" && !profileStore.hasAccountProfile(stored.profileId))
           throw new Error("The named account profile is not registered on this host.");
-        if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
+        if (
+          options.owner.kind === "execution" ||
+          nightlyWindowLeases?.hasWindow(options.owner.windowId) === true
+        )
           return createOffscreenBrowserSurface(options);
         return new WebContentsView({
           webPreferences: { partition: options.partition, ...options.webPreferences },
@@ -4399,6 +4402,7 @@ async function quitHostAfterLastClient(
 }
 
 async function stopHostForQuit(): Promise<void> {
+  const browserStopped = browserSurfaceHost?.persistentOwner?.close();
   const prototypesStopped = canvasPrototypeSurface?.stop();
   const hostStopped = (async () => {
     await shutdownSecondaryProjectWindows();
@@ -4411,12 +4415,8 @@ async function stopHostForQuit(): Promise<void> {
   })();
   const native = desktopPeerStatusOwner?.close();
   const windows = nightlyWindowLeases?.close();
-  const [hostResult, prototypeResult, nativeResult, windowsResult] = await Promise.allSettled([
-    hostStopped,
-    prototypesStopped,
-    native,
-    windows,
-  ]);
+  const [hostResult, prototypeResult, nativeResult, windowsResult, browserResult] =
+    await Promise.allSettled([hostStopped, prototypesStopped, native, windows, browserStopped]);
   const windowsFailed =
     windowsResult.status === "rejected" || windowsResult.value?.kind === "failed";
   const nativeFailed = nativeResult.status === "rejected" || nativeResult.value?.kind === "failed";
@@ -4429,7 +4429,12 @@ async function stopHostForQuit(): Promise<void> {
   }
   // Native close can retain an OS launch after its deadline. Report failure
   // only after every sibling has settled, so quit never records it as clean.
-  if (windowsFailed || nativeFailed)
+  if (
+    windowsFailed ||
+    nativeFailed ||
+    browserResult.status === "rejected" ||
+    browserResult.value === "unconfirmed"
+  )
     throw new Error("Octant could not finish closing its native desktop owners.");
 }
 
@@ -4720,7 +4725,10 @@ else {
   }).then(startDesktopInstance, handleFatalStartup);
 }
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (
+    process.platform !== "darwin" &&
+    browserSurfaceHost?.persistentOwner?.retainsProcess() !== true
+  ) {
     quitCanPrompt = true;
     app.quit();
   }

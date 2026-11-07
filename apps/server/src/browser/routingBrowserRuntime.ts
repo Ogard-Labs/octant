@@ -4,6 +4,7 @@ import type {
 } from "@octant/contracts/browser-presentation";
 import type { WindowId } from "@octant/contracts/shell";
 import type { BrowserContextId } from "@octant/contracts/browser-automation";
+import type { PersistentBrowserLeaseId } from "@octant/contracts/persistent-browser-owner";
 import { BrowserProfileUnavailableError, type BrowserRuntimePort } from "./browserRuntimePort";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 
@@ -11,6 +12,7 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
   readonly #native: BrowserRuntimePort;
   readonly #headless: BrowserRuntimePort;
   readonly #backend = new Map<BrowserContextId, BrowserRuntimePort>();
+  readonly #executionContexts = new Map<PersistentBrowserLeaseId, BrowserContextId>();
 
   constructor(options: {
     readonly native: BrowserRuntimePort;
@@ -18,6 +20,31 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
   }) {
     this.#native = options.native;
     this.#headless = options.headless;
+  }
+
+  get persistentOwner(): BrowserRuntimePort["persistentOwner"] {
+    const native = this.#native.persistentOwner;
+    if (native === undefined) return undefined;
+    return {
+      status: (signal) => native.status(signal),
+      configure: (enabled, signal) => native.configure(enabled, signal),
+      createContext: async (...args) => {
+        const created = await native.createContext(...args);
+        if (created.status === "created") {
+          this.#backend.set(args[0], this.#native);
+          this.#executionContexts.set(created.leaseId, args[0]);
+        }
+        return created;
+      },
+      release: async (leaseId) => {
+        const result = await native.release(leaseId);
+        if (result === "closed") {
+          const contextId = this.#executionContexts.get(leaseId);
+          if (contextId !== undefined) this.#forget(contextId);
+        }
+        return result;
+      },
+    };
   }
 
   async humanPresentation(
@@ -146,12 +173,13 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
 
   async closeContext(contextId: BrowserContextId): Promise<void> {
     const runtime = this.#backend.get(contextId);
-    this.#backend.delete(contextId);
     await runtime?.closeContext(contextId);
+    this.#forget(contextId);
   }
 
   async closeAll(): Promise<void> {
     this.#backend.clear();
+    this.#executionContexts.clear();
     await Promise.all([this.#native.closeAll(), this.#headless.closeAll()]);
   }
 
@@ -170,6 +198,7 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
             backend === runtime && (contextIds === undefined || contextIds.includes(contextId)),
         )
         .map(([contextId]) => contextId);
+      for (const contextId of owned) this.#forget(contextId);
       if (owned.length > 0) listener(owned);
     };
     const removeNative = this.#native.onProcessExit?.((contextIds) =>
@@ -193,5 +222,11 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     const runtime = this.#backend.get(contextId);
     if (runtime === undefined) throw new Error("Browser context is stale or unknown.");
     return runtime;
+  }
+
+  #forget(contextId: BrowserContextId): void {
+    this.#backend.delete(contextId);
+    for (const [leaseId, held] of this.#executionContexts)
+      if (String(held) === String(contextId)) this.#executionContexts.delete(leaseId);
   }
 }

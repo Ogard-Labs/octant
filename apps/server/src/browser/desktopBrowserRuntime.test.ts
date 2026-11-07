@@ -1,6 +1,10 @@
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserRuntime } from "./desktopBrowserRuntime";
+import {
+  decodePersistentBrowserLeaseBinding,
+  decodePersistentBrowserContextCreated,
+} from "@octant/contracts/persistent-browser-owner";
 
 const contextId = "60000000-0000-4000-8000-000000000001" as never;
 const policy = {
@@ -12,6 +16,114 @@ const policy = {
 };
 
 describe("DesktopBrowserRuntime", () => {
+  it("releases exact execution receipts on cancellation and removes listeners when native expiry ends them", async () => {
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: "10000000-0000-4000-8000-000000000001",
+      grantId: "10000000-0000-4000-8000-000000000002",
+      executionId: "execution",
+      threadId: "10000000-0000-4000-8000-000000000004",
+      mode: "code",
+      projectId: "10000000-0000-4000-8000-000000000005",
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: ["https://example.com"],
+      expiresAt: "2026-11-07T20:30:00.000Z",
+    });
+    const receipt = decodePersistentBrowserContextCreated({
+      status: "created",
+      ownerId: binding.ownerId,
+      leaseId: binding.grantId,
+    });
+    const paths: string[] = [];
+    const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (path.endsWith("/create")) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          contextId,
+          policy: { ...policy, profile: binding.profile },
+          binding,
+        });
+        return Response.json(receipt);
+      }
+      return Response.json(
+        path.endsWith("/gone") ? { contextIds: [contextId] } : { status: "closed" },
+      );
+    });
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch,
+      eventPollIntervalMs: 10,
+    });
+    const first = new AbortController();
+    await runtime.persistentOwner.createContext(
+      contextId,
+      { ...policy, profile: binding.profile },
+      first.signal,
+      binding,
+    );
+    first.abort();
+    await vi.waitFor(() =>
+      expect(paths.filter((path) => path.endsWith("/release"))).toHaveLength(1),
+    );
+    const second = new AbortController();
+    await runtime.persistentOwner.createContext(
+      contextId,
+      { ...policy, profile: binding.profile },
+      second.signal,
+      binding,
+    );
+    const exited = vi.fn();
+    const remove = runtime.onProcessExit(exited);
+    try {
+      await vi.waitFor(() => expect(exited).toHaveBeenCalledWith([contextId]));
+      second.abort();
+      expect(paths.filter((path) => path.endsWith("/release"))).toHaveLength(1);
+    } finally {
+      remove();
+      await runtime.closeAll();
+    }
+  });
+
+  it("cleans a lost execution-create response only with its exact host binding", async () => {
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: "10000000-0000-4000-8000-000000000001",
+      grantId: "10000000-0000-4000-8000-000000000002",
+      executionId: "execution",
+      threadId: "10000000-0000-4000-8000-000000000004",
+      mode: "code",
+      projectId: "10000000-0000-4000-8000-000000000005",
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: ["https://example.com"],
+      expiresAt: "2026-11-07T20:30:00.000Z",
+    });
+    const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/create")) throw new Error("Lost reply");
+      expect(String(input)).toContain("/v1/persistent-owner/release-context");
+      expect(JSON.parse(String(init?.body))).toEqual({ contextId, binding });
+      return Response.json({ status: "closed" });
+    });
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch,
+    });
+    expect(
+      await runtime.persistentOwner.createContext(
+        contextId,
+        { ...policy, profile: binding.profile },
+        new AbortController().signal,
+        binding,
+      ),
+    ).toEqual({ status: "unavailable" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it("sends pinned script source only during preparation and rejects malformed native replies without their contents", async () => {
     const sent: unknown[] = [];
     let malformed = false;

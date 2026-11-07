@@ -114,6 +114,14 @@ export function createPersistentBrowserOwner(options: {
         ownerId = Schema.decodeUnknownSync(PersistentBrowserOwnerId)(uuid());
       return status();
     },
+    retainsProcess: () => enabled && !stopped,
+    contextEnded: (contextId: string) => {
+      for (const [id, lease] of leases)
+        if (String(lease.contextId) === contextId) {
+          lease.controller.abort();
+          leases.delete(id);
+        }
+    },
     reserves: (contextId: string) =>
       [...leases.values()].some((lease) => String(lease.contextId) === contextId),
     admits: (owner: BrowserExecutionOwner) => {
@@ -189,6 +197,16 @@ export function createPersistentBrowserOwner(options: {
       return { status: "created", ownerId: lease.owner.ownerId, leaseId };
     },
     release,
+    releaseContext: (
+      contextId: string,
+      binding: PersistentBrowserLeaseBinding,
+    ): Promise<"closed" | "unconfirmed"> => {
+      const lease = [...leases.values()].find((row) => String(row.contextId) === contextId);
+      if (lease === undefined) return Promise.resolve("closed");
+      if (JSON.stringify(lease.binding) !== JSON.stringify(binding))
+        return Promise.resolve("unconfirmed");
+      return release(lease.owner.leaseId);
+    },
     sweep: async () => {
       await Promise.allSettled(
         [...leases.values()]
@@ -201,9 +219,10 @@ export function createPersistentBrowserOwner(options: {
       if (enabled && !stopped && leases.size === 0)
         ownerId = Schema.decodeUnknownSync(PersistentBrowserOwnerId)(uuid());
     },
-    close: async () => {
+    close: async (): Promise<"closed" | "unconfirmed"> => {
       stopped = true;
       await retire();
+      return leases.size === 0 ? "closed" : "unconfirmed";
     },
   };
 }

@@ -1,3 +1,8 @@
+import {
+  decodeBrowserContextId,
+  decodeBrowserContextPolicy,
+  decodePersistentBrowserLeaseBinding,
+} from "@octant/contracts";
 import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
@@ -3139,5 +3144,91 @@ describe("native page script ownership", () => {
     } finally {
       await f.host.closeAll();
     }
+  });
+});
+
+describe("the native execution owner boundary", () => {
+  it("retains only opted-in execution pages when the last renderer closes and lends no renderer control", async () => {
+    const created: Array<
+      Parameters<Parameters<typeof createBrowserSurfaceHost>[0]["createView"]>[0]
+    > = [];
+    const views: BrowserSurfaceViewPort[] = [];
+    let windowAvailable = true;
+    const host = createBrowserSurfaceHost({
+      isOwnerWindowAvailable: () => windowAvailable,
+      createView: (input) => {
+        created.push(input);
+        const native = view();
+        views.push(native);
+        return native;
+      },
+    });
+    const policy = decodeBrowserContextPolicy({
+      profileMode: "isolated",
+      profile: { kind: "personal" },
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 60000,
+    });
+    await host.createContext({ contextId, owner: { windowId: "window-a", threadId }, policy });
+    const ready = await host.persistentOwner.configure(true);
+    if (ready.status !== "ready") throw Error("owner missing");
+    const executionId = decodeBrowserContextId("60000000-0000-4000-8000-000000000002");
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: ready.ownerId,
+      grantId: contextId,
+      executionId,
+      threadId,
+      mode: "work",
+      projectId: contextId,
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: policy.allowedOrigins,
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+    expect(
+      await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      ),
+    ).toMatchObject({ status: "created" });
+    windowAvailable = false;
+    await host.closeOwnerContexts("window-a");
+    expect(() => host.state(contextId)).toThrow();
+    expect(host.state(executionId).contextId).toBe(executionId);
+    expect(created.map((row) => row.partition)).toEqual([
+      "persist:octant-profile-personal",
+      "persist:octant-profile-personal",
+    ]);
+    expect(created[1]?.owner).not.toHaveProperty("windowId");
+    const shell = {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    };
+    expect(() =>
+      host.attach(executionId, { windowId: "window-a", threadId }, shell, {
+        x: 0,
+        y: 0,
+        width: 800,
+        height: 600,
+      }),
+    ).toThrow("owning Project window");
+    expect(
+      await host.prepareCredentialFill(
+        executionId,
+        { windowId: "window-a", threadId },
+        "https://example.com",
+      ),
+    ).toMatchObject({ status: "refused" });
+    await host.persistentOwner.configure(false);
+    expect(() => host.state(executionId)).toThrow();
+    expect(views[1]?.webContents.close).toHaveBeenCalled();
+    await host.closeAll();
   });
 });
