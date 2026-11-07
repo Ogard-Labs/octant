@@ -1,4 +1,5 @@
 import {
+  decodeHostHealthHistoryRequest,
   decodeUsageDiagnosticsRequest,
   decodeUsageExportRequest,
   decodeUsageQueryRequest,
@@ -25,6 +26,7 @@ import {
 } from "./persistence/usageProjection";
 import { aggregateUsage } from "./persistence/usageAggregation";
 import type { TurnMetricsStore } from "./metrics/turnMetricsStore";
+import type { HostHealthRecorder } from "./metrics/hostHealthRecorder";
 import { recordsToCsv, recordsToJson, SENSITIVE_EXPORT_FIELDS } from "./persistence/usageExport";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 
@@ -75,6 +77,8 @@ export interface UsageRouteDependencies {
    * the same Project scope and filter. Absent leaves turns out of the answer.
    */
   readonly turnMetrics?: Pick<TurnMetricsStore, "summarize" | "report">;
+  /** How the host process did over time. Numbers only, so not Project-scoped. */
+  readonly hostHealth?: Pick<HostHealthRecorder, "read">;
 }
 
 export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
@@ -119,6 +123,9 @@ export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
       return failureResponse("Usage API requires POST.", 405, origin);
     }
 
+    if (url.pathname === "/api/usage/host-health") {
+      return handleHostHealth(request, dependencies, bodyLimit, origin);
+    }
     if (url.pathname === "/api/usage/diagnostics") {
       let projectScope: UsageProjectScope;
       try {
@@ -270,6 +277,39 @@ async function handleDiagnostics(
   } catch {
     return failureResponse("Usage diagnostics request is invalid.", 400, origin);
   }
+}
+
+/**
+ * The host's health over time. It names no Project, thread, route, or SQL, so
+ * any authenticated window may read it, the way the dashboard's host latency
+ * already is.
+ */
+async function handleHostHealth(
+  request: Request,
+  dependencies: UsageRouteDependencies,
+  bodyLimit: number,
+  origin: string | null,
+): Promise<Response> {
+  const decoded = await readJson(request, bodyLimit);
+  if (decoded.kind === "too-large") {
+    return failureResponse("Request body is too large.", 413, origin);
+  }
+  if (decoded.kind === "invalid") {
+    return failureResponse("Request body must be valid JSON.", 400, origin);
+  }
+  if (dependencies.hostHealth === undefined) {
+    return failureResponse("Host health is unavailable.", 503, origin);
+  }
+  let historyRequest: ReturnType<typeof decodeHostHealthHistoryRequest>;
+  try {
+    historyRequest = decodeHostHealthHistoryRequest(decoded.value);
+  } catch {
+    return failureResponse("Host health request is invalid.", 400, origin);
+  }
+  return new Response(JSON.stringify(dependencies.hostHealth.read(historyRequest)), {
+    status: 200,
+    headers: { "content-type": "application/json", ...corsHeaders(origin) },
+  });
 }
 
 async function handleExport(

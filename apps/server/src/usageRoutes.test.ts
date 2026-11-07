@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createUsageRouteHandler } from "./usageRoutes";
@@ -1021,5 +1021,50 @@ describe("usage route turn diagnostics", () => {
       (await diagnose(fixture, { timeZone: "Mars/Olympus" }, fixture.capability))?.status,
     ).toBe(400);
     expect((await diagnose(fixture, {}))?.status).toBe(401);
+  });
+});
+
+describe("usage route host health", () => {
+  it("answers the host's health over time to any authenticated window, and refuses a bad span", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+    const read = vi.fn(() => ({
+      generatedAt: "2026-11-07T12:00:00.000Z",
+      resolution: "minute",
+      retentionDays: 14,
+      samples: [],
+    }));
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({
+      windowId: ids.window as never,
+      capability: fixture.capability,
+      now: nowMs,
+    });
+    const handler = createUsageRouteHandler({
+      connection: fixture.connection,
+      windowAuthorityStore,
+      readWindowProjectScope: () => ({ kind: "projects", projectIds: [ids.projectA] }),
+      now: () => nowMs,
+      hostHealth: { read } as never,
+    });
+    const ask = (body: unknown, capability?: string) =>
+      handler(
+        makeRequest("/api/usage/host-health", {
+          body,
+          ...(capability === undefined ? {} : { capability }),
+        }),
+      );
+
+    const ok = await ask({ resolution: "hour" }, fixture.capability);
+    expect(ok?.status).toBe(200);
+    expect(read).toHaveBeenCalledWith({ resolution: "hour" });
+    expect(
+      (
+        await ask(
+          { from: "2026-11-07T12:00:00.000Z", to: "2026-11-06T12:00:00.000Z" },
+          fixture.capability,
+        )
+      )?.status,
+    ).toBe(400);
+    expect((await ask({}))?.status).toBe(401);
   });
 });

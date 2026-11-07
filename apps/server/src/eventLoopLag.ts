@@ -9,10 +9,24 @@ export interface EventLoopLagCounters {
 
 let lagCount = 0;
 let worstLagMs = 0;
+// The same tally since the last host-health sample took it.
+let windowLagCount = 0;
+let windowWorstLagMs = 0;
 
 /** Process-wide tally since start; carries no route names. */
 export function readEventLoopLagCounters(): EventLoopLagCounters {
   return { count: lagCount, worstMs: Math.round(worstLagMs) };
+}
+
+/**
+ * Lag since the previous call, then starts a new window. Only the host-health
+ * recorder calls it; the lifetime tally above is unaffected.
+ */
+export function takeEventLoopLagWindow(): EventLoopLagCounters {
+  const window = { count: windowLagCount, worstMs: Math.round(windowWorstLagMs) };
+  windowLagCount = 0;
+  windowWorstLagMs = 0;
+  return window;
 }
 
 export function eventLoopLagThresholdFromEnvironment(
@@ -61,6 +75,8 @@ export function startEventLoopLagDetector(options: EventLoopLagDetectorOptions =
     if (lagMs > thresholdMs) {
       lagCount += 1;
       if (lagMs > worstLagMs) worstLagMs = lagMs;
+      windowLagCount += 1;
+      if (lagMs > windowWorstLagMs) windowWorstLagMs = lagMs;
       log?.(`[event-loop-lag] ${Math.round(lagMs)} ms over ${thresholdMs} ms`);
     }
   }, intervalMs);

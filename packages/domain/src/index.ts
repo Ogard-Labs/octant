@@ -215,6 +215,7 @@ export * from "./googleWorkspaceConnectors";
 export * from "./providerToolingPolicy";
 export * from "./turnDiagnosticsPolicy";
 export * from "./turnDiagnosticsReport";
+export * from "./hostHealthPolicy";
 export * from "./turnMetricsPolicy";
 export * from "./liveTurnPolicy";
 export * from "./threadToolSteps";

@@ -47,6 +47,18 @@ describe("LatencyStatsProjection", () => {
     });
   });
 
+  it("hands each host-health window what it saw since the last one, and leaves lifetime figures alone", () => {
+    const projection = new LatencyStatsProjection();
+    projection.record("rpc", 10);
+    projection.record("rpc", 30);
+
+    expect(projection.takeWindow()).toEqual([
+      { key: "rpc", count: 2, p50Ms: 10, p95Ms: 30, maxMs: 30 },
+    ]);
+    expect(projection.takeWindow()).toEqual([]);
+    expect(projection.read().measurements[0]?.observationCount).toBe(2);
+  });
+
   it("keeps percentiles bounded to the newest 256 samples", () => {
     const projection = new LatencyStatsProjection();
     for (let duration = 0; duration < 512; duration += 1) {

@@ -57,6 +57,7 @@ import {
   PersistenceStartupFailed,
 } from "./persistence/persistenceService";
 import { LatencyStatsProjection } from "./latencyStatsProjection";
+import { HostHealthRecorder } from "./metrics/hostHealthRecorder";
 import {
   isAllowedRendererOrigin,
   isForeignLoopbackOrigin,
@@ -189,6 +190,22 @@ export function startOctantServer(
     for (const fact of persistence.projectionCatchUp) {
       latencyStats.record("projection-catch-up", fact.durationMs);
     }
+    const hostHealth = new HostHealthRecorder({
+      path: join(persistence.dataDirectory, "host-health.sqlite3"),
+      latencyWindow: () => latencyStats.takeWindow(),
+      databaseBytes: () => {
+        const row = persistence.connection
+          .prepare(
+            "SELECT page_count * page_size AS bytes FROM pragma_page_count(), pragma_page_size()",
+          )
+          .get();
+        return typeof row === "object" && row !== null && "bytes" in row
+          ? Number(row.bytes)
+          : undefined;
+      },
+    });
+    const stopHostHealth = hostHealth.start();
+    yield* Effect.addFinalizer(() => Effect.sync(stopHostHealth));
 
     const serve = options.serve;
     if (serve === undefined) {
@@ -360,6 +377,7 @@ export function startOctantServer(
       zenEventStore,
     } = wireUsage({
       cacheStats,
+      hostHealth,
       latencyStats,
       persistence,
       spendCeilingHolder,
