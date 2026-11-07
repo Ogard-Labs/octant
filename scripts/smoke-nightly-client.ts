@@ -1033,8 +1033,15 @@ try {
           );
           if (answer.status === "refused") {
             const trace = stableA.events
-              .matching((event) => event.event.startsWith("presentation-"))
-              .slice(-50);
+              .matching(
+                (event) =>
+                  event.id === presentationId &&
+                  (event.event === "presentation-layout" ||
+                    event.type === "mouseDown" ||
+                    event.type === "mouseUp"),
+              )
+              .slice(-10)
+              .map(({ id: _id, ...event }) => event);
             throw new Error(
               `Input refused: ${JSON.stringify(value)} Trace: ${JSON.stringify(trace)}`,
             );
