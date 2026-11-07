@@ -188,7 +188,7 @@ describe("the Diagnostics page", () => {
 
 describe("the Diagnostics report copy", () => {
   it("copies the whole report as JSON, and a newer reading replaces the note", async () => {
-    const copyText = vi.fn(async () => undefined);
+    const copyText = vi.fn(async (_text: string) => undefined);
     const client = { diagnostics: vi.fn(async () => troubledReport) };
     render(
       <TurnDiagnosticsWorkspace
