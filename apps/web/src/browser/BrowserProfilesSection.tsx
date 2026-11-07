@@ -1,3 +1,4 @@
+import { BrowserUploadPermissionsSection } from "./BrowserUploadPermissionsSection";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { announceBrowserAccountProfilesChanged } from "./useBrowserAccountProfiles";
@@ -16,7 +17,10 @@ import { formatProfileSize } from "./browserProfileCopy";
 import { BrowserSessionGrantsSection } from "./BrowserSessionGrantsSection";
 
 export interface BrowserProfilesSectionProps {
-  readonly client: Pick<BrowserAutomationClient, "manageProfiles" | "manageSessionGrants">;
+  readonly client: Pick<
+    BrowserAutomationClient,
+    "manageProfiles" | "manageSessionGrants" | "manageUploadPermissions"
+  >;
   readonly focusedSetting?: string | undefined;
 }
 
@@ -255,6 +259,11 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
         )}
       </SettingsSection>
       <BrowserSessionGrantsSection
+        client={client}
+        profiles={loaded.kind === "ready" ? loaded.profiles : []}
+        focusedSetting={props.focusedSetting}
+      />
+      <BrowserUploadPermissionsSection
         client={client}
         profiles={loaded.kind === "ready" ? loaded.profiles : []}
         focusedSetting={props.focusedSetting}

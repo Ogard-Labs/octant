@@ -649,7 +649,10 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
         return failure("profile-tool-refused", profileFailure);
       }
       if (name === CODE_BROWSER_TOOL_NAME && options.delegatedBrowserTools !== undefined) {
-        const operation = parseBrowserToolInput(inputJson, { allowProfile: true });
+        const operation = parseBrowserToolInput(inputJson, {
+          allowProfile: true,
+          allowUploadPermission: true,
+        });
         if (operation === undefined) return failure("invalid-browser-input");
         const refused = browserAuthorityFailure(options, operation.operation);
         if (refused !== undefined) return failure(refused);

@@ -389,6 +389,14 @@ export function erasePurgedProjectData(input: {
   ]) {
     aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
   }
+  for (const aggregate of projectOwnedAggregates(
+    connection,
+    "browser-upload-permission",
+    "$.permission.target.authority.projectId",
+    projectId,
+  )) {
+    aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+  }
   for (const canvasId of input.canvasIds) {
     for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
       aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
@@ -497,7 +505,7 @@ function languageServerEgressAggregates(
 function projectOwnedAggregates(
   connection: SqliteConnection,
   aggregateType: string,
-  projectPath: "$.projectId" | "$.launch.projectId",
+  projectPath: "$.projectId" | "$.launch.projectId" | "$.permission.target.authority.projectId",
   projectId: string,
 ): ReadonlyArray<AggregateKey> {
   const rows = connection

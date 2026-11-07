@@ -399,6 +399,7 @@ export class BrowserAutomationService {
     }
   >();
   /** Each context's staged upload copies, deleted when the context closes. */
+  readonly #uploadAdmissions = new Map<BrowserContextId, Set<() => boolean>>();
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
   readonly #removePersonInputListener: (() => void) | undefined;
@@ -1014,6 +1015,9 @@ export class BrowserAutomationService {
      * approved. Nothing else supplies a path to a runtime.
      */
     readonly uploadFiles?: ReadonlyArray<string>;
+    /** Host-issued transfer revocation; wire commands cannot supply it. */
+    readonly uploadSignal?: AbortSignal;
+    readonly uploadIsCurrent?: () => boolean;
     /**
      * Deletes the copies `uploadFiles` names. The service owns it from here:
      * a page reads an attached file when its form is sent, often in a later
@@ -1059,6 +1063,31 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    let releaseUpload = input.releaseUpload;
+    if (
+      input.request.kind === "upload" &&
+      input.uploadFiles !== undefined &&
+      input.releaseUpload !== undefined &&
+      input.uploadSignal !== undefined &&
+      input.uploadIsCurrent !== undefined
+    ) {
+      const signal = input.uploadSignal;
+      const current = input.uploadIsCurrent;
+      const admissions =
+        this.#uploadAdmissions.get(owned.record.contextId) ?? new Set<() => boolean>();
+      admissions.add(current);
+      this.#uploadAdmissions.set(owned.record.contextId, admissions);
+      const revoked = () => this.#revokeAuthority(owned);
+      signal.addEventListener("abort", revoked, { once: true });
+      const release = releaseUpload;
+      releaseUpload = async () => {
+        signal.removeEventListener("abort", revoked);
+        admissions.delete(current);
+        if (admissions.size === 0) this.#uploadAdmissions.delete(owned.record.contextId);
+        await release?.();
+      };
+      if (signal.aborted || !current()) revoked();
+    }
     const credentialEpoch = owned.credentialEpoch;
     const byAgent = (input.activityBy ?? input.capturedBy) === "agent";
     if (byAgent) owned.agentActions += 1;
@@ -1095,7 +1124,7 @@ export class BrowserAutomationService {
         owned.agentActions -= 1;
         owned.agentActedAt = this.#now();
       }
-      if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
+      if (releaseUpload !== undefined) this.#keepUpload(owned, releaseUpload);
     }
   }
 
@@ -3205,6 +3234,10 @@ export class BrowserAutomationService {
   }
 
   #authorityIsActive(owned: OwnedContext): boolean {
+    if (
+      [...(this.#uploadAdmissions.get(owned.record.contextId) ?? [])].some((current) => !current())
+    )
+      return false;
     const profile = storedBrowserProfile(owned.record.policy.profile);
     if (
       profile !== undefined &&

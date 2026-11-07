@@ -51,6 +51,7 @@ jobs:
       # recipe change is most likely to break, so they belong on the PR and
       # not only in a local `bun run verify`.
       - run: bun run ui:check
+      - run: bun run --cwd apps/server browser:uploads:smoke
       - run: bun run style:check
       - run: bun run decisions:check
       - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
@@ -183,6 +184,7 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/server browser:uploads:smoke
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
       # Confined Code and Work opens prove where they landed with

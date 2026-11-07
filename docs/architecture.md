@@ -709,9 +709,13 @@ level, before creating a new file in `downloads/` of the thread's workspace;
 programs and installers and a symbolic link are refused, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
-person's own download in the Browser pane stays blocked. An upload asks every
-time, at every access level, naming each file and the site, and the answer is
-never remembered.
+person's own download in the Browser pane stays blocked. Ordinary uploads ask
+once per use at every access level. A local person may separately review a
+fixed-content routine upload manifest from one approved Project folder, binding
+caller/model/authority, profile/site, exact files, quota and expiry. It grants no
+account access or downloads; revocation and expiry close affected contexts, and
+restart restores none. The [upload specification](design/browser-agent-tool.md#recurring-upload-manifests)
+owns its file, quota and per-operation rules.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —

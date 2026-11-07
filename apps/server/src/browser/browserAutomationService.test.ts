@@ -1395,6 +1395,38 @@ describe("BrowserAutomationService", () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
+  it.each(["revoked", "stale"] as const)(
+    "withholds further page effects after attached upload permission becomes %s",
+    async (reason) => {
+      const { runtime, service } = harness();
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const stop = new AbortController();
+      let current = true;
+      const release = vi.fn(async () => undefined);
+      await service.act({
+        windowId,
+        request: request({ kind: "upload", target: "#file", files: ["report.txt"] }),
+        uploadFiles: ["/staging/report.txt"],
+        releaseUpload: release,
+        uploadSignal: stop.signal,
+        uploadIsCurrent: () => current,
+      });
+      expect(runtime.act).toHaveBeenCalledOnce();
+      current = false;
+      if (reason === "revoked") stop.abort();
+      const refused = await service.act({
+        windowId,
+        request: request({ kind: "click", target: "#send" }),
+      });
+      expect(refused.failure).toBeDefined();
+      expect(refused.observation).toBeUndefined();
+      expect(runtime.act).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(runtime.closeContext).toHaveBeenCalledOnce());
+      expect(release).toHaveBeenCalledOnce();
+      await service.close();
+    },
+  );
+
   describe("downloads", () => {
     const click = () => request({ kind: "click", target: "#get" });
 

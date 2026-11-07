@@ -1,3 +1,4 @@
+import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import {
   decodeBrowserThreadId,
   LOCAL_HOST_ID,
@@ -68,6 +69,7 @@ export class BrowserDelegatedChildren {
     readonly executionId?: string;
     readonly contentThreadId?: BrowserThreadId;
     readonly executionAuthority?: () => ToolActionAuthority | undefined;
+    readonly uploadPermissions?: Pick<BrowserUploadPermissions, "prepare" | "choices">;
   }): AppManagedToolSet {
     const id =
       input.target.grantee.kind === "child"
@@ -130,14 +132,20 @@ export class BrowserDelegatedChildren {
       execute: async (call) => {
         if (call.name !== BROWSER_TOOL_DEFINITION.name) return refusal("tool-unavailable");
         if (closing !== undefined || call.signal?.aborted) return refusal("tool-interrupted");
-        const operation = parseBrowserToolInput(call.inputJson, { allowProfile: true });
+        const operation = parseBrowserToolInput(call.inputJson, {
+          allowProfile: true,
+          allowUploadPermission: input.uploadPermissions !== undefined,
+        });
         if (operation === undefined) return refusal("invalid-browser-input");
         const current = input.current();
         if (current === undefined) {
           await close();
           return refusal("browser-authority-stale");
         }
-        if (operation.operation === "upload" || operation.operation === "download-save")
+        if (
+          (operation.operation === "upload" && input.uploadPermissions === undefined) ||
+          operation.operation === "download-save"
+        )
           return refusal("transfer-needs-separate-permission");
         if (operation.operation === "sign-in" || operation.operation === "run-script")
           return refusal("browser-operation-needs-a-local-person");
@@ -162,6 +170,17 @@ export class BrowserDelegatedChildren {
               : [];
         if (profile === undefined || origins.length === 0)
           return refusal("browser-session-permission-required");
+        if (operation.operation === "upload" && operation.uploadPermissionId === undefined)
+          return {
+            result: {
+              error: "upload-permission-required",
+              message:
+                "A local person reviews an exact file manifest in Settings > Data & storage. Retry with its uploadPermissionId; account permission alone authorizes no file transfer.",
+              permissions:
+                input.uploadPermissions?.choices(current, profile, origins[0] ?? "") ?? [],
+            },
+            isError: true,
+          };
         if (
           entry !== undefined &&
           (!this.#options.grants.isCurrent(entry.grantId, current, profile, origins) ||
@@ -225,6 +244,22 @@ export class BrowserDelegatedChildren {
                 : input.executionAuthority(),
             resolveModelId: () => input.current()?.modelId,
             delegatedProfileIsCurrent: permitted,
+            ...(input.uploadPermissions === undefined
+              ? {}
+              : {
+                  uploadPermission: (request) => {
+                    const live = input.current();
+                    return live === undefined
+                      ? undefined
+                      : input.uploadPermissions?.prepare({
+                          ...request,
+                          target: live,
+                          callerIsCurrent: () =>
+                            input.current() !== undefined &&
+                            permitted(request.profile, [request.origin]),
+                        });
+                  },
+                }),
             browser: {
               inspectThread: (window, thread) => service.inspectThread(window, thread),
               create: (request) => service.create(request),

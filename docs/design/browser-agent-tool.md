@@ -268,8 +268,9 @@ the page, the workspace, or the person is reached.
 
 ### Upload
 
-A file leaves this computer through a page only from the thread's workspace and
-only after the person approves it.
+A file leaves this computer through a page only after a person approves its
+file authority. Ordinary uploads use the thread's workspace and a one-use
+answer; a recurring routine may instead use the explicit manifest below.
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
@@ -286,7 +287,7 @@ only after the person approves it.
   a later action, so the copies stay until the page's browsing context closes
   (at most 8 uploads' worth per context, the oldest deleted first), and are
   deleted then, or at once if the upload never reached the page.
-- The person is asked every time, naming each file with its size and the site:
+- For an ordinary upload, the person is asked every time, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once. It is never remembered, so the card has
   no "Always allow", and it is asked at every access level, Full access
@@ -299,9 +300,55 @@ only after the person approves it.
 - Rationale: an upload is the one Browser action that reads a file off this
   computer and sends it to a site, so it keeps the narrowest reach the request
   allowed. The workspace is the folder the thread's own file tools already
-  treat as its root; a Work Project's extra folders are left out until a person
-  asks for them. Asking every time follows the Browser's first-action ask,
+  treat as its root. Broader approved-folder selection belongs only to an
+  explicit recurring manifest. Asking every time follows the Browser's first-action ask,
   which a separate maintainer decision keeps at every access level.
+
+### Recurring upload manifests
+
+Settings › Data & storage › Recurring uploads lets a local person review a
+separate file permission for one enabled local Work/Code routine, its current
+definition/model/authority, stored Browser profile, exact HTTPS origin and one
+approved Project folder. Main and extra folders use their current host-issued
+folder identities; an agent cannot supply an absolute root or choose another
+folder implicitly. The selected files are relative to that folder, which stays
+explicit even when a Code run has its own checkout. The profile's account-use
+permission remains separate and must also be current.
+
+A manifest names up to five plain files, their exact content digests, sizes and
+extensions. The host stages bounded private copies before review and on every
+use, opens without following a link, and compares full file identity and copied
+contents. Hard-linked manifest files refuse. A changed file or root identity
+invalidates the permission; it does not silently approve the replacement.
+Ordinary one-use uploads keep their current behavior.
+
+The person explicitly reviews a total file-use count (at most 100), total file
+bytes (at most 250 MiB) and expiry (seven days by default, at most 30 days).
+Each file stays capped at 25 MiB. Quota counts file contents, not HTTP framing.
+Every admitted file consumes quota before the Browser receives it; later
+cancellation or uncertainty is not automatically refunded. A synchronous
+journal reservation makes concurrent uploads share one remaining budget. An
+audit-write failure refuses the upload. The journal keeps the manifest and use
+metadata, including relative file names, never file bodies or absolute roots.
+A host restart restores no permission. A Project erase removes its manifest
+metadata and active grants without creating replacement audit records. Manifest
+metadata stays out of thread/host data exports and replica sync.
+
+The routine selects the explicit `uploadPermissionId` and exact manifest file
+paths. A missing-permission response lists only that caller/profile/site's
+available manifests and remaining quotas. No file permission starts a run,
+chooses an account, permits another file/site or authorizes downloads. Managed
+children, terminal sessions, paired clients and ordinary task turns do not gain
+recurring file permission from this routine grant. Their existing one-use or
+refusal rules remain.
+
+Expiry, Revoke, profile clear or changed routine authority invalidates pending
+uses. The Browser rechecks authority while an upload waits and on later page
+effects while it retains the attached copies. Revocation closes that affected
+context and releases its copies; data already handed to the page/site cannot be
+recalled. Existing credential, frame, ref, origin, redirect, Plan and native-owner
+checks remain. No native owner means unavailable; source verification alone does
+not establish packaged or personal-account acceptance.
 
 ### Download
 

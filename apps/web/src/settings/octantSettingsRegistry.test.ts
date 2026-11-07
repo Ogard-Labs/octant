@@ -141,6 +141,7 @@ describe("octantSettingsRegistry", () => {
       "data-map",
       "browser-accounts",
       "browser-profiles",
+      "browser-upload-permissions",
       "browser-session-permissions",
       "browser-flows",
       "browser-extensions",

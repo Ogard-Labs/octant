@@ -432,7 +432,9 @@ Journal records retain permission and revocation metadata, never cookies or
 credential values, and cannot reactivate a permission on replay.
 
 Credential fill/submit, sign-in, page scripts, uploads and download saves retain
-their separate gates. A delegated session permission authorizes none of them. Plan
+their separate gates. A delegated session permission authorizes none of them. A named routine may
+separately receive an explicit [fixed-content upload manifest](browser-agent-tool.md#recurring-upload-manifests);
+account permission alone still authorizes no file transfer. Plan
 still refuses new pages and effects; credential-field, origin, stale-ref,
 concurrency and account-store protections still apply. The child must explicitly
 retry or resume after a person grants permission; granting alone starts nothing.
