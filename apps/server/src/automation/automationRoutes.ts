@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
+  AutomationEventSourceChoices,
+  type AutomationEventSourceChoice,
   decodeAutomationCommandResult,
+  decodeAutomationCommand,
   decodeAutomationFollowUpRequest,
   decodeAutomationThreadRoutineRequest,
-  decodeAutomationTrigger,
+  decodeAutomationScheduledTrigger,
   decodeRoutineProposalDecision,
   decodeRoutineProposalId,
   decodeRoutineProposalDecisionResult,
@@ -21,11 +24,14 @@ import {
   type AutomationId,
   type HostId,
   type ProjectId,
+  type RoutineChangeRequest,
   type RoutineProposal,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import type { AutomationEventSourcePreparation } from "./automationEventSources";
 import { resolveNextAutomationOccurrence } from "@octant/domain";
-import { ClientPrincipalError } from "../clientPrincipal";
+import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
 import type { ProjectService } from "../projectService";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -34,6 +40,11 @@ import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
 import type { RoutineProposalService } from "./routineProposalService";
 import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
+import type {
+  AutomationFileSourcePreparation,
+  AutomationFileSourceRearmPreparation,
+} from "./automationFileSourceAuthority";
+import { AutomationFileSourceReviewError } from "./automationFileSources";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -42,6 +53,15 @@ const DEFAULT_PAGE_LIMIT = 50;
 const DETAIL_RUNS_LIMIT = 50;
 
 export interface AutomationRouteDependencies {
+  readonly eventSourceChoices?: () => Promise<ReadonlyArray<AutomationEventSourceChoice>>;
+  readonly prepareEventSource?: (input: {
+    readonly command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationEventSourcePreparation | undefined>;
   readonly projection: AutomationProjection;
   readonly commands: Pick<AutomationCommandService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -55,9 +75,11 @@ export interface AutomationRouteDependencies {
    */
   readonly historyAvailable?: () => boolean;
   /**
-   * Routines thread agents proposed. Listed and answered only by the window
-   * whose turn raised them; a confirm builds the routine from the thread's
-   * live facts and creates it through the same command path as `commands`.
+   * Routines thread agents proposed, and pauses or archives they asked for.
+   * Listed and answered only by the window whose turn raised them; a confirm
+   * builds the routine from the thread's live facts and creates it, or pauses
+   * or archives the named routine, through the same command path as
+   * `commands`.
    */
   readonly proposals?: {
     readonly service: Pick<RoutineProposalService, "list" | "claim">;
@@ -65,6 +87,19 @@ export interface AutomationRouteDependencies {
   };
   readonly now?: () => number;
   readonly uuid?: () => string;
+  readonly prepareFileRearm?: (input: {
+    readonly command: Extract<AutomationCommand, { readonly kind: "rearm-file-automation" }>;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationFileSourceRearmPreparation>;
+  readonly prepareFileSource?: (input: {
+    readonly command: Extract<
+      AutomationCommand,
+      { readonly kind: "create-automation" | "update-automation" }
+    >;
+    readonly current: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<AutomationFileSourcePreparation>;
 }
 
 /**
@@ -140,6 +175,20 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
       if (route === "list" && request.method === "GET") {
         return await handleList(dependencies, context, url, origin);
       }
+      if (route === "event-sources" && request.method === "GET") {
+        if (context.principal.kind !== "local-window")
+          return failureResponse(
+            "Configure event sources from a window on this host.",
+            403,
+            origin,
+          );
+        const choices = (await dependencies.eventSourceChoices?.()) ?? [];
+        return jsonResponse(
+          Schema.decodeUnknownSync(AutomationEventSourceChoices)(choices),
+          200,
+          origin,
+        );
+      }
       if (route === "get" && request.method === "GET") {
         return await handleGet(dependencies, context, url, origin);
       }
@@ -147,7 +196,7 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
         return await handleHistory(dependencies, context, url, origin);
       }
       if (route === "commands" && request.method === "POST") {
-        return await handleCommand(dependencies, context, body, origin);
+        return await handleCommand(dependencies, context, body, origin, request);
       }
       if (route === "proposals" && request.method === "GET") {
         return jsonResponse(
@@ -289,9 +338,13 @@ async function handleGet(
     return failureResponse("Automation is unavailable.", 404, origin);
   }
   const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
+  const fileSource = dependencies.projection.getFileSourceSummary(automationId);
+  const eventSource = dependencies.projection.getEventSource(automationId);
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-detail",
+      ...(fileSource === undefined ? {} : { fileSource }),
+      ...(eventSource === undefined ? {} : { eventSource }),
       automation: definition,
       runs: runs.runs,
     }),
@@ -352,7 +405,25 @@ async function handleCommand(
   context: PrincipalRouteContext,
   body: unknown,
   origin: string | null,
+  request: Request,
 ): Promise<Response> {
+  const signal = request.signal;
+  // File setup/review is local HTTP only. Retain the original capability, not merely
+  // a window id that could be revoked and registered again while preparation awaits.
+  const capability = request.headers.get(WINDOW_CAPABILITY_HEADER);
+  const localAuthorityCurrent = () => {
+    if (context.principal.kind !== "local-window" || capability === null) return false;
+    try {
+      return (
+        dependencies.windowAuthorityStore.authenticate(
+          capability,
+          dependencies.now?.() ?? Date.now(),
+        ) === context.scopeId
+      );
+    } catch {
+      return false;
+    }
+  };
   if (!isRecord(body)) {
     return failureResponse("Automation command is invalid.", 400, origin);
   }
@@ -417,21 +488,206 @@ async function handleCommand(
     return jsonResponse(decodeAutomationCommandResult(denial), 200, origin);
   }
 
-  const command = {
+  let command = {
     ...body,
     principal: context.principal,
     origin: { kind: "interactive" },
   } as AutomationCommand;
-  const result = dependencies.commands.execute(command);
+  let preparation:
+    | AutomationFileSourcePreparation
+    | AutomationFileSourceRearmPreparation
+    | undefined;
+  let eventPreparation: AutomationEventSourcePreparation | undefined;
+  if (
+    (command.kind === "create-automation" || command.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    isRecord(body.definition.trigger) &&
+    body.definition.trigger.kind === "integration-event"
+  ) {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure("unauthorized", "Configure an event routine from a window on this host."),
+        200,
+        origin,
+      );
+    const checked = decodeAutomationCommand(command);
+    if (checked.kind !== "create-automation" && checked.kind !== "update-automation")
+      return jsonResponse(commandFailure("invalid", "The event routine is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      (checked.kind === "create-automation"
+        ? dependencies.projection.getDefinition(checked.automationId) === undefined
+        : dependencies.projection.getDefinition(checked.automationId)?.version ===
+          checked.expectedVersion);
+    eventPreparation = await dependencies.prepareEventSource?.({
+      command: checked,
+      current,
+      signal,
+    });
+    if (
+      eventPreparation === undefined ||
+      !eventPreparation.current() ||
+      authorizeCommandProject(
+        dependencies,
+        body,
+        await accessibleProjects(dependencies, context),
+      ) !== undefined ||
+      !current()
+    )
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "The selected event source is unavailable or changed. Check its connection and filters. Source changes require explicit re-arm.",
+        ),
+        200,
+        origin,
+      );
+    command = { ...checked, definition: eventPreparation.definition };
+  }
+  if (command.kind === "rearm-file-automation") {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure(
+          "unauthorized",
+          "Re-arm this file routine from an Octant window on this host.",
+        ),
+        200,
+        origin,
+      );
+    let checked: AutomationCommand;
+    try {
+      checked = decodeAutomationCommand(command);
+    } catch {
+      return jsonResponse(commandFailure("invalid", "The input review is invalid."), 200, origin);
+    }
+    if (checked.kind !== "rearm-file-automation")
+      return jsonResponse(commandFailure("invalid", "The input review is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      dependencies.projection.getDefinition(checked.automationId)?.version ===
+        checked.expectedVersion;
+    try {
+      if (dependencies.prepareFileRearm === undefined || !current())
+        return jsonResponse(
+          commandFailure(
+            "blocked",
+            "The current input review is unavailable. Refresh and try again.",
+          ),
+          200,
+          origin,
+        );
+      preparation = await dependencies.prepareFileRearm({ command: checked, current, signal });
+      const latestProjects = await accessibleProjects(dependencies, context);
+      if (
+        !current() ||
+        !preparation.current() ||
+        authorizeCommandProject(dependencies, body, latestProjects) !== undefined
+      )
+        return jsonResponse(
+          commandFailure(
+            "stale-version",
+            "The input review or its authority changed. Refresh it before re-arming.",
+          ),
+          200,
+          origin,
+        );
+    } catch (error) {
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          error instanceof AutomationFileSourceReviewError
+            ? error.message
+            : "The input could not be verified. Check the Project, refresh and try again.",
+        ),
+        200,
+        origin,
+      );
+    }
+  }
+  if (
+    (command.kind === "create-automation" || command.kind === "update-automation") &&
+    isRecord(body.definition) &&
+    isRecord(body.definition.trigger) &&
+    body.definition.trigger.kind === "file-arrival"
+  ) {
+    if (context.principal.kind !== "local-window")
+      return jsonResponse(
+        commandFailure(
+          "unauthorized",
+          "Configure a file routine from an Octant window on this host.",
+        ),
+        200,
+        origin,
+      );
+    let checked: AutomationCommand;
+    try {
+      checked = decodeAutomationCommand(command);
+    } catch {
+      return jsonResponse(commandFailure("invalid", "The file routine is invalid."), 200, origin);
+    }
+    if (checked.kind !== "create-automation" && checked.kind !== "update-automation")
+      return jsonResponse(commandFailure("invalid", "The file routine is invalid."), 200, origin);
+    const current = () =>
+      !signal.aborted &&
+      context.abortSignal?.aborted !== true &&
+      localAuthorityCurrent() &&
+      (checked.kind === "create-automation"
+        ? dependencies.projection.getDefinition(checked.automationId) === undefined
+        : dependencies.projection.getDefinition(checked.automationId)?.version ===
+          checked.expectedVersion);
+    try {
+      if (dependencies.prepareFileSource === undefined || !current())
+        return jsonResponse(
+          commandFailure(
+            "blocked",
+            "The local input folder is unavailable. Check the Project and try again.",
+          ),
+          200,
+          origin,
+        );
+      preparation = await dependencies.prepareFileSource({ command: checked, current, signal });
+      const latestProjects = await accessibleProjects(dependencies, context);
+      if (
+        !current() ||
+        !preparation.current() ||
+        authorizeCommandProject(dependencies, body, latestProjects) !== undefined
+      )
+        return jsonResponse(
+          commandFailure(
+            "unauthorized",
+            "The file routine's Project or window authority changed. Review it and try again.",
+          ),
+          200,
+          origin,
+        );
+    } catch {
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "The local input folder is unavailable or changed. Check the Project and try again.",
+        ),
+        200,
+        origin,
+      );
+    }
+  }
+  const result =
+    eventPreparation === undefined
+      ? dependencies.commands.execute(command, undefined, preparation)
+      : dependencies.commands.execute(command, undefined, preparation, eventPreparation);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 
 /**
- * A person's answer to a thread's routine proposal. The proposal leaves the
- * waiting list on the first answer, so a retry cannot create a second
- * routine. A confirm is a create by this request's own principal, held to the
- * same Project check and command service as a create from the editor; only
- * the host adds which thread proposed it.
+ * A person's answer to a thread's routine proposal or change request. It
+ * leaves the waiting list on the first answer, so a retry cannot act twice.
+ * A confirm is a create, pause, or archive by this request's own principal,
+ * held to the same Project check and command service as the person's own;
+ * only the host adds which thread proposed a created routine.
  */
 async function handleProposalDecision(
   dependencies: AutomationRouteDependencies,
@@ -466,6 +722,25 @@ async function handleProposalDecision(
     claimed.settle({ status: "not-created", message: failure.message });
     return jsonResponse(decodeRoutineProposalDecisionResult(failure), 200, origin);
   };
+  if ("kind" in claimed.proposal) {
+    const changed = await changeThreadRoutine(dependencies, context, claimed.proposal);
+    if (changed.kind !== "automation-paused" && changed.kind !== "automation-archived") {
+      return refuse(
+        changed.kind === "automation-command-failed"
+          ? changed
+          : commandFailure("invalid", "The routine was not changed."),
+      );
+    }
+    claimed.settle({ status: "confirmed", automationId: changed.automation.id });
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({
+        kind: "routine-proposal-confirmed",
+        automation: changed.automation,
+      }),
+      200,
+      origin,
+    );
+  }
   const result = await createThreadRoutine(dependencies, context, claimed.proposal);
   if (result.kind !== "automation-created") {
     return refuse(
@@ -524,6 +799,38 @@ async function createThreadRoutine(
     } as AutomationCommand,
     { originThreadId: proposal.threadId },
   );
+}
+
+/**
+ * Pause or archive the routine a thread's agent asked about, as this
+ * request's own principal: the same Project check and command as the person's
+ * own pause or archive in Automation Center, at the version the agent saw, so
+ * a routine changed since the request is refused rather than changed.
+ */
+async function changeThreadRoutine(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  request: RoutineChangeRequest,
+): Promise<AutomationCommandResult> {
+  if (dependencies.historyAvailable?.() === false) {
+    return commandFailure(
+      "unsupported",
+      "Automation history could not be loaded, so Automations cannot change.",
+    );
+  }
+  const command = {
+    kind: request.change === "pause" ? "pause-automation" : "archive-automation",
+    automationId: request.automationId,
+    expectedVersion: request.expectedVersion,
+  };
+  const accessible = await accessibleProjects(dependencies, context);
+  const denial = authorizeCommandProject(dependencies, command, accessible);
+  if (denial !== undefined) return denial;
+  return dependencies.commands.execute({
+    ...command,
+    principal: context.principal,
+    origin: { kind: "interactive" },
+  } as AutomationCommand);
 }
 
 /**
@@ -602,7 +909,10 @@ async function handleFollowUp(
       origin,
     );
   }
-  const trigger = decodeAutomationTrigger({ kind: "once", scheduledAt: request.scheduledAt });
+  const trigger = decodeAutomationScheduledTrigger({
+    kind: "once",
+    scheduledAt: request.scheduledAt,
+  });
   if (request.kind === "schedule-follow-up") {
     const result = await createThreadRoutine(dependencies, context, {
       proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),

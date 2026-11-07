@@ -1,10 +1,15 @@
 import { createThreadMentionClient, type ThreadMentionClient } from "@octant/client-runtime";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { ChatThreadId } from "@octant/contracts/chat";
-import type { SideChatSidecar } from "@octant/contracts";
+import {
+  decodeMentionableThreadId,
+  decodeThreadMentionRequestId,
+  type SideChatSidecar,
+} from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { buildModelPickerGroups } from "@octant/domain";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ChatWorkspace } from "./ChatWorkspace";
@@ -68,7 +73,7 @@ export function SideChatWorkspaceTab(props: SideChatWorkspaceTabProps) {
         ? {}
         : { onSidecarOpened })}
       sourceThreadId={tab.sourceThreadId}
-      renderSidecar={(sidecarThreadId) =>
+      renderSidecar={(sidecarThreadId, sidecar) =>
         // A restored tab names the sidecar it was showing. When the host answers
         // with a different one, the recorded sidecar is gone and this lane's
         // conversation with it; say so rather than presenting a fresh, empty
@@ -89,6 +94,7 @@ export function SideChatWorkspaceTab(props: SideChatWorkspaceTabProps) {
               ? {}
               : { providerController: props.providerController })}
             sidecarThreadId={sidecarThreadId}
+            sidecar={sidecar}
           />
         )
       }
@@ -111,6 +117,7 @@ function SideChatSidecarSurface(props: {
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly providerController?: SideChatProviderView;
   readonly sidecarThreadId: ChatThreadId;
+  readonly sidecar: SideChatSidecar;
   readonly threadMentionClient?: ThreadMentionClient;
 }) {
   const controller = useChatController({
@@ -121,7 +128,23 @@ function SideChatSidecarSurface(props: {
     client: props.chatClient,
     readCursorStore: props.chatReadCursorStore,
   });
+  const [returnPending, setReturnPending] = useState(false);
+  const [returnNotice, setReturnNotice] = useState<string>();
+  const live = useRef(true);
+  const pending = useRef(false);
+  const activeReturn = useRef<AbortController | undefined>(undefined);
+  const identity = `${props.sidecarThreadId}:${props.sidecar.sourceThreadId}`;
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+      activeReturn.current?.abort();
+    };
+  }, []);
   const providerController = props.providerController;
+  const returnClient = props.threadMentionClient;
   const providerGroups = useMemo(
     () =>
       providerController === undefined
@@ -148,15 +171,86 @@ function SideChatSidecarSurface(props: {
     );
   }
   return (
-    <ChatWorkspace
-      controller={controller}
-      providerGroups={providerGroups}
-      {...(providerController?.snapshot === undefined
-        ? {}
-        : { providerSnapshot: providerController.snapshot })}
-      {...(props.threadMentionClient === undefined
-        ? {}
-        : { threadMentionClient: props.threadMentionClient })}
-    />
+    <>
+      {returnNotice === undefined ? null : <OctantAlert tone="neutral">{returnNotice}</OctantAlert>}
+      <ChatWorkspace
+        controller={controller}
+        sideChatReturnPending={returnPending}
+        {...(returnClient === undefined
+          ? {}
+          : {
+              onReturnSideChatReply: async (turnId, attemptId) => {
+                if (pending.current) return;
+                pending.current = true;
+                setReturnPending(true);
+                setReturnNotice(undefined);
+                const abort = new AbortController();
+                activeReturn.current = abort;
+                // Match the existing bounded folder-read budget. A transport may
+                // ignore abort, so race the entire prepare read, including decoding.
+                let removeAbort = () => {};
+                const stopped = new Promise<never>((_resolve, reject) => {
+                  const refuse = () => reject(new Error("Side Chat preparation was interrupted."));
+                  abort.signal.addEventListener("abort", refuse, { once: true });
+                  removeAbort = () => abort.signal.removeEventListener("abort", refuse);
+                });
+                const deadline = setTimeout(() => abort.abort(), 20_000);
+                try {
+                  const result = await Promise.race([
+                    returnClient.execute(
+                      {
+                        kind: "prepare-side-chat-return",
+                        requestId: decodeThreadMentionRequestId(globalThis.crypto.randomUUID()),
+                        sidecarThreadId: decodeMentionableThreadId(
+                          String(props.sidecar.sidecarThreadId),
+                        ),
+                        expectedSourceThreadId: props.sidecar.sourceThreadId,
+                        turnId,
+                        attemptId,
+                      },
+                      abort.signal,
+                    ),
+                    stopped,
+                  ]);
+                  if (!live.current || identityRef.current !== identity || abort.signal.aborted)
+                    return;
+                  if (
+                    result.kind !== "side-chat-draft-prepared" ||
+                    String(result.reference.sourceThreadId) !==
+                      String(props.sidecar.sourceThreadId) ||
+                    String(result.reference.sidecarThreadId) !== String(props.sidecarThreadId)
+                  )
+                    throw new Error("unavailable");
+                  const saved = composerThreadDrafts.appendSideChatReturn(result);
+                  setReturnNotice(
+                    saved.status === "refused"
+                      ? saved.message
+                      : saved.status === "unpersisted"
+                        ? "Added to the source draft in this window, but it could not be saved. Nothing was sent."
+                        : "Added to the source’s saved draft. Existing text is kept. Open the source to review and edit it; nothing was sent or queued.",
+                  );
+                } catch {
+                  if (live.current)
+                    setReturnNotice(
+                      "This reply could not be added to its source draft. Reopen the source and Side Chat, then try again. Nothing was sent.",
+                    );
+                } finally {
+                  clearTimeout(deadline);
+                  removeAbort();
+                  if (activeReturn.current === abort) activeReturn.current = undefined;
+                  pending.current = false;
+                  if (live.current) setReturnPending(false);
+                }
+              },
+            })}
+        providerGroups={providerGroups}
+        {...(providerController?.snapshot === undefined
+          ? {}
+          : { providerSnapshot: providerController.snapshot })}
+        {...(props.threadMentionClient === undefined
+          ? {}
+          : { threadMentionClient: props.threadMentionClient })}
+      />
+    </>
   );
 }

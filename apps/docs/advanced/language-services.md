@@ -1,5 +1,5 @@
 ---
-description: Project-wide type errors and go to definition in the Code editor, from a confined language server, and how to turn them off.
+description: Project-wide type errors, go to definition, and capability-aware references in the Code editor, from a confined language server, and how to turn them off.
 ---
 
 # Language Services
@@ -34,6 +34,52 @@ check reads one file alone and would report imports it cannot see as errors.
 Plan threads are served too: the server reads the checkout and cannot change
 it. A paired device that can reach the thread gets the same problems and
 definitions.
+
+## Find references in the checkout
+
+Place the cursor on a name and choose **Find references in checkout** in the
+editor toolbar or context menu, or press **⌘+Alt+F12** on macOS or
+**Ctrl+Alt+F12** elsewhere. The host first checks whether the running server
+supports references for this file, then confirms the current text in memory.
+It does not save the file or start a server for this action.
+
+The list names the checkout and shows a snapshot of up to 1,000 locations in
+64 files, with a notice if results were omitted. Choose a location to open it;
+a location outside this checkout shows only a notice. **Recheck references**
+queries again explicitly. **Close references** or **Escape** closes the list.
+Changing the source text or switching files hides old results.
+
+Closing a query may happen after the host accepted its in-memory text sync.
+If that acknowledgement arrives safely, the next query uses it. If the reply
+is lost, choose **Reload language document**, then **Find references in
+checkout** again. Reload explicitly reconnects this file under the current
+language-server permissions; **Recheck references** alone never opens or
+starts a server. It does not save your file or silently retry the old query.
+
+Unsupported, unknown, unavailable, stale, or timed-out support stays visible.
+Where configured, **Open externally** uses your existing editor handoff. An
+older host that cannot acknowledge the current text cannot supply this query;
+reconnect or use the external editor. Monaco's built-in single-file references
+remain available separately. Rename and reviewed quick fixes are not part of
+this references action.
+
+## Rename and reviewed quick fixes
+
+Put the cursor on a symbol, enter a **New symbol name**, and choose **Preview
+rename**, or choose **Find quick fixes**. The running server must report support;
+otherwise use **Open externally** where configured. Nothing is saved while
+preparing. Open each affected file to review its **Before** and **After** text,
+then choose **Apply reviewed changes**. Plan can preview but cannot apply.
+
+Save unsaved drafts first. Changing the source text hides the preview; changes
+to affected files or their authority block a stale save. A fix that requires
+running a command, creating/deleting/renaming a file, or resolving more data is
+not offered. Large or unsafe edits explain why preparation stopped.
+
+Files save in order through the ordinary editor save checks. If a later save
+fails, the message names the stopped file and how many earlier files were
+saved. Check those files before preparing again. An uncertain answer is never
+retried automatically.
 
 ## What the server can do
 
@@ -92,19 +138,27 @@ Files the server does not read, such as Markdown or Python, show nothing.
 
 ## Agents
 
-An agent in a Code thread can ask the same server two things: the problems in
-a file (`octant_code_diagnostics`) and where a name in it is defined
-(`octant_code_definition`). It can do this in Plan mode too, since both only
-read. They are offered on providers that can carry Octant's own tools, the
-same ones listed for the other Octant tools in [Code](/guide/code), and a
-profile whose tool list leaves them out does not offer them.
+An agent in a Code thread can ask the same server three things through one
+tool, `octant_code`: the problems in a file, where a name in it is defined,
+and where that name is used across the checkout (at most 200 places; the
+agent is told when there were more). It can do this in Plan mode too, since
+all three only read, and nothing asks you first.
+
+The tool is offered only where it can help: on providers that can carry
+Octant's own tools, the same ones listed for the other Octant tools in
+[Code](/guide/code), and only when a server the agent may start reads some
+file in the checkout. Today that is the bundled TypeScript and JavaScript
+server, or a server you added that does not run the repository's tooling. A
+Python or Rust repository with no such server, or a checkout whose server you
+turned off in **Settings › Code**, is not offered the tool at all. A profile
+whose tool list leaves out `octant_code` does not offer it either.
 
 - The agent gets answers for the file as saved, with lines counted from 1, so
   they match what it reads. If you have unsaved changes in that file, the
   agent is told to wait for you to save; your text stays as you typed it and
   is never sent to the provider.
-- A definition outside the checkout is named only as a library or "elsewhere",
-  never by its host path.
+- A definition or use outside the checkout is named only as a library or
+  "elsewhere", never by its host path.
 - An agent can start the bundled server, but is never served by one that runs
   the repository's own tooling, even one you allowed and have open in the
   editor, and it never restarts a server that stopped:

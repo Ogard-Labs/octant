@@ -307,7 +307,7 @@ function versionReadEnvironment(
  * entry point's own package. Everything else under the user's home stays
  * denied, which is the reach this confinement exists to take away.
  */
-function versionProbeReadRoots(
+export function versionProbeReadRoots(
   binaryPath: string,
   resolved: string,
   scratchDirectory: string,

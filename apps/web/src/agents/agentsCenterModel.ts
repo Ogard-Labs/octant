@@ -94,6 +94,8 @@ export function agentRunAcknowledgementLabel(
 
 export function agentRunRecoveryLabel(recoveryReason: string | undefined): string | undefined {
   if (recoveryReason === undefined) return undefined;
+  if (recoveryReason === "Managed AgentRun turn exceeded its runtime deadline.")
+    return "Reached the 30-minute working-time limit. Retry or Resume starts a fresh window; approval and answer waits do not count.";
   if (recoveryReason === "host-restart") return "Recovered after host restart";
   if (recoveryReason === "journal-replay") return "Recovered after journal replay";
   if (recoveryReason === "provider-reconnect") return "Waiting after provider reconnect";

@@ -51,14 +51,21 @@ export function useResolvedMaterial(
  * launch before it learned the person had said not to.
  */
 export function useAutomaticUpdateCheckSync(
-  hostBridge: OctantHostBridge | undefined,
+  hostBridge:
+    | Pick<OctantHostBridge, "appUpdatePreferenceScope" | "setAutomaticAppUpdateChecks">
+    | undefined,
   automaticUpdateChecks: boolean | undefined,
 ): void {
   const setAutomatic = hostBridge?.setAutomaticAppUpdateChecks;
   useEffect(() => {
-    if (setAutomatic === undefined || automaticUpdateChecks === undefined) return;
+    if (
+      hostBridge?.appUpdatePreferenceScope === "local" ||
+      setAutomatic === undefined ||
+      automaticUpdateChecks === undefined
+    )
+      return;
     void setAutomatic(automaticUpdateChecks).catch(() => undefined);
-  }, [automaticUpdateChecks, setAutomatic]);
+  }, [automaticUpdateChecks, setAutomatic, hostBridge?.appUpdatePreferenceScope]);
 }
 
 /**
@@ -70,14 +77,19 @@ export function useAutomaticUpdateCheckSync(
  * move every preview install onto stable the first time settings loaded.
  */
 export function useReleaseRingSync(
-  hostBridge: OctantHostBridge | undefined,
+  hostBridge: Pick<OctantHostBridge, "appUpdatePreferenceScope" | "setAppUpdateRing"> | undefined,
   releaseRing: AppReleaseRing | undefined,
 ): void {
   const setRing = hostBridge?.setAppUpdateRing;
   useEffect(() => {
-    if (setRing === undefined || releaseRing === undefined) return;
+    if (
+      hostBridge?.appUpdatePreferenceScope === "local" ||
+      setRing === undefined ||
+      releaseRing === undefined
+    )
+      return;
     void setRing(releaseRing).catch(() => undefined);
-  }, [releaseRing, setRing]);
+  }, [releaseRing, setRing, hostBridge?.appUpdatePreferenceScope]);
 }
 
 /**

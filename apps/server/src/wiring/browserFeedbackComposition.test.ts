@@ -183,8 +183,8 @@ it("composes the real persisted Code and hydrated Work feedback owner through se
           });
           observed.windows?.revoke(windowId);
           for (const scope of scopes) expect(scope?.current()).toBe(false);
-        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
-      ),
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
   } finally {
     for (const spy of spies) spy.mockRestore();

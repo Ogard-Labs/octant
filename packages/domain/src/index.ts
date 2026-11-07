@@ -1,10 +1,12 @@
+export * from "./questionnaire";
 export * from "./browserAutomationPolicy";
 export * from "./browserElementFeedback";
-export * from "./browserPointCapture";
 export * from "./browserDownloadPolicy";
 export * from "./browserPageSnapshot";
+export * from "./browserPageAudit";
 export * from "./browserCapturePolicy";
 export * from "./browserProofPolicy";
+export * from "./browserRecording";
 export * from "./browserProfilePolicy";
 export * from "./browserExtensionPolicy";
 export * from "./computerUsePolicy";
@@ -139,6 +141,7 @@ export * from "./providerPolicy";
 export * from "./providerNativeSetupPolicy";
 export * from "./providerCatalogPolicy";
 export * from "./researchPolicy";
+export * from "./replyDetailPolicy";
 export * from "./shellPolicy";
 export * from "./sidebarThreadStatusPolicy";
 export * from "./speechPolicy";
@@ -209,6 +212,7 @@ export * from "./subscriptionOAuthCatalog";
 export * from "./directorySignIn";
 export * from "./cloudIamSignIn";
 export * from "./connectorCatalog";
+export * from "./googleWorkspaceConnectors";
 export * from "./providerToolingPolicy";
 export * from "./turnMetricsPolicy";
 export * from "./liveTurnPolicy";
@@ -223,3 +227,12 @@ export * from "./hubSignInPolicy";
 export * from "./hubPushPolicy";
 export * from "./hubWakePolicy";
 export * from "./hubGuestPolicy";
+
+export * from "./providerCloudPolicy";
+export * from "./paperLocalSetup";
+export * from "./unifiedDiff";
+export * from "./browserCredentialUsePolicy";
+
+export * from "./browserPageScriptPolicy";
+
+export * from "./ownerBrowserPolicy";

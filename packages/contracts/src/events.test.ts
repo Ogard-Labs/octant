@@ -84,6 +84,16 @@ describe("EventActor", () => {
     expect(() => decodeActor({ kind: "remote-device", actorId })).toThrow();
   });
 
+  it("keeps an unlocked owner's member identity distinct from a host window", () => {
+    expect(decodeActor({ kind: "owner-unlock", actorId, memberId: deviceId })).toEqual({
+      kind: "owner-unlock",
+      actorId,
+      memberId: deviceId,
+    });
+    expect(() => decodeActor({ kind: "owner-unlock", actorId })).toThrow();
+    expect(() => decodeActor({ kind: "owner-unlock", actorId, memberId: "invalid" })).toThrow();
+  });
+
   it("accepts agent attribution with provider instance and thread identity", () => {
     expect(
       decodeActor({

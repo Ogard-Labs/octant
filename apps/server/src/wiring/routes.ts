@@ -1,3 +1,4 @@
+import { dispatchNativeWindowRequest } from "../nativeWindowRequest";
 import { observedRpcLatency, slowRequestRoute, withServerTiming } from "../latencyStatsProjection";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { compareRemoteForwardListToClassifier } from "../remoteForwardListClassifierGate";
@@ -27,7 +28,11 @@ import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { WorkRequestsWiring } from "./workRequests";
 
-export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence"> &
+export type RoutesDependencies = {
+  readonly conversationInputRoutes: (request: Request) => Promise<Response | undefined>;
+  readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
+  readonly providerCloudSessionRoutes: (request: Request) => Promise<Response | undefined>;
+} & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
   Pick<
     IntegrationsWiring,
@@ -51,6 +56,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "goalRoutes"
     | "planRoutes"
     | "projectBindingRoutes"
+    | "replyDetailRoutes"
     | "shellRoutes"
     | "shipRoutes"
     | "themeRoutes"
@@ -69,7 +75,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "providerRoutes"
     | "providerUsageLimitsRoutes"
   > &
-  Pick<BrowserWiring, "productFeedbackRoutes"> &
+  Pick<BrowserWiring, "productFeedbackRoutes" | "nativeBrowserPresentationRoutes"> &
   Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
   Pick<
     CodeToolingWiring,
@@ -142,6 +148,9 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
+    conversationInputRoutes,
+    credentialRequestRoutes,
+    providerCloudSessionRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
     agentRunRouteDependencies,
@@ -196,6 +205,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     previewHandoffBridgeRoutes,
     previewRoutes,
     productFeedbackRoutes,
+    nativeBrowserPresentationRoutes,
     projectBindingRoutes,
     projectRoutes,
     personMemoryRoutes,
@@ -206,6 +216,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     remoteServerGrantLocalRoutes,
     replicaSyncStatusRoutes,
     scaffoldRoutes,
+    replyDetailRoutes,
     shellRoutes,
     shipRoutes,
     sidebarBackgroundRoutes,
@@ -252,7 +263,9 @@ export function wireRoutes(deps: RoutesDependencies) {
   // gives this chain a loopback-shaped internal request; individual handlers
   // resolve the bound context through principalRouteContext before effects.
   const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
+    (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
+    (await conversationInputRoutes(request)) ??
     (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??
     (await launchSessionRoutes(request)) ??
@@ -271,6 +284,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await sideTaskRoutes(request)) ??
     (await githubRoutes(request)) ??
     (await integrationRoutes(request)) ??
+    (await credentialRequestRoutes(request)) ??
     (await githubCloneRoutes(request)) ??
     (await agentProfileRoutes(request)) ??
     (await folderBrowseRoutes(request)) ??
@@ -300,7 +314,9 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await previewRoutes(request)) ??
     (await canvasRoutes(request)) ??
     (await imageRoutes(request)) ??
+    (await providerCloudSessionRoutes(request)) ??
     (await speechRoutes(request)) ??
+    (await replyDetailRoutes(request)) ??
     (await artifactLibraryRoutes(request)) ??
     (await artifactMirrorRoutes(request)) ??
     (await syncedArtifactRoutes(request)) ??
@@ -343,7 +359,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await agentMessageRoutes(request)) ??
     (await themeRoutes(request));
 
-  const dispatchMeasuredProductRoutes = async (request: Request): Promise<Response | undefined> => {
+  const measureProductRoutes = async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const measurement = observedRpcLatency(url.pathname);
     if (measurement === undefined) return dispatchProductRoutes(request);
@@ -363,6 +379,9 @@ export function wireRoutes(deps: RoutesDependencies) {
     }
     return withServerTiming(response, measurement, durationMs);
   };
+
+  const dispatchMeasuredProductRoutes = (request: Request): Promise<Response | undefined> =>
+    dispatchNativeWindowRequest(request, windowAuthorityStore, Date.now(), measureProductRoutes);
 
   const forwardListDrift = compareRemoteForwardListToClassifier();
   if (forwardListDrift.length > 0) {

@@ -1,3 +1,5 @@
+import type { CredentialOperation } from "@octant/plugin-api/credential-request";
+import { IntegrationCredentialOperations } from "./integrationCredentialOperations";
 import type {
   IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
@@ -22,6 +24,8 @@ import {
 } from "../plugins/linear/linearIntegration";
 
 export interface IntegrationService {
+  readonly connectionRevision?: () => number;
+  readonly credentialOperations?: () => ReadonlyArray<CredentialOperation>;
   readonly snapshot: (
     pluginSlug: string,
     signal: AbortSignal,
@@ -68,6 +72,7 @@ export function createLinearIntegrationService(options: {
   readonly isEffective?: () => boolean;
 }): IntegrationService {
   let bound: IntegrationService | undefined;
+  let connectionRevision = 0;
 
   const ensureBound = (pluginSlug: string): IntegrationService | undefined => {
     if (pluginSlug !== LINEAR_SLUG) return undefined;
@@ -77,12 +82,15 @@ export function createLinearIntegrationService(options: {
   };
 
   return {
+    connectionRevision: () => connectionRevision,
+    credentialOperations: () => ensureBound(LINEAR_SLUG)?.credentialOperations?.() ?? [],
     snapshot: async (pluginSlug, signal) => {
       const service = ensureBound(pluginSlug);
       if (service === undefined) return unavailableAuthentication();
       return service.snapshot(pluginSlug, signal);
     },
     execute: async (pluginSlug, command, signal) => {
+      connectionRevision += 1;
       const service = ensureBound(pluginSlug);
       if (service === undefined) return unavailableAuthentication();
       return service.execute(pluginSlug, command, signal);
@@ -93,16 +101,19 @@ export function createLinearIntegrationService(options: {
       return service.executeOperation(pluginSlug, command, signal);
     },
     completeAuthorization: async (pluginSlug, request) => {
+      connectionRevision += 1;
       const service = ensureBound(pluginSlug);
       if (service === undefined) return { kind: "refused", reason: UNAVAILABLE_REMEDIATION };
       return service.completeAuthorization(pluginSlug, request);
     },
     putSecret: async (pluginSlug, scope, secret) => {
+      connectionRevision += 1;
       const service = ensureBound(pluginSlug);
       if (service === undefined) return { kind: "unavailable", reason: UNAVAILABLE_REMEDIATION };
       return service.putSecret(pluginSlug, scope, secret);
     },
     deleteSecret: async (pluginSlug, scope) => {
+      connectionRevision += 1;
       const service = ensureBound(pluginSlug);
       if (service === undefined) return;
       await service.deleteSecret(pluginSlug, scope);
@@ -131,7 +142,9 @@ function constructLinearBoundService(options: {
             startLinearOAuthCallbackListener({ onAuthorize }),
         }),
   });
+  const credentialOperations = new IntegrationCredentialOperations();
   const hostPort = createIntegrationHostPort({
+    registerCredentialOperation: (operation) => credentialOperations.register(operation),
     fetch: oauth.authorizedFetch,
     requestCredential: oauth.requestCredential,
     beginPkceAuthorization: oauth.beginPkceAuthorization,
@@ -146,7 +159,10 @@ function constructLinearBoundService(options: {
   if (loaded.kind !== "loaded") {
     throw new Error("Linear integration failed to load.");
   }
-  return createBoundService(LINEAR_SLUG, loaded.runtime, oauth);
+  return {
+    ...createBoundService(LINEAR_SLUG, loaded.runtime, oauth),
+    credentialOperations: () => credentialOperations.list(),
+  };
 }
 
 function unavailableAuthentication(): IntegrationAuthenticationSnapshot {

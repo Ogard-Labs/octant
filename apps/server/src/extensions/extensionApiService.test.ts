@@ -1,3 +1,7 @@
+import { decodeExtensionSnapshot, decodeExtensionCommand } from "@octant/contracts/extension-rpc";
+import { decodeHostOAuthDescriptor } from "@octant/contracts/host-oauth";
+import { createHostOAuthService } from "../providers/oauth/hostOAuthService";
+import { McpServerSignIn } from "./mcpServerSignIn";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ExtensionEffectiveSnapshot,
@@ -11,7 +15,7 @@ import {
 } from "./packageInspector";
 import { ExtensionApiService } from "./extensionApiService";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeExtensionPackageManifest } from "@octant/contracts/extensions";
@@ -100,6 +104,204 @@ function lifecycle(captured: Array<InspectedExtensionPackage>): ExtensionLifecyc
 }
 
 describe("extension inspection and lifecycle API service", () => {
+  it("retains completed sign-out cleanup controls when the person requests uninstall", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-uninstall-sign-out-"));
+    const componentId = "server";
+    const credentialRef = "55000000-0000-4000-8000-000000000002";
+    const oauthDescriptor = decodeHostOAuthDescriptor({
+      descriptorId: "mcp-fixture",
+      flow: "authorization-code-pkce",
+      dialect: "mcp-authorization",
+      clientId: "owned-client",
+      authorizationEndpoint: "https://issuer.example/authorize",
+      tokenEndpoint: "https://issuer.example/token",
+      resource: "https://mcp.example/mcp",
+      redirectPort: 43125,
+      scopes: [],
+      termsId: "terms-v1",
+    });
+    const statePath = join(directory, "sign-ins.json");
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        signIns: {
+          [`${extensionId}:${componentId}`]: {
+            descriptor: oauthDescriptor,
+            credentialRef,
+            issuer: "https://issuer.example",
+          },
+        },
+        registrations: {
+          "https://mcp.example/mcp": {
+            kind: "registered",
+            clientId: "owned-client",
+            issuer: "https://issuer.example",
+            resource: "https://mcp.example/mcp",
+            redirectPort: 43125,
+          },
+        },
+      }),
+    );
+    let available = false;
+    const drop = vi.fn(async () => {
+      if (!available) throw new Error("Synthetic credential broker unavailable");
+    });
+    const oauth = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: drop,
+        revoke: async () => {
+          await drop();
+          return { kind: "revoked" };
+        },
+      },
+    });
+    const signIn = new McpServerSignIn({
+      statePath,
+      oauth,
+      access: async () => ({ kind: "unavailable" }),
+      serverUrl: async () => "https://mcp.example/mcp",
+      actorId: credentialRef,
+    });
+    const activation = {
+      installed: true,
+      trusted: true,
+      pluginDesired: true,
+      componentDesired: true,
+      compatible: true,
+      policyAllowed: true,
+      quarantined: false,
+      draining: false,
+      broken: false,
+      unavailable: false,
+      interrupted: false,
+      waiting: false,
+    };
+    let snapshot = decodeExtensionSnapshot({
+      sequence: 1,
+      snapshotAt: "2026-11-02T00:00:00.000Z",
+      packages: [
+        {
+          extensionId,
+          packageId,
+          stateVersion: 1,
+          version: "1.0.0",
+          digest: `sha256:${"0".repeat(64)}`,
+          source: { kind: "user-added", sourceRef: "owned-server" },
+          compatibility: { platforms: ["linux"], modes: ["chat"], providerFamilies: [] },
+          activation,
+          components: [
+            {
+              component: {
+                id: componentId,
+                kind: "mcp-server",
+                displayName: "Server",
+                declaredCapabilities: ["mcp"],
+                entryPoint: "mcp.json",
+              },
+              activation,
+              effectiveState: { kind: "effective" },
+            },
+          ],
+          diagnostics: [],
+        },
+      ],
+      collisions: [],
+    });
+    const state = lifecycle([]);
+    state.snapshot = () => snapshot;
+    state.uninstall = vi.fn(async () => {
+      snapshot = decodeExtensionSnapshot({
+        ...snapshot,
+        packages: snapshot.packages.map((pkg) => ({
+          ...pkg,
+          activation: { ...pkg.activation, installed: false, trusted: false, pluginDesired: false },
+          components: pkg.components.map((component) => ({
+            ...component,
+            activation: { ...component.activation, installed: false },
+            effectiveState: { kind: "blocked", reason: "not-installed" },
+          })),
+        })),
+      });
+      return snapshot;
+    });
+    const remove = vi.fn(async () => undefined);
+    const service = new ExtensionApiService({
+      lifecycle: state,
+      resolver: { resolve: async () => resolvedPackage() },
+      userAddedMcpServers: {
+        owns: (ref) => ref === "owned-server",
+        prepareRemoval: (id) => signIn.preparePackageRemoval(id),
+        remove,
+      },
+    });
+    const command = decodeExtensionCommand({ kind: "uninstall-package", extensionId, packageId });
+    try {
+      expect(await signIn.signOut(extensionId, componentId, "local-window")).toMatchObject({
+        kind: "sign-out-pending",
+      });
+      const cleanupCalls = drop.mock.calls.length;
+      expect(await service.execute(command)).toMatchObject({
+        kind: "extension-command-failed",
+        failure: { category: "blocked", message: expect.stringContaining("signing out") },
+      });
+      expect(state.uninstall).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(drop).toHaveBeenCalledTimes(cleanupCalls);
+      expect(state.snapshot().packages[0]?.activation.installed).toBe(true);
+      expect(await signIn.status(extensionId, componentId, "local-window")).toMatchObject({
+        kind: "sign-out-pending",
+      });
+      available = true;
+      expect(await signIn.signOut(extensionId, componentId, "local-window")).toEqual({
+        kind: "signed-out",
+      });
+      expect((await service.execute(command)).kind).toBe("extension-state-updated");
+      expect(state.uninstall).toHaveBeenCalledOnce();
+      expect(state.snapshot().packages[0]?.activation.installed).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an owned user-added package installed until sign-in cancellation is confirmed and releases preflight on later failure", async () => {
+    const state = lifecycle([]);
+    const installed = {
+      ...emptySnapshot,
+      packages: [{ extensionId, source: { kind: "local-folder", sourceRef: "owned-server" } }],
+    } as unknown as ExtensionSnapshot;
+    state.snapshot = () => installed;
+    state.uninstall = vi.fn(async () => emptySnapshot);
+    const remove = vi.fn(async () => undefined);
+    const release = vi.fn();
+    const prepareRemoval = vi.fn(async () => release);
+    const service = new ExtensionApiService({
+      lifecycle: state,
+      resolver: { resolve: async () => resolvedPackage() },
+      userAddedMcpServers: { owns: (ref) => ref === "owned-server", prepareRemoval, remove },
+    });
+    prepareRemoval.mockRejectedValueOnce(new Error("synthetic broker unavailable"));
+    expect(
+      await service.execute({ kind: "uninstall-package", extensionId } as never),
+    ).toMatchObject({
+      failure: { category: "blocked", message: expect.stringContaining("retry removal") },
+    });
+    expect(state.uninstall).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    await service.execute({ kind: "uninstall-package", extensionId } as never);
+    expect(state.uninstall).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith("owned-server", extensionId);
+    expect(release).toHaveBeenCalledTimes(1);
+    vi.mocked(state.uninstall).mockRejectedValueOnce(new Error("synthetic lifecycle failure"));
+    await service.execute({ kind: "uninstall-package", extensionId } as never);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
   it("includes bounded bundled skill instructions in the pre-trust package preview", async () => {
     const instructions = "Never disclose secrets. Review every change before applying it.";
     const entries: ReadonlyArray<ExtensionArchiveEntry> = [
@@ -374,71 +576,84 @@ describe("extension inspection and lifecycle API service", () => {
     );
   });
 
-  it("marks only the packages the host wrote for a server added in Settings, whatever their slug", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "octant-user-added-mark-"));
-    try {
-      const registry = new LocalPluginFolderRegistry({ sourceKind: "user-added" });
-      const servers = new UserAddedMcpServerStore({
-        directory: join(directory, "user-added"),
-        registry,
-      });
-      const { source } = await servers.add({
-        name: "Linear",
-        connectorId: "linear",
-        server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
-      });
-      const registered = registry.get(source.sourceRef);
-      if (registered === undefined) throw new Error("Expected the registered folder.");
-      const written = decodeExtensionPackageManifest(
-        normalizeAgentPluginPackage(registered.packageInput).manifest,
-      );
-      const thirdPartyId = "45000000-0000-4000-8000-000000000009";
-      // A third-party plugin may pick the same `connector-<id>` name; only the
-      // host's record of the folders it wrote can tell the two apart.
-      const installed = {
-        ...emptySnapshot,
-        packages: [
-          { extensionId: written.extensionId, slug: written.slug, source: written.source },
-          {
-            extensionId: thirdPartyId,
-            slug: "connector-linear",
-            source: { kind: "plugin-package", sourceRef: "local-connector-linear" },
-            addedInSettings: true,
-          },
-        ],
-      } as unknown as ExtensionSnapshot;
-      const state = lifecycle([]);
-      state.snapshot = () => installed;
-      state.setPluginDesired = async () => installed;
-      const service = new ExtensionApiService({
-        lifecycle: state,
-        resolver: { resolve: async () => resolvedPackage() },
-        userAddedMcpServers: servers,
-      });
+  it.each(["linear", "paper"] as const)(
+    "marks only host-verified Settings sources and strips package claims for %s",
+    async (setup) => {
+      const directory = await mkdtemp(join(tmpdir(), "octant-user-added-mark-"));
+      try {
+        const registry = new LocalPluginFolderRegistry({ sourceKind: "user-added" });
+        const servers = new UserAddedMcpServerStore({
+          directory: join(directory, "user-added"),
+          registry,
+        });
+        const { source } = await servers.add(
+          setup === "paper"
+            ? {
+                name: "Paper",
+                localSetupId: "paper",
+                server: { type: "streamable-http", url: "http://127.0.0.1:29979/mcp", headers: [] },
+              }
+            : {
+                name: "Linear",
+                connectorId: "linear",
+                server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
+              },
+        );
+        const registered = registry.get(source.sourceRef);
+        if (registered === undefined) throw new Error("Expected the registered folder.");
+        const written = decodeExtensionPackageManifest(
+          normalizeAgentPluginPackage(registered.packageInput).manifest,
+        );
+        const thirdPartyId = "45000000-0000-4000-8000-000000000009";
+        // A third-party plugin may pick the same `connector-<id>` name; only the
+        // host's record of the folders it wrote can tell the two apart.
+        const installed = {
+          ...emptySnapshot,
+          packages: [
+            { extensionId: written.extensionId, slug: written.slug, source: written.source },
+            {
+              extensionId: thirdPartyId,
+              slug: "connector-linear",
+              source: { kind: "plugin-package", sourceRef: "local-connector-linear" },
+              addedInSettings: true,
+              localSetupId: "paper",
+            },
+          ],
+        } as unknown as ExtensionSnapshot;
+        const state = lifecycle([]);
+        state.snapshot = () => installed;
+        state.setPluginDesired = async () => installed;
+        const service = new ExtensionApiService({
+          lifecycle: state,
+          resolver: { resolve: async () => resolvedPackage() },
+          userAddedMcpServers: servers,
+        });
 
-      const marks = (snapshot: ExtensionSnapshot) =>
-        snapshot.packages.map((candidate) => [
-          String(candidate.extensionId),
-          candidate.addedInSettings,
-        ]);
-      const expected = [
-        [String(written.extensionId), true],
-        [thirdPartyId, undefined],
-      ];
-      expect(marks(service.snapshot())).toEqual(expected);
-      const result = await service.execute({
-        kind: "set-plugin-desired",
-        commandVersion: 1,
-        extensionId: thirdPartyId,
-        desired: true,
-        expectedStateVersion: 1,
-      } as never);
-      if (result.kind !== "extension-state-updated") throw new Error("Expected a state update.");
-      expect(marks(result.snapshot)).toEqual(expected);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+        const marks = (snapshot: ExtensionSnapshot) =>
+          snapshot.packages.map((candidate) => [
+            String(candidate.extensionId),
+            candidate.addedInSettings,
+            candidate.localSetupId,
+          ]);
+        const expected = [
+          [String(written.extensionId), true, setup === "paper" ? "paper" : undefined],
+          [thirdPartyId, undefined, undefined],
+        ];
+        expect(marks(service.snapshot())).toEqual(expected);
+        const result = await service.execute({
+          kind: "set-plugin-desired",
+          commandVersion: 1,
+          extensionId: thirdPartyId,
+          desired: true,
+          expectedStateVersion: 1,
+        } as never);
+        if (result.kind !== "extension-state-updated") throw new Error("Expected a state update.");
+        expect(marks(result.snapshot)).toEqual(expected);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("removes the generated folder and its secrets when an added MCP server is uninstalled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-user-added-uninstall-"));

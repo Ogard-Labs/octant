@@ -1,5 +1,7 @@
 import {
   AGENT_MESSAGE_AGGREGATE,
+  decodeAgentMessageExpired,
+  type AgentMessageExpired,
   decodeAgentMessageAcknowledged,
   decodeAgentMessageDelivered,
   decodeAgentMessageRefused,
@@ -24,7 +26,7 @@ import {
  * irrevocable delivery right, so the state after `sent` is "the host promised
  * to recheck", nothing stronger.
  */
-export type AgentMessageState = "in-flight" | "delivered" | "refused" | "acknowledged";
+export type AgentMessageState = "in-flight" | "delivered" | "refused" | "acknowledged" | "expired";
 
 export interface AgentMessageRecord {
   readonly messageId: AgentMessageId;
@@ -34,11 +36,17 @@ export interface AgentMessageRecord {
   readonly recipientThreadId: AgentMessageEndpointId;
   readonly recipientRunId?: AgentMessageEndpointId;
   readonly bodyReference: AgentMessageBodyReference;
+  readonly expiresAt?: string;
   readonly state: AgentMessageState;
   readonly refuseReason?: AgentMessageRefuseReason;
   /** When the record last moved. */
   readonly occurredAt?: string;
 }
+
+export type AgentMessageReceiptRecord = Pick<
+  AgentMessageRecord,
+  "messageId" | "senderThreadId" | "recipientThreadId" | "state" | "refuseReason" | "occurredAt"
+>;
 
 /**
  * How many refusals made before admission the projection keeps for one
@@ -82,6 +90,7 @@ export class AgentMessageProjection {
       | AgentMessageSent
       | AgentMessageDelivered
       | AgentMessageRefused
+      | AgentMessageExpired
       | AgentMessageAcknowledged,
   ): void {
     if (event.kind === "message-sent") {
@@ -96,8 +105,20 @@ export class AgentMessageProjection {
         recipientThreadId: sent.recipientThreadId,
         ...(sent.recipientRunId === undefined ? {} : { recipientRunId: sent.recipientRunId }),
         bodyReference: sent.bodyReference,
+        ...(sent.expiresAt === undefined ? {} : { expiresAt: sent.expiresAt }),
         state: "in-flight",
         occurredAt: sent.occurredAt,
+      });
+      return;
+    }
+    if (event.kind === "message-expired") {
+      const expired = decodeAgentMessageExpired(event);
+      const current = this.#byMessage.get(String(expired.messageId));
+      if (current?.state !== "in-flight") return;
+      this.#byMessage.set(String(expired.messageId), {
+        ...current,
+        state: "expired",
+        occurredAt: expired.occurredAt,
       });
       return;
     }
@@ -167,6 +188,23 @@ export class AgentMessageProjection {
 
   lookup(messageId: string): AgentMessageRecord | undefined {
     return this.#byMessage.get(messageId);
+  }
+
+  /** The sender's own metadata includes bounded refusals made before admission. */
+  receiptForSender(
+    senderThreadId: string,
+    messageId: string,
+  ): AgentMessageReceiptRecord | undefined {
+    const record = this.#byMessage.get(messageId);
+    if (
+      record !== undefined &&
+      String(record.senderThreadId) === senderThreadId &&
+      record.senderRunId === undefined &&
+      record.recipientRunId === undefined
+    )
+      return record;
+    const early = this.#refusedBeforeAdmission.get(senderThreadId)?.records.get(messageId);
+    return early === undefined ? undefined : { ...early, state: "refused" };
   }
 
   countInFlightForSender(senderThreadId: string): number {
@@ -242,10 +280,8 @@ export class AgentMessageProjection {
       if (!visibleSender(String(record.senderThreadId))) continue;
       if (record.state === "in-flight") {
         openInFlight += 1;
-        continue;
-      }
-      if (record.state === "refused") refused += 1;
-      else delivered += 1;
+      } else if (record.state === "refused") refused += 1;
+      else if (record.state !== "expired") delivered += 1;
       settled.push({
         messageId: String(record.messageId),
         senderThreadId: String(record.senderThreadId),
@@ -272,8 +308,8 @@ export class AgentMessageProjection {
         });
       }
     }
-    // In-flight messages carry no settled time of their own; the most recent
-    // settled statuses are what the bounds view can state. The sort is stable,
+    // Queued rows retain admission time; settled rows retain the last receipt.
+    // The most recent host facts are bounded for every sender. The sort is stable,
     // so messages that settled in the same instant keep their journal order.
     settled.sort((a, b) => (a.occurredAt ?? "").localeCompare(b.occurredAt ?? ""));
     return {
@@ -345,6 +381,8 @@ export function hydrateAgentMessageProjectionFromJournal(input: {
       }
       if (event.eventName === "agent.message-sent@1") {
         input.projection.apply(event.payload as AgentMessageSent);
+      } else if (event.eventName === "agent.message-expired@1") {
+        input.projection.apply(event.payload as AgentMessageExpired);
       } else if (event.eventName === "agent.message-delivered@1") {
         input.projection.apply(event.payload as AgentMessageDelivered);
       } else if (event.eventName === "agent.message-refused@1") {

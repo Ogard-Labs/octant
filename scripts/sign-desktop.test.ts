@@ -1,6 +1,8 @@
+import { packagedNativePath } from "./desktop-client-runtime";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it } from "vitest";
 import {
   BUNDLED_LANGUAGE_SERVER_SIGNING_PATH,
@@ -131,11 +133,12 @@ describe("signPackagedDesktop", () => {
 });
 
 describe("signAndNotarizeDesktop", () => {
-  async function record() {
+  async function record(productName = "Octant") {
     const argv: string[][] = [];
     await signAndNotarizeDesktop({
       repositoryRoot: "/repo",
-      appPath: "/repo/out/Octant.app",
+      appPath: `/repo/out/${productName}.app`,
+      identity: desktopIdentity(productName === "Octant" ? "stable" : "nightly"),
       archivePath: "/repo/out/Octant-0.1.0-arm64.zip",
       credentials: { identity: "Developer ID", notaryProfile: "profile", teamId: "TEAM" },
       run: async (command) => void argv.push([...command]),
@@ -151,6 +154,34 @@ describe("signAndNotarizeDesktop", () => {
     return argv;
   }
 
+  it("signs Nightly's actual Electron helper bundles under its separate product name", async () => {
+    const commands = await record("Octant Nightly");
+    const targets = commands.filter((argv) => argv.includes("--sign")).map((argv) => argv.at(-1));
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Nightly Helper.app",
+    );
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Nightly Helper (Renderer).app",
+    );
+    expect(targets.some((target) => target?.includes("/Octant Helper"))).toBe(false);
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Resources/app.asar.unpacked/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
+    );
+    // Nightly carries the worker host tree and runtime as Octant does.
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Resources/app/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
+    );
+    expect(targets).toContain(
+      "/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Runtime.app",
+    );
+    expect(
+      targets.indexOf("/repo/out/Octant Nightly.app/Contents/Frameworks/Octant Runtime.app"),
+    ).toBeLessThan(targets.indexOf("/repo/out/Octant Nightly.app"));
+    expect(
+      targets.some((target) => target?.includes("/Resources/app.asar.unpacked/apps/server/")),
+    ).toBe(false);
+  });
+
   it("signs every nested payload before the bundle that contains them", async () => {
     // `codesign` seals a bundle including what is inside it, so a nested binary
     // signed afterwards would invalidate the outer seal.
@@ -160,8 +191,14 @@ describe("signAndNotarizeDesktop", () => {
       .map((command) => command[command.length - 1]);
 
     expect(signed[signed.length - 1]).toBe("/repo/out/Octant.app");
+    expect(signed).toContain("/repo/out/Octant.app/Contents/Frameworks/Octant Runtime.app");
+    expect(
+      signed.indexOf("/repo/out/Octant.app/Contents/Frameworks/Octant Runtime.app"),
+    ).toBeLessThan(signed.length - 1);
     for (const nested of SIGNING_ORDER) {
-      expect(signed.indexOf(`/repo/out/Octant.app/${nested}`)).toBeLessThan(signed.length - 1);
+      expect(signed.indexOf(`/repo/out/Octant.app/${packagedNativePath(nested)}`)).toBeLessThan(
+        signed.length - 1,
+      );
     }
   });
 
@@ -172,6 +209,8 @@ describe("signAndNotarizeDesktop", () => {
     for (const payload of [
       "Contents/Resources/native/octant-keychain-helper",
       "Contents/Resources/native/octant-code-file-helper",
+      "Contents/Resources/native/octant-desktop-peer-status.node",
+      "Contents/Resources/native/octant-browser-text-input.node",
       "Contents/Resources/native/octant-device-helper",
       "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     ]) {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { Cause, Effect, Exit, Option } from "effect";
 import {
   acquireHostRuntimeOwner,
@@ -15,6 +15,9 @@ import {
   HostRuntimePathError,
   probeHostPlatformCapabilities,
   readHostRuntimeProcessStart,
+  decodeKeychainServiceFamily,
+  DEFAULT_FOLDER_ENVIRONMENT,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   resolveHostRuntimePaths,
   resolveReportedHostVersion,
   ServicePolicyStore,
@@ -69,6 +72,21 @@ try {
   if (artifactInspection !== undefined && !artifactInspection.ok) {
     console.error(
       `Octant refused to start from this artifact: ${artifactInspection.rejection.code}.`,
+    );
+    process.exit(1);
+  }
+  // The desktop names these for Nightly's own test host; a value it never
+  // sends refuses here rather than leaving the host on Octant's names.
+  if (decodeKeychainServiceFamily(process.env[KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]) === undefined) {
+    console.error(
+      `Octant refused to start: ${KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT} is not recognized.`,
+    );
+    process.exit(1);
+  }
+  const configuredDefaultFolder = process.env[DEFAULT_FOLDER_ENVIRONMENT];
+  if (configuredDefaultFolder !== undefined && !isAbsolute(configuredDefaultFolder)) {
+    console.error(
+      `Octant refused to start: ${DEFAULT_FOLDER_ENVIRONMENT} must be an absolute path.`,
     );
     process.exit(1);
   }
@@ -170,6 +188,7 @@ try {
       platform: process.platform,
       uid: paths.uid,
     });
+    // Persistence must outlive the server's scoped cancellation and finalizers.
     const program = Effect.scoped(
       Effect.gen(function* () {
         const server = yield* startOctantServer({
@@ -222,8 +241,8 @@ try {
         );
         console.info(`Octant server listening on ${server.url}`);
         return yield* Effect.never;
-      }).pipe(Effect.provide(PersistenceLive)),
-    );
+      }),
+    ).pipe(Effect.provide(PersistenceLive));
     const exit = await Effect.runPromiseExit(program, { signal: abortController.signal });
     if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
       // A defect (a failed listen, an fs error) has no typed failure; squash

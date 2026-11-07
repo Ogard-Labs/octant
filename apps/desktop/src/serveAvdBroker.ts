@@ -27,6 +27,7 @@ export interface ServeAvdBrokerOptions {
     args: ReadonlyArray<string>,
     options: {
       readonly env: NodeJS.ProcessEnv;
+      readonly cwd?: string;
       readonly stdio: ["ignore", "pipe", "pipe"];
     },
   ) => ChildProcess;
@@ -61,6 +62,7 @@ export async function startServeAvdBroker(
   const token = randomBytes(32).toString("base64url");
   const sessions = new Map<string, Promise<AvdLaunch>>();
   let closed = false;
+  let closing: Promise<void> | undefined;
 
   function open(serial: string, sdkRoot: string | undefined): Promise<AvdLaunch> {
     const existing = sessions.get(serial);
@@ -96,18 +98,15 @@ export async function startServeAvdBroker(
     onExit: () => void,
   ): Promise<AvdLaunch> {
     if (closed) return { kind: "unavailable", reason: "tool-missing" };
-    const spec = await tools.launchSpec("serve-avd", [
-      "--no-preview",
-      "-q",
-      "--codec",
-      "mjpeg",
-      "--host",
-      "127.0.0.1",
-      serial,
-    ]);
+    const spec = await tools.launchSpec(
+      "serve-avd",
+      ["--no-preview", "-q", "--codec", "mjpeg", "--host", "127.0.0.1", serial],
+      sdkRoot,
+    );
     if (spec === undefined || closed) return { kind: "unavailable", reason: "tool-missing" };
     const child = spawn(spec.command, spec.args, {
       env: serveAvdEnvironment(spec.env, sdkRoot),
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     // An unread stderr pipe fills and stalls serve-avd. An unhandled spawn
@@ -153,17 +152,30 @@ export async function startServeAvdBroker(
   return {
     token,
     url: `http://127.0.0.1:${address.port}${PATH}`,
-    close: async () => {
-      closed = true;
-      for (const pending of sessions.values()) {
-        const launched = await pending;
-        if (launched.kind === "attached") launched.session.child.kill("SIGTERM");
-      }
-      sessions.clear();
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
-      });
+    close: () => {
+      closing ??= (async () => {
+        closed = true;
+        let failed = false;
+        for (const pending of sessions.values()) {
+          try {
+            const launched = await pending;
+            if (launched.kind === "attached") launched.session.child.kill("SIGTERM");
+          } catch {
+            failed = true;
+          }
+        }
+        sessions.clear();
+        server.closeAllConnections();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            server.close((error) => (error === undefined ? resolve() : reject(error)));
+          });
+        } catch {
+          failed = true;
+        }
+        if (failed) throw new Error("Octant could not close managed-device broker resources.");
+      })();
+      return closing;
     },
   };
 }

@@ -1,3 +1,5 @@
+import { CodeLocalReview } from "./CodeLocalReview";
+import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import type { AutoReview } from "./autoReview";
@@ -153,7 +155,7 @@ export interface CodeWorkspaceProps {
   readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
-  readonly onOpenReview?: () => void;
+  readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly onOpenSurface?: (
     kind: CodeOverviewSurfaceKind,
     options?: { readonly terminalId?: CodeTerminalId },
@@ -224,6 +226,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   if (props.tab.kind === "code-overview") {
     return (
       <CodeThreadWorkspace
+        {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined
           ? {}
@@ -322,7 +325,15 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     case "code-file":
       return props.projections?.file?.path === props.tab.relativePath ? (
         <MonacoEditorPane
+          debugProjectId={view.thread.projectId}
           client={props.client}
+          checkoutLabel={
+            view.checkout.head.kind === "branch"
+              ? view.checkout.head.name
+              : view.checkout.head.kind === "detached"
+                ? "Detached checkout"
+                : "Project folder"
+          }
           draftStore={props.controller.editorDrafts}
           file={props.projections.file}
           {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
@@ -412,34 +423,12 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         <PullRequestWorkspaceSurface {...props} nextUuid={nextUuid} scope={scope} tab={props.tab} />
       );
     case "code-local-review":
-      if (props.projections?.findings === undefined) {
-        return (
-          <UnavailableProjection
-            message="Local findings were not included in the authoritative restored projection."
-            title="Local review unavailable"
-          />
-        );
-      }
-      if (
-        decidesCodeEffectsByApproval(view.thread.executionPolicy) &&
-        props.approvals?.review === undefined
-      ) {
-        return <ApprovalUnavailable surface="Local review" />;
-      }
       return (
-        <CodeReviewPane
+        <CodeLocalReview
           client={props.client}
-          createFindingId={() => nextUuid() as never}
-          createOperationId={() => nextUuid() as never}
-          executionPolicy={view.thread.executionPolicy}
-          findings={props.projections.findings}
-          {...(props.approvals?.review === undefined
-            ? {}
-            : { requestApproval: props.approvals.review })}
           scope={scope}
-          {...(props.projections.reviewTarget === undefined
-            ? {}
-            : { target: props.projections.reviewTarget })}
+          executionPolicy={view.thread.executionPolicy}
+          createUuid={nextUuid}
         />
       );
     case "apple-workbench":

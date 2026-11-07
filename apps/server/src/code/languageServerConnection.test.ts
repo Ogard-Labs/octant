@@ -49,7 +49,6 @@ describe("language server connection", () => {
       [1, "workspace/applyEdit"],
       [2, "workspace/executeCommand"],
       [3, "window/showDocument"],
-      [4, "client/unregisterCapability"],
     ] as const) {
       fromServer.write(frame({ jsonrpc: "2.0", id, method, params: {} }));
     }
@@ -58,7 +57,6 @@ describe("language server connection", () => {
       [1, -32601],
       [2, -32601],
       [3, -32601],
-      [4, -32601],
     ]);
     expect(sent.every((message) => message.result === undefined)).toBe(true);
   });
@@ -91,6 +89,55 @@ describe("language server connection", () => {
     expect(sent[1]?.error).toBeDefined();
     expect(connection.registered("workspace/didChangeWatchedFiles")).toBe(true);
     expect(connection.registered("textDocument/didOpen")).toBe(false);
+  });
+
+  it("scopes reference registrations to known selectors and refuses unrelated unregister batches", async () => {
+    const { connection, fromServer, sent } = harness();
+    const register = (id: string, selector: unknown) =>
+      fromServer.write(
+        frame({
+          jsonrpc: "2.0",
+          id,
+          method: "client/registerCapability",
+          params: {
+            registrations: [
+              {
+                id,
+                method: "textDocument/references",
+                registerOptions: { documentSelector: selector },
+              },
+            ],
+          },
+        }),
+      );
+    register("refs", [{ language: "typescript", scheme: "file" }]);
+    expect(connection.referencesRegistrationSupport("typescript")).toBe("supported");
+    expect(connection.referencesRegistrationSupport("python")).toBe("unsupported");
+    fromServer.write(
+      frame({
+        jsonrpc: "2.0",
+        id: "bad",
+        method: "client/unregisterCapability",
+        params: { unregisterations: [{ id: "refs", method: "workspace/applyEdit" }] },
+      }),
+    );
+    expect(connection.referencesRegistrationSupport("typescript")).toBe("supported");
+    fromServer.write(
+      frame({
+        jsonrpc: "2.0",
+        id: "good",
+        method: "client/unregisterCapability",
+        params: { unregisterations: [{ id: "refs", method: "textDocument/references" }] },
+      }),
+    );
+    expect(connection.referencesRegistrationSupport("typescript")).toBe("unsupported");
+    register("pattern", [{ language: "typescript", pattern: "**/*.ts" }]);
+    expect(connection.referencesRegistrationSupport("typescript")).toBe("unknown");
+    register("wrong", [{ language: "python" }]);
+    expect(connection.referencesRegistrationSupport("python")).toBe("supported");
+    await settle();
+    expect(sent.find((message) => message.id === "bad")?.error).toBeDefined();
+    expect(sent.find((message) => message.id === "good")?.result).toBeNull();
   });
 
   it("answers configuration with the server's own defaults and accepts progress tokens", async () => {

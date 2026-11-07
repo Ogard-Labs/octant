@@ -2,6 +2,10 @@ import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   decodeProviderTurnInput,
+  decodeProviderInstance,
+  decodeCodeThreadId,
+  decodeProjectId,
+  decodeWindowId,
   type OutsideDriverKeyPlacement,
   type ProviderFailure,
   type ProviderInstanceId,
@@ -26,6 +30,18 @@ import {
   type OutsideDriverFetch,
 } from "./outsideHarnessEndpointProxy";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import {
+  ProviderCloudCreateInput,
+  decodeProviderCloudJobId,
+  decodeProviderCloudRemoteId,
+  decodeProviderCloudRequest,
+  type ProviderCloudJob,
+} from "@octant/contracts/provider-cloud-sessions";
+import { openAiCloudSessionRequests } from "@octant/provider-sdk/openai-cloud-session-protocol";
+import { makeProviderCloudPorts } from "../cloud/providerCloudHttp";
+import { ProviderCloudSessionService } from "../cloud/providerCloudSessionService";
+import { createHash } from "node:crypto";
+import { Schema } from "effect";
 
 const instanceA = decodeProviderInstanceId("80000000-0000-4000-8000-000000000a01");
 const instanceB = decodeProviderInstanceId("80000000-0000-4000-8000-000000000b01");
@@ -80,6 +96,8 @@ function harness(
     readonly httpConnectionTimeoutMs?: number;
     readonly httpIdleTimeoutMs?: number;
     readonly key?: OutsideDriverKeyPlacement | undefined;
+    readonly baseUrl?: string;
+    readonly callTimeoutMs?: number;
   } = {},
 ) {
   const channel = makeInMemoryOutsideDriverChannel();
@@ -89,7 +107,7 @@ function harness(
   const proxy = makeOutsideHarnessEndpointProxy({
     instanceId: id,
     channel: channel.host,
-    baseUrl,
+    baseUrl: options.baseUrl ?? baseUrl,
     // The placement most of these drivers ask for; a test that needs another names it.
     key: "key" in options ? options.key : { header: "authorization" },
     modelIds: [modelId],
@@ -99,7 +117,7 @@ function harness(
       : { credentialResolver: options.credentialResolver }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     limits: {
-      callTimeoutMs: 2_000,
+      callTimeoutMs: options.callTimeoutMs ?? 2_000,
       sendTimeoutMs: 2_000,
       ...(options.messageBytes === undefined ? {} : { messageBytes: options.messageBytes }),
       ...(options.httpResponseBytes === undefined
@@ -142,6 +160,257 @@ function expectNoHostileText(value: unknown) {
 }
 
 describe("outside harness endpoint proxy", () => {
+  it.each([false, true])(
+    "keeps the host-observed session after an outside reply is lost and cancels on admission loss: %s",
+    async (loseAdmission) => {
+      const created = Promise.withResolvers<void>();
+      const { proxy, probe } = harness(
+        {
+          initialize: () => ({
+            protocolVersion: "harness-endpoint/1",
+            cloudSessions: "openai-agents-v1",
+          }),
+          probe: () => ({ models: [{ id: modelId }], claims: { cloudSessions: "supported" } }),
+          "cloud/create": async (params, context) => {
+            const command = Schema.decodeUnknownSync(ProviderCloudCreateInput)(params);
+            const planned = openAiCloudSessionRequests({ kind: "create", ...command })[0];
+            if (planned === undefined) throw new Error("Missing planned create.");
+            await context.http({
+              requestId: context.id,
+              url: `https://api.openai.com${planned.path}`,
+              method: "POST",
+              body: planned.body,
+              auth: { header: "authorization", scheme: "Bearer" },
+            });
+            return NO_ANSWER;
+          },
+          "cloud/cancel": async (params, context) => {
+            const remoteId = decodeProviderCloudRemoteId(params.remoteId);
+            const jobId = decodeProviderCloudJobId(params.jobId);
+            const planned = openAiCloudSessionRequests({ kind: "cancel", remoteId, jobId })[0];
+            if (planned === undefined) throw new Error("Missing planned cancel.");
+            await context.http({
+              requestId: context.id,
+              url: `https://api.openai.com${planned.path}`,
+              method: "POST",
+              body: planned.body,
+              auth: { header: "authorization", scheme: "Bearer" },
+            });
+            return { status: "requested" };
+          },
+        },
+        {
+          baseUrl: "https://api.openai.com/v1/",
+          key: { header: "authorization", scheme: "Bearer" },
+          callTimeoutMs: 100,
+        },
+      );
+      await probe();
+      const cloud = proxy.cloudSessions;
+      if (cloud === undefined) throw new Error("Cloud seam missing.");
+      const instance = decodeProviderInstance({
+        id: instanceA,
+        driverKind: "outside-harness-endpoint",
+        displayName: "Fixture cloud",
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        configuration: {
+          kind: "outside-harness-endpoint",
+          driver: {
+            extensionId: instanceB,
+            packageId: instanceB,
+            componentId: "driver",
+            version: "1.0.0",
+            digest: `sha256:${"a".repeat(64)}`,
+          },
+          baseUrl: "https://api.openai.com/v1/",
+          key: { header: "authorization", scheme: "Bearer" },
+          modelIds: [modelId],
+        },
+      });
+      const jobs = new Map<string, ProviderCloudJob>();
+      const dispatched = new Set<string>();
+      let enabled = false;
+      let current = true;
+      let cancellations = 0;
+      const threadId = decodeCodeThreadId("a7550000-0000-4000-8000-000000000020");
+      const windowId = decodeWindowId("a7550000-0000-4000-8000-000000000021");
+      const service = new ProviderCloudSessionService({
+        now: () => now,
+        instances: () => [instance],
+        supports: cloud.supports,
+        models: () => [modelId],
+        canManageProvider: () => current,
+        context: () => ({
+          threadId,
+          projectId: decodeProjectId(instanceB),
+          executionPolicy: "full-access",
+          current: () => current,
+          requiresUnsupportedBound: () => false,
+          canSubmit: () => true,
+        }),
+        store: {
+          enabled: () => enabled,
+          setEnabled: (_id, next) => {
+            enabled = next;
+          },
+          get: (id) => jobs.get(id),
+          put: (job) => {
+            jobs.set(job.id, job);
+            return job;
+          },
+          list: () => [...jobs.values()],
+          active: () =>
+            [...jobs.values()].filter(
+              (job) => !["completed", "failed", "cancelled", "unavailable"].includes(job.state),
+            ),
+          hasCreateDispatch: (id) => dispatched.has(id),
+        },
+        adapter: (_instance, intent, admission = () => true, onCreated) =>
+          cloud.create({
+            instanceId: instanceA,
+            ports: makeProviderCloudPorts({
+              instanceId: instanceA,
+              intent,
+              admission,
+              ...(onCreated === undefined
+                ? {}
+                : {
+                    onCreated: (remoteId) => {
+                      onCreated(remoteId);
+                      created.resolve();
+                    },
+                  }),
+              onCreateDispatch: () => {
+                if (intent.kind === "create") dispatched.add(intent.jobId);
+              },
+              credentialResolver: {
+                has: async () => true,
+                resolve: async () => "synthetic-not-an-account-key",
+              },
+              fetch: async (url) => {
+                if (url.endsWith("/events")) {
+                  cancellations += 1;
+                  return Response.json({});
+                }
+                return Response.json({ id: "sess_host_owned", status: "in_progress" });
+              },
+            }),
+          }),
+      });
+      try {
+        await service.execute(windowId, { kind: "opt-in", instanceId: instanceA, enabled: true });
+        const text = "Synthetic reviewed cloud task.";
+        const command = decodeProviderCloudRequest({
+          kind: "start",
+          jobId: "a7550000-0000-4000-8000-000000000022",
+          threadId,
+          instanceId: instanceA,
+          modelId,
+          input: text,
+          reviewedInputDigest: createHash("sha256").update(text).digest("hex"),
+          cloudExecutionConsent: true,
+        });
+        const pending = service.execute(windowId, command);
+        await created.promise;
+        if (loseAdmission) current = false;
+        const result = await pending;
+        const job = jobs.get("a7550000-0000-4000-8000-000000000022");
+        expect(job?.remoteId).toBe("sess_host_owned");
+        expect(job?.state).toBe(loseAdmission ? "cancel-requested" : "running");
+        expect(cancellations).toBe(loseAdmission ? 1 : 0);
+        expect(result.status).toBe(loseAdmission ? "refused" : "ready");
+        expect(dispatched.size).toBe(1);
+      } finally {
+        await service.close();
+      }
+    },
+  );
+
+  it("uses the same sealed cloud permit for outside HTTP and refuses changed, unowned or duplicate creates", async () => {
+    let calls = 0;
+    let usage = 0;
+    const failures: boolean[] = [];
+    const genericFetch = vi.fn<OutsideDriverFetch>(async () => Response.json({}));
+    const { proxy, probe } = harness(
+      {
+        initialize: () => ({
+          protocolVersion: "harness-endpoint/1",
+          cloudSessions: "openai-agents-v1",
+        }),
+        probe: () => ({ models: [{ id: modelId }], claims: { cloudSessions: "supported" } }),
+        "cloud/create": async (params, context) => {
+          const command = Schema.decodeUnknownSync(ProviderCloudCreateInput)(params);
+          const planned = openAiCloudSessionRequests({ kind: "create", ...command })[0];
+          if (planned === undefined) throw new Error("No planned cloud request.");
+          const wire = {
+            requestId: context.id,
+            url: `https://api.openai.com${planned.path}`,
+            method: planned.method,
+            auth: { header: "authorization", scheme: "Bearer" },
+            headers: [["OpenAI-Beta", "agents=v1"]],
+            body: planned.body,
+          };
+          failures.push(
+            (await context.http({ ...wire, requestId: undefined })).error !== undefined,
+          );
+          failures.push((await context.http({ ...wire, body: "{}" })).error !== undefined);
+          expect((await context.http(wire)).status).toBe(200);
+          failures.push((await context.http(wire)).error !== undefined);
+          return {
+            status: "observed",
+            remoteId: "sess_owned",
+            state: "running",
+            output: "",
+            truncated: false,
+          };
+        },
+      },
+      {
+        baseUrl: "https://api.openai.com/v1/",
+        key: { header: "authorization", scheme: "Bearer" },
+        fetch: genericFetch,
+      },
+    );
+    await probe();
+    const cloud = proxy.cloudSessions;
+    if (cloud === undefined) throw new Error("Cloud seam missing.");
+    const intent = {
+      kind: "create" as const,
+      jobId: decodeProviderCloudJobId("a7550000-0000-4000-8000-000000000001"),
+      modelId,
+      text: "synthetic reviewed task",
+    };
+    const ports = makeProviderCloudPorts({
+      instanceId: instanceA,
+      intent,
+      admission: () => true,
+      credentialResolver: {
+        has: async () => true,
+        resolve: async () => "synthetic-not-an-account-key",
+      },
+      onCreateDispatch: () => {
+        usage += 1;
+      },
+      fetch: async () => {
+        calls += 1;
+        return Response.json({ id: "sess_owned", status: "in_progress" });
+      },
+    });
+    expect(
+      await cloud
+        .create({ instanceId: instanceA, ports })
+        .create({ jobId: intent.jobId, modelId: intent.modelId, text: intent.text }),
+    ).toMatchObject({ status: "observed", remoteId: decodeProviderCloudRemoteId("sess_owned") });
+    expect(failures).toEqual([true, true, true]);
+    expect(calls).toBe(1);
+    expect(usage).toBe(1);
+    expect(genericFetch).not.toHaveBeenCalled();
+  });
+
   it("passes the harness endpoint conformance kit with a driver that ignores cancels, answers after release, and over-claims", async () => {
     let sends = 0;
     const { proxy, probe, driver } = harness({

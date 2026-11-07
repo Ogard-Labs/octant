@@ -710,17 +710,21 @@ describe("Claude runtime confinement", () => {
     const confinement = recordingConfinement();
     const port = makePort(target, { confinement: confinement.port });
 
-    // The readiness check has no launch to speak for and stays unconfined.
+    // A standalone check has only its account resources, never the project.
     await expect(
       Effect.runPromise(port.probeSubscription(target.binaryPath, target.environment)),
     ).resolves.toBe("authenticated");
-    // An approval-gated launch is not confined by Octant, so neither is its check.
+    // Its later turn's posture does not widen a readiness check.
     await expect(
       Effect.runPromise(
         port.probeSubscription(target.binaryPath, target.environment, approvalGated(target)),
       ),
     ).resolves.toBe("authenticated");
-    expect(confinement.prepared).toEqual([]);
+    expect(confinement.prepared).toHaveLength(2);
+    for (const prepared of confinement.prepared) {
+      expect(prepared.networkEgress).toBe("none");
+      expect(prepared.boundRoot).not.toBe(target.root);
+    }
 
     await expect(
       Effect.runPromise(
@@ -730,8 +734,8 @@ describe("Claude runtime confinement", () => {
         }),
       ),
     ).resolves.toBe("authenticated");
-    expect(confinement.prepared).toHaveLength(1);
-    expect(confinement.prepared[0]).toMatchObject({
+    expect(confinement.prepared).toHaveLength(3);
+    expect(confinement.prepared[2]).toMatchObject({
       executable: target.binaryPath,
       args: ["auth", "status", "--json"],
       boundRoot: realpathSync(target.root),

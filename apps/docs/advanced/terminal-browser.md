@@ -68,7 +68,8 @@ computer that runs Octant, can switch one on; a paired device cannot.
   unchanged.
 - **As this thread.** The Browser's site list, its protection of password
   fields, and Plan mode apply as they do to the thread's agent. In Plan mode
-  the Browser refuses every action that would change something.
+  the CLI may read the page already open, and the Browser refuses every action
+  that would change something.
 - **You approve each new site.** The first time the CLI opens a site, the
   thread asks you, in a card that says the request came from a program in the
   thread's terminal, not from the thread's agent. **Always allow** remembers

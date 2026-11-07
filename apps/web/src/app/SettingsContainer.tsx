@@ -116,6 +116,24 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     usageDashboardClient,
   } = props.clients;
   const selectLocalPluginFolder = props.hostBridge?.selectLocalPluginFolder;
+  const selectSkillFolder = props.hostBridge?.selectSkillFolder;
+  const pickSkillFolder = useMemo(
+    () =>
+      selectSkillFolder === undefined ||
+      extensionClient.resolveSkillFolder === undefined ||
+      !extensionClient.toolGrantsAvailable
+        ? undefined
+        : async () => {
+            const selected = await selectSkillFolder();
+            return selected.kind === "selected"
+              ? extensionClient.resolveSkillFolder?.(
+                  selected.receiptId,
+                  AbortSignal.timeout(15_000),
+                )
+              : undefined;
+          },
+    [selectSkillFolder, extensionClient],
+  );
   const chatThreads = chatController.bootstrap?.threads;
   const workThreads = workNavigation.bootstrap?.threads;
   const codeThreads = codeController.bootstrap?.threads;
@@ -167,6 +185,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       discoveryController={discoveryController}
       extensionClient={extensionClient}
       projectNames={projectNamesById}
+      {...(pickSkillFolder === undefined ? {} : { pickSkillFolder })}
       {...(selectLocalPluginFolder === undefined
         ? {}
         : {

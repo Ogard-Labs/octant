@@ -191,6 +191,7 @@ const BoundedProviderToolDescription = Schema.NonEmptyTrimmedString.pipe(Schema.
 const BoundedProviderAttachmentId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 const BoundedProviderDisplayName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 const BoundedProviderMediaType = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+const BoundedProviderContextKey = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 
 /**
  * One answer a provider offers for a question it asked: what the person picks,
@@ -208,7 +209,7 @@ const MAX_PROVIDER_JSON_ENTRIES = 256;
 const MAX_PROVIDER_JSON_KEY_LENGTH = 128;
 const MAX_PROVIDER_JSON_STRING_LENGTH = 4_096;
 const MAX_PROVIDER_ATTACHMENT_BYTES = 26_214_400;
-const MAX_PROVIDER_ATTACHMENTS = 16;
+export const MAX_PROVIDER_ATTACHMENTS = 16;
 export const MAX_PROVIDER_CONTEXT_BLOCKS = 256;
 // The native harness offers twelve tools beside research and extension tools;
 // the wire protocols this bound guards accept far more than that.
@@ -1490,6 +1491,7 @@ export const ProviderCatalogUpdated = Schema.Struct({
 export type ProviderCatalogUpdated = typeof ProviderCatalogUpdated.Type;
 
 export const ProviderCapabilities = Schema.Struct({
+  cloudSessions: Schema.optional(ProviderCapabilitySupport),
   streaming: ProviderCapabilitySupport,
   resume: ProviderCapabilitySupport,
   interruption: ProviderCapabilitySupport,
@@ -1617,6 +1619,15 @@ export type ProviderToolDefinition = typeof ProviderToolDefinition.Type;
 export const ProviderContextBlock = Schema.Struct({
   kind: Schema.Literal(
     "instructions",
+    // Octant's instructions for this turn alone, such as asking a task to take
+    // stock when it opens. Never held, so the standing instructions stay
+    // byte-stable and a provider's prompt cache is never invalidated by them.
+    "turn-instructions",
+    // Instructions from a skill the person enabled, whether standalone or in a
+    // plugin. Standing like Octant's own, but kept apart from them so a runtime
+    // with a higher-authority channel for Octant's rules (Codex developer
+    // context) never lifts third-party text into it.
+    "skill-instructions",
     "user-message",
     "assistant-message",
     // What Octant remembers about the person from earlier threads, framed as
@@ -1629,6 +1640,18 @@ export const ProviderContextBlock = Schema.Struct({
     "conversation-summary",
   ),
   text: ProviderPromptText,
+  /**
+   * Names standing context Octant re-reads every turn, such as a Project's
+   * status file. A session holding an older version under the same key gets
+   * the newer one appended; it is not a withdrawal, so nothing is restated.
+   */
+  key: Schema.optional(BoundedProviderContextKey),
+  /**
+   * The app tool this block describes, such as the Canvas delivery rule or the
+   * Browser note. A driver whose session cannot call that tool leaves the
+   * block out, so the model is never told about a tool it does not have.
+   */
+  tool: Schema.optional(BoundedProviderToolName),
 }).annotations(strict);
 export type ProviderContextBlock = typeof ProviderContextBlock.Type;
 
@@ -2408,6 +2431,22 @@ export const ProviderResumeCursor = Schema.Struct({
       modelId: ProviderModelId,
     }).annotations(strict),
   ),
+  /**
+   * The app tools a runtime fixed for this session when it started and cannot
+   * change later (Codex keeps a thread's starting tools across every resume),
+   * so a resumed session still knows which tool rules it can carry. Absent
+   * means unknown, and every rule is kept.
+   */
+  tools: Schema.optional(Schema.Array(BoundedProviderToolName).pipe(Schema.maxItems(256))),
+  /** Fingerprints of the immutable starting definitions; schemas and secrets are never retained here. */
+  toolDefinitions: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: BoundedProviderToolName,
+        digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type ProviderResumeCursor = typeof ProviderResumeCursor.Type;
 
@@ -2441,6 +2480,7 @@ export const ProviderUsageLimit = Schema.Struct({
 export type ProviderUsageLimit = typeof ProviderUsageLimit.Type;
 
 export const ProviderFailure = Schema.Struct({
+  toolCatalogHandoffRequired: Schema.optional(Schema.Literal(true)),
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
   reason: Schema.optional(ProviderRefusalReason),

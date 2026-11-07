@@ -1,3 +1,4 @@
+import { DESKTOP_FLAVOR_IDENTITIES } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -37,8 +38,6 @@ import {
   installPrivateListenerIpcHandlers,
   installRemoteDeviceIpcHandlers,
   installHostIdentityIpcHandlers,
-  shutdownManagedServerResources,
-  startManagedServerResources,
   createMainBrowserWindowOptions,
   createProjectWindowAuthorityRefresh,
   createTrustedRendererRequestRegistry,
@@ -103,6 +102,11 @@ describe("canonical local host endpoint", () => {
     expect(resolveConfiguredServerPort({})).toBe(13_773);
     expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" })).toBe(14_000);
   });
+
+  it("starts Nightly's test host on its own port unless OCTANT_SERVER_PORT overrides it", () => {
+    expect(resolveConfiguredServerPort({}, 13_774)).toBe(13_774);
+    expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" }, 13_774)).toBe(14_000);
+  });
 });
 
 describe("packaged desktop host capabilities", () => {
@@ -156,7 +160,12 @@ describe("development renderer startup", () => {
       developmentOrigin: "http://localhost:5173",
     };
     const trusted = decorateTrustedRendererHeaders({
-      requestHeaders: { "X-Octant-Renderer-Identity": "forged", accept: "application/json" },
+      requestHeaders: {
+        "X-Octant-Renderer-Identity": "forged",
+        "X-Octant-Human-Presentation": "forged",
+        "X-Octant-Native-Main-Authority": "forged",
+        accept: "application/json",
+      },
       requestUrl: "http://127.0.0.1:13773/api/shell/bootstrap",
       frameUrl: "http://localhost:5173/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773",
       context,
@@ -166,6 +175,10 @@ describe("development renderer startup", () => {
       "x-octant-renderer-identity": context.rendererIdentity,
     });
     expect(trusted["X-Octant-Renderer-Identity"]).toBeUndefined();
+    expect(trusted["X-Octant-Human-Presentation"]).toBeUndefined();
+    expect(trusted["x-octant-human-presentation"]).toBeUndefined();
+    expect(trusted["X-Octant-Native-Main-Authority"]).toBeUndefined();
+    expect(trusted["x-octant-native-main-authority"]).toBeUndefined();
 
     const untrustedFrame = decorateTrustedRendererHeaders({
       requestHeaders: { "x-octant-renderer-identity": "forged" },
@@ -206,6 +219,52 @@ function deferred() {
 }
 
 describe("Project window BrowserWindow construction", () => {
+  it("labels only a Nightly application window through its local preload bootstrap", () => {
+    const input: Parameters<typeof createMainBrowserWindowOptions>[0] = {
+      bounds: { x: 10, y: 20, width: 1000, height: 720 },
+      capability: "A".repeat(43),
+      windowId: "00000000-0000-4000-8000-000000000201",
+      preloadPath: "/app/preload.mjs",
+      browserWindow: { backgroundColor: "#101013", frame: true },
+    };
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-flavor=nightly");
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-name=Octant Nightly");
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: "Other",
+      }).webPreferences?.additionalArguments,
+    ).not.toContain("--octant-application-flavor=nightly");
+    expect(createMainBrowserWindowOptions(input).webPreferences?.additionalArguments).not.toContain(
+      "--octant-application-flavor=nightly",
+    );
+    expect(
+      createMainBrowserWindowOptions({
+        ...input,
+        applicationFlavor: "nightly",
+        productName: DESKTOP_FLAVOR_IDENTITIES.nightly.productName,
+        applicationData: "test-data",
+      }).webPreferences?.additionalArguments,
+    ).toContain("--octant-application-data=test-data");
+    expect(
+      createMainBrowserWindowOptions({ ...input, applicationData: "test-data" }).webPreferences
+        ?.additionalArguments,
+    ).not.toContain("--octant-application-data=test-data");
+  });
+
   it("consumes the resolved native presentation without overriding the frameless contract", () => {
     const options = createMainBrowserWindowOptions({
       bounds: { x: 10, y: 20, width: 1000, height: 720 },
@@ -473,13 +532,13 @@ describe("Project window authority production lifecycle", () => {
       restartDesktopHostAndRefreshWindowAuthorities({
         restart: async () => {
           order.push("restart");
-          return host;
+          return { status: "running", host };
         },
         refreshWindowAuthorities: async (replacement) => {
           order.push(`refresh:${replacement.instanceId}`);
         },
       }),
-    ).resolves.toEqual({ host, windowAuthorities: "ready" });
+    ).resolves.toEqual({ status: "running", host, windowAuthorities: "ready" });
     expect(order).toEqual(["restart", "refresh:replacement-instance"]);
   });
 
@@ -492,10 +551,21 @@ describe("Project window authority production lifecycle", () => {
 
     await expect(
       restartDesktopHostAndRefreshWindowAuthorities({
-        restart: vi.fn().mockResolvedValue(host),
+        restart: vi.fn().mockResolvedValue({ status: "running", host }),
         refreshWindowAuthorities: vi.fn().mockRejectedValue(new Error("window closed")),
       }),
-    ).resolves.toEqual({ host, windowAuthorities: "attention-required" });
+    ).resolves.toEqual({ status: "running", host, windowAuthorities: "attention-required" });
+  });
+
+  it("refreshes no window authority when quit refused the restart", async () => {
+    const refreshWindowAuthorities = vi.fn(async () => undefined);
+    await expect(
+      restartDesktopHostAndRefreshWindowAuthorities({
+        restart: async () => ({ status: "closing" }),
+        refreshWindowAuthorities,
+      }),
+    ).resolves.toEqual({ status: "closing" });
+    expect(refreshWindowAuthorities).not.toHaveBeenCalled();
   });
 
   it("awaits registration before construction and renderer load", async () => {
@@ -919,86 +989,6 @@ describe("renderer exit window recovery", () => {
     for (const reason of ["clean-exit", "killed"]) {
       expect(shouldRecoverWindowAfterRendererExit(reason)).toBe(false);
     }
-  });
-});
-
-describe("managed server credential broker lifecycle", () => {
-  it("sanitizes broker startup failure without attempting server startup", async () => {
-    const privateFailure = "listen EADDRINUSE with private runtime path";
-    const startServer = vi.fn();
-
-    const failure = await startManagedServerResources({
-      startBroker: vi.fn().mockRejectedValue(new Error(privateFailure)),
-      startServer,
-    }).catch((error: unknown) => error);
-
-    expect(startServer).not.toHaveBeenCalled();
-    expect(failure).toBeInstanceOf(Error);
-    expect(String(failure)).not.toContain(privateFailure);
-  });
-
-  it("starts the broker before the managed server", async () => {
-    const order: string[] = [];
-    const broker = {
-      url: "http://127.0.0.1:41000/",
-      token: "broker-token",
-      close: vi.fn(),
-    };
-    const child = { id: "server" };
-
-    const resources = await startManagedServerResources({
-      startBroker: async () => {
-        order.push("broker");
-        return broker;
-      },
-      startServer: (startedBroker) => {
-        if (startedBroker === undefined) throw new Error("expected broker");
-        order.push(`server:${startedBroker.url}`);
-        return child;
-      },
-    });
-
-    expect(order).toEqual(["broker", "server:http://127.0.0.1:41000/"]);
-    expect(resources).toEqual({ broker, server: child });
-  });
-
-  it("closes the broker when managed server startup fails", async () => {
-    const privateFailure = "spawn command leaked a private path";
-    const broker = {
-      url: "http://127.0.0.1:41000/",
-      token: "broker-token",
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const failure = await startManagedServerResources({
-      startBroker: vi.fn().mockResolvedValue(broker),
-      startServer: () => {
-        throw new Error(privateFailure);
-      },
-    }).catch((error: unknown) => error);
-
-    expect(broker.close).toHaveBeenCalledOnce();
-    expect(failure).toBeInstanceOf(Error);
-    expect(String(failure)).not.toContain(privateFailure);
-  });
-
-  it("closes the server before the broker and still closes the broker after server cleanup fails", async () => {
-    const order: string[] = [];
-    const broker = {
-      url: "http://127.0.0.1:41000/",
-      token: "broker-token",
-      close: vi.fn(async () => void order.push("broker")),
-    };
-    const server = { id: "server" };
-    const shutdownServer = vi.fn(async () => {
-      order.push("server");
-      throw new Error("private shutdown diagnostic");
-    });
-
-    await expect(
-      shutdownManagedServerResources({ broker, server, shutdownServer }),
-    ).rejects.toThrow("Octant could not stop its managed server resources.");
-    expect(order).toEqual(["server", "broker"]);
   });
 });
 

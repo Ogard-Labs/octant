@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import type {
   ExtensionContentDigest,
   ExtensionDiagnostic,
@@ -16,6 +17,7 @@ import type {
 import { sourceQualifiedSkillId, buildSkillCatalog, type SkillCatalog } from "@octant/plugin-host";
 
 const DEFAULT_MAX_CONTENT_BYTES = 256 * 1024;
+const MAX_SKILL_WATCHERS = 512;
 const skillNamePattern = /^[a-z][a-z0-9-]{0,63}$/;
 /**
  * The closed list of skill folders read in a Project's ancestry. A
@@ -79,6 +81,15 @@ export class SkillDiscoveryService {
   #catalog: SkillCatalog = { skills: [], collisions: [] };
   #watchers: FSWatcher[] = [];
   #reconcileTimer: ReturnType<typeof setTimeout> | undefined;
+  #rootStatuses = new Map<string, SkillRootStatus>();
+  /** Watch state per added root, kept apart from scan results so a later scan cannot erase it. */
+  #watchedSourceRefs = new Map<string, boolean>();
+  #reconcileTail: Promise<void> = Promise.resolve();
+  #watching = false;
+  #watchGeneration = 0;
+  #watchRefreshPending = false;
+  #watchRefreshRequested = false;
+  #closed = false;
 
   constructor(options: SkillDiscoveryServiceOptions) {
     this.#roots = options.roots;
@@ -90,17 +101,38 @@ export class SkillDiscoveryService {
     return this.#catalog;
   }
 
-  async reconcile(): Promise<SkillCatalog> {
+  rootStatuses(): ReadonlyArray<SkillRootStatus> {
+    return [...this.#rootStatuses.values()].map((status) => ({
+      ...status,
+      watching: this.#watchedSourceRefs.get(status.sourceRef) === true,
+    }));
+  }
+
+  reconcile(): Promise<SkillCatalog> {
+    const run = this.#reconcileTail.then(() => {
+      if (this.#closed) throw new Error("Skill discovery is stopped.");
+      return this.#reconcile();
+    });
+    this.#reconcileTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async #reconcile(): Promise<SkillCatalog> {
+    this.#rootStatuses = new Map();
     const records: Array<StandaloneSkillRecord> = [];
     const seenGlobalRoots = new Set<string>();
     const seenExtraRoots = new Set<string>();
     for (const roots of await this.#roots.resolve()) {
+      if (this.#closed) throw new Error("Skill discovery is stopped.");
       for (const extra of roots.extraSkillRoots ?? []) {
         const key = `${extra.sourceRef}\u0000${resolve(extra.path)}`;
         if (seenExtraRoots.has(key)) continue;
         seenExtraRoots.add(key);
         records.push(
-          ...(await this.#scanSkillsDirectory(extra.path, extra.sourceRef, undefined, {})),
+          ...(await this.#scanSkillsDirectory(extra.path, extra.sourceRef, undefined, {}, true)),
         );
       }
       records.push(...(await this.#discoverProjectRoots(roots)));
@@ -117,9 +149,28 @@ export class SkillDiscoveryService {
   }
 
   async startWatching(): Promise<void> {
+    if (this.#closed) return;
+    const requested = this.#watchRefreshRequested;
     this.stopWatching();
+    this.#watchRefreshRequested = requested;
+    this.#watching = true;
+    const generation = this.#watchGeneration;
     const seen = new Set<string>();
+    const watchedRoots = new Map<string, boolean>();
+    const watchRoot = async (path: string, allowedRoot?: string) => {
+      const key = `${resolve(path)}\u0000${allowedRoot ?? ""}`;
+      const held = watchedRoots.get(key);
+      if (held !== undefined) return held;
+      const watching = await this.#watchSkillRoot(path, seen, generation, allowedRoot);
+      watchedRoots.set(key, watching);
+      return watching;
+    };
     for (const roots of await this.#roots.resolve()) {
+      if (!this.#activeWatch(generation)) return;
+      for (const extra of roots.extraSkillRoots ?? []) {
+        const watching = await watchRoot(extra.path);
+        if (this.#activeWatch(generation)) this.#watchedSourceRefs.set(extra.sourceRef, watching);
+      }
       const boundRoot = await canonicalDirectory(roots.projectRoot);
       const workingDirectory = await canonicalDirectory(roots.workingDirectory);
       if (
@@ -132,7 +183,7 @@ export class SkillDiscoveryService {
         while (true) {
           for (const rootEntry of PROJECT_SKILL_ROOTS) {
             if (insideUserFolder(current, rootEntry.userFolder, userFolders)) continue;
-            await this.#watchDirectory(join(current, ...rootEntry.segments), seen, boundRoot);
+            await watchRoot(join(current, ...rootEntry.segments), boundRoot);
           }
           if (current === boundRoot) break;
           const parent = dirname(current);
@@ -140,12 +191,17 @@ export class SkillDiscoveryService {
           current = parent;
         }
       }
-      await this.#watchDirectory(roots.userGlobalSkillsRoot, seen);
-      for (const extra of roots.extraSkillRoots ?? []) await this.#watchDirectory(extra.path, seen);
+      await watchRoot(roots.userGlobalSkillsRoot);
     }
+    if (this.#activeWatch(generation) && this.#watchRefreshRequested && !this.#watchRefreshPending)
+      this.#scheduleReconcile(generation);
   }
 
   stopWatching(): void {
+    this.#watching = false;
+    this.#watchGeneration += 1;
+    this.#watchRefreshRequested = false;
+    this.#watchedSourceRefs.clear();
     for (const watcher of this.#watchers.splice(0)) watcher.close();
     if (this.#reconcileTimer !== undefined) {
       clearTimeout(this.#reconcileTimer);
@@ -153,27 +209,122 @@ export class SkillDiscoveryService {
     }
   }
 
-  async #watchDirectory(path: string, seen: Set<string>, allowedRoot?: string): Promise<void> {
+  /** Permanent host-scope teardown; an already awaited reconciliation cannot restart watchers. */
+  close(): void {
+    this.#closed = true;
+    this.stopWatching();
+  }
+
+  #activeWatch(generation: number): boolean {
+    return this.#watching && generation === this.#watchGeneration;
+  }
+
+  #scheduleReconcile(generation: number): void {
+    if (!this.#activeWatch(generation)) return;
+    this.#watchRefreshRequested = true;
+    if (this.#reconcileTimer !== undefined || this.#watchRefreshPending) return;
+    this.#reconcileTimer = setTimeout(() => {
+      this.#reconcileTimer = undefined;
+      if (!this.#activeWatch(generation)) return;
+      this.#watchRefreshPending = true;
+      this.#watchRefreshRequested = false;
+      // Re-arm before scanning. Scanning first left the package directories unwatched while
+      // the watchers were rebuilt, so a SKILL.md edit in that window raised no event and the
+      // catalog kept the earlier instructions until some unrelated change arrived (seen on
+      // loaded CI as an edit made right after a refresh never appearing).
+      void this.startWatching()
+        .then(() => (this.#watching ? this.reconcile() : undefined))
+        .catch(() => undefined)
+        .finally(() => {
+          this.#watchRefreshPending = false;
+          if (this.#watching && this.#watchRefreshRequested)
+            this.#scheduleReconcile(this.#watchGeneration);
+        });
+    }, 50);
+    this.#reconcileTimer.unref?.();
+  }
+
+  async #watchSkillRoot(
+    path: string,
+    seen: Set<string>,
+    generation: number,
+    allowedRoot?: string,
+  ): Promise<boolean> {
+    if (!this.#activeWatch(generation)) return false;
     const canonical = await canonicalDirectory(path);
-    if (
-      canonical === undefined ||
-      (allowedRoot !== undefined && !isWithin(allowedRoot, canonical)) ||
-      seen.has(canonical)
-    )
-      return;
-    seen.add(canonical);
+    if (!this.#activeWatch(generation)) return false;
+    if (canonical === undefined) return this.#watchExistence(path, seen, generation, allowedRoot);
+    if (allowedRoot !== undefined && !isWithin(allowedRoot, canonical)) return false;
+    const watching = this.#watchDirectory(canonical, seen, generation);
+    let complete = watching;
     try {
-      const watcher = watch(canonical, { persistent: false }, () => {
-        if (this.#reconcileTimer !== undefined) return;
-        this.#reconcileTimer = setTimeout(() => {
-          this.#reconcileTimer = undefined;
-          void this.reconcile().catch(() => undefined);
-        }, 50);
-      });
-      watcher.on("error", () => watcher.close());
-      this.#watchers.push(watcher);
+      for (const entry of await readdir(canonical, { withFileTypes: true })) {
+        if (!this.#activeWatch(generation)) return false;
+        if (entry.isDirectory() && !entry.isSymbolicLink() && skillNamePattern.test(entry.name)) {
+          const packageRoot = await canonicalDirectory(join(canonical, entry.name));
+          complete =
+            packageRoot !== undefined &&
+            isWithin(canonical, packageRoot) &&
+            this.#watchDirectory(packageRoot, seen, generation) &&
+            complete;
+        }
+      }
     } catch {
-      // Watchers are best-effort; startup reconciliation remains authoritative.
+      return this.#watchExistence(path, seen, generation, allowedRoot);
+    }
+    return complete;
+  }
+
+  /** Necessary ancestor metadata only: never list or scan the ancestor's contents. */
+  async #watchExistence(
+    path: string,
+    seen: Set<string>,
+    generation: number,
+    allowedRoot?: string,
+  ): Promise<boolean> {
+    let child = resolve(path);
+    while (this.#activeWatch(generation)) {
+      const parent = dirname(child);
+      if (parent === child) return false;
+      try {
+        const canonical = await realpath(parent);
+        if ((await lstat(canonical)).isDirectory()) {
+          if (allowedRoot !== undefined && !isWithin(allowedRoot, canonical)) return false;
+          if (this.#watchDirectory(canonical, seen, generation, basename(child))) return true;
+        }
+      } catch {
+        /* The next ancestor may exist or be accessible. */
+      }
+      child = parent;
+    }
+    return false;
+  }
+
+  #watchDirectory(
+    path: string,
+    seen: Set<string>,
+    generation: number,
+    childName?: string,
+  ): boolean {
+    if (!this.#activeWatch(generation)) return false;
+    const key = `${path}\u0000${childName ?? ""}`;
+    if (seen.has(key)) return true;
+    if (this.#watchers.length >= MAX_SKILL_WATCHERS) return false;
+    seen.add(key);
+    try {
+      const watcher = watch(path, { persistent: false }, (_event, filename) => {
+        if (childName !== undefined && filename !== null && String(filename) !== childName) return;
+        this.#scheduleReconcile(generation);
+      });
+      watcher.on("error", () => {
+        watcher.close();
+        this.#scheduleReconcile(generation);
+      });
+      this.#watchers.push(watcher);
+      return true;
+    } catch {
+      seen.delete(key);
+      return false;
     }
   }
 
@@ -250,14 +401,51 @@ export class SkillDiscoveryService {
     sourceRef: string,
     allowedRoot: string | undefined,
     scope: DiscoveredSkillScope,
+    reportRoot = false,
   ): Promise<ReadonlyArray<StandaloneSkillRecord>> {
+    const report = (status: SkillRootStatus["status"], skillCount = 0) => {
+      if (reportRoot)
+        this.#rootStatuses.set(sourceRef, {
+          sourceRef,
+          displayName:
+            sourceRef === "provider:claude"
+              ? "Claude Code skills"
+              : sourceRef === "provider:codex"
+                ? "Codex skills"
+                : (skillsRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "")
+                    .trim()
+                    .slice(0, 256)
+                    .trim() || "Skill folder",
+          status,
+          skillCount,
+          watching: false,
+        });
+    };
     const root = await canonicalDirectory(skillsRoot);
-    if (root === undefined || (allowedRoot !== undefined && !isWithin(allowedRoot, root)))
+    if (root === undefined || (allowedRoot !== undefined && !isWithin(allowedRoot, root))) {
+      if (reportRoot) {
+        try {
+          const stat = await lstat(resolve(skillsRoot));
+          report(
+            stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "unreadable" : "not-directory",
+          );
+        } catch (error) {
+          report(
+            error instanceof Error && "code" in error && error.code === "ENOENT"
+              ? "missing"
+              : error instanceof Error && "code" in error && error.code === "ENOTDIR"
+                ? "not-directory"
+                : "unreadable",
+          );
+        }
+      }
       return [];
+    }
     let entries: ReadonlyArray<import("node:fs").Dirent>;
     try {
       entries = await readdir(root, { withFileTypes: true });
     } catch {
+      report("unreadable");
       return [];
     }
     const records: Array<StandaloneSkillRecord> = [];
@@ -278,6 +466,7 @@ export class SkillDiscoveryService {
       }
       records.push(await this.#readPackage(packagePath, entry.name, source, root, scope));
     }
+    report("ready", records.length);
     return records;
   }
 

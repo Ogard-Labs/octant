@@ -26,6 +26,7 @@ describe("first-party plugin catalog", () => {
       "board",
       "github",
       "linear",
+      "azure-arm",
       "appearance",
       "preview-viewers",
     ]);

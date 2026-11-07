@@ -40,6 +40,14 @@ export interface HostLifecycleOperations {
 }
 
 export type HostAction = "start" | "stop" | "restart";
+/**
+ * Start and restart refuse once quit was accepted. That refusal is the
+ * expected end of a queued request during shutdown, not a startup failure, so
+ * callers receive it as a value and never report it as one.
+ */
+export type HostAdmission =
+  | { readonly status: "running"; readonly host: LocalHostDescriptor }
+  | { readonly status: "closing" };
 export type HostQuitResult = "stopped" | "attached" | "cancelled";
 
 export function canRunHostAction(snapshot: LocalHostSnapshot, action: HostAction): boolean {
@@ -131,6 +139,17 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
   let state: LocalHostState = "stopped";
   let activity: LocalHostActivity = { activeAgentCount: 0, attentionRequired: false };
   let pending: Promise<unknown> = Promise.resolve();
+  let quitAccepted = false;
+  const acceptQuit = (): void => {
+    quitAccepted = true;
+  };
+  const closing: HostAdmission = Object.freeze({ status: "closing" });
+  /** True when quit was accepted while starting; a desktop-owned start is stopped first. */
+  const refusesLateStart = async (started: LocalHostDescriptor): Promise<boolean> => {
+    if (!quitAccepted) return false;
+    if (started.ownership === "desktop-owned") await operations.stop(started);
+    return true;
+  };
 
   const snapshot = (): LocalHostSnapshot => ({
     state,
@@ -149,14 +168,22 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
     return next;
   };
 
-  const ensureRunning = (): Promise<LocalHostDescriptor> =>
-    runExclusive(async () => {
-      if (host !== undefined && state !== "stopped") return host;
+  const ensureRunning = (): Promise<HostAdmission> =>
+    runExclusive(async (): Promise<HostAdmission> => {
+      if (quitAccepted) return closing;
+      if (host !== undefined && state !== "stopped") return { status: "running", host };
       state = "starting";
       try {
-        host = (await operations.attach()) ?? (await operations.start());
+        const attached = await operations.attach();
+        const started = attached ?? (quitAccepted ? undefined : await operations.start());
+        if (started === undefined || (await refusesLateStart(started))) {
+          host = undefined;
+          state = "stopped";
+          return closing;
+        }
+        host = started;
         state = activity.attentionRequired ? "attention-required" : "running";
-        return host;
+        return { status: "running", host };
       } catch (error) {
         host = undefined;
         state = "attention-required";
@@ -192,8 +219,9 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
       return replacement;
     });
 
-  const restart = (): Promise<LocalHostDescriptor> =>
-    runExclusive(async () => {
+  const restart = (): Promise<HostAdmission> =>
+    runExclusive(async (): Promise<HostAdmission> => {
+      if (quitAccepted) return closing;
       if (host !== undefined && host.ownership !== "desktop-owned") {
         throw new Error("Octant cannot restart a separately managed host.");
       }
@@ -203,11 +231,18 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
         host = undefined;
         state = "stopped";
       }
+      if (quitAccepted) return closing;
       state = "starting";
       try {
-        host = await operations.start();
+        const started = await operations.start();
+        if (await refusesLateStart(started)) {
+          host = undefined;
+          state = "stopped";
+          return closing;
+        }
+        host = started;
         state = activity.attentionRequired ? "attention-required" : "running";
-        return host;
+        return { status: "running", host };
       } catch (error) {
         host = undefined;
         state = "stopped";
@@ -219,9 +254,15 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
   const prepareQuit = (confirmQuit: () => boolean | Promise<boolean>): Promise<HostQuitResult> =>
     runExclusive(async () => {
       const current = snapshot();
+      if (
+        current.ownership === "desktop-owned" &&
+        shouldConfirmQuit(current) &&
+        !(await confirmQuit())
+      )
+        return "cancelled";
+      acceptQuit();
       if (current.state === "stopped" || current.ownership === undefined) return "stopped";
       if (current.ownership === "managed") return "attached";
-      if (shouldConfirmQuit(current) && !(await confirmQuit())) return "cancelled";
       const stopping = host;
       if (stopping !== undefined) await operations.stop(stopping);
       host = undefined;
@@ -231,6 +272,8 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
     });
 
   return Object.freeze({
+    /** Only after the existing quit confirmation accepts; never while it is pending. */
+    acceptQuit,
     ensureRunning,
     onLastWindowClosed: (): void => undefined,
     prepareQuit,

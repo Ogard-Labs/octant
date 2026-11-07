@@ -18,6 +18,13 @@ export interface MonacoEditorPosition {
   readonly column: number;
 }
 
+export interface MonacoEditorView {
+  readonly lineNumber: number;
+  readonly column: number;
+  readonly scrollTop: number;
+  readonly scrollLeft: number;
+}
+
 /** A diagnostic the host's language server reported for this file. */
 export interface MonacoEditorMarker {
   readonly range: MonacoEditorRange;
@@ -52,6 +59,7 @@ export interface MonacoLanguageBridge {
  */
 export interface MonacoDebugDecorations {
   readonly breakpoints: ReadonlyArray<number>;
+  readonly unresolvedBreakpoints?: ReadonlyArray<number>;
   readonly stoppedLine?: number;
 }
 
@@ -82,8 +90,12 @@ export interface MonacoAdapterRuntime {
       readonly language: string;
       /** Answers definitions while a language server serves this model. */
       readonly languageBridge?: MonacoLanguageBridge;
+      readonly viewState?: MonacoEditorView;
+      readonly onViewState?: (view: MonacoEditorView) => void;
       readonly modelUri: string;
       readonly onChange: (value: string) => void;
+      readonly onCursorPosition?: (position: MonacoEditorPosition) => void;
+      readonly onReferences?: (position: MonacoEditorPosition) => void;
       /**
        * A click in the gutter, or F9, on a line: the editor shows a gutter
        * for breakpoints only when this is given.
@@ -102,6 +114,7 @@ export interface MonacoDiffSession {
   readonly setColors?: (colors: EditorColorProjection) => void;
   readonly setTypography?: (typography: EditorTypographyProjection) => void;
   readonly setValues: (values: { readonly original: string; readonly modified: string }) => void;
+  readonly setIgnoreTrimWhitespace?: (ignore: boolean) => void;
 }
 
 export interface MonacoDiffRuntime {
@@ -114,12 +127,19 @@ export interface MonacoDiffRuntime {
       readonly original: string;
       readonly modified: string;
       readonly renderSideBySide: boolean;
+      readonly ignoreTrimWhitespace?: boolean;
+      readonly onSelectLine?: (selection: {
+        readonly side: "original" | "modified";
+        readonly line: number;
+      }) => void;
       readonly typography?: EditorTypographyProjection;
     },
   ) => MonacoDiffSession;
 }
 
 export interface MonacoEditorAdapterProps {
+  readonly viewState?: MonacoEditorView | undefined;
+  readonly onViewState?: ((view: MonacoEditorView) => void) | undefined;
   readonly ariaLabel: string;
   readonly language: string;
   readonly languageBridge?: MonacoLanguageBridge;
@@ -130,6 +150,8 @@ export interface MonacoEditorAdapterProps {
   readonly loadRuntime?: () => Promise<MonacoAdapterRuntime>;
   readonly modelUri: string;
   readonly onChange: (value: string) => void;
+  readonly onCursorPosition?: (position: MonacoEditorPosition) => void;
+  readonly onReferences?: (position: MonacoEditorPosition) => void;
   readonly onSave?: () => void;
   readonly debugDecorations?: MonacoDebugDecorations;
   readonly onToggleBreakpoint?: (lineNumber: number) => void;
@@ -184,7 +206,19 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
                 },
               }),
           modelUri: props.modelUri,
+          ...(latestProps.current.viewState === undefined
+            ? {}
+            : { viewState: latestProps.current.viewState }),
+          ...(latestProps.current.onViewState === undefined
+            ? {}
+            : { onViewState: (view: MonacoEditorView) => latestProps.current.onViewState?.(view) }),
           onChange: (nextValue) => latestProps.current.onChange(nextValue),
+          ...(latestProps.current.onCursorPosition === undefined
+            ? {}
+            : { onCursorPosition: (position) => latestProps.current.onCursorPosition?.(position) }),
+          ...(latestProps.current.onReferences === undefined
+            ? {}
+            : { onReferences: (position) => latestProps.current.onReferences?.(position) }),
           ...(latestProps.current.onToggleBreakpoint === undefined
             ? {}
             : {

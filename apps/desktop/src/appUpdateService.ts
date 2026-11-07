@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type {
   AppReleaseRing,
+  AppUpdateProduct,
   AppUpdateRelease,
   AppUpdateState,
   AppVersion,
@@ -17,6 +18,7 @@ import {
   fetchUpdateFeed,
   fetchVerifiedArtifact,
   type FeedVerifier,
+  isEmptyFeedMarker,
   updateFeedUrl,
 } from "./appUpdateFeed";
 import type { PortableImageApplyResult, PortableImagePort } from "./portableImageUpdate";
@@ -62,7 +64,13 @@ export interface AppUpdateServiceOptions {
    * known size; a body far past it is not one.
    */
   readonly maxArtifactBytes?: number;
-  readonly app: { readonly version: AppVersion; readonly platform: string; readonly arch: string };
+  readonly app: {
+    readonly version: AppVersion;
+    readonly platform: string;
+    readonly arch: string;
+    /** Which app this is; a signed release for the other app is refused. */
+    readonly product: AppUpdateProduct;
+  };
   readonly automaticChecks: boolean;
   /**
    * The ring to follow before the persisted preference arrives. Defaults to
@@ -70,6 +78,7 @@ export interface AppUpdateServiceOptions {
    * preview build follows previews unless it is told otherwise.
    */
   readonly ring?: AppReleaseRing;
+  readonly allowedRings?: ReadonlyArray<AppReleaseRing>;
   readonly verifier?: FeedVerifier;
   readonly fetchImpl?: typeof globalThis.fetch;
   readonly clock?: () => string;
@@ -117,15 +126,21 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     });
   let automaticChecks = options.automaticChecks;
   let ring: AppReleaseRing = options.ring ?? ringForVersion(options.app.version);
+  if (options.allowedRings !== undefined && !options.allowedRings.includes(ring)) {
+    throw new TypeError("This app cannot follow the configured release ring.");
+  }
   let state: AppUpdateState = {
     status: "idle",
     currentVersion: options.app.version,
     automaticChecks,
     ring,
+    ...(options.allowedRings === undefined ? {} : { allowedRings: options.allowedRings }),
   };
   let staged: { readonly feedUrl: string; readonly close: () => void } | undefined;
   let stagedImage: { readonly bytes: Uint8Array; readonly sha256: string } | undefined;
   let cancelScheduled: (() => void) | undefined;
+  let generation = 0;
+  let nativeDownloadGeneration: number | undefined;
 
   const publish = (next: Partial<AppUpdateState>): AppUpdateState => {
     state = { ...state, ...next, currentVersion: options.app.version, automaticChecks, ring };
@@ -155,12 +170,20 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
   };
 
   options.updater.on("update-downloaded", () => {
-    // Staged, not applied. Relaunching is the person's to ask for.
+    if (nativeDownloadGeneration === undefined) return;
+    const current = nativeDownloadGeneration === generation && state.status === "downloading";
+    nativeDownloadGeneration = undefined;
     releaseLoopback();
+    if (!current) return;
+    // Staged, not applied. Relaunching is the person's to ask for.
     publish({ status: "ready" });
   });
   options.updater.on("error", () => {
+    if (nativeDownloadGeneration === undefined) return;
+    const current = nativeDownloadGeneration === generation && state.status === "downloading";
+    nativeDownloadGeneration = undefined;
     releaseLoopback();
+    if (!current) return;
     publish({ status: "failed", message: "The update could not be downloaded." });
   });
 
@@ -187,7 +210,9 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
    * writable cannot be swapped atomically, so offering a download would only
    * fetch bytes we have already decided not to use.
    */
-  async function linuxLaunchRefusal(): Promise<AppUpdateState | undefined> {
+  async function linuxLaunchRefusal(
+    requestedGeneration = generation,
+  ): Promise<AppUpdateState | undefined> {
     if (options.app.platform !== "linux") return undefined;
     let location: Awaited<ReturnType<PortableImagePort["locate"]>>;
     try {
@@ -196,6 +221,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     } catch {
       location = { kind: "not-portable" };
     }
+    if (requestedGeneration !== generation) return state;
     if (location.kind === "portable") return undefined;
     return publishWithoutOffer({
       status: "refused",
@@ -272,7 +298,17 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
      * check answers for the new ring from scratch.
      */
     setRing(next: AppReleaseRing): AppUpdateState {
+      if (options.allowedRings !== undefined && !options.allowedRings.includes(next)) {
+        generation += 1;
+        releaseLoopback();
+        return publishWithoutOffer({
+          status: "refused",
+          refusal: "wrong-ring",
+          message: refusalMessage("wrong-ring", options.app.product),
+        });
+      }
       if (next === ring) return state;
+      generation += 1;
       ring = next;
       releaseLoopback();
       return publishWithoutOffer({ status: "idle" });
@@ -293,8 +329,12 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     },
 
     async check(signal?: AbortSignal): Promise<AppUpdateState> {
-      publish({ status: "checking" });
+      const requestedGeneration = ++generation;
+      const requestedRing = ring;
+      // A successful retry must not keep the old failure beside its new offer.
+      publishWithoutOffer({ status: "checking" });
       const blocked = await linuxLaunchRefusal();
+      if (requestedGeneration !== generation) return state;
       if (blocked !== undefined) return blocked;
       if (!supportsSignedDesktopUpdateChannel(options.app.platform)) {
         return publishWithoutOffer({
@@ -305,7 +345,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
             "This platform has no signed update channel yet, so Octant will not install an update.",
         });
       }
-      if (!verifier.configured(ring)) {
+      if (!verifier.configured(requestedRing)) {
         // No release key compiled in means nothing can be proven, so nothing is
         // offered. A build in this state is not a build that updates quietly.
         return publishWithoutOffer({
@@ -317,7 +357,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       }
       const fetched = await fetchUpdateFeed(
         updateFeedUrl(options.feedBaseUrl, {
-          ring,
+          ring: requestedRing,
           platform: options.app.platform,
           arch: options.app.arch,
         }),
@@ -329,6 +369,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
         options.fetchImpl,
         signal,
       );
+      if (requestedGeneration !== generation) return state;
       if (fetched.kind !== "fetched") {
         return publishWithoutOffer({
           status: "refused",
@@ -343,15 +384,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       const document = fetched.document;
       // The feed can report an unpublished channel, but that unsigned marker
       // proves nothing about the installed version and must never carry an offer.
-      if (
-        typeof document === "object" &&
-        document !== null &&
-        "schemaVersion" in document &&
-        document.schemaVersion === 1 &&
-        "status" in document &&
-        document.status === "empty" &&
-        Object.keys(document).length === 2
-      ) {
+      if (isEmptyFeedMarker(document)) {
         return publishWithoutOffer({
           status: "idle",
           checkedAt: clock() as AppUpdateState["checkedAt"],
@@ -360,7 +393,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       }
       const offer = resolveUpdateOffer({
         document: fetched.document,
-        app: { ...options.app, ring },
+        app: { ...options.app, ring: requestedRing },
         verifySignature: verifier.verify,
       });
       if (offer.kind === "refuse") {
@@ -368,7 +401,9 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
           status: offer.refusal === "not-newer" ? "up-to-date" : "refused",
           refusal: offer.refusal,
           checkedAt: clock() as AppUpdateState["checkedAt"],
-          ...(offer.refusal === "not-newer" ? {} : { message: refusalMessage(offer.refusal) }),
+          ...(offer.refusal === "not-newer"
+            ? {}
+            : { message: refusalMessage(offer.refusal, options.app.product) }),
         });
       }
       return publish({
@@ -385,9 +420,16 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
      * so a caller cannot skip the check and ask for bytes directly.
      */
     async download(signal?: AbortSignal): Promise<AppUpdateState> {
+      const requestedGeneration = generation;
       const release = state.available;
       if (state.status !== "available" || release === undefined) return state;
+      if (nativeDownloadGeneration !== undefined) {
+        return publish({
+          message: "Wait for the previous update download to finish, then try again.",
+        });
+      }
       const blocked = await linuxLaunchRefusal();
+      if (requestedGeneration !== generation) return state;
       if (blocked !== undefined) return blocked;
       releaseLoopback();
       publish({ status: "downloading" });
@@ -405,6 +447,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
         options.fetchImpl,
         signal,
       );
+      if (requestedGeneration !== generation) return state;
       if (artifact.kind !== "verified") {
         return publishWithoutOffer({
           status: "refused",
@@ -434,11 +477,18 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
         return state;
       }
       try {
-        staged = await serveVerifiedArtifact(release, artifact.bytes);
+        const prepared = await serveVerifiedArtifact(release, artifact.bytes);
+        if (requestedGeneration !== generation) {
+          prepared.close();
+          return state;
+        }
+        staged = prepared;
       } catch {
+        if (requestedGeneration !== generation) return state;
         return publish({ status: "failed", message: "The update could not be prepared." });
       }
       options.updater.setFeedURL({ url: staged.feedUrl, serverType: "json" });
+      nativeDownloadGeneration = requestedGeneration;
       options.updater.checkForUpdates();
       return publish({ status: "downloading" });
     },
@@ -467,6 +517,8 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     },
 
     dispose(): void {
+      generation += 1;
+      automaticChecks = false;
       cancelScheduled?.();
       cancelScheduled = undefined;
       releaseLoopback();
@@ -495,8 +547,12 @@ const ROLLED_BACK_MESSAGE =
 const RESTORE_FAILED_MESSAGE =
   "Octant could not relaunch the update and could not restore the previous copy. Replace the image by hand.";
 
-function refusalMessage(refusal: string): string {
+function refusalMessage(refusal: string, product: AppUpdateProduct): string {
   switch (refusal) {
+    case "wrong-app":
+      return product === "octant"
+        ? "This update is for Octant Nightly, not Octant."
+        : "This update is for Octant, not Octant Nightly.";
     case "untrusted-signature":
       return "The update was not signed by Octant, so it was refused.";
     case "malformed":

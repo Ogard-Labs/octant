@@ -1,3 +1,4 @@
+import type { McpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   ExtensionCommand,
   ExtensionCommandResult,
@@ -18,13 +19,15 @@ import {
   type DiscoveredAgentToolingListing,
   type ExtensionProjectPinListing,
   type McpServerSignInView,
+  type McpClientSetupInput,
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
-import { createHash, timingSafeEqual } from "node:crypto";
-import { decodeWindowId } from "@octant/contracts";
+import { decodeWindowId, SkillFolderPath } from "@octant/contracts";
+import { Schema } from "effect";
 import { AgentPluginsError } from "@octant/plugin-host/agent-plugins";
-import { ClientPrincipalError } from "./clientPrincipal";
+import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
+import { ClientPrincipalError, resolveLocalWindowPrincipal } from "./clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -60,6 +63,23 @@ export function createExtensionRouteHandler(options: {
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
+    prepareClient?(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
+    saveClient?(
+      extensionId: string,
+      componentId: string,
+      setup: McpClientSetupInput,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
+    configureClient(
+      extensionId: string,
+      componentId: string,
+      registration: McpOAuthClientRegistration,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
     status(
       extensionId: string,
       componentId: string,
@@ -121,15 +141,17 @@ export function createExtensionRouteHandler(options: {
       return response(failure("invalid", "Extension API requires loopback."), 400, origin);
     }
     if (url.pathname === "/api/extensions/import-local-receipts") {
+      const admission = admitDesktopBroker({
+        request,
+        desktopBridgeSecret: options.desktopBridgeSecret,
+        windowAuthorityStore: options.windowAuthorityStore,
+        now: now(),
+      });
       if (
         request.method !== "POST" ||
-        origin !== null ||
         options.desktopBridgeSecret === undefined ||
         options.localPluginImportReceipts === undefined ||
-        !secretsEqual(
-          options.desktopBridgeSecret,
-          request.headers.get("x-octant-desktop-secret") ?? "",
-        )
+        admission.status !== "admitted"
       ) {
         return response(
           failure("unauthorized", "Local plugin folder receipt is unauthorized."),
@@ -141,18 +163,33 @@ export function createExtensionRouteHandler(options: {
       if (body.kind === "too-large") {
         return response(failure("invalid", "Extension request is too large."), 413, null);
       }
-      if (body.kind !== "ok" || !hasExactKeys(body.value, ["absolutePath", "windowId"])) {
+      if (
+        body.kind !== "ok" ||
+        (!hasExactKeys(body.value, ["absolutePath", "windowId"]) &&
+          !(
+            hasExactKeys(body.value, ["absolutePath", "windowId", "purpose"]) &&
+            body.value.purpose === "skill-folder"
+          ))
+      ) {
         return response(failure("invalid", "Local plugin receipt request is invalid."), 400, null);
       }
       const absolutePath = body.value.absolutePath;
       if (typeof absolutePath !== "string" || !isAbsolute(absolutePath)) {
         return response(failure("invalid", "Local plugin path must be absolute."), 400, null);
       }
+      if (!admitsWindow(admission, body.value.windowId)) {
+        return response(
+          failure("unauthorized", "Local plugin folder receipt is unauthorized."),
+          401,
+          null,
+        );
+      }
       try {
         const receipt = options.localPluginImportReceipts.issue({
           windowId: String(decodeWindowId(body.value.windowId)),
           absolutePath,
           now: now(),
+          ...(body.value.purpose === "skill-folder" ? { purpose: "skill-folder" as const } : {}),
         });
         return Response.json(receipt, { status: 201 });
       } catch {
@@ -258,9 +295,67 @@ export function createExtensionRouteHandler(options: {
     }
     if (url.pathname === "/api/extensions/snapshot") {
       try {
-        return response(options.service.snapshot(), 200, origin);
+        const snapshot = options.service.snapshot();
+        if (principalContext.principal.kind === "local-window")
+          return response(snapshot, 200, origin);
+        const { skillRoots: _localRootDiagnostics, ...remoteSnapshot } = snapshot;
+        return response(remoteSnapshot, 200, origin);
       } catch {
         return response(failure("failed", "Extension snapshot failed."), 500, origin);
+      }
+    }
+    if (url.pathname === "/api/extensions/skill-folder-selection") {
+      if (
+        principalContext.principal.kind !== "local-window" ||
+        options.localPluginImportReceipts === undefined
+      )
+        return response(
+          failure("unauthorized", "Choose a skill folder in the local desktop window."),
+          401,
+          origin,
+        );
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large")
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      if (
+        body.kind !== "ok" ||
+        !hasExactKeys(body.value, ["receiptId"]) ||
+        typeof body.value.receiptId !== "string"
+      )
+        return response(failure("invalid", "Skill folder receipt is invalid."), 400, origin);
+      try {
+        const current = resolveLocalWindowPrincipal({
+          request,
+          body: body.value,
+          store: options.windowAuthorityStore,
+          now: now(),
+        });
+        if (current.windowId !== principalContext.principal.windowId) throw new Error("changed");
+      } catch {
+        return response(
+          failure("unauthorized", "Skill folder selection is unauthorized."),
+          401,
+          origin,
+        );
+      }
+      const path = options.localPluginImportReceipts.consume({
+        receiptId: body.value.receiptId,
+        windowId: String(principalContext.principal.windowId),
+        purpose: "skill-folder",
+        now: now(),
+      });
+      try {
+        const folderPath = Schema.decodeUnknownSync(SkillFolderPath)(path);
+        return Response.json({ folderPath }, { status: 200, headers: corsHeaders(origin) });
+      } catch {
+        return response(
+          failure(
+            "invalid",
+            "Skill folder receipt expired or is unavailable. Choose the folder again.",
+          ),
+          400,
+          origin,
+        );
       }
     }
     if (url.pathname === "/api/extensions/import-local") {
@@ -423,6 +518,54 @@ export function createExtensionRouteHandler(options: {
       const extensionId = String(signIn.extensionId);
       const componentId = String(signIn.componentId);
       try {
+        if (signIn.kind === "prepare-client" || signIn.kind === "save-client") {
+          if (principalKind !== "local-window")
+            return response(
+              failure("unauthorized", "Set up the client from the Octant window on this host."),
+              401,
+              origin,
+            );
+          const view =
+            signIn.kind === "prepare-client"
+              ? await options.mcpServerSignIn.prepareClient?.(
+                  extensionId,
+                  componentId,
+                  principalKind,
+                )
+              : await options.mcpServerSignIn.saveClient?.(
+                  extensionId,
+                  componentId,
+                  signIn.setup,
+                  principalKind,
+                );
+          return response(
+            view ?? {
+              kind: "refused",
+              reason: "unavailable",
+              message: "Client setup is unavailable on this host.",
+            },
+            200,
+            origin,
+          );
+        }
+        if (signIn.kind === "configure-client") {
+          if (principalKind !== "local-window")
+            return response(
+              failure("unauthorized", "Set up the client from the Octant window on this host."),
+              401,
+              origin,
+            );
+          return response(
+            await options.mcpServerSignIn.configureClient(
+              extensionId,
+              componentId,
+              signIn.registration,
+              principalKind,
+            ),
+            200,
+            origin,
+          );
+        }
         if (signIn.kind === "status") {
           return response(
             await options.mcpServerSignIn.status(extensionId, componentId, principalKind),
@@ -746,12 +889,6 @@ function corsHeaders(origin: string | null): Record<string, string> {
     "access-control-allow-methods": "POST, OPTIONS",
     "access-control-allow-headers": "content-type, x-octant-window-capability",
   };
-}
-
-function secretsEqual(expected: string, actual: string): boolean {
-  const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
-  const actualDigest = createHash("sha256").update(actual, "utf8").digest();
-  return timingSafeEqual(expectedDigest, actualDigest);
 }
 
 function hasExactKeys(

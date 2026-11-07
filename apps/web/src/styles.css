@@ -5765,7 +5765,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   width: 100%;
   padding: var(--oct-space-2) 8px;
   font: inherit;
-  resize: vertical;
 }
 
 .product-feedback__list {

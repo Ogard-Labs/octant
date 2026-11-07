@@ -430,15 +430,26 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
   if (address === null || typeof address === "string") {
     throw new Error("Simulator device broker did not bind.");
   }
+  let closing: Promise<void> | undefined;
   return {
     token,
     url: `http://127.0.0.1:${address.port}${PATH}`,
-    close: async () => {
-      helpers.dispose();
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error === undefined ? resolve() : reject(error))),
-      );
+    close: (): Promise<void> => {
+      if (closing !== undefined) return closing;
+      closing = (async () => {
+        const stopped = Promise.resolve().then(() => helpers.dispose());
+        server.closeAllConnections();
+        const closed = new Promise<void>((resolve, reject) =>
+          server.close((error) => (error === undefined ? resolve() : reject(error))),
+        );
+        const [helperResult, serverResult] = await Promise.allSettled([stopped, closed]);
+        if (serverResult.status === "rejected") throw serverResult.reason;
+        if (helperResult.status === "rejected") throw helperResult.reason;
+        if (helperResult.value.status === "failed") {
+          throw new Error(`Simulator helper shutdown failed: ${helperResult.value.reason}.`);
+        }
+      })();
+      return closing;
     },
   };
 }

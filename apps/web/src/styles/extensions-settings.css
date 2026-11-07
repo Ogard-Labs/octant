@@ -613,6 +613,14 @@
   font-size: var(--oct-text-xs);
 }
 
+.mcp-sign-in__account {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* The Installed / Marketplace / Connectors toggle drops under the title when
    both do not fit: at 390px "Connectors" beside it ran 9px past the column. */
 .extensions-settings__section > .settings-section-head {

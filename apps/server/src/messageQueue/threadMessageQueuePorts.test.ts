@@ -223,7 +223,13 @@ describe("queued turn admission", () => {
         ],
       });
       const options = { persistence, uuid: randomUUID, clock };
+      let returnAllowed = false;
+      const validateReturn = vi.fn(async () => {
+        if (!returnAllowed) throw new Error("purged reference");
+        return "Exact returned answer provenance; no execution authority.";
+      });
       const chat = new ChatService({
+        resolveSideChatReturns: validateReturn,
         ...options,
         dataDirectory,
         driver: () => driver,
@@ -285,13 +291,40 @@ describe("queued turn admission", () => {
         status: "ready",
       });
       const messageId = decodeThreadQueueMessageId(randomUUID());
+      const sideChatReturns = [
+        {
+          sidecarThreadId: decodeMentionableThreadId(String(thread.id)),
+          sourceThreadId: scope.threadId,
+          sourceMode: "chat" as const,
+          turnId: randomUUID(),
+          attemptId: randomUUID(),
+          answerDigest: "a".repeat(64),
+        },
+      ];
+      const admission = {
+        scope,
+        windowId,
+        messageId,
+        binding: inspection.binding,
+        payload: { mode: "chat" as const, prompt: "Queued follow-up", sideChatReturns },
+        signal: new AbortController().signal,
+      };
+      expect(await port.admit(admission)).toEqual({ status: "unknown" });
+      expect(chat.read(created.thread.id).turns).toHaveLength(1);
+      expect(validateReturn).toHaveBeenCalledWith({
+        references: sideChatReturns,
+        readerThreadId: String(created.thread.id),
+        mode: "chat",
+        windowId,
+      });
+      returnAllowed = true;
       expect(
         await port.admit({
           scope,
           windowId,
           messageId,
           binding: inspection.binding,
-          payload: { mode: "chat", prompt: "Queued follow-up" },
+          payload: { mode: "chat", prompt: "Queued follow-up", sideChatReturns },
           signal: new AbortController().signal,
         }),
       ).toEqual({ status: "accepted" });
@@ -300,7 +333,7 @@ describe("queued turn admission", () => {
         .toEqual({ status: "completed" });
       expect(chat.read(created.thread.id).turns).toMatchObject([
         { sequence: 1 },
-        { sequence: 2, submissionId: messageId },
+        { sequence: 2, submissionId: messageId, sideChatReturns },
       ]);
     } finally {
       completion.resolve();
@@ -448,6 +481,16 @@ describe("queued turn admission", () => {
       });
       const scope = { mode, threadId };
       const messageId = decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004");
+      const sideChatReturns = [
+        {
+          sidecarThreadId: threadId,
+          sourceThreadId: threadId,
+          sourceMode: mode,
+          turnId: threadId,
+          attemptId: threadId,
+          answerDigest: "b".repeat(64),
+        },
+      ];
       const codeOperationId = decodeCodeOperationId("92000000-0000-4000-8000-000000000005");
       const inspection = await port.inspect({ scope, windowId, intent: "enqueue" });
       if (inspection.status === "held") throw new Error("Expected an admitted scope.");
@@ -458,7 +501,7 @@ describe("queued turn admission", () => {
           messageId,
           ...(mode === "code" ? { codeOperationId } : {}),
           binding: inspection.binding,
-          payload: { mode, prompt: "Continue", threadMentionIds: [threadId] },
+          payload: { mode, prompt: "Continue", threadMentionIds: [threadId], sideChatReturns },
           signal: new AbortController().signal,
         }),
       ).toEqual({ status: "accepted" });
@@ -468,6 +511,7 @@ describe("queued turn admission", () => {
           expect.objectContaining({
             requestId: messageId,
             turnId: messageId,
+            sideChatReturns,
             authority: expect.objectContaining({
               confinementPosture: "project-root-confined",
               workingDirectory: "docs",
@@ -496,6 +540,7 @@ describe("queued turn admission", () => {
             sessionId: codeOperationId,
             checkoutId,
             threadMentionIds: [threadId],
+            sideChatReturns,
           }),
           expect.objectContaining({ admissionCurrent: expect.any(Function) }),
         );
@@ -606,6 +651,7 @@ describe("queued turn admission", () => {
         payload: {
           mode: "chat",
           prompt: "Continue with the next part.",
+          contextInputPolicy: "text-only",
           threadMentionIds: [threadId],
         },
         signal: new AbortController().signal,
@@ -616,6 +662,7 @@ describe("queued turn admission", () => {
         kind: "send-chat-turn",
         submissionId: messageId,
         prompt: "Continue with the next part.",
+        contextInputPolicy: "text-only",
         threadMentionIds: [threadId],
         expectedVersion: thread.version,
       }),

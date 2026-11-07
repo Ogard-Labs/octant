@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { settleSettingsRail } from "./settingsRailScroll";
+import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
@@ -65,6 +66,11 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { RememberedBrowserProfileSite } from "@octant/contracts/shell";
 import { browserProfileKey } from "@octant/domain";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
+import {
+  REPLY_DETAIL_DESCRIPTIONS,
+  REPLY_DETAIL_LABELS,
+  REPLY_DETAIL_LEVELS,
+} from "../transcript/replyDetail";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
@@ -187,6 +193,7 @@ import {
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
+import { ApplicationIdentity } from "./ApplicationIdentity";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
@@ -194,6 +201,7 @@ import "../styles/extensions-settings.css";
 import "../styles/extension-library.css";
 
 export interface SettingsViewProps {
+  readonly pickSkillFolder?: () => Promise<string | undefined>;
   readonly chatController?: ChatController;
   /** Work's defaults for new threads; absent where no Work host is reachable. */
   readonly workSettings?: WorkSettingsController;
@@ -590,6 +598,14 @@ export function SettingsView(props: SettingsViewProps) {
               <span className="settings-view__drag-space" />
             </div>
           ) : null}
+          {props.hostBridge?.applicationIdentity !== undefined ? (
+            <div className="sidebar__application-identity">
+              <ApplicationIdentity
+                productName={props.hostBridge.applicationIdentity.productName}
+                testData={props.hostBridge.applicationIdentity.data === "test-data"}
+              />
+            </div>
+          ) : null}
           <div className="settings-view__sidebar-content">
             <div className="settings-view__rail-head">
               <h2 className="settings-view__rail-title">Settings</h2>
@@ -634,7 +650,27 @@ export function SettingsView(props: SettingsViewProps) {
                   <span>Back to app</span>
                 </OctantButton>
               )}
-              <span className="settings-view__mobile-title">{subPage ?? currentSectionLabel}</span>
+              <span
+                className={
+                  props.hostBridge?.applicationIdentity !== undefined
+                    ? "settings-view__mobile-title settings-view__mobile-title--nightly"
+                    : "settings-view__mobile-title"
+                }
+              >
+                {props.hostBridge?.applicationIdentity !== undefined ? (
+                  <>
+                    <span className="settings-view__mobile-section-name">
+                      {subPage ?? currentSectionLabel}
+                    </span>
+                    <ApplicationIdentity
+                      productName={props.hostBridge.applicationIdentity.productName}
+                      testData={props.hostBridge.applicationIdentity.data === "test-data"}
+                    />
+                  </>
+                ) : (
+                  (subPage ?? currentSectionLabel)
+                )}
+              </span>
               <OctantButton
                 aria-expanded={navigationOpen}
                 aria-haspopup="dialog"
@@ -1136,6 +1172,11 @@ function ActiveSectionContent({
           {props.providerController === undefined ? null : (
             <ModelEndpointSettingsView
               {...providerSettingsViewProps(props.providerController, props.hostBridge)}
+              {...(props.codeController?.client.providerCloudSessions === undefined
+                ? {}
+                : {
+                    providerCloudSessionClient: props.codeController.client.providerCloudSessions,
+                  })}
               {...(props.discoveryController?.snapshot === undefined
                 ? {}
                 : { discoverySnapshot: props.discoveryController.snapshot })}
@@ -1225,6 +1266,15 @@ function ActiveSectionContent({
         />
       ) : null;
     case "remote-access": {
+      if (props.hostBridge?.managedInOctant === true)
+        return (
+          <section aria-label="Remote access" id="settings-remote-access">
+            <p className="settings-managed-in-octant">
+              Managed in Octant. Remote access, paired computers and hubs are set up in the Octant
+              app.
+            </p>
+          </section>
+        );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
       return administration !== undefined ? (
         <RemoteAccessSettingsSection
@@ -1278,6 +1328,7 @@ function ActiveSectionContent({
       return (
         <SecretStoresSettingsSection
           client={props.secretStoresClient}
+          projectNames={props.projectNames ?? new Map()}
           focusedSetting={focusedSetting}
         />
       );
@@ -1946,7 +1997,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             onAutomaticChecksChange={(enabled) =>
               props.onSettingsChange({ automaticUpdateChecks: enabled })
             }
-            onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
+            updateChannel={props.settings.updateChannel}
+            onUpdateChannelChange={(updateChannel, releaseRing) =>
+              props.onSettingsChange({ updateChannel, releaseRing })
+            }
           />
         </div>
       </SettingsSection>
@@ -1999,11 +2053,13 @@ function SkillsSection({
   props,
 }: SectionProps & { readonly onApplyDeepLink: (link: SettingsDeepLink) => void }) {
   const [skillFolderSaves, setSkillFolderSaves] = useState(0);
+  const [skillRoots, setSkillRoots] = useState<ReadonlyArray<SkillRootStatus>>([]);
   return (
     <div className="settings-section-stack" id="settings-skills">
       {props.extensionClient === undefined ? null : (
         <ExtensionsSettingsView
           client={props.extensionClient}
+          onSkillRootsChanged={setSkillRoots}
           marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
           skillFoldersKey={`${JSON.stringify(props.settings.skillFolders)}:${skillFolderSaves}`}
           showHeading={false}
@@ -2041,6 +2097,7 @@ function SkillsSection({
         />
       )}
       <SkillFoldersSection
+        skillRoots={skillRoots}
         onSaved={() => setSkillFolderSaves((count) => count + 1)}
         props={props}
       />
@@ -2054,15 +2111,37 @@ function SkillsSection({
  * folder indexes its skills only; the activation ladder still applies.
  */
 function SkillFoldersSection({
+  skillRoots,
   onSaved,
   props,
-}: Pick<SectionProps, "props"> & { readonly onSaved: () => void }) {
+}: Pick<SectionProps, "props"> & {
+  readonly onSaved: () => void;
+  readonly skillRoots: ReadonlyArray<SkillRootStatus>;
+}) {
   return (
-    <SettingsSection title="Skill folders">
+    <SettingsSection
+      title="Skill folders"
+      actions={
+        props.extensionClient === undefined ? undefined : (
+          <OctantButton
+            aria-label="Refresh folder status"
+            onClick={onSaved}
+            type="button"
+            variant="outline"
+          >
+            Refresh
+          </OctantButton>
+        )
+      }
+    >
       <SkillFolderSettingsPanel
-        onChange={(skillFolders) =>
-          void Promise.resolve(props.onSettingsChange({ skillFolders })).then(onSaved)
-        }
+        {...(props.pickSkillFolder === undefined ? {} : { pickFolder: props.pickSkillFolder })}
+        statuses={skillRoots}
+        onChange={async (skillFolders) => {
+          const accepted = await props.onSettingsChange({ skillFolders });
+          if (accepted !== false) onSaved();
+          return accepted;
+        }}
         value={props.settings.skillFolders}
       />
     </SettingsSection>
@@ -2261,6 +2340,30 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
               <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
               <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
+        ) : null}
+        {isAvailable("reply-detail") ? (
+          <SettingRow
+            description={`Where every thread starts unless it sets its own. ${REPLY_DETAIL_DESCRIPTIONS[props.settings.replyDetail]}`}
+            focused={focusedSetting === settingId("reply-detail")}
+            label="Reply detail"
+            scope="app"
+            settingId="reply-detail"
+          >
+            <OctantToggleGroup<ShellSettings["replyDetail"]>
+              aria-label="Reply detail"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSettingsChange({ replyDetail: selected });
+              }}
+              value={[props.settings.replyDetail]}
+            >
+              {REPLY_DETAIL_LEVELS.map((level) => (
+                <OctantToggleGroupItem key={level} value={level}>
+                  {REPLY_DETAIL_LABELS[level]}
+                </OctantToggleGroupItem>
+              ))}
             </OctantToggleGroup>
           </SettingRow>
         ) : null}

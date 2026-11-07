@@ -1,3 +1,4 @@
+import { decodeProviderSessionId } from "@octant/contracts";
 import {
   decodeWorkTurnAuthority,
   decodeWorkTurnId,
@@ -5,7 +6,6 @@ import {
   decodeWorkThreadId,
   decodeProjectId,
   decodeProviderInstanceId,
-  decodeProviderSessionId,
   decodeStartWorkThreadTurnCommand,
   decodeProviderRuntimeEvent,
   type ProviderRuntimeEvent,
@@ -13,7 +13,7 @@ import {
   CorrelationId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { Effect, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
@@ -35,127 +35,81 @@ const ids = {
 } as const;
 
 describe("WorkTurnRuntime", () => {
-  it.each([true, false])(
-    "claims feedback only at the live final Work send after held acquire: %s",
-    async (stillCurrent) => {
-      let release: (() => void) | undefined;
-      let acquired = false;
-      let current = true;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const order: string[] = [];
-      const sessionId = decodeProviderSessionId(ids.session);
-      const feedback = vi.fn(() => {
-        order.push("feedback");
-        return {
-          context: "Person comment; quoted outside-content element evidence.",
-          attachments: [
-            {
-              attachmentId: "feedback",
-              displayName: "Pointed-at element",
-              mediaType: "image/jpeg",
-              bytes: new Uint8Array([3]),
-            },
-          ],
-        };
-      });
-      const send = vi.fn((_input: Parameters<ProviderConnection["send"]>[0]) => {
-        order.push("send");
-        return Effect.void;
-      });
-      const connection: ProviderConnection = {
-        subscribe: Effect.succeed(
-          Stream.make(
+  it("keeps an owned force-stop available while ordinary interruption is stuck", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const runtime = new WorkTurnRuntime({ timeoutMs: 5000 });
+    const controller = new AbortController();
+    const send = vi.fn(() => Effect.void);
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send,
+      interrupt: () => Deferred.await(gate),
+      stop: () => Deferred.succeed(gate, undefined).pipe(Effect.asVoid),
+      forceStop: () =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(gate, undefined);
+          yield* Queue.offer(
+            queue,
             decodeProviderRuntimeEvent({
-              kind: "completed",
+              kind: "interrupted",
               instanceId: ids.provider,
               sequence: 1,
               correlationId: ids.project,
-              occurredAt: "2026-08-11T12:00:00.000Z",
-              sessionId,
+              occurredAt: "2026-11-06T12:00:00.000Z",
+              sessionId: ids.session,
+              message: "Stopped by force",
             }),
-          ),
-        ),
-        start: () => Effect.succeed({ sessionId }),
-        resume: () => Effect.die("unused"),
-        send,
-        interrupt: () => Effect.void,
-        stop: () => Effect.void,
-        answerApproval: () => Effect.void,
-        answerUserInput: () => Effect.void,
-        answerTool: () => Effect.void,
-      };
-      const outcome = new WorkTurnRuntime({ timeoutMs: 2_000 }).run({
-        command: decodeStartWorkThreadTurnCommand({
-          kind: "start-work-thread-turn",
-          requestId: ids.request,
-          threadId: ids.thread,
-          turnId: ids.turn,
-          prompt: "Use my selected notes",
-          authority: decodeWorkTurnAuthority({
-            hostId: "local",
-            projectId: ids.project,
-            bindingRevisionId: ids.binding,
-            workingDirectory: ".",
-            confinementPosture: "project-root-confined",
-            providerInstanceId: ids.provider,
-            modelId: "gpt-5",
-          }),
+          );
         }),
-        providerSessionId: sessionId,
-        projectRoot: "/tmp/work-project",
-        driver: {
-          kind: "openai-compatible",
-          probe: () => Effect.die("unused"),
-          acquire: () =>
-            Effect.promise(async () => {
-              acquired = true;
-              await gate;
-              return connection;
-            }),
-        },
-        signal: new AbortController().signal,
-        admissionCurrent: () => current,
-        takeProductFeedback: feedback,
-        context: [{ kind: "user-message", text: "Existing context" }],
-        attachments: [
-          {
-            attachmentId: "upload",
-            displayName: "Original upload",
-            mediaType: "image/png",
-            bytes: new Uint8Array([1, 2]),
-          },
-        ],
-      });
-      await vi.waitFor(() => expect(acquired).toBe(true));
-      expect(feedback).not.toHaveBeenCalled();
-      expect(send).not.toHaveBeenCalled();
-      current = stillCurrent;
-      release?.();
-      const result = await outcome;
-      expect(feedback).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
-      expect(send).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
-      if (stillCurrent) {
-        expect(order).toEqual(["feedback", "send"]);
-        expect(send.mock.calls[0]?.[0]).toMatchObject({
-          prompt: "Use my selected notes",
-          context: [
-            { kind: "user-message", text: "Existing context" },
-            {
-              kind: "user-message",
-              text: "Person comment; quoted outside-content element evidence.",
-            },
-          ],
-          attachments: [
-            expect.objectContaining({ attachmentId: "upload" }),
-            expect.objectContaining({ attachmentId: "feedback" }),
-          ],
-        });
-        expect(result.kind).toBe("completed");
-      } else expect(result.kind).toBe("failed");
-    },
-  );
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Summarize the brief",
+      authority: {
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model",
+      },
+    });
+    const running = runtime.run({
+      command,
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver: {
+        kind: "claude",
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.succeed(connection),
+      },
+      signal: controller.signal,
+    });
+    try {
+      await vi.waitFor(() => expect(send).toHaveBeenCalled());
+      controller.abort();
+      expect(runtime.canForceStop(String(ids.request))).toBe(true);
+      expect(await runtime.forceStop("other-request")).toBe(false);
+      expect(await runtime.forceStop(String(ids.request))).toBe(true);
+      expect(await running).toMatchObject({ kind: "cancelled" });
+      expect(runtime.canForceStop(String(ids.request))).toBe(false);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await Effect.runPromise(Queue.shutdown(queue));
+      await running;
+    }
+  });
+
   it("acquires Work project-backed authority with request projection context and streams a reply", async () => {
     const acquireInputs: unknown[] = [];
     const start = vi.fn((_input: Parameters<ProviderConnection["start"]>[0]) => Effect.void);
@@ -1913,4 +1867,126 @@ describe("WorkTurnRuntime", () => {
       ]);
     });
   });
+
+  it.each([true, false])(
+    "claims feedback only at the live final Work send after held acquire: %s",
+    async (stillCurrent) => {
+      let release: (() => void) | undefined;
+      let acquired = false;
+      let current = true;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const order: string[] = [];
+      const sessionId = decodeProviderSessionId(ids.session);
+      const feedback = vi.fn(() => {
+        order.push("feedback");
+        return {
+          context: "Person comment; quoted outside-content element evidence.",
+          attachments: [
+            {
+              attachmentId: "feedback",
+              displayName: "Pointed-at element",
+              mediaType: "image/jpeg",
+              bytes: new Uint8Array([3]),
+            },
+          ],
+        };
+      });
+      const send = vi.fn((_input: Parameters<ProviderConnection["send"]>[0]) => {
+        order.push("send");
+        return Effect.void;
+      });
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(
+          Stream.make(
+            decodeProviderRuntimeEvent({
+              kind: "completed",
+              instanceId: ids.provider,
+              sequence: 1,
+              correlationId: ids.project,
+              occurredAt: "2026-08-11T12:00:00.000Z",
+              sessionId,
+            }),
+          ),
+        ),
+        start: () => Effect.succeed({ sessionId }),
+        resume: () => Effect.die("unused"),
+        send,
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const outcome = new WorkTurnRuntime({ timeoutMs: 2_000 }).run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Use my selected notes",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: sessionId,
+        projectRoot: "/tmp/work-project",
+        driver: {
+          kind: "openai-compatible",
+          probe: () => Effect.die("unused"),
+          acquire: () =>
+            Effect.promise(async () => {
+              acquired = true;
+              await gate;
+              return connection;
+            }),
+        },
+        signal: new AbortController().signal,
+        admissionCurrent: () => current,
+        takeProductFeedback: feedback,
+        context: [{ kind: "user-message", text: "Existing context" }],
+        attachments: [
+          {
+            attachmentId: "upload",
+            displayName: "Original upload",
+            mediaType: "image/png",
+            bytes: new Uint8Array([1, 2]),
+          },
+        ],
+      });
+      await vi.waitFor(() => expect(acquired).toBe(true));
+      expect(feedback).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      current = stillCurrent;
+      release?.();
+      const result = await outcome;
+      expect(feedback).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
+      expect(send).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
+      if (stillCurrent) {
+        expect(order).toEqual(["feedback", "send"]);
+        expect(send.mock.calls[0]?.[0]).toMatchObject({
+          prompt: "Use my selected notes",
+          context: [
+            { kind: "user-message", text: "Existing context" },
+            {
+              kind: "user-message",
+              text: "Person comment; quoted outside-content element evidence.",
+            },
+          ],
+          attachments: [
+            expect.objectContaining({ attachmentId: "upload" }),
+            expect.objectContaining({ attachmentId: "feedback" }),
+          ],
+        });
+        expect(result.kind).toBe("completed");
+      } else expect(result.kind).toBe("failed");
+    },
+  );
 });

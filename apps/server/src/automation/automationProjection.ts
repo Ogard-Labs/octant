@@ -1,4 +1,8 @@
 import {
+  AutomationEventSourceObserved,
+  type AutomationEventSourceCheckpoint,
+  AutomationFileSourceObserved,
+  type AutomationFileSourceCheckpoint,
   AutomationBlocked,
   AutomationDefinitionCreated,
   AutomationDefinitionExhausted,
@@ -13,6 +17,7 @@ import {
   AutomationRunCreated,
   AutomationRunStatusChanged,
   AutomationNotificationRefRecorded,
+  AutomationRunResultReported,
   MAX_AUTOMATION_HISTORY_ENTRIES,
   MAX_AUTOMATION_NOTIFICATION_REFERENCES,
   MAX_AUTOMATION_QUERY_LIMIT,
@@ -35,11 +40,14 @@ import {
   resolveNextAutomationOccurrence,
 } from "@octant/domain";
 import { Schema } from "effect";
+import { validateAutomationFileCheckpoint } from "./automationFileSourceState";
 import { ReplayEventInvalid } from "../persistence/journalErrors";
 import type { Projection } from "../persistence/projection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import type { AutomationEventStore } from "./automationEventStore";
 import {
+  AUTOMATION_EVENT_SOURCE_OBSERVED,
+  AUTOMATION_FILE_SOURCE_OBSERVED,
   AUTOMATION_BLOCKED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_EXHAUSTED,
@@ -53,9 +61,11 @@ import {
   AUTOMATION_OCCURRENCE_CLAIMED,
   AUTOMATION_OCCURRENCE_SKIPPED,
   AUTOMATION_RUN_CREATED,
+  AUTOMATION_RUN_RESULT_REPORTED,
   AUTOMATION_RUN_STATUS_CHANGED,
 } from "./automationEventStore";
 
+const decodeFileSourceObserved = Schema.decodeUnknownSync(AutomationFileSourceObserved);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -72,6 +82,7 @@ const decodeDispatchIntentRecorded = Schema.decodeUnknownSync(AutomationDispatch
 const decodeFirstTurnRuntimeClaimed = Schema.decodeUnknownSync(AutomationFirstTurnRuntimeClaimed);
 const decodeFirstTurnAccepted = Schema.decodeUnknownSync(AutomationFirstTurnAccepted);
 const decodeNotificationRefRecorded = Schema.decodeUnknownSync(AutomationNotificationRefRecorded);
+const decodeRunResultReported = Schema.decodeUnknownSync(AutomationRunResultReported);
 
 /**
  * Bound on retained consumed-occurrence keys per Automation. The due ledger
@@ -123,6 +134,8 @@ export interface AutomationRunPage {
 export class AutomationProjection implements Projection {
   readonly name = "automations";
   readonly dependencies: ReadonlyArray<string> = [];
+  readonly #fileSources = new Map<AutomationId, AutomationFileSourceCheckpoint>();
+  readonly #eventSources = new Map<AutomationId, AutomationEventSourceCheckpoint>();
   readonly #definitions = new Map<AutomationId, AutomationDefinition>();
   readonly #runs = new Map<AutomationRunId, AutomationRun>();
   readonly #runsByAutomation = new Map<AutomationId, Set<AutomationRunId>>();
@@ -133,6 +146,8 @@ export class AutomationProjection implements Projection {
   }
 
   clear(): void {
+    this.#fileSources.clear();
+    this.#eventSources.clear();
     this.#definitions.clear();
     this.#runs.clear();
     this.#runsByAutomation.clear();
@@ -146,15 +161,96 @@ export class AutomationProjection implements Projection {
   applyEnvelope(event: EventEnvelope): void {
     if (event.eventVersion !== 1) return;
     switch (event.eventName) {
-      case AUTOMATION_DEFINITION_CREATED:
-        this.#upsertDefinition(decodeDefinitionCreated(event.payload).automation);
+      case AUTOMATION_EVENT_SOURCE_OBSERVED: {
+        const payload = Schema.decodeUnknownSync(AutomationEventSourceObserved)(event.payload);
+        const definition = this.#definitions.get(payload.automationId);
+        if (definition === undefined || definition.version >= event.aggregateVersion) return;
+        const previous = this.#eventSources.get(payload.automationId);
+        if (
+          definition.trigger.kind !== "integration-event" ||
+          definition.definitionRevision !== payload.definitionRevision ||
+          definition.trigger.sourceIdentity !== payload.checkpoint.sourceIdentity ||
+          (previous !== undefined &&
+            (payload.checkpoint.observationRevision !== previous.observationRevision + 1 ||
+              payload.checkpoint.automaticStarts < previous.automaticStarts ||
+              payload.checkpoint.automaticStarts > previous.automaticStarts + 1))
+        )
+          throw invalidFileSourceFrame(event);
+        this.#eventSources.set(payload.automationId, payload.checkpoint);
+        this.#definitions.set(payload.automationId, {
+          ...definition,
+          version: event.aggregateVersion,
+          updatedAt: payload.recordedAt,
+        });
         return;
-      case AUTOMATION_DEFINITION_UPDATED:
-        this.#upsertDefinition(decodeDefinitionUpdated(event.payload).automation);
+      }
+      case AUTOMATION_DEFINITION_CREATED: {
+        const payload = decodeDefinitionCreated(event.payload);
+        if (!this.#definitions.has(payload.automation.id) && payload.eventSource !== undefined)
+          this.#eventSources.set(payload.automation.id, payload.eventSource);
+        if (!this.#definitions.has(payload.automation.id) && payload.fileSource !== undefined) {
+          validateFileSourceFrame(payload.fileSource, event);
+          this.#fileSources.set(payload.automation.id, payload.fileSource);
+        }
+        this.#upsertDefinition(payload.automation);
         return;
-      case AUTOMATION_DEFINITION_LIFECYCLE_CHANGED:
-        this.#upsertDefinition(decodeDefinitionLifecycleChanged(event.payload).automation);
+      }
+      case AUTOMATION_FILE_SOURCE_OBSERVED:
+        this.#applyFileSourceObserved(event);
         return;
+      case AUTOMATION_DEFINITION_UPDATED: {
+        const payload = decodeDefinitionUpdated(event.payload);
+        const existing = this.#definitions.get(payload.automation.id);
+        if (existing !== undefined && existing.version >= payload.automation.version) return;
+        if (payload.eventSource !== undefined)
+          this.#eventSources.set(payload.automation.id, payload.eventSource);
+        const previous = this.#fileSources.get(payload.automation.id);
+        if (payload.fileSource !== undefined) {
+          validateFileSourceFrame(payload.fileSource, event);
+          if (
+            previous !== undefined &&
+            (payload.fileSource.observationRevision !== previous.observationRevision + 1 ||
+              payload.fileSource.armGeneration !== previous.armGeneration ||
+              payload.fileSource.automaticStarts !== previous.automaticStarts ||
+              payload.fileSource.baselineDigest !== previous.baselineDigest)
+          )
+            throw invalidFileSourceFrame(event);
+        }
+        this.#upsertDefinition(payload.automation);
+        if (payload.fileSource !== undefined)
+          this.#fileSources.set(payload.automation.id, payload.fileSource);
+        return;
+      }
+      case AUTOMATION_DEFINITION_LIFECYCLE_CHANGED: {
+        const payload = decodeDefinitionLifecycleChanged(event.payload);
+        const existing = this.#definitions.get(payload.automation.id);
+        if (existing !== undefined && existing.version >= payload.automation.version) return;
+        const previous = this.#fileSources.get(payload.automation.id);
+        if (payload.fileSource !== undefined && payload.fileSourceReview !== undefined) {
+          const review = payload.fileSourceReview;
+          if (
+            existing === undefined ||
+            previous === undefined ||
+            existing.version !== review.expectedDefinitionVersion ||
+            previous.sourceIdentity !== review.previousSourceIdentity ||
+            previous.observationRevision !== review.previousObservationRevision ||
+            (previous.held?.digest ?? previous.baselineDigest) !== review.previousBatchDigest ||
+            payload.fileSource.armGeneration !== previous.armGeneration + 1 ||
+            payload.fileSource.observationRevision !== previous.observationRevision + 1 ||
+            payload.fileSource.automaticStarts !== (review.disposition === "run-once" ? 1 : 0)
+          )
+            throw invalidFileSourceFrame(event);
+          validateFileSourceFrame(payload.fileSource, event);
+          this.#fileSources.set(payload.automation.id, payload.fileSource);
+        }
+        // An intentional pause is not an offline catch-up request. Keep its
+        // baseline/budget, but require a fresh settled baseline on ordinary Resume.
+        // Held or unknown activity ownership is never cleared by this transition.
+        if (payload.automation.lifecycle === "paused" && previous?.phase === "watching")
+          this.#fileSources.set(payload.automation.id, { ...previous, phase: "arming" });
+        this.#upsertDefinition(payload.automation);
+        return;
+      }
       case AUTOMATION_DEFINITION_EXHAUSTED:
         this.#applyDefinitionExhausted(event);
         return;
@@ -188,11 +284,27 @@ export class AutomationProjection implements Projection {
       case AUTOMATION_NOTIFICATION_REF_RECORDED:
         this.#applyNotificationRefRecorded(event);
         return;
+      case AUTOMATION_RUN_RESULT_REPORTED:
+        this.#applyRunResultReported(event);
+        return;
       default:
         // Unknown automation frames belong to newer sibling slices; this
         // projection tolerates them so replay never quarantines on them.
         return;
     }
+  }
+
+  getFileSourceSummary(automationId: AutomationId): AutomationSummary["fileSource"] {
+    const definition = this.#definitions.get(automationId);
+    return definition === undefined ? undefined : this.#summarize(definition).fileSource;
+  }
+
+  getFileSource(automationId: AutomationId): AutomationFileSourceCheckpoint | undefined {
+    return this.#fileSources.get(automationId);
+  }
+
+  getEventSource(automationId: AutomationId): AutomationEventSourceCheckpoint | undefined {
+    return this.#eventSources.get(automationId);
   }
 
   getDefinition(automationId: AutomationId): AutomationDefinition | undefined {
@@ -289,7 +401,32 @@ export class AutomationProjection implements Projection {
 
   #summarize(definition: AutomationDefinition): AutomationSummary {
     const latest = this.latestRun(definition.id);
+    const latestEventRun = this.#runsNewestFirst(definition.id).find(
+      (run) =>
+        run.occurrence.kind === "integration-event" ||
+        (run.occurrence.kind === "manual" && run.occurrence.eventSource !== undefined),
+    );
+    const eventReceipt =
+      latestEventRun?.occurrence.kind === "integration-event"
+        ? latestEventRun.occurrence.source
+        : latestEventRun?.occurrence.kind === "manual"
+          ? latestEventRun.occurrence.eventSource
+          : undefined;
+    const source = this.#fileSources.get(definition.id);
+    const eventSource = this.#eventSources.get(definition.id);
     return {
+      ...(latestEventRun === undefined || eventReceipt === undefined
+        ? {}
+        : {
+            latestEventRun: {
+              event: eventReceipt.event,
+              runId: latestEventRun.id,
+              lifecycle: latestEventRun.lifecycle,
+            },
+          }),
+      ...(definition.trigger.kind !== "integration-event" || eventSource === undefined
+        ? {}
+        : { eventSource }),
       id: definition.id,
       displayName: definition.displayName,
       hostId: definition.hostId,
@@ -299,6 +436,29 @@ export class AutomationProjection implements Projection {
       trigger: definition.trigger,
       definitionRevision: definition.definitionRevision,
       nextDueAt: definition.nextDueAt,
+      ...(definition.trigger.kind !== "file-arrival"
+        ? {}
+        : {
+            fileSource: {
+              phase: definition.lifecycle === "enabled" ? (source?.phase ?? "arming") : "paused",
+              ...(source?.reason === undefined ? {} : { reason: source.reason }),
+              observationRevision: source?.observationRevision ?? 0,
+              remainingStarts: Math.max(
+                0,
+                definition.trigger.automaticStartLimit - (source?.automaticStarts ?? 0),
+              ),
+              ...(source === undefined ? {} : { observedAt: source.observedAt }),
+              coverageGap: source?.coverageGap ?? false,
+              ...(source === undefined
+                ? {}
+                : {
+                    sourceIdentity: source.sourceIdentity,
+                    reviewDigest: source.held?.digest ?? source.baselineDigest,
+                  }),
+              heldFiles: source?.held?.files ?? [],
+              ...(source?.held === undefined ? {} : { heldDigest: source.held.digest }),
+            },
+          }),
       ...(latest === undefined ? {} : { latestRunLifecycle: latest.lifecycle }),
       ...(definition.originThreadId === undefined
         ? {}
@@ -313,6 +473,45 @@ export class AutomationProjection implements Projection {
     const existing = this.#definitions.get(definition.id);
     if (existing !== undefined && existing.version >= definition.version) return;
     this.#definitions.set(definition.id, definition);
+    const source = this.#fileSources.get(definition.id);
+    if (
+      existing !== undefined &&
+      source !== undefined &&
+      existing.definitionRevision !== definition.definitionRevision
+    )
+      this.#fileSources.set(definition.id, {
+        ...source,
+        phase: "needs-rearm",
+        reason: "definition-changed",
+      });
+  }
+
+  #applyFileSourceObserved(event: EventEnvelope): void {
+    const payload = decodeFileSourceObserved(event.payload);
+    const definition = this.#definitions.get(payload.automationId);
+    if (definition === undefined || definition.version >= event.aggregateVersion) return;
+    const previous = this.#fileSources.get(payload.automationId);
+    validateFileSourceFrame(payload.checkpoint, event);
+    if (
+      definition.trigger.kind !== "file-arrival" ||
+      definition.definitionRevision !== payload.definitionRevision ||
+      (previous !== undefined &&
+        (payload.checkpoint.observationRevision !== previous.observationRevision + 1 ||
+          payload.checkpoint.armGeneration < previous.armGeneration ||
+          payload.checkpoint.armGeneration > previous.armGeneration + 1 ||
+          (payload.checkpoint.armGeneration === previous.armGeneration &&
+            (payload.checkpoint.sourceIdentity !== previous.sourceIdentity ||
+              payload.checkpoint.automaticStarts < previous.automaticStarts ||
+              payload.checkpoint.automaticStarts > previous.automaticStarts + 1))))
+    ) {
+      throw invalidFileSourceFrame(event);
+    }
+    this.#fileSources.set(payload.automationId, payload.checkpoint);
+    this.#definitions.set(payload.automationId, {
+      ...definition,
+      version: event.aggregateVersion,
+      updatedAt: payload.recordedAt,
+    });
   }
 
   #applyDefinitionExhausted(event: EventEnvelope): void {
@@ -337,6 +536,16 @@ export class AutomationProjection implements Projection {
       payload.occurrence.kind === "scheduled" ? payload.occurrence : undefined,
       event,
     );
+    if (payload.occurrence.kind === "file-arrival") {
+      const source = this.#fileSources.get(payload.automationId);
+      if (source !== undefined && !source.activityWindow.includes(payload.runId))
+        this.#fileSources.set(
+          payload.automationId,
+          source.activityWindow.length >= 64
+            ? { ...source, phase: "needs-rearm", reason: "activity-history-limit" }
+            : { ...source, activityWindow: [...source.activityWindow, payload.runId] },
+        );
+    }
   }
 
   #applyOccurrenceSkipped(event: EventEnvelope): void {
@@ -409,6 +618,19 @@ export class AutomationProjection implements Projection {
     const existing = this.#runs.get(run.id);
     if (existing !== undefined && existing.version >= run.version) return;
     this.#indexRun(run);
+    const source = this.#fileSources.get(run.automationId);
+    if (
+      source !== undefined &&
+      run.definitionSnapshot.trigger.kind === "file-arrival" &&
+      !source.activityWindow.includes(run.id)
+    ) {
+      this.#fileSources.set(
+        run.automationId,
+        source.activityWindow.length >= 64
+          ? { ...source, phase: "needs-rearm", reason: "activity-history-limit" }
+          : { ...source, activityWindow: [...source.activityWindow, run.id] },
+      );
+    }
   }
 
   #applyRunStatusChanged(event: EventEnvelope): void {
@@ -496,6 +718,23 @@ export class AutomationProjection implements Projection {
       notificationRefs: nextRefs,
       version: payload.version,
       updatedAt: payload.recordedAt,
+    } as AutomationRun);
+  }
+
+  /**
+   * The first reported result stands. A second frame for the same run (the
+   * host refuses one, but a journal could still hold it) only advances the
+   * version, so replay rebuilds the result a person first saw.
+   */
+  #applyRunResultReported(event: EventEnvelope): void {
+    const payload = decodeRunResultReported(event.payload);
+    const existing = this.#runs.get(payload.runId);
+    if (existing === undefined || existing.version >= event.aggregateVersion) return;
+    this.#indexRun({
+      ...existing,
+      ...(existing.reportedResult === undefined ? { reportedResult: payload.result } : {}),
+      version: event.aggregateVersion,
+      updatedAt: event.occurredAt as UtcTimestamp,
     } as AutomationRun);
   }
 
@@ -593,6 +832,7 @@ function nextDueStateAfter(
   trigger: AutomationDefinition["trigger"],
   after: UtcTimestamp,
 ): DueLedgerState | undefined {
+  if (trigger.kind === "file-arrival") return { nextDueAt: null };
   try {
     const nextDueAt = resolveNextAutomationOccurrence({ trigger, after });
     if (nextDueAt === undefined) return { nextDueAt: null };
@@ -637,4 +877,24 @@ function paginate<T>(
 function clampLimit(limit: number, max: number): number {
   if (!Number.isSafeInteger(limit) || limit < 1) return 1;
   return Math.min(limit, max);
+}
+
+function invalidFileSourceFrame(event: EventEnvelope): ReplayEventInvalid {
+  return new ReplayEventInvalid({
+    eventId: event.eventId,
+    globalSequence: event.globalSequence,
+    eventName: event.eventName,
+    eventVersion: event.eventVersion,
+    reason: "event-payload-invalid",
+  });
+}
+function validateFileSourceFrame(
+  checkpoint: AutomationFileSourceCheckpoint,
+  event: EventEnvelope,
+): void {
+  try {
+    validateAutomationFileCheckpoint(checkpoint);
+  } catch {
+    throw invalidFileSourceFrame(event);
+  }
 }

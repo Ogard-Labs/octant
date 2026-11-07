@@ -1,5 +1,20 @@
+import {
+  decodeOwnerBrowserTarget,
+  type OwnerBrowserControlId,
+  type OwnerBrowserNativeCommand,
+  type OwnerBrowserTarget,
+} from "@octant/contracts/owner-browser";
+import type { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import type { OwnerBrowserHost } from "./ownerBrowserControl";
+import type {
+  BrowserPageScriptReceipt,
+  BrowserPageScriptRefusalReason,
+} from "@octant/contracts/browser-page-script";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
+import { clampTurnAccessPosture, evaluateBrowserPageScriptPolicy } from "@octant/domain";
 import type {
   BrowserActionRequest,
+  BrowserProfile,
   BrowserAutomationFailure,
   BrowserDownloadRefusalReason,
   BrowserDownloadReport,
@@ -22,6 +37,16 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import {
+  decodeBrowserCredentialTarget,
+  type BrowserCredentialCommand,
+  type BrowserCredentialTarget,
+} from "@octant/contracts/browser-credential-use";
+import {
+  browserCredentialRefusal,
+  type BrowserCredentialCurrentTarget,
+  type BrowserCredentialFillLease,
+} from "./browserCredentialUseService";
+import {
   MAX_BROWSER_HELD_DOWNLOADS,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
@@ -31,6 +56,7 @@ import {
 import {
   authorizeToolAction,
   browserCaptureTaker,
+  browserPageAuditResult,
   canRequestToolCancellation,
   browserProfileKey,
   browserContextExpiresAt,
@@ -38,6 +64,7 @@ import {
   evaluateBrowserAction,
   evaluateBrowserProfileUse,
   storedBrowserProfile,
+  originAllowed,
   type BrowserCaptureTaker,
   type BrowserPageSnapshotRef,
   type BrowserProfileCaller,
@@ -46,6 +73,7 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
+import { browserExpiryFailure, browserOriginRefusal } from "./browserRecoveryMessages";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import type { BrowserDownloadRecorder } from "./browserDownloadJournal";
@@ -53,11 +81,13 @@ import { saveBrowserDownload, type BrowserDownloadFacts } from "./browserDownloa
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserPointObservation,
   type BrowserRuntimeAction,
   type BrowserRuntimePort,
+  type BrowserRuntimeRecording,
 } from "./browserRuntimePort";
 
 export interface BrowserAuthorityResolver {
@@ -72,7 +102,46 @@ export interface BrowserAuthorityResolver {
   ): boolean;
 }
 
+export type BrowserTaskProfileCommit =
+  | { readonly status: "saved" }
+  | { readonly status: "refused"; readonly failure: BrowserAutomationFailure };
+
+export interface BrowserTaskProfileSwitchInput {
+  readonly windowId: WindowId;
+  readonly threadId: BrowserThreadId;
+  readonly action: ToolActionRequest;
+  readonly profile: BrowserProfile;
+  readonly expectedContextId?: BrowserContextId;
+  readonly url?: string;
+  readonly isCurrent: () => boolean;
+  readonly save: (commit: (persist: () => void) => boolean) => Promise<BrowserTaskProfileCommit>;
+  /** Registers an identity-only pending binding before the shared page is exposed. */
+  readonly bind: (contextId: BrowserContextId, authority: ToolActionAuthority) => void;
+}
+
+export type BrowserTaskProfileSwitchResult =
+  | { readonly status: "changed"; readonly browser: BrowserAutomationSnapshot }
+  | { readonly status: "refused"; readonly failure: BrowserAutomationFailure };
+
+export interface BrowserPageScriptInput {
+  readonly windowId: WindowId;
+  readonly threadId: BrowserThreadId;
+  readonly contextId: BrowserContextId;
+  readonly source: string;
+  readonly expectedObservationRevision: number;
+  readonly turnExecutionPolicy: ProviderExecutionPolicy;
+  /** A server-owned turn/model binding check; it may only narrow persisted authority. */
+  readonly callerIsCurrent: () => boolean;
+  readonly signal?: AbortSignal;
+}
+
 export interface BrowserAutomationServiceOptions {
+  /** Resolves current local-person thread posture; absent/unknown fails closed. */
+  readonly pageScriptPolicy?: (
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ) => ProviderExecutionPolicy | undefined;
   readonly runtime: BrowserRuntimePort;
   readonly authority: BrowserAuthorityResolver;
   /** Optional override; when omitted, a choke-point service wraps `authority`. */
@@ -113,6 +182,9 @@ export interface BrowserAutomationServiceOptions {
 
 /** How long a picture of a page stays current before a preview may ask for another. */
 const PEEK_INTERVAL_MS = 1_500;
+// Like the tool's model-binding cache, retain only a bounded recovery hint,
+// never the expired page's observations, content, pictures, or evidence.
+const MAX_BROWSER_EXPIRY_RECEIPTS = 256;
 /**
  * How long after its last action an agent still counts as driving a page. An
  * agent's turns pause between actions to think, so the mark would otherwise
@@ -130,7 +202,7 @@ interface OwnedContext {
    * context and a second Local servers Open neither reuses nor replaces the
    * first server's session.
    */
-  readonly dedicated: boolean;
+  dedicated: boolean;
   readonly action: ToolActionRequest;
   readonly abort: AbortController;
   actionTail: Promise<void>;
@@ -160,6 +232,15 @@ interface OwnedContext {
   peekedAt: number | undefined;
   /** Agent actions queued or running on this page. */
   agentActions: number;
+  credentialEpoch: number;
+  credentialFill:
+    | {
+        readonly planId: string;
+        readonly target: BrowserCredentialTarget;
+        readonly abort: AbortController;
+        pendingPersonRelease: (() => void) | undefined;
+      }
+    | undefined;
   /** When an agent's action on this page last finished. */
   agentActedAt: number | undefined;
   /**
@@ -169,6 +250,7 @@ interface OwnedContext {
   waitingForPerson: "sign-in" | "take-over" | undefined;
   /** Ends a take-over (Hand back). Absent for a sign-in, which only its card ends. */
   releaseTakeOver: (() => void) | undefined;
+  ownerController: { readonly name: string; readonly expiresAt: UtcTimestamp } | undefined;
   /**
    * How many times the person used the page (typed, clicked, or took it over
    * and handed it back). The agent's refs are good only while this has not
@@ -234,6 +316,16 @@ const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Se
   "drag",
   "upload",
 ]);
+/**
+ * The actions that start and end an agent's recording. They read the page as
+ * a screenshot does and change nothing on it, so they leave the observation
+ * revision where it was: a call recorded around a batch must not make the
+ * batch's first step stale, nor the revision the batch answered with.
+ */
+const RECORDING_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "record-start",
+  "record-stop",
+]);
 /** The person's pane actions that change what the page shows or holds. */
 const PERSON_PAGE_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
   "navigate",
@@ -262,6 +354,7 @@ const staleRefFailure: BrowserAutomationFailure = {
 
 export class BrowserAutomationService {
   readonly #runtime: BrowserRuntimePort;
+  readonly #pageScriptPolicy: BrowserAutomationServiceOptions["pageScriptPolicy"];
   readonly #authority: BrowserAuthorityResolver;
   readonly #toolCalls: ToolCallAuthorityService;
   readonly #recordExternalContentIngestion:
@@ -276,6 +369,23 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  readonly #taskProfileSwitches = new Set<string>();
+  readonly #ownerControllers = new Map<
+    BrowserContextId,
+    {
+      readonly id: OwnerBrowserControlId;
+      readonly target: OwnerBrowserTarget;
+      readonly expiresAt: number;
+    }
+  >();
+  readonly #ownerReclaimed = new Set<(contextId: BrowserContextId) => void>();
+  readonly #expiredContexts = new Map<
+    BrowserContextId,
+    {
+      readonly windowId: WindowId;
+      readonly context: BrowserContextRecord;
+    }
+  >();
   /** Each context's staged upload copies, deleted when the context closes. */
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
@@ -283,6 +393,7 @@ export class BrowserAutomationService {
 
   constructor(options: BrowserAutomationServiceOptions) {
     this.#runtime = options.runtime;
+    this.#pageScriptPolicy = options.pageScriptPolicy;
     this.#authority = options.authority;
     this.#toolCalls =
       options.toolCallAuthority ??
@@ -380,6 +491,7 @@ export class BrowserAutomationService {
       }
       return snapshot(current);
     }
+    if (!dedicated) this.#forgetExpiry(input.windowId, input.threadId);
     const contextId = this.#uuid() as BrowserContextId;
     const record: BrowserContextRecord = {
       contextId,
@@ -408,9 +520,12 @@ export class BrowserAutomationService {
       contentHash: undefined,
       peekedAt: undefined,
       agentActions: 0,
+      credentialEpoch: 0,
+      credentialFill: undefined,
       agentActedAt: undefined,
       waitingForPerson: undefined,
       releaseTakeOver: undefined,
+      ownerController: undefined,
       personInputs: 0,
       snapshotPersonInputs: 0,
       announcedPersonInputs: 0,
@@ -504,6 +619,352 @@ export class BrowserAutomationService {
     return created;
   }
 
+  /** The person's task default replaces a shared page only after staging and saving succeed. */
+  async switchTaskProfile(
+    input: BrowserTaskProfileSwitchInput,
+  ): Promise<BrowserTaskProfileSwitchResult> {
+    const key = JSON.stringify([input.windowId, input.threadId]);
+    if (this.#taskProfileSwitches.has(key))
+      return {
+        status: "refused",
+        failure: {
+          category: "unavailable",
+          message: "A Browser profile switch is already in progress for this task.",
+        },
+      };
+    this.#taskProfileSwitches.add(key);
+    try {
+      return await this.#switchTaskProfile(input);
+    } finally {
+      this.#taskProfileSwitches.delete(key);
+    }
+  }
+
+  async #switchTaskProfile(
+    input: BrowserTaskProfileSwitchInput,
+  ): Promise<BrowserTaskProfileSwitchResult> {
+    const refused = (message: string): BrowserTaskProfileSwitchResult => ({
+      status: "refused",
+      failure: { category: "stale", message },
+    });
+    if (this.#isUnattendedScope(input.windowId))
+      return {
+        status: "refused",
+        failure: {
+          category: "unauthorized",
+          message: "Only a person on this computer can choose a task's default Browser profile.",
+        },
+      };
+    const granted = this.#authority.resolve(input.threadId, input.action.authority.mode);
+    if (
+      !this.#authority.canAccessWindow(
+        input.windowId,
+        input.threadId,
+        input.action.authority.mode,
+      ) ||
+      granted === undefined ||
+      authorizeToolAction(input.action, granted).kind !== "allowed"
+    )
+      return {
+        status: "refused",
+        failure: {
+          category: "unauthorized",
+          message: "This window cannot change the task's Browser profile.",
+        },
+      };
+    const previous = this.#current(input.windowId, input.threadId);
+    if (previous?.record.contextId !== input.expectedContextId || !input.isCurrent())
+      return refused("This task or its Browser changed. Reload before choosing a profile.");
+    if (
+      previous !== undefined &&
+      (previous.record.state !== "active" || !this.#authorityIsActive(previous))
+    )
+      return refused("The task's Browser authority changed. Reload before choosing a profile.");
+    if (previous?.waitingForPerson !== undefined)
+      return {
+        status: "refused",
+        failure: {
+          category: "unavailable",
+          message: "Finish the Browser handoff before changing this task's default profile.",
+        },
+      };
+    const target = previous === undefined ? undefined : (input.url ?? previous.observation?.url);
+    let origin: string | undefined;
+    if (target !== undefined) {
+      origin = originOfUrl(target);
+      if (origin === undefined)
+        return {
+          status: "refused",
+          failure: {
+            category: "invalid",
+            message: "A Browser profile switch needs an HTTP or HTTPS page.",
+          },
+        };
+    }
+    const policy: BrowserContextPolicy = {
+      ...hostPolicy,
+      ...(input.profile.kind === "private" ? {} : { profile: input.profile }),
+      allowedOrigins:
+        origin === undefined ? (previous?.record.policy.allowedOrigins ?? []) : [origin],
+    };
+    const profileFailure = await this.#authorizeProfile({
+      windowId: input.windowId,
+      action: input.action,
+      policy,
+    });
+    if (profileFailure !== undefined) return { status: "refused", failure: profileFailure };
+    if (
+      previous === undefined ||
+      browserProfileKey(previous.record.policy.profile) === browserProfileKey(input.profile)
+    ) {
+      if (
+        !input.isCurrent() ||
+        this.#current(input.windowId, input.threadId) !== previous ||
+        (previous !== undefined &&
+          (!this.#authorityIsActive(previous) || previous.waitingForPerson !== undefined))
+      )
+        return refused("The task changed before its Browser choice was saved.");
+      let committed = false;
+      const saved = await input.save((persist) => {
+        const live = this.#authority.resolve(input.threadId, input.action.authority.mode);
+        if (
+          !input.isCurrent() ||
+          this.#current(input.windowId, input.threadId) !== previous ||
+          live === undefined ||
+          authorizeToolAction(input.action, live).kind !== "allowed" ||
+          !this.#authority.canAccessWindow(
+            input.windowId,
+            input.threadId,
+            input.action.authority.mode,
+          ) ||
+          (previous !== undefined &&
+            (!this.#authorityIsActive(previous) || previous.waitingForPerson !== undefined))
+        )
+          return false;
+        persist();
+        committed = true;
+        return true;
+      });
+      if (committed)
+        return { status: "changed", browser: this.inspectThread(input.windowId, input.threadId) };
+      return saved.status === "refused"
+        ? saved
+        : refused("The task changed before its Browser choice was saved.");
+    }
+    const revision = previous.observationRevision;
+    const personInputs = previous.personInputs;
+    let staged: OwnedContext | undefined;
+    let committed = false;
+    try {
+      const created = await this.create({
+        windowId: input.windowId,
+        threadId: input.threadId,
+        action: input.action,
+        policy,
+        dedicated: true,
+      });
+      if (created.context !== undefined) staged = this.#contexts.get(created.context.contextId);
+      if (created.failure !== undefined) return { status: "refused", failure: created.failure };
+      if (staged === undefined || staged.record.state !== "active")
+        return {
+          status: "refused",
+          failure: {
+            category: "unavailable",
+            message: "The replacement Browser page could not open.",
+          },
+        };
+      if (target !== undefined) {
+        const navigated = await this.act({
+          windowId: input.windowId,
+          threadId: input.threadId,
+          request: {
+            actionId: staged.record.actionId,
+            contextId: staged.record.contextId,
+            correlationId: staged.record.correlationId,
+            authority: staged.record.authority,
+            kind: "navigate",
+            target,
+          },
+        });
+        if (navigated.failure !== undefined)
+          return { status: "refused", failure: navigated.failure };
+      }
+      const replacement = staged;
+      if (!input.isCurrent()) return refused("The task changed while its replacement was opening.");
+      return await this.#queueAction(previous, async () => {
+        let retired: Promise<void> | undefined;
+        const saved = await input.save((persist) => {
+          if (
+            this.#current(input.windowId, input.threadId) !== previous ||
+            previous.record.state !== "active" ||
+            replacement.record.state !== "active" ||
+            previous.waitingForPerson !== undefined ||
+            previous.observationRevision !== revision ||
+            previous.personInputs !== personInputs ||
+            !this.#authorityIsActive(previous) ||
+            !this.#authorityIsActive(replacement) ||
+            !input.isCurrent()
+          )
+            return false;
+          // Final CAS, durable write, binding and exposure cannot yield. Native
+          // teardown starts synchronously, then finishes after this commit.
+          persist();
+          input.bind(replacement.record.contextId, replacement.record.authority);
+          retired = this.#destroy(previous, "user-requested", "ready");
+          replacement.dedicated = false;
+          committed = true;
+          return true;
+        });
+        if (saved.status === "refused" && !committed) return saved;
+        if (!committed)
+          return refused(
+            "The task or page changed while its replacement was opening. The page was not replaced.",
+          );
+        await retired;
+        return { status: "changed", browser: snapshot(replacement) };
+      });
+    } finally {
+      if (!committed && staged !== undefined)
+        await this.#destroy(staged, "user-requested", "ready");
+    }
+  }
+
+  async runScript(input: BrowserPageScriptInput): Promise<BrowserPageScriptReceipt> {
+    const owned = this.#contexts.get(input.contextId);
+    const native = this.#runtime.runPageScript?.bind(this.#runtime);
+    const refused = (reason: BrowserPageScriptRefusalReason): BrowserPageScriptReceipt => ({
+      status: "refused",
+      effect: "none",
+      reason,
+    });
+    if (
+      owned === undefined ||
+      owned.windowId !== input.windowId ||
+      String(owned.threadId) !== String(input.threadId)
+    )
+      return refused("stale");
+    if (native === undefined || Buffer.byteLength(input.source, "utf8") > 8192)
+      return refused("unavailable");
+    const epoch = owned.credentialEpoch;
+    const current = (): BrowserPageScriptReceipt | undefined => {
+      if (
+        !input.callerIsCurrent() ||
+        input.signal?.aborted ||
+        owned.abort.signal.aborted ||
+        owned.record.state !== "active" ||
+        !this.#authorityIsActive(owned) ||
+        this.#expired(owned) ||
+        owned.observation?.stale !== false ||
+        owned.observation?.revision !== input.expectedObservationRevision ||
+        owned.personInputs > owned.snapshotPersonInputs
+      )
+        return refused("stale");
+      if (
+        owned.waitingForPerson !== undefined ||
+        owned.credentialFill !== undefined ||
+        epoch !== owned.credentialEpoch
+      )
+        return refused("held");
+      const policy = this.#pageScriptPolicy?.(
+        input.windowId,
+        input.threadId,
+        owned.record.authority.mode,
+      );
+      if (policy === undefined) return refused("unavailable");
+      const decision = evaluateBrowserPageScriptPolicy({
+        executionPolicy: clampTurnAccessPosture({
+          requested: input.turnExecutionPolicy,
+          thread: policy,
+        }),
+        caller: this.#isUnattendedScope(input.windowId) ? "unattended" : "person",
+      });
+      if (decision.status === "refused") return refused(decision.reason);
+      const call = this.#toolCalls.authorize({
+        threadId: String(input.threadId),
+        request: owned.action,
+        arguments: owned.record.policy,
+        turnExecutionPolicy: input.turnExecutionPolicy,
+      });
+      return call.kind === "allow" ? undefined : refused("unavailable");
+    };
+    const initial = current();
+    if (initial !== undefined) return initial;
+    owned.agentActions++;
+    let dispatched = false;
+    let needsObservation = false;
+    try {
+      return await this.#queueAction(owned, async () => {
+        const before = current();
+        if (before !== undefined) return before;
+        const expectedUrl = owned.observation?.url;
+        if (expectedUrl === undefined) return refused("stale");
+        const signal =
+          input.signal === undefined
+            ? owned.abort.signal
+            : AbortSignal.any([owned.abort.signal, input.signal]);
+        const owner = { windowId: input.windowId, threadId: input.threadId };
+        const prepared = await native(
+          {
+            operation: "prepare",
+            contextId: input.contextId,
+            owner,
+            source: input.source,
+            expectedUrl,
+          },
+          signal,
+        );
+        if (prepared.status !== "prepared") return prepared;
+        const after = current();
+        if (after !== undefined) {
+          await native(
+            { operation: "cancel", contextId: input.contextId, owner, planId: prepared.planId },
+            owned.abort.signal,
+          ).catch(() => undefined);
+          return after;
+        }
+        // The source is already pinned in the native one-use preparation. No new source travels at commit.
+        dispatched = true;
+        needsObservation = true;
+        const result = await native(
+          { operation: "execute", contextId: input.contextId, owner, planId: prepared.planId },
+          signal,
+        );
+        if (result.status !== "prepared" && result.effect === "none") needsObservation = false;
+        if (result.status === "prepared")
+          return { status: "execution-uncertain", effect: "possible" };
+        const publication = current();
+        if (publication !== undefined) return { ...publication, effect: result.effect };
+        if ("valueJson" in result && result.valueJson !== undefined) {
+          const ingested = this.#recordExternalContentIngestion?.({
+            threadId: owned.threadId,
+            provenance: { origin: "tool-result", sourceLabel: "browser-page-script" },
+            contentReference: `browser-page-script-${this.#uuid()}`,
+            correlationId: owned.action.correlationId,
+            authorized: true,
+          });
+          if (ingested?.kind === "refused")
+            return { status: "refused", effect: result.effect, reason: "unavailable" };
+        }
+        return result;
+      });
+    } catch {
+      return { status: "execution-uncertain", effect: dispatched ? "possible" : "none" };
+    } finally {
+      if (needsObservation) {
+        owned.refs = undefined;
+        owned.contentHash = undefined;
+        if (owned.observation !== undefined)
+          owned.observation = {
+            ...owned.observation,
+            revision: ++owned.observationRevision,
+            stale: true,
+          };
+      }
+      owned.agentActions--;
+      owned.agentActedAt = this.#now();
+    }
+  }
+
   async act(input: {
     readonly windowId: WindowId;
     /**
@@ -522,6 +983,13 @@ export class BrowserAutomationService {
     readonly capturedBy?: BrowserCaptureTaker;
     /** Trusted caller attribution for admission/idle only; never keeps a capture. */
     readonly activityBy?: BrowserCaptureTaker;
+    /**
+     * On the agent's `record-stop`: end the recording and keep nothing. The
+     * agent tool asks for it when its thread moved into Plan while the
+     * recorded call ran, because Plan keeps no artifact; the stop still has
+     * to reach the runtime, or the screencast runs on to its own bound.
+     */
+    readonly discardRecording?: true;
     /**
      * For an upload: the absolute paths of the files the request names, as the
      * agent tool resolved them inside the thread's workspace after the person
@@ -573,6 +1041,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    const credentialEpoch = owned.credentialEpoch;
     const byAgent = (input.activityBy ?? input.capturedBy) === "agent";
     if (byAgent) owned.agentActions += 1;
     try {
@@ -584,8 +1053,20 @@ export class BrowserAutomationService {
           title: owned.observation?.title,
           contentHash: owned.contentHash,
         };
+        if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch)
+          return this.#failure(
+            owned,
+            {
+              category: "unavailable",
+              message: "The login fill holds Browser actions and observations.",
+            },
+            owned.status,
+          );
         const result = await this.#actOwned(owned, input);
-        if (input.capturedBy === "agent") {
+        // Starting and stopping a recording are not steps of the check: the
+        // recording is a capture, and the proof shows it after the steps it
+        // covered, as it shows a screenshot no step names.
+        if (input.capturedBy === "agent" && !RECORDING_ACTIONS.has(input.request.kind)) {
           this.#recordStep(owned, input.request, element, before, result);
         }
         return result;
@@ -633,6 +1114,7 @@ export class BrowserAutomationService {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
       readonly activityBy?: BrowserCaptureTaker;
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
@@ -692,12 +1174,8 @@ export class BrowserAutomationService {
       );
     }
     if (this.#expired(owned)) {
-      await this.#destroy(owned, "timeout", "stale");
-      return this.#failure(
-        owned,
-        { category: "context-expired", message: "The browser context expired." },
-        "stale",
-      );
+      await this.#expireContext(owned);
+      return expiredSnapshot(owned.threadId, owned.record);
     }
     if (
       input.request.expectedObservationRevision !== undefined &&
@@ -750,11 +1228,25 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    // A recording happens only because the agent tool asked for one around a
+    // call of its own. The pane, a paired device, and an unnamed caller reach
+    // this service through the ordinary action route, which names no one.
+    if (RECORDING_ACTIONS.has(input.request.kind) && input.capturedBy !== "agent") {
+      return this.#failure(
+        owned,
+        { category: "policy-denied", message: "Only the agent's own call can record the page." },
+        "failed",
+      );
+    }
     const decision = evaluateBrowserAction(resolved.request, owned.record, granted);
     if (decision.kind === "denied") {
       return this.#failure(
         owned,
-        { category: "policy-denied", message: decision.reason },
+        (input.request.kind === "navigate" || input.request.kind === "tab-open") &&
+          input.request.target !== undefined &&
+          !originAllowed(input.request.target, owned.record.policy.allowedOrigins)
+          ? browserOriginRefusal()
+          : { category: "policy-denied", message: decision.reason },
         "failed",
       );
     }
@@ -801,6 +1293,16 @@ export class BrowserAutomationService {
     const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
     if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
     try {
+      const credentialEpoch = owned.credentialEpoch;
+      if (owned.credentialFill !== undefined)
+        return this.#failure(
+          owned,
+          {
+            category: "unavailable",
+            message: "The login fill holds Browser actions and observations.",
+          },
+          owned.status,
+        );
       const { files: _named, ...action } = resolved.request;
       const effect = await waitForBrowserRuntime(
         this.#runtime.act(
@@ -832,6 +1334,15 @@ export class BrowserAutomationService {
         await this.#expireContext(owned);
         return snapshot(owned);
       }
+      if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch)
+        return this.#failure(
+          owned,
+          {
+            category: "unavailable",
+            message: "The login fill withheld an overlapping observation.",
+          },
+          owned.status,
+        );
       if (owned.abort.signal.aborted || owned.record.state !== "active") {
         return this.#failure(
           owned,
@@ -845,6 +1356,15 @@ export class BrowserAutomationService {
           owned.threadId,
           { category: "unauthorized", message: "Browser action authority was revoked." },
           "interrupted",
+        );
+      }
+      // A runtime that cannot audit (an older desktop app's Browser) answers
+      // the action without one; that is a refusal, not a clean page.
+      if (input.request.kind === "audit" && observed.audit === undefined) {
+        return this.#failure(
+          owned,
+          { category: "unavailable", message: "This Browser cannot audit pages." },
+          owned.status,
         );
       }
       const change = describeChange(
@@ -894,7 +1414,24 @@ export class BrowserAutomationService {
         ...(observed.diagnosticsCursor === undefined
           ? {}
           : { diagnosticsCursor: observed.diagnosticsCursor }),
-        revision: ++owned.observationRevision,
+        // Shaped here, so both Browsers answer with the same bounds and words,
+        // and a finding is named by the ref the latest snapshot of this page
+        // gave its element.
+        ...(observed.audit === undefined
+          ? {}
+          : {
+              audit: browserPageAuditResult(
+                observed.audit,
+                new Map(
+                  owned.refs !== undefined && owned.refs.url === observed.url
+                    ? [...owned.refs.byRef.values()].map((entry) => [entry.selector, entry.ref])
+                    : [],
+                ),
+              ),
+            }),
+        revision: RECORDING_ACTIONS.has(input.request.kind)
+          ? owned.observationRevision
+          : ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,
       };
@@ -991,14 +1528,10 @@ export class BrowserAutomationService {
         return this.#failure(owned, staleRefFailure, "failed");
       }
       if (!interrupted && error instanceof BrowserNavigationBlockedError) {
-        return this.#failure(
-          owned,
-          {
-            category: "policy-denied",
-            message: `The page moved to ${new URL(error.url).origin}, which is outside this session's allowed origin. Open ${error.url} directly to browse it there.`,
-          },
-          "failed",
-        );
+        return this.#failure(owned, browserOriginRefusal(new URL(error.url).origin), "failed");
+      }
+      if (!interrupted && error instanceof BrowserRecordingUnavailableError) {
+        return this.#failure(owned, { category: "unavailable", message: error.message }, "failed");
       }
       return this.#failure(
         owned,
@@ -1188,26 +1721,45 @@ export class BrowserAutomationService {
     input: {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly discardRecording?: true;
     },
     observed: {
       readonly screenshotDataUrl?: string;
+      readonly recording?: BrowserRuntimeRecording;
       readonly url?: string;
       readonly title?: string;
     },
   ): Promise<BrowserCaptureOutcome | undefined> {
     const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
     if (takenBy === undefined || this.#captures === undefined) return undefined;
-    // Someone asked for a capture and the runtime withheld the picture. Saying
+    const stopping = input.request.kind === "record-stop";
+    if (stopping && input.discardRecording === true) return undefined;
+    const recording =
+      stopping && observed.recording?.status === "recorded" ? observed.recording : undefined;
+    const dataUrl = stopping ? recording?.dataUrl : observed.screenshotDataUrl;
+    // Someone asked for a capture and the runtime withheld the picture (or a
+    // recording's page painted nothing, or showed a credential field). Saying
     // nothing here left the pane looking as if the capture had been kept.
-    if (observed.screenshotDataUrl === undefined) {
+    if (dataUrl === undefined) {
       return { status: "not-kept", reason: "no-picture" };
     }
     try {
       return await this.#captures.keep({
         threadId: owned.threadId,
-        dataUrl: observed.screenshotDataUrl,
-        url: observed.url,
-        title: observed.title,
+        dataUrl,
+        ...(recording !== undefined
+          ? {
+              recording: {
+                frames: recording.frames,
+                durationMs: recording.durationMs,
+                ...(recording.truncated === undefined ? {} : { truncated: recording.truncated }),
+              },
+            }
+          : {}),
+        // A recording is of the tab it started on, which need not be the tab
+        // the call left in front: it is kept under that tab's address only.
+        url: stopping ? recording?.url : observed.url,
+        title: stopping ? recording?.title : observed.title,
         takenBy,
         ...(storedBrowserProfile(owned.record.policy.profile) === undefined
           ? {}
@@ -1424,6 +1976,168 @@ export class BrowserAutomationService {
     return snapshot(owned);
   }
 
+  holdCredentialFill(
+    windowId: WindowId,
+    target: BrowserCredentialTarget,
+    planId: string,
+  ):
+    | BrowserCredentialFillLease
+    | (BrowserCredentialCurrentTarget & { readonly kind: "browser-credential-refused" }) {
+    const owned = this.#contexts.get(target.contextId);
+    if (
+      owned === undefined ||
+      String(owned.windowId) !== String(windowId) ||
+      String(owned.threadId) !== String(target.threadId) ||
+      !this.#authorityIsActive(owned) ||
+      this.#isUnattendedScope(windowId) ||
+      owned.waitingForPerson === undefined ||
+      owned.agentActions > 0 ||
+      owned.credentialFill !== undefined ||
+      owned.record.presentation !== "native-live" ||
+      owned.record.authority.mode !== target.mode ||
+      String(owned.record.authority.projectId) !== String(target.projectId) ||
+      browserProfileKey(owned.record.policy.profile) !== browserProfileKey(target.profile)
+    )
+      return browserCredentialRefusal(
+        "hold-required",
+        "This page needs its current person-held sign-in context.",
+      );
+    const record = owned.record;
+    const held: NonNullable<OwnedContext["credentialFill"]> = {
+      planId,
+      target,
+      abort: new AbortController(),
+      pendingPersonRelease: undefined,
+    };
+    owned.credentialFill = held;
+    owned.credentialEpoch += 1;
+    owned.observation = undefined;
+    owned.refs = undefined;
+    owned.contentHash = undefined;
+    const abort = () => held.abort.abort();
+    owned.abort.signal.addEventListener("abort", abort, { once: true });
+    const current = async (): Promise<BrowserCredentialCurrentTarget> => {
+      const validOwner = () =>
+        this.#contexts.get(target.contextId) === owned &&
+        owned.record === record &&
+        owned.credentialFill === held &&
+        owned.waitingForPerson !== undefined &&
+        !held.abort.signal.aborted &&
+        !owned.abort.signal.aborted &&
+        this.#authorityIsActive(owned);
+      if (!validOwner() || this.#runtime.validateCredentialFill === undefined)
+        return browserCredentialRefusal("stale", "The held login form changed.");
+      const valid = await this.#runtime.validateCredentialFill(
+        target.contextId,
+        { windowId, threadId: target.threadId },
+        planId,
+      );
+      return valid && validOwner()
+        ? { kind: "browser-credential-target", target }
+        : browserCredentialRefusal("stale", "The held login form changed.");
+    };
+    return {
+      kind: "held",
+      signal: held.abort.signal,
+      current,
+      release: () => {
+        owned.abort.signal.removeEventListener("abort", abort);
+        if (owned.credentialFill !== held) return;
+        owned.credentialFill = undefined;
+        owned.observation = undefined;
+        owned.refs = undefined;
+        owned.peekedAt = undefined;
+        held.pendingPersonRelease?.();
+      },
+    };
+  }
+
+  async credentialUseTarget(
+    windowId: WindowId,
+    command: BrowserCredentialCommand,
+    holdRequired: boolean,
+  ): Promise<BrowserCredentialCurrentTarget> {
+    const owned = this.#contexts.get(command.contextId);
+    if (
+      owned === undefined ||
+      String(owned.windowId) !== String(windowId) ||
+      String(owned.threadId) !== String(command.threadId) ||
+      owned.record.authority.mode !== command.mode ||
+      this.#isUnattendedScope(windowId) ||
+      !this.#authorityIsActive(owned)
+    )
+      return browserCredentialRefusal(
+        "unauthorized",
+        "This Browser page is not available to this local task.",
+      );
+    if (owned.record.presentation !== "native-live" || this.#runtime.peek === undefined)
+      return browserCredentialRefusal(
+        "unsupported",
+        "Login permissions require this computer's native Browser.",
+      );
+    if (holdRequired && (owned.waitingForPerson === undefined || owned.agentActions > 0))
+      return browserCredentialRefusal(
+        "hold-required",
+        "Take over the page or wait for its sign-in handoff before reviewing an item.",
+      );
+    const record = owned.record;
+    const credentialEpoch = owned.credentialEpoch;
+    if (holdRequired && owned.credentialFill !== undefined)
+      return browserCredentialRefusal("hold-required", "A login fill already holds this page.");
+    try {
+      const observed =
+        owned.credentialFill !== undefined
+          ? await this.#runtime
+              .validateCredentialFill?.(
+                command.contextId,
+                { windowId, threadId: owned.threadId },
+                owned.credentialFill.planId,
+              )
+              .then((valid) => (valid ? { url: owned.credentialFill?.target.topOrigin } : {}))
+          : await this.#runtime.peek(command.contextId, owned.abort.signal);
+      if (
+        this.#contexts.get(command.contextId) !== owned ||
+        owned.credentialEpoch !== credentialEpoch ||
+        owned.record !== record ||
+        !this.#authorityIsActive(owned) ||
+        owned.abort.signal.aborted ||
+        (holdRequired && (owned.waitingForPerson === undefined || owned.agentActions > 0))
+      )
+        return browserCredentialRefusal(
+          "stale",
+          "The Browser page changed while its site was being checked.",
+        );
+      if (record.authority.mode === "chat" || observed?.url === undefined)
+        return browserCredentialRefusal(
+          "unsupported",
+          "This page has no eligible task and HTTPS site.",
+        );
+      const url = new URL(observed.url);
+      if (url.protocol !== "https:" || url.username !== "" || url.password !== "")
+        return browserCredentialRefusal(
+          "unsupported",
+          "Login permissions require an exact HTTPS site.",
+        );
+      return {
+        kind: "browser-credential-target",
+        target: decodeBrowserCredentialTarget({
+          contextId: record.contextId,
+          threadId: record.threadId,
+          mode: record.authority.mode,
+          projectId: record.authority.projectId,
+          profile: record.policy.profile ?? { kind: "private" },
+          topOrigin: url.origin,
+          frame: { kind: "top", origin: url.origin },
+        }),
+      };
+    } catch {
+      return browserCredentialRefusal(
+        "unavailable",
+        "The current Browser site could not be verified.",
+      );
+    }
+  }
+
   inspect(
     windowId: WindowId,
     threadId: BrowserThreadId,
@@ -1451,13 +2165,32 @@ export class BrowserAutomationService {
     }
     if (this.#expired(owned)) {
       this.#markExpired(owned);
-      const expired = snapshot(owned);
+      const expired = expiredSnapshot(owned.threadId, owned.record);
       void this.#safeClose(owned.record.contextId).finally(() => {
         this.#contexts.delete(owned.record.contextId);
       });
       return expired;
     }
     return snapshot(owned);
+  }
+
+  ownsHumanPresentation(
+    windowId: WindowId,
+    contextId: BrowserContextId,
+    threadId: BrowserThreadId,
+  ): boolean {
+    const owned = this.#contexts.get(contextId);
+    return (
+      owned !== undefined &&
+      String(owned.windowId) === String(windowId) &&
+      String(owned.threadId) === String(threadId) &&
+      !owned.abort.signal.aborted &&
+      owned.record.state === "active" &&
+      owned.record.presentation === "native-live" &&
+      !this.#expired(owned) &&
+      !this.#isUnattendedScope(windowId) &&
+      this.#authorityIsActive(owned)
+    );
   }
 
   /**
@@ -1470,6 +2203,7 @@ export class BrowserAutomationService {
    * what these checks exist to prevent. A runtime that cannot read its own page
    * reports the surface unavailable rather than guessing at an element.
    */
+
   async describePoint(input: {
     readonly windowId: WindowId;
     readonly threadId: BrowserThreadId;
@@ -1490,6 +2224,8 @@ export class BrowserAutomationService {
       return { status: "unavailable" };
     if (input.selectionId !== undefined && owned.record.presentation !== "native-live")
       return { status: "unavailable" };
+    if (owned.credentialFill !== undefined) return { status: "unavailable" };
+    const credentialEpoch = owned.credentialEpoch;
     const describe = this.#runtime.describePoint;
     if (describe === undefined) return { status: "unavailable", reason: "capture-unavailable" };
     const deadline = this.#now() + 10_000;
@@ -1512,6 +2248,8 @@ export class BrowserAutomationService {
         !signal.aborted &&
         owned.record.state === "active" &&
         this.#authorityIsActive(owned) &&
+        owned.credentialFill === undefined &&
+        credentialEpoch === owned.credentialEpoch &&
         input.current?.() !== false &&
         owned.waitingForPerson !== "sign-in" &&
         (input.expectedObservationRevision === undefined ||
@@ -1578,7 +2316,26 @@ export class BrowserAutomationService {
           contextInspectWeight(right.record.state) - contextInspectWeight(left.record.state),
       )
       .slice(0, MAX_BROWSER_THREAD_CONTEXTS);
-    if (threadContexts.length === 0) return { status: "ready", threadId, evidence: [] };
+    if (threadContexts.length === 0) {
+      const expired = [...this.#expiredContexts.values()].find(
+        (receipt) => receipt.windowId === windowId && receipt.context.threadId === threadId,
+      );
+      if (expired === undefined) return { status: "ready", threadId, evidence: [] };
+      const granted = this.#authority.resolve(threadId, expired.context.authority.mode);
+      if (
+        !this.#authority.canAccessWindow(windowId, threadId, expired.context.authority.mode) ||
+        granted === undefined ||
+        !sameToolActionAuthority(expired.context.authority, granted)
+      ) {
+        this.#forgetExpiry(windowId, threadId);
+        return failedSnapshot(
+          threadId,
+          { category: "unauthorized", message: "Browser context authority is no longer active." },
+          "failed",
+        );
+      }
+      return expiredSnapshot(threadId, expired.context);
+    }
     if (threadContexts.length === 1) {
       const single = threadContexts[0];
       if (single === undefined) return { status: "ready", threadId, evidence: [] };
@@ -1727,12 +2484,14 @@ export class BrowserAutomationService {
     // own state, and a bare reference to it arrived there with no `this`.
     const runtime = this.#runtime;
     if (
+      owned.credentialFill === undefined &&
       runtime.peek !== undefined &&
       // A live context is "running" for as long as it exists; "waiting" is one
       // still being created, whose page is not there to look at yet.
       owned.status === "running" &&
       !this.#pictureFresh(owned)
     ) {
+      const credentialEpoch = owned.credentialEpoch;
       owned.peekedAt = this.#now();
       try {
         const readSignal =
@@ -1752,6 +2511,7 @@ export class BrowserAutomationService {
           return;
         }
         const observed = peeked.value;
+        if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch) return;
         // A fresh picture of the same page is not a new page: keeping the
         // revision lets an agent's next action, which names the revision its
         // last action returned, still run while a preview is open.
@@ -1810,6 +2570,7 @@ export class BrowserAutomationService {
     windowId: WindowId,
     threadId: BrowserThreadId,
   ): Promise<BrowserAutomationSnapshot> {
+    this.#forgetExpiry(windowId, threadId);
     const ownedContexts = [...this.#contexts.values()].filter(
       (owned) => owned.windowId === windowId && owned.threadId === threadId,
     );
@@ -1823,6 +2584,7 @@ export class BrowserAutomationService {
   }
 
   async revokeWindow(windowId: WindowId): Promise<void> {
+    this.#forgetExpiry(windowId);
     await Promise.all(
       [...this.#contexts.values()]
         .filter((owned) => owned.windowId === windowId)
@@ -1834,10 +2596,12 @@ export class BrowserAutomationService {
   }
 
   async close(): Promise<void> {
+    this.#expiredContexts.clear();
     this.#removeProcessExitListener?.();
     this.#removePersonInputListener?.();
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
+      this.#reclaimOwnerController(owned.record.contextId);
       owned.abort.abort();
       owned.cancelExpiry?.();
       owned.cancelExpiry = undefined;
@@ -1928,12 +2692,18 @@ export class BrowserAutomationService {
     // after Continue to read it.
     owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
     this.#scheduleExpiry(owned);
-    return () => {
+    const release = () => {
+      if (owned.credentialFill !== undefined) {
+        owned.credentialFill.pendingPersonRelease = release;
+        owned.credentialFill.abort.abort();
+        return;
+      }
       owned.waitingForPerson = undefined;
       owned.releaseTakeOver = undefined;
       owned.keptUntil = this.#now() + AFTER_HAND_OFF_KEEP_MS;
       if (owned.record.state === "active") this.#scheduleExpiry(owned);
     };
+    return release;
   }
 
   /**
@@ -1971,6 +2741,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    this.#reclaimOwnerController(owned.record.contextId);
     if (owned.waitingForPerson === "take-over") return snapshot(owned);
     if (owned.waitingForPerson !== undefined) {
       return failedSnapshot(
@@ -2009,6 +2780,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    this.#reclaimOwnerController(owned.record.contextId);
     // Only a take-over ends here; the agent's sign-in ask ends with its card.
     if (owned.releaseTakeOver === undefined) return snapshot(owned);
     owned.releaseTakeOver();
@@ -2053,6 +2825,232 @@ export class BrowserAutomationService {
     return true;
   }
 
+  onOwnerControlReclaimed(listener: (contextId: BrowserContextId) => void): () => void {
+    this.#ownerReclaimed.add(listener);
+    return () => this.#ownerReclaimed.delete(listener);
+  }
+
+  #reclaimOwnerController(contextId: BrowserContextId): void {
+    this.#ownerControllers.delete(contextId);
+    const owned = this.#contexts.get(contextId);
+    if (owned !== undefined) owned.ownerController = undefined;
+    for (const listener of this.#ownerReclaimed) listener(contextId);
+  }
+
+  /** Owner interaction names the original resource, never borrows its window capability. */
+  ownerBrowserHost(options: {
+    readonly hostMemberId: () => HubMemberId;
+    readonly threadTitle: (threadId: string) => string | undefined;
+  }): OwnerBrowserHost {
+    const eligible = (owned: OwnedContext | undefined): owned is OwnedContext =>
+      owned !== undefined &&
+      owned.record.state === "active" &&
+      !owned.dedicated &&
+      owned.record.authority.mode === "code" &&
+      owned.record.presentation === "native-live" &&
+      !owned.abort.signal.aborted &&
+      !this.#isUnattendedScope(owned.windowId) &&
+      this.#authorityIsActive(owned) &&
+      (owned.record.policy.profile?.kind ?? "private") === "private" &&
+      owned.record.policy.profileMode === "isolated" &&
+      this.#runtime.ownerControl !== undefined &&
+      options.threadTitle(String(owned.threadId)) !== undefined;
+    const inspect = async (
+      target: Pick<OwnerBrowserTarget, "contextId">,
+    ): Promise<OwnerBrowserTarget | undefined> => {
+      const owned = this.#contexts.get(target.contextId);
+      if (!eligible(owned)) return undefined;
+      const record = owned.record;
+      const result = await this.#runtime.ownerControl?.(
+        {
+          operation: "inspect",
+          contextId: target.contextId,
+          owner: { windowId: owned.windowId, threadId: owned.threadId },
+        },
+        owned.abort.signal,
+      );
+      if (
+        result?.status !== "target" ||
+        this.#contexts.get(target.contextId) !== owned ||
+        owned.record !== record ||
+        !eligible(owned)
+      )
+        return undefined;
+      return decodeOwnerBrowserTarget({
+        hostMemberId: options.hostMemberId(),
+        threadId: owned.threadId,
+        contextId: target.contextId,
+        profile: "private",
+        ...result.target,
+      });
+    };
+    const native = async (
+      target: OwnerBrowserTarget,
+      make: (owned: OwnedContext) => OwnerBrowserNativeCommand,
+      signal?: AbortSignal,
+    ) => {
+      const owned = this.#contexts.get(target.contextId);
+      if (
+        !eligible(owned) ||
+        String(target.hostMemberId) !== String(options.hostMemberId()) ||
+        String(target.threadId) !== String(owned.threadId)
+      )
+        return { status: "refused" as const };
+      return (
+        this.#runtime.ownerControl?.(
+          make(owned),
+          signal === undefined ? owned.abort.signal : AbortSignal.any([signal, owned.abort.signal]),
+        ) ?? { status: "refused" as const }
+      );
+    };
+    return {
+      authorityCurrent: (target) => {
+        const owned = this.#contexts.get(target.contextId);
+        return (
+          eligible(owned) &&
+          String(owned.threadId) === String(target.threadId) &&
+          String(target.hostMemberId) === String(options.hostMemberId())
+        );
+      },
+      targets: async () => {
+        const targets = [];
+        for (const owned of this.#contexts.values()) {
+          if (!eligible(owned) || targets.length >= 16) continue;
+          const target = await inspect({ contextId: owned.record.contextId });
+          const title = options.threadTitle(String(owned.threadId));
+          if (target !== undefined && title !== undefined)
+            targets.push({
+              target,
+              threadTitle: title.slice(0, 200),
+              ...(owned.ownerController === undefined
+                ? {}
+                : { controllerName: owned.ownerController.name }),
+            });
+        }
+        return targets;
+      },
+      inspect,
+      privateHeld: (target) => {
+        const owned = this.#contexts.get(target.contextId);
+        return (
+          !eligible(owned) ||
+          owned.credentialFill !== undefined ||
+          owned.agentActions > 0 ||
+          owned.waitingForPerson === "sign-in"
+        );
+      },
+      claim: async (target, id, ownerName, expiresAt) => {
+        const owned = this.#contexts.get(target.contextId);
+        const previous = this.#ownerControllers.get(target.contextId);
+        if (previous !== undefined && previous.expiresAt <= Date.now())
+          this.#ownerControllers.delete(target.contextId);
+        if (
+          !eligible(owned) ||
+          owned.agentActions > 0 ||
+          owned.credentialFill !== undefined ||
+          owned.waitingForPerson === "sign-in" ||
+          this.#ownerControllers.has(target.contextId)
+        )
+          return false;
+        if (owned.waitingForPerson === undefined) {
+          const release = this.holdForPerson(owned.windowId, owned.threadId, "take-over");
+          if (release === undefined) return false;
+          owned.releaseTakeOver = release;
+          this.#notePersonInput(owned);
+        }
+        this.#ownerControllers.set(target.contextId, {
+          id,
+          target,
+          expiresAt: Date.parse(expiresAt),
+        });
+        owned.ownerController = { name: ownerName.slice(0, 128), expiresAt };
+        const result = await native(target, (resource) => ({
+          operation: "claim",
+          contextId: target.contextId,
+          owner: { windowId: resource.windowId, threadId: resource.threadId },
+          controlId: id,
+          target: {
+            targetVersion: target.targetVersion,
+            documentRevision: target.documentRevision,
+            origin: target.origin,
+          },
+          expiresAt,
+        }));
+        return result.status === "claimed";
+      },
+      frame: async (target, id, sequence, signal) => {
+        if (this.#ownerControllers.get(target.contextId)?.id !== id) return { status: "refused" };
+        const result = await native(
+          target,
+          (resource) => ({
+            operation: "frame",
+            contextId: target.contextId,
+            owner: { windowId: resource.windowId, threadId: resource.threadId },
+            controlId: id,
+            sequence,
+          }),
+          signal,
+        );
+        return result.status === "frame" ? result : { status: "refused" };
+      },
+      input: async (target, id, sequence, expectedFrame, input, signal) => {
+        if (this.#ownerControllers.get(target.contextId)?.id !== id) return { status: "refused" };
+        const result = await native(
+          target,
+          (resource) => ({
+            operation: "input",
+            contextId: target.contextId,
+            owner: { windowId: resource.windowId, threadId: resource.threadId },
+            controlId: id,
+            sequence,
+            expectedFrame,
+            input,
+          }),
+          signal,
+        );
+        return result.status === "input" ? result : { status: "refused" };
+      },
+      release: async (target, id, disposition) => {
+        const owned = this.#contexts.get(target.contextId);
+        const held = this.#ownerControllers.get(target.contextId);
+        if (owned === undefined || String(owned.threadId) !== String(target.threadId))
+          return { status: "refused" };
+        // Revocation invalidates a concurrent handback before either native reply.
+        if (disposition === "revoke" && held?.id === id) {
+          this.#ownerControllers.delete(target.contextId);
+          owned.ownerController = undefined;
+        }
+        const result = await this.#runtime.ownerControl?.(
+          {
+            operation: "release",
+            contextId: target.contextId,
+            owner: { windowId: owned.windowId, threadId: owned.threadId },
+            controlId: id,
+            disposition,
+          },
+          AbortSignal.timeout(3_000),
+        );
+        if (result?.status !== "released") return { status: "refused" };
+        const stillOwned = held?.id === id && this.#ownerControllers.get(target.contextId) === held;
+        if (stillOwned) {
+          this.#ownerControllers.delete(target.contextId);
+          owned.ownerController = undefined;
+        }
+        if (
+          disposition === "hand-back" &&
+          stillOwned &&
+          this.#contexts.get(target.contextId) === owned &&
+          eligible(owned)
+        ) {
+          owned.releaseTakeOver?.();
+          owned.handedBack = true;
+          this.#notePersonInput(owned);
+        }
+        return { status: "released" };
+      },
+    };
+  }
+
   /** Say once, on an agent action's answer, that the person used the page. */
   #withPersonNotice(
     owned: OwnedContext,
@@ -2088,6 +3086,10 @@ export class BrowserAutomationService {
    */
   async closeProfile(profile: StoredBrowserProfile): Promise<void> {
     const key = browserProfileKey(profile);
+    for (const [id, receipt] of this.#expiredContexts) {
+      if (browserProfileKey(receipt.context.policy.profile) === key)
+        this.#expiredContexts.delete(id);
+    }
     const closing = [...this.#contexts.values()]
       .filter(
         (owned) =>
@@ -2202,10 +3204,33 @@ export class BrowserAutomationService {
     owned.cancelExpiry = undefined;
     owned.record = stoppedRecord(owned.record, this.#clock(), "timeout", "expired");
     owned.status = "stale";
-    owned.failure = { category: "context-expired", message: "The browser context expired." };
+    owned.failure = browserExpiryFailure(owned.record.policy.profile);
+    if (!owned.dedicated) {
+      this.#forgetExpiry(owned.windowId, owned.threadId);
+      if (this.#expiredContexts.size >= MAX_BROWSER_EXPIRY_RECEIPTS) {
+        const oldest = this.#expiredContexts.keys().next().value;
+        if (oldest !== undefined) this.#expiredContexts.delete(oldest);
+      }
+      this.#expiredContexts.set(owned.record.contextId, {
+        windowId: owned.windowId,
+        context: owned.record,
+      });
+    }
+  }
+
+  #forgetExpiry(windowId: WindowId, threadId?: BrowserThreadId): void {
+    for (const [id, receipt] of this.#expiredContexts) {
+      if (
+        receipt.windowId === windowId &&
+        (threadId === undefined || receipt.context.threadId === threadId)
+      ) {
+        this.#expiredContexts.delete(id);
+      }
+    }
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#reclaimOwnerController(contextId);
     this.#releaseUploads(contextId);
     try {
       await this.#runtime.closeContext(contextId);
@@ -2282,7 +3307,9 @@ function describeChange(
     kind === "extract-text" ||
     kind === "snapshot" ||
     kind === "screenshot" ||
-    kind === "observe-diagnostics"
+    kind === "observe-diagnostics" ||
+    kind === "audit" ||
+    RECORDING_ACTIONS.has(kind)
   ) {
     return undefined;
   }
@@ -2415,6 +3442,19 @@ function mapToolCallDenial(reason: string, request: ToolActionRequest): BrowserA
   };
 }
 
+function expiredSnapshot(
+  threadId: BrowserThreadId,
+  context: BrowserContextRecord,
+): BrowserAutomationSnapshot {
+  return {
+    status: "stale",
+    threadId,
+    context,
+    evidence: [],
+    failure: browserExpiryFailure(context.policy.profile),
+  };
+}
+
 function snapshot(owned: OwnedContext): BrowserAutomationSnapshot {
   return {
     status: owned.status,
@@ -2424,6 +3464,7 @@ function snapshot(owned: OwnedContext): BrowserAutomationSnapshot {
     evidence: [...owned.evidence],
     ...(owned.failure === undefined ? {} : { failure: owned.failure }),
     ...(owned.waitingForPerson === undefined ? {} : { waitingForPerson: owned.waitingForPerson }),
+    ...(owned.ownerController === undefined ? {} : { ownerController: owned.ownerController }),
   };
 }
 
@@ -2467,6 +3508,7 @@ function threadSnapshotFromSnapshots(
     ...(primary.waitingForPerson === undefined
       ? {}
       : { waitingForPerson: primary.waitingForPerson }),
+    ...(primary.ownerController === undefined ? {} : { ownerController: primary.ownerController }),
   };
 }
 

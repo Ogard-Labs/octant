@@ -24,6 +24,8 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "github-issues": "GitHub issues",
   "github-pull-requests": "GitHub pull requests",
   "github-projects": "GitHub projects",
+  "github-pull-request": "A GitHub pull request",
+  "github-search": "GitHub search results",
   "linear-issue": "A Linear issue",
   "mcp-tool": "Results from connected tools",
   "planner-proposal": "The planner thread that proposed this one",
@@ -36,26 +38,35 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "simulator-screen": "A simulator screen sent as feedback",
   "subagent-result": "A subagent's result",
   "thread-mention": "A thread mentioned in a message",
-  octant_agent_message: "A message from another agent",
   octant_agents: "Results from helper agents",
+  octant_ask_thread: "A reply from another thread",
   octant_android: "The Android emulator",
   octant_apple: "Apple builds, the iOS Simulator, and paired devices",
-  octant_board: "The Project's work board",
   octant_browser: "Pages seen in the browser",
   octant_canvas: "A Canvas document",
   octant_computer: "Apps on your desktop",
   octant_create_image: "A generated image",
-  octant_github: "GitHub issues, pull requests and projects",
+  octant_github: "GitHub issues, pull requests, projects and searches",
   octant_offer_side_task: "A side task offer",
   octant_propose_routine: "A proposed routine",
-  octant_propose_thread: "A proposed thread",
   octant_pull_request: "This thread's pull request",
+  octant_routines: "Routines and their runs",
   octant_side_chat_list_files: "Files listed for a side chat",
   octant_side_chat_read_file: "A file read for a side chat",
   octant_side_chat_search_files: "A file search for a side chat",
   octant_terminal: "Terminal output",
-  octant_thread_message: "A reply from another thread",
+  octant_threads: "The Project's work board",
+  // Chat search's name before it became `web-search`, kept so a label
+  // journaled under it still reads.
   octant_web_research: "Web research",
+  octant_zen: "Results from the Zen assistant",
+  // Tools since folded into `octant_threads`, `octant_offer_side_task`, and
+  // `octant_ask_thread`. No turn is offered them any more, but marks recorded
+  // under their names stay in the journal and still show in words.
+  octant_agent_message: "A message from another agent",
+  octant_board: "The Project's work board",
+  octant_propose_thread: "A proposed thread",
+  octant_thread_message: "A reply from another thread",
   // The harness's own tools. Only some bring in outside content, but a name
   // the catalog does not know taints, so each has words.
   read: "Files read",
@@ -70,13 +81,15 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "context-remaining": "The context estimate",
   "journal-lookup": "Earlier messages of this conversation",
   "second-opinion": "A second opinion from another model",
+  // Retired: journals written while the harness offered `delegate` still name it.
   delegate: "A helper agent's reply",
   "ask-user": "Your answer to a question",
   goal: "The thread's goal",
   "goal-check": "A goal check",
 };
 
-// The Zen assistant's tools share one prefix and one meaning.
+// Earlier versions recorded each of the Zen assistant's seven tools under
+// its own name; one prefix keeps those journaled labels readable.
 const ZEN_PREFIX = "octant_zen_";
 // A synced artifact's label names the computer it came from, in words.
 const SYNCED_PREFIX = "Synced from ";

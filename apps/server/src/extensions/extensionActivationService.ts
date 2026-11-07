@@ -163,8 +163,14 @@ export class ExtensionActivationService {
 
 function withoutSettingsFacts(
   packageState: ExtensionPackageState,
-): Omit<ExtensionPackageState, "publisher" | "npm" | "addedInSettings"> {
-  const { publisher: _publisher, npm: _npm, addedInSettings: _added, ...rest } = packageState;
+): Omit<ExtensionPackageState, "publisher" | "npm" | "addedInSettings" | "localSetupId"> {
+  const {
+    publisher: _publisher,
+    npm: _npm,
+    addedInSettings: _added,
+    localSetupId: _local,
+    ...rest
+  } = packageState;
   return rest;
 }
 

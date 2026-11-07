@@ -1,3 +1,5 @@
+import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
 import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
 import {
@@ -84,6 +86,7 @@ import {
   decodeCodeOperationEventFrame,
   type Project,
   type EventEnvelope,
+  type EventActor,
   type PermissionPersistence,
   type ProjectId,
   type TerminalSessionImportRequest,
@@ -569,6 +572,8 @@ export interface ManagedCodeThreadCreationPort {
 }
 
 export interface CodeFileRootResolution {
+  /** Host-only retained binding/physical proof; never a renderer assertion. */
+  readonly current?: () => boolean;
   readonly fileId: CodeFileId;
   readonly rootPath: string;
   readonly rootIdentity: FileIdentity;
@@ -629,11 +634,15 @@ export interface CodeRepositoryTestDiscoveryPort {
 
 /** Host-only facts a caller adds to a command; the wire commands cannot carry them. */
 export interface CodeServiceExecutionContext {
+  /** Final Browser CAS and journal write run without yielding; never decoded from HTTP. */
+  readonly commitBrowserProfile?: (persist: () => void) => boolean;
   /**
    * The outside-content mark a thread this command creates starts with, set
    * by a host caller that makes it from a marked thread (a follow-up).
    */
   readonly inheritedMark?: InheritedExternalContentMark;
+  /** Host observer, called before the first worktree or thread-creation mutation. */
+  readonly onCreationBoundary?: () => void;
 }
 
 export interface CodeServiceOptions {
@@ -736,6 +745,7 @@ export interface CodeServiceOptions {
       authenticatedWindowId: WindowId,
       forkThreadId: CodeThreadId,
       throughOperationId: string,
+      contextInputPolicy?: ConversationInputPolicy,
     ) => Promise<CodeForkMergeBackOutcome>;
   };
   readonly probeProvider?: (
@@ -748,6 +758,12 @@ export interface CodeServiceOptions {
     readonly modelId: ProviderModelId;
   }) => boolean;
   readonly workingDirectories: {
+    readonly validateChoice?: (
+      windowId: WindowId,
+      projectId: ProjectId,
+      folderId: CodeThread["workingFolderId"],
+      directory: ThreadWorkingDirectory | undefined,
+    ) => Promise<boolean>;
     readonly resolve: (
       authenticatedWindowId: WindowId,
       thread: CodeThread,
@@ -876,6 +892,7 @@ export interface CodeWatchFilesInput {
    * the checkout. The root authority places it or the watch is refused.
    */
   readonly folder?: CodeRelativePath | undefined;
+  readonly folders?: ReadonlyArray<CodeRelativePath | ".">;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -1259,6 +1276,75 @@ export class CodeService {
     };
   }
 
+  /** Called only by the host's owner route after verifying its action-bound unlock. */
+  changeOwnerPosture(input: {
+    readonly threadId: CodeThreadId;
+    readonly expectedVersion: number;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly permissionPersistence: PermissionPersistence;
+    readonly ownerMemberId: string;
+    readonly freshFull: boolean;
+  }): CodeThread {
+    const current = this.#persistence.readCodeThread(input.threadId);
+    if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
+    if (current.version !== input.expectedVersion) {
+      throw this.#failure("stale", "Code state changed; reload and unlock again.");
+    }
+    if (input.executionPolicy === "full-access" && !input.freshFull) {
+      throw this.#failure(
+        "unauthorized",
+        "Full access needs a fresh owner unlock for this change.",
+      );
+    }
+    const project = this.#persistence.readProject?.(current.projectId);
+    if (
+      project?.type !== "code" ||
+      project.lifecycle !== "active" ||
+      current.lifecycle !== "active"
+    ) {
+      throw this.#failure("unauthorized", "The Code thread or Project is unavailable.");
+    }
+    const next = this.#withGuardrailStamp(
+      decodeCodeThread({
+        ...current,
+        executionPolicy: input.executionPolicy,
+        permissionPersistence: input.permissionPersistence,
+        version: current.version + 1,
+        updatedAt: decodeTimestamp(this.#clock()),
+      }),
+    );
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#inUnit(() => {
+      this.#append(
+        "code-thread",
+        current.id,
+        current.version,
+        "code.thread-updated@1",
+        {
+          kind: "thread-updated",
+          thread: next,
+        },
+        actor,
+      );
+      this.#journalLowering(
+        {
+          scope: "thread",
+          from: permissionModeOf(current),
+          to: permissionModeOf(next),
+          projectId: current.projectId,
+          threadId: String(current.id),
+        },
+        actor,
+      );
+    });
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return next;
+  }
+
   async execute(
     authenticatedWindowId: WindowId,
     input: unknown,
@@ -1291,6 +1377,7 @@ export class CodeService {
                 authenticatedWindowId,
                 fork.id,
                 command.throughOperationId,
+                command.contextInputPolicy,
               );
         return { kind: "fork-context-merge", threadId: fork.id, outcome };
       }
@@ -1329,6 +1416,19 @@ export class CodeService {
           throw this.#failure("conflict", "Code thread already exists.");
         }
         this.#assertThreadIdFree(command.threadId);
+        if (
+          command.workingFolderId !== undefined &&
+          (await this.#workingDirectories.validateChoice?.(
+            authenticatedWindowId,
+            command.projectId,
+            command.workingFolderId,
+            command.workingDirectory,
+          )) !== true
+        )
+          throw this.#failure(
+            "invalid",
+            "The selected working folder is unavailable. Choose a current Project folder.",
+          );
         const inheritedMark =
           this.#requireForkOrigin(command.projectId, command.threadId, command.forkedFrom) ??
           executionContext?.inheritedMark;
@@ -1410,6 +1510,12 @@ export class CodeService {
             bindingRevisionId: command.bindingRevisionId,
             repositoryId: preparation.repositoryId,
             checkoutId: preparation.checkoutId,
+            ...(command.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: command.workingFolderId }),
+            ...(command.workingDirectory === undefined
+              ? {}
+              : { workingDirectory: command.workingDirectory }),
             title: command.title,
             lifecycle: "active",
             providerInstanceId: command.providerInstanceId,
@@ -1431,6 +1537,7 @@ export class CodeService {
           }),
         );
         // Commit creates the worktree (the only mutation) and confirms the HEAD.
+        executionContext?.onCreationBoundary?.();
         const committed = await this.#managedThreadCreation.commit(
           creationInput,
           preparation,
@@ -1505,6 +1612,20 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
+          if (
+            thread.workingFolderId !== undefined &&
+            (await this.#workingDirectories.resolve(
+              authenticatedWindowId,
+              thread,
+              checkout,
+              thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            )) === undefined
+          )
+            throw this.#failure(
+              "invalid",
+              "The selected working folder changed while the task was being created.",
+            );
+
           this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
             this.#append(
               "code-thread",
@@ -1712,6 +1833,12 @@ export class CodeService {
         // Choosing Claude artifacts turns on the runtime's telemetry, so only
         // the change command, which a paired device cannot send with it, may
         // make that choice; a create carrying it would skip that refusal.
+        if (command.thread.browserTaskProfile !== undefined) {
+          throw this.#failure(
+            "unauthorized",
+            "Choose a default Browser profile from this task after creating it.",
+          );
+        }
         if (command.thread.documentDelivery === "native-artifacts") {
           throw this.#failure(
             "unauthorized",
@@ -1789,6 +1916,17 @@ export class CodeService {
             "This provider or model is not allowed by this Code Project's provider policy.",
           );
         }
+        if (
+          (thread.workingFolderId !== undefined || thread.workingDirectory !== undefined) &&
+          (await this.#workingDirectories.resolve(
+            authenticatedWindowId,
+            thread,
+            checkout,
+            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          )) === undefined
+        )
+          throw this.#failure("invalid", "The selected working folder is unavailable.");
+        executionContext?.onCreationBoundary?.();
         this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
             kind: "thread-created",
@@ -1948,6 +2086,22 @@ export class CodeService {
         };
       }
       if (command.kind === "change-code-thread-working-directory") {
+        if (
+          current.workingFolderId !== undefined &&
+          String(command.workingDirectory) !== String(current.workingDirectory ?? ".")
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose another working subfolder in a new task; this conversation keeps its original provider session.",
+          );
+        if (
+          command.workingFolderId !== undefined &&
+          command.workingFolderId !== current.workingFolderId
+        )
+          throw this.#failure(
+            "invalid",
+            "Choose a different approved working folder in a new task; this conversation keeps its original provider session.",
+          );
         const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
         if (
           checkout === undefined ||
@@ -1960,7 +2114,12 @@ export class CodeService {
         try {
           resolved = await this.#workingDirectories.resolve(
             authenticatedWindowId,
-            current,
+            {
+              ...current,
+              ...(command.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: command.workingFolderId }),
+            },
             checkout,
             command.workingDirectory,
           );
@@ -1992,6 +2151,12 @@ export class CodeService {
       }
       // The choice takes effect when the next turn launches its provider; a
       // running turn keeps the launch it started with.
+      if (command.kind === "change-code-thread-browser-profile" && current.lifecycle !== "active") {
+        throw this.#failure(
+          "invalid",
+          "Only an active task can choose its default Browser profile.",
+        );
+      }
       if (
         command.kind === "change-code-thread-document-delivery" &&
         current.lifecycle === "archived"
@@ -2194,32 +2359,59 @@ export class CodeService {
                                   version: command.expectedVersion + 1,
                                   updatedAt,
                                 }
-                              : {
-                                  ...current,
-                                  workingDirectory: command.workingDirectory,
-                                  version: command.expectedVersion + 1,
-                                  updatedAt,
-                                },
+                              : command.kind === "change-code-thread-browser-profile"
+                                ? {
+                                    ...current,
+                                    browserTaskProfile: command.browserTaskProfile,
+                                    version: command.expectedVersion + 1,
+                                    updatedAt,
+                                  }
+                                : {
+                                    ...current,
+                                    ...(command.workingFolderId === undefined
+                                      ? {}
+                                      : { workingFolderId: command.workingFolderId }),
+                                    workingDirectory: command.workingDirectory,
+                                    version: command.expectedVersion + 1,
+                                    updatedAt,
+                                  },
       );
       const next =
         command.kind === "change-code-thread-access"
           ? this.#withGuardrailStamp(requestedNext)
           : requestedNext;
-      this.#inUnit(() => {
-        this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
-          kind: "thread-updated",
-          thread: next,
+      const persist = () =>
+        this.#inUnit(() => {
+          this.#append(
+            "code-thread",
+            current.id,
+            command.expectedVersion,
+            "code.thread-updated@1",
+            {
+              kind: "thread-updated",
+              thread: next,
+            },
+          );
+          if (command.kind === "change-code-thread-access") {
+            this.#journalLowering({
+              scope: "thread",
+              from: permissionModeOf(current),
+              to: permissionModeOf(next),
+              projectId: current.projectId,
+              threadId: String(current.id),
+            });
+          }
         });
-        if (command.kind === "change-code-thread-access") {
-          this.#journalLowering({
-            scope: "thread",
-            from: permissionModeOf(current),
-            to: permissionModeOf(next),
-            projectId: current.projectId,
-            threadId: String(current.id),
-          });
-        }
-      });
+      if (
+        command.kind === "change-code-thread-browser-profile" &&
+        executionContext?.commitBrowserProfile !== undefined
+      ) {
+        if (!executionContext.commitBrowserProfile(persist))
+          throw this.#failure(
+            "stale",
+            "The task or Browser changed before its profile could be saved.",
+          );
+      } else persist();
       if (command.kind === "change-code-thread-working-directory") {
         await this.#onWorkingDirectoryChanged({
           mode: "code",
@@ -2802,6 +2994,39 @@ export class CodeService {
     authenticatedWindowId: WindowId,
     input: CodeWatchFilesInput,
   ): Promise<AsyncIterable<CodeFileChangeNotice>> {
+    if (input.folders !== undefined) {
+      if (
+        input.folder !== undefined ||
+        input.folders.length < 1 ||
+        input.folders.length > 17 ||
+        new Set(input.folders).size !== input.folders.length
+      )
+        throw this.#failure("invalid", "Code file watch folders are invalid.");
+      const abort = new AbortController();
+      const signal =
+        input.signal === undefined ? abort.signal : AbortSignal.any([input.signal, abort.signal]);
+      const streams: Array<{
+        readonly folder?: CodeRelativePath;
+        readonly stream: AsyncIterable<CodeFileChangeNotice>;
+      }> = [];
+      try {
+        for (const folder of input.folders) {
+          if (folder !== "." && !folder.startsWith("/"))
+            throw this.#failure("invalid", "Code file watch folders are invalid.");
+          const stream = await this.watchFiles(authenticatedWindowId, {
+            threadId: input.threadId,
+            checkoutId: input.checkoutId,
+            signal,
+            ...(folder === "." ? {} : { folder }),
+          });
+          streams.push({ stream, ...(folder === "." ? {} : { folder }) });
+        }
+        return multiplexFileChanges(streams, signal, () => abort.abort());
+      } catch (error) {
+        abort.abort();
+        throw error;
+      }
+    }
     const authorized = await this.#authorizeCheckoutRead(
       authenticatedWindowId,
       input.threadId,
@@ -2838,14 +3063,34 @@ export class CodeService {
     });
     const openWatches = this.#openWatches;
     const windowKey = String(authenticatedWindowId);
-    return (async function* () {
+    const current = () => {
       try {
-        yield* notices;
+        return root.current?.() !== false;
+      } catch {
+        return false;
+      }
+    };
+    const release = () => {
+      input.signal?.removeEventListener("abort", abort);
+      const remaining = openWatches.get(windowKey);
+      remaining?.delete(revocation);
+      if (remaining?.size === 0) openWatches.delete(windowKey);
+    };
+    revocation.signal.addEventListener("abort", release, { once: true });
+    if (revocation.signal.aborted) release();
+    return (async function* () {
+      const authority = setInterval(() => {
+        if (!current()) revocation.abort();
+      }, 250);
+      try {
+        for await (const notice of notices) {
+          if (revocation.signal.aborted || !current()) return;
+          yield { ...notice, ...(input.folder === undefined ? {} : { folder: input.folder }) };
+        }
       } finally {
-        input.signal?.removeEventListener("abort", abort);
-        const remaining = openWatches.get(windowKey);
-        remaining?.delete(revocation);
-        if (remaining?.size === 0) openWatches.delete(windowKey);
+        clearInterval(authority);
+        revocation.signal.removeEventListener("abort", release);
+        release();
       }
     })();
   }
@@ -3264,6 +3509,14 @@ export class CodeService {
     if (source?.type !== "code" || destination === undefined) {
       throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
     }
+    if (
+      current.workingFolderId !== undefined &&
+      String(destination.id) !== String(current.projectId)
+    )
+      throw this.#failure(
+        "invalid",
+        "This task's working folder is bound to its current Project. Start a new task in the destination Project.",
+      );
     const signals = boardRuntimeActivityFromWorks(
       this.#persistence.readCodeRuntimeWorks(current.id),
     );
@@ -3372,7 +3625,7 @@ export class CodeService {
     payload: unknown,
     // Everything a person asks for is theirs; only the host's own timer
     // writes as the system, so a journal reader can tell the two apart.
-    actorKind: "local-user" | "system" = "local-user",
+    actorKind: "local-user" | "system" | EventActor = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: { aggregateType, aggregateId },
@@ -3383,7 +3636,10 @@ export class CodeService {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor:
+            typeof actorKind === "string"
+              ? { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
+              : actorKind,
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },
@@ -3404,13 +3660,16 @@ export class CodeService {
    * the time; the payload names the scope and both levels. A change that does
    * not lower the guardrail records nothing.
    */
-  #journalLowering(change: {
-    readonly scope: "global" | "project" | "thread";
-    readonly from: PermissionMode;
-    readonly to: PermissionMode;
-    readonly projectId?: ProjectId;
-    readonly threadId?: string;
-  }): void {
+  #journalLowering(
+    change: {
+      readonly scope: "global" | "project" | "thread";
+      readonly from: PermissionMode;
+      readonly to: PermissionMode;
+      readonly projectId?: ProjectId;
+      readonly threadId?: string;
+    },
+    actor?: EventActor,
+  ): void {
     if (!guardrailLowered(change.from, change.to)) return;
     this.#append(
       "guardrail-change",
@@ -3418,6 +3677,7 @@ export class CodeService {
       0,
       GUARDRAIL_LEVEL_LOWERED,
       decodeGuardrailLevelLowered({ surface: "code", ...change }),
+      actor,
     );
   }
 
@@ -3817,7 +4077,11 @@ export class CodeService {
     if (this.#terminalSessions === undefined || project?.type !== "code") {
       throw this.#failure("unavailable", "Terminal sessions are unavailable for this Project.");
     }
-    const prepared = await this.#terminalSessions.prepare(request, project.binding.canonicalRoot);
+    const prepared = await this.#terminalSessions.prepare(
+      request,
+      project.binding.canonicalRoot,
+      projectId,
+    );
     if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
     return prepared.prepared;
   }
@@ -3896,6 +4160,12 @@ export class CodeService {
         projectId: source.projectId,
         bindingRevisionId: source.bindingRevisionId,
         title: command.title,
+        ...(source.workingFolderId === undefined
+          ? {}
+          : {
+              workingFolderId: source.workingFolderId,
+              workingDirectory: source.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            }),
         providerInstanceId: source.providerInstanceId,
         modelId: source.modelId,
         ...(source.modelOptionValues === undefined
@@ -4041,3 +4311,60 @@ const FORK_REFUSALS: Readonly<
   "no-commits": "This repository has no commits yet, so a fork has nowhere to start.",
   unavailable: "The thread's checkout is unavailable right now, so it cannot be forked.",
 };
+
+/** One pending invalidation per root bounds slow readers without losing staleness. */
+async function* multiplexFileChanges(
+  sources: ReadonlyArray<{
+    readonly folder?: CodeRelativePath;
+    readonly stream: AsyncIterable<CodeFileChangeNotice>;
+  }>,
+  signal: AbortSignal,
+  stop: () => void,
+): AsyncGenerator<CodeFileChangeNotice> {
+  const pending = new Map<string, CodeFileChangeNotice>();
+  let ended = signal.aborted;
+  let wake: (() => void) | undefined;
+  const changed = () => {
+    const resume = wake;
+    wake = undefined;
+    resume?.();
+  };
+  const end = () => {
+    ended = true;
+    if (signal.aborted) pending.clear();
+    changed();
+  };
+  signal.addEventListener("abort", end, { once: true });
+  const readers = sources.map(async ({ folder, stream }) => {
+    try {
+      for await (const notice of stream) {
+        if (ended) break;
+        const key = folder ?? ".";
+        pending.set(key, pending.has(key) ? { ...notice, paths: [], truncated: true } : notice);
+        changed();
+      }
+    } catch {
+      // An ended constituent invalidates this connection; readers reconnect and reconcile.
+    } finally {
+      end();
+      stop();
+    }
+  });
+  try {
+    while (!ended || pending.size > 0) {
+      const first = pending.entries().next().value;
+      if (signal.aborted) return;
+      if (first !== undefined) {
+        pending.delete(first[0]);
+        yield first[1];
+      } else
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+    }
+  } finally {
+    signal.removeEventListener("abort", end);
+    stop();
+    await Promise.allSettled(readers);
+  }
+}

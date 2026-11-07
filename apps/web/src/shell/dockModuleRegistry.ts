@@ -88,6 +88,7 @@ export const dockModuleInputs = {
   review: [
     "agentRunClient",
     "requestedAgentReview",
+    "requestedCodeReviewFile",
     "onAgentReviewBack",
     "codeClient",
     "codeDiffLayout",
@@ -149,7 +150,7 @@ export const dockModuleInputs = {
     "windowCapability",
   ],
   desktop: ["serverUrl", "subject", "windowCapability"],
-  debug: ["onOpenFile", "serverUrl", "subject", "windowCapability"],
+  debug: ["onOpenFile", "serverUrl", "subject", "windowCapability", "codeClient", "codeThreadView"],
   environment: [],
 } as const satisfies Readonly<
   Record<RightUtilityDockSurfaceId, ReadonlyArray<keyof ThreadUtilityDockContentProps>>

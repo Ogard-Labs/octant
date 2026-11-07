@@ -1795,6 +1795,34 @@ describe("useShellController", () => {
     expect(result.current.announcement).toBe("Project thread opened.");
   });
 
+  it("restores kept references after renderer reload without opening or rerunning any surface", async () => {
+    const server = statefulClient();
+    const options = { client: server.client, serverUrl: "http://127.0.0.1:13773", windowId };
+    const first = renderHook(() => useShellController(options));
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    await act(async () =>
+      first.result.current.openChatThread(
+        decodeChatThreadId("00000000-0000-4000-8000-000000000901"),
+        "First kept",
+      ),
+    );
+    await act(async () =>
+      first.result.current.openChatThread(
+        decodeChatThreadId("00000000-0000-4000-8000-000000000902"),
+        "Second kept",
+      ),
+    );
+    const titles = [...first.result.current.contentTabs.values()].flat().map((tab) => tab.title);
+    const writes = server.execute.mock.calls.length;
+    first.unmount();
+    const second = renderHook(() => useShellController(options));
+    await waitFor(() => expect(second.result.current.status).toBe("ready"));
+    expect([...second.result.current.contentTabs.values()].flat().map((tab) => tab.title)).toEqual(
+      titles,
+    );
+    expect(server.execute.mock.calls).toHaveLength(writes);
+  });
+
   it("keeps the task beside opened files and returns to it when the file tab closes", async () => {
     const { result, threadId } = await readyBoundCodeShell();
     const pane = firstPane(result.current.workspace!.layouts.code);
@@ -3288,6 +3316,32 @@ describe("useShellController", () => {
     await waitFor(() =>
       expect(result.current.settings?.rememberedBrowserOrigins).toEqual(["https://example.com"]),
     );
+    expect(result.current.status).toBe("ready");
+  });
+
+  it("picks up a reply detail level another window chose when this window regains focus", async () => {
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    const journaled = server.read();
+    server.write({
+      ...journaled,
+      settings: {
+        ...journaled.settings,
+        replyDetail: "medium",
+        threadReplyDetail: [{ mode: "work", threadId: "thread-1", level: "high" }],
+      },
+      settingsVersion: (journaled.settingsVersion + 1) as ShellBootstrap["settingsVersion"],
+    });
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(result.current.settings?.replyDetail).toBe("medium"));
+    expect(result.current.settings?.threadReplyDetail).toEqual([
+      { mode: "work", threadId: "thread-1", level: "high" },
+    ]);
     expect(result.current.status).toBe("ready");
   });
 });

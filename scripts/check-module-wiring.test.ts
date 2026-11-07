@@ -746,7 +746,7 @@ describe("production launch wiring", () => {
     const files = [
       "apps/desktop/src/main.ts",
       "apps/server/src/main.ts",
-      "packages/cli/src/bin.ts",
+      "packages/cli/src/cli.ts",
       "packages/cli/src/web.ts",
       "packages/cli/src/hostLauncher.ts",
       "packages/cli/src/serverLifecycle.ts",

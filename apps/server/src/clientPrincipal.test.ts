@@ -36,6 +36,38 @@ describe("clientPrincipal adapter", () => {
     expect(requireLocalWindowId(principal)).toBe(windowId);
   });
 
+  it("uses the stored native generation and refuses the expired native principal", () => {
+    const store = new WindowAuthorityStore(undefined, { elapsedNow: () => 0 });
+    const token = capability();
+    store.registerNative({
+      windowId,
+      capability: token,
+      rendererIdentity: capability(),
+      now: 0,
+      source: {
+        kind: "native-nightly",
+        processRegistration: capability(),
+        incarnation: "a".repeat(64),
+        generation: 7,
+      },
+    });
+    const request = new Request("http://127.0.0.1/api/projects/bootstrap", {
+      headers: { "x-octant-window-capability": token },
+    });
+    expect(
+      resolveLocalWindowPrincipal({ request, store, now: 0, capabilityGeneration: 999 })
+        .capabilityGeneration,
+    ).toBe(7);
+    expect(() => resolveLocalWindowPrincipal({ request, store, now: 15_000 })).toThrow(
+      ClientPrincipalError,
+    );
+    store.register({ windowId, capability: token, now: 15_000 });
+    expect(
+      resolveLocalWindowPrincipal({ request, store, now: 15_000, capabilityGeneration: 12 })
+        .capabilityGeneration,
+    ).toBe(12);
+  });
+
   it("rejects missing/invalid capability without leaking store internals", () => {
     const store = new WindowAuthorityStore();
     const request = new Request("https://octant.local/api/chat/threads");

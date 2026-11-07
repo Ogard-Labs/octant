@@ -178,17 +178,19 @@ export async function browserOwnerSpokes(input: {
       const here = target.origin === input.pageOrigin || target.webOrigin === input.pageOrigin;
       const origin = here ? input.pageOrigin : target.webOrigin;
       if (origin === undefined) return [];
+      const client = createOwnerClient({
+        target: { memberId: target.memberId, origin },
+        identity,
+        unlock: here ? unlock : readOnly,
+        transport,
+      });
       return [
         {
           memberId: target.memberId,
           name: target.name,
           ...(here ? {} : { openAt: origin }),
-          client: createOwnerClient({
-            target: { memberId: target.memberId, origin },
-            identity,
-            unlock: here ? unlock : readOnly,
-            transport,
-          }),
+          client,
+          browser: client,
         },
       ];
     });

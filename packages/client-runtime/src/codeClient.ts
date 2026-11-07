@@ -1,4 +1,8 @@
 import {
+  createProviderCloudSessionClient,
+  type ProviderCloudSessionClient,
+} from "./providerCloudSessionClient";
+import {
   decodeCodeCheckoutId,
   decodeCodeBoardQuery,
   decodeCodeProjectPullRequestQuery,
@@ -165,11 +169,15 @@ export interface CodeFileSave {
 }
 
 export interface CodeClient {
+  readonly providerCloudSessions?: ProviderCloudSessionClient;
   bootstrap(): Promise<CodeBootstrap>;
   navigation(): Promise<CodeNavigation>;
   thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
   execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
-  executeOperation(command: CodeOperationCommand): Promise<CodeOperationResult>;
+  executeOperation(
+    command: CodeOperationCommand,
+    signal?: AbortSignal,
+  ): Promise<CodeOperationResult>;
   inspectTerminal(request: CodeTerminalInspectionRequest): Promise<CodeTerminalInspection>;
   /**
    * A terminal's output as it is printed, outside the journal, for as long as
@@ -313,6 +321,7 @@ export interface CodeClient {
   readTestStatus?(
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
+    signal?: AbortSignal,
   ): Promise<CodeRepositoryTestStatus>;
   /**
    * Tell the host's language server what the editor holds open: `open` names
@@ -322,9 +331,15 @@ export interface CodeClient {
    * Optional like `listTests`: an editor without it shows no language state
    * and keeps Monaco's own single-file services.
    */
-  syncLanguageDocument?(request: CodeLanguageDocumentRequest): Promise<CodeLanguageDocumentResult>;
-  /** Diagnostics or a definition for a document this thread has open. */
-  readLanguage?(request: CodeLanguageReadRequest): Promise<CodeLanguageReadResult>;
+  syncLanguageDocument?(
+    request: CodeLanguageDocumentRequest,
+    signal?: AbortSignal,
+  ): Promise<CodeLanguageDocumentResult>;
+  /** Bounded language reads for a document this thread has open. */
+  readLanguage?(
+    request: CodeLanguageReadRequest,
+    signal?: AbortSignal,
+  ): Promise<CodeLanguageReadResult>;
   /**
    * The person at a local window approves the server that would read this
    * file to run the repository's tooling, after the host answered
@@ -404,6 +419,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         ),
     });
   return {
+    providerCloudSessions: createProviderCloudSessionClient(options),
     bootstrap() {
       return request(
         fetch,
@@ -447,7 +463,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeCommandResult),
       );
     },
-    async executeOperation(command) {
+    async executeOperation(command, signal) {
       let validated: CodeOperationCommand;
       try {
         validated = decodeCodeOperationCommand(command);
@@ -461,6 +477,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
         },
         (value) => {
           const result = decodeHostAnswer(CodeOperationResult)(value);
@@ -1092,7 +1109,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeRepositoryTestListing),
       );
     },
-    async syncLanguageDocument(input) {
+    async syncLanguageDocument(input, signal) {
       let validated: CodeLanguageDocumentRequest;
       try {
         validated = decodeCodeLanguageDocumentRequest(input);
@@ -1106,6 +1123,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(CodeLanguageDocumentResult),
       );
@@ -1128,7 +1146,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeLanguageApprovalResult),
       );
     },
-    async readLanguage(input) {
+    async readLanguage(input, signal) {
       let validated: CodeLanguageReadRequest;
       try {
         validated = decodeCodeLanguageReadRequest(input);
@@ -1142,11 +1160,12 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(CodeLanguageReadResult),
       );
     },
-    readTestStatus(threadId, checkoutId) {
+    readTestStatus(threadId, checkoutId, signal) {
       try {
         decodeCodeThreadId(threadId);
         decodeCodeCheckoutId(checkoutId);
@@ -1159,7 +1178,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       return request(
         fetch,
         url.toString(),
-        { method: "GET", headers },
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeHostAnswer(CodeRepositoryTestStatus),
       );
     },

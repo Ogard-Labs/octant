@@ -64,7 +64,15 @@ export {
 export { formatHostRuntimeError, redactHostRuntimeText } from "./redaction";
 export { CONFIGURATION_FAILURE_EXIT_CODE, startupFailureExitCode } from "./startupFailure";
 export { redactHostRuntimeValue } from "./redaction";
-export { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
+export {
+  startCredentialBroker,
+  type CredentialBroker,
+  type BrowserCredentialFillHostPort,
+} from "./credentialBroker";
+export type {
+  BrowserCredentialValues,
+  BrowserCredentialConsumption,
+} from "./onePasswordBrowserCredential";
 export {
   decodeLinkedSecretPointer,
   encodeLinkedSecretPointer,
@@ -108,8 +116,13 @@ export {
   type CredentialStoreFailureCategory,
 } from "./credentialStore";
 export {
+  clearSecretServiceTestData,
   makeSecretServiceCredentialStore,
   probeSecretService,
+  secretServiceAttribute,
+  SECRET_SERVICE_NAMESPACES,
+  SECRET_SERVICE_TEST_DATA_PREFIX,
+  type SecretServiceNamespace,
   SECRET_SERVICE_ATTRIBUTE,
   SECRET_SERVICE_BUSCTL_PATH,
   SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE,
@@ -212,3 +225,63 @@ export {
   prepareBrowserDownloadHoldRoot,
   type BrowserDownloadHoldKind,
 } from "./browserDownloadHold";
+export {
+  DEFAULT_FOLDER_ENVIRONMENT,
+  DESKTOP_DATA_CHOICE_FILE,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+  decodeKeychainServiceFamily,
+  keychainServicePrefix,
+  type KeychainServiceFamily,
+  DESKTOP_FLAVOR_IDENTITIES,
+  decodeDesktopDataChoice,
+  desktopDataDirectoriesOverlap,
+  desktopIdentity,
+  desktopIdentityForPackage,
+  desktopWindowStorageDirectory,
+  encodeDesktopDataChoice,
+  resolveDesktopHostRole,
+  resolveDesktopPackageFlavor,
+  type DesktopDataChoice,
+  type DesktopFlavor,
+  type DesktopHostRole,
+  type DesktopIdentity,
+} from "./desktopIdentity";
+export { readStoredDesktopDataChoice } from "./desktopDataChoice";
+
+export {
+  SLACK_MCP_USER_OAUTH,
+  mcpOAuthResourceForTransport,
+  isSlackMcpUserGrantBinding,
+  isSlackMcpUserDescriptorBinding,
+} from "./slackMcpOAuth";
+
+export type { BrowserCredentialItemPin, BrowserItemMetadata } from "./onePasswordBrowserMetadata";
+
+export { onePasswordCommandCredentials } from "./onePasswordCommandCredentials";
+
+export { resolveOnePasswordExecutable } from "./linkedSecretStores";
+
+export { GOOGLE_WORKSPACE_MCP_OAUTH, googleWorkspaceMcpScopes } from "./googleWorkspaceMcpOAuth";
+
+export {
+  GITHUB_MCP_OAUTH_APP,
+  GITHUB_MCP_REPOSITORY_PROFILE,
+  githubMcpRequiredScopes,
+  type GithubMcpPermissionProfile,
+  isGithubMcpGrantBinding,
+  isGithubMcpDescriptorBinding,
+  isGithubMcpCallbackUri,
+  decodeGithubMcpAccount,
+} from "./githubMcpOAuth";
+
+export {
+  decodeGithubActionsSourceRead,
+  decodeGithubActionsSourceResult,
+  type GithubActionsSourceRead,
+  type GithubActionsSourceResult,
+  type GithubActionsSourceOwner,
+  type GithubActionsRepository,
+  type GithubActionsCompletedRun,
+} from "./githubActionsSource";
+
+export * from "./browserPointCapture";

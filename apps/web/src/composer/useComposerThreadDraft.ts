@@ -1,3 +1,4 @@
+import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import {
   composerDraftRecordKey,
@@ -7,10 +8,20 @@ import {
   type ComposerThreadDraftStore,
 } from "./composerThreadDraftStore";
 
+// Quiet thread updates must retain the controller's unchanged draft facts.
+const EMPTY_SIDE_CHAT_RETURNS: ReadonlyArray<SideChatDraftReturnReference> = Object.freeze([]);
+const EMPTY_REVIEW_FINDING_REFERENCES: ReadonlyArray<CodeReviewFindingReference> = Object.freeze(
+  [],
+);
+
 export interface ComposerThreadDraftController {
   readonly text: string;
   readonly caretIndex: number;
   readonly stagedDropped: boolean;
+  readonly sideChatReturns: ReadonlyArray<SideChatDraftReturnReference>;
+  readonly sideChatReturnsInvalid: boolean;
+  readonly reviewFindingReferences: ReadonlyArray<CodeReviewFindingReference>;
+  readonly reviewFindingReferencesInvalid: boolean;
   readonly persistError: string | undefined;
   readonly setDraft: (text: string, caretIndex?: number) => void;
   readonly setCaret: (caretIndex: number) => void;
@@ -130,6 +141,10 @@ export function useComposerThreadDraft(options: {
     text: current?.text ?? "",
     caretIndex: current?.caretIndex ?? 0,
     stagedDropped: current?.stagedDropped === true,
+    sideChatReturns: current?.sideChatReturns ?? EMPTY_SIDE_CHAT_RETURNS,
+    sideChatReturnsInvalid: current?.sideChatReturnsInvalid === true,
+    reviewFindingReferences: current?.reviewFindingReferences ?? EMPTY_REVIEW_FINDING_REFERENCES,
+    reviewFindingReferencesInvalid: current?.reviewFindingReferencesInvalid === true,
     persistError: store.persistError(),
     setDraft,
     setCaret,
@@ -153,12 +168,13 @@ function writeDraft(
   caretIndex: number | undefined,
   stagedDropped?: boolean,
 ): void {
-  if (text.trim() === "") {
+  if (text.length === 0) {
     store.clear(mode, threadId);
     return;
   }
   const previous = store.read(mode, threadId);
   store.write(mode, threadId, {
+    ...previous,
     text,
     caretIndex: caretIndex ?? previous?.caretIndex ?? text.length,
     stagedDropped: stagedDropped ?? previous?.stagedDropped === true,

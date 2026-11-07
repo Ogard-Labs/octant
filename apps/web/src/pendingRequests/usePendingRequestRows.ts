@@ -1,3 +1,4 @@
+import { decodeUtcTimestamp } from "@octant/contracts";
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
 import type { OctantMode } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
@@ -48,6 +49,7 @@ const NO_FRESHNESS: PendingRequestFreshness = {
  * the hook reads nothing.
  */
 export function usePendingRequestRows(source: PendingRequestRowsSource | undefined): {
+  readonly defer: (request: PendingRequest, until: string | null) => Promise<boolean>;
   readonly rows: ReadonlyArray<PendingRequestRowEntry> | undefined;
   readonly answer: (
     request: PendingRequest,
@@ -122,8 +124,32 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
       ...[...refused]
         .filter(([key]) => !liveKeys.has(key))
         .map(([, entry]) => ({ request: entry.request, unlisted: true })),
-    ].toSorted((a, b) => a.request.requestedAt.localeCompare(b.request.requestedAt));
-  }, [listed, read.status, refused]);
+    ].toSorted((a, b) => {
+      const deferred = (request: PendingRequest) =>
+        request.deferredUntil !== undefined && Date.parse(request.deferredUntil) > (now ?? 0)
+          ? 1
+          : 0;
+      return (
+        deferred(a.request) - deferred(b.request) ||
+        a.request.requestedAt.localeCompare(b.request.requestedAt)
+      );
+    });
+  }, [listed, read.status, refused, now]);
 
-  return { rows, answer };
+  const defer = useCallback(
+    async (request: PendingRequest, until: string | null) => {
+      if (request.deferralKey === undefined || source?.pendingRequestClient?.defer === undefined)
+        return false;
+      try {
+        return await source.pendingRequestClient.defer({
+          key: request.deferralKey,
+          until: until === null ? null : decodeUtcTimestamp(until),
+        });
+      } finally {
+        refresh();
+      }
+    },
+    [source?.pendingRequestClient, refresh],
+  );
+  return { rows, answer, defer };
 }

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { decideProviderRuntimeEgress } from "@octant/domain/safe-network-policy";
 import { startEgressHarness } from "../harness/nativeHarnessEgressProxy.test-support";
 import { LINUX_EGRESS_FORWARDER_SOURCE, proxiedLaunchEnvironment } from "./proxiedNetworkEgress";
+import { deferredProxyEnvironment, DEFERRED_PROXY_SOURCE } from "./deferredProxyEnvironment";
 
 const directories: string[] = [];
 const servers: Server[] = [];
@@ -45,18 +46,39 @@ describe("Linux egress forwarder", () => {
     servers.push(proxy);
     await new Promise<void>((done) => proxy.listen(socket, () => done()));
     const port = await freePort();
-    const run = (command: ReadonlyArray<string>) =>
+    const run = (command: ReadonlyArray<string>, environment?: NodeJS.ProcessEnv) =>
       new Promise<{
         readonly code: number | null;
         readonly stdout: string;
         readonly stderr: string;
       }>((done) => {
-        const child = spawn(process.execPath, [script, socket, String(port), ...command]);
+        const child = spawn(process.execPath, [script, socket, String(port), ...command], {
+          detached: process.platform !== "win32",
+          ...(environment === undefined ? {} : { env: environment }),
+        });
+        const timer = setTimeout(() => {
+          if (process.platform !== "win32" && child.pid !== undefined) {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+              return;
+            } catch {
+              /* The owned group may have exited. */
+            }
+          }
+          child.kill("SIGKILL");
+        }, 3000);
         let stdout = "";
         let stderr = "";
         child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
         child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-        child.on("close", (code) => done({ code, stdout, stderr }));
+        child.once("error", () => {
+          clearTimeout(timer);
+          done({ code: null, stdout, stderr: "Fixture spawn failed" });
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          done({ code, stdout, stderr });
+        });
       });
     return { run, port, received };
   }
@@ -84,6 +106,24 @@ describe("Linux egress forwarder", () => {
   it("exits with the command's status", async () => {
     const forwarder = await forwarderFixture();
     expect((await forwarder.run(["/bin/sh", "-c", "exit 7"])).code).toBe(7);
+  });
+  it("restores only the selected host runtime's Node mode after the forwarder removes its inherited flag", async () => {
+    const forwarder = await forwarderFixture();
+    const environment = {
+      PATH: "/usr/bin:/bin",
+      ELECTRON_RUN_AS_NODE: "1",
+      [DEFERRED_PROXY_SOURCE]: "http://synthetic@127.0.0.1:1",
+    };
+    expect(
+      (await forwarder.run(["/bin/sh", "-c", 'test -z "${ELECTRON_RUN_AS_NODE+x}"'], environment))
+        .code,
+    ).toBe(0);
+    const target = deferredProxyEnvironment(
+      "/bin/sh",
+      ["-c", 'test "$ELECTRON_RUN_AS_NODE" = 1'],
+      "electron-node",
+    );
+    expect((await forwarder.run([target.command, ...target.args], environment)).code).toBe(0);
   });
 
   it("never runs the command when it cannot listen", async () => {

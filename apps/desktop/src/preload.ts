@@ -1,3 +1,11 @@
+import type {
+  HumanBrowserRequest,
+  HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
+import {
+  decodeHumanBrowserIpcRequest,
+  decodeHumanBrowserIpcResult,
+} from "./browserPresentationIpc";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import {
@@ -9,13 +17,14 @@ import type {
   OwnerUnlockKeyOutcome,
   OwnerUnlockRefusal,
 } from "./ownerUnlockKeychain";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 import type { PreviewHandoffRequest } from "@octant/contracts/previews";
 import {
   DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
   KEYRING_ADVICE_MARKER,
+  NEEDS_NEWER_OCTANT,
   MAX_PROVIDER_CREDENTIAL_BYTES,
   OPEN_IN_APPLICATION_IDS,
   PROVIDER_INSTANCE_ID_PATTERN,
@@ -74,6 +83,10 @@ import type {
   AppUpdateState,
   AppUpdateStatus,
   AppVersion,
+  NightlyDataChoice,
+  NightlyDataState,
+  NightlyInstallRefusal,
+  NightlyInstallState,
 } from "@octant/contracts/app-updates";
 import type { UtcTimestamp } from "@octant/contracts";
 
@@ -185,6 +198,7 @@ export interface ContextBridgePort {
 }
 
 export interface OctantHostBridge {
+  readonly getDroppedFilePath?: (file: File) => string | undefined;
   readonly popupNativeMenu: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly setMenuBarOpenThread: (thread: MenuBarOpenThread | null) => Promise<void>;
   readonly subscribeMenuBarTask: (listener: (target: MenuBarOpenThread) => void) => () => void;
@@ -226,6 +240,7 @@ export interface OctantHostBridge {
    * checks.
    */
   readonly subscribeCanvasPrototypeEvents: (listener: (event: unknown) => void) => () => void;
+  readonly presentBrowser: (request: HumanBrowserRequest) => Promise<HumanBrowserResult>;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -255,6 +270,30 @@ export interface OctantHostBridge {
   readonly installAppUpdate: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks: (enabled: boolean) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => () => void;
+  readonly appUpdatePreferenceScope?: "local";
+  /**
+   * Octant's Nightly row. Absent in Nightly itself; the desktop main process
+   * decides every install, open and remove.
+   */
+  readonly readNightlyInstall?: () => Promise<NightlyInstallState>;
+  readonly installNightly?: () => Promise<NightlyInstallState>;
+  readonly openNightly?: () => Promise<NightlyInstallState>;
+  readonly removeNightly?: () => Promise<NightlyInstallState>;
+  /** Local application display only; never a host or capability identity. */
+  readonly applicationIdentity?: Readonly<{
+    readonly flavor: "nightly";
+    readonly productName: "Octant Nightly";
+    /** The Data role this launch runs with, where Nightly offers the choice. */
+    readonly data?: NightlyDataChoice;
+  }>;
+  /**
+   * Nightly's Data setting. Present only where Nightly offers separate test
+   * data; its main process owns the folder, the role and the relaunch.
+   */
+  readonly readNightlyData?: () => Promise<NightlyDataState>;
+  readonly chooseNightlyData?: (choice: NightlyDataChoice) => Promise<NightlyDataState>;
+  readonly removeNightlyTestData?: () => Promise<NightlyDataState>;
+  readonly relaunchNightly?: () => Promise<{ readonly kind: "relaunching" | "unchanged" }>;
   readonly readBundledWhatsNew: () => Promise<BundledWhatsNew>;
   readonly acknowledgeWhatsNew: () => Promise<void>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
@@ -294,6 +333,7 @@ export interface OctantHostBridge {
   readonly resetBounds: () => Promise<void>;
   readonly selectProjectRoot: (projectType: BoundProjectType) => Promise<ProjectRootPickerResult>;
   readonly selectLocalPluginFolder: () => Promise<PickerReceiptResult>;
+  readonly selectSkillFolder: () => Promise<PickerReceiptResult>;
   /** Native file picker for a runtime's executable; returns an opaque receipt, never the path. */
   readonly selectRuntimeBinary: () => Promise<PickerReceiptResult>;
   /**
@@ -361,20 +401,26 @@ export interface OctantHostBridge {
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
+   * Set only in an Octant Nightly client window, whose bridge omits the
+   * Octant-only administration below (remote access, pairing, hubs, owner
+   * unlock, host identity), so Settings says it is managed in Octant.
+   */
+  readonly managedInOctant?: true;
+  /**
    * Pairs with another computer from its pasted app pairing code. Main reads
    * the code, checks the computer's key against its pin, records the pin, and
    * hands back the ticket for this window to claim with its own device key.
    */
-  readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
-  readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
-  readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  readonly pairWithPairingCode?: (code: string) => Promise<PairedComputerOutcome>;
+  readonly listPairedComputers?: () => Promise<ReadonlyArray<PairedComputer>>;
+  readonly forgetPairedComputer?: (origin: string) => Promise<ForgetPairedComputerOutcome>;
   /**
    * Ends the pairing main has open for an origin: `approved` once the other
    * computer approved this window's device, which records the pin; `abandoned`
    * when the person leaves first, which drops only what that pairing staged and
    * never a computer already paired.
    */
-  readonly settlePairedComputer: (
+  readonly settlePairedComputer?: (
     origin: string,
     outcome: "approved" | "abandoned",
   ) => Promise<SettlePairedComputerOutcome>;
@@ -384,14 +430,16 @@ export interface OctantHostBridge {
    * refuses an unlisted origin, a method or path off the short list, and any
    * header a signed request does not carry, and strips cookies from the reply.
    */
-  readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
+  readonly requestPairedComputer?: (
+    request: PairedComputerRequest,
+  ) => Promise<PairedComputerAnswer>;
   /**
    * Shows a server of another paired computer, which that computer granted,
    * in Octant's browser or the default browser. The main process checks the
    * request; the answer is opened, or refused with words for the row.
    */
-  readonly openRemoteServerPage: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
-  readonly forgetRemoteServerPages: (
+  readonly openRemoteServerPage?: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
+  readonly forgetRemoteServerPages?: (
     hostId: string,
   ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
   /**
@@ -399,37 +447,37 @@ export interface OctantHostBridge {
    * it to sign each of their requests, and it answers with Octant's headers
    * or a refusal.
    */
-  readonly subscribeRemoteServerPageSigning: (
+  readonly subscribeRemoteServerPageSigning?: (
     signer: (request: unknown) => Promise<unknown>,
   ) => () => void;
-  readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
-  readonly enablePrivateListener: (
+  readonly getPrivateListenerStatus?: () => Promise<PrivateListenerPublicStatus>;
+  readonly enablePrivateListener?: (
     request: PrivateListenerEnableRequest,
   ) => Promise<PrivateListenerPublicStatus>;
-  readonly restartPrivateListener: (
+  readonly restartPrivateListener?: (
     request: PrivateListenerEnableRequest,
   ) => Promise<PrivateListenerPublicStatus>;
-  readonly disablePrivateListener: () => Promise<PrivateListenerPublicStatus>;
-  readonly mintRemotePairingTicket: (
+  readonly disablePrivateListener?: () => Promise<PrivateListenerPublicStatus>;
+  readonly mintRemotePairingTicket?: (
     sourceClass: RemotePairingTicketSourceClass,
   ) => Promise<RemoteMintedPairingTicket>;
-  readonly listRemotePairingRequests: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
-  readonly approveRemotePairingRequest: (ticketId: string) => Promise<RemotePairingApprovalResult>;
-  readonly denyRemotePairingRequest: (
+  readonly listRemotePairingRequests?: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
+  readonly approveRemotePairingRequest?: (ticketId: string) => Promise<RemotePairingApprovalResult>;
+  readonly denyRemotePairingRequest?: (
     ticketId: string,
     reasonCode: string,
   ) => Promise<RemotePairingDenialResult>;
-  readonly getRemoteDeviceInventory: () => Promise<ReadonlyArray<RemoteDeviceInventoryEntry>>;
-  readonly renameRemoteDevice: (
+  readonly getRemoteDeviceInventory?: () => Promise<ReadonlyArray<RemoteDeviceInventoryEntry>>;
+  readonly renameRemoteDevice?: (
     deviceId: string,
     deviceLabel: string,
   ) => Promise<RemoteDeviceInventoryEntry>;
-  readonly revokeRemoteDevice: (deviceId: string) => Promise<RemoteCredentialOperationReceipt>;
-  readonly revokeAllRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
-  readonly reconcileExpiredRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
-  readonly getRemoteHostIdentityRecovery: () => Promise<RemoteHostIdentityRecoveryState>;
-  readonly rotateRemoteHostIdentity: () => Promise<RemoteHostIdentityRotationResult>;
-  readonly recoverRemoteHostIdentity: () => Promise<RemoteHostIdentityRecoveryState>;
+  readonly revokeRemoteDevice?: (deviceId: string) => Promise<RemoteCredentialOperationReceipt>;
+  readonly revokeAllRemoteDevices?: () => Promise<RemoteCredentialOperationReceipt>;
+  readonly reconcileExpiredRemoteDevices?: () => Promise<RemoteCredentialOperationReceipt>;
+  readonly getRemoteHostIdentityRecovery?: () => Promise<RemoteHostIdentityRecoveryState>;
+  readonly rotateRemoteHostIdentity?: () => Promise<RemoteHostIdentityRotationResult>;
+  readonly recoverRemoteHostIdentity?: () => Promise<RemoteHostIdentityRecoveryState>;
 }
 
 export function createHostBridge(
@@ -438,13 +486,28 @@ export function createHostBridge(
   initialProjectTarget?: ProjectWindowTarget,
   platform: NodeJS.Platform = process.platform,
   windowId?: string,
+  localUpdatePreferences = false,
+  applicationIdentity?: OctantHostBridge["applicationIdentity"],
+  nightlyClient = false,
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
-  const invokeApiKey = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
+  // A flow Nightly's matching Octant does not broker arrives with Electron's
+  // remote-call prefix; the window gets the fixed sentence alone, and every
+  // wrapper that replaces other failures lets it through.
+  const invokeBrokered = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
     try {
       return await ipc.invoke(channel, ...args);
     } catch (error) {
+      if (needsNewerOctant(error)) throw new Error(NEEDS_NEWER_OCTANT);
+      throw error;
+    }
+  };
+  const invokeApiKey = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
+    try {
+      return await invokeBrokered(channel, ...args);
+    } catch (error) {
+      if (needsNewerOctant(error)) throw error;
       const known = error instanceof Error ? knownApiKeyFailure(error.message) : undefined;
       throw new Error(known ?? "Octant could not update the provider API keys.");
     }
@@ -469,6 +532,13 @@ export function createHostBridge(
             threadId: initialProjectTarget.threadId,
           });
   return Object.freeze({
+    getDroppedFilePath: (file: File): string | undefined => {
+      try {
+        return webUtils.getPathForFile(file) || undefined;
+      } catch {
+        return undefined;
+      }
+    },
     popupNativeMenu: async (request: NativeMenuRequest): Promise<NativeMenuOutcome> => {
       try {
         const result: unknown = await ipc.invoke(IPC_CHANNELS.nativeMenu, request);
@@ -534,6 +604,13 @@ export function createHostBridge(
     acknowledgeCanvasPrototypeFrame: async (surfaceId: string) => {
       await ipc.invoke(IPC_CHANNELS.canvasPrototypeDrawn, surfaceId);
     },
+    presentBrowser: async (request: HumanBrowserRequest) =>
+      decodeHumanBrowserIpcResult(
+        await ipc.invoke(
+          IPC_CHANNELS.browserHumanPresentation,
+          decodeHumanBrowserIpcRequest(request),
+        ),
+      ),
     attachBrowserSurface: async (request: BrowserSurfaceRequest) => {
       validateBrowserSurfaceRequest(request);
       return decodeBrowserSurfaceState(
@@ -680,8 +757,9 @@ export function createHostBridge(
     clearProviderCredential: async (providerInstanceId: string) => {
       validateProviderInstanceId(providerInstanceId);
       try {
-        await invoke(IPC_CHANNELS.clearProviderCredential, providerInstanceId);
-      } catch {
+        await invokeBrokered(IPC_CHANNELS.clearProviderCredential, providerInstanceId);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         throw new Error("Octant could not clear the provider credential.");
       }
     },
@@ -700,6 +778,7 @@ export function createHostBridge(
       return Object.freeze({
         sidebarVibrancySupported: value.sidebarVibrancySupported,
         liveBrowserSupported: value.liveBrowserSupported,
+        ...(value.embeddedBrowserSupported === true ? { embeddedBrowserSupported: true } : {}),
         liveSimulatorFrameSupported: value.liveSimulatorFrameSupported,
         liveAndroidFrameSupported: value.liveAndroidFrameSupported,
       });
@@ -713,7 +792,10 @@ export function createHostBridge(
     minimize: () => invoke(IPC_CHANNELS.minimize),
     openCodeExternalEditor: (request: CodeExternalEditorRequest) => {
       // The decoded value crosses the bridge, not the raw renderer payload.
-      return invoke(IPC_CHANNELS.openCodeExternalEditor, decodeCodeExternalEditorRequest(request));
+      return invokeBrokered(
+        IPC_CHANNELS.openCodeExternalEditor,
+        decodeCodeExternalEditorRequest(request),
+      ).then(() => undefined);
     },
     listOpenInApplications: async () => {
       const value: unknown = await ipc.invoke(IPC_CHANNELS.listOpenInApplications);
@@ -723,10 +805,10 @@ export function createHostBridge(
       return Object.freeze(value.map((entry) => Object.freeze({ ...entry })));
     },
     openCodeCheckoutInApplication: (request: CodeCheckoutOpenRequest) => {
-      return invoke(
+      return invokeBrokered(
         IPC_CHANNELS.openCodeCheckoutInApplication,
         decodeCodeCheckoutOpenRequest(request),
-      );
+      ).then(() => undefined);
     },
     openInNewWindow: async (target: ProjectWindowTarget) => {
       validateProjectWindowTarget(target);
@@ -734,7 +816,7 @@ export function createHostBridge(
     },
     previewHandoff: (request: PreviewHandoffRequest) => {
       validatePreviewHandoffRequest(request);
-      return invoke(IPC_CHANNELS.previewHandoff, request);
+      return invokeBrokered(IPC_CHANNELS.previewHandoff, request).then(() => undefined);
     },
     requestCodeOperationApproval: async (
       request: CodeOperationApprovalRequest,
@@ -745,8 +827,8 @@ export function createHostBridge(
       if (presentation !== undefined) validateCodeOperationApprovalPresentation(presentation);
       const value =
         presentation === undefined
-          ? await ipc.invoke(IPC_CHANNELS.requestCodeOperationApproval, request)
-          : await ipc.invoke(IPC_CHANNELS.requestCodeOperationApproval, request, presentation);
+          ? await invokeBrokered(IPC_CHANNELS.requestCodeOperationApproval, request)
+          : await invokeBrokered(IPC_CHANNELS.requestCodeOperationApproval, request, presentation);
       if (value === undefined) return undefined;
       if (typeof value !== "string" || !PROVIDER_INSTANCE_ID_PATTERN.test(value)) {
         throw new Error("Octant received an invalid Code approval receipt.");
@@ -758,6 +840,39 @@ export function createHostBridge(
       return invoke(IPC_CHANNELS.updateCodeOperationApprovalAnchor, anchor);
     },
     cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
+    ...(applicationIdentity === undefined ? {} : { applicationIdentity }),
+    ...(applicationIdentity?.data === undefined
+      ? {}
+      : {
+          readNightlyData: async () =>
+            decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataState)),
+          chooseNightlyData: async (choice: NightlyDataChoice) =>
+            decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataChoose, choice)),
+          removeNightlyTestData: async () =>
+            decodeNightlyDataState(await ipc.invoke(IPC_CHANNELS.nightlyDataRemove)),
+          relaunchNightly: async () => {
+            const outcome: unknown = await ipc.invoke(IPC_CHANNELS.nightlyDataRelaunch);
+            const kind = isRecord(outcome) ? outcome.kind : undefined;
+            if (kind !== "relaunching" && kind !== "unchanged")
+              throw new Error("Octant Nightly returned an invalid relaunch outcome.");
+            return Object.freeze({ kind });
+          },
+        }),
+    ...(localUpdatePreferences ? { appUpdatePreferenceScope: "local" as const } : {}),
+    // Nightly never offers to install, open or remove itself, so its bridge
+    // carries none of the row's requests.
+    ...(localUpdatePreferences || nightlyClient || applicationIdentity !== undefined
+      ? {}
+      : {
+          readNightlyInstall: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallState)),
+          installNightly: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstall)),
+          openNightly: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallOpen)),
+          removeNightly: async () =>
+            decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallRemove)),
+        }),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
       let active = true;
@@ -789,8 +904,9 @@ export function createHostBridge(
       validateProviderInstanceId(providerInstanceId);
       let value: unknown;
       try {
-        value = await ipc.invoke(IPC_CHANNELS.providerCredentialStatus, providerInstanceId);
-      } catch {
+        value = await invokeBrokered(IPC_CHANNELS.providerCredentialStatus, providerInstanceId);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         throw new Error("Octant could not check the provider credential.");
       }
       if (value !== "stored" && value !== "missing" && value !== "unavailable") {
@@ -805,7 +921,7 @@ export function createHostBridge(
       }
       try {
         return decodeProjectRootPickerResult(
-          await ipc.invoke(IPC_CHANNELS.selectProjectRoot, projectType),
+          await invokeBrokered(IPC_CHANNELS.selectProjectRoot, projectType),
         );
       } catch (error) {
         // ipcRenderer.invoke recreates main-process errors with a remote
@@ -820,16 +936,22 @@ export function createHostBridge(
     },
     selectLocalPluginFolder: async () =>
       decodePickerReceiptResult(
-        await ipc.invoke(IPC_CHANNELS.selectLocalPluginFolder),
+        await invokeBrokered(IPC_CHANNELS.selectLocalPluginFolder),
         "local plugin folder",
       ),
+    selectSkillFolder: async () =>
+      decodePickerReceiptResult(
+        await invokeBrokered(IPC_CHANNELS.selectSkillFolder),
+        "skill folder",
+      ),
     selectRuntimeBinary: async () =>
-      decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectRuntimeBinary), "binary"),
+      decodePickerReceiptResult(await invokeBrokered(IPC_CHANNELS.selectRuntimeBinary), "binary"),
     saveSupportBundle: async () => {
       let answer: unknown;
       try {
-        answer = await ipc.invoke(IPC_CHANNELS.saveSupportBundle);
-      } catch {
+        answer = await invokeBrokered(IPC_CHANNELS.saveSupportBundle);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         // The main process's own sentence arrives with a remote-call prefix;
         // the renderer gets one fixed sentence.
         throw new Error("Octant could not save the diagnostics. Nothing was written.");
@@ -881,8 +1003,9 @@ export function createHostBridge(
         throw new TypeError("Invalid provider credential.");
       }
       try {
-        await invoke(IPC_CHANNELS.setProviderCredential, providerInstanceId, credential);
-      } catch {
+        await invokeBrokered(IPC_CHANNELS.setProviderCredential, providerInstanceId, credential);
+      } catch (error) {
+        if (needsNewerOctant(error)) throw error;
         throw new Error("Octant could not store the provider credential.");
       }
     },
@@ -1007,205 +1130,275 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.startNewAgent, receive);
       return () => ipc.removeListener(IPC_CHANNELS.startNewAgent, receive);
     },
-    openRemoteServerPage: async (request: unknown): Promise<RemoteServerPageBridgeOutcome> => {
-      try {
-        return decodeRemoteServerPageOutcome(
-          await ipc.invoke(IPC_CHANNELS.remoteServerPageOpen, request),
-        );
-      } catch {
-        return { kind: "refused", message: "Octant could not open this server." };
-      }
-    },
-    forgetRemoteServerPages: async (hostId: string) => {
-      const outcome = (await ipc
-        .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
-        .catch(() => null)) as {
-        readonly status?: unknown;
-        readonly message?: unknown;
-      } | null;
-      return outcome?.status === "forgotten"
-        ? { status: "forgotten" as const }
-        : {
-            status: "incomplete" as const,
-            ...(typeof outcome?.message === "string" ? { message: outcome.message } : {}),
-          };
-    },
-    subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
-      const receive: DeepLinkListener = (_event, message) => {
-        if (typeof message !== "object" || message === null) return;
-        const { requestId, request } = message as {
-          readonly requestId?: unknown;
-          readonly request?: unknown;
-        };
-        if (typeof requestId !== "string") return;
-        void signer(request)
-          .catch(() => ({ status: "refused" }))
-          .then((signing) =>
-            ipc.invoke(IPC_CHANNELS.remoteServerPageSigned, { requestId, signing }),
-          )
-          .catch(() => undefined);
-      };
-      ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
-      return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
-    },
-    hubAdministrationRequest: async (operation: string, body?: unknown) => {
-      // Main refuses an unknown operation; the preload stays free of the
-      // operation table because its body decoders pull in npm modules a
-      // sandboxed preload cannot require.
-      if (typeof operation !== "string") {
-        throw new TypeError("Invalid hub request.");
-      }
-      const answer = (await ipc.invoke(IPC_CHANNELS.hubAdministrationRequest, operation, body)) as {
-        readonly status?: unknown;
-        readonly body?: unknown;
-      } | null;
-      if (typeof answer?.status !== "number") {
-        throw new Error("Octant hub controls are unavailable.");
-      }
-      return { status: answer.status, body: answer.body };
-    },
-    // A Mac owner device's unlock key. The bridge can make the key (its public
-    // half comes back), sign one owner unlock challenge, and forget the key.
-    // It cannot return the private key or sign any other text.
-    ownerUnlockMakeKey: async () =>
-      decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockMake)),
-    ownerUnlockSign: async (challenge: OwnerUnlockChallenge) =>
-      decodeOwnerUnlockOutcome(
-        await ipc.invoke(IPC_CHANNELS.ownerUnlockSign, {
-          challengeId: challenge.challengeId,
-          nonce: challenge.nonce,
-          hostMemberId: challenge.hostMemberId,
-          ownerMemberId: challenge.ownerMemberId,
-          method: challenge.method,
-          path: challenge.path,
-          bodyHash: challenge.bodyHash,
-          expiresAt: challenge.expiresAt,
+    // A Nightly client never carries Octant-only administration: the members
+    // are absent rather than refusing, so the screens that need them hide.
+    ...(nightlyClient
+      ? { managedInOctant: true as const }
+      : {
+          openRemoteServerPage: async (
+            request: unknown,
+          ): Promise<RemoteServerPageBridgeOutcome> => {
+            try {
+              return decodeRemoteServerPageOutcome(
+                await ipc.invoke(IPC_CHANNELS.remoteServerPageOpen, request),
+              );
+            } catch {
+              return { kind: "refused", message: "Octant could not open this server." };
+            }
+          },
+          forgetRemoteServerPages: async (hostId: string) => {
+            const outcome = (await ipc
+              .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
+              .catch(() => null)) as {
+              readonly status?: unknown;
+              readonly message?: unknown;
+            } | null;
+            return outcome?.status === "forgotten"
+              ? { status: "forgotten" as const }
+              : {
+                  status: "incomplete" as const,
+                  ...(typeof outcome?.message === "string" ? { message: outcome.message } : {}),
+                };
+          },
+          subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
+            const receive: DeepLinkListener = (_event, message) => {
+              if (typeof message !== "object" || message === null) return;
+              const { requestId, request } = message as {
+                readonly requestId?: unknown;
+                readonly request?: unknown;
+              };
+              if (typeof requestId !== "string") return;
+              void signer(request)
+                .catch(() => ({ status: "refused" }))
+                .then((signing) =>
+                  ipc.invoke(IPC_CHANNELS.remoteServerPageSigned, { requestId, signing }),
+                )
+                .catch(() => undefined);
+            };
+            ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
+            return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
+          },
+          hubAdministrationRequest: async (operation: string, body?: unknown) => {
+            // Main refuses an unknown operation; the preload stays free of the
+            // operation table because its body decoders pull in npm modules a
+            // sandboxed preload cannot require.
+            if (typeof operation !== "string") {
+              throw new TypeError("Invalid hub request.");
+            }
+            const answer = (await ipc.invoke(
+              IPC_CHANNELS.hubAdministrationRequest,
+              operation,
+              body,
+            )) as {
+              readonly status?: unknown;
+              readonly body?: unknown;
+            } | null;
+            if (typeof answer?.status !== "number") {
+              throw new Error("Octant hub controls are unavailable.");
+            }
+            return { status: answer.status, body: answer.body };
+          },
+          // A Mac owner device's unlock key. The bridge can make the key (its public
+          // half comes back), sign one owner unlock challenge, and forget the key.
+          // It cannot return the private key or sign any other text.
+          ownerUnlockMakeKey: async () =>
+            decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockMake)),
+          ownerUnlockSign: async (challenge: OwnerUnlockChallenge) =>
+            decodeOwnerUnlockOutcome(
+              await ipc.invoke(IPC_CHANNELS.ownerUnlockSign, {
+                challengeId: challenge.challengeId,
+                nonce: challenge.nonce,
+                hostMemberId: challenge.hostMemberId,
+                ownerMemberId: challenge.ownerMemberId,
+                method: challenge.method,
+                path: challenge.path,
+                bodyHash: challenge.bodyHash,
+                expiresAt: challenge.expiresAt,
+              }),
+            ),
+          ownerUnlockForgetKey: async () =>
+            decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockForget)),
+          getPrivateListenerStatus: async () =>
+            decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
+          enablePrivateListener: async (request: PrivateListenerEnableRequest) => {
+            validatePrivateListenerEnableRequest(request);
+            try {
+              return decodePrivateListenerStatus(
+                await ipc.invoke(IPC_CHANNELS.privateListenerEnable, {
+                  hostname: request.hostname,
+                  port: request.port,
+                  origin: request.origin,
+                  certificatePem: request.certificatePem,
+                  privateKeyPem: request.privateKeyPem,
+                  localConfirmation: true,
+                }),
+              );
+            } catch {
+              throw new Error("Octant could not enable the private listener.");
+            }
+          },
+          restartPrivateListener: async (request: PrivateListenerEnableRequest) => {
+            validatePrivateListenerEnableRequest(request);
+            try {
+              return decodePrivateListenerStatus(
+                await ipc.invoke(IPC_CHANNELS.privateListenerRestart, {
+                  hostname: request.hostname,
+                  port: request.port,
+                  origin: request.origin,
+                  certificatePem: request.certificatePem,
+                  privateKeyPem: request.privateKeyPem,
+                  localConfirmation: true,
+                }),
+              );
+            } catch {
+              throw new Error("Octant could not restart the private listener.");
+            }
+          },
+          disablePrivateListener: async () => {
+            try {
+              return decodePrivateListenerStatus(
+                await ipc.invoke(IPC_CHANNELS.privateListenerDisable),
+              );
+            } catch {
+              throw new Error("Octant could not disable the private listener.");
+            }
+          },
+          mintRemotePairingTicket: async (sourceClass: RemotePairingTicketSourceClass) => {
+            if (
+              sourceClass !== "loopback" &&
+              sourceClass !== "lan-private" &&
+              sourceClass !== "tailscale"
+            ) {
+              throw new TypeError("Invalid pairing source class.");
+            }
+            return decodeRemoteMintedTicket(
+              await invokeRemote(IPC_CHANNELS.remotePairingTicket, sourceClass),
+            );
+          },
+          listRemotePairingRequests: async () =>
+            decodeRemotePendingList(await invokeRemote(IPC_CHANNELS.remotePairingRequests)),
+          approveRemotePairingRequest: async (ticketId: string) => {
+            validateRemoteUuid(ticketId);
+            return decodeRemotePairingApproval(
+              await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId),
+            );
+          },
+          denyRemotePairingRequest: async (ticketId: string, reasonCode: string) => {
+            validateRemoteUuid(ticketId);
+            validateRemoteReason(reasonCode);
+            return decodeRemotePairingDenial(
+              await invokeRemote(IPC_CHANNELS.remotePairingDeny, ticketId, reasonCode),
+            );
+          },
+          getRemoteDeviceInventory: async () =>
+            decodeRemoteDeviceList(await invokeRemote(IPC_CHANNELS.remoteDeviceInventory)),
+          renameRemoteDevice: async (deviceId: string, deviceLabel: string) => {
+            validateRemoteUuid(deviceId);
+            validateRemoteDeviceLabel(deviceLabel);
+            return decodeRemoteDevice(
+              await invokeRemote(IPC_CHANNELS.remoteDeviceRename, deviceId, deviceLabel.trim()),
+            );
+          },
+          revokeRemoteDevice: async (deviceId: string) => {
+            validateRemoteUuid(deviceId);
+            return decodeRemoteReceipt(
+              await invokeRemote(IPC_CHANNELS.remoteDeviceRevoke, deviceId),
+            );
+          },
+          revokeAllRemoteDevices: async () =>
+            decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceRevokeAll)),
+          reconcileExpiredRemoteDevices: async () =>
+            decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceReconcileExpired)),
+          getRemoteHostIdentityRecovery: async () =>
+            decodeRemoteHostIdentityRecovery(
+              await invokeRemote(IPC_CHANNELS.remoteHostIdentityStatus),
+            ),
+          rotateRemoteHostIdentity: async () =>
+            decodeRemoteHostIdentityRotation(
+              await invokeRemote(IPC_CHANNELS.remoteHostIdentityRotate),
+            ),
+          recoverRemoteHostIdentity: async () =>
+            decodeRemoteHostIdentityRecovery(
+              await invokeRemote(IPC_CHANNELS.remoteHostIdentityRecover),
+            ),
+          pairWithPairingCode: async (code: string): Promise<PairedComputerOutcome> => {
+            if (typeof code !== "string" || code.length > 4_096) {
+              return {
+                status: "refused",
+                message: "Paste the whole pairing code from that computer.",
+              };
+            }
+            return decodePairedComputerOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerPair, code),
+            );
+          },
+          listPairedComputers: async () =>
+            decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
+          forgetPairedComputer: async (origin: string) =>
+            decodeForgetPairedComputerOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
+            ),
+          settlePairedComputer: async (
+            origin: string,
+            outcome: "approved" | "abandoned",
+          ): Promise<SettlePairedComputerOutcome> => {
+            if (typeof origin !== "string" || (outcome !== "approved" && outcome !== "abandoned")) {
+              return { status: "refused", message: "Octant refused that pairing answer." };
+            }
+            return decodeSettlePairedComputerOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerSettle, origin, outcome),
+            );
+          },
+          requestPairedComputer: async (request: PairedComputerRequest) =>
+            decodePairedComputerAnswer(
+              await ipc.invoke(
+                IPC_CHANNELS.pairedComputerRequest,
+                pairedComputerRequestOf(request),
+              ),
+            ),
         }),
-      ),
-    ownerUnlockForgetKey: async () =>
-      decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockForget)),
-    getPrivateListenerStatus: async () =>
-      decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
-    enablePrivateListener: async (request: PrivateListenerEnableRequest) => {
-      validatePrivateListenerEnableRequest(request);
-      try {
-        return decodePrivateListenerStatus(
-          await ipc.invoke(IPC_CHANNELS.privateListenerEnable, {
-            hostname: request.hostname,
-            port: request.port,
-            origin: request.origin,
-            certificatePem: request.certificatePem,
-            privateKeyPem: request.privateKeyPem,
-            localConfirmation: true,
-          }),
-        );
-      } catch {
-        throw new Error("Octant could not enable the private listener.");
-      }
-    },
-    restartPrivateListener: async (request: PrivateListenerEnableRequest) => {
-      validatePrivateListenerEnableRequest(request);
-      try {
-        return decodePrivateListenerStatus(
-          await ipc.invoke(IPC_CHANNELS.privateListenerRestart, {
-            hostname: request.hostname,
-            port: request.port,
-            origin: request.origin,
-            certificatePem: request.certificatePem,
-            privateKeyPem: request.privateKeyPem,
-            localConfirmation: true,
-          }),
-        );
-      } catch {
-        throw new Error("Octant could not restart the private listener.");
-      }
-    },
-    disablePrivateListener: async () => {
-      try {
-        return decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerDisable));
-      } catch {
-        throw new Error("Octant could not disable the private listener.");
-      }
-    },
-    mintRemotePairingTicket: async (sourceClass: RemotePairingTicketSourceClass) => {
-      if (
-        sourceClass !== "loopback" &&
-        sourceClass !== "lan-private" &&
-        sourceClass !== "tailscale"
-      ) {
-        throw new TypeError("Invalid pairing source class.");
-      }
-      return decodeRemoteMintedTicket(
-        await invokeRemote(IPC_CHANNELS.remotePairingTicket, sourceClass),
-      );
-    },
-    listRemotePairingRequests: async () =>
-      decodeRemotePendingList(await invokeRemote(IPC_CHANNELS.remotePairingRequests)),
-    approveRemotePairingRequest: async (ticketId: string) => {
-      validateRemoteUuid(ticketId);
-      return decodeRemotePairingApproval(
-        await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId),
-      );
-    },
-    denyRemotePairingRequest: async (ticketId: string, reasonCode: string) => {
-      validateRemoteUuid(ticketId);
-      validateRemoteReason(reasonCode);
-      return decodeRemotePairingDenial(
-        await invokeRemote(IPC_CHANNELS.remotePairingDeny, ticketId, reasonCode),
-      );
-    },
-    getRemoteDeviceInventory: async () =>
-      decodeRemoteDeviceList(await invokeRemote(IPC_CHANNELS.remoteDeviceInventory)),
-    renameRemoteDevice: async (deviceId: string, deviceLabel: string) => {
-      validateRemoteUuid(deviceId);
-      validateRemoteDeviceLabel(deviceLabel);
-      return decodeRemoteDevice(
-        await invokeRemote(IPC_CHANNELS.remoteDeviceRename, deviceId, deviceLabel.trim()),
-      );
-    },
-    revokeRemoteDevice: async (deviceId: string) => {
-      validateRemoteUuid(deviceId);
-      return decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceRevoke, deviceId));
-    },
-    revokeAllRemoteDevices: async () =>
-      decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceRevokeAll)),
-    reconcileExpiredRemoteDevices: async () =>
-      decodeRemoteReceipt(await invokeRemote(IPC_CHANNELS.remoteDeviceReconcileExpired)),
-    getRemoteHostIdentityRecovery: async () =>
-      decodeRemoteHostIdentityRecovery(await invokeRemote(IPC_CHANNELS.remoteHostIdentityStatus)),
-    rotateRemoteHostIdentity: async () =>
-      decodeRemoteHostIdentityRotation(await invokeRemote(IPC_CHANNELS.remoteHostIdentityRotate)),
-    recoverRemoteHostIdentity: async () =>
-      decodeRemoteHostIdentityRecovery(await invokeRemote(IPC_CHANNELS.remoteHostIdentityRecover)),
-    pairWithPairingCode: async (code: string): Promise<PairedComputerOutcome> => {
-      if (typeof code !== "string" || code.length > 4_096) {
-        return { status: "refused", message: "Paste the whole pairing code from that computer." };
-      }
-      return decodePairedComputerOutcome(await ipc.invoke(IPC_CHANNELS.pairedComputerPair, code));
-    },
-    listPairedComputers: async () =>
-      decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
-    forgetPairedComputer: async (origin: string) =>
-      decodeForgetPairedComputerOutcome(
-        await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
-      ),
-    settlePairedComputer: async (
-      origin: string,
-      outcome: "approved" | "abandoned",
-    ): Promise<SettlePairedComputerOutcome> => {
-      if (typeof origin !== "string" || (outcome !== "approved" && outcome !== "abandoned")) {
-        return { status: "refused", message: "Octant refused that pairing answer." };
-      }
-      return decodeSettlePairedComputerOutcome(
-        await ipc.invoke(IPC_CHANNELS.pairedComputerSettle, origin, outcome),
-      );
-    },
-    requestPairedComputer: async (request: PairedComputerRequest) =>
-      decodePairedComputerAnswer(
-        await ipc.invoke(IPC_CHANNELS.pairedComputerRequest, pairedComputerRequestOf(request)),
-      ),
   });
 }
+
+/**
+ * The bridge members that reach an Octant-only channel, all absent from a
+ * Nightly client bridge. The preload test checks that the remaining members
+ * reach no Octant-only channel.
+ */
+export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
+  "readNightlyInstall",
+  "installNightly",
+  "openNightly",
+  "removeNightly",
+  "pairWithPairingCode",
+  "listPairedComputers",
+  "forgetPairedComputer",
+  "settlePairedComputer",
+  "requestPairedComputer",
+  "openRemoteServerPage",
+  "forgetRemoteServerPages",
+  "subscribeRemoteServerPageSigning",
+  "hubAdministrationRequest",
+  "ownerUnlockMakeKey",
+  "ownerUnlockSign",
+  "ownerUnlockForgetKey",
+  "getPrivateListenerStatus",
+  "enablePrivateListener",
+  "restartPrivateListener",
+  "disablePrivateListener",
+  "mintRemotePairingTicket",
+  "listRemotePairingRequests",
+  "approveRemotePairingRequest",
+  "denyRemotePairingRequest",
+  "getRemoteDeviceInventory",
+  "renameRemoteDevice",
+  "revokeRemoteDevice",
+  "revokeAllRemoteDevices",
+  "reconcileExpiredRemoteDevices",
+  "getRemoteHostIdentityRecovery",
+  "rotateRemoteHostIdentity",
+  "recoverRemoteHostIdentity",
+]);
 
 function decodePairedComputer(value: unknown): PairedComputer {
   if (typeof value !== "object" || value === null) {
@@ -1635,6 +1828,10 @@ function decodeProviderApiKeySummaries(value: unknown): readonly ProviderApiKeyS
   return value.map((key) => ({ id: key.id, label: key.label, active: key.active }));
 }
 
+function needsNewerOctant(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(NEEDS_NEWER_OCTANT);
+}
+
 function knownApiKeyFailure(message: string): string | undefined {
   const advice = message.indexOf(KEYRING_ADVICE_MARKER);
   if (advice >= 0) return message.slice(advice + KEYRING_ADVICE_MARKER.length);
@@ -1903,7 +2100,7 @@ function decodeSupportBundleSaveResult(value: unknown): SupportBundleSaveResult 
 
 function decodePickerReceiptResult(
   value: unknown,
-  picker: "local plugin folder" | "binary",
+  picker: "local plugin folder" | "skill folder" | "binary",
 ): PickerReceiptResult {
   if (!isRecord(value)) throw new TypeError(`Invalid ${picker} picker result.`);
   const keys = Object.keys(value).sort();
@@ -2190,6 +2387,15 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
   ) {
     throw new TypeError("Invalid update state.");
   }
+  const allowedRings: Array<"stable" | "preview" | "candidate"> = [];
+  if (value.allowedRings !== undefined) {
+    if (!Array.isArray(value.allowedRings) || value.allowedRings.length > 3)
+      throw new TypeError("Invalid update ring choices.");
+    for (const ring of value.allowedRings) {
+      if (!isReleaseRing(ring)) throw new TypeError("Invalid update ring choices.");
+      allowedRings.push(ring);
+    }
+  }
   return Object.freeze({
     // The guards above already proved the literals; the brands are what the
     // strict contract type carries and no runtime can check here.
@@ -2197,6 +2403,7 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
     currentVersion: value.currentVersion as AppVersion,
     automaticChecks: value.automaticChecks,
     ring: value.ring,
+    ...(value.allowedRings === undefined ? {} : { allowedRings: Object.freeze(allowedRings) }),
     ...(value.available === undefined
       ? {}
       : { available: decodeAppUpdateRelease(value.available) }),
@@ -2206,9 +2413,73 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
   });
 }
 
+const NIGHTLY_INSTALL_STATUSES = [
+  "unavailable",
+  "not-installed",
+  "installing",
+  "installed",
+  "removing",
+] as const;
+
+/** Hand-validated for the same reason as the update state: no runtime imports here. */
+const NIGHTLY_DATA_REMOVALS = [
+  "removed",
+  "absent",
+  "test-host-running",
+  "unsafe-folder",
+  "not-nightly",
+  "failed",
+] as const;
+
+function decodeNightlyDataState(value: unknown): NightlyDataState {
+  const choice = (candidate: unknown): candidate is NightlyDataChoice =>
+    candidate === "octant" || candidate === "test-data";
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) => !["running", "chosen", "testDataPresent", "removal"].includes(key),
+    ) ||
+    !choice(value.running) ||
+    !choice(value.chosen) ||
+    typeof value.testDataPresent !== "boolean" ||
+    (value.removal !== undefined &&
+      !(NIGHTLY_DATA_REMOVALS as ReadonlyArray<unknown>).includes(value.removal))
+  ) {
+    throw new TypeError("Invalid Octant Nightly Data state.");
+  }
+  return Object.freeze({
+    running: value.running,
+    chosen: value.chosen,
+    testDataPresent: value.testDataPresent,
+    ...(value.removal === undefined
+      ? {}
+      : { removal: value.removal as NonNullable<NightlyDataState["removal"]> }),
+  });
+}
+
+function decodeNightlyInstallState(value: unknown): NightlyInstallState {
+  if (
+    !isRecord(value) ||
+    typeof value.status !== "string" ||
+    !(NIGHTLY_INSTALL_STATUSES as ReadonlyArray<string>).includes(value.status) ||
+    (value.refusal !== undefined &&
+      (typeof value.refusal !== "string" || value.refusal.length > 64)) ||
+    (value.message !== undefined &&
+      (typeof value.message !== "string" || value.message.length > 512))
+  ) {
+    throw new TypeError("Invalid Octant Nightly state.");
+  }
+  return Object.freeze({
+    status: value.status as NightlyInstallState["status"],
+    ...(value.refusal === undefined ? {} : { refusal: value.refusal as NightlyInstallRefusal }),
+    ...(value.message === undefined ? {} : { message: value.message }),
+  });
+}
+
 function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
   if (
     !isRecord(value) ||
+    (value.product !== "octant" && value.product !== "octant-nightly") ||
     typeof value.version !== "string" ||
     typeof value.platform !== "string" ||
     typeof value.arch !== "string" ||
@@ -2222,6 +2493,7 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     throw new TypeError("Invalid update release.");
   }
   return Object.freeze({
+    product: value.product,
     // The guards above proved the strings; the brands and platform literals
     // are what the strict contract type carries and no runtime can check here.
     version: value.version as AppVersion,
@@ -2557,6 +2829,30 @@ export function decodeInitialProjectTarget(
   return Object.freeze({ kind: "project-thread", projectId, mode, threadId });
 }
 
+function applicationIdentityArgument(
+  argv: ReadonlyArray<string>,
+): OctantHostBridge["applicationIdentity"] {
+  const flavors = argv.filter((argument) => argument.startsWith("--octant-application-flavor="));
+  const names = argv.filter((argument) => argument.startsWith("--octant-application-name="));
+  const productName = names[0]?.slice("--octant-application-name=".length);
+  const data = argv.filter((argument) => argument.startsWith("--octant-application-data="));
+  const role = data[0]?.slice("--octant-application-data=".length);
+  if (
+    flavors.length !== 1 ||
+    flavors[0] !== "--octant-application-flavor=nightly" ||
+    names.length !== 1 ||
+    productName !== "Octant Nightly" ||
+    data.length > 1 ||
+    (role !== undefined && role !== "octant" && role !== "test-data")
+  )
+    return undefined;
+  return Object.freeze(
+    role === undefined
+      ? { flavor: "nightly", productName }
+      : { flavor: "nightly", productName, data: role },
+  );
+}
+
 export function installHostBridge(
   context: ContextBridgePort,
   ipc: IpcRendererPort,
@@ -2564,10 +2860,22 @@ export function installHostBridge(
   initialProjectTarget = decodeInitialProjectTarget(process.argv),
   platform: NodeJS.Platform = process.platform,
   windowId?: string,
+  localUpdatePreferences = process.argv.includes("--octant-local-update-preferences"),
+  applicationIdentity = applicationIdentityArgument(process.argv),
+  nightlyClient = process.argv.includes("--octant-nightly-client"),
 ): void {
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
-    createHostBridge(ipc, projectWindowCapability, initialProjectTarget, platform, windowId),
+    createHostBridge(
+      ipc,
+      projectWindowCapability,
+      initialProjectTarget,
+      platform,
+      windowId,
+      localUpdatePreferences,
+      applicationIdentity,
+      nightlyClient,
+    ),
   );
 }
 

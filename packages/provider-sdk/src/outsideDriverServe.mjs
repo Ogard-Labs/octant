@@ -135,12 +135,37 @@ export function serveOutsideDriver(driver, io = standardIo()) {
         }
         configuration = params.configuration;
         await driver.initialize?.(configuration, host);
-        return { protocolVersion: HARNESS_ENDPOINT_PROTOCOL_VERSION };
+        return {
+          protocolVersion: HARNESS_ENDPOINT_PROTOCOL_VERSION,
+          ...(driver.cloudSessions === undefined
+            ? {}
+            : { cloudSessions: driver.cloudSessions.protocol }),
+        };
       }
       case "probe":
         return driver.probe(host);
       case "session/open":
         return (await driver.open?.(params, host)) ?? {};
+      case "cloud/create":
+      case "cloud/read":
+      case "cloud/cancel": {
+        if (driver.cloudSessions === undefined) throw new OutsideDriverFailure("unsupported");
+        const controller = new AbortController();
+        cancels.set(id, controller);
+        const open = new Set();
+        controller.signal.addEventListener("abort", () => {
+          for (const waiter of open) waiter.interrupt();
+          open.clear();
+        });
+        const scoped = hostFor({ id, signal: controller.signal, open });
+        try {
+          if (method === "cloud/create") return await driver.cloudSessions.create(params, scoped);
+          if (method === "cloud/read") return await driver.cloudSessions.read(params, scoped);
+          return await driver.cloudSessions.cancel(params, scoped);
+        } finally {
+          cancels.delete(id);
+        }
+      }
       case "session/send": {
         const controller = new AbortController();
         cancels.set(id, controller);

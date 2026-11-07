@@ -6,6 +6,7 @@ import {
   decodeAgentMessageDelivered,
   decodeAgentMessageRefused,
   decodeAgentMessageSent,
+  decodeAgentMessageReceiptRequest,
   MAX_AGENT_MESSAGE_BODY_BYTES,
 } from "./agentMessage";
 
@@ -23,10 +24,27 @@ const sent = {
 };
 
 describe("the agent message contract", () => {
+  it("bounds exact receipt requests and refuses caller-supplied authority", () => {
+    const request = { action: "acknowledge", messageIds: [sent.messageId] };
+    expect(decodeAgentMessageReceiptRequest(request)).toEqual(request);
+    expect(decodeAgentMessageReceiptRequest({ ...request, action: "status" }).action).toBe(
+      "status",
+    );
+    for (const invalid of [
+      { ...request, messageIds: [] },
+      { ...request, messageIds: Array(21).fill(sent.messageId) },
+      { ...request, messageIds: ["unknown"] },
+      { ...request, recipientThreadId: sent.recipientThreadId },
+      { ...request, action: "extend" },
+    ])
+      expect(() => decodeAgentMessageReceiptRequest(invalid)).toThrow();
+  });
+
   it("decodes the four journaled payloads on the agent-message aggregate", () => {
     expect(AGENT_MESSAGE_AGGREGATE).toBe("agent-message");
     expect(AGENT_MESSAGE_EVENT_NAMES).toEqual({
       sent: "agent.message-sent@1",
+      expired: "agent.message-expired@1",
       delivered: "agent.message-delivered@1",
       refused: "agent.message-refused@1",
       acknowledged: "agent.message-acknowledged@1",

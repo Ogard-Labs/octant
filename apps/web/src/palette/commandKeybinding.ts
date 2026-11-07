@@ -13,6 +13,7 @@ const COMMAND_KEYBINDING_ACTIONS: Readonly<Partial<Record<string, OctantKeybindi
   "workspace:context-usage": "context-usage",
   "code:file-search": "code-file-search",
   "code:content-search": "code-content-search",
+  "thread:reply-detail-cycle": "reply-detail-cycle",
 };
 
 export function keybindingActionForCommand(

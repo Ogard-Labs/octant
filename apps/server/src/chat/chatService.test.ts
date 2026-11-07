@@ -1,9 +1,22 @@
+import { decodeChatThreadId } from "@octant/contracts";
+import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { SideChatSidecarStore } from "./sideChatSidecarStore";
+import { createHash } from "node:crypto";
+import {
+  ThreadMentionService,
+  createChatThreadMentionDirectory,
+  createChatSideChatThreadFactory,
+  sideChatReturnContextResolver,
+} from "./threadMentionService";
+import { resolveSideChatSourceContext } from "./sideChatSource";
+import { decodeMentionableThreadId, WEB_SEARCH_TOOL_DEFINITION } from "@octant/contracts";
 import {
   ThreadWorkItemId,
   EventActor,
   MAX_PROVIDER_TOOLS,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   decodeThreadRetentionThreadId,
+  decodeChatSubmissionId,
 } from "@octant/contracts";
 import {
   mkdtempSync,
@@ -221,8 +234,11 @@ function withProbe(
 }
 
 function openFixture(options?: {
+  readonly responseFragments?: ReadonlyArray<string>;
+  readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
+  readonly toolCatalogContinuation?: ProviderDriver["toolCatalogContinuation"];
   /** The provider keeps durable sessions the host can always rebuild, as Octant Harness does. */
   readonly resumableHostConversation?: boolean;
   /** The service's clock, for a scenario whose order the journal's timestamps must show. */
@@ -250,6 +266,7 @@ function openFixture(options?: {
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  readonly resolveSideChatReturns?: import("./sideChatReturn").SideChatReturnResolver;
   readonly resolveSideChatSourceContext?: (input: {
     readonly sidecarThreadId: ChatThreadId;
     readonly windowId?: WindowId;
@@ -369,7 +386,7 @@ function openFixture(options?: {
         readonly bytes: Uint8Array;
         readonly displayName: string;
       }>;
-      readonly tools: ReadonlyArray<{ readonly name: string }>;
+      readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
     }>;
     readonly driver: ProviderDriver;
     readonly queue: Queue.Queue<never>;
@@ -529,7 +546,7 @@ function openFixture(options?: {
       readonly bytes: Uint8Array;
       readonly displayName: string;
     }>;
-    readonly tools: ReadonlyArray<{ readonly name: string }>;
+    readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
   }> = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
@@ -569,7 +586,7 @@ function openFixture(options?: {
         readonly bytes: Uint8Array;
         readonly displayName: string;
       }>;
-      readonly tools: ReadonlyArray<{ readonly name: string }>;
+      readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
@@ -605,11 +622,13 @@ function openFixture(options?: {
           } as never);
           return;
         }
-        yield* Queue.offer(queue, {
-          kind: "text-delta",
-          sessionId: input.sessionId,
-          text: "Fixture response",
-        } as never);
+        for (const text of options?.responseFragments ?? ["Fixture response"]) {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId: input.sessionId,
+            text,
+          } as never);
+        }
         yield* Queue.offer(queue, { kind: "completed", sessionId: input.sessionId } as never);
       }),
     interrupt: () => Effect.void,
@@ -628,6 +647,9 @@ function openFixture(options?: {
             : options?.resumableHostConversation === true
               ? { conversationOwnership: "host-resumable" }
               : {}),
+          ...(options?.toolCatalogContinuation === undefined
+            ? {}
+            : { toolCatalogContinuation: options.toolCatalogContinuation }),
           acquire: (input: ProviderAcquireInput) => {
             acquireInputs.push(input);
             return Effect.succeed(connectionDriver);
@@ -685,6 +707,9 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.inputTransfer === undefined
+      ? {}
+      : { conversationInputTransfer: options.inputTransfer(dataDirectory) }),
     recordExternalContentIngestion:
       options?.recordExternalContentIngestion ?? ((input) => ingestions.record(input)),
     ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
@@ -716,6 +741,9 @@ function openFixture(options?: {
       ? {}
       : { contextMaintenanceShutdownTimeoutMs: options.contextMaintenanceShutdownTimeoutMs }),
     ...(options?.hiddenThreadIds === undefined ? {} : { hiddenThreadIds: options.hiddenThreadIds }),
+    ...(options?.resolveSideChatReturns === undefined
+      ? {}
+      : { resolveSideChatReturns: options.resolveSideChatReturns }),
     ...(options?.resolveSideChatSourceContext === undefined
       ? {}
       : { resolveSideChatSourceContext: options.resolveSideChatSourceContext }),
@@ -1286,6 +1314,7 @@ describe("ChatService", () => {
     expect(fakeDriver.sentTurns[0]?.context).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
+      tool: "octant_canvas",
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
@@ -3211,9 +3240,10 @@ describe("ChatService", () => {
       text: "Use only the selected build guidance.",
     });
     expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toEqual([
-      "octant_web_research",
+      "web-search",
       "build_project",
     ]);
+    expect(fakeDriver.sentTurns[0]?.tools[0]).toEqual(WEB_SEARCH_TOOL_DEFINITION);
   });
 
   it("blocks provider handoff before provider acquisition when extension authority drifts", async () => {
@@ -3734,7 +3764,7 @@ describe("ChatService", () => {
       catalogEpoch: `sha256:${"c".repeat(64)}` as never,
       origin: { kind: "draft" as const, reference: "draft-collision" },
     };
-    for (const collision of ["octant_web_research", "octant_app_tool"]) {
+    for (const collision of ["web-search", "octant_app_tool"]) {
       const resolveExtensionSelectionContext = vi.fn(async (input) => ({
         selections: input.selections,
         entries: [],
@@ -8084,6 +8114,46 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
+  it("offers a harness Chat thread with research on exactly one web search", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000097" as WindowId;
+    // The harness's own tool set offers `web-search` to a Chat thread with
+    // research on; the turn must not add a second search beside it.
+    const harnessSearch = vi.fn(async () => ({ result: { query: "x", results: [] } }));
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [WEB_SEARCH_TOOL_DEFINITION],
+        execute: harnessSearch,
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Harness research",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(created.thread.researchEnabled).toBe(true);
+
+    await (
+      service.execute as never as (
+        command: unknown,
+        context: { readonly windowId: WindowId },
+      ) => Promise<unknown>
+    )(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Look it up",
+      },
+      { windowId },
+    );
+
+    const searchTools = (fakeDriver.sentTurns[0]?.tools ?? []).filter(({ name }) =>
+      ["web-search", "octant_web_research"].includes(name),
+    );
+    expect(searchTools).toEqual([WEB_SEARCH_TOOL_DEFINITION]);
+  });
+
   it("offers Zen-only tools to the exact authenticated assistant thread and zero ordinary threads", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     let assistantThreadId: string | undefined;
@@ -8093,7 +8163,7 @@ describe("ChatService", () => {
           ? {
               definitions: [
                 {
-                  name: "octant_zen_search_threads",
+                  name: "octant_zen",
                   inputSchema: { type: "object", properties: {}, required: [] },
                 },
               ],
@@ -8146,12 +8216,8 @@ describe("ChatService", () => {
       { windowId },
     );
 
-    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).not.toContain(
-      "octant_zen_search_threads",
-    );
-    expect(fakeDriver.sentTurns[1]?.tools.map((tool) => tool.name)).toContain(
-      "octant_zen_search_threads",
-    );
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).not.toContain("octant_zen");
+    expect(fakeDriver.sentTurns[1]?.tools.map((tool) => tool.name)).toContain("octant_zen");
     expect(resolveAppManagedTools).toHaveBeenCalledTimes(2);
   });
 
@@ -8170,7 +8236,7 @@ describe("ChatService", () => {
           : {
               definitions: [
                 {
-                  name: "octant_thread_message",
+                  name: "octant_ask_thread",
                   inputSchema: { type: "object", properties: {}, required: [] },
                 },
               ],
@@ -8201,9 +8267,7 @@ describe("ChatService", () => {
       { windowId },
     );
 
-    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain(
-      "octant_thread_message",
-    );
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain("octant_ask_thread");
     expect(resolveAppManagedTools).toHaveBeenCalledWith(
       expect.objectContaining({ threadMentionIds: [targetThreadId] }),
     );
@@ -11059,7 +11123,7 @@ describe("handing a Chat conversation to a new provider session", () => {
   /** A thread with one answered turn on the first provider, ready to move. */
   async function answeredThread(
     fixture: ReturnType<typeof openFixture>,
-    options?: { readonly projectId?: string },
+    options?: { readonly projectId?: string; readonly originalDocument?: Uint8Array },
   ) {
     const created = await fixture.service.execute({
       kind: "create-chat-thread",
@@ -11068,11 +11132,22 @@ describe("handing a Chat conversation to a new provider session", () => {
       ...(options?.projectId === undefined ? {} : { projectId: options.projectId }),
     } as never);
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload =
+      options?.originalDocument === undefined
+        ? undefined
+        : await fixture.service.uploadAttachment({
+            threadId: created.thread.id,
+            attachmentId: decodeChatAttachmentId(ids.attachment),
+            displayName: "Original.txt",
+            mediaType: "text/plain",
+            bytes: options.originalDocument,
+          });
     const sent = await fixture.service.execute({
       kind: "send-chat-turn",
       threadId: created.thread.id,
-      expectedVersion: created.thread.version,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
       prompt: "Remember the walrus",
+      ...(upload === undefined ? {} : { attachmentIds: [upload.id] }),
     });
     if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
     return created.thread.id;
@@ -11106,6 +11181,142 @@ describe("handing a Chat conversation to a new provider session", () => {
 
   const lastAttempt = (fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) =>
     fixture.service.read(threadId).turns.at(-1)?.attempts.at(-1);
+
+  it("keeps the draft unaccepted until the person chooses a text handoff for changed tools", async () => {
+    const fixture = openMoving({
+      nativeConversation: true,
+      toolCatalogContinuation: () => "handoff-required",
+    });
+    const threadId = await answeredThread(fixture);
+    const before = fixture.service.read(threadId);
+    await expect(sendFollowUp(fixture, threadId, "Use the new tools")).rejects.toThrow(
+      "different tools",
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(1);
+    expect(fixture.fakeDriver.resumeInputs).toHaveLength(0);
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+    const submissionId = decodeChatSubmissionId("84000000-0000-4000-8000-000000000096");
+    await fixture.service.execute({
+      submissionId,
+      kind: "send-chat-turn",
+      threadId,
+      expectedVersion: before.thread.version,
+      prompt: "Use the new tools",
+      toolCatalogHandoff: true,
+    });
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(2);
+    expect(fixture.fakeDriver.resumeInputs).toHaveLength(0);
+    expect(lastAttempt(fixture, threadId)?.handoff).toMatchObject({
+      reason: "provider-switch",
+      messages: 2,
+    });
+    expect(JSON.stringify(fixture.fakeDriver.sentTurns.at(-1)?.context)).toContain(
+      "Remember the walrus",
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(2);
+    await expect(
+      fixture.service.execute({
+        kind: "send-chat-turn",
+        submissionId,
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        prompt: "Use the new tools",
+      }),
+    ).rejects.toThrow("submission identity");
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(2);
+  });
+
+  it.each([otherNative, hosted])(
+    "preserves the original document on provider switch to %s or refuses before acquisition",
+    async (target) => {
+      let supports = false;
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        inputTransfer: (directory) => {
+          const store = new ChatAttachmentStore(directory);
+          return new ConversationInputTransfer({
+            ownerCurrent: () => true,
+            dataDirectory: directory,
+            sourceCurrent: () => true,
+            supports: () => supports,
+            read: (reference) =>
+              store.read({
+                chatThreadId: decodeChatThreadId(reference.source.threadId),
+                chatAttachmentId: decodeChatAttachmentId(reference.source.attachmentId),
+                displayName: reference.displayName,
+                size: reference.byteLength,
+                hash: reference.digest,
+                finalizedAt: now,
+              }),
+          });
+        },
+      });
+      const bytes = new TextEncoder().encode("Original document content");
+      const threadId = await answeredThread(fixture, { originalDocument: bytes });
+      await moveTo(fixture, threadId, target);
+      await expect(sendFollowUp(fixture, threadId)).rejects.toMatchObject({
+        failure: { message: expect.stringContaining("Original.txt (unsupported)") },
+      });
+      expect(fixture.fakeDriver.acquireInputs).toHaveLength(1);
+      supports = true;
+      await sendFollowUp(fixture, threadId);
+      expect(fixture.fakeDriver.sentTurns[1]?.attachments).toEqual([
+        expect.objectContaining({ displayName: "Original.txt", bytes }),
+      ]);
+      expect(lastAttempt(fixture, threadId)?.inputReceipt).toMatchObject({
+        purpose: "provider-switch",
+        included: 1,
+        omitted: 0,
+      });
+    },
+  );
+
+  it("keeps a branched document bound to its original source instead of dropping it or sharing its native writer", async () => {
+    const fixture = openMoving({
+      nativeConversationFor: ownsConversation,
+      inputTransfer: (directory) => {
+        const store = new ChatAttachmentStore(directory);
+        return new ConversationInputTransfer({
+          ownerCurrent: () => true,
+          dataDirectory: directory,
+          sourceCurrent: () => true,
+          supports: () => true,
+          read: (reference) =>
+            store.read({
+              chatThreadId: decodeChatThreadId(reference.source.threadId),
+              chatAttachmentId: decodeChatAttachmentId(reference.source.attachmentId),
+              displayName: reference.displayName,
+              size: reference.byteLength,
+              hash: reference.digest,
+              finalizedAt: now,
+            }),
+        });
+      },
+    });
+    const bytes = new TextEncoder().encode("Original branch document");
+    const sourceId = await answeredThread(fixture, { originalDocument: bytes });
+    const source = fixture.service.read(sourceId);
+    const result = await fixture.service.execute({
+      kind: "branch-chat-thread",
+      threadId: sourceId,
+      turnId: source.turns[0]?.id,
+      expectedVersion: source.thread.version,
+      title: "Branched document",
+    });
+    if (result.kind !== "thread-created") throw new Error("Branch was not created");
+    expect(
+      fixture.service.read(result.thread.id).turns[0]?.originalInputs?.[0]?.source.threadId,
+    ).toBe(String(sourceId));
+    await sendFollowUp(fixture, result.thread.id);
+    expect(fixture.fakeDriver.sentTurns[1]?.attachments).toEqual([
+      expect.objectContaining({ displayName: "Original.txt", bytes }),
+    ]);
+    expect(fixture.fakeDriver.resumeInputs).toHaveLength(0);
+    expect(lastAttempt(fixture, result.thread.id)?.inputReceipt).toMatchObject({
+      purpose: "branch",
+      included: 1,
+    });
+  });
 
   it("starts a new session with the earlier conversation when a provider that keeps its own session takes over", async () => {
     const fixture = openMoving({ nativeConversationFor: ownsConversation });
@@ -11638,4 +11849,330 @@ describe("handing a Chat conversation to a new provider session", () => {
       });
     });
   });
+});
+
+describe("person-returned Side Chat admission", () => {
+  it("retains the actual source-read receipt through a persisted reply and revalidates edited returns before send and retry", async () => {
+    const sidecarRoot = mkdtempSync(join(tmpdir(), "side-chat-return-"));
+    const registry = new SideChatSidecarStore(sidecarRoot);
+    await registry.hydrate();
+    const windowId = decodeWindowId("84000000-0000-4000-8000-000000000099");
+    let mentions: ThreadMentionService;
+    const marked = new Set<string>();
+    let allowMark = true;
+    const marks = {
+      isMarked: (id: string) =>
+        marked.has(id) ||
+        readThreadExternalContentTaint(fixture.persistence.connection, id).externalContentIngested,
+      record: (input: Parameters<ExternalContentIngestionStore["record"]>[0]) => {
+        if (!allowMark) throw new Error("write failed");
+        marked.add(String(input.threadId));
+        return fixture.ingestions.record(input);
+      },
+    };
+    const responseFragments = [
+      "  Review https://exa",
+      "mple.com/path\n```ts\nconst num",
+      "ber = 1;\n```\n  ",
+    ];
+    const exactResponse = responseFragments.join("");
+    const fixture = openFixture({
+      responseFragments,
+      resolveSideChatReturns: sideChatReturnContextResolver(() => mentions, marks),
+      resolveSideChatSourceContext: (input) =>
+        resolveSideChatSourceContext(
+          {
+            findSidecar: (id) => registry.findBySidecarThread(id as ChatThreadId),
+            resolveSource: (window, id) => mentions.resolveSideChatSource(window, id),
+            readState: async () => ({}),
+            readSourceVersion: async (window, id) =>
+              (await mentions.openableThread(window, id))?.version,
+            marks,
+            uuid: () => crypto.randomUUID(),
+            clock: () => now,
+          },
+          { ...input, readToolNames: [] },
+        ),
+    });
+    const { service, fakeDriver } = fixture;
+    mentions = new ThreadMentionService({
+      sidecars: registry,
+      sideChatThreads: createChatSideChatThreadFactory({
+        execute: (command) => service.execute(command),
+        read: (id) => {
+          try {
+            return service.read(id);
+          } catch {
+            return undefined;
+          }
+        },
+      }),
+      readSidecar: (id) => {
+        try {
+          return service.read(id);
+        } catch {
+          return undefined;
+        }
+      },
+      directories: [
+        createChatThreadMentionDirectory({
+          bootstrap: () => service.bootstrap(),
+          read: (id) => service.read(id),
+        }),
+      ],
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+    });
+    try {
+      const source = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Source task",
+      });
+      if (source.kind !== "thread-created") throw new Error("source");
+      const opened = await mentions.execute(
+        {
+          kind: "open-side-chat",
+          requestId: crypto.randomUUID(),
+          sourceThreadId: source.thread.id,
+        },
+        { windowId },
+      );
+      if (opened.kind !== "side-chat-opened") throw new Error("sidecar");
+      const sidecar = service.read(opened.sidecar.sidecarThreadId);
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: sidecar.thread.id,
+          expectedVersion: sidecar.thread.version,
+          prompt: "Summarize the source",
+        },
+        { windowId },
+      );
+      const answered = service.read(sidecar.thread.id).turns.at(-1)!;
+      const attempt = answered.attempts.at(-1)!;
+      expect(attempt.outcome).toBe("completed");
+      expect(attempt.responseRefs.length).toBeGreaterThan(1);
+      expect(attempt.sideChatSourceReceipt).toMatchObject({
+        sourceThreadId: source.thread.id,
+        sourceMode: "chat",
+        threadVersionBefore: source.thread.version,
+        threadVersionAfter: source.thread.version,
+        versions: [
+          {
+            kind: "aggregate",
+            aggregateType: "chat-thread",
+            id: source.thread.id,
+            version: source.thread.version,
+          },
+        ],
+      });
+      const prepared = await mentions.execute(
+        {
+          kind: "prepare-side-chat-return",
+          requestId: crypto.randomUUID(),
+          sidecarThreadId: sidecar.thread.id,
+          expectedSourceThreadId: source.thread.id,
+          turnId: answered.id,
+          attemptId: attempt.id,
+        },
+        { windowId },
+      );
+      if (prepared.kind !== "side-chat-draft-prepared") throw new Error("prepare");
+      expect(prepared.text).toContain(exactResponse);
+      expect(prepared.reference.answerDigest).toBe(
+        createHash("sha256").update(exactResponse).digest("hex"),
+      );
+      expect(prepared.text).toContain("not an atomic snapshot");
+      expect(prepared.omissions.join()).toContain("Other replies");
+      await expect(
+        mentions.resolveSideChatReturns({
+          windowId,
+          readerThreadId: String(source.thread.id),
+          mode: "chat",
+          references: [{ ...prepared.reference, answerDigest: "f".repeat(64) }],
+        }),
+      ).rejects.toThrow();
+      await expect(
+        mentions.resolveSideChatReturns({
+          windowId,
+          readerThreadId: String(source.thread.id),
+          mode: "chat",
+          references: [{ ...prepared.reference, sourceReceiptDigest: "f".repeat(64) }],
+        }),
+      ).rejects.toThrow();
+      await expect(
+        mentions.resolveSideChatReturns({
+          windowId,
+          readerThreadId: String(sidecar.thread.id),
+          mode: "chat",
+          references: [prepared.reference],
+        }),
+      ).rejects.toThrow();
+      const stale = await mentions.execute(
+        {
+          kind: "prepare-side-chat-return",
+          requestId: crypto.randomUUID(),
+          sidecarThreadId: sidecar.thread.id,
+          expectedSourceThreadId: source.thread.id,
+          turnId: answered.id,
+          attemptId: crypto.randomUUID(),
+        },
+        { windowId },
+      );
+      expect(stale).toMatchObject({ kind: "failed", reason: "unavailable" });
+      expect(service.read(source.thread.id).turns).toHaveLength(0);
+      expect(fakeDriver.sentTurns).toHaveLength(1);
+      marked.add(String(sidecar.thread.id));
+      const sent = await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: source.thread.id,
+          expectedVersion: source.thread.version,
+          prompt: "Person edited the chosen excerpt",
+          sideChatReturns: [prepared.reference],
+        },
+        { windowId },
+      );
+      if (sent.kind !== "turn-created") throw new Error("send");
+      expect(marked.has(String(source.thread.id))).toBe(true);
+      expect(fakeDriver.sentTurns.at(-1)?.prompt).toBe("Person edited the chosen excerpt");
+      expect(
+        fakeDriver.sentTurns
+          .at(-1)
+          ?.context?.map((block) => block.text)
+          .join("\n"),
+      ).toContain(prepared.reference.answerDigest);
+      expect(service.read(source.thread.id).turns.at(-1)?.sideChatReturns).toEqual([
+        prepared.reference,
+      ]);
+      const before = fakeDriver.sentTurns.length;
+      allowMark = false;
+      const sourceNow = service.read(source.thread.id);
+      await expect(
+        service.execute(
+          {
+            kind: "retry-chat-turn",
+            threadId: source.thread.id,
+            expectedVersion: sourceNow.thread.version,
+            turnId: sent.turn.id,
+            attemptId: sourceNow.turns.at(-1)!.attempts.at(-1)!.id,
+          },
+          { windowId },
+        ),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      expect(fakeDriver.sentTurns).toHaveLength(before);
+      allowMark = true;
+      await registry.forget(decodeMentionableThreadId(String(source.thread.id)));
+      await expect(
+        service.execute(
+          {
+            kind: "send-chat-turn",
+            threadId: source.thread.id,
+            expectedVersion: service.read(source.thread.id).thread.version,
+            prompt: "Keep edited excerpt",
+            sideChatReturns: [prepared.reference],
+          },
+          { windowId },
+        ),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      expect(fakeDriver.sentTurns).toHaveLength(before);
+    } finally {
+      rmSync(sidecarRoot, { recursive: true, force: true });
+    }
+  });
+  it("fails closed when a typed return has no admission resolver, while ordinary no-ref sends still work", async () => {
+    const { service, fakeDriver } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Source",
+    });
+    if (created.kind !== "thread-created") throw new Error("source");
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "edited returned text",
+        sideChatReturns: [
+          {
+            sidecarThreadId: created.thread.id,
+            sourceThreadId: created.thread.id,
+            sourceMode: "chat",
+            turnId: crypto.randomUUID(),
+            attemptId: crypto.randomUUID(),
+            answerDigest: "a".repeat(64),
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "ordinary",
+    });
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+});
+
+it("revalidates the exact returned reply before Chat resume instead of trusting previously accepted editable text", async () => {
+  let permitted = true;
+  const resolveSideChatReturns = vi.fn(async () => {
+    if (!permitted) throw new Error("purged");
+    return "Selected Side Chat answer reference; not authority.";
+  });
+  const { service, fakeDriver } = openFixture({
+    nativeConversation: true,
+    turnOutcome: "interrupted",
+    resolveSideChatReturns,
+  });
+  const created = await service.execute({
+    kind: "create-chat-thread",
+    hostId: "local",
+    title: "Source",
+  });
+  if (created.kind !== "thread-created") throw new Error("source");
+  const sideChatReturns = [
+    {
+      sidecarThreadId: created.thread.id,
+      sourceThreadId: created.thread.id,
+      sourceMode: "chat",
+      turnId: crypto.randomUUID(),
+      attemptId: crypto.randomUUID(),
+      answerDigest: "b".repeat(64),
+    },
+  ];
+  const sent = await service.execute({
+    kind: "send-chat-turn",
+    threadId: created.thread.id,
+    expectedVersion: created.thread.version,
+    prompt: "Person edited reference",
+    sideChatReturns,
+  });
+  if (sent.kind !== "turn-created") throw new Error("send");
+  const view = service.read(created.thread.id);
+  const attempt = view.turns[0]!.attempts.at(-1)!;
+  expect(attempt.outcome).toBe("interrupted");
+  permitted = false;
+  const before = fakeDriver.sentTurns.length;
+  await expect(
+    service.execute({
+      kind: "resume-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: view.thread.version,
+      turnId: sent.turn.id,
+      attemptId: attempt.id,
+    }),
+  ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  expect(resolveSideChatReturns).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      references: sideChatReturns,
+      readerThreadId: String(created.thread.id),
+      mode: "chat",
+    }),
+  );
+  expect(fakeDriver.sentTurns).toHaveLength(before);
 });

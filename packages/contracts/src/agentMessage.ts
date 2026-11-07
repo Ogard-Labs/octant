@@ -60,12 +60,16 @@ export const AGENT_MESSAGE_AGGREGATE = "agent-message";
 
 export const AGENT_MESSAGE_EVENT_NAMES = {
   sent: "agent.message-sent@1",
+  expired: "agent.message-expired@1",
   delivered: "agent.message-delivered@1",
   refused: "agent.message-refused@1",
   acknowledged: "agent.message-acknowledged@1",
 } as const;
 
+export const AGENT_MESSAGE_LIFETIME_MS = 24 * 60 * 60_000;
+
 export const AgentMessageSent = Schema.Struct({
+  expiresAt: Schema.optional(UtcTimestamp),
   kind: Schema.Literal("message-sent"),
   messageId: AgentMessageId,
   correlationId: CorrelationId,
@@ -106,6 +110,15 @@ export const AgentMessageRefused = Schema.Struct({
 }).annotations(strict);
 export type AgentMessageRefused = typeof AgentMessageRefused.Type;
 
+export const AgentMessageExpired = Schema.Struct({
+  kind: Schema.Literal("message-expired"),
+  messageId: AgentMessageId,
+  correlationId: CorrelationId,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentMessageExpired = typeof AgentMessageExpired.Type;
+export const decodeAgentMessageExpired = Schema.decodeUnknownSync(AgentMessageExpired);
+
 export const AgentMessageAcknowledged = Schema.Struct({
   kind: Schema.Literal("message-acknowledged"),
   messageId: AgentMessageId,
@@ -120,6 +133,20 @@ export const decodeAgentMessageRefused = Schema.decodeUnknownSync(AgentMessageRe
 export const decodeAgentMessageAcknowledged = Schema.decodeUnknownSync(AgentMessageAcknowledged);
 export const decodeAgentMessageEndpointId = Schema.decodeUnknownSync(AgentMessageEndpointId);
 
+/** One bounded receipt petition; caller identity is supplied only by the host. */
+export const MAX_AGENT_MESSAGE_RECEIPT_IDS = 20;
+export const AgentMessageReceiptRequest = Schema.Struct({
+  action: Schema.Literal("acknowledge", "status"),
+  messageIds: Schema.Array(AgentMessageId).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_AGENT_MESSAGE_RECEIPT_IDS),
+  ),
+}).annotations(strict);
+export type AgentMessageReceiptRequest = typeof AgentMessageReceiptRequest.Type;
+export const decodeAgentMessageReceiptRequest = Schema.decodeUnknownSync(
+  AgentMessageReceiptRequest,
+);
+
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 
 /** One message in the messaging bounds view: a status, never a body. */
@@ -127,11 +154,12 @@ export const AgentMessageStatusSummary = Schema.Struct({
   messageId: AgentMessageId,
   senderThreadId: AgentMessageEndpointId,
   recipientThreadId: AgentMessageEndpointId,
-  state: Schema.Literal("in-flight", "delivered", "refused", "acknowledged"),
+  state: Schema.Literal("in-flight", "delivered", "refused", "acknowledged", "expired"),
   refuseReason: Schema.optional(AgentMessageRefuseReason),
   occurredAt: UtcTimestamp,
 }).annotations(strict);
 export type AgentMessageStatusSummary = typeof AgentMessageStatusSummary.Type;
+export const decodeAgentMessageStatusSummary = Schema.decodeUnknownSync(AgentMessageStatusSummary);
 
 export const MAX_AGENT_MESSAGE_STATUS_SUMMARIES = 20;
 

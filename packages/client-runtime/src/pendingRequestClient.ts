@@ -1,3 +1,4 @@
+import type { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import { PendingRequestFailure, PendingRequestList, decodeHostAnswer } from "@octant/contracts";
 
 export interface PendingRequestClientOptions {
@@ -8,11 +9,12 @@ export interface PendingRequestClientOptions {
 
 /**
  * Reads every approval and question this window can answer, across modes and
- * Projects. Answers go through each mode's own client; this client only lists.
+ * Projects. Answers go through each mode's own client; this client lists requests and changes question attention preferences.
  * Local windows only: the host refuses a paired device, so the client refuses
  * a non-loopback host before asking.
  */
 export interface PendingRequestClient {
+  defer?(change: PendingQuestionDeferral): Promise<boolean>;
   list(signal?: AbortSignal): Promise<PendingRequestList>;
 }
 
@@ -31,6 +33,17 @@ export function createPendingRequestClient(
 ): PendingRequestClient {
   const url = loopbackUrl(options.baseUrl);
   return {
+    async defer(change) {
+      const response = await options.fetch(`${url}/defer`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": options.windowCapability,
+        },
+        body: JSON.stringify(change),
+      });
+      return response.ok;
+    },
     async list(signal) {
       let response: Response;
       try {

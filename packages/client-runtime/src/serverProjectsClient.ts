@@ -3,6 +3,9 @@ import {
   type ServerProjectsCommand,
   ServerProjectsCommandResult,
   ServerProjectsView,
+  ServerPreviewResult,
+  ServerPreviewView,
+  type ServerPreviewCommand,
 } from "@octant/contracts/server-projects";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -20,6 +23,8 @@ export interface ServerProjectsClientOptions {
 
 export interface ServerProjectsClient {
   read(signal?: AbortSignal): Promise<ServerProjectsView>;
+  previewRead?(projectId: string): Promise<ServerPreviewView | null>;
+  previewCommand?(command: ServerPreviewCommand): Promise<ServerPreviewResult>;
   command(
     command: ServerProjectsCommand,
     signal?: AbortSignal,
@@ -41,11 +46,10 @@ export function createServerProjectsClient(
   options: ServerProjectsClientOptions,
 ): ServerProjectsClient {
   const fetch = bindFetchPort(options.fetch);
-  const target = new URL(PATH, options.baseUrl).toString();
-  const send = async (init: RequestInit): Promise<unknown> => {
+  const send = async (init: RequestInit, path = PATH): Promise<unknown> => {
     let response: Response;
     try {
-      response = await fetch(target, {
+      response = await fetch(new URL(path, options.baseUrl).toString(), {
         ...init,
         headers: {
           "content-type": "application/json",
@@ -67,7 +71,8 @@ export function createServerProjectsClient(
     const refusal =
       typeof body === "object" &&
       body !== null &&
-      (body as { kind?: unknown }).kind === "server-projects-refused";
+      ((body as { kind?: unknown }).kind === "server-projects-refused" ||
+        (body as { kind?: unknown }).kind === "refused");
     if (!response.ok && !refusal) {
       const message =
         typeof (body as { error?: unknown } | null)?.error === "string"
@@ -78,6 +83,22 @@ export function createServerProjectsClient(
     return body;
   };
   return {
+    async previewRead(projectId) {
+      const body = await send(
+        { method: "GET" },
+        `/api/server-project-preview?projectId=${encodeURIComponent(projectId)}`,
+      );
+      const view = (body as { view?: unknown }).view;
+      return view === null ? null : decodeHostAnswer(ServerPreviewView)(view);
+    },
+    async previewCommand(command) {
+      return decodeHostAnswer(ServerPreviewResult)(
+        await send(
+          { method: "POST", body: JSON.stringify(command) },
+          "/api/server-project-preview",
+        ),
+      );
+    },
     async read(signal) {
       const body = await send({ method: "GET", ...(signal === undefined ? {} : { signal }) });
       return decodeHostAnswer(ServerProjectsView)((body as { view?: unknown }).view);

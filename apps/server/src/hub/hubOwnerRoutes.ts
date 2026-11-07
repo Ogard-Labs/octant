@@ -14,6 +14,8 @@
 // agent or a routine holds no member key and reaches only the product routes.
 
 import { createHash } from "node:crypto";
+import { decodeOwnerBrowserRequest } from "@octant/contracts/owner-browser";
+import type { OwnerBrowserActor, OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import {
   CODE_OWNER_UNLOCKED_MERGE_PATHS,
   OWNER_IDENTITY_KEY_HEADER,
@@ -91,6 +93,9 @@ export const HUB_OWNER_ROUTES = {
   signInAccept: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/accept`,
   signInDecline: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/decline`,
   signInCheck: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/check`,
+  browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
+  browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
+  browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -106,7 +111,10 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
 /** The routes an unlock can be asked for: every one that changes something. */
 const UNLOCKED_ROUTES: ReadonlySet<string> = new Set(
   Object.values(HUB_OWNER_ROUTES).filter(
-    (route) => route !== HUB_OWNER_ROUTES.challenge && !READ_ROUTES.has(route),
+    (route) =>
+      route !== HUB_OWNER_ROUTES.challenge &&
+      route !== HUB_OWNER_ROUTES.browserControl &&
+      !READ_ROUTES.has(route),
   ),
 );
 
@@ -122,6 +130,9 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
+  HUB_OWNER_ROUTES.browserTargets,
+  HUB_OWNER_ROUTES.browserTakeOver,
+  HUB_OWNER_ROUTES.browserControl,
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
 ]);
 
@@ -146,6 +157,7 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.leave,
   HUB_OWNER_ROUTES.credentialReceive,
   HUB_OWNER_ROUTES.credentialCopy,
+  HUB_OWNER_ROUTES.browserTakeOver,
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
@@ -178,6 +190,7 @@ const MAX_BODY_BYTES = 16 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 export interface HubOwnerRouteOptions {
+  readonly browser?: OwnerBrowserControlService;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
   readonly unlock: OwnerUnlockService;
@@ -370,8 +383,74 @@ export function createHubOwnerRouteHandler(
       memberId: senderMember.memberId,
     };
 
+    if (
+      route === HUB_OWNER_ROUTES.browserTargets ||
+      route === HUB_OWNER_ROUTES.browserTakeOver ||
+      route === HUB_OWNER_ROUTES.browserControl
+    ) {
+      if (options.browser === undefined) return refused(409, "unsupported");
+      const command = (() => {
+        try {
+          return decodeOwnerBrowserRequest(JSON.parse(body));
+        } catch {
+          return undefined;
+        }
+      })();
+      if (
+        command === undefined ||
+        (route === HUB_OWNER_ROUTES.browserTargets
+          ? command.kind !== "targets"
+          : route === HUB_OWNER_ROUTES.browserTakeOver
+            ? command.kind !== "take-over"
+            : command.kind === "targets" || command.kind === "take-over")
+      )
+        return refused(400, "invalid");
+      if (
+        command.kind === "take-over" &&
+        String(command.target.hostMemberId) !== String(options.hub.hubMemberId())
+      )
+        return refused(403, "wrong-host");
+      const stamp = ownerListStamp(scope);
+      const actor: OwnerBrowserActor = {
+        principal,
+        name: senderMember.name,
+        freshOwnUnlock: unlockResult?.status === "fresh",
+        unlockDeadline: (options.now ?? Date.now)() + 60_000,
+        current: () => {
+          const latest = scopeFor(route, body);
+          if (
+            "kind" in latest ||
+            ownerListStamp(latest) !== stamp ||
+            latest.inactiveDeviceMemberIds.includes(senderId)
+          )
+            return false;
+          return (
+            authorizeOwnerRequest({
+              host: latest.host,
+              grant: latest.grant,
+              owners: ownerEntries(latest.owners),
+              roster: latest.roster,
+              memberId: senderMember.memberId,
+              identityKeyFingerprint: publicKeyFingerprint(presentedKey),
+              unlock: "not-needed",
+              unlockClass: "own",
+            }).status === "allowed"
+          );
+        },
+      };
+      const result = await options.browser.execute(actor, command, request.signal);
+      return Response.json(result, { headers: NO_STORE });
+    }
+
     try {
-      return await act({ route, body, scope, senderMemberId: senderMember.memberId, principal });
+      return await act({
+        route,
+        body,
+        scope,
+        senderMemberId: senderMember.memberId,
+        principal,
+        freshFull: unlockResult?.status === "fresh",
+      });
     } catch {
       return refused(400, "invalid");
     }
@@ -383,6 +462,7 @@ export function createHubOwnerRouteHandler(
     readonly scope: OwnerScope;
     readonly senderMemberId: HubMemberId;
     readonly principal: AuditActingPrincipal;
+    readonly freshFull: boolean;
   }): Promise<Response> {
     const { route, body, scope, principal } = input;
     const json = (): unknown => JSON.parse(body);
@@ -390,6 +470,10 @@ export function createHubOwnerRouteHandler(
       if (body.trim() !== "") throw new Error("invalid");
     };
     switch (route) {
+      case HUB_OWNER_ROUTES.browserTargets:
+      case HUB_OWNER_ROUTES.browserTakeOver:
+      case HUB_OWNER_ROUTES.browserControl:
+        return refused(400, "invalid");
       case HUB_OWNER_ROUTES.challenge: {
         const asked = decodeOwnerChallengeRequest(json());
         // A challenge is for one of the actions below or a paired client's
@@ -489,11 +573,22 @@ export function createHubOwnerRouteHandler(
         });
         return Response.json({ status: "opened", session }, { headers: NO_STORE });
       }
-      case HUB_OWNER_ROUTES.postureRead:
-        return outcome(await options.postures.read(decodeOwnerPostureReadRequest(json()).subject));
+      case HUB_OWNER_ROUTES.postureRead: {
+        const subject = decodeOwnerPostureReadRequest(json()).subject;
+        if (subject !== undefined) return outcome(await options.postures.read(subject));
+        return options.postures.list === undefined
+          ? refused(409, "unsupported")
+          : Response.json(
+              { status: "read", targets: await options.postures.list() },
+              { headers: NO_STORE },
+            );
+      }
       case HUB_OWNER_ROUTES.postureChange: {
         const change = decodeOwnerPostureChangeRequest(json());
-        const result = await options.postures.change(change);
+        const result = await options.postures.change(change, {
+          ownerMemberId: String(input.senderMemberId),
+          freshFull: input.freshFull,
+        });
         if (result.status === "changed") {
           options.record({
             change: "owner-posture-changed",

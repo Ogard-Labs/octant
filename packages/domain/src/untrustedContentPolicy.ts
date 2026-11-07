@@ -153,17 +153,11 @@ export function decideExternalContentClear(input: {
 
 /**
  * Whether a successful native harness tool result taints its thread. Only a
- * tool the catalog marks as bringing in outside content does. A delegate call
- * is outside content only when `collect` hands back a finished child's reply:
- * starting, listing, or waiting on children, and a `collect` that finds the
- * child still running, return the host's own records. A name the catalog does
- * not know taints, so a new tool cannot slip outside content in unmarked.
+ * tool the catalog marks as bringing in outside content does. A name the
+ * catalog does not know taints, so a new tool cannot slip outside content in
+ * unmarked.
  */
-export function nativeHarnessResultTaintsThread(input: {
-  readonly toolName: string;
-  readonly arguments: unknown;
-  readonly result: unknown;
-}): boolean {
+export function nativeHarnessResultTaintsThread(input: { readonly toolName: string }): boolean {
   const name = NATIVE_HARNESS_TOOL_NAMES.find((candidate) => candidate === input.toolName);
   if (name === undefined) return true;
   const entry = lookupClosedToolCatalogEntry({
@@ -171,19 +165,7 @@ export function nativeHarnessResultTaintsThread(input: {
     version: 1,
   });
   if (entry === undefined) return true;
-  if (name === "delegate") {
-    return (
-      fieldOf(input.arguments, "operation") === "collect" &&
-      fieldOf(input.result, "status") === "completed"
-    );
-  }
   return entry.resultTaintsThread;
-}
-
-function fieldOf(value: unknown, key: string): unknown {
-  return typeof value === "object" && value !== null && key in value
-    ? (value as Readonly<Record<string, unknown>>)[key]
-    : undefined;
 }
 
 /** A search query longer than this is refused on a tainted thread. */

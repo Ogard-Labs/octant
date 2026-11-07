@@ -413,3 +413,85 @@ describe("FileMentionService", () => {
     expect(result.unavailable).toEqual([]);
   });
 });
+
+describe("dropped folder references", () => {
+  const scope = { mode: "code", threadId, checkoutId };
+  it("validates folder metadata within the current root without reading or listing contents", async () => {
+    const io = trackingIo();
+    vi.mocked(io.locate).mockResolvedValue({
+      kind: "directory",
+      canonicalPath: `${rootPath}/日本語 folder`,
+    });
+    const service = new FileMentionService({ authority: authority(), io });
+    const result = await service.execute(
+      { kind: "inspect-folder-mentions", requestId, scope, paths: [`${rootPath}/日本語 folder`] },
+      { windowId, localHost: true },
+    );
+    expect(result).toMatchObject({
+      kind: "folder-mentions-inspected",
+      folders: [{ path: `${rootPath}/日本語 folder`, hostId: "local" }],
+      unavailable: [],
+    });
+    expect(io.readCalls).toEqual([]);
+    expect(io.listCalls).toEqual([]);
+  });
+  it("refuses remote clients and outside paths before consulting the filesystem", async () => {
+    const io = trackingIo();
+    const service = new FileMentionService({ authority: authority(), io });
+    expect(
+      await service.execute(
+        { kind: "inspect-folder-mentions", requestId, scope, paths: [`${rootPath}/folder`] },
+        { windowId },
+      ),
+    ).toMatchObject({ kind: "failed", reason: "unauthorized" });
+    expect(
+      await service.execute(
+        {
+          kind: "inspect-folder-mentions",
+          requestId,
+          scope,
+          paths: ["/private/unapproved", `${rootPath}/../unapproved`],
+        },
+        { windowId, localHost: true },
+      ),
+    ).toMatchObject({
+      kind: "folder-mentions-inspected",
+      folders: [],
+      unavailable: [{ reason: "out-of-root" }, { reason: "out-of-root" }],
+    });
+    expect(io.locateCalls).toEqual([]);
+  });
+});
+
+it("refuses deleted folders and escaping symlinks, and deduplicates canonical aliases", async () => {
+  const io = trackingIo();
+  vi.mocked(io.locate).mockImplementation(async (_root, relative) =>
+    relative === "missing"
+      ? { kind: "missing" }
+      : relative === "escape"
+        ? { kind: "escapes-root" }
+        : { kind: "directory", canonicalPath: `${rootPath}/real` },
+  );
+  const service = new FileMentionService({ authority: authority(), io });
+  const result = await service.execute(
+    {
+      kind: "inspect-folder-mentions",
+      requestId,
+      scope: { mode: "work", threadId },
+      paths: [
+        `${rootPath}/missing`,
+        `${rootPath}/escape`,
+        `${rootPath}/real`,
+        `${rootPath}/alias`,
+        rootPath,
+      ],
+    },
+    { windowId, localHost: true },
+  );
+  expect(result).toMatchObject({
+    kind: "folder-mentions-inspected",
+    folders: [{ path: `${rootPath}/real`, hostId: "local" }],
+    unavailable: [{ reason: "not-found" }, { reason: "out-of-root" }],
+  });
+  expect(io.readCalls).toEqual([]);
+});

@@ -1,3 +1,5 @@
+import { GOOGLE_WORKSPACE_SERVICES } from "./googleWorkspaceConnectors";
+
 /**
  * The connectors catalog: hosted MCP servers a person can connect from
  * Settings by name. Every entry is data the app ships with, naming only the
@@ -6,8 +8,15 @@
  * authorization sign-in or takes a key the vendor issues.
  */
 export type ConnectorAuth =
-  /** The server runs the MCP authorization flow and registers clients itself. */
-  | { readonly kind: "sign-in" }
+  /** Account consent uses MCP OAuth; a closed catalog policy may first require an owned app. */
+  | {
+      readonly kind: "sign-in";
+      readonly clientSetup?: "registered";
+      readonly setupGuide?: string;
+      readonly requestedScopes?: readonly string[];
+      /** Plain-language authority disclosed before app consent, not a tool approval. */
+      readonly permissionNotice?: string;
+    }
   /** The server takes a token the person creates with the vendor, sent in one header. */
   | {
       readonly kind: "key";
@@ -42,9 +51,90 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
  * metadata with PKCE S256 and dynamic client registration; each key server
  * answered 401 without registration; each open server answered without a
  * credential. An address that stops behaving that way belongs out, not fixed
- * up in the UI.
+ * up in the UI. Slack is separately documented on 2026-11-02: its exact dedicated
+ * metadata requires a person-owned registered confidential client and a single
+ * public-search scope; no live registration/consent/tool acceptance is claimed.
+ * Google entries are Developer Preview: the 2026-11-03 documentation establishes
+ * agentic Desktop public clients and per-service read scopes, not live acceptance
+ * or permission for public distribution.
  */
+export const GITHUB_REPOSITORY_PERMISSION_NOTICE =
+  "Allows read and write access to public and private repositories and related organization resources available to your account. This OAuth App permission does not select individual repositories. Reusing the same app can change permissions returned to other connections; their original access policy is retained.";
+
 const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
+  ...GOOGLE_WORKSPACE_SERVICES.map(
+    (service): ConnectorCatalogEntry => ({
+      id: service.id,
+      displayName: `${service.displayName} preview`,
+      description: service.description,
+      category: "business",
+      url: service.resource,
+      auth: {
+        kind: "sign-in",
+        clientSetup: "registered",
+        setupGuide: "https://developers.google.com/workspace/guides/create-credentials#desktop-app",
+        requestedScopes: service.scopes,
+        permissionNotice: `Developer Preview requires an enrolled Workspace account and project. ${service.description} Public distribution requires Google's permission or general availability.`,
+      },
+    }),
+  ),
+  {
+    id: "slack",
+    displayName: "Slack",
+    description: "Search public Slack content with an eligible app you register.",
+    category: "business",
+    url: "https://mcp.slack.com/mcp",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide: "https://docs.slack.dev/ai/slack-mcp-server/",
+      requestedScopes: ["search:read.public"],
+    },
+  },
+  {
+    id: "atlassian",
+    displayName: "Atlassian",
+    description: "Work with permitted Jira, Confluence and other Atlassian Cloud content.",
+    category: "business",
+    url: "https://mcp.atlassian.com/v2/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "airtable",
+    displayName: "Airtable",
+    description: "Read and update the bases you select during Airtable consent.",
+    category: "business",
+    url: "https://mcp.airtable.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "airtable-pat",
+    displayName: "Airtable personal token",
+    description: "Use a personal token limited to selected bases and read or write permissions.",
+    category: "business",
+    url: "https://mcp.airtable.com/mcp",
+    auth: {
+      kind: "key",
+      header: "Authorization",
+      prefix: "Bearer",
+      keyPage: "https://airtable.com/create/tokens",
+    },
+  },
+  {
+    id: "hubspot",
+    displayName: "HubSpot",
+    description: "Read and update CRM data with a connector you register in your HubSpot account.",
+    category: "business",
+    url: "https://mcp.hubspot.com/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide:
+        "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+      permissionNotice:
+        "Can read and write CRM data allowed by your HubSpot permissions and consent. Available tools depend on your subscription and account configuration. Create your own MCP connector and link its client secret before signing in.",
+    },
+  },
   {
     id: "linear",
     displayName: "Linear",
@@ -92,6 +182,36 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     category: "popular",
     url: "https://mcp.vercel.com",
     auth: { kind: "sign-in" },
+  },
+  {
+    id: "github-repositories",
+    displayName: "GitHub repositories",
+    description: "Read and write public and private repositories with your registered OAuth App.",
+    category: "developer-tools",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide:
+        "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps",
+      requestedScopes: ["read:user", "repo", "offline_access"],
+      permissionNotice: GITHUB_REPOSITORY_PERMISSION_NOTICE,
+    },
+  },
+  {
+    id: "github-oauth",
+    displayName: "GitHub OAuth App",
+    description:
+      "Connect your registered OAuth App with profile read access; tool availability varies.",
+    category: "developer-tools",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide:
+        "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+      requestedScopes: ["read:user", "offline_access"],
+    },
   },
   {
     id: "github",

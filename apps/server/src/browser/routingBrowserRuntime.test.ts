@@ -1,3 +1,6 @@
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
+import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
@@ -19,6 +22,12 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
   let exit: (() => void) | undefined;
   return {
     available: vi.fn(async () => true),
+    ownerControl: vi.fn(async () => ({ status: "refused" as const })),
+    runPageScript: vi.fn(async () => ({
+      status: "completed" as const,
+      effect: "possible" as const,
+      valueJson: "42",
+    })),
     createContext: vi.fn(async () => presentation),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     act: vi.fn(async () => ({ title: "Example" })),
@@ -36,6 +45,75 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
 }
 
 describe("RoutingBrowserRuntime", () => {
+  it("refuses native-only control for a headless fallback instead of borrowing the native owner's page", async () => {
+    const native = runtime();
+    native.available.mockResolvedValue(false);
+    const headless = runtime("headless");
+    const router = new RoutingBrowserRuntime({ native, headless });
+    await router.createContext(contextId, policy, new AbortController().signal, owner);
+    const command = decodeBrowserPageScriptNativeCommand({
+      operation: "prepare",
+      contextId,
+      owner,
+      source: "42",
+      expectedUrl: "https://example.com/",
+    });
+    expect(await router.runPageScript(command, new AbortController().signal)).toMatchObject({
+      status: "refused",
+      effect: "none",
+    });
+    expect(native.runPageScript).not.toHaveBeenCalled();
+    expect(headless.runPageScript).not.toHaveBeenCalled();
+    expect(
+      await router.ownerControl(
+        decodeOwnerBrowserNativeCommand({ operation: "inspect", contextId, owner }),
+        new AbortController().signal,
+      ),
+    ).toEqual({ status: "refused" });
+    expect(native.ownerControl).not.toHaveBeenCalled();
+    expect(headless.ownerControl).not.toHaveBeenCalled();
+    await router.closeAll();
+  });
+
+  it("presents only the recorded native owner and suppresses a result after owner closure", async () => {
+    let finish: (() => void) | undefined;
+    const held = new Promise<void>((done) => {
+      finish = done;
+    });
+    const humanPresentation = vi.fn(async () => {
+      await held;
+      return { status: "idle" as const };
+    });
+    const native = { ...runtime(), humanPresentation };
+    const headless = {
+      ...runtime("headless"),
+      humanPresentation: vi.fn(async () => ({ status: "idle" as const })),
+    };
+    const router = new RoutingBrowserRuntime({ native, headless });
+    const request = decodeHumanBrowserRequest({
+      kind: "attach",
+      contextId,
+      threadId: owner.threadId,
+    });
+    const signal = new AbortController().signal;
+    expect(await router.humanPresentation(request, owner.windowId, signal)).toEqual({
+      status: "refused",
+    });
+    native.available.mockResolvedValueOnce(false);
+    await router.createContext(contextId, policy, signal, owner);
+    expect(await router.humanPresentation(request, owner.windowId, signal)).toEqual({
+      status: "refused",
+    });
+    expect(headless.humanPresentation).not.toHaveBeenCalled();
+    await router.closeContext(contextId);
+    await router.createContext(contextId, policy, signal, owner);
+    const pending = router.humanPresentation(request, owner.windowId, signal);
+    await router.closeContext(contextId);
+    finish?.();
+    expect(await pending).toEqual({ status: "refused" });
+    expect(humanPresentation).toHaveBeenCalledOnce();
+  });
+
   it("uses the native page for a verified Electron owner", async () => {
     const native = runtime();
     const headless = runtime("headless");

@@ -16,6 +16,13 @@
  * and anything that runs there can read its key. Everything here that decides
  * *what* to sign is pure and tested; the key handling is at the edges, so the
  * shape of a feed is exercised on hosts that hold no key.
+ *
+ * The signed release names its app, from the build's flavor, so Octant and
+ * Octant Nightly each refuse the other's builds. Installs built before that
+ * field decode a feed strictly and call a document carrying it malformed, so
+ * `--legacy-document` writes the old shape for the one name such Octant
+ * installs still read (`legacyUpdateFeedRelativePath`). Nothing writes the old
+ * shape for Nightly: the old preview names were read by Octant builds.
  */
 
 import {
@@ -37,8 +44,10 @@ import {
   decodeAppUpdateRelease,
   isAppReleaseRing,
 } from "@octant/contracts/app-updates";
-import { canonicalReleaseBytes } from "@octant/domain";
+import { canonicalReleaseBytes, canonicalReleaseBytesWithoutProduct } from "@octant/domain";
+import { type DesktopFlavor, desktopIdentity } from "@octant/host-runtime";
 import {
+  legacyUpdateFeedRelativePath,
   OCTANT_UPDATE_TRUSTED_KEYS,
   updateFeedRelativePath,
 } from "../apps/desktop/src/appUpdateFeed";
@@ -63,6 +72,8 @@ export function feedPrivateKeyVariable(ring: AppReleaseRing): string {
 export interface ReleaseInput {
   readonly version: string;
   readonly ring: AppReleaseRing;
+  /** The build's flavor, which names the app the release is for. */
+  readonly flavor: DesktopFlavor;
   readonly platform: string;
   readonly arch: string;
   readonly url: string;
@@ -80,7 +91,14 @@ export interface ReleaseInput {
  * machine.
  */
 export function buildRelease(input: ReleaseInput): AppUpdateRelease {
+  const identity = desktopIdentity(input.flavor);
+  if (!(identity.rings as ReadonlyArray<AppReleaseRing>).includes(input.ring)) {
+    // A build's flavor follows its ring. A Nightly signed for `candidate` would
+    // reach Octant's Preview channel and be refused there as the wrong app.
+    throw new Error(`${identity.productName} is not published on the ${input.ring} ring.`);
+  }
   return decodeAppUpdateRelease({
+    product: identity.updateProduct,
     version: input.version,
     ring: input.ring,
     platform: input.platform,
@@ -98,6 +116,49 @@ export function buildRelease(input: ReleaseInput): AppUpdateRelease {
  */
 export function feedRelativePath(release: ReleaseInput | AppUpdateRelease): string {
   return updateFeedRelativePath(release);
+}
+
+/**
+ * The old-shape document for installs built before the release named its app:
+ * the same release without `product`, signed over the encoding they verify.
+ *
+ * Refused for any release but an Octant candidate, the one ring whose old name
+ * belongs to Octant alone (`legacyUpdateFeedRelativePath`).
+ */
+export interface LegacyFeedDocument {
+  readonly schemaVersion: 1;
+  readonly release: Omit<AppUpdateRelease, "product">;
+  readonly signature: string;
+}
+
+export function legacyFeedRelativePath(release: AppUpdateRelease): string {
+  const path = legacyUpdateFeedRelativePath(release);
+  if (path === undefined || release.product !== "octant") {
+    throw new Error(
+      `No old-shape feed is published for ${release.product} on the ${release.ring} ring.`,
+    );
+  }
+  return path;
+}
+
+export function signLegacyFeed(
+  release: AppUpdateRelease,
+  privateKeyBase64: string,
+): LegacyFeedDocument {
+  legacyFeedRelativePath(release);
+  const { product: _product, ...unnamed } = release;
+  const key = createPrivateKey({
+    key: Buffer.from(privateKeyBase64, "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  const signature = sign(null, canonicalReleaseBytesWithoutProduct(unnamed), key).toString(
+    "base64",
+  );
+  // The schema check of the current shape, so the old one cannot drift past
+  // what the release fields and signature allow.
+  decodeAppUpdateFeed({ schemaVersion: 1, release, signature });
+  return { schemaVersion: 1, release: unnamed, signature };
 }
 
 /**
@@ -215,6 +276,9 @@ export function dryRunFeedDocument(input: ReleaseInput): {
 export interface FeedCommand {
   readonly version: string;
   readonly ring: AppReleaseRing;
+  readonly flavor: DesktopFlavor;
+  /** Write the old-shape document for its legacy name instead. */
+  readonly legacyDocument: boolean;
   readonly platform: string;
   readonly arch: string;
   readonly url: string;
@@ -234,12 +298,13 @@ export interface FeedCommand {
  */
 export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
   const values = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index] ?? "";
+  const valued = argv.filter((argument) => argument !== "--legacy-document");
+  for (let index = 0; index < valued.length; index += 1) {
+    const argument = valued[index] ?? "";
     if (!argument.startsWith("--")) continue;
     const equals = argument.indexOf("=");
     if (equals === -1) {
-      const next = argv[index + 1];
+      const next = valued[index + 1];
       if (next === undefined || next.startsWith("--")) {
         throw new Error(`${argument} needs a value.`);
       }
@@ -260,10 +325,16 @@ export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
       `--ring must be a known release ring (${APP_RELEASE_RINGS.join(", ")}), not ${ring}.`,
     );
   }
+  const flavor = required("flavor");
+  if (flavor !== "stable" && flavor !== "nightly") {
+    throw new Error(`--flavor must be stable or nightly, not ${flavor}.`);
+  }
   const notesFile = values.get("notes-file");
   return {
     version: required("version"),
     ring,
+    flavor,
+    legacyDocument: argv.includes("--legacy-document"),
     platform: required("platform"),
     arch: required("arch"),
     url: required("url"),
@@ -272,6 +343,29 @@ export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
     out: required("out"),
     ...(notesFile === undefined || notesFile === "" ? {} : { notesFile }),
   };
+}
+
+/**
+ * `--print-feed-path --ring <ring> --platform <p> --arch <a> [--legacy-document]`:
+ * the file name, under the ring's mailbox, that a feed is published as.
+ */
+export function printedFeedPath(argv: ReadonlyArray<string>): string {
+  const value = (name: string): string => {
+    const index = argv.indexOf(`--${name}`);
+    const found = index === -1 ? undefined : argv[index + 1];
+    if (found === undefined || found === "" || found.startsWith("--")) {
+      throw new Error(`--${name} is required.`);
+    }
+    return found;
+  };
+  const target = { ring: value("ring"), platform: value("platform"), arch: value("arch") };
+  if (!isAppReleaseRing(target.ring)) throw new Error(`Unknown release ring ${target.ring}.`);
+  if (!argv.includes("--legacy-document")) return updateFeedRelativePath(target);
+  const legacy = legacyUpdateFeedRelativePath(target);
+  if (legacy === undefined) {
+    throw new Error(`No old-shape feed is published on the ${target.ring} ring.`);
+  }
+  return legacy;
 }
 
 async function main(argv: ReadonlyArray<string>): Promise<void> {
@@ -285,6 +379,12 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     );
     return;
   }
+  if (argv.includes("--print-feed-path")) {
+    // The workflows name the files they publish from here, so a feed cannot
+    // land at a name the app does not read.
+    console.log(printedFeedPath(argv));
+    return;
+  }
   const dryRun = argv.includes("--dry-run");
   const command = parseFeedCommand(argv.filter((argument) => argument !== "--dry-run"));
   // Hashed from the artifact on disk rather than taken as an argument: the
@@ -296,6 +396,7 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
   const releaseInput: ReleaseInput = {
     version: command.version,
     ring: command.ring,
+    flavor: command.flavor,
     platform: command.platform,
     arch: command.arch,
     url: command.url,
@@ -307,7 +408,9 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
   if (dryRun) {
     const { release, feedPath } = dryRunFeedDocument(releaseInput);
     const material = resolveFeedSigningMaterial(release.ring);
-    console.log(`Dry-run feed path: <base>/${feedPath}`);
+    console.log(
+      `Dry-run feed path: <base>/${command.legacyDocument ? legacyFeedRelativePath(release) : feedPath}`,
+    );
     console.log(
       `Dry-run release schema ok for ${release.version} (${release.platform}-${release.arch}).`,
     );
@@ -329,11 +432,16 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     throw new Error(`Refusing to sign: ${trust.reason}`);
   }
   const release = buildRelease(releaseInput);
-  const feed = signFeed(release, material.privateKey);
+  const feed = command.legacyDocument
+    ? signLegacyFeed(release, material.privateKey)
+    : signFeed(release, material.privateKey);
+  const published = command.legacyDocument
+    ? legacyFeedRelativePath(release)
+    : feedRelativePath(release);
   await mkdir(dirname(command.out), { recursive: true });
   await writeFile(command.out, `${JSON.stringify(feed, null, 2)}\n`, "utf8");
   console.log(`Signed ${release.ring} feed for ${release.version}: ${command.out}`);
-  console.log(`Publish it at <base>/${feedRelativePath(release)}`);
+  console.log(`Publish it at <base>/${published}`);
 }
 
 if (import.meta.main) {

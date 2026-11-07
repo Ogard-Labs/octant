@@ -1,3 +1,4 @@
+import type { CredentialOperation } from "./credentialRequest";
 import type {
   IntegrationCommand,
   IntegrationCredentialRequestResult,
@@ -12,6 +13,38 @@ import type {
  * between a plugin's runtime and the host.
  */
 export * from "@octant/contracts/integration";
+
+/** Read-only contributed sources. Discovery and event data never grant execution authority. */
+export interface IntegrationEventSourceProvider {
+  readonly choices: () => Promise<
+    ReadonlyArray<import("@octant/contracts").AutomationEventSourceChoice>
+  >;
+  readonly bind: (
+    selection: import("@octant/contracts").AutomationIntegrationEventTrigger,
+    signal: AbortSignal,
+  ) => Promise<IntegrationEventSource | undefined>;
+}
+
+export interface IntegrationEventSource {
+  readonly identity: string;
+  readonly label: string;
+  /** Assignment sets detect absent-to-present transitions; append sources retain seen event ids. */
+  readonly semantics: "assignment-set" | "append";
+  readonly current: () => boolean;
+  readonly read: (signal: AbortSignal) => Promise<
+    | {
+        readonly kind: "complete";
+        readonly events: ReadonlyArray<import("@octant/contracts").AutomationIntegrationEvent>;
+        /** The complete bounded observation before event filters are applied. */
+        readonly window?: import("@octant/contracts").AutomationEventSourceWindow;
+      }
+    | {
+        readonly kind: "unavailable";
+        readonly reason: "source-unavailable" | "source-limit";
+        readonly retryAfterSeconds?: number;
+      }
+  >;
+}
 
 /**
  * Request header a plugin uses to ask the host fetch interceptor to attach
@@ -54,6 +87,10 @@ export type IntegrationRevokeResult = { readonly kind: "revoked" } | { readonly 
  * filesystem handles, and shell access are never handed over.
  */
 export interface IntegrationHostPort {
+  /** Register a fixed one-use operation. Availability never grants consent. */
+  readonly registerCredentialOperation?: (
+    operation: CredentialOperation,
+  ) => { readonly kind: "registered"; readonly release: () => void } | { readonly kind: "refused" };
   readonly fetch: (input: Request) => Promise<Response>;
   readonly requestCredential: (scope: string) => Promise<IntegrationCredentialRequestResult>;
   readonly beginPkceAuthorization: (

@@ -4,6 +4,7 @@ const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_MAX_RECEIPTS = 128;
 
 interface LocalPluginImportReceipt {
+  readonly purpose: "plugin-import" | "skill-folder";
   readonly windowId: string;
   readonly absolutePath: string;
   readonly expiresAt: number;
@@ -28,6 +29,7 @@ export class LocalPluginImportReceiptStore {
   }
 
   issue(input: {
+    readonly purpose?: "skill-folder";
     readonly windowId: string;
     readonly absolutePath: string;
     readonly now: number;
@@ -39,6 +41,7 @@ export class LocalPluginImportReceiptStore {
     const receiptId = this.#uniqueReceiptId();
     const expiresAt = input.now + this.#ttlMs;
     this.#receipts.set(receiptId, {
+      purpose: input.purpose ?? "plugin-import",
       windowId: input.windowId,
       absolutePath: input.absolutePath,
       expiresAt,
@@ -47,6 +50,7 @@ export class LocalPluginImportReceiptStore {
   }
 
   consume(input: {
+    readonly purpose?: "skill-folder";
     readonly receiptId: string;
     readonly windowId: string;
     readonly now: number;
@@ -55,6 +59,7 @@ export class LocalPluginImportReceiptStore {
     if (
       receipt === undefined ||
       receipt.windowId !== input.windowId ||
+      receipt.purpose !== (input.purpose ?? "plugin-import") ||
       receipt.expiresAt <= input.now
     ) {
       if (receipt !== undefined && receipt.expiresAt <= input.now) {

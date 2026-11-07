@@ -26,6 +26,7 @@ import {
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
+import { decodeCodeLanguageReadRequest } from "@octant/contracts/code-language";
 import type {
   CodeLanguageDocumentResult,
   CodeLanguageReadResult,
@@ -328,6 +329,58 @@ const confinementRuntime =
   process.platform === "linux"
     ? existsSync("/usr/bin/bwrap")
     : process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec");
+
+describe("project-wide references through the existing companion", () => {
+  it("returns references from the initialized supported server while preserving outside-root redaction", async () => {
+    const paths = workspace();
+    const log = join(paths.root, "references.jsonl");
+    const test = harness({
+      ...paths,
+      receipts: paths.receipts,
+      component: fakeComponent("references", log),
+      confinement: passthrough,
+    });
+    const opened = await test.open("b.ts");
+    const fileId = syncedFileId(opened);
+    if (
+      opened.status !== "synced" ||
+      opened.documentVersion === undefined ||
+      opened.documentRevision === undefined
+    )
+      throw new Error("Current host did not acknowledge document revision");
+    const answer = await test.service.read(
+      { scopeId, principal: "local-window" },
+      decodeCodeLanguageReadRequest({
+        kind: "references",
+        threadId: test.state.thread.id,
+        checkoutId: test.state.checkout.id,
+        fileId,
+        position: { line: 1, character: 30 },
+        includeDeclaration: true,
+        expectedVersion: opened.documentVersion,
+        expectedRevision: opened.documentRevision,
+      }),
+    );
+    expect(answer).toMatchObject({
+      status: "references",
+      truncated: false,
+      targets: [
+        {
+          kind: "checkout-location",
+          path: "a.ts",
+          range: { start: { line: 0, character: 16 }, end: { line: 0, character: 21 } },
+        },
+        {
+          kind: "checkout-location",
+          path: "b.ts",
+          range: { start: { line: 1, character: 29 }, end: { line: 1, character: 34 } },
+        },
+        { kind: "outside-checkout", label: "elsewhere" },
+      ],
+    });
+    expect(logged(log).some((entry) => entry.method === "textDocument/references")).toBe(true);
+  });
+});
 
 describe("Code language service with the bundled TypeScript server", () => {
   it.runIf(typeScriptBinary !== undefined && confinementRuntime)(
@@ -986,44 +1039,54 @@ describe("Code language service against a hostile server", () => {
     });
   });
 
-  it("tells a server that registered for file changes which checkout files changed", async () => {
-    const paths = workspace();
-    const log = join(paths.root, "server.log");
-    let release = () => {};
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const test = harness({
-      ...paths,
-      component: fakeComponent("normal", log),
-      confinement: passthrough,
-      watcher: {
-        watch: async function* (request) {
-          // The first notice waits until the server has registered.
-          await released;
-          yield decodeCodeFileChangeNotice({
-            kind: "code-file-change",
-            threadId: request.threadId,
-            checkoutId: request.checkoutId,
-            paths: ["a.ts"],
-            truncated: false,
-            observedAt: now,
-          });
+  it.each([false, true])(
+    "tells a server about changed files in its own root, including an extra folder: %s",
+    async (extraFolder) => {
+      const paths = workspace();
+      const log = join(paths.root, "server.log");
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const test = harness({
+        ...paths,
+        component: fakeComponent("normal", log),
+        confinement: passthrough,
+        watcher: {
+          watch: async function* (request) {
+            // The first notice waits until the server has registered.
+            await released;
+            yield decodeCodeFileChangeNotice({
+              kind: "code-file-change",
+              threadId: request.threadId,
+              checkoutId: request.checkoutId,
+              paths: ["a.ts"],
+              truncated: false,
+              observedAt: now,
+            });
+          },
         },
-      },
-    });
-    syncedFileId(await test.open("b.ts"));
-    await eventually(() =>
-      logged(log).some((entry) => entry.event === "answer" && entry.id === 1000),
-    );
-    release();
-    await eventually(() =>
-      logged(log).some((entry) => entry.method === "workspace/didChangeWatchedFiles"),
-    );
-    expect(
-      logged(log).find((entry) => entry.method === "workspace/didChangeWatchedFiles")?.params,
-    ).toEqual({ changes: [{ uri: pathToFileURL(join(paths.checkout, "a.ts")).href, type: 2 }] });
-  });
+      });
+      const folder = extraFolder ? join(paths.root, "extra") : paths.checkout;
+      if (extraFolder) {
+        mkdirSync(folder);
+        writeFileSync(join(folder, "b.ts"), "export const b = 1;\n");
+        test.state.extraFolders = [folder];
+      }
+      if (extraFolder) expect((await test.agent(join(folder, "b.ts"))).status).toBe("diagnostics");
+      else syncedFileId(await test.open("b.ts"));
+      await eventually(() =>
+        logged(log).some((entry) => entry.event === "answer" && entry.id === 1000),
+      );
+      release();
+      await eventually(() =>
+        logged(log).some((entry) => entry.method === "workspace/didChangeWatchedFiles"),
+      );
+      expect(
+        logged(log).find((entry) => entry.method === "workspace/didChangeWatchedFiles")?.params,
+      ).toEqual({ changes: [{ uri: pathToFileURL(join(folder, "a.ts")).href, type: 2 }] });
+    },
+  );
 
   it("answers too-large for a document whose escaped text would not fit a frame, and does not send it", async () => {
     const { test, log } = fake("normal");

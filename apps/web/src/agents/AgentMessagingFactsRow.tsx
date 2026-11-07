@@ -1,4 +1,4 @@
-import type { AgentMessageMessagingFacts } from "@octant/contracts";
+import type { AgentMessageMessagingFacts, AgentMessageStatusSummary } from "@octant/contracts";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { useEffect, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
@@ -26,6 +26,14 @@ const REFUSE_LABELS: Record<string, string> = {
   policy: "refused by policy",
 };
 
+const RECEIPT_LABELS: Readonly<Record<AgentMessageStatusSummary["state"], string>> = {
+  "in-flight": "Queued",
+  delivered: "Delivered to provider",
+  acknowledged: "Acknowledged by recipient",
+  refused: "Refused",
+  expired: "Expired after 24 hours",
+};
+
 /**
  * The host's messaging facts in the bounds the policy admits, under the run
  * list it governs: how many messages sit open in flight against the per-sender
@@ -35,19 +43,28 @@ const REFUSE_LABELS: Record<string, string> = {
  */
 export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
   const [loaded, setLoaded] = useState<AgentMessageMessagingFacts | undefined>(props.facts);
+  const [stale, setStale] = useState(false);
   const client = props.client;
   useEffect(() => {
     if (client === undefined) return;
     let cancelled = false;
+    let reading = false;
     const read = () => {
+      if (reading) return;
+      reading = true;
       client
         .facts()
         .then((facts) => {
-          if (!cancelled) setLoaded(facts);
+          if (!cancelled) {
+            setLoaded(facts);
+            setStale(false);
+          }
         })
         .catch(() => {
-          // The row is a status aid, not the center's purpose: an unavailable
-          // read leaves the last facts up rather than shouting over the list.
+          if (!cancelled) setStale(true);
+        })
+        .finally(() => {
+          reading = false;
         });
     };
     read();
@@ -66,6 +83,7 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
   const refusals = facts.recent.filter((entry) => entry.state === "refused");
   const shownRefusals = refusals.slice(0, SHOWN_REFUSALS);
   const latestRefusal = refusals[0];
+  const receipts = facts.recent.filter((entry) => entry.state !== "refused").slice(0, 5);
   return (
     <>
       <p
@@ -74,10 +92,11 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
         data-testid="agent-messaging-facts"
       >
         <span>
-          {facts.openInFlight} of {facts.maxOpenInFlightPerSender} open messages per sender
+          {facts.openInFlight} queued across visible threads · Limit{" "}
+          {facts.maxOpenInFlightPerSender} per sender
         </span>
         <span>
-          {facts.delivered} delivered · {facts.refused} refused
+          {facts.delivered} provider-delivered · {facts.refused} refused
         </span>
         {latestRefusal === undefined ? null : (
           <span>
@@ -85,6 +104,36 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
           </span>
         )}
       </p>
+      {stale && props.facts === undefined ? (
+        <p className="agents-center__messaging">
+          Message receipts could not refresh. Showing the last host report.
+        </p>
+      ) : null}
+      {receipts.length === 0 ? null : (
+        <>
+          <ul aria-label="Recent message receipts" className="agents-center__receipts">
+            {receipts.map((entry) => (
+              <li key={String(entry.messageId)}>
+                <span title={String(entry.senderThreadId)}>
+                  {threadLabel(String(entry.senderThreadId))}
+                </span>
+                {" → "}
+                <span title={String(entry.recipientThreadId)}>
+                  {threadLabel(String(entry.recipientThreadId))}
+                </span>
+                <span>{RECEIPT_LABELS[entry.state]}</span>
+                <time dateTime={String(entry.occurredAt)}>
+                  {relativeTimeLabel(String(entry.occurredAt))}
+                </time>
+              </li>
+            ))}
+          </ul>
+          <p className="agents-center__messaging">
+            Delivered means the provider accepted the message. Acknowledged means the recipient
+            reported receipt; understanding and action are separate.
+          </p>
+        </>
+      )}
       {refusals.length === 0 ? null : (
         <ul aria-label="Refused agent messages" className="agents-center__refusals">
           {shownRefusals.map((entry) => (

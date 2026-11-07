@@ -24,7 +24,10 @@
     "./cloud-iam": "./src/cloudIam.ts",
     "./cloud-iam-conformance": "./src/cloudIamConformance.ts",
     "./image-generation": "./src/imageGeneration.ts",
-    "./image-generation-conformance": "./src/imageGenerationConformance.ts"
+    "./image-generation-conformance": "./src/imageGenerationConformance.ts",
+    "./cloud-sessions": "./src/cloudSessions.ts",
+    "./openai-cloud-session-protocol": "./src/openAiCloudSessionProtocol.ts",
+    "./cloud-session-conformance": "./src/cloudSessionConformance.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

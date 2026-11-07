@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AppReleaseRing } from "./appUpdates";
+
 import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
 import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
@@ -26,6 +27,9 @@ import { ImageGenerationSettings } from "./imageGeneration";
 import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
+
+export const AppUpdateChannel = Schema.Literal("stable", "preview", "nightly");
+export type AppUpdateChannel = typeof AppUpdateChannel.Type;
 
 /** Native menu contributions carry presentation and opaque action IDs only. */
 export type NativeMenuEntry =
@@ -454,6 +458,49 @@ export type TranscriptWidth = typeof TranscriptWidth.Type;
 /** How the composer's plan-usage meters draw their bar: a smooth fill or square cells. */
 export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
 export type UsageBarStyle = typeof UsageBarStyle.Type;
+/**
+ * How much of an agent's work a transcript shows open. Presentation only: it
+ * never changes what is asked of a model or what a client fetches.
+ */
+export const ReplyDetailLevel = Schema.Literal("low", "medium", "high");
+export type ReplyDetailLevel = typeof ReplyDetailLevel.Type;
+
+/** One thread's own Reply detail level, which wins over the default. */
+export const ThreadReplyDetail = Schema.Struct({
+  mode: OctantMode,
+  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  level: ReplyDetailLevel,
+}).annotations(strict);
+export type ThreadReplyDetail = typeof ThreadReplyDetail.Type;
+
+/**
+ * How many threads may carry their own level. When the list is full, setting
+ * one more drops the longest-standing choice, so the settings document stays
+ * bounded however many threads a host has had.
+ */
+export const MAX_THREAD_REPLY_DETAILS = 500;
+export const ThreadReplyDetails = Schema.Array(ThreadReplyDetail).pipe(
+  Schema.maxItems(MAX_THREAD_REPLY_DETAILS),
+  Schema.filter(
+    (entries) =>
+      new Set(entries.map((entry) => `${entry.mode}:${entry.threadId}`)).size === entries.length,
+    { message: () => "A thread carries at most one Reply detail level." },
+  ),
+);
+export type ThreadReplyDetails = typeof ThreadReplyDetails.Type;
+
+/**
+ * The read a paired device makes to draw a thread at the person's level: the
+ * default and the threads that chose their own. Presentation only; it is the
+ * whole of what this route discloses from the host's shell settings.
+ */
+export const REPLY_DETAIL_PATH = "/api/reply-detail";
+export const ReplyDetailReading = Schema.Struct({
+  defaultLevel: ReplyDetailLevel,
+  threads: ThreadReplyDetails,
+}).annotations(strict);
+export type ReplyDetailReading = typeof ReplyDetailReading.Type;
+export const decodeReplyDetailReading = Schema.decodeUnknownSync(ReplyDetailReading);
 
 export const MIN_COMPLETED_THREAD_ARCHIVE_DAYS = 1;
 export const MAX_COMPLETED_THREAD_ARCHIVE_DAYS = 365;
@@ -598,11 +645,12 @@ export const ShellSettings = Schema.Struct({
   /**
    * Whether Octant may check for updates on its own. Off means no request is
    * made at all rather than a check whose answer is withheld — what leaves the
-   * machine is the point of the switch. A store
-   * persisted before updates shipped decodes to on, which is the behaviour the
-   * release notes describe.
+   * machine is the point of the switch. Off by default, including for a store
+   * persisted before updates shipped: an unrecorded preference must not turn
+   * into network traffic the person never asked for (data protection by
+   * default). Turning the switch on records the choice explicitly.
    */
-  automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
     default: () => ({ enabled: true, automaticUpdates: false }),
   }),
@@ -636,6 +684,13 @@ export const ShellSettings = Schema.Struct({
    * were built for".
    */
   releaseRing: Schema.optional(AppReleaseRing),
+  /**
+   * The update channel chosen in Settings. Two choices follow the same ring
+   * (Preview and Nightly both sit on `candidate`), so the ring alone cannot
+   * say which one was picked. Absent means "derive it from the ring":
+   * `stable` is Stable and `candidate` is Preview.
+   */
+  updateChannel: Schema.optional(AppUpdateChannel),
   /** Enabled Open in applications, in the order shown by the native shell. */
   openInApplications: Schema.optionalWith(OpenInApplicationOrder, {
     default: () => [...DEFAULT_OPEN_IN_APPLICATIONS],
@@ -651,6 +706,18 @@ export const ShellSettings = Schema.Struct({
    * before the setting shipped decodes to the smooth bar.
    */
   usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
+  /**
+   * How much of a turn's thinking and tool calls the transcript shows open.
+   * A store persisted before the setting shipped decodes to low, the quiet
+   * folding every transcript had before.
+   */
+  replyDetail: Schema.optionalWith(ReplyDetailLevel, { default: () => "low" as const }),
+  /**
+   * Threads that chose their own Reply detail level. A thread not listed
+   * follows `replyDetail`, so changing the default never moves a thread that
+   * chose. A store persisted before per-thread levels shipped decodes to none.
+   */
+  threadReplyDetail: Schema.optionalWith(ThreadReplyDetails, { default: () => [] }),
   showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
    * Whether the quiet stats line (tokens, cache hit, speed, first-token time,

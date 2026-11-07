@@ -1,3 +1,4 @@
+import { ConversationInputPolicy } from "./conversationInputs";
 import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -8,7 +9,7 @@ import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { AutoReviewer, ShieldModelChoice } from "./shield";
-import { ThreadWorkingDirectory } from "./workingDirectory";
+import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import {
   PermissionPersistence,
   ProviderExecutionPolicy,
@@ -19,6 +20,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 
@@ -326,6 +328,8 @@ export const CodeThread = Schema.Struct({
    * {@link ThreadDocumentDelivery}.
    */
   documentDelivery: Schema.optional(ThreadDocumentDelivery),
+  /** A person's default for this task's new Browser pages; a profile choice grants no access. */
+  browserTaskProfile: Schema.optional(BrowserProfileChoice),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
@@ -376,6 +380,7 @@ export const CodeThread = Schema.Struct({
     }).annotations(strict),
   ),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
   deliveryTarget: CodeDeliveryTarget,
   /**
    * Whether the harness may answer approval prompts on the user's behalf using
@@ -564,6 +569,8 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   threadId: CodeThreadId,
   projectId: ProjectId,
   bindingRevisionId: BindingRevisionId,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
+  workingDirectory: Schema.optional(ThreadWorkingDirectory),
   title: Schema.NonEmptyTrimmedString,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -651,6 +658,7 @@ export type ForkCodeThreadCommand = typeof ForkCodeThreadCommand.Type;
  */
 export const MergeCodeForkContextCommand = Schema.Struct({
   kind: Schema.Literal("merge-code-fork-context"),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   /** The fork. */
   threadId: CodeThreadId,
   throughOperationId: Schema.UUID,
@@ -787,6 +795,11 @@ export const CodeCommand = Schema.Union(
    * choose Canvas.
    */
   Schema.Struct({
+    kind: Schema.Literal("change-code-thread-browser-profile"),
+    ...CodeThreadCommandFields,
+    browserTaskProfile: BrowserProfileChoice,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-thread-document-delivery"),
     ...CodeThreadCommandFields,
     documentDelivery: ThreadDocumentDelivery,
@@ -806,6 +819,7 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("change-code-thread-working-directory"),
     ...CodeThreadCommandFields,
     workingDirectory: ThreadWorkingDirectory,
+    workingFolderId: Schema.optional(ProjectWorkingFolderId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("propose-code-delivery-outcome"),
@@ -845,6 +859,7 @@ export type CodeCommand = typeof CodeCommand.Type;
 export const CodeFailure = Schema.Struct({
   category: Schema.Literal(
     "unavailable",
+    "tools-changed",
     "unauthorized",
     "unsupported",
     "waiting",
@@ -1185,6 +1200,7 @@ export const CodeForkMergeBackOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeForkMergeBackRefusal,
+    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   }).annotations(strict),
 );
 export type CodeForkMergeBackOutcome = typeof CodeForkMergeBackOutcome.Type;

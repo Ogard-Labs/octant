@@ -9,6 +9,8 @@ import {
   decodeCodeLanguageReadRequest,
   decodeCodeLanguageReadResult,
   MAX_CODE_LANGUAGE_DEFINITION_TARGETS,
+  MAX_CODE_LANGUAGE_REFERENCES,
+  MAX_CODE_LANGUAGE_REFERENCE_FILES,
   MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH,
   MAX_CODE_LANGUAGE_DIAGNOSTICS,
   MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH,
@@ -33,6 +35,34 @@ function diagnostic(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Code language read contracts", () => {
+  it("requires an acknowledged revision for bounded rename and quick-fix previews", () => {
+    const request = {
+      kind: "rename",
+      ...scope,
+      newName: "renamed",
+      position: { line: 0, character: 1 },
+      expectedVersion: 1,
+      expectedRevision: "90000000-0000-4000-8000-000000000001",
+    };
+    expect(decodeCodeLanguageReadRequest(request)).toEqual(request);
+    for (const change of [
+      { newName: "" },
+      { newName: "a\nb" },
+      { expectedRevision: undefined },
+      { expectedVersion: 0 },
+    ])
+      expect(() => decodeCodeLanguageReadRequest({ ...request, ...change })).toThrow();
+    expect(() =>
+      decodeCodeLanguageReadResult({
+        status: "edit-previews",
+        ...scope,
+        documentVersion: 1,
+        documentRevision: request.expectedRevision,
+        previews: new Array(17).fill({ title: "fix", files: [] }),
+      }),
+    ).toThrow();
+  });
+
   it("decodes a diagnostics read and a definition read for one file of a Code thread", () => {
     expect(decodeCodeLanguageReadRequest({ kind: "diagnostics", ...scope })).toEqual({
       kind: "diagnostics",
@@ -47,6 +77,110 @@ describe("Code language read contracts", () => {
     ).toBe("definition");
   });
 
+  it("allows exact foreground revision guards only on changes and never accepts caller authority from a body", () => {
+    const expectedRevision = "90000000-0000-4000-8000-000000000001";
+    const change = { kind: "change", ...scope, text: "draft", expectedRevision };
+    expect(decodeCodeLanguageDocumentRequest(change)).toEqual(change);
+    expect(decodeCodeLanguageDocumentResult({ status: "stale" })).toEqual({ status: "stale" });
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({ ...change, expectedRevision: "bad" }),
+    ).toThrow();
+    expect(() => decodeCodeLanguageDocumentRequest({ ...change, isCurrent: () => true })).toThrow();
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({ ...change, windowId: scope.threadId }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({
+        kind: "open",
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        path: "b.ts",
+        text: "draft",
+        expectedRevision,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageDocumentRequest({ kind: "close", ...scope, expectedRevision }),
+    ).toThrow();
+  });
+  it("binds a references read to a known acknowledged version and document revision", () => {
+    const read = {
+      kind: "references",
+      ...scope,
+      position: { line: 1, character: 2 },
+      includeDeclaration: true,
+      expectedVersion: 3,
+      expectedRevision: "90000000-0000-4000-8000-000000000001",
+    };
+    expect(decodeCodeLanguageReadRequest(read)).toEqual(read);
+    expect(decodeCodeLanguageReadRequest({ kind: "capabilities", ...scope }).kind).toBe(
+      "capabilities",
+    );
+    for (const change of [
+      { expectedVersion: 0 },
+      { expectedVersion: 1.5 },
+      { expectedVersion: undefined },
+      { expectedRevision: undefined },
+      { expectedRevision: "not-a-revision" },
+      { path: "src/private.ts" },
+      { windowId: "forged" },
+    ])
+      expect(() => decodeCodeLanguageReadRequest({ ...read, ...change })).toThrow();
+    const result = {
+      status: "references",
+      ...scope,
+      documentVersion: 3,
+      documentRevision: read.expectedRevision,
+      targets: [{ kind: "checkout-location", path: "src/a.ts", range }],
+      truncated: false,
+    };
+    expect(decodeCodeLanguageReadResult(result)).toEqual(result);
+    expect(() =>
+      decodeCodeLanguageReadResult({
+        ...result,
+        targets: Array.from({ length: MAX_CODE_LANGUAGE_REFERENCES + 1 }, () => result.targets[0]),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageReadResult({
+        ...result,
+        targets: Array.from({ length: MAX_CODE_LANGUAGE_REFERENCE_FILES + 1 }, (_, index) => ({
+          kind: "checkout-location",
+          path: `src/file-${index}.ts`,
+          range,
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageReadResult({
+        ...result,
+        targets: [{ uri: "file:///private/location", range }],
+      }),
+    ).toThrow();
+  });
+  it("keeps old-host sync acknowledgements readable without pretending to know a current revision", () => {
+    const legacy = decodeCodeLanguageDocumentResult({ status: "synced", ...scope });
+    if (legacy.status !== "synced") throw new Error("Expected sync fixture");
+    expect(legacy.documentRevision).toBeUndefined();
+    expect(() =>
+      decodeCodeLanguageDocumentResult({
+        status: "synced",
+        ...scope,
+        documentVersion: 1,
+        documentRevision: "not-a-revision",
+      }),
+    ).toThrow();
+    expect(
+      decodeCodeLanguageReadResult({ status: "capabilities", ...scope, references: "unknown" }),
+    ).toMatchObject({ references: "unknown" });
+    expect(
+      decodeCodeLanguageReadResult({
+        status: "unsupported",
+        capability: "references",
+        support: "unsupported",
+      }),
+    ).toMatchObject({ status: "unsupported" });
+  });
   it("refuses a read that names no file, a raw path, a negative position, or an unknown kind", () => {
     for (const request of [
       { kind: "diagnostics", threadId: scope.threadId, checkoutId: scope.checkoutId },

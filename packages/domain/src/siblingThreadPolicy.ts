@@ -1,10 +1,11 @@
 import type {
-  CodeThreadId,
   OctantMode,
   ProjectId,
   SiblingThreadAction,
+  SiblingThreadId,
   SiblingThreadReference,
   SiblingThreadRefuseReason,
+  ThreadsToolOperation,
 } from "@octant/contracts";
 import {
   DEFAULT_SIBLING_THREAD_WAIT_MS,
@@ -12,16 +13,17 @@ import {
   MAX_SIBLING_THREAD_READS_PER_TURN,
   MAX_SIBLING_THREAD_WAITS_PER_TURN,
   MAX_SIBLING_THREAD_WAIT_MS,
-  decodeCodeThreadId,
   decodeProjectId,
+  decodeSiblingThreadId,
   decodeSiblingThreadReference,
 } from "@octant/contracts";
 
 /**
- * Pure policy for the sibling-threads tool: which threads a Code turn may
- * list, read, and wait on, how a reference resolves, and the per-turn bounds.
- * Nothing here reads storage or grants authority; the host supplies the facts
- * on every call and owns the taint, the journal, and the transcript read.
+ * Pure policy for the threads tool: which operations a turn is offered, which
+ * threads a Work or Code turn may list, read, and wait on, how a reference
+ * resolves, and the per-turn bounds. Nothing here reads storage or grants
+ * authority; the host supplies the facts on every call and owns the taint,
+ * the journal, the transcript read, and message delivery.
  */
 
 /**
@@ -34,7 +36,7 @@ export const SIBLING_THREAD_UNREACHABLE = "That thread cannot be read from this 
 
 /** Where the calling turn stands. */
 export interface SiblingThreadCaller {
-  readonly threadId: CodeThreadId;
+  readonly threadId: SiblingThreadId;
   /** Absent for a thread outside any Project, which reads nothing. */
   readonly projectId: ProjectId | undefined;
   readonly mode: OctantMode;
@@ -46,7 +48,7 @@ export interface SiblingThreadCaller {
  * messaging, so its id refuses as an unknown one.
  */
 export interface SiblingThreadFacts {
-  readonly threadId: CodeThreadId;
+  readonly threadId: SiblingThreadId;
   readonly projectId: ProjectId | undefined;
   readonly mode: OctantMode;
   /** Completed or archived. A deleted thread does not resolve at all. */
@@ -54,18 +56,18 @@ export interface SiblingThreadFacts {
 }
 
 /**
- * Whether the caller may see a thread: both are Code threads, the target is
- * another, still-open thread of the caller's own Project. A Project has one
- * mode, so today this is Code to Code; Chat and Work conversations are never
- * callers or targets.
+ * Whether the caller may see a thread: both are threads of one Work or Code
+ * Project, and the target is another, still-open thread of it. A Project has
+ * one mode, so this is Work to Work or Code to Code; Chat conversations have
+ * no folder or board and are never callers or targets.
  */
 export function siblingThreadReadable(
   caller: SiblingThreadCaller,
   target: SiblingThreadFacts,
 ): boolean {
   return (
-    caller.mode === "code" &&
-    target.mode === "code" &&
+    (caller.mode === "work" || caller.mode === "code") &&
+    target.mode === caller.mode &&
     caller.projectId !== undefined &&
     target.projectId !== undefined &&
     String(caller.projectId) === String(target.projectId) &&
@@ -76,7 +78,7 @@ export function siblingThreadReadable(
 
 /** The reference `list` returns for a readable thread. */
 export function siblingThreadReference(target: {
-  readonly threadId: CodeThreadId;
+  readonly threadId: SiblingThreadId;
   readonly projectId: ProjectId;
 }): SiblingThreadReference {
   return decodeSiblingThreadReference(`${String(target.threadId)}@${String(target.projectId)}`);
@@ -89,10 +91,10 @@ export function siblingThreadReference(target: {
  */
 export function parseSiblingThreadReference(
   reference: string,
-): { readonly threadId: CodeThreadId; readonly projectId: ProjectId } | undefined {
+): { readonly threadId: SiblingThreadId; readonly projectId: ProjectId } | undefined {
   try {
     const [threadId, projectId] = decodeSiblingThreadReference(reference).split("@");
-    return { threadId: decodeCodeThreadId(threadId), projectId: decodeProjectId(projectId) };
+    return { threadId: decodeSiblingThreadId(threadId), projectId: decodeProjectId(projectId) };
   } catch {
     return undefined;
   }
@@ -203,4 +205,41 @@ export function siblingThreadWaitMs(requested: number | undefined): number {
  */
 export function siblingThreadActionIngestsContent(action: SiblingThreadAction): boolean {
   return action !== "wait";
+}
+
+/**
+ * The operations one turn is offered, in the order its enum lists them. The
+ * read-only operations reach every Work and Code turn whose profile names the
+ * tool, Plan included. Messaging is Code to Code only: it is withheld in Plan,
+ * from Work (its turns do not carry messages, so a message to a Work thread
+ * would never arrive), and from a profile that does not name it. `board` is
+ * the designated planner's alone. `help` comes with any other operation and
+ * never alone, so a turn with nothing it may do is offered no tool at all.
+ */
+export function threadsToolOperations(input: {
+  readonly mode: OctantMode;
+  /** The turn's access posture now; `undefined` where the mode has no Plan. */
+  readonly posture: string | undefined;
+  readonly profileAllowsRead: boolean;
+  readonly profileAllowsSend: boolean;
+  readonly profileAllowsBoard: boolean;
+  /** Whether the host carries messages into this mode's turns. */
+  readonly messagingCarried: boolean;
+  readonly plannerThread: boolean;
+}): ReadonlyArray<ThreadsToolOperation> {
+  if (input.mode !== "work" && input.mode !== "code") return [];
+  const operations: ThreadsToolOperation[] = [];
+  if (input.profileAllowsRead) operations.push("list", "read", "wait");
+  if (
+    input.mode === "code" &&
+    input.messagingCarried &&
+    input.profileAllowsSend &&
+    input.posture !== "plan"
+  ) {
+    operations.push("send", "acknowledge", "receipts");
+  }
+  if (input.mode === "code" && input.plannerThread && input.profileAllowsBoard) {
+    operations.push("board");
+  }
+  return operations.length === 0 ? [] : ["help", ...operations];
 }

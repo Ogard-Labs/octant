@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeMcpOAuthClientRegistration,
   decodeHostOAuthDescriptor,
   decodeHostOAuthJournalRecord,
   decodeHostOAuthSignInOffer,
@@ -8,6 +9,120 @@ import {
 } from "./hostOAuth";
 
 describe("host OAuth contracts", () => {
+  it("accepts only the closed GitHub OAuth App read descriptor and actionable reconnect reasons", () => {
+    const descriptor = {
+      descriptorId: "github-read",
+      clientId: "owned-app",
+      dialect: "github-mcp-oauth-app",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://github.com/login/oauth/authorize",
+      tokenEndpoint: "https://github.com/login/oauth/access_token",
+      resource: "https://api.githubcopilot.com/mcp/",
+      mcpTransportUrl: "https://api.githubcopilot.com/mcp/",
+      mcpIssuer: "https://github.com/login/oauth",
+      redirectPort: 43125,
+      scopes: ["read:user", "offline_access"],
+      termsId: "github-read-1",
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: "55000000-0000-4000-8000-000000000001",
+        tokenEndpoint: "https://github.com/login/oauth/access_token",
+      },
+    };
+    expect(decodeHostOAuthDescriptor(descriptor)).toEqual(descriptor);
+    const repositories = {
+      ...descriptor,
+      mcpPermissionProfile: "github-repositories-read-write",
+      scopes: ["read:user", "repo", "offline_access"],
+    };
+    expect(decodeHostOAuthDescriptor(repositories)).toEqual(repositories);
+    for (const change of [
+      { mcpPermissionProfile: undefined },
+      { mcpPermissionProfile: "public_repo" },
+      { scopes: ["read:user", "offline_access"] },
+      { dialect: "mcp-authorization" },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor({ ...repositories, ...change })).toThrow();
+    }
+    for (const change of [
+      { scopes: ["repo", "offline_access"] },
+      { redirectHostname: "localhost" },
+      { dialect: "mcp-authorization" },
+      { resource: "https://api.githubcopilot.com/" },
+      { mcpIssuer: "https://other.example" },
+      { tokenEndpoint: "https://other.example/token" },
+      { clientAuthentication: undefined },
+      {
+        clientAuthentication: { ...descriptor.clientAuthentication, method: "client_secret_basic" },
+      },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor({ ...descriptor, ...change })).toThrow();
+    }
+    for (const reason of ["permission-mismatch", "identity-unavailable"])
+      expect(
+        decodeHostOAuthSignInState({
+          kind: "sign-in-again",
+          credentialRef: "55000000-0000-4000-8000-000000000001",
+          reason,
+        }),
+      ).toEqual({
+        kind: "sign-in-again",
+        credentialRef: "55000000-0000-4000-8000-000000000001",
+        reason,
+      });
+  });
+
+  it("accepts reusable registration metadata and refuses raw secrets or unbound confidential clients", () => {
+    const registration = {
+      kind: "registered",
+      clientId: "owned-client",
+      issuer: "https://auth.example",
+      resource: "https://mcp.example/mcp",
+      redirectPort: 43126,
+    };
+    expect(decodeMcpOAuthClientRegistration(registration)).toEqual(registration);
+    expect(
+      decodeMcpOAuthClientRegistration({
+        ...registration,
+        kind: "metadata-document",
+        clientId: "https://client.example/oauth.json",
+      }).kind,
+    ).toBe("metadata-document");
+    for (const invalid of [
+      { ...registration, clientSecret: "must-not-accept" },
+      { ...registration, kind: "metadata-document", clientId: "plain-client-id" },
+      {
+        ...registration,
+        clientAuthentication: { method: "client_secret_post", secretRef: "not-a-ref" },
+      },
+      {
+        ...registration,
+        clientAuthentication: {
+          method: "client_secret_post",
+          secretRef: "44000000-0000-4000-8000-000000000001",
+        },
+      },
+    ])
+      expect(() => decodeMcpOAuthClientRegistration(invalid)).toThrow();
+    const descriptor = {
+      descriptorId: "registered-mcp",
+      clientId: "owned-client",
+      dialect: "mcp-authorization",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://auth.example/authorize",
+      tokenEndpoint: "https://auth.example/token",
+      scopes: [],
+      termsId: "terms-1",
+      resource: registration.resource,
+      clientAuthentication: {
+        method: "client_secret_post",
+        secretRef: "44000000-0000-4000-8000-000000000001",
+        tokenEndpoint: "https://other.example/token",
+      },
+    };
+    expect(() => decodeHostOAuthDescriptor(descriptor)).toThrow();
+  });
+
   it("rejects a journal record that carries a token", () => {
     expect(() =>
       decodeHostOAuthJournalRecord({

@@ -68,10 +68,14 @@ confirmation when work may remain. Ambiguous identity or inventory becomes
 Read-only observation and mutation are separate ports. Mutation serializes
 per checkout and refuses an active Git index lock.
 
-Serializing does not make a restore safe against another thread's turn. Restoring
-files in place refuses while a different thread has a writing turn in flight on
-the same checkout path. A thread on its own managed worktree has its own path
-and is never held up by, or holding up, the Project's checkout.
+Restoring files in place and discarding tracked changes refuse while another
+thread has a writing turn running or waiting on approval in the same checkout
+folder. Discard also waits for you to finish or stop the requesting thread's own
+turn before you retry. The refusal names the blocking thread when it is in the
+same Project. Approval does not override this check: a writer that starts while
+you review an approval still blocks discard. A turn starting during an overwrite
+waits for it to finish. Plan turns and threads on a different managed worktree
+do not block the operation. Refresh Review before retrying if the files changed.
 
 **Unavailable in V1:** broad staging, shared stash, reset, checkout-based
 discard, rebase, history rewriting, and force push options. Staging always
@@ -112,7 +116,9 @@ receives an explicit normalized path set.
   requests it opens** on a Code routine in Automation Center. Only a window on
   this computer turns either on, and the head and required-check rules still
   apply. Switch the choice off and the next merge asks again. A routine's
-  choice covers only the threads its own runs create.
+  choice covers only the threads its own runs create. The agent can also ask
+  to **watch** its own pull request; see
+  [A thread watching its pull request](#a-thread-watching-its-pull-request).
 - **You merge yourself.** Open a pull request's review and choose a method,
   then **Confirm merge**. Octant merges only the head you reviewed, refuses
   if it moved or if a required check has not passed, and uses your signed-in
@@ -140,6 +146,7 @@ receives an explicit normalized path set.
 | Stage, commit, push, create PR   | Deny                                                        | Prompt                                                   | Allow               |
 | Merge, comment, or reply on a PR | Deny                                                        | Prompt for each act                                      | Prompt for each act |
 | Labels, close, reopen a PR       | Deny                                                        | Prompt                                                   | Allow               |
+| Watch its own PR                 | Deny (stopping a watch is allowed)                          | Prompt for each act                                      | Prompt for each act |
 | Create sibling managed root      | Separate local-user confirmation (denied to remote clients) |                                                          |                     |
 
 ## Pull requests workspace
@@ -209,6 +216,33 @@ phone, before it turns on.
   request's review again.
 
 Every switch change and every wake is recorded in Octant's journal.
+
+### A thread watching its pull request
+
+Instead of checking its pull request over and over, a Code thread's agent can
+ask to watch it, for example after it pushes or while it waits on reviewers.
+The thread shows you which pull request and the limits, and nothing is watched
+until you allow it. It asks every time, at every access level, and never in Plan
+or in a turn Octant started on its own.
+
+- While the watch is on, Octant looks at the pull request about once a minute
+  and starts a new turn in the thread when the checks on its latest commit
+  finish (passed or failed), the review decision changes, someone posts a new
+  review or comment, or the branch starts to conflict with its base. Everything
+  it found in one look arrives in one turn. Comments posted under your own
+  GitHub login are left out, since they are yours or the agent's.
+- The turn says what changed and leaves the next step to the agent, under the
+  thread's usual access level and approvals. The text from GitHub is marked as
+  outside content, as for Auto-fix. The watch never tries to fix anything by
+  itself.
+- It waits while a turn is running in the thread or you are typing there, and
+  it ends when the pull request merges or closes, the thread is archived, the
+  Project no longer connects the repository, the agent stops it, after ten
+  wakes, or three days after it began. Reaching ten wakes or three days marks
+  the thread for your follow-up. After Octant restarts, it stays quiet until
+  you open the pull request's review again or the agent asks to watch it again.
+
+Each watch, each wake, and why it ended are recorded in Octant's journal.
 
 A Code thread's right sidebar can also host **Pull requests**: it lists the
 active Project's active rows from the same cached snapshot and opens a selected

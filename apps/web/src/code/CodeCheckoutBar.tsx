@@ -72,6 +72,26 @@ export function CodeCheckoutBar(props: {
 
   return (
     <div aria-label="Checkout" className="code-checkout-bar">
+      {checkout.workingFolderUnavailable === true ? (
+        <span className="code-checkout-bar__working-folder" role="status">
+          Working folder unavailable
+        </span>
+      ) : checkout.workingFolder === undefined ? null : (
+        <span
+          className="code-checkout-bar__working-folder"
+          title={
+            checkout.workingFolder.kind === "extra"
+              ? "Shared folder outside the worktree. Git, Review and changed files cover the checkout only."
+              : "Task working folder"
+          }
+        >
+          Working: {checkout.workingFolder.label}
+          {String(checkout.workingDirectory ?? ".") === "."
+            ? ""
+            : ` / ${checkout.workingDirectory}`}
+          {checkout.workingFolder.kind === "extra" ? " (shared; Review is checkout only)" : ""}
+        </span>
+      )}
       <span className="code-checkout-bar__identity">
         <span
           className="code-checkout-bar__project"

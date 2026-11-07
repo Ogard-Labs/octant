@@ -2,25 +2,31 @@
 #
 # Those installs trust only the stable key and read
 # `<base>/<ring>/<platform>-<arch>.json`. The preview workflow now signs with
-# the preview key and publishes under `<platform>-<arch>.preview-key.json`, so
-# without this they would never see another release. This job signs one
-# already-published preview or candidate build with the stable key and puts it
-# at the old name, where nothing overwrites it: an install that comes back
+# the preview key and publishes under newer names, so without this they would
+# never see another release. This job signs one already-published candidate
+# build with the stable key and puts it at `candidate/<platform>-<arch>.json`, where nothing overwrites it: an install that comes back
 # online months later still finds a release it can verify, and that release
 # reads the new name from then on.
 #
 # It runs in the approval-gated `stable` environment because only that holds
-# the stable key. A stable-key signature on a preview release grants nothing
+# the stable key. A stable-key signature on a candidate release grants nothing
 # the stable key cannot already do, and the app refuses it for the stable ring.
 # Nothing is built here; the bytes are the published release asset, hashed
 # into the signature as for any feed.
+#
+# Candidate tags only. Installs that read the old preview names are Octant
+# builds, and the preview ring now carries Octant Nightly, so bridging one to a
+# preview tag would replace Octant with Nightly (on Linux nothing else would
+# refuse it). Those installs reach new builds by switching to Octant's Preview
+# channel, the candidate ring. The bridge document keeps the old shape, without
+# the app name, because the installs reading it decode a feed strictly.
 name: Release (preview bridge)
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Published preview or candidate tag to bridge to, e.g. v0.2.0-preview.20261012.57"
+        description: "Published candidate tag to bridge to, e.g. v0.2.0-candidate.20261012.57"
         required: true
         type: string
 
@@ -67,19 +73,19 @@ jobs:
           fetch-tags: true
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
 
-      - name: Refuse a tag that is not a key-aware preview or candidate build
+      - name: Refuse a tag that is not a key-aware candidate build
         id: tag
         env:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           case "$TAG" in
-            v*-preview.*) ring="preview" ;;
             v*-candidate.*) ring="candidate" ;;
-            *) echo "${TAG} is not a preview or candidate tag." >&2; exit 1 ;;
+            v*-preview.*) echo "${TAG} is an Octant Nightly build; Octant installs are never bridged to it." >&2; exit 1 ;;
+            *) echo "${TAG} is not a candidate tag." >&2; exit 1 ;;
           esac
           source="${RUNNER_TEMP}/bridged-appUpdateFeed.ts"
           git show "${TAG}:apps/desktop/src/appUpdateFeed.ts" > "$source"
@@ -117,13 +123,18 @@ jobs:
           set -euo pipefail
           downloads="${RUNNER_TEMP}/assets"
           mkdir -p "$downloads"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Octant-*${ASSET_SUFFIX}" --dir "$downloads"
+          # Candidate builds publish as `Octant-<version>…`, the exact
+          # space-free name `release-preview.yml` uploads.
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Octant-${VERSION}${ASSET_SUFFIX}" --dir "$downloads"
           archive=$(ls "$downloads"/*"${ASSET_SUFFIX}")
           # The bare `${TARGET}.json` name on purpose: it is the name installs
-          # that predate the preview key ask for.
+          # that predate the preview key ask for. The old shape, because those
+          # installs predate the app name too.
           bun scripts/sign-update-feed.ts \
+            --legacy-document \
             --version "$VERSION" \
             --ring "$RING" \
+            --flavor stable \
             --platform "$PLATFORM" \
             --arch "$ARCH" \
             --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$archive")" \

@@ -44,6 +44,8 @@ export interface TerminalLauncher {
 }
 
 export interface TerminalLaunchRequest {
+  readonly command?: string;
+  readonly admit?: () => boolean;
   readonly terminalId: string;
   readonly shell: string;
   readonly cwd: string;
@@ -233,11 +235,14 @@ export class TerminalService {
     if (request.server !== undefined && request.credentialReferences.length > 0) {
       throw new Error("A terminal on a server carries no credentials from this host.");
     }
+    if (request.admit !== undefined && !request.admit())
+      throw new Error("Terminal authority changed before launch.");
     const process =
       request.server !== undefined
         ? startServerTerminal(request.server, { columns: request.columns, rows: request.rows })
         : this.#options.port.start({
             shell: request.shell,
+            ...(request.command === undefined ? {} : { command: request.command }),
             cwd: request.cwd,
             stateScope: request.stateScope,
             environment,

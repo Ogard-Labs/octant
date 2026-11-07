@@ -181,6 +181,24 @@ export function wireReplica(deps: ReplicaDependencies) {
       if (provenance.mode !== "code") return false;
       return persistence.readCodeThread(provenance.threadId)?.executionPolicy === "plan";
     },
+    destination: () => {
+      const store = replicaStoreSettingsService.settings().store;
+      if (store.kind === "synced-folder") return store.folder;
+      if (store.kind === "s3")
+        return `${store.settings.endpoint} · ${store.settings.bucket}/${store.settings.prefix ?? ""}`;
+      return "No replica store selected";
+    },
+    publicationAllowed: (version) => {
+      const provenance = version.definition.provenance;
+      const thread = syncedArtifactThreads().find(
+        (candidate) => candidate.threadId === String(provenance.threadId),
+      );
+      return (
+        thread !== undefined &&
+        String(thread.projectId) === String(provenance.projectId) &&
+        decideReplicaArtifactBinding(provenance.mode, thread.facts).kind !== "incompatible"
+      );
+    },
     // Built just below; a pull only happens once the host is serving.
     afterPull: () => {
       syncedArtifactService.catchUp();

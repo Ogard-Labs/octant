@@ -1,3 +1,9 @@
+import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
+import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
+import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
+import { ConversationInputs } from "../continuity/ConversationInputs";
+import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -76,10 +82,12 @@ import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -302,6 +310,8 @@ function withNewestWorkTurns(
  * the failure's words; the notice is the provider-reported fact about why.
  */
 function WorkTurnHeader(props: {
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
   readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
@@ -327,6 +337,16 @@ function WorkTurnHeader(props: {
         {...(workedFor === undefined ? {} : { workedFor })}
         {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
       />
+      {props.turn.inputReceipt === undefined ? null : (
+        <ConversationInputs
+          mode="work"
+          threadId={String(props.turn.threadId)}
+          admissionId={String(props.turn.requestId)}
+          receipt={props.turn.inputReceipt}
+          serverUrl={props.serverUrl}
+          windowCapability={props.windowCapability}
+        />
+      )}
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -732,6 +752,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const serverWorkProject = serverCodeProjectFor(useServerCodeProjects().workProjects, projectId);
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
+  const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -778,6 +799,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   );
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const [toolCatalogHandoffRequired, setToolCatalogHandoffRequired] = useState(false);
   const [creating, setCreating] = useState(false);
   const [providerChanging, setProviderChanging] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -812,6 +834,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (thread === undefined || accessChanging || access === thread.access) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const result = await props.threadClient.execute({
         kind: "change-work-thread-access",
@@ -842,6 +865,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (thread === undefined || deliveryChanging) return;
     setDeliveryChanging(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     try {
       const result = await props.threadClient.execute({
         kind: "change-work-thread-document-delivery",
@@ -1036,7 +1060,29 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     String(runningTurn.threadId) === String(props.threadId)
       ? runningTurn
       : undefined;
+  const forceStop = useDelayedForceStop(
+    stoppableTurn === undefined ? undefined : String(stoppableTurn.requestId),
+    (props.providerGroups ?? []).find(
+      (group) => String(group.instance.id) === String(stoppableTurn?.authority.providerInstanceId),
+    )?.forceStop === "supported",
+  );
+  const onForceStop = async () => {
+    if (props.turnClient === undefined || stoppableTurn === undefined) return;
+    try {
+      await props.turnClient.cancelFirstTurn({
+        kind: "force-stop-work-turn",
+        requestId: stoppableTurn.requestId,
+        threadId: stoppableTurn.threadId,
+        turnId: stoppableTurn.turnId,
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "The owned attempt could not be force-stopped.",
+      );
+    }
+  };
   const onStop = useCallback(async () => {
+    forceStop.requestStop();
     const turnClient = props.turnClient;
     const turn = stoppableTurn;
     if (turnClient === undefined || turn === undefined) return;
@@ -1056,7 +1102,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           : "The Work turn could not be stopped. Try again.",
       );
     }
-  }, [props.threadId, props.turnClient, stoppableTurn]);
+  }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
     async (
       request: WorkRequest,
@@ -1087,6 +1133,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   useEffect(() => {
     setPendingRequests([]);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     setEarlierState("idle");
     return () => earlierAbort.current?.abort();
@@ -1560,6 +1607,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
       setProviderChanging(true);
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       setStatus(undefined);
       try {
         const result = await props.threadClient.execute({
@@ -1679,7 +1727,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   }, [props, thread]);
 
   const sendWorkTurn = useCallback(
-    async (enqueue = false): Promise<boolean> => {
+    async (enqueue = false, toolCatalogHandoff = false): Promise<boolean> => {
       if (
         thread !== undefined &&
         thread.bindingRevisionId === undefined &&
@@ -1703,6 +1751,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
         receipt.selection === undefined ? [] : [receipt.selection],
       );
+      if (composerDraft.sideChatReturnsInvalid) {
+        setErrorMessage(
+          "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+        );
+        return false;
+      }
+      const sideChatReturns = composerDraft.sideChatReturns;
       const promptText = composerDraft.text;
       if (promptText.length === 0) return false;
       const sendingThreadId = String(thread.id);
@@ -1717,6 +1772,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       };
       setCreating(true);
       setErrorMessage(undefined);
+      setToolCatalogHandoffRequired(false);
       setStatus(undefined);
       try {
         if (String(props.threadId) !== sendingThreadId) return false;
@@ -1742,13 +1798,18 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           const result = await messageQueue.enqueue(
             {
               mode: "work",
+              ...(continuation.policy === "text-only"
+                ? { contextInputPolicy: continuation.policy }
+                : {}),
               prompt: promptText,
               attachmentIds,
               threadMentionIds,
+              ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
               fileMentionPaths,
               extensionSelections,
             },
             () => {
+              continuation.reset();
               if (currentThreadKeyRef.current !== sendingThreadId) return;
               images.consume(staged);
               if (composerDraft.revisionFor(sendingThreadId) === draftRevision) {
@@ -1765,6 +1826,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         }
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
+          ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+          ...(continuation.policy === "text-only"
+            ? { contextInputPolicy: continuation.policy }
+            : {}),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
@@ -1775,12 +1840,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             projectId,
             bindingRevisionId: thread.bindingRevisionId,
             workingDirectory: thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
             confinementPosture: "project-root-confined",
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
           },
           ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
           ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+          ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
           ...(fileMentionPaths.length === 0 ? {} : { fileMentionPaths: [...fileMentionPaths] }),
         });
         if (started.kind !== "accepted") {
@@ -1789,6 +1858,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           return false;
         }
         {
+          continuation.reset();
           images.consume(staged);
           threadMentions.clear();
           fileMentions.clear();
@@ -1808,6 +1878,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         return true;
       } catch (error) {
         await discardUploadedAttachments();
+        setToolCatalogHandoffRequired(
+          error instanceof WorkTurnClientFailure && error.category === "tools-changed",
+        );
         setErrorMessage(
           error instanceof WorkTurnClientFailure
             ? error.message
@@ -1819,6 +1892,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
     },
     [
+      continuation.policy,
       composerDraft,
       fileMentions,
       images,
@@ -1854,6 +1928,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (props.mutationClient === undefined) return;
     setCreating(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     try {
       const reply = await props.mutationClient.mutate({
@@ -1901,6 +1976,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     setCompleting(true);
     setErrorMessage(undefined);
+    setToolCatalogHandoffRequired(false);
     setStatus(undefined);
     try {
       const result = await props.threadClient.execute({
@@ -1924,6 +2000,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [completing, props.threadClient, thread]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope: { mode: "work", threadId: props.threadId },
+    draft: prompt,
+    onDraftChange: (text, caret) => rememberDraft(text, caret),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.hostId,
+    refused: serverWorkProject !== undefined || creating || completionLocked,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -1969,16 +2059,26 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
   );
   const projectLabel = project?.name ?? serverWorkProject?.name;
+  const chosenFolder =
+    project?.type === "work"
+      ? project.workingFolders?.find((folder) => folder.id === thread?.workingFolderId)
+      : undefined;
+  const folderUnavailable = thread?.workingFolderId !== undefined && chosenFolder === undefined;
   const folder = thread?.workingDirectory;
   // A server thread's folder is named where it is: `alias:folder` on its server.
   const root =
     serverWorkProject !== undefined
       ? serverWorkProject.location
       : project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
-        ? project.binding.canonicalRoot
+        ? chosenFolder?.kind === "extra"
+          ? chosenFolder.label
+          : folderUnavailable
+            ? undefined
+            : project.binding.canonicalRoot
         : undefined;
-  const path =
-    root === undefined
+  const path = folderUnavailable
+    ? "Working folder unavailable"
+    : root === undefined
       ? folder
       : folder === undefined || folder === "."
         ? root
@@ -2019,790 +2119,841 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
 
   return (
-    <section aria-label="Task workspace" className="work-thread-workspace">
-      <h1 className="sr-only">{props.title}</h1>
-      {thread === undefined ? null : (
-        <ThreadGuardrailLevel
-          autoSupported={autoSupported}
-          mode={workModeOf(thread.access)}
-          projectId={String(thread.projectId)}
-          surface="work"
-        />
-      )}
+    <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
+      <section aria-label="Task workspace" className="work-thread-workspace">
+        <h1 className="sr-only">{props.title}</h1>
+        {thread === undefined ? null : (
+          <ThreadGuardrailLevel
+            factsVersion={thread.version}
+            factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}
+            autoSupported={autoSupported}
+            mode={workModeOf(thread.access)}
+            projectId={String(thread.projectId)}
+            surface="work"
+          />
+        )}
 
-      {confirmArtifacts ? (
-        <ThreadArtifactsConfirm
-          onCancel={() => setConfirmArtifacts(false)}
-          onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-          pending={deliveryChanging}
-        />
-      ) : null}
+        {confirmArtifacts ? (
+          <ThreadArtifactsConfirm
+            onCancel={() => setConfirmArtifacts(false)}
+            onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+            pending={deliveryChanging}
+          />
+        ) : null}
 
-      {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-        <OctantConfirmDialog
-          confirmLabel="Mark done"
-          onCancel={() => setCompletionFormOpen(false)}
-          onConfirm={() => void confirmCompletion()}
-          pending={completing}
-          title="Mark this task Done?"
-        >
-          {thread.title} moves to Done on the board. Its composer and provider lock until you
-          archive and reactivate it.
-        </OctantConfirmDialog>
-      ) : null}
+        {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
+          <OctantConfirmDialog
+            confirmLabel="Mark done"
+            onCancel={() => setCompletionFormOpen(false)}
+            onConfirm={() => void confirmCompletion()}
+            pending={completing}
+            title="Mark this task Done?"
+          >
+            {thread.title} moves to Done on the board. Its composer and provider lock until you
+            archive and reactivate it.
+          </OctantConfirmDialog>
+        ) : null}
 
-      <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
-        <TranscriptWindow
-          ariaLabel="Work transcript"
-          className="work-thread-workspace__conversation transcript-scroll"
-          estimateSize={92}
-          gap={20}
-          compactionSubject={threadCompactionSubject("work-thread", String(props.threadId))}
-          itemAt={workRowHappenedAt}
-          itemKey={(row) => row.key}
-          items={transcriptRows}
-          lead={
-            <>
-              <ImportedTerminalHistory
-                threadId={String(props.threadId)}
-                {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-                {...(props.windowCapability === undefined
-                  ? {}
-                  : { windowCapability: props.windowCapability })}
-              />
-              {earlierRow === undefined ? null : (
-                <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />
-              )}
-            </>
-          }
-          listClassName="thread-column"
-          {...(canvasClient === undefined
-            ? {}
-            : {
-                afterItem: (row: WorkTranscriptRow) => (
-                  <>
-                    <ThreadCanvases
-                      cards={canvasPlacement.byRow.get(row.key)}
-                      client={canvasClient}
-                      {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                    />
-                    {row.key === artifactsOfferRow ? (
-                      <ThreadArtifactsOffer
-                        onChoose={(choice) => void changeDocumentDelivery(choice)}
-                        pending={deliveryChanging}
-                      />
-                    ) : null}
-                  </>
-                ),
-              })}
-          renderItem={(row) => {
-            if (row.kind === "empty") {
-              return (
-                <p className="work-thread-workspace__opening">
-                  Describe what you want made. Files this task writes stay inside its folder.
-                </p>
-              );
+        <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
+          <TranscriptWindow
+            ariaLabel="Work transcript"
+            className="work-thread-workspace__conversation transcript-scroll"
+            estimateSize={92}
+            gap={20}
+            compactionSubject={threadCompactionSubject("work-thread", String(props.threadId))}
+            itemAt={workRowHappenedAt}
+            itemKey={(row) => row.key}
+            items={transcriptRows}
+            lead={
+              <>
+                <ImportedTerminalHistory
+                  threadId={String(props.threadId)}
+                  {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+                  {...(props.windowCapability === undefined
+                    ? {}
+                    : { windowCapability: props.windowCapability })}
+                />
+                {earlierRow === undefined ? null : (
+                  <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />
+                )}
+              </>
             }
-            if (row.kind === "message") {
-              if (row.entry.role === "user") {
-                if (row.delivered === true) {
-                  return (
-                    <article aria-label="Subagent results" className="turn-child-result">
-                      <ChildResultCards
-                        providerGroups={props.providerGroups}
-                        text={row.entry.text}
+            listClassName="thread-column"
+            {...(canvasClient === undefined
+              ? {}
+              : {
+                  afterItem: (row: WorkTranscriptRow) => (
+                    <>
+                      <ThreadCanvases
+                        cards={canvasPlacement.byRow.get(row.key)}
+                        client={canvasClient}
+                        {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
                       />
-                    </article>
-                  );
-                }
-                const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
-                if (followUpPrompt !== undefined) {
-                  return (
-                    <article aria-label="Scheduled follow-up" className="turn-user">
-                      <ScheduledFollowUpMark />
-                      <div className="bubble">
-                        <TrackerReferenceText asParagraph text={followUpPrompt} />
-                      </div>
-                      {row.at === undefined ? null : (
-                        <TurnTime at={row.at} copyValue={followUpPrompt} />
-                      )}
-                    </article>
-                  );
-                }
+                      {row.key === artifactsOfferRow ? (
+                        <ThreadArtifactsOffer
+                          onChoose={(choice) => void changeDocumentDelivery(choice)}
+                          pending={deliveryChanging}
+                        />
+                      ) : null}
+                    </>
+                  ),
+                })}
+            renderItem={(row) => {
+              if (row.kind === "empty") {
                 return (
-                  <article aria-label="Your message" className="turn-user">
+                  <p className="work-thread-workspace__opening">
+                    Describe what you want made. Files this task writes stay inside its folder.
+                  </p>
+                );
+              }
+              if (row.kind === "message") {
+                if (row.entry.role === "user") {
+                  if (row.delivered === true) {
+                    return (
+                      <article aria-label="Subagent results" className="turn-child-result">
+                        <ChildResultCards
+                          providerGroups={props.providerGroups}
+                          text={row.entry.text}
+                        />
+                      </article>
+                    );
+                  }
+                  const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
+                  if (followUpPrompt !== undefined) {
+                    return (
+                      <article aria-label="Scheduled follow-up" className="turn-user">
+                        <ScheduledFollowUpMark />
+                        <div className="bubble">
+                          <TrackerReferenceText asParagraph text={followUpPrompt} />
+                        </div>
+                        {row.at === undefined ? null : (
+                          <TurnTime at={row.at} copyValue={followUpPrompt} />
+                        )}
+                      </article>
+                    );
+                  }
+                  return (
+                    <article aria-label="Your message" className="turn-user">
+                      <TurnActionMenu
+                        actions={turnActionsFor("user", row.turn).actions}
+                        onAction={(value) => onTurnAction(value, "user", row.turn)}
+                      >
+                        <div className="bubble">
+                          <TrackerReferenceText asParagraph text={row.entry.text} />
+                        </div>
+                        {row.at === undefined ? null : (
+                          <TurnTime at={row.at} copyValue={row.entry.text} />
+                        )}
+                      </TurnActionMenu>
+                    </article>
+                  );
+                }
+                // A reply is markdown, as it is in Chat and Code: the same headings,
+                // lists, and code blocks render the same way here.
+                return (
+                  <article aria-label="Assistant message" className="turn-agent">
                     <TurnActionMenu
-                      actions={turnActionsFor("user", row.turn).actions}
-                      onAction={(value) => onTurnAction(value, "user", row.turn)}
+                      actions={turnActionsFor("assistant", row.turn).actions}
+                      onAction={(value) => onTurnAction(value, "assistant", row.turn)}
                     >
-                      <div className="bubble">
-                        <TrackerReferenceText asParagraph text={row.entry.text} />
-                      </div>
-                      {row.at === undefined ? null : (
-                        <TurnTime at={row.at} copyValue={row.entry.text} />
+                      {row.head === undefined ? null : (
+                        <>
+                          <WorkTurnHeader
+                            serverUrl={props.serverUrl}
+                            windowCapability={props.windowCapability}
+                            copyValue={row.entry.text}
+                            onRestorePrompt={composerDraft.setDraft}
+                            onCancelResume={cancelUsageResume}
+                            onScheduleResume={scheduleUsageResume}
+                            providerGroups={props.providerGroups ?? []}
+                            resumable={
+                              String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
+                              row.head.status === "waiting"
+                            }
+                            {...(thread?.snooze === undefined
+                              ? { onSnoozeAtReset: snoozeAtUsageReset }
+                              : {})}
+                            turn={row.head}
+                            {...(thread?.usageResume === undefined ||
+                            String(thread.usageResume.record.turnId) !== String(row.head.turnId)
+                              ? {}
+                              : { usageResume: thread.usageResume })}
+                          />
+                          <HarnessRetryStatus
+                            events={workRetryEvents(retries, String(row.head.requestId))}
+                          />
+                          <WorkToolGroup
+                            turn={row.head}
+                            {...(props.canvasClient === undefined
+                              ? {}
+                              : { canvasClient: props.canvasClient })}
+                          />
+                        </>
+                      )}
+                      {row.entry.text === "" ? null : (
+                        <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
                       )}
                     </TurnActionMenu>
                   </article>
                 );
               }
-              // A reply is markdown, as it is in Chat and Code: the same headings,
-              // lists, and code blocks render the same way here.
-              return (
-                <article aria-label="Assistant message" className="turn-agent">
-                  <TurnActionMenu
-                    actions={turnActionsFor("assistant", row.turn).actions}
-                    onAction={(value) => onTurnAction(value, "assistant", row.turn)}
+              if (row.kind === "head") {
+                return (
+                  <div className="turn-agent">
+                    <WorkTurnHeader
+                      serverUrl={props.serverUrl}
+                      windowCapability={props.windowCapability}
+                      onCancelResume={cancelUsageResume}
+                      onRestorePrompt={composerDraft.setDraft}
+                      onScheduleResume={scheduleUsageResume}
+                      providerGroups={props.providerGroups ?? []}
+                      resumable={
+                        String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
+                        row.turn.status === "waiting"
+                      }
+                      {...(thread?.snooze === undefined
+                        ? { onSnoozeAtReset: snoozeAtUsageReset }
+                        : {})}
+                      turn={row.turn}
+                      {...(thread?.usageResume === undefined ||
+                      String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
+                        ? {}
+                        : { usageResume: thread.usageResume })}
+                    />
+                    <HarnessRetryStatus
+                      events={workRetryEvents(retries, String(row.turn.requestId))}
+                    />
+                    <WorkToolGroup
+                      turn={row.turn}
+                      {...(props.canvasClient === undefined
+                        ? {}
+                        : { canvasClient: props.canvasClient })}
+                    />
+                  </div>
+                );
+              }
+              if (row.kind === "files") {
+                return (
+                  <section
+                    aria-label="Files this turn changed"
+                    className="work-thread-workspace__files"
                   >
-                    {row.head === undefined ? null : (
-                      <>
-                        <WorkTurnHeader
-                          copyValue={row.entry.text}
-                          onRestorePrompt={composerDraft.setDraft}
-                          onCancelResume={cancelUsageResume}
-                          onScheduleResume={scheduleUsageResume}
-                          providerGroups={props.providerGroups ?? []}
-                          resumable={
-                            String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
-                            row.head.status === "waiting"
-                          }
-                          {...(thread?.snooze === undefined
-                            ? { onSnoozeAtReset: snoozeAtUsageReset }
-                            : {})}
-                          turn={row.head}
-                          {...(thread?.usageResume === undefined ||
-                          String(thread.usageResume.record.turnId) !== String(row.head.turnId)
-                            ? {}
-                            : { usageResume: thread.usageResume })}
-                        />
-                        <HarnessRetryStatus
-                          events={workRetryEvents(retries, String(row.head.requestId))}
-                        />
-                        <WorkToolGroup
-                          turn={row.head}
-                          {...(props.canvasClient === undefined
-                            ? {}
-                            : { canvasClient: props.canvasClient })}
-                        />
-                      </>
-                    )}
-                    {row.entry.text === "" ? null : (
-                      <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
-                    )}
-                  </TurnActionMenu>
-                </article>
-              );
-            }
-            if (row.kind === "head") {
-              return (
-                <div className="turn-agent">
-                  <WorkTurnHeader
-                    onCancelResume={cancelUsageResume}
-                    onRestorePrompt={composerDraft.setDraft}
-                    onScheduleResume={scheduleUsageResume}
-                    providerGroups={props.providerGroups ?? []}
-                    resumable={
-                      String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
-                      row.turn.status === "waiting"
-                    }
-                    {...(thread?.snooze === undefined
-                      ? { onSnoozeAtReset: snoozeAtUsageReset }
-                      : {})}
-                    turn={row.turn}
-                    {...(thread?.usageResume === undefined ||
-                    String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
-                      ? {}
-                      : { usageResume: thread.usageResume })}
-                  />
-                  <HarnessRetryStatus
-                    events={workRetryEvents(retries, String(row.turn.requestId))}
-                  />
-                  <WorkToolGroup
-                    turn={row.turn}
-                    {...(props.canvasClient === undefined
-                      ? {}
-                      : { canvasClient: props.canvasClient })}
-                  />
-                </div>
-              );
-            }
-            if (row.kind === "files") {
-              return (
-                <section
-                  aria-label="Files this turn changed"
-                  className="work-thread-workspace__files"
-                >
-                  <h3 className="oct-section-label">
-                    {/* A watcher that failed reports no paths and marks itself
+                    <h3 className="oct-section-label">
+                      {/* A watcher that failed reports no paths and marks itself
                       truncated. Counting that as zero told the person nothing
                       changed, which is not what the host observed. An empty
                       list that is not truncated really is nothing. */}
-                    {row.wrote.paths.length === 0 && row.wrote.truncated
-                      ? "Changed files could not be observed while this ran"
-                      : row.wrote.paths.length === 1
-                        ? "1 file changed while this ran"
-                        : `${String(row.wrote.paths.length)} files changed while this ran`}
-                  </h3>
-                  <ul className="work-thread-workspace__file-list">
-                    {row.wrote.paths.map((path) => (
-                      <li className="work-thread-workspace__file" key={path}>
-                        <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
-                        <span>{path}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {row.wrote.truncated ? (
-                    <p className="oct-row-detail" role="status">
-                      {/* "More changed" claims a file changed. A watcher that
+                      {row.wrote.paths.length === 0 && row.wrote.truncated
+                        ? "Changed files could not be observed while this ran"
+                        : row.wrote.paths.length === 1
+                          ? "1 file changed while this ran"
+                          : `${String(row.wrote.paths.length)} files changed while this ran`}
+                    </h3>
+                    <ul className="work-thread-workspace__file-list">
+                      {row.wrote.paths.map((path) => (
+                        <li className="work-thread-workspace__file" key={path}>
+                          <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                          <span>{path}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {row.wrote.truncated ? (
+                      <p className="oct-row-detail" role="status">
+                        {/* "More changed" claims a file changed. A watcher that
                         failed establishes no such thing. */}
-                      {row.wrote.paths.length === 0
-                        ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
-                        : "More changed than Octant could record. Open Files for the folder itself."}
-                    </p>
-                  ) : null}
-                </section>
-              );
-            }
-            if (row.kind === "tasks") {
-              return (
-                <ThreadTasksPanel
-                  tasks={{
-                    running: row.turn.status === "accepted" || row.turn.status === "running",
-                    tasks: row.tasks.map((task) => ({
-                      id: task.taskId,
-                      state: task.state,
-                      summary: task.summary,
-                    })),
-                  }}
-                />
-              );
-            }
-            if (row.kind === "request") {
-              if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                        {row.wrote.paths.length === 0
+                          ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
+                          : "More changed than Octant could record. Open Files for the folder itself."}
+                      </p>
+                    ) : null}
+                  </section>
+                );
+              }
+              if (row.kind === "tasks") {
                 return (
-                  <ProviderApprovalPrompt
-                    onAnswer={(decision) => {
-                      void answerWorkRequest(row.request, {
-                        kind: "approval",
-                        approved: decision === "approved",
-                      });
+                  <ThreadTasksPanel
+                    tasks={{
+                      running: row.turn.status === "accepted" || row.turn.status === "running",
+                      tasks: row.tasks.map((task) => ({
+                        id: task.taskId,
+                        state: task.state,
+                        summary: task.summary,
+                      })),
                     }}
-                    summary={`${row.request.detail.action}: ${row.request.detail.description}`}
                   />
                 );
               }
-              if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
+              if (row.kind === "request") {
+                if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                  return (
+                    <ProviderApprovalPrompt
+                      onAnswer={(decision) => {
+                        void answerWorkRequest(row.request, {
+                          kind: "approval",
+                          approved: decision === "approved",
+                        });
+                      }}
+                      summary={`${row.request.detail.action}: ${row.request.detail.description}`}
+                    />
+                  );
+                }
+                if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
+                  return (
+                    <ProviderQuestionCard
+                      onAnswer={(answer) => {
+                        void answerWorkRequest(row.request, { kind: "user-input", answer });
+                      }}
+                      options={row.request.detail.options.map((label) => ({ label }))}
+                      prompt={row.request.detail.prompt}
+                    />
+                  );
+                }
                 return (
-                  <ProviderQuestionCard
-                    onAnswer={(answer) => {
-                      void answerWorkRequest(row.request, { kind: "user-input", answer });
-                    }}
-                    options={row.request.detail.options.map((label) => ({ label }))}
-                    prompt={row.request.detail.prompt}
-                  />
+                  <div className="approval-row approval-row--request" role="status">
+                    <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <span className="approval-row__text">
+                      {row.request.detail.kind === "approval"
+                        ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
+                        : `Input required — ${row.request.detail.prompt}`}
+                    </span>
+                  </div>
                 );
               }
               return (
-                <div className="approval-row approval-row--request" role="status">
-                  <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-                  <span className="approval-row__text">
-                    {row.request.detail.kind === "approval"
-                      ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
-                      : `Input required — ${row.request.detail.prompt}`}
-                  </span>
+                // The surrounding list is already a live region; a nested status
+                // here would announce the same trail line twice.
+                <p className="oct-row-detail">{row.text}</p>
+              );
+            }}
+            restoreKey={`work:${String(props.threadId)}`}
+            role="log"
+            trail={
+              (props.imageGenerationClient === undefined ||
+                props.imageGenerationProfiles === undefined) &&
+              props.browserAutomationClient === undefined ? null : (
+                <div className="work-thread-workspace__transcript-trail">
+                  {props.imageGenerationClient === undefined ||
+                  props.imageGenerationProfiles === undefined ? null : (
+                    <GeneratedImageList
+                      canSaveToProject
+                      client={props.imageGenerationClient}
+                      onAttach={(file) => images.attach([file])}
+                      onSaveToProject={(job, artifact) => {
+                        void props.imageGenerationClient
+                          ?.save({
+                            jobId: job.id,
+                            attachmentId: artifact.attachmentId,
+                            relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+                          })
+                          .then((result) => {
+                            if (result.status === "saved")
+                              setStatus(`Saved ${result.relativePath}.`);
+                            else setStatus(result.reason);
+                          })
+                          .catch(() => {
+                            setStatus("The image could not be saved.");
+                          });
+                      }}
+                      profiles={props.imageGenerationProfiles}
+                      scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                      threadKind="work-thread"
+                    />
+                  )}
+                  {props.browserAutomationClient === undefined ? null : (
+                    <BrowserCaptureList
+                      client={props.browserAutomationClient}
+                      threadId={decodeBrowserThreadId(String(props.threadId))}
+                    />
+                  )}
                 </div>
-              );
+              )
             }
-            return (
-              // The surrounding list is already a live region; a nested status
-              // here would announce the same trail line twice.
-              <p className="oct-row-detail">{row.text}</p>
-            );
+          />
+        </SelectionThreadScope>
+        <RewindDialog
+          busy={rewind?.busy === true}
+          files={{
+            kind: "unavailable",
+            reason:
+              "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
           }}
-          restoreKey={`work:${String(props.threadId)}`}
-          role="log"
-          trail={
-            (props.imageGenerationClient === undefined ||
-              props.imageGenerationProfiles === undefined) &&
-            props.browserAutomationClient === undefined ? null : (
-              <div className="work-thread-workspace__transcript-trail">
+          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+          onClose={() => {
+            if (rewind?.busy !== true) setRewind(undefined);
+          }}
+          onRewind={() => void runRewind()}
+          open={rewind !== undefined}
+          removedTurns={rewind?.removedTurns}
+        />
+
+        {props.canvasClient === undefined ? null : (
+          <div className="thread-column">
+            <CanvasThreadReferenceCardList
+              cards={threadCanvases.cards.filter(
+                (card) => !canvasPlacement.placed.has(String(card.canvasId)),
+              )}
+              error={threadCanvases.error}
+              {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+            />
+          </div>
+        )}
+
+        <ExtensionToolApprovalPrompt
+          className="thread-column"
+          client={props.extensionClient}
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
+        <RoutineProposalPrompt
+          className="thread-column"
+          client={props.automationClient}
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
+        {pendingBrowserApproval === undefined ? null : (
+          <OctantApprovalCard
+            actions={
+              <>
+                <OctantButton
+                  disabled={browserApprovalBusy}
+                  onClick={() => void decideBrowserApproval("approved")}
+                  size="sm"
+                  type="button"
+                >
+                  {pendingBrowserApproval.signIn !== undefined
+                    ? "Continue"
+                    : pendingBrowserApproval.download !== undefined
+                      ? "Save once"
+                      : pendingBrowserApproval.upload === undefined
+                        ? "Approve once"
+                        : "Upload once"}
+                </OctantButton>
+                {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
+                {pendingBrowserApproval.upload === undefined &&
+                pendingBrowserApproval.download === undefined &&
+                pendingBrowserApproval.signIn === undefined ? (
+                  <OctantButton
+                    disabled={browserApprovalBusy}
+                    onClick={() => void decideBrowserApproval("approved", true)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Always allow
+                  </OctantButton>
+                ) : null}
+                <OctantButton
+                  disabled={browserApprovalBusy}
+                  onClick={() => void decideBrowserApproval("denied")}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  {pendingBrowserApproval.signIn === undefined ? "Deny" : "Cancel"}
+                </OctantButton>
+              </>
+            }
+            className="thread-column"
+            detail={browserApprovalDetail(pendingBrowserApproval)}
+            error={browserApprovalMessage}
+            label={
+              pendingBrowserApproval.signIn !== undefined
+                ? "Browser sign-in"
+                : pendingBrowserApproval.download !== undefined
+                  ? "Browser download approval"
+                  : pendingBrowserApproval.upload === undefined
+                    ? "Browser origin approval"
+                    : "Browser upload approval"
+            }
+            summary={browserApprovalSummary(pendingBrowserApproval)}
+          />
+        )}
+        {folderDrops.notice}
+        {thread === undefined ? null : (
+          <ContinueElsewhere
+            mode="work"
+            threadId={String(thread.id)}
+            groups={
+              turns.length > 0
+                ? startedConversationPickerGroups(props.providerGroups ?? [], {
+                    providerInstanceId: thread.providerInstanceId,
+                    modelId: thread.modelId,
+                  })
+                : (props.providerGroups ?? [])
+            }
+            selected={thread}
+            policy={continuation.policy}
+            onPolicyChange={continuation.change}
+            onProviderChange={changeProvider}
+            disabled={providerChanging || creating || completionLocked || turnRunning}
+          />
+        )}
+        <ThreadComposer
+          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
+          presentation="follow-up"
+          {...(threadDropKey === undefined ? {} : { threadDropKey })}
+          context={
+            <div className="work-folder-bar" role="group" aria-label="Project and folder">
+              <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+              {projectLabel === undefined ? null : (
+                <span className="work-folder-bar__project" title={projectLabel}>
+                  {projectLabel}
+                </span>
+              )}
+              {path === undefined ? null : (
+                <span className="work-folder-bar__folder" title={path}>
+                  {folderUnavailable
+                    ? "Working folder unavailable"
+                    : folder === undefined || folder === "."
+                      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+                      : folder}
+                </span>
+              )}
+            </div>
+          }
+          className="thread-composer thread-column"
+          chips={
+            <>
+              {extensionDraft.receipts.length > 0 ? (
+                <ul aria-label="Selected extensions" className="composer-chips">
+                  {extensionDraft.receipts.map((receipt) => (
+                    <li className="chip" key={receipt.reference}>
+                      <span>{receipt.label}</span>
+                      {receipt.status.kind === "blocked" ? (
+                        <span>{`Blocked: ${receipt.status.reason}`}</span>
+                      ) : null}
+                      <OctantButton
+                        aria-label={`Remove ${receipt.label} extension`}
+                        className="chip-x window-no-drag"
+                        onClick={() => extensionDraft.remove(receipt.reference)}
+                        type="button"
+                        variant="bare"
+                      >
+                        ×
+                      </OctantButton>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <ThreadMentionChips
+                chips={threadMentions.chips}
+                onRemove={(mentionedThreadId) =>
+                  threadMentions.composer?.onRemoveChip(mentionedThreadId)
+                }
+              />
+              <TrackerReferenceComposerHints draft={prompt} />
+              <WorkImageAttachmentChips images={images} />
+              {turnActionMessage === undefined ? null : (
+                <p className="work-thread-workspace__hint" role="status">
+                  {turnActionMessage}
+                </p>
+              )}
+              <SideChatDraftNotice
+                count={composerDraft.sideChatReturns.length}
+                invalid={composerDraft.sideChatReturnsInvalid}
+                onClear={composerDraft.clear}
+              />
+              {composerDraft.stagedDropped === true ? (
+                <p className="work-thread-workspace__hint" role="status">
+                  {COMPOSER_STAGED_DROPPED_NOTE}
+                </p>
+              ) : null}
+              {composerDraft.persistError === undefined ? null : (
+                <p className="work-thread-workspace__hint" role="status">
+                  {composerDraft.persistError}
+                </p>
+              )}
+            </>
+          }
+          input={
+            <OctantTextarea
+              aria-label="Work prompt"
+              aria-autocomplete="list"
+              aria-expanded={atMenu.open || slash.open}
+              aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
+              aria-activedescendant={
+                atMenu.active !== undefined
+                  ? `${atMenu.listId}-${atMenu.active.id}`
+                  : slash.active === undefined
+                    ? undefined
+                    : `${slash.listId}-${slash.active.id}`
+              }
+              autoFocus
+              className="composer-input"
+              disabled={
+                (creating && !preparingQueue.current) ||
+                completionLocked ||
+                (props.mutationClient === undefined && props.turnClient === undefined)
+              }
+              onChange={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onClick={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onKeyDown={handleKeyDown}
+              onKeyUp={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                  event.preventDefault();
+              }}
+              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                if ((creating && !preparingQueue.current) || completionLocked) return;
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+              }}
+              data-suggested={suggestionInput.suggested ? "true" : undefined}
+              placeholder={suggestionInput.placeholder}
+              ref={textareaRef}
+              rows={3}
+              value={prompt}
+            />
+          }
+          typeahead={
+            atMenu.open ? (
+              <ComposerAtTypeahead controller={atMenu} />
+            ) : slash.open ? (
+              <ComposerSlashTypeahead controller={slash} />
+            ) : (
+              <>
+                {mention.open ? (
+                  <ThreadMentionTypeahead
+                    activeIndex={mention.activeIndex}
+                    {...(threadMentions.composer?.busy === undefined
+                      ? {}
+                      : { busy: threadMentions.composer.busy })}
+                    candidates={threadMentions.composer?.candidates ?? []}
+                    listId={mentionListId}
+                    onChoose={mention.choose}
+                    onHover={mention.setActiveIndex}
+                  />
+                ) : null}
+                {fileMentionOpen ? (
+                  <PathMentionTypeahead
+                    activeIndex={fileMentions.activeIndex}
+                    busy={fileMentions.busy}
+                    candidates={fileMentions.candidates}
+                    listId={fileMentionListId}
+                    onChoose={fileMentions.choose}
+                    onHover={fileMentions.setActiveIndex}
+                  />
+                ) : null}
+              </>
+            )
+          }
+          row={{
+            leading: (
+              <>
+                {props.turnClient === undefined ? null : (
+                  <>
+                    <ComposerAttachButton
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      busy={creating || completionLocked}
+                      refusedReason={
+                        imageSupport === false
+                          ? "The selected model does not accept images. Choose an image-capable model."
+                          : undefined
+                      }
+                      onRefused={images.refuse}
+                      onFileSelected={(file) => images.attach([file])}
+                    />
+                  </>
+                )}
                 {props.imageGenerationClient === undefined ||
                 props.imageGenerationProfiles === undefined ? null : (
-                  <GeneratedImageList
-                    canSaveToProject
+                  <ImageGenerationAction
                     client={props.imageGenerationClient}
-                    onAttach={(file) => images.attach([file])}
-                    onSaveToProject={(job, artifact) => {
-                      void props.imageGenerationClient
-                        ?.save({
-                          jobId: job.id,
-                          attachmentId: artifact.attachmentId,
-                          relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                        })
-                        .then((result) => {
-                          if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
-                          else setStatus(result.reason);
-                        })
-                        .catch(() => {
-                          setStatus("The image could not be saved.");
-                        });
-                    }}
+                    disabled={completionLocked}
+                    {...(props.onOpenImageSettings === undefined
+                      ? {}
+                      : { onOpenSettings: props.onOpenImageSettings })}
+                    presentation="icon"
                     profiles={props.imageGenerationProfiles}
                     scopeId={decodeImageGenerationScopeId(String(props.threadId))}
                     threadKind="work-thread"
                   />
                 )}
-                {props.browserAutomationClient === undefined ? null : (
-                  <BrowserCaptureList
-                    client={props.browserAutomationClient}
-                    threadId={decodeBrowserThreadId(String(props.threadId))}
-                  />
-                )}
-              </div>
-            )
-          }
-        />
-      </SelectionThreadScope>
-      <RewindDialog
-        busy={rewind?.busy === true}
-        files={{
-          kind: "unavailable",
-          reason:
-            "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
-        }}
-        {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-        onClose={() => {
-          if (rewind?.busy !== true) setRewind(undefined);
-        }}
-        onRewind={() => void runRewind()}
-        open={rewind !== undefined}
-        removedTurns={rewind?.removedTurns}
-      />
-
-      {props.canvasClient === undefined ? null : (
-        <div className="thread-column">
-          <CanvasThreadReferenceCardList
-            cards={threadCanvases.cards.filter(
-              (card) => !canvasPlacement.placed.has(String(card.canvasId)),
-            )}
-            error={threadCanvases.error}
-            {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
-          />
-        </div>
-      )}
-
-      <ExtensionToolApprovalPrompt
-        className="thread-column"
-        client={props.extensionClient}
-        threadId={String(props.threadId)}
-        turnActive={turnRunning}
-      />
-      <RoutineProposalPrompt
-        className="thread-column"
-        client={props.automationClient}
-        threadId={String(props.threadId)}
-        turnActive={turnRunning}
-      />
-      {pendingBrowserApproval === undefined ? null : (
-        <OctantApprovalCard
-          actions={
-            <>
-              <OctantButton
-                disabled={browserApprovalBusy}
-                onClick={() => void decideBrowserApproval("approved")}
-                size="sm"
-                type="button"
-              >
-                {pendingBrowserApproval.signIn !== undefined
-                  ? "Continue"
-                  : pendingBrowserApproval.download !== undefined
-                    ? "Save once"
-                    : pendingBrowserApproval.upload === undefined
-                      ? "Approve once"
-                      : "Upload once"}
-              </OctantButton>
-              {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
-              {pendingBrowserApproval.upload === undefined &&
-              pendingBrowserApproval.download === undefined &&
-              pendingBrowserApproval.signIn === undefined ? (
-                <OctantButton
-                  disabled={browserApprovalBusy}
-                  onClick={() => void decideBrowserApproval("approved", true)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Always allow
-                </OctantButton>
-              ) : null}
-              <OctantButton
-                disabled={browserApprovalBusy}
-                onClick={() => void decideBrowserApproval("denied")}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                {pendingBrowserApproval.signIn === undefined ? "Deny" : "Cancel"}
-              </OctantButton>
-            </>
-          }
-          className="thread-column"
-          detail={browserApprovalDetail(pendingBrowserApproval)}
-          error={browserApprovalMessage}
-          label={
-            pendingBrowserApproval.signIn !== undefined
-              ? "Browser sign-in"
-              : pendingBrowserApproval.download !== undefined
-                ? "Browser download approval"
-                : pendingBrowserApproval.upload === undefined
-                  ? "Browser origin approval"
-                  : "Browser upload approval"
-          }
-          summary={browserApprovalSummary(pendingBrowserApproval)}
-        />
-      )}
-      <ThreadComposer
-        queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
-        threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
-        presentation="follow-up"
-        {...(threadDropKey === undefined ? {} : { threadDropKey })}
-        context={
-          <div className="work-folder-bar" role="group" aria-label="Project and folder">
-            <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-            {projectLabel === undefined ? null : (
-              <span className="work-folder-bar__project" title={projectLabel}>
-                {projectLabel}
-              </span>
-            )}
-            {path === undefined ? null : (
-              <span className="work-folder-bar__folder" title={path}>
-                {folder === undefined || folder === "."
-                  ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
-                  : folder}
-              </span>
-            )}
-          </div>
-        }
-        className="thread-composer thread-column"
-        chips={
-          <>
-            {extensionDraft.receipts.length > 0 ? (
-              <ul aria-label="Selected extensions" className="composer-chips">
-                {extensionDraft.receipts.map((receipt) => (
-                  <li className="chip" key={receipt.reference}>
-                    <span>{receipt.label}</span>
-                    {receipt.status.kind === "blocked" ? (
-                      <span>{`Blocked: ${receipt.status.reason}`}</span>
-                    ) : null}
-                    <OctantButton
-                      aria-label={`Remove ${receipt.label} extension`}
-                      className="chip-x window-no-drag"
-                      onClick={() => extensionDraft.remove(receipt.reference)}
-                      type="button"
-                      variant="bare"
-                    >
-                      ×
-                    </OctantButton>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <ThreadMentionChips
-              chips={threadMentions.chips}
-              onRemove={(mentionedThreadId) =>
-                threadMentions.composer?.onRemoveChip(mentionedThreadId)
-              }
-            />
-            <TrackerReferenceComposerHints draft={prompt} />
-            <WorkImageAttachmentChips images={images} />
-            {turnActionMessage === undefined ? null : (
-              <p className="work-thread-workspace__hint" role="status">
-                {turnActionMessage}
-              </p>
-            )}
-            {composerDraft.stagedDropped === true ? (
-              <p className="work-thread-workspace__hint" role="status">
-                {COMPOSER_STAGED_DROPPED_NOTE}
-              </p>
-            ) : null}
-            {composerDraft.persistError === undefined ? null : (
-              <p className="work-thread-workspace__hint" role="status">
-                {composerDraft.persistError}
-              </p>
-            )}
-          </>
-        }
-        input={
-          <OctantTextarea
-            aria-label="Work prompt"
-            aria-autocomplete="list"
-            aria-expanded={atMenu.open || slash.open}
-            aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
-            aria-activedescendant={
-              atMenu.active !== undefined
-                ? `${atMenu.listId}-${atMenu.active.id}`
-                : slash.active === undefined
-                  ? undefined
-                  : `${slash.listId}-${slash.active.id}`
-            }
-            autoFocus
-            className="composer-input"
-            disabled={
-              (creating && !preparingQueue.current) ||
-              completionLocked ||
-              (props.mutationClient === undefined && props.turnClient === undefined)
-            }
-            onChange={(event) => {
-              rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-            }}
-            onClick={(event) => {
-              rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-            }}
-            onKeyDown={handleKeyDown}
-            onKeyUp={(event) => {
-              rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-            }}
-            onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-              if ((creating && !preparingQueue.current) || completionLocked) return;
-              if (attachFromTransfer(event.clipboardData)) event.preventDefault();
-            }}
-            data-suggested={suggestionInput.suggested ? "true" : undefined}
-            placeholder={suggestionInput.placeholder}
-            ref={textareaRef}
-            rows={3}
-            value={prompt}
-          />
-        }
-        typeahead={
-          atMenu.open ? (
-            <ComposerAtTypeahead controller={atMenu} />
-          ) : slash.open ? (
-            <ComposerSlashTypeahead controller={slash} />
-          ) : (
-            <>
-              {mention.open ? (
-                <ThreadMentionTypeahead
-                  activeIndex={mention.activeIndex}
-                  {...(threadMentions.composer?.busy === undefined
-                    ? {}
-                    : { busy: threadMentions.composer.busy })}
-                  candidates={threadMentions.composer?.candidates ?? []}
-                  listId={mentionListId}
-                  onChoose={mention.choose}
-                  onHover={mention.setActiveIndex}
-                />
-              ) : null}
-              {fileMentionOpen ? (
-                <PathMentionTypeahead
-                  activeIndex={fileMentions.activeIndex}
-                  busy={fileMentions.busy}
-                  candidates={fileMentions.candidates}
-                  listId={fileMentionListId}
-                  onChoose={fileMentions.choose}
-                  onHover={fileMentions.setActiveIndex}
-                />
-              ) : null}
-            </>
-          )
-        }
-        row={{
-          leading: (
-            <>
-              {props.turnClient === undefined ? null : (
-                <>
-                  <ComposerAttachButton
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    busy={creating || completionLocked}
-                    refusedReason={
-                      imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
-                    }
-                    onRefused={images.refuse}
-                    onFileSelected={(file) => images.attach([file])}
-                  />
-                </>
-              )}
-              {props.imageGenerationClient === undefined ||
-              props.imageGenerationProfiles === undefined ? null : (
-                <ImageGenerationAction
-                  client={props.imageGenerationClient}
-                  disabled={completionLocked}
-                  {...(props.onOpenImageSettings === undefined
-                    ? {}
-                    : { onOpenSettings: props.onOpenImageSettings })}
-                  presentation="icon"
-                  profiles={props.imageGenerationProfiles}
-                  scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-                  threadKind="work-thread"
-                />
-              )}
-              {thread?.lifecycle === "active" && !completionLocked ? (
-                <OctantMenu
-                  items={[
-                    {
-                      value: "complete",
-                      label: "Mark done",
-                      icon: <Check aria-hidden="true" size={14} />,
-                      disabled: completing || providerChanging || creating,
-                    },
-                    ...(thread.documentDelivery === "native-artifacts"
-                      ? [
-                          {
-                            value: "canvas",
-                            label: "Use Canvas instead of Claude artifacts",
-                            disabled: deliveryChanging,
-                          },
-                        ]
-                      : artifactsChoosable
+                {thread?.lifecycle === "active" && !completionLocked ? (
+                  <OctantMenu
+                    items={[
+                      {
+                        value: "complete",
+                        label: "Mark done",
+                        icon: <Check aria-hidden="true" size={14} />,
+                        disabled: completing || providerChanging || creating,
+                      },
+                      ...(thread.documentDelivery === "native-artifacts"
                         ? [
                             {
-                              value: "native-artifacts",
-                              label: "Use Claude artifacts instead of Canvas",
+                              value: "canvas",
+                              label: "Use Canvas instead of Claude artifacts",
                               disabled: deliveryChanging,
                             },
                           ]
-                        : []),
-                  ]}
-                  onValueChange={(value) => {
-                    if (value === "canvas") void changeDocumentDelivery("canvas");
-                    else if (value === "native-artifacts") setConfirmArtifacts(true);
-                    else setCompletionFormOpen(true);
-                  }}
-                  selectionMode="action"
-                  trigger={<Ellipsis aria-hidden="true" size={16} />}
-                  triggerClassName="shell-icon-button"
-                  triggerLabel="Task actions"
-                  value=""
-                />
-              ) : null}
-            </>
-          ),
-          // Two groups: what the person adds sits left, how the task runs
-          // sits right beside send. The model used to hug the attach
-          // button, so it jumped sides between a new task and the thread it
-          // became.
-          trailing: (
-            <>
-              {thread === undefined ? null : (
-                <ThreadNativeSetupControl
-                  disabled={accessChanging || creating || completionLocked}
-                  providerInstanceId={thread.providerInstanceId}
-                  threadId={String(thread.id)}
-                />
-              )}
-              {thread === undefined ? null : (
-                <PermissionModePicker
-                  autoSupported={autoSupported}
-                  disabled={accessChanging || creating || completionLocked}
-                  modes={WORK_PERMISSION_MODES}
-                  onChange={(mode) => {
-                    const access = workAccessOfMode(mode);
-                    if (access !== undefined) void changeAccess(access);
-                  }}
-                  value={workModeOf(thread.access)}
-                  warningScope={{ projectId: String(thread.projectId) }}
-                />
-              )}
-              {thread === undefined ? null : (
-                <span
-                  aria-label="Bound provider and model"
-                  className="work-thread-workspace__bound-model"
-                >
-                  <ComposerModelPicker
-                    ariaLabel="Provider and model"
-                    disabled={providerChanging || creating || completionLocked}
-                    // Once any turn ran, the host checks the latest one
-                    // whatever its status, so the thread's history lives with
-                    // its provider kind; offering a move the host refuses led
-                    // straight to a stuck thread.
-                    groups={
-                      turns.length > 0
-                        ? startedConversationPickerGroups(props.providerGroups ?? [], {
-                            providerInstanceId: thread.providerInstanceId,
-                            modelId: thread.modelId,
-                          })
-                        : (props.providerGroups ?? [])
-                    }
-                    {...(thread.modelOptionValues === undefined
-                      ? {}
-                      : { modelOptionValues: thread.modelOptionValues })}
-                    onModelOptionChange={(optionId, value) => {
-                      const values = { ...thread.modelOptionValues };
-                      if (value === undefined) delete values[optionId];
-                      else values[optionId] = value;
-                      void changeProvider({
-                        providerInstanceId: thread.providerInstanceId,
-                        modelId: thread.modelId,
-                        modelOptionValues: values,
-                      });
+                        : artifactsChoosable
+                          ? [
+                              {
+                                value: "native-artifacts",
+                                label: "Use Claude artifacts instead of Canvas",
+                                disabled: deliveryChanging,
+                              },
+                            ]
+                          : []),
+                    ]}
+                    onValueChange={(value) => {
+                      if (value === "canvas") void changeDocumentDelivery("canvas");
+                      else if (value === "native-artifacts") setConfirmArtifacts(true);
+                      else setCompletionFormOpen(true);
                     }}
-                    onSelect={changeProvider}
-                    {...(props.onOpenSettings === undefined
-                      ? {}
-                      : { onOpenSettings: props.onOpenSettings })}
-                    selectedModelId={thread.modelId}
-                    selectedProviderInstanceId={thread.providerInstanceId}
+                    selectionMode="action"
+                    trigger={<Ellipsis aria-hidden="true" size={16} />}
+                    triggerClassName="shell-icon-button"
+                    triggerLabel="Task actions"
+                    value=""
                   />
+                ) : null}
+                {thread === undefined ? null : <ThreadReplyDetailMenu />}
+              </>
+            ),
+            // Two groups: what the person adds sits left, how the task runs
+            // sits right beside send. The model used to hug the attach
+            // button, so it jumped sides between a new task and the thread it
+            // became.
+            trailing: (
+              <>
+                {thread === undefined ? null : (
+                  <ThreadNativeSetupControl
+                    disabled={accessChanging || creating || completionLocked}
+                    providerInstanceId={thread.providerInstanceId}
+                    threadId={String(thread.id)}
+                  />
+                )}
+                {thread === undefined ? null : (
+                  <PermissionModePicker
+                    autoSupported={autoSupported}
+                    disabled={accessChanging || creating || completionLocked}
+                    modes={WORK_PERMISSION_MODES}
+                    onChange={(mode) => {
+                      const access = workAccessOfMode(mode);
+                      if (access !== undefined) void changeAccess(access);
+                    }}
+                    value={workModeOf(thread.access)}
+                    warningScope={{ projectId: String(thread.projectId) }}
+                  />
+                )}
+                {thread === undefined ? null : (
+                  <span
+                    aria-label="Bound provider and model"
+                    className="work-thread-workspace__bound-model"
+                  >
+                    <ComposerModelPicker
+                      ariaLabel="Provider and model"
+                      disabled={providerChanging || creating || completionLocked}
+                      // Once any turn ran, the host checks the latest one
+                      // whatever its status, so the thread's history lives with
+                      // its provider kind; offering a move the host refuses led
+                      // straight to a stuck thread.
+                      groups={
+                        turns.length > 0
+                          ? startedConversationPickerGroups(props.providerGroups ?? [], {
+                              providerInstanceId: thread.providerInstanceId,
+                              modelId: thread.modelId,
+                            })
+                          : (props.providerGroups ?? [])
+                      }
+                      {...(thread.modelOptionValues === undefined
+                        ? {}
+                        : { modelOptionValues: thread.modelOptionValues })}
+                      onModelOptionChange={(optionId, value) => {
+                        const values = { ...thread.modelOptionValues };
+                        if (value === undefined) delete values[optionId];
+                        else values[optionId] = value;
+                        void changeProvider({
+                          providerInstanceId: thread.providerInstanceId,
+                          modelId: thread.modelId,
+                          modelOptionValues: values,
+                        });
+                      }}
+                      onSelect={changeProvider}
+                      {...(props.onOpenSettings === undefined
+                        ? {}
+                        : { onOpenSettings: props.onOpenSettings })}
+                      selectedModelId={thread.modelId}
+                      selectedProviderInstanceId={thread.providerInstanceId}
+                    />
+                  </span>
+                )}
+                <ComposerVoiceButton
+                  disabled={creating || completionLocked}
+                  onTranscript={(transcript) =>
+                    rememberDraft(appendTranscript(prompt, transcript), null)
+                  }
+                />
+              </>
+            ),
+            actions: {
+              kind: "send-or-stop",
+              cellClassName: "composer-actions",
+              sending: turnRunning,
+              send: {
+                ariaLabel: queueFollowUp
+                  ? "Queue message"
+                  : props.turnClient === undefined && !turnRunning
+                    ? "Create artifact"
+                    : "Send follow-up",
+                disabled: !canSubmit,
+                onSend: () => void submit(),
+              },
+              stop: {
+                ariaLabel: "Stop turn",
+                ...(props.turnClient === undefined || stoppableTurn === undefined
+                  ? { disabledReason: "Stopping is available once the turn has started." }
+                  : {}),
+                onStop: () => void onStop(),
+                ...(forceStop.offered
+                  ? { forceStop: { onForceStop: () => void onForceStop() } }
+                  : {}),
+              },
+            },
+          }}
+          footer={
+            <div aria-live="polite" className="composer-status">
+              {errorMessage === undefined ? null : (
+                /* ui-boundary-exception: compact-status */
+                <span className="composer-status__notice" role="alert" title={errorMessage}>
+                  {errorMessage}
                 </span>
               )}
-              <ComposerVoiceButton
-                disabled={creating || completionLocked}
-                onTranscript={(transcript) =>
-                  rememberDraft(appendTranscript(prompt, transcript), null)
-                }
-              />
-            </>
-          ),
-          actions: {
-            kind: "send-or-stop",
-            cellClassName: "composer-actions",
-            sending: turnRunning,
-            send: {
-              ariaLabel: queueFollowUp
-                ? "Queue message"
-                : props.turnClient === undefined && !turnRunning
-                  ? "Create artifact"
-                  : "Send follow-up",
-              disabled: !canSubmit,
-              onSend: () => void submit(),
-            },
-            stop: {
-              ariaLabel: "Stop turn",
-              ...(props.turnClient === undefined || stoppableTurn === undefined
-                ? { disabledReason: "Stopping is available once the turn has started." }
-                : {}),
-              onStop: () => void onStop(),
-            },
-          },
-        }}
-        footer={
-          <div aria-live="polite" className="composer-status">
-            {errorMessage === undefined ? null : (
-              /* ui-boundary-exception: compact-status */
-              <span className="composer-status__notice" role="alert" title={errorMessage}>
-                {errorMessage}
-              </span>
-            )}
-            {handoffNotice === undefined || completionLocked || turnRunning ? null : (
-              <span className="composer-status__hint" role="status">
-                {handoffNotice}
-              </span>
-            )}
-            {completionLocked || turnRunning || props.turnClient === undefined ? (
-              <span className="composer-status__hint" role="status">
-                {completionLocked
-                  ? "Reactivate this task before creating another file or changing its provider."
-                  : turnRunning
-                    ? "Submit adds this message to the host queue"
-                    : "Enter saves a Markdown artifact · Shift+Enter for a new line"}
-              </span>
-            ) : null}
-          </div>
-        }
-      />
-    </section>
+              {toolCatalogHandoffRequired ? (
+                <ToolCatalogContinuation
+                  disabled={!canSubmit || queueFollowUp || creating}
+                  onContinue={() => void sendWorkTurn(false, true)}
+                />
+              ) : null}
+              {handoffNotice === undefined || completionLocked || turnRunning ? null : (
+                <span className="composer-status__hint" role="status">
+                  {handoffNotice}
+                </span>
+              )}
+              {completionLocked || turnRunning || props.turnClient === undefined ? (
+                <span className="composer-status__hint" role="status">
+                  {completionLocked
+                    ? "Reactivate this task before creating another file or changing its provider."
+                    : turnRunning
+                      ? "Submit adds this message to the host queue"
+                      : "Enter saves a Markdown artifact · Shift+Enter for a new line"}
+                </span>
+              ) : null}
+            </div>
+          }
+        />
+      </section>
+    </ThreadReplyDetailScope>
   );
 }

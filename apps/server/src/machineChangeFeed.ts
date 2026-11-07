@@ -244,6 +244,8 @@ function topicsForEvent(event: {
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }
+  if (aggregateType === "pending-question-deferral")
+    return ["chat-navigation", "work-navigation", "code-navigation"];
   if (aggregateType.startsWith("chat-")) return ["chat-navigation"];
   // A compaction of a Chat session ends on the thread's context ledger, and
   // its outcome rides the thread's held stream, which wakes on Chat changes.

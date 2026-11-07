@@ -16,7 +16,14 @@ import {
   type ShieldWatcherLabel,
   type TurnUsage,
 } from "@octant/contracts";
-import { shieldReviewsPrompts, workThreadAccessOf } from "@octant/domain/guardrail-policy";
+import {
+  permissionModeOf,
+  resolveGuardrail,
+  shieldReviewsPrompts,
+  workThreadAccessOf,
+  type ThreadAccess,
+  type GuardrailResolution,
+} from "@octant/domain/guardrail-policy";
 import type { ShieldServerRule } from "@octant/domain/shield-server-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -106,6 +113,17 @@ export interface HostShield extends ShieldReviewPort {
   readonly shield: OctantShield;
   /** Whether Shield can run for a thread on this provider instance at all. */
   readonly availableFor: (providerInstanceId: ProviderInstanceId) => boolean;
+  /** The same reviewer route and model as enforcement, without making a model call. */
+  readonly describe: (
+    threadId: string,
+    access: ThreadAccess,
+  ) =>
+    | {
+        readonly resolution: GuardrailResolution;
+        readonly model?: ShieldModelChoice;
+        readonly modelUnavailable: boolean;
+      }
+    | undefined;
   /** Where decisions show on a thread's transcript; set once the Code runtime exists. */
   readonly showDecisionsWith: (record: (input: ShieldTranscriptRecord) => void) => void;
 }
@@ -242,6 +260,39 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
   return {
     shield,
     availableFor,
+    describe: (threadId, access) => {
+      const subject = subjectOf(threadId);
+      if (subject === undefined) return undefined;
+      const thread = subject.thread;
+      const chosenReviewer = deps.chosenReviewer?.(thread);
+      const providerReview =
+        deps.providerCapabilities(thread.providerInstanceId)?.harnessAutoReview === "supported";
+      const needsShield =
+        permissionModeOf(access) === "auto" &&
+        (!providerReview || chosenReviewer === "octant-shield");
+      const resolution = resolveGuardrail({
+        access,
+        reviewer: chosenReviewer,
+        capabilities: {
+          providerReview,
+          providerSandbox: false,
+          shield:
+            needsShield && availableFor(thread.providerInstanceId)
+              ? { available: true }
+              : { available: false, reason: "No Shield model is reachable." },
+        },
+      });
+      const effective = resolution.status === "supported" ? resolution : resolution.fallback;
+      if (effective.approver !== "octant-shield") return { resolution, modelUnavailable: false };
+      const chosen = deps.chosenModel?.();
+      const model = resolveShieldModel({ chosen, thread, catalog: deps.catalog });
+      return {
+        resolution,
+        model,
+        modelUnavailable:
+          chosen !== undefined && deps.chosenModelUnavailable?.(chosen) !== undefined,
+      };
+    },
     review: (request) => shield.review(request),
     recordOnTranscript: (input) => {
       try {

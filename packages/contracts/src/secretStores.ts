@@ -1,3 +1,4 @@
+import { CommandCredentialJournalRecord } from "./commandCredentials";
 /**
  * Linked external secret stores: Settings › Secret stores, and the record the
  * journal keeps of them.
@@ -12,6 +13,7 @@
  */
 
 import { Schema } from "effect";
+import { BrowserCredentialJournalRecord } from "./browserCredentialUse";
 import { UtcTimestamp } from "./events";
 import { ProviderInstanceId } from "./providers";
 import { WindowId } from "./shell";
@@ -78,7 +80,40 @@ export const AwsCliKeyReference = Schema.Struct({
 }).annotations(strict);
 export type AwsCliKeyReference = typeof AwsCliKeyReference.Type;
 
+/** Exact selected identity and OAuth scopes; IAM may authorize several Projects. */
+export const GoogleCliAccountIdentity = Schema.Struct({
+  serviceAccountEmail: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(256),
+    Schema.pattern(/^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.gserviceaccount\.com$/),
+  ),
+  scopes: Schema.Array(
+    Schema.String.pipe(
+      Schema.maxLength(256),
+      Schema.pattern(/^https:\/\/www\.googleapis\.com\/auth\/[a-zA-Z0-9._/-]+$/),
+    ),
+  ).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(16),
+    Schema.filter((scopes) => new Set(scopes).size === scopes.length),
+  ),
+}).annotations(strict);
+export const GoogleCliAccountReference = Schema.Struct({
+  ...StoreAndReference,
+  reference: SecretStoreItemReference.pipe(Schema.pattern(/^op:\/\//)),
+  ...GoogleCliAccountIdentity.fields,
+}).annotations(strict);
+export type GoogleCliAccountReference = typeof GoogleCliAccountReference.Type;
+export const decodeGoogleCliAccountReference = Schema.decodeUnknownSync(GoogleCliAccountReference);
+export const decodeGoogleCliAccountIdentity = Schema.decodeUnknownSync(GoogleCliAccountIdentity);
+
 export const SecretStoresCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("point-google-cli-account"),
+    confirmed: Schema.Literal(true),
+    ...GoogleCliAccountReference.fields,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("clear-google-cli-account") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("read-google-cli-account") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("link-store"), store: SecretStoreKind }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("unlink-store"), store: SecretStoreKind }).annotations(
     strict,
@@ -121,6 +156,8 @@ export type SecretStoreCheckOutcome = typeof SecretStoreCheckOutcome.Type;
 
 export const SecretStoreRefusalReason = Schema.Literal(
   "malformed",
+  "credential-refused",
+  "selection-changed",
   "broker-unavailable",
   "store-locked",
   "tool-not-installed",
@@ -141,6 +178,10 @@ const Message = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
 /** The plain words for each refusal, so every surface says the same thing. */
 export const SECRET_STORE_REFUSAL_MESSAGES: Readonly<Record<SecretStoreRefusalReason, string>> = {
   malformed: "That request was not understood.",
+  "credential-refused":
+    "The linked item is not a usable key for the selected service account. Check the item, account and scopes.",
+  "selection-changed":
+    "The selected account changed while it was being checked. Read the current account before trying again.",
   "broker-unavailable": "This host has no credential broker, so it cannot link a secret store.",
   "store-locked": "The secret store is locked. Unlock it, then try again.",
   "tool-not-installed": "The secret store's command line tool is not installed.",
@@ -158,6 +199,11 @@ export const SECRET_STORE_REFUSAL_MESSAGES: Readonly<Record<SecretStoreRefusalRe
 };
 
 export const SecretStoresResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("secret-stores-google-cli-account"),
+    reference: Schema.NullOr(GoogleCliAccountReference),
+    sessionExpiresAt: Schema.optional(UtcTimestamp),
+  }).annotations(strict),
   SecretStoresView,
   Schema.Struct({
     kind: Schema.Literal("secret-stores-checked"),
@@ -188,6 +234,10 @@ export const SECRET_STORE_AGGREGATE_TYPE = "secret-store";
 
 const CredentialTarget = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("google-cli-account"),
+    ...GoogleCliAccountIdentity.fields,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("provider-key"),
     instanceId: ProviderInstanceId,
   }).annotations(strict),
@@ -209,6 +259,8 @@ const CredentialTarget = Schema.Union(
  * is never an input to any of these records.
  */
 export const SecretStoreJournalRecord = Schema.Union(
+  BrowserCredentialJournalRecord,
+  CommandCredentialJournalRecord,
   Schema.Struct({
     name: Schema.Literal("secret-store.linked"),
     store: SecretStoreKind,
@@ -217,6 +269,17 @@ export const SecretStoreJournalRecord = Schema.Union(
   Schema.Struct({
     name: Schema.Literal("secret-store.unlinked"),
     store: SecretStoreKind,
+    windowId: WindowId,
+  }).annotations(strict),
+  Schema.Struct({
+    /** Person-confirmed intent; an unavailable broker reply does not prove a change committed. */
+    name: Schema.Literal("credential-reference.requested"),
+    target: Schema.Struct({
+      kind: Schema.Literal("google-cli-account"),
+      ...GoogleCliAccountIdentity.fields,
+    }).annotations(strict),
+    ...StoreAndReference,
+    replaced: Schema.Boolean,
     windowId: WindowId,
   }).annotations(strict),
   Schema.Struct({

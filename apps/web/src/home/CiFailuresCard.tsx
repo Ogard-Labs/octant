@@ -1,4 +1,6 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { AutomationClient } from "@octant/client-runtime";
+import type { AutomationSummary } from "@octant/contracts";
 import type { CodeProjectPullRequestView } from "@octant/contracts";
 import { CircleX } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -13,6 +15,8 @@ import {
 import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 
 export interface CiFailuresCardSource {
+  readonly routines?: AutomationClient;
+  readonly onOpenRoutine?: (automationId: string) => void;
   readonly available: boolean;
   readonly viewerLogin: string;
   /** Branches the window already holds. The card does not look them up. */
@@ -56,6 +60,19 @@ type FailureRead =
 
 function useCiFailuresContent(source: CiFailuresCardSource): HomeCardContent {
   const read = useFailureRead(source.load);
+  const [routines, setRoutines] = useState<ReadonlyArray<AutomationSummary>>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void source.routines
+      ?.list({ limit: 100 }, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setRoutines(value.items);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setRoutines([]);
+      });
+    return () => controller.abort();
+  }, [source.routines]);
   const { currentBranches, viewerLogin } = source;
   const model = useMemo(
     () =>
@@ -71,7 +88,15 @@ function useCiFailuresContent(source: CiFailuresCardSource): HomeCardContent {
   return {
     status: "ready",
     count: model.rows.length,
-    body: <FailureRows now={source.now} onStartFix={source.onStartFix} rows={model.rows} />,
+    body: (
+      <FailureRows
+        now={source.now}
+        onStartFix={source.onStartFix}
+        rows={model.rows}
+        routines={routines}
+        {...(source.onOpenRoutine === undefined ? {} : { onOpenRoutine: source.onOpenRoutine })}
+      />
+    ),
   };
 }
 
@@ -97,6 +122,8 @@ function useFailureRead(load: CiFailuresCardSource["load"]): FailureRead {
 }
 
 function FailureRows(props: {
+  readonly routines: ReadonlyArray<AutomationSummary>;
+  readonly onOpenRoutine?: (automationId: string) => void;
   readonly rows: ReadonlyArray<CiFailureCardRow>;
   readonly now: number;
   readonly onStartFix: (row: CiFailureCardRow) => void;
@@ -131,6 +158,50 @@ function FailureRows(props: {
               </OctantButton>
             )}
           </div>
+          {props.routines
+            .filter(
+              (routine) =>
+                routine.projectId === row.projectId && routine.latestEventRun !== undefined,
+            )
+            .filter((routine) => {
+              try {
+                const data: unknown = JSON.parse(routine.latestEventRun?.event.data ?? "{}");
+                return (
+                  typeof data === "object" &&
+                  data !== null &&
+                  "repository" in data &&
+                  "branch" in data &&
+                  data.repository === `${row.repositoryOwner}/${row.repositoryName}` &&
+                  data.branch === row.branch
+                );
+              } catch {
+                return false;
+              }
+            })
+            .slice(0, 3)
+            .map((routine) => (
+              <p className="oct-meta" key={String(routine.id)}>
+                Routine work exists for CI on this branch. Review it before starting another fix:{" "}
+                {props.onOpenRoutine === undefined ? (
+                  routine.displayName
+                ) : (
+                  <OctantButton
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    onClick={() => props.onOpenRoutine?.(String(routine.id))}
+                  >
+                    {routine.displayName}
+                  </OctantButton>
+                )}
+                .
+                {routine.latestEventRun?.event.url === undefined ? null : (
+                  <a href={routine.latestEventRun.event.url} target="_blank" rel="noreferrer">
+                    View CI event
+                  </a>
+                )}
+              </p>
+            ))}
         </li>
       ))}
     </ul>

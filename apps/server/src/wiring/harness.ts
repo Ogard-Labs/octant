@@ -1,3 +1,7 @@
+import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
+import { createServerPreviewTunnelRoutes } from "../serverProjects/serverPreviewTunnelRoutes";
+import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
+import { createCommandCredentialPreparation } from "../secretStores/commandCredentialPreparation";
 import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -44,7 +48,6 @@ import {
 } from "../harness/nativeHarnessComposition";
 import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSecondOpinion";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
-import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
   createFollowUp,
@@ -63,6 +66,7 @@ import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessE
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
+import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
@@ -90,6 +94,7 @@ import {
   readRunbookFile,
   ShieldServerStore,
 } from "../shield/shieldServerStore";
+import { createGoogleCliCommandCredentials } from "../secretStores/googleCliCommandCredentials";
 import { awsCliEnvironment } from "../secretStores/awsCliEnvironment";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -98,7 +103,6 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
-    | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "personMemory"
@@ -106,14 +110,10 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    | "agentRunAdmission"
     | "nativeHarnessRouter"
     | "nativeHarnessRoutingStore"
-    | "agentRunEligibleTargets"
-    | "agentRunOrchestration"
     | "contributeChildTools"
     | "externalContentIngestionStore"
-    | "remoteDelegation"
     | "sideTasks"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
@@ -153,13 +153,9 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
 export function wireHarness(deps: HarnessDependencies) {
   const {
     safeNetworkStore,
-    agentRunAdmission,
-    agentRunEligibleTargets,
     agentRunInteractions,
     serverProjectStore,
     serverRegistry,
-    agentRunOrchestration,
-    agentRunPersistence,
     codeBoardEventStore,
     codeEvidence,
     codeParentActiveTurn,
@@ -177,7 +173,6 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
-    remoteDelegation,
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
     nativeHarnessTranscripts,
@@ -240,10 +235,36 @@ export function wireHarness(deps: HarnessDependencies) {
   // Code Projects bound to a folder on one of those servers.
   serverRegistry.servers = () => shieldServerStore.servers();
   serverRegistry.serversFor = (projectId) => shieldServerStore.serversFor(projectId);
-  const serverProjectRoutes = createServerProjectRouteHandler({
+  const serverPreviewTunnels = new ServerPreviewTunnels({
+    address: (projectId) => {
+      const project = serverProjectStore.project(projectId);
+      const address = serverProjectStore.addressOf(projectId);
+      if (project === undefined || address.kind !== "address") return undefined;
+      return {
+        server: address.server,
+        identity: JSON.stringify([
+          project.serverId,
+          project.folder,
+          project.boundAt,
+          address.server,
+        ]),
+      };
+    },
+    ownerCurrent: (owner) =>
+      windowAuthorityStore.listWindowIds().some((id) => String(id) === owner),
+    agentSocket: sshAgentSocket,
+    record: (record) => serverProjectStore.recordPreview(record),
+  });
+  const previewRoutes = createServerPreviewTunnelRoutes({
+    windows: windowAuthorityStore,
+    tunnels: serverPreviewTunnels,
+  });
+  const catalogRoutes = createServerProjectRouteHandler({
     windowAuthorityStore,
     store: serverProjectStore,
   });
+  const serverProjectRoutes = async (request: Request) =>
+    (await previewRoutes(request)) ?? catalogRoutes(request);
   const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
     shieldServerStore.recordRemoteCommand(input),
   );
@@ -281,6 +302,11 @@ export function wireHarness(deps: HarnessDependencies) {
   // command cannot swap the script another thread is about to run.
   const harnessScriptDirectory = join(providerDataDirectory, "harness", "scripts");
   mkdirSync(harnessScriptDirectory, { recursive: true, mode: 0o700 });
+  const googleCliCommands = createGoogleCliCommandCredentials({
+    broker: secretStoreBroker,
+    scriptRoot: harnessScriptDirectory,
+    configurationRoot: join(providerDataDirectory, "harness", "cloud-cli"),
+  });
   const harnessProcessPort = new RepositoryTestProcessPort({
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
     temporaryDirectory: harnessWorkDirectory,
@@ -333,6 +359,7 @@ export function wireHarness(deps: HarnessDependencies) {
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
             cloudCliEnvironment,
+            googleCliCredentials: googleCliCommands.prepare,
             // Below Full access a command reaches a registered server only
             // through the host's relays and agent socket: ports Seatbelt
             // opens on macOS, sockets the capsule's forwarder dials on Linux.
@@ -457,6 +484,7 @@ export function wireHarness(deps: HarnessDependencies) {
     return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
   };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
+    mayAnswerChildFromDevice: agentRunInteractions.mayAnswerFromDevice,
     windowAuthorityStore,
     store: {
       read: (threadId) => {
@@ -566,14 +594,18 @@ export function wireHarness(deps: HarnessDependencies) {
   // reaches the observer and the lead fallback.
   const nativeHarnessHooks = {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
-      nativeHarnessQuestions.answer(threadId, questionId, answer);
+      return nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
     observeRemoteCommand: (
       threadId: string,
       projectId: string | undefined,
       event: ProviderRuntimeEvent,
     ) => runtimeRemoteCommands.observe(threadId, projectId, event),
+    // Orientation first and the reply formats it introduces next, ahead of
+    // each mode's own rules and tool notes, so every mode and provider opens
+    // its instructions the same way.
     contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
+      octantOrientation(scope.mode),
       ...nativeHarnessObserver.contextFor(scope),
       ...nativeHarnessObserver.runtimeServerNotes(scope),
       ...turnDecisionInstructions(scope.mode),
@@ -804,23 +836,6 @@ export function wireHarness(deps: HarnessDependencies) {
         },
         scope,
       ),
-    delegate: (scope) =>
-      createNativeHarnessDelegatePort(
-        {
-          admission: agentRunAdmission,
-          orchestration: agentRunOrchestration,
-          persistence: agentRunPersistence,
-          listTargets: () => agentRunEligibleTargets(scope.projectId),
-          isTainted: () =>
-            readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
-              .externalContentIngested,
-          remote: remoteDelegation,
-          router: nativeHarnessRouter,
-          sessions: nativeHarnessSessions,
-          uuid: randomUUID,
-        },
-        scope,
-      ),
     authority: createNativeHarnessAuthority({
       hostId: deriveToolHostId(providerDataDirectory),
       persistence,
@@ -842,18 +857,21 @@ export function wireHarness(deps: HarnessDependencies) {
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
       cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
     }),
     offlineShell: createNativeHarnessShell({
       process: harnessOfflineProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
       cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
     }),
     fullAccessShell: createNativeHarnessShell({
       process: harnessFullAccessProcessPort,
       scriptDirectory: harnessScriptDirectory,
       sshAgentSocket,
       cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
     }),
     ...(harnessProxiedShell === undefined
       ? {}
@@ -911,7 +929,29 @@ export function wireHarness(deps: HarnessDependencies) {
   // A managed child's harness tools come first in its tool set, ahead of
   // what later areas add.
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
+  const prepareCredentialCommand = createCommandCredentialPreparation({
+    readThread: (id) => persistence.readCodeThread(id),
+    ordinary: nativeHarnessComposition,
+    egress: toolEgressRules,
+    endpoint: harnessEgressEndpoint,
+    fullAccessProcess: harnessFullAccessProcessPort,
+    temporaryDirectory: harnessWorkDirectory,
+    receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+    uuid: randomUUID,
+  });
   return {
+    readHarnessProcessReceipts: async () =>
+      (
+        await readOwnedProcessReceipts({
+          receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+          supervisor: "repository-test-runner",
+        })
+      ).map((row) => row.receipt),
+
+    beginGoogleCliChange: googleCliCommands.beginChange,
+    recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
+    credentialCommandProcess: harnessFullAccessProcessPort,
+    prepareCredentialCommand,
     personMemorySweep,
     runtimeForgeChanges,
     followUpCreation,
@@ -923,6 +963,7 @@ export function wireHarness(deps: HarnessDependencies) {
     shieldServerRoutes,
     shieldServerStore,
     serverProjectRoutes,
+    serverPreviewTunnels,
     nativeHarnessHooks,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,

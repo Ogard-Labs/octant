@@ -1,3 +1,8 @@
+import { EventEmitter } from "node:events";
+import { createContext, runInContext } from "node:vm";
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
+import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
+import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
   BrowserTargetStaleError,
@@ -7,7 +12,6 @@ import {
 
 const contextId = "60000000-0000-4000-8000-000000000001";
 const threadId = "10000000-0000-4000-8000-000000000001";
-const requestId = "61000000-0000-4000-8000-000000000000";
 
 function view(): BrowserSurfaceViewPort {
   const listeners = new Map<string, (...args: readonly unknown[]) => void>();
@@ -61,351 +65,298 @@ function view(): BrowserSurfaceViewPort {
   };
 }
 
-async function selectedSurface(extraTab = false) {
-  const created = view();
-  vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(false);
-  let screenshot: (() => Promise<unknown>) | undefined;
-  vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) => {
-    if (method === "Page.getFrameTree")
-      return {
-        frameTree: {
-          frame: {
-            id: "top",
-            loaderId: "document-1",
-            url: "https://example.com/",
-          },
-        },
-      };
-    if (method === "Page.getLayoutMetrics")
-      return {
-        cssVisualViewport: {
-          clientWidth: 320,
-          clientHeight: 240,
-          pageX: 0,
-          pageY: 0,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-        },
-      };
-    if (method === "DOM.getNodeForLocation") return { frameId: "top", backendNodeId: 42 };
-    if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
-    if (method === "Runtime.evaluate")
-      return {
-        result: {
-          value: {
-            title: "Example",
-            read: {
-              element: {
-                selector: "#save",
-                text: "Save",
-                bounds: { x: 0.25, y: 0.25, width: 0.1, height: 0.1 },
-              },
-              context: {
-                viewport: { width: 320, height: 240 },
-                tag: "button",
-                ancestors: ["main"],
-                children: [],
-                styles: [{ property: "color", value: "rgb(0, 0, 0)" }],
-                omissions: [],
-              },
-              cropBlocked: false,
+async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionStart) {
+  const base = view();
+  const target = {
+    id: "60000000-0000-4000-8000-000000000039",
+    kind: "text",
+    selectionStart,
+    selectionEnd,
+  };
+  let current = true;
+  // The native lookup itself is synchronous; the host's next field read is
+  // where a deferred lookup awaits.
+  let afterCaret: Promise<void> | undefined;
+  let onCaret = () => {};
+  vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(async () => {
+    const waiting = afterCaret;
+    afterCaret = undefined;
+    if (waiting !== undefined) await waiting;
+    return { ...target };
+  });
+  let receive:
+    | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+    | undefined;
+  const nativeInput = vi.fn((input: { readonly type: string; readonly button?: string }) => {
+    if (input.type === "mouseUp" && input.button === "right")
+      for (const [name, listener] of vi.mocked(base.webContents.on).mock.calls)
+        if (name === "context-menu")
+          listener(
+            {},
+            {
+              frame: base.webContents.mainFrame,
+              isEditable: true,
+              editFlags: { canSelectAll: true },
             },
-          },
-        },
-      };
-    if (method === "Page.captureScreenshot") return screenshot?.() ?? { data: "/9j/AA==" };
-    throw new Error(`Unexpected native protocol command ${method}`);
+          );
   });
-  const second = view();
-  let allocated = false;
   const host = createBrowserSurfaceHost({
-    createView: () => {
-      if (allocated) return second;
-      allocated = true;
-      return created;
-    },
+    isEmbeddedOwner: () => current,
+    isOwnerWindowAvailable: () => current,
+    createView: () => ({
+      ...base,
+      human: {
+        input: nativeInput,
+        visible: vi.fn(),
+        bounds: vi.fn(),
+        caret: () => {
+          onCaret();
+          return { x: 20, y: 30, width: 0, height: 24 };
+        },
+        frames: (listener) => {
+          receive = listener;
+          return () => {};
+        },
+      },
+    }),
   });
-  const owner = { windowId: "window-a", threadId };
   await host.createContext({
     contextId,
-    owner,
+    owner: { windowId: "window-a", threadId },
     policy: {
       profileMode: "isolated",
+      profile: { kind: "personal" },
       allowedOrigins: ["https://example.com"],
       credentialFieldProtection: true,
-      maxConcurrentTabs: extraTab ? 2 : 1,
-      sessionTimeoutMs: 300_000,
+      maxConcurrentTabs: 2,
+      sessionTimeoutMs: 300000,
     },
   });
-  host.attach(
-    contextId,
-    owner,
-    {
-      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
-      isDestroyed: () => false,
-      webContents: { send: vi.fn() },
-    },
-    { x: 10, y: 20, width: 640, height: 480 },
+  const attached = await host.humanPresentation(
+    decodeHumanBrowserRequest({ contextId, threadId, kind: "attach" }),
+    "window-a",
   );
-  host.setPointSelection(contextId, owner, true, requestId);
-  const mouse = vi
-    .mocked(created.webContents.on)
-    .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
-  mouse?.({ preventDefault: vi.fn() }, { type: "mouseDown", button: "left", x: 160, y: 120 });
-  mouse?.({ preventDefault: vi.fn() }, { type: "mouseUp", button: "left", x: 160, y: 120 });
-  const selected = host.state(contextId).pointSelection;
-  if (selected?.status !== "selected") throw new Error("Missing native selection");
+  if (attached.status !== "attached") throw new Error("Expected native presentation");
+  const send = (raw: Readonly<Record<string, unknown>>) =>
+    host.humanPresentation(
+      decodeHumanBrowserRequest({
+        contextId,
+        threadId,
+        presentationId: attached.presentationId,
+        ...raw,
+      }),
+      "window-a",
+    );
+  await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+  receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+  await send({ kind: "frame", acknowledgement: 0 });
   return {
     host,
-    created,
-    second,
-    selected,
-    holdScreenshot: (read: () => Promise<unknown>) => {
-      screenshot = read;
+    send,
+    nativeInput,
+    press: async () => {
+      const result = await send({
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyDown", keyCode: "F10", modifiers: ["shift"] },
+      });
+      if (result.status !== "edit-menu-pending")
+        throw new Error("Expected private pending gesture");
+      return result.menuId;
+    },
+    release: () =>
+      send({
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "keyUp", keyCode: "F10", modifiers: [] },
+      }),
+    expire: () => {
+      current = false;
+    },
+    deferCaret: () => {
+      let resume: () => void = () => {};
+      let entered: () => void = () => {};
+      const held = new Promise<void>((done) => {
+        resume = done;
+      });
+      const started = new Promise<void>((done) => {
+        entered = done;
+      });
+      onCaret = () => {
+        onCaret = () => {};
+        afterCaret = held;
+        entered();
+      };
+      return { resume, started };
     },
   };
 }
 
 describe("BrowserSurfaceHost", () => {
-  it.each(["fresh-gesture", "window", "document", "tab", "capture-finished"] as const)(
-    "bounds selected release suppression to its original gesture: %s",
-    async (retirement) => {
-      const f = await selectedSurface(retirement === "tab");
-      const owner = { windowId: "window-a", threadId };
-      const mouse = vi
-        .mocked(f.created.webContents.on)
-        .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
-      const down = vi.fn();
-      try {
-        f.host.setPointSelection(contextId, owner, true, "61000000-0000-4000-8000-000000000777");
-        mouse?.({ preventDefault: down }, { type: "mouseDown", button: "left", x: 160, y: 120 });
-        expect(down).toHaveBeenCalledOnce();
-        let activeMouse = mouse;
-        if (retirement === "window") {
-          f.host.detach(contextId, owner);
-          f.host.attach(
-            contextId,
-            owner,
-            {
-              contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
-              isDestroyed: () => false,
-              webContents: { send: vi.fn() },
-            },
-            { x: 0, y: 0, width: 640, height: 480 },
-          );
+  it("keeps owner frames volatile, fences earlier agent captures and lets local input reclaim the exact native page", async () => {
+    const created = view();
+    created.webContents.insertText = vi.fn(async () => undefined);
+    vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(
+      async (method, params) => {
+        // Actual Electron emits before-mouse-event for CDP mouse dispatch too.
+        if (method === "Input.dispatchMouseEvent" && params?.type === "mousePressed") {
+          vi.mocked(created.webContents.on).mock.calls.find(
+            ([event]) => event === "before-mouse-event",
+          )?.[1]({}, { type: "mouseDown" });
         }
-        if (retirement === "document")
-          vi.mocked(f.created.webContents.on).mock.calls.find(
-            ([event]) => event === "did-navigate",
-          )?.[1]();
-        if (retirement === "tab") {
-          await f.host.act(contextId, {
-            kind: "tab-open",
-            target: "https://example.com/next",
-            include: [],
-          });
-          activeMouse = vi
-            .mocked(f.second.webContents.on)
-            .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
-        }
-        if (retirement === "capture-finished") {
-          const selected = f.host.state(contextId).pointSelection;
-          if (selected?.status !== "selected") throw Error("Missing selected point");
-          await f.host.describePoint(
-            contextId,
-            selected.point,
-            new AbortController().signal,
-            selected.selectionId,
-          );
-          expect(f.host.state(contextId).pointSelection).toBeUndefined();
-        }
-        if (retirement === "fresh-gesture")
-          activeMouse?.(
-            { preventDefault: vi.fn() },
-            { type: "mouseDown", button: "left", x: 100, y: 100 },
-          );
-        const firstUp = vi.fn();
-        activeMouse?.(
-          { preventDefault: firstUp },
-          { type: "mouseUp", button: "left", x: 100, y: 100 },
-        );
-        expect(firstUp).toHaveBeenCalledTimes(retirement === "capture-finished" ? 1 : 0);
-        const ordinaryDown = vi.fn(),
-          ordinaryUp = vi.fn();
-        activeMouse?.(
-          { preventDefault: ordinaryDown },
-          { type: "mouseDown", button: "left", x: 100, y: 100 },
-        );
-        activeMouse?.(
-          { preventDefault: ordinaryUp },
-          { type: "mouseUp", button: "left", x: 100, y: 100 },
-        );
-        expect(ordinaryDown).not.toHaveBeenCalled();
-        expect(ordinaryUp).not.toHaveBeenCalled();
-      } finally {
-        await f.host.closeAll();
-      }
-    },
-  );
-
-  it("keeps a replacement panel's selection when an older panel cancels", async () => {
-    const f = await selectedSurface();
-    const owner = { windowId: "window-a", threadId };
-    const firstRequest = "61000000-0000-4000-8000-000000000001";
-    const secondRequest = "61000000-0000-4000-8000-000000000002";
+        return undefined;
+      },
+    );
+    const started = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<void>();
+    let delay = true;
+    vi.mocked(created.webContents.capturePage).mockImplementation(async () => {
+      started.resolve();
+      if (delay) await captured.promise;
+      return {
+        isEmpty: () => false,
+        getSize: () => ({ width: 800, height: 600 }),
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+      };
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000001", threadId };
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const id = "a7880000-0000-4000-8000-000000000002";
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.ownerControl(decodeOwnerBrowserNativeCommand({ contextId, owner, ...command }));
     try {
-      f.host.setPointSelection(contextId, owner, true, firstRequest);
-      const replacement = f.host.setPointSelection(
+      await host.createContext({
         contextId,
         owner,
-        true,
-        secondRequest,
-      ).pointSelection;
-      expect(replacement?.status).toBe("armed");
-      f.host.setPointSelection(contextId, owner, false, firstRequest);
-      expect(f.host.state(contextId).pointSelection).toEqual(replacement);
-      f.host.setPointSelection(contextId, owner, false, secondRequest);
-      expect(f.host.state(contextId).pointSelection).toBeUndefined();
-    } finally {
-      await f.host.closeAll();
-    }
-  });
-  it("resolves a native person's selection through the shared CDP reader with CSS viewport coordinates", async () => {
-    const f = await selectedSurface();
-    try {
-      const capture = await f.host.describePoint(
-        contextId,
-        f.selected.point,
-        new AbortController().signal,
-        f.selected.selectionId,
-      );
-      if (capture.status !== "described") throw new Error("Missing native capture");
-      expect(capture.element.context?.viewport).toEqual({ width: 320, height: 240 });
-      expect(capture.element.context?.captureId).toMatch(/^[a-f0-9]{64}$/);
-      expect(capture.cropDataUrl).toBe("data:image/jpeg;base64,/9j/AA==");
-      expect(f.created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
-        "DOM.getNodeForLocation",
-        {
-          x: 80,
-          y: 60,
-          includeUserAgentShadowDOM: false,
-          ignorePointerEventsNone: false,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
         },
-      );
-      expect(f.host.state(contextId).pointSelection).toBeUndefined();
-    } finally {
-      await f.host.closeAll();
-    }
-  });
-
-  it("refuses a changed caller point before native DOM or screenshot reads", async () => {
-    const f = await selectedSurface();
-    try {
-      expect(
-        await f.host.describePoint(
-          contextId,
-          { x: 0.5, y: 0.5 },
-          new AbortController().signal,
-          f.selected.selectionId,
-        ),
-      ).toEqual({ status: "unavailable", reason: "page-changed" });
-      expect(f.created.webContents.debugger.sendCommand).not.toHaveBeenCalled();
-      expect(f.created.webContents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
-    } finally {
-      await f.host.closeAll();
-    }
-  });
-
-  it("settles an in-flight native crop on context close and ignores late pixels", async () => {
-    const f = await selectedSurface();
-    let release: ((value: unknown) => void) | undefined;
-    f.holdScreenshot(
-      () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    try {
-      const capture = f.host.describePoint(
+      });
+      expect(await run({ operation: "inspect" })).toEqual({ status: "refused" });
+      host.attach(
         contextId,
-        f.selected.point,
-        new AbortController().signal,
-        f.selected.selectionId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 800, height: 600 },
       );
-      await vi.waitFor(() => expect(release).toBeDefined());
-      await f.host.closeContext(contextId);
-      await expect(capture).resolves.toEqual({ status: "unavailable", reason: "page-changed" });
-      release?.({ data: "/9j/AA==" });
-      await Promise.resolve();
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected visible native target");
+      const pending = host.peek(contextId);
+      // Attach rejection handling before the deliberately delayed capture settles.
+      const withheld = expect(pending).rejects.toThrow(
+        "Owner Browser control holds agent observations",
+      );
+      await started.promise;
+      expect(
+        await run({
+          operation: "claim",
+          controlId: id,
+          target: inspect.target,
+          expiresAt: new Date(Date.now() + 50_000).toISOString(),
+        }),
+      ).toEqual({ status: "claimed" });
+      expect(
+        (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
+      ).toBe("refused");
+      expect(await run({ operation: "release", controlId: id, disposition: "revoke" })).toEqual({
+        status: "released",
+      });
+      captured.resolve();
+      await withheld;
+      delay = false;
+      expect(
+        (
+          await run({
+            operation: "claim",
+            controlId: id,
+            target: inspect.target,
+            expiresAt: new Date(Date.now() + 50_000).toISOString(),
+          })
+        ).status,
+      ).toBe("claimed");
+      expect((await run({ operation: "frame", controlId: id, sequence: 1 })).status).toBe("frame");
+      await expect(host.peek(contextId)).rejects.toThrow(
+        "Owner Browser control holds agent observations",
+      );
+      expect(
+        await run({
+          operation: "input",
+          controlId: id,
+          sequence: 2,
+          expectedFrame: 1,
+          input: { kind: "press", key: "Tab" },
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "Input.dispatchKeyEvent",
+        expect.objectContaining({ type: "keyDown", key: "Tab" }),
+      );
+      expect((await run({ operation: "frame", controlId: id, sequence: 3 })).status).toBe("frame");
+      expect(
+        await run({
+          operation: "input",
+          controlId: id,
+          sequence: 4,
+          expectedFrame: 3,
+          input: { kind: "tap", x: 0.5, y: 0.5 },
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "Input.dispatchTouchEvent",
+        expect.objectContaining({ type: "touchStart" }),
+      );
+      expect((await run({ operation: "frame", controlId: id, sequence: 5 })).status).toBe("frame");
+      const reclaim = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "before-input-event")?.[1];
+      reclaim?.({}, { type: "keyDown" });
+      expect(
+        (
+          await run({
+            operation: "input",
+            controlId: id,
+            sequence: 6,
+            expectedFrame: 5,
+            input: { kind: "press", key: "Enter" },
+          })
+        ).status,
+      ).toBe("refused");
     } finally {
-      await f.host.closeAll();
+      captured.resolve();
+      await host.closeAll();
     }
   });
-
-  it("consumes only an explicitly armed native selection and preserves person-input invalidation", async () => {
-    const created = view();
-    const host = createBrowserSurfaceHost({ createView: () => created });
-    const owner = { windowId: "window-a", threadId };
-    await host.createContext({
-      contextId,
-      owner,
-      policy: {
-        profileMode: "isolated",
-        allowedOrigins: ["https://example.com"],
-        credentialFieldProtection: true,
-        maxConcurrentTabs: 1,
-        sessionTimeoutMs: 300_000,
-      },
-    });
-    const window = {
-      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
-      isDestroyed: () => false,
-      webContents: { send: vi.fn() },
-    };
-    host.attach(contextId, owner, window, { x: 10, y: 20, width: 640, height: 480 });
-    const input = vi.fn();
-    host.onPersonInput(input);
-    const mouse = vi
-      .mocked(created.webContents.on)
-      .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
-    const ordinary = vi.fn();
-    mouse?.({ preventDefault: ordinary }, { type: "mouseDown", button: "left", x: 160, y: 120 });
-    expect(ordinary).not.toHaveBeenCalled();
-    expect(input).toHaveBeenCalledOnce();
-
-    expect(() =>
-      host.setPointSelection(contextId, { ...owner, windowId: "other" }, true, requestId),
-    ).toThrow();
-    host.setPointSelection(contextId, owner, true, requestId);
-    const selected = vi.fn();
-    mouse?.({ preventDefault: selected }, { type: "mouseDown", button: "left", x: 160, y: 120 });
-    expect(selected).toHaveBeenCalledOnce();
-    expect(input).toHaveBeenCalledTimes(2);
-    expect(window.webContents.send).toHaveBeenLastCalledWith(
-      "octant:browser-surface:state",
-      expect.objectContaining({
-        pointSelection: expect.objectContaining({
-          status: "selected",
-          selectionId: expect.any(String),
-          point: { x: 0.25, y: 0.25 },
-        }),
-      }),
-    );
-    const release = vi.fn();
-    mouse?.({ preventDefault: release }, { type: "mouseUp", button: "left", x: 160, y: 120 });
-    expect(release).toHaveBeenCalledOnce();
-    const next = vi.fn();
-    mouse?.({ preventDefault: next }, { type: "mouseDown", button: "left", x: 320, y: 240 });
-    expect(next).not.toHaveBeenCalled();
-    await host.closeContext(contextId);
-  });
-
-  it.each(["cancel", "escape", "navigate", "detach", "deadline"] as const)(
-    "retires an armed native selection on %s without consuming later page input",
-    async (reason) => {
-      vi.useFakeTimers();
+  it.each([
+    ["https://example.com"],
+    ["https://identity.example:8443"],
+    ["https://example.com", "https://identity.example"],
+  ])(
+    "refuses native custody unless both exact page and submission origins are saved (%j)",
+    async (...origins) => {
       const created = view();
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+        async (_world, scripts) =>
+          scripts[0]?.code.includes('"operation":"validate"')
+            ? { status: "valid" }
+            : {
+                status: "prepared",
+                usernameLabel: "Email",
+                passwordLabel: "Password",
+                submissionOrigin: "https://identity.example:8443",
+              },
+      );
       const host = createBrowserSurfaceHost({ createView: () => created });
       const owner = { windowId: "window-a", threadId };
       try {
@@ -420,57 +371,1222 @@ describe("BrowserSurfaceHost", () => {
             sessionTimeoutMs: 300_000,
           },
         });
-        host.attach(
-          contextId,
-          owner,
-          {
-            contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
-            isDestroyed: () => false,
-            webContents: { send: vi.fn() },
-          },
-          { x: 0, y: 0, width: 640, height: 480 },
-        );
-        host.setPointSelection(contextId, owner, true, requestId);
-        const event = (name: string) =>
-          vi
-            .mocked(created.webContents.on)
-            .mock.calls.find(([registered]) => registered === name)?.[1];
-        if (reason === "cancel") host.setPointSelection(contextId, owner, false, requestId);
-        if (reason === "escape") {
-          const prevent = vi.fn();
-          event("before-input-event")?.(
-            { preventDefault: prevent },
-            { type: "keyDown", key: "Escape" },
-          );
-          expect(prevent).toHaveBeenCalledOnce();
-        }
-        if (reason === "navigate") event("did-navigate")?.();
-        if (reason === "detach") host.detach(contextId, owner);
-        if (reason === "deadline") await vi.advanceTimersByTimeAsync(60_000);
-        expect(host.state(contextId).pointSelection).toBeUndefined();
-        const prevent = vi.fn();
-        event("before-mouse-event")?.(
-          { preventDefault: prevent },
-          {
-            type: "mouseDown",
-            button: "left",
-            x: 160,
-            y: 120,
-          },
-        );
-        expect(prevent).not.toHaveBeenCalled();
+        const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+        if (plan.status !== "prepared") throw new Error("Expected plan");
+        expect(await host.reserveCredentialFill(contextId, owner, plan.planId, origins)).toEqual({
+          status: "refused",
+        });
+        await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
       } finally {
         await host.closeAll();
-        // The existing download owner's bounded close-race timer settles too.
-        await vi.advanceTimersByTimeAsync(2_000);
-        try {
-          expect(vi.getTimerCount()).toBe(0);
-        } finally {
-          vi.useRealTimers();
-        }
       }
     },
   );
+
+  it("opens inside the native selection-start rectangle without moving a selected range", async () => {
+    const f = await keyboardMenuSurface(0, 20);
+    try {
+      const menuId = await f.press();
+      await f.release();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId })).toEqual({ status: "accepted" });
+      expect(f.nativeInput.mock.calls.map(([event]) => event)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "mouseDown", button: "right", x: 21, y: 42 }),
+          expect.objectContaining({ type: "mouseUp", button: "right", x: 21, y: 42 }),
+        ]),
+      );
+    } finally {
+      await f.host.closeContext(contextId);
+    }
+  });
+
+  it("requires a released exact menu intent before one native caret click", async () => {
+    const f = await keyboardMenuSurface();
+    try {
+      const first = await f.press();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: first })).toEqual({
+        status: "refused",
+      });
+      await f.release();
+      expect(f.nativeInput.mock.calls.map(([input]) => input.type)).toEqual(["keyDown", "keyUp"]);
+      const next = await f.press();
+      await f.release();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: first })).toEqual({
+        status: "refused",
+      });
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: next })).toEqual({
+        status: "accepted",
+      });
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: next })).toEqual({
+        status: "refused",
+      });
+      expect(
+        f.nativeInput.mock.calls
+          .filter(([input]) => input.type.startsWith("mouse"))
+          .map(([input]) => input.type),
+      ).toEqual(["mouseDown", "mouseUp"]);
+      expect((await f.send({ kind: "edit-menu" })).status).toBe("edit-menu");
+    } finally {
+      await f.host.closeContext(contextId);
+    }
+  });
+
+  it("retires an awaited old activation without clearing a queued successor", async () => {
+    const f = await keyboardMenuSurface();
+    let resume = () => {};
+    try {
+      const old = await f.press();
+      await f.release();
+      const caret = f.deferCaret();
+      resume = caret.resume;
+      const activating = f.send({ kind: "edit-menu-keyboard", menuId: old });
+      await caret.started;
+      expect(await f.send({ kind: "edit-menu-dismiss", menuId: old })).toEqual({
+        status: "accepted",
+      });
+      const successor = f.press();
+      resume();
+      expect(await activating).toEqual({ status: "refused" });
+      const next = await successor;
+      await f.release();
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: old })).toEqual({
+        status: "refused",
+      });
+      expect(await f.send({ kind: "edit-menu-keyboard", menuId: next })).toEqual({
+        status: "accepted",
+      });
+      expect(
+        f.nativeInput.mock.calls
+          .filter(([input]) => input.type.startsWith("mouse"))
+          .map(([input]) => input.type),
+      ).toEqual(["mouseDown", "mouseUp"]);
+    } finally {
+      resume();
+      await f.host.closeContext(contextId);
+    }
+  });
+
+  it.each(["hide", "expiry", "revoke"])(
+    "refuses caret dispatch after %s during the native caret await",
+    async (retirement) => {
+      const f = await keyboardMenuSurface();
+      let resume = () => {};
+      try {
+        const id = await f.press();
+        await f.release();
+        const caret = f.deferCaret();
+        resume = caret.resume;
+        const pending = f.send({ kind: "edit-menu-keyboard", menuId: id });
+        await caret.started;
+        if (retirement === "hide")
+          await f.send({ kind: "layout", layout: { width: 800, height: 600, visible: false } });
+        else if (retirement === "expiry") f.expire();
+        else await f.host.closeContext(contextId);
+        resume();
+        expect(await pending).toEqual({ status: "refused" });
+        expect(f.nativeInput.mock.calls.some(([input]) => input.type.startsWith("mouse"))).toBe(
+          false,
+        );
+      } finally {
+        resume();
+        await f.host.closeContext(contextId);
+      }
+    },
+  );
+
+  it("releases an expired ready reservation when commit can no longer find an eligible plan", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await vi.advanceTimersByTimeAsync(180_001);
+      await expect(host.peek(contextId)).rejects.toThrow(/credential fill holds observations/);
+      expect(
+        await host.commitCredentialFill(contextId, owner, plan.planId, {
+          username: "never",
+          password: "never",
+        }),
+      ).toEqual({ status: "cancelled", effect: "none" });
+      await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps native observation exclusion after a late reservation's plan expires until custody cleanup", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await vi.advanceTimersByTimeAsync(179_900);
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await vi.advanceTimersByTimeAsync(101);
+      expect(await host.validateCredentialFill(contextId, owner, plan.planId)).toBe(false);
+      await expect(host.peek(contextId)).rejects.toThrow(/credential fill holds observations/);
+      host.cancelCredentialFill(contextId, owner, plan.planId);
+      await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+  it("refuses submission when the grant deadline passes during final native field validation", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    let defer = false;
+    let finish: ((value: object) => void) | undefined;
+    let submitted = false;
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) => {
+        const code = scripts[0]?.code ?? "";
+        if (code.includes('"operation":"validate"'))
+          return defer
+            ? new Promise((resolve) => {
+                finish = resolve;
+              })
+            : { status: "valid" };
+        if (code.includes('"operation":"submit"')) {
+          submitted = true;
+          return { status: "submitted" };
+        }
+        return code.includes('"operation":"fill"')
+          ? { status: "filled" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://identity.example",
+            };
+      },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await host.commitCredentialFill(contextId, owner, plan.planId, {
+        username: "fixture",
+        password: "fixture-private",
+      });
+      const expiresAt = new Date(Date.now() + 100).toISOString();
+      defer = true;
+      const pending = host.submitCredentialFill(contextId, owner, plan.planId, expiresAt);
+      await vi.advanceTimersByTimeAsync(101);
+      finish?.({ status: "valid" });
+      expect(await pending).toEqual({ status: "cancelled", effect: "none" });
+      expect(submitted).toBe(false);
+      const guard = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "will-navigate")?.[1];
+      const refused = vi.fn();
+      guard?.({
+        preventDefault: refused,
+        isMainFrame: true,
+        url: "https://identity.example/authorize",
+      });
+      expect(refused).toHaveBeenCalledOnce();
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])(
+    "cancels an unstarted submit and reports possible effect after submit start (%s)",
+    async (started) => {
+      const created = view();
+      let hold = false;
+      let finish: ((value: object) => void) | undefined;
+      let submissions = 0;
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+        async (_world, scripts) => {
+          const code = scripts[0]?.code ?? "";
+          if (code.includes('"operation":"validate"')) {
+            if (hold && !started)
+              return new Promise((resolve) => {
+                finish = resolve;
+              });
+            return { status: "valid" };
+          }
+          if (code.includes('"operation":"submit"')) {
+            submissions += 1;
+            if (hold && started)
+              return new Promise((resolve) => {
+                finish = resolve;
+              });
+            return { status: "submitted" };
+          }
+          return code.includes('"operation":"fill"')
+            ? { status: "filled" }
+            : {
+                status: "prepared",
+                usernameLabel: "Email",
+                passwordLabel: "Password",
+                submissionOrigin: "https://identity.example",
+              };
+        },
+      );
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      const owner = { windowId: "window-a", threadId };
+      try {
+        await host.createContext({
+          contextId,
+          owner,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+        });
+        const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+        if (plan.status !== "prepared") throw new Error("Expected form");
+        await host.reserveCredentialFill(contextId, owner, plan.planId, [
+          "https://example.com",
+          "https://identity.example",
+          "https://identity.example:8443",
+        ]);
+        await host.commitCredentialFill(contextId, owner, plan.planId, {
+          username: "fixture",
+          password: "fixture-private",
+        });
+        hold = true;
+        const pending = host.submitCredentialFill(
+          contextId,
+          owner,
+          plan.planId,
+          new Date(Date.now() + 180_000).toISOString(),
+        );
+        await vi.waitFor(() => expect(finish).toBeDefined());
+        expect(host.cancelCredentialFill(contextId, owner, plan.planId)).toEqual({
+          status: "cancelled",
+          effect: started ? "possible" : "none",
+        });
+        finish?.(started ? { status: "submitted" } : { status: "valid" });
+        expect(await pending).toEqual(
+          started
+            ? { status: "authentication-required", effect: "completed" }
+            : { status: "cancelled", effect: "none" },
+        );
+        expect(submissions).toBe(started ? 1 : 0);
+      } finally {
+        await host.closeAll();
+      }
+    },
+  );
+
+  it("admits only the reviewed SSO submission and return origins after explicit submit without creating another profile", async () => {
+    const created = view();
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) => {
+        const code = scripts[0]?.code ?? "";
+        return code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : code.includes('"operation":"fill"')
+            ? { status: "filled" }
+            : code.includes('"operation":"submit"')
+              ? { status: "submitted" }
+              : {
+                  status: "prepared",
+                  usernameLabel: "Email",
+                  passwordLabel: "Password",
+                  submissionOrigin: "https://identity.example:8443",
+                };
+      },
+    );
+    const createView = vi.fn(() => created);
+    const host = createBrowserSurfaceHost({ createView });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "private" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const navigate = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "will-navigate")?.[1];
+      if (navigate === undefined) throw new Error("Expected native navigation guard");
+      const before = vi.fn();
+      navigate({ preventDefault: before }, "https://identity.example:8443/authorize");
+      expect(before).toHaveBeenCalledOnce();
+      let plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected plan");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await host.commitCredentialFill(contextId, owner, plan.planId, {
+        username: "fixture",
+        password: "fixture-private",
+      });
+      const notYet = vi.fn();
+      navigate({ preventDefault: notYet }, "https://identity.example:8443/authorize");
+      expect(notYet).toHaveBeenCalledOnce();
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld)
+        .mockResolvedValueOnce({ status: "valid" })
+        .mockResolvedValueOnce({ status: "refused" });
+      expect(
+        await host.submitCredentialFill(
+          contextId,
+          owner,
+          plan.planId,
+          new Date(Date.now() + 180_000).toISOString(),
+        ),
+      ).toEqual({ status: "cancelled", effect: "none" });
+      const staleAdmission = vi.fn();
+      navigate({ preventDefault: staleAdmission }, "https://identity.example:8443/authorize");
+      expect(staleAdmission).toHaveBeenCalledOnce();
+      plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expected fresh form");
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]);
+      await host.commitCredentialFill(contextId, owner, plan.planId, {
+        username: "fixture",
+        password: "fixture-private",
+      });
+      expect(
+        await host.submitCredentialFill(
+          contextId,
+          owner,
+          plan.planId,
+          new Date(Date.now() + 180_000).toISOString(),
+        ),
+      ).toEqual({
+        status: "authentication-required",
+        effect: "completed",
+      });
+      for (const target of [
+        "https://identity.example:8443/authorize",
+        "https://example.com/callback",
+      ]) {
+        const refused = vi.fn();
+        navigate({ preventDefault: refused }, target);
+        expect(refused).not.toHaveBeenCalled();
+      }
+      for (const target of [
+        "https://identity.example/authorize",
+        "https://unreviewed.example/authorize",
+      ]) {
+        const refused = vi.fn();
+        navigate({ preventDefault: refused }, target);
+        expect(refused).toHaveBeenCalledOnce();
+      }
+      for (const eventName of ["will-frame-navigate", "will-redirect"]) {
+        const guard = vi
+          .mocked(created.webContents.on)
+          .mock.calls.find(([name]) => name === eventName)?.[1];
+        if (guard === undefined) throw new Error("Expected frame-aware guard");
+        const main = vi.fn();
+        guard({
+          preventDefault: main,
+          isMainFrame: true,
+          url: "https://identity.example:8443/authorize",
+        });
+        expect(main).not.toHaveBeenCalled();
+        const frame = vi.fn();
+        guard({
+          preventDefault: frame,
+          isMainFrame: false,
+          url: "https://identity.example:8443/authorize",
+        });
+        expect(frame).toHaveBeenCalledOnce();
+        const unknown = vi.fn();
+        guard({ preventDefault: unknown, url: "https://identity.example:8443/authorize" });
+        expect(unknown).toHaveBeenCalledOnce();
+      }
+      expect(createView).toHaveBeenCalledOnce();
+    } finally {
+      await host.closeAll();
+    }
+  });
+
+  it("expires abandoned form plans and releases reserved ownership after the window disappears", async () => {
+    vi.useFakeTimers();
+    const created = view();
+    let available = true;
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => available,
+    });
+    const owner = { windowId: "window-a", threadId };
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      for (let i = 0; i < 32; i++)
+        expect(
+          (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
+        ).toBe("prepared");
+      expect(
+        (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
+      ).toBe("refused");
+      await vi.advanceTimersByTimeAsync(180_001);
+      const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw new Error("Expired plans must release capacity");
+      expect(
+        await host.reserveCredentialFill(contextId, owner, plan.planId, [
+          "https://example.com",
+          "https://identity.example",
+          "https://identity.example:8443",
+        ]),
+      ).toEqual({
+        status: "reserved",
+      });
+      available = false;
+      host.cancelCredentialFill(contextId, owner, plan.planId);
+      available = true;
+      await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+      expect(
+        await host.commitCredentialFill(contextId, owner, plan.planId, {
+          username: "never",
+          password: "never",
+        }),
+      ).toEqual({ status: "cancelled", effect: "none" });
+    } finally {
+      await host.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("withholds a capture already awaited when credential custody starts", async () => {
+    const created = view();
+    let releaseCapture:
+      | ((value: Awaited<ReturnType<typeof created.webContents.capturePage>>) => void)
+      | undefined;
+    const image = { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+    vi.mocked(created.webContents.capturePage).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCapture = resolve;
+        }),
+    );
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"validate"')
+          ? { status: "valid" }
+          : {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            },
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    await host.createContext({
+      contextId,
+      owner,
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const plan = await host.prepareCredentialFill(contextId, owner, "https://example.com");
+    expect(plan.status).toBe("prepared");
+    if (plan.status !== "prepared") throw new Error("Expected prepared fixture");
+    const capture = host.peek(contextId);
+    await vi.waitFor(() => expect(releaseCapture).toBeDefined());
+    expect(
+      await host.reserveCredentialFill(contextId, owner, plan.planId, [
+        "https://example.com",
+        "https://identity.example",
+        "https://identity.example:8443",
+      ]),
+    ).toEqual({
+      status: "reserved",
+    });
+    await expect(host.peek(contextId)).rejects.toThrow(/credential fill holds observations/);
+    await expect(host.act(contextId, { kind: "snapshot" })).rejects.toThrow(
+      /credential fill holds observations/,
+    );
+    host.cancelCredentialFill(contextId, owner, plan.planId);
+    releaseCapture?.(image);
+    await expect(capture).rejects.toThrow(/credential fill holds observations/);
+
+    vi.mocked(created.webContents.capturePage).mockResolvedValue(image);
+    await expect(host.peek(contextId)).resolves.toMatchObject({ url: "https://example.com/" });
+  });
+
+  it.each([false, true])(
+    "closes an already destroyed view with its cached contents and preferred close %s",
+    async (preferred) => {
+      const base = view();
+      const contents = base.webContents;
+      let destroyed = false;
+      vi.mocked(contents.isDestroyed).mockImplementation(() => destroyed);
+      const close = vi.fn();
+      const created: BrowserSurfaceViewPort = { ...base, ...(preferred ? { close } : {}) };
+      Object.defineProperty(created, "webContents", {
+        get() {
+          if (destroyed) throw new Error("Destroyed view wrapper");
+          return contents;
+        },
+      });
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      const gone = vi.fn();
+      host.onContextGone(gone);
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300000,
+        },
+      });
+      const listener = vi
+        .mocked(contents.on)
+        .mock.calls.find(([event]) => event === "destroyed")?.[1];
+      if (listener === undefined) throw new Error("Missing native retirement listener");
+      destroyed = true;
+      expect(() => listener()).not.toThrow();
+      expect(gone).toHaveBeenCalledExactlyOnceWith(contextId);
+      if (preferred) expect(close).toHaveBeenCalledOnce();
+      else expect(contents.close).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a successor page menu through stale detach and revokes it with its source", async () => {
+    const base = view();
+    const selectAll = vi.fn();
+    const target = {
+      id: "60000000-0000-4000-8000-000000000029",
+      kind: "text",
+      selectionStart: 0,
+      selectionEnd: 0,
+    };
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
+    let receive:
+      | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+      | undefined;
+    const emit = (event: string, ...args: readonly unknown[]) => {
+      for (const [name, listener] of vi.mocked(base.webContents.on).mock.calls)
+        if (event === name) listener(...args);
+    };
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        webContents: { ...base.webContents, selectAll },
+        human: {
+          input: (input) => {
+            if (input.type === "mouseUp" && input.button === "right")
+              emit(
+                "context-menu",
+                {},
+                {
+                  frame: base.webContents.mainFrame,
+                  isEditable: true,
+                  editFlags: { canSelectAll: true },
+                },
+              );
+          },
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300000,
+      },
+    });
+    const send = (raw: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        decodeHumanBrowserRequest({ contextId, threadId, ...raw }),
+        "window-a",
+      );
+    const first = await send({ kind: "attach" });
+    const second = await send({ kind: "attach" });
+    if (first.status !== "attached" || second.status !== "attached")
+      throw new Error("Expected attachments");
+    const owned = (raw: Readonly<Record<string, unknown>>) =>
+      send({ presentationId: second.presentationId, ...raw });
+    await owned({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await owned({ kind: "frame", acknowledgement: 0 });
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await owned({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, x: 10, y: 20, button: "right", clickCount: 1 },
+        }),
+      ).toEqual({ status: "accepted" });
+    const menu = await owned({ kind: "edit-menu" });
+    expect(menu.status).toBe("edit-menu");
+    if (menu.status !== "edit-menu") throw new Error("Expected page editing menu");
+    expect(await send({ kind: "detach", presentationId: first.presentationId })).toEqual({
+      status: "refused",
+    });
+    expect(await owned({ kind: "edit-menu" })).toEqual(menu);
+    expect(
+      await owned({ kind: "edit-menu-action", menuId: menu.menuId, action: "selectAll" }),
+    ).toEqual({ status: "accepted" });
+    expect(selectAll).toHaveBeenCalledOnce();
+    expect(
+      await owned({ kind: "edit-menu-action", menuId: menu.menuId, action: "selectAll" }),
+    ).toEqual({ status: "refused" });
+    for (const type of ["mouseDown", "mouseUp"])
+      await owned({
+        kind: "input",
+        frameSequence: 1,
+        input: { type, x: 10, y: 20, button: "right", clickCount: 1 },
+      });
+    const next = await owned({ kind: "edit-menu" });
+    if (next.status !== "edit-menu") throw new Error("Expected successor menu");
+    const watching = owned({ kind: "edit-menu-watch", menuId: next.menuId });
+    emit("did-start-loading");
+    expect(await watching).toEqual({ status: "refused" });
+    await host.closeContext(contextId);
+  });
+
+  it("keeps an admitted pointer down ahead of its release while composition cleanup awaits", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const editorId = "60000000-0000-4000-8000-000000000019";
+    const base = view();
+    const input = vi.fn();
+    const target = { id: editorId, kind: "text", selectionStart: 0, selectionEnd: 0 };
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
+    let finish: (() => void) | undefined;
+    const cancellation = new Promise<void>((done) => {
+      finish = done;
+    });
+    let cancelling = false;
+    vi.mocked(base.webContents.debugger.sendCommand).mockImplementation(
+      async (method, parameters) => {
+        if (method === "Input.imeSetComposition" && parameters?.text === "") {
+          cancelling = true;
+          await cancellation;
+        }
+      },
+    );
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input,
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+          caret: () => ({ x: 20, y: 30, width: 0, height: 24 }),
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    const started = await send({ kind: "composition", composition: { phase: "begin", editorId } });
+    if (started.status !== "composition-started") throw new Error("Composition refused");
+    const down = send({
+      kind: "input",
+      frameSequence: 1,
+      input: { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+    });
+    await vi.waitFor(() => expect(cancelling).toBe(true));
+    const up = send({
+      kind: "input",
+      frameSequence: 1,
+      input: { type: "mouseUp", x: 10, y: 20, button: "left", clickCount: 1 },
+    });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([2]) });
+    expect(await send({ kind: "frame", acknowledgement: 1 })).toMatchObject({
+      status: "frame",
+      sequence: 2,
+    });
+    expect(input).not.toHaveBeenCalled();
+    finish?.();
+    expect(await down).toEqual({ status: "accepted" });
+    expect(await up).toEqual({ status: "accepted" });
+    expect(input.mock.calls.map((call) => call[0])).toEqual([
+      { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+      { type: "mouseUp", x: -1, y: -1, button: "left", clickCount: 1 },
+    ]);
+    expect(
+      await send({
+        kind: "input",
+        frameSequence: 1,
+        input: { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1 },
+      }),
+    ).toEqual({ status: "refused" });
+    host.closeContext(contextId);
+  });
+  it("presents a password field by identity alone and never composes into it", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const editorId = "60000000-0000-4000-8000-000000000031";
+    const base = view();
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue({
+      id: editorId,
+      kind: "secure",
+      selectionStart: 3,
+      selectionEnd: 9,
+    });
+    const caret = vi.fn(() => ({ x: 20, y: 30, width: 6, height: 24 }));
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input: vi.fn(),
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+          caret,
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    const presented = await send({ kind: "editor" });
+    expect(presented).toEqual({ status: "editor", editor: { id: editorId, secure: true } });
+    expect(JSON.stringify(presented)).not.toMatch(/selection|caret|"x"|9/);
+    expect(await send({ kind: "composition", composition: { phase: "begin", editorId } })).toEqual({
+      status: "refused",
+    });
+    expect(base.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+      "Input.imeSetComposition",
+      expect.anything(),
+    );
+    host.closeContext(contextId);
+  });
+
+  it("offers a page editing menu for a field in a nested frame", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const base = view();
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue({
+      id: "60000000-0000-4000-8000-000000000032",
+      kind: "rich",
+      collapsed: true,
+      caret: { x: 40, y: 50, width: 0, height: 20 },
+    });
+    // The editable's own frame, not the page's main frame, reports the menu.
+    const nested = {};
+    const input = vi.fn((event: { readonly type: string; readonly button?: string }) => {
+      if (event.type === "mouseUp" && event.button === "right")
+        for (const [name, listener] of vi.mocked(base.webContents.on).mock.calls)
+          if (name === "context-menu")
+            listener({}, { frame: nested, isEditable: true, editFlags: { canPaste: true } });
+    });
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input,
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await send({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, x: 40, y: 60, button: "right", clickCount: 1 },
+        }),
+      ).toEqual({ status: "accepted" });
+    expect(await send({ kind: "edit-menu" })).toMatchObject({
+      status: "edit-menu",
+      flags: { paste: true, copy: false },
+    });
+    host.closeContext(contextId);
+  });
+
+  it("refuses a composition edit when an agent action takes the surface while the edit awaits its field", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const editorId = "60000000-0000-4000-8000-000000000029";
+    const base = view();
+    const target = { id: editorId, kind: "text", selectionStart: 0, selectionEnd: 0 };
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(target);
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView: () => ({
+        ...base,
+        human: {
+          input: vi.fn(),
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener) => {
+            receive = listener;
+            return () => {};
+          },
+          caret: () => ({ x: 20, y: 30, width: 0, height: 24 }),
+        },
+      }),
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    const started = await send({ kind: "composition", composition: { phase: "begin", editorId } });
+    if (started.status !== "composition-started") throw new Error("Composition refused");
+
+    let fieldFound = () => {};
+    let agentRead = () => {};
+    vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            fieldFound = () => resolve(target);
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            agentRead = () => resolve(undefined);
+          }),
+      );
+    const calls = vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length;
+    const update = send({
+      kind: "composition",
+      composition: {
+        phase: "update",
+        compositionId: started.compositionId,
+        text: "é",
+        selectionStart: 1,
+        selectionEnd: 1,
+      },
+    });
+    await vi.waitFor(() =>
+      expect(vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length).toBe(
+        calls + 1,
+      ),
+    );
+    const agentAction = host.act(contextId, { kind: "snapshot" });
+    await vi.waitFor(() =>
+      expect(vi.mocked(base.webContents.executeJavaScriptInIsolatedWorld).mock.calls.length).toBe(
+        calls + 2,
+      ),
+    );
+    fieldFound();
+    expect(await update).toEqual({ status: "refused" });
+    expect(base.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+      "Input.imeSetComposition",
+      expect.objectContaining({ text: "é" }),
+    );
+    agentRead();
+    await agentAction.catch(() => undefined);
+    host.closeContext(contextId);
+  });
+
+  it("hides expired embedded profiles and isolates listeners while closing owned views", async () => {
+    let available = true;
+    const base = view();
+    const created = { ...base, webContents: { ...base.webContents, id: 701 } };
+    const input = vi.fn();
+    const visible = vi.fn();
+    const close = vi.fn();
+    const source = { input, visible, bounds: vi.fn(), frames: () => () => {} };
+    const host = createBrowserSurfaceHost({
+      createView: () => ({ ...created, human: source, close }),
+      isOwnerWindowAvailable: () => available,
+      isEmbeddedOwner: () => available,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    await host.humanPresentation(
+      request({
+        kind: "layout",
+        presentationId: attached.presentationId,
+        layout: { width: 800, height: 600, visible: true },
+      }),
+      "window-a",
+    );
+    expect(host.profileTabs({ kind: "personal" }, "window-a")).toHaveLength(1);
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await host.humanPresentation(
+        request({ kind: "command", presentationId: attached.presentationId, command: "reload" }),
+        "window-a",
+        aborted.signal,
+      ),
+    ).toEqual({ status: "refused" });
+    expect(created.webContents.reload).not.toHaveBeenCalled();
+    available = false;
+    expect(host.profileTabs({ kind: "personal" }, "window-a")).toMatchObject([{ active: false }]);
+    expect(
+      await host.openProfileTab({ kind: "personal" }, "window-a", "https://example.com/"),
+    ).toEqual({ status: "no-page" });
+    expect(
+      await host.humanPresentation(
+        request({ kind: "frame", presentationId: attached.presentationId, acknowledgement: 0 }),
+        "window-a",
+      ),
+    ).toEqual({ status: "refused" });
+    const sibling = vi.fn();
+    host.onContextGone(() => {
+      throw new Error("observer failed");
+    });
+    host.onContextGone(sibling);
+    await host.closeOwnerContexts("window-a");
+    expect(visible).toHaveBeenLastCalledWith(false);
+    expect(close).toHaveBeenCalledOnce();
+    expect(sibling).toHaveBeenCalledWith(contextId);
+  });
 
   it("refuses certificate acceptance it cannot bind to this surface's one origin", async () => {
     // Local-certificate acceptance is bounded to the exact origin this tab was
@@ -518,6 +1634,7 @@ describe("BrowserSurfaceHost", () => {
     });
 
     expect(createView).toHaveBeenCalledWith({
+      owner: { windowId: "window-a", threadId },
       partition: `octant-browser-${contextId}`,
       webPreferences: {
         allowRunningInsecureContent: false,
@@ -689,7 +1806,11 @@ describe("BrowserSurfaceHost", () => {
     // loadURL rejects with an opaque ERR_ABORTED after the guard has run.
     vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
       // A site's own www host is the same place; a different site is not.
-      redirectGuard?.({ preventDefault: vi.fn() }, { url: "https://login.example.net/" });
+      redirectGuard?.({
+        preventDefault: vi.fn(),
+        isMainFrame: true,
+        url: "https://login.example.net/",
+      });
       throw new Error("ERR_ABORTED (-3) loading 'https://example.com/'");
     });
     await expect(
@@ -779,6 +1900,87 @@ describe("BrowserSurfaceHost", () => {
       "octant:browser-surface:state",
       expect.objectContaining({ control: "user" }),
     );
+  });
+
+  it("delivers the person's embedded keys and releases while an agent action is in flight", async () => {
+    const created = view();
+    let releaseAction!: () => void;
+    const action = new Promise<{ x: number; y: number }>((resolve) => {
+      releaseAction = () => resolve({ x: 20, y: 30 });
+    });
+    let offer:
+      | ((image: { getSize(): { width: number; height: number }; toJPEG(): Uint8Array }) => void)
+      | undefined;
+    const delivered = vi.fn();
+    const source = {
+      input: delivered,
+      visible: vi.fn(),
+      bounds: vi.fn(),
+      frames: (listener: NonNullable<typeof offer>) => {
+        offer = listener;
+        return () => {};
+      },
+    };
+    const host = createBrowserSurfaceHost({
+      createView: () => ({ ...created, human: source, close: vi.fn() }),
+      isEmbeddedOwner: () => true,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const presentationId = attached.presentationId;
+    await host.humanPresentation(
+      request({
+        kind: "layout",
+        presentationId,
+        layout: { width: 800, height: 600, visible: true },
+      }),
+      "window-a",
+    );
+    offer?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => Uint8Array.from([1]) });
+    expect(
+      await host.humanPresentation(
+        request({ kind: "frame", presentationId, acknowledgement: 0 }),
+        "window-a",
+      ),
+    ).toMatchObject({ status: "frame", sequence: 1 });
+    const key = (type: "keyDown" | "keyUp" | "char", keyCode: string) =>
+      host.humanPresentation(
+        request({ kind: "input", presentationId, frameSequence: 1, input: { type, keyCode } }),
+        "window-a",
+      );
+    expect(await key("keyDown", "Shift")).toEqual({ status: "accepted" });
+
+    const personInput = vi.fn();
+    const stopListening = host.onPersonInput(personInput);
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementationOnce(
+      async () => action,
+    );
+    const agentAction = host.act(contextId, { kind: "snapshot" });
+    await vi.waitFor(() =>
+      expect(created.webContents.executeJavaScriptInIsolatedWorld).toHaveBeenCalled(),
+    );
+    // A held modifier released mid-action is released in the page, and new
+    // typing is delivered and reported so the agent's snapshot goes stale.
+    expect(await key("keyUp", "Shift")).toEqual({ status: "accepted" });
+    expect(await key("keyDown", "a")).toEqual({ status: "accepted" });
+    expect(delivered).toHaveBeenLastCalledWith({ type: "keyDown", keyCode: "a" });
+    expect(personInput).toHaveBeenCalledWith(contextId);
+    stopListening();
+    releaseAction();
+    await agentAction.catch(() => undefined);
   });
 
   it("refuses an agent keystroke or click the moment the person has typed, until the agent reads the page", async () => {
@@ -1413,6 +2615,349 @@ describe("BrowserSurfaceHost", () => {
     expect(read.consoleErrors?.[0]?.text).toBe("error 8");
     expect(read.consoleErrors?.at(-1)?.text).toBe("error 39");
   });
+
+  it.each(["cancel", "escape", "navigate", "detach", "deadline"] as const)(
+    "retires an armed native selection on %s without consuming later page input",
+    async (reason) => {
+      vi.useFakeTimers();
+      const created = view();
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      const owner = { windowId: "window-a", threadId };
+      try {
+        await host.createContext({
+          contextId,
+          owner,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+        });
+        host.attach(
+          contextId,
+          owner,
+          {
+            contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+            isDestroyed: () => false,
+            webContents: { send: vi.fn() },
+          },
+          { x: 0, y: 0, width: 640, height: 480 },
+        );
+        host.setPointSelection(contextId, owner, true, requestId);
+        const event = (name: string) =>
+          vi
+            .mocked(created.webContents.on)
+            .mock.calls.find(([registered]) => registered === name)?.[1];
+        if (reason === "cancel") host.setPointSelection(contextId, owner, false, requestId);
+        if (reason === "escape") {
+          const prevent = vi.fn();
+          event("before-input-event")?.(
+            { preventDefault: prevent },
+            { type: "keyDown", key: "Escape" },
+          );
+          expect(prevent).toHaveBeenCalledOnce();
+        }
+        if (reason === "navigate") event("did-navigate")?.();
+        if (reason === "detach") host.detach(contextId, owner);
+        if (reason === "deadline") await vi.advanceTimersByTimeAsync(60_000);
+        expect(host.state(contextId).pointSelection).toBeUndefined();
+        const prevent = vi.fn();
+        event("before-mouse-event")?.(
+          { preventDefault: prevent },
+          {
+            type: "mouseDown",
+            button: "left",
+            x: 160,
+            y: 120,
+          },
+        );
+        expect(prevent).not.toHaveBeenCalled();
+      } finally {
+        await host.closeAll();
+        // The existing download owner's bounded close-race timer settles too.
+        await vi.advanceTimersByTimeAsync(2_000);
+        try {
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    },
+  );
+
+  it("consumes only an explicitly armed native selection and preserves person-input invalidation", async () => {
+    const created = view();
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    const owner = { windowId: "window-a", threadId };
+    await host.createContext({
+      contextId,
+      owner,
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const window = {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    };
+    host.attach(contextId, owner, window, { x: 10, y: 20, width: 640, height: 480 });
+    const input = vi.fn();
+    host.onPersonInput(input);
+    const mouse = vi
+      .mocked(created.webContents.on)
+      .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+    const ordinary = vi.fn();
+    mouse?.({ preventDefault: ordinary }, { type: "mouseDown", button: "left", x: 160, y: 120 });
+    expect(ordinary).not.toHaveBeenCalled();
+    expect(input).toHaveBeenCalledOnce();
+
+    expect(() =>
+      host.setPointSelection(contextId, { ...owner, windowId: "other" }, true, requestId),
+    ).toThrow();
+    host.setPointSelection(contextId, owner, true, requestId);
+    const selected = vi.fn();
+    mouse?.({ preventDefault: selected }, { type: "mouseDown", button: "left", x: 160, y: 120 });
+    expect(selected).toHaveBeenCalledOnce();
+    expect(input).toHaveBeenCalledTimes(2);
+    expect(window.webContents.send).toHaveBeenLastCalledWith(
+      "octant:browser-surface:state",
+      expect.objectContaining({
+        pointSelection: expect.objectContaining({
+          status: "selected",
+          selectionId: expect.any(String),
+          point: { x: 0.25, y: 0.25 },
+        }),
+      }),
+    );
+    const release = vi.fn();
+    mouse?.({ preventDefault: release }, { type: "mouseUp", button: "left", x: 160, y: 120 });
+    expect(release).toHaveBeenCalledOnce();
+    const next = vi.fn();
+    mouse?.({ preventDefault: next }, { type: "mouseDown", button: "left", x: 320, y: 240 });
+    expect(next).not.toHaveBeenCalled();
+    await host.closeContext(contextId);
+  });
+
+  it("settles an in-flight native crop on context close and ignores late pixels", async () => {
+    const f = await selectedSurface();
+    let release: ((value: unknown) => void) | undefined;
+    f.holdScreenshot(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    try {
+      const capture = f.host.describePoint(
+        contextId,
+        f.selected.point,
+        new AbortController().signal,
+        f.selected.selectionId,
+      );
+      await vi.waitFor(() => expect(release).toBeDefined());
+      await f.host.closeContext(contextId);
+      await expect(capture).resolves.toEqual({ status: "unavailable", reason: "page-changed" });
+      release?.({ data: "/9j/AA==" });
+      await Promise.resolve();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("refuses a changed caller point before native DOM or screenshot reads", async () => {
+    const f = await selectedSurface();
+    try {
+      expect(
+        await f.host.describePoint(
+          contextId,
+          { x: 0.5, y: 0.5 },
+          new AbortController().signal,
+          f.selected.selectionId,
+        ),
+      ).toEqual({ status: "unavailable", reason: "page-changed" });
+      expect(f.created.webContents.debugger.sendCommand).not.toHaveBeenCalled();
+      expect(f.created.webContents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("withholds selected element feedback while credential fill holds the native page", async () => {
+    const f = await selectedSurface();
+    const owner = { windowId: "window-a", threadId };
+    vi.mocked(f.created.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+      async (_world, scripts) =>
+        scripts[0]?.code.includes('"operation":"prepare"')
+          ? {
+              status: "prepared",
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+            }
+          : scripts[0]?.code.includes('"operation":"validate"')
+            ? { status: "valid" }
+            : false,
+    );
+    try {
+      const plan = await f.host.prepareCredentialFill(contextId, owner, "https://example.com");
+      if (plan.status !== "prepared") throw Error("Expected credential preparation");
+      expect(
+        await f.host.reserveCredentialFill(contextId, owner, plan.planId, ["https://example.com"]),
+      ).toMatchObject({ status: "reserved" });
+      const result = await f.host.describePoint(
+        contextId,
+        f.selected.point,
+        new AbortController().signal,
+        f.selected.selectionId,
+      );
+      expect(result.status).toBe("unavailable");
+      expect(f.created.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+        "Page.captureScreenshot",
+        expect.anything(),
+      );
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("resolves a native person's selection through the shared CDP reader with CSS viewport coordinates", async () => {
+    const f = await selectedSurface();
+    try {
+      const capture = await f.host.describePoint(
+        contextId,
+        f.selected.point,
+        new AbortController().signal,
+        f.selected.selectionId,
+      );
+      if (capture.status !== "described") throw new Error("Missing native capture");
+      expect(capture.element.context?.viewport).toEqual({ width: 320, height: 240 });
+      expect(capture.element.context?.captureId).toMatch(/^[a-f0-9]{64}$/);
+      expect(capture.cropDataUrl).toBe("data:image/jpeg;base64,/9j/AA==");
+      expect(f.created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "DOM.getNodeForLocation",
+        {
+          x: 80,
+          y: 60,
+          includeUserAgentShadowDOM: false,
+          ignorePointerEventsNone: false,
+        },
+      );
+      expect(f.host.state(contextId).pointSelection).toBeUndefined();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("keeps a replacement panel's selection when an older panel cancels", async () => {
+    const f = await selectedSurface();
+    const owner = { windowId: "window-a", threadId };
+    const firstRequest = "61000000-0000-4000-8000-000000000001";
+    const secondRequest = "61000000-0000-4000-8000-000000000002";
+    try {
+      f.host.setPointSelection(contextId, owner, true, firstRequest);
+      const replacement = f.host.setPointSelection(
+        contextId,
+        owner,
+        true,
+        secondRequest,
+      ).pointSelection;
+      expect(replacement?.status).toBe("armed");
+      f.host.setPointSelection(contextId, owner, false, firstRequest);
+      expect(f.host.state(contextId).pointSelection).toEqual(replacement);
+      f.host.setPointSelection(contextId, owner, false, secondRequest);
+      expect(f.host.state(contextId).pointSelection).toBeUndefined();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it.each(["fresh-gesture", "window", "document", "tab", "capture-finished"] as const)(
+    "bounds selected release suppression to its original gesture: %s",
+    async (retirement) => {
+      const f = await selectedSurface(retirement === "tab");
+      const owner = { windowId: "window-a", threadId };
+      const mouse = vi
+        .mocked(f.created.webContents.on)
+        .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+      const down = vi.fn();
+      try {
+        f.host.setPointSelection(contextId, owner, true, "61000000-0000-4000-8000-000000000777");
+        mouse?.({ preventDefault: down }, { type: "mouseDown", button: "left", x: 160, y: 120 });
+        expect(down).toHaveBeenCalledOnce();
+        let activeMouse = mouse;
+        if (retirement === "window") {
+          f.host.detach(contextId, owner);
+          f.host.attach(
+            contextId,
+            owner,
+            {
+              contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+              isDestroyed: () => false,
+              webContents: { send: vi.fn() },
+            },
+            { x: 0, y: 0, width: 640, height: 480 },
+          );
+        }
+        if (retirement === "document")
+          vi.mocked(f.created.webContents.on).mock.calls.find(
+            ([event]) => event === "did-navigate",
+          )?.[1]();
+        if (retirement === "tab") {
+          await f.host.act(contextId, {
+            kind: "tab-open",
+            target: "https://example.com/next",
+            include: [],
+          });
+          activeMouse = vi
+            .mocked(f.second.webContents.on)
+            .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+        }
+        if (retirement === "capture-finished") {
+          const selected = f.host.state(contextId).pointSelection;
+          if (selected?.status !== "selected") throw Error("Missing selected point");
+          await f.host.describePoint(
+            contextId,
+            selected.point,
+            new AbortController().signal,
+            selected.selectionId,
+          );
+          expect(f.host.state(contextId).pointSelection).toBeUndefined();
+        }
+        if (retirement === "fresh-gesture")
+          activeMouse?.(
+            { preventDefault: vi.fn() },
+            { type: "mouseDown", button: "left", x: 100, y: 100 },
+          );
+        const firstUp = vi.fn();
+        activeMouse?.(
+          { preventDefault: firstUp },
+          { type: "mouseUp", button: "left", x: 100, y: 100 },
+        );
+        expect(firstUp).toHaveBeenCalledTimes(retirement === "capture-finished" ? 1 : 0);
+        const ordinaryDown = vi.fn(),
+          ordinaryUp = vi.fn();
+        activeMouse?.(
+          { preventDefault: ordinaryDown },
+          { type: "mouseDown", button: "left", x: 100, y: 100 },
+        );
+        activeMouse?.(
+          { preventDefault: ordinaryUp },
+          { type: "mouseUp", button: "left", x: 100, y: 100 },
+        );
+        expect(ordinaryDown).not.toHaveBeenCalled();
+        expect(ordinaryUp).not.toHaveBeenCalled();
+      } finally {
+        await f.host.closeAll();
+      }
+    },
+  );
 });
 
 describe("BrowserSurfaceHost stored profiles", () => {
@@ -1696,3 +3241,354 @@ describe("BrowserSurfaceHost stored profiles", () => {
     });
   });
 });
+
+function scriptView() {
+  const base = view();
+  const protocol = new EventEmitter();
+  const events = new EventEmitter();
+  let attached = false;
+  let unique = 1;
+  let realm = createContext({ TextEncoder });
+  let reply: ((expression: string) => Promise<unknown>) | undefined;
+  const context = () => ({
+    id: unique,
+    uniqueId: `document-${unique}`,
+    name: "octant-page-scripts",
+  });
+  const created: BrowserSurfaceViewPort = {
+    ...base,
+    webContents: {
+      ...base.webContents,
+      on: vi.fn((event, listener) => {
+        events.on(event, listener);
+      }),
+      debugger: {
+        attach: vi.fn(() => {
+          attached = true;
+        }),
+        detach: vi.fn(() => {
+          attached = false;
+        }),
+        isAttached: () => attached,
+        on: (event, listener) => {
+          protocol.on(event, listener);
+        },
+        removeListener: (event, listener) => {
+          protocol.removeListener(event, listener);
+        },
+        sendCommand: vi.fn(async (method, params) => {
+          if (method === "Runtime.enable")
+            protocol.emit("message", {}, "Runtime.executionContextCreated", { context: context() });
+          if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "top" } } };
+          if (method === "Page.createIsolatedWorld") {
+            protocol.emit("message", {}, "Runtime.executionContextCreated", { context: context() });
+            return { executionContextId: unique };
+          }
+          if (method === "Runtime.evaluate") {
+            const expression = String(params?.expression);
+            if (reply !== undefined && expression.startsWith("this.__octantBoundedScript("))
+              return reply(expression);
+            return { result: { value: runInContext(expression, realm, { timeout: 150 }) } };
+          }
+          return undefined;
+        }),
+      },
+    },
+  };
+  return {
+    created,
+    events,
+    protocol,
+    setReply: (next: typeof reply) => {
+      reply = next;
+    },
+    nextDocument: () => {
+      unique++;
+      realm = createContext({ TextEncoder });
+    },
+  };
+}
+const scriptOwner = { windowId: "10000000-0000-4000-8000-000000000001", threadId };
+function scriptCommand(input: Record<string, unknown>) {
+  return decodeBrowserPageScriptNativeCommand({ contextId, owner: scriptOwner, ...input });
+}
+async function scriptHost() {
+  const fixture = scriptView();
+  const host = createBrowserSurfaceHost({ createView: () => fixture.created });
+  await host.createContext({
+    contextId,
+    owner: scriptOwner,
+    policy: {
+      profileMode: "isolated",
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 300000,
+    },
+  });
+  return { ...fixture, host };
+}
+async function preparedScript(host: ReturnType<typeof createBrowserSurfaceHost>, source = "42") {
+  const prepared = await host.runPageScript(
+    scriptCommand({ operation: "prepare", source, expectedUrl: "https://example.com/" }),
+    new AbortController().signal,
+  );
+  if (prepared.status !== "prepared") throw new Error("Expected prepared native script");
+  return prepared.planId;
+}
+
+describe("native page script ownership", () => {
+  it("reuses the private kernel after debugger reattachment and bounds retained unknown documents", async () => {
+    const f = await scriptHost();
+    try {
+      const first = await preparedScript(f.host, "JSON.stringify=()=>{while(true){}};42");
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId: first }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "completed", valueJson: "42" });
+      const next = await preparedScript(f.host);
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId: next }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "completed", valueJson: "42" });
+      for (let i = 0; i < 30; i++) {
+        f.nextDocument();
+        const plan = await preparedScript(f.host);
+        await f.host.runPageScript(
+          scriptCommand({ operation: "cancel", planId: plan }),
+          new AbortController().signal,
+        );
+      }
+      f.nextDocument();
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({
+            operation: "prepare",
+            source: "42",
+            expectedUrl: "https://example.com/",
+          }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "refused", effect: "none", reason: "unavailable" });
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("prepares a script on a hash-routed page whose snapshot reported the redacted address", async () => {
+    const f = await scriptHost();
+    try {
+      vi.mocked(f.created.webContents.getURL).mockReturnValue(
+        "https://example.com/app?token=fixture#/dashboard",
+      );
+      const prepared = await f.host.runPageScript(
+        scriptCommand({
+          operation: "prepare",
+          source: "42",
+          expectedUrl: "https://example.com/app?token=redacted",
+        }),
+        new AbortController().signal,
+      );
+      expect(prepared).toMatchObject({ status: "prepared" });
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({
+            operation: "prepare",
+            source: "42",
+            expectedUrl: "https://example.com/elsewhere",
+          }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "refused", effect: "none", reason: "stale" });
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("does not mint a person origin grant for script navigation even if focus changes while held", async () => {
+    const f = await scriptHost();
+    const preventDefault = vi.fn();
+    try {
+      const planId = await preparedScript(f.host);
+      f.setReply(async () => {
+        f.events.emit("focus");
+        f.events.emit("will-navigate", {
+          url: "https://unapproved.example/",
+          isMainFrame: true,
+          preventDefault,
+        });
+        return { result: { value: '{"status":"completed","value":42}' } };
+      });
+      await f.host.runPageScript(
+        scriptCommand({ operation: "execute", planId }),
+        new AbortController().signal,
+      );
+      expect(preventDefault).toHaveBeenCalledOnce();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("retires a quarantined document after the view drops its WebContents wrapper", async () => {
+    const f = await scriptHost();
+    const contents = f.created.webContents;
+    const gone = vi.fn();
+    f.host.onContextGone(gone);
+    const planId = await preparedScript(f.host);
+    f.setReply(async () => {
+      throw new Error("transport disconnected");
+    });
+    await f.host.runPageScript(
+      scriptCommand({ operation: "execute", planId }),
+      new AbortController().signal,
+    );
+    vi.mocked(contents.isDestroyed).mockReturnValue(true);
+    Object.defineProperty(f.created, "webContents", { value: undefined });
+    expect(() => f.events.emit("destroyed")).not.toThrow();
+    expect(gone).toHaveBeenCalledWith(contextId);
+    await f.host.closeAll();
+  });
+
+  it("keeps uncertain script custody through navigation notifications until the exact context is destroyed", async () => {
+    const f = await scriptHost();
+    try {
+      const planId = await preparedScript(f.host);
+      f.setReply(async () => {
+        throw new Error("transport disconnected");
+      });
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({ status: "execution-uncertain", effect: "possible" });
+      f.events.emit("did-start-navigation");
+      f.events.emit("did-navigate");
+      await expect(f.host.peek(contextId)).rejects.toThrow("script holds agent observations");
+      f.protocol.emit("message", {}, "Runtime.executionContextDestroyed", {
+        executionContextId: 1,
+        executionContextUniqueId: "other-document",
+      });
+      await expect(f.host.peek(contextId)).rejects.toThrow("script holds agent observations");
+      f.protocol.emit("message", {}, "Runtime.executionContextDestroyed", {
+        executionContextId: 1,
+        executionContextUniqueId: "document-1",
+      });
+      await expect(f.host.peek(contextId)).resolves.toBeDefined();
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+});
+
+async function selectedSurface(extraTab = false) {
+  const created = view();
+  vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockResolvedValue(false);
+  let screenshot: (() => Promise<unknown>) | undefined;
+  vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) => {
+    if (method === "Page.getFrameTree")
+      return {
+        frameTree: {
+          frame: {
+            id: "top",
+            loaderId: "document-1",
+            url: "https://example.com/",
+          },
+        },
+      };
+    if (method === "Page.getLayoutMetrics")
+      return {
+        cssVisualViewport: {
+          clientWidth: 320,
+          clientHeight: 240,
+          pageX: 0,
+          pageY: 0,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+        },
+      };
+    if (method === "DOM.getNodeForLocation") return { frameId: "top", backendNodeId: 42 };
+    if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
+    if (method === "Runtime.evaluate")
+      return {
+        result: {
+          value: {
+            title: "Example",
+            read: {
+              element: {
+                selector: "#save",
+                text: "Save",
+                bounds: { x: 0.25, y: 0.25, width: 0.1, height: 0.1 },
+              },
+              context: {
+                viewport: { width: 320, height: 240 },
+                tag: "button",
+                ancestors: ["main"],
+                children: [],
+                styles: [{ property: "color", value: "rgb(0, 0, 0)" }],
+                omissions: [],
+              },
+              cropBlocked: false,
+            },
+          },
+        },
+      };
+    if (method === "Page.captureScreenshot") return screenshot?.() ?? { data: "/9j/AA==" };
+    throw new Error(`Unexpected native protocol command ${method}`);
+  });
+  const second = view();
+  let allocated = false;
+  const host = createBrowserSurfaceHost({
+    createView: () => {
+      if (allocated) return second;
+      allocated = true;
+      return created;
+    },
+  });
+  const owner = { windowId: "window-a", threadId };
+  await host.createContext({
+    contextId,
+    owner,
+    policy: {
+      profileMode: "isolated",
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: extraTab ? 2 : 1,
+      sessionTimeoutMs: 300_000,
+    },
+  });
+  host.attach(
+    contextId,
+    owner,
+    {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    },
+    { x: 10, y: 20, width: 640, height: 480 },
+  );
+  host.setPointSelection(contextId, owner, true, requestId);
+  const mouse = vi
+    .mocked(created.webContents.on)
+    .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+  mouse?.({ preventDefault: vi.fn() }, { type: "mouseDown", button: "left", x: 160, y: 120 });
+  mouse?.({ preventDefault: vi.fn() }, { type: "mouseUp", button: "left", x: 160, y: 120 });
+  const selected = host.state(contextId).pointSelection;
+  if (selected?.status !== "selected") throw new Error("Missing native selection");
+  return {
+    host,
+    created,
+    second,
+    selected,
+    holdScreenshot: (read: () => Promise<unknown>) => {
+      screenshot = read;
+    },
+  };
+}
+
+const requestId = "61000000-0000-4000-8000-000000000000";

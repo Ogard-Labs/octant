@@ -1,5 +1,7 @@
+import { sideChatTextDigest } from "./sideChatReturn";
 import {
   MAX_SIDE_CHAT_SOURCE_CHANGED_PATHS,
+  decodeSideChatSourceReceipt,
   decodeCodeThreadId,
   decodeWorkThreadId,
   type CodeEnvironmentObservation,
@@ -57,6 +59,11 @@ export async function resolveSideChatSourceContext(
       sourceThreadId: MentionableThreadId,
     ) => Promise<SideChatSourceResolution>;
     readonly readState: SideChatSourceStateReader;
+    readonly readSourceVersion?: (
+      windowId: WindowId,
+      threadId: MentionableThreadId,
+    ) => Promise<import("@octant/contracts").AggregateVersion | undefined>;
+    readonly clock?: () => string;
     readonly marks: ThreadOutsideContentMarks;
     readonly uuid: () => string;
   },
@@ -114,12 +121,42 @@ export async function resolveSideChatSourceContext(
       if (markedByReply.status === "refused") return { kind: "unreadable" };
     }
   }
+  const text = formatSideChatSourceContext({
+    source: resolved.source,
+    ...(state === undefined ? {} : { state }),
+    readToolNames: input.readToolNames,
+  });
+  let after: import("@octant/contracts").AggregateVersion | undefined;
+  if (ports.readSourceVersion !== undefined) {
+    try {
+      after = await ports.readSourceVersion(input.windowId, sidecar.sourceThreadId);
+    } catch {
+      return { kind: "unreadable" };
+    }
+    if (after === undefined) return { kind: "unreadable" };
+  }
+  const omissions = [
+    ...(state === undefined ? ["The source state section could not be read."] : []),
+    ...(input.readToolNames.length > 0
+      ? ["Later read-only file/tool observations are not included in this source-context receipt."]
+      : []),
+  ];
   return {
     kind: "resolved",
-    text: formatSideChatSourceContext({
-      source: resolved.source,
-      ...(state === undefined ? {} : { state }),
-      readToolNames: input.readToolNames,
+    text,
+    receipt: decodeSideChatSourceReceipt({
+      sourceThreadId: sidecar.sourceThreadId,
+      sourceMode: sidecar.sourceMode,
+      capturedAt: ports.clock?.() ?? new Date().toISOString(),
+      contextDigest: sideChatTextDigest(text),
+      ...(resolved.source.versionBefore === undefined
+        ? {}
+        : { threadVersionBefore: resolved.source.versionBefore }),
+      ...(after === undefined ? {} : { threadVersionAfter: after }),
+      versions: resolved.source.versions ?? [],
+      versionsTruncated: resolved.source.versionsTruncated ?? false,
+      transcriptTruncated: resolved.source.truncated,
+      omissions,
     }),
   };
 }

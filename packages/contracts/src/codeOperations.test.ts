@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODE_OPERATION_COMMAND_KINDS,
   decodeCodeConversationPage,
+  decodeCodeTurnReviewPreview,
   decodeCodeConversationWindow,
   decodeCodeConversationWindowRequest,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
@@ -15,6 +16,8 @@ import {
   decodeCodeOperationResult,
   decodeCodeRepositoryTestStatus,
   decodeCodeReviewFinding,
+  decodeCodeReviewTarget,
+  decodeCodeReviewFindingReferences,
   decodeCodeReviewFindingUpdated,
   decodeCodeThreadOperationalMetadata,
   decodeCodeThreadOperationalMetadataView,
@@ -78,6 +81,21 @@ const definition = {
 } as const;
 
 describe("Code operation contracts", () => {
+  it.each(["stale-state", "unlisted-path", "untracked-path"] as const)(
+    "preserves a discard refusal for %s through the result contract",
+    (reason) => {
+      const result = {
+        kind: "git-mutation-state",
+        operationId: ids.operation,
+        gitOperationId: ids.git,
+        mutation: "discard",
+        state: "rejected",
+        reason,
+      };
+      expect(decodeCodeOperationResult(result)).toEqual(result);
+    },
+  );
+
   it("keeps evidence batches below the authenticated remote response budget", () => {
     expect(MAX_CODE_EVIDENCE_BATCH_ITEMS).toBe(64);
     expect(() =>
@@ -320,6 +338,14 @@ describe("Code operation contracts", () => {
         },
         authorization: { kind: "full-access" },
       },
+      { kind: "prepare-git-hunks", ...scope, gitOperationId: ids.git, scope: "unstaged" },
+      ...(["stage-git-hunks", "unstage-git-hunks", "reverse-git-hunks"] as const).map((kind) => ({
+        kind,
+        ...scope,
+        gitOperationId: ids.git,
+        comparisonOperationId: ids.operation,
+        selected: ["d".repeat(64)],
+      })),
       {
         kind: "stage-git",
         ...scope,
@@ -398,6 +424,21 @@ describe("Code operation contracts", () => {
         state: "resolved",
       },
       {
+        kind: "prepare-review-target",
+        ...scope,
+        reviewOperationId: ids.operation,
+        path: "src/index.ts",
+        side: "original",
+        line: 4,
+      },
+      { kind: "observe-turn-review", ...scope, turnOperationId: ids.operation, refresh: false },
+      { kind: "list-review-findings", ...scope },
+      {
+        kind: "prepare-review-correction",
+        ...scope,
+        findings: [{ findingId: ids.finding, expectedVersion: 1 }],
+      },
+      {
         kind: "start-provider-turn",
         ...scope,
         sessionId: ids.providerSession,
@@ -416,6 +457,7 @@ describe("Code operation contracts", () => {
         decision: "approved",
       },
       { kind: "cancel-provider-turn", ...scope },
+      { kind: "force-stop-provider-turn", ...scope, turnOperationId: ids.operation },
     ] as const;
 
     expect(commands.map((command) => decodeCodeOperationCommand(command))).toEqual(commands);
@@ -1634,4 +1676,89 @@ describe("Code thread follow-up contracts", () => {
     const empty = { threadId: ids.thread, followUpVersion: 0 } as const;
     expect(decodeCodeThreadFollowUpView(empty)).toEqual(empty);
   });
+});
+
+it("decodes scoped local review selection and bounded original finding references without execution authority", () => {
+  const command = {
+    kind: "prepare-review-target",
+    ...scope,
+    reviewOperationId: ids.resourceOperation,
+    path: "src/file.ts",
+    side: "original",
+    line: 4,
+  };
+  expect(decodeCodeOperationCommand(command)).toEqual(command);
+  expect(() => decodeCodeOperationCommand({ ...command, side: "left" })).toThrow();
+  expect(() => decodeCodeOperationCommand({ ...command, line: 0 })).toThrow();
+  expect(() => decodeCodeOperationCommand({ ...command, path: "../outside" })).toThrow();
+  const reference = {
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    findingId: ids.finding,
+    version: 1,
+    anchorDigest: "a".repeat(64),
+  };
+  expect(decodeCodeReviewFindingReferences([reference])).toEqual([reference]);
+  expect(() =>
+    decodeCodeReviewFindingReferences([{ ...reference, anchorDigest: "damaged" }]),
+  ).toThrow();
+  expect(() =>
+    decodeCodeReviewFindingReferences(Array.from({ length: 17 }, () => reference)),
+  ).toThrow();
+  expect(() =>
+    decodeCodeReviewTarget({
+      fileId: ids.finding,
+      path: "src/file.ts",
+      fileDigest: "a".repeat(64),
+      location: { kind: "line", line: 4 },
+    }),
+  ).toThrow();
+});
+
+it("decodes bounded live capture identity and refuses an apparently ready preview without evidence", () => {
+  const capture = {
+    checkoutId: ids.checkout,
+    version: 1,
+    cursor: 301,
+    baseline: "a".repeat(40),
+    tree: "b".repeat(40),
+    diff: { contentId: ids.content, digest: "c".repeat(64), byteLength: 90 },
+    changedFiles: {
+      files: [{ path: "src/app.ts", insertions: 1, deletions: 1 }],
+      total: 1,
+      truncated: false,
+    },
+    capturedAt: "2026-11-03T00:00:00.000Z",
+    final: false,
+  };
+  const ready = {
+    status: "ready",
+    capture,
+    explanation: "Compared captured checkout trees; later writes may be uncaptured.",
+  };
+  expect(decodeCodeTurnReviewPreview(ready)).toEqual(ready);
+  expect(decodeCodeTurnReviewPreview({ ...ready, status: "unavailable" }).capture).toEqual(capture);
+  expect(() =>
+    decodeCodeTurnReviewPreview({ status: "ready", explanation: "No evidence" }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeTurnReviewPreview({ ...ready, capture: { ...capture, cursor: 0 } }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeTurnReviewPreview({ ...ready, capture: { ...capture, version: 0 } }),
+  ).toThrow();
+  expect(() =>
+    decodeCodeTurnReviewPreview({
+      ...ready,
+      capture: { ...capture, label: "untrusted extra identity" },
+    }),
+  ).toThrow();
+  const frame = {
+    threadId: ids.thread,
+    operationId: ids.operation,
+    cursor: 301,
+    occurredAt: capture.capturedAt,
+    event: { kind: "conversation-turn-review-preview", preview: ready },
+  };
+  expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
 });

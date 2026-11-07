@@ -1,3 +1,4 @@
+import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
@@ -106,6 +107,32 @@ describe("Code plan proposals", () => {
       expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
     },
   );
+});
+
+describe("updated native session tools", () => {
+  it("offers an explicit fresh-session send while retaining the refused Code draft", async () => {
+    const code = controller({
+      turnStatus: "waiting",
+      turnErrorCategory: "tools-changed",
+      turnError: "The saved session has different tools.",
+      pendingDraft: "Use updated tools",
+    });
+    render(<CodeThreadWorkspace controller={code} threadId={threadId} />);
+    const action = await screen.findByRole("button", { name: "Continue with updated tools" });
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
+    expect(code.sendFollowUp).not.toHaveBeenCalled();
+    fireEvent.drop(screen.getByLabelText("Follow-up message"), {
+      dataTransfer: nativeFolderTransfer(),
+    });
+    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
+    expect(action).toBeVisible();
+    expect(code.sendFollowUp).not.toHaveBeenCalled();
+    await userEvent.click(action);
+    await waitFor(() => expect(code.sendFollowUp).toHaveBeenCalledOnce());
+    expect(vi.mocked(code.sendFollowUp).mock.calls[0]?.[11]).toBe(true);
+    expect(vi.mocked(code.sendFollowUp).mock.calls[0]?.[0]).toBe("Use updated tools");
+  });
 });
 
 describe("Code host queue", () => {
@@ -3898,3 +3925,63 @@ async function chooseTurnAction(
   await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
   await user.click(await screen.findByRole("menuitem", { name }));
 }
+
+it.each(["legacy", "rebound", "source-thread"] as const)(
+  "does not retarget a %s changed-file receipt to the active checkout",
+  (kind) => {
+    const open = vi.fn();
+    const code = controller();
+    const current = code.activeView!;
+    const message = {
+      id: "receipt",
+      role: "assistant" as const,
+      text: "Finished",
+      status: "completed" as const,
+      operationId: "70000000-0000-4000-8000-000000000001" as never,
+      changedFiles: {
+        files: [{ path: "src/old.ts" as never, insertions: 1, deletions: 0 }],
+        total: 1,
+        truncated: false,
+      },
+      ...(kind === "legacy"
+        ? {}
+        : {
+            checkoutId:
+              kind === "rebound"
+                ? ("20000000-0000-4000-8000-000000000099" as never)
+                : current.checkout.id,
+          }),
+      ...(kind === "source-thread" ? { sourceThreadId: anotherThreadId } : {}),
+    };
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation: [message] })}
+        threadId={threadId}
+        onOpenReview={open}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Review src/old.ts" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        kind === "legacy"
+          ? /older receipt did not record its checkout/
+          : kind === "rebound"
+            ? /earlier checkout binding/
+            : /original source thread/,
+      ),
+    ).toBeVisible();
+    expect(open).not.toHaveBeenCalled();
+  },
+);
+
+it("refuses a native folder as an attachment when the desktop extraction bridge is unavailable", async () => {
+  render(
+    <CodeThreadWorkspace
+      controller={controller({ pendingDraft: "keep text" })}
+      threadId={threadId}
+    />,
+  );
+  const input = screen.getByRole("textbox", { name: "Follow-up message" });
+  fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
+  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+});

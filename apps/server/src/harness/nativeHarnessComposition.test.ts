@@ -1,4 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -11,10 +21,13 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
-import { childAgentTools } from "../chat/sideChatDelegation";
+import { withheldFromSideChat } from "../chat/sideChatToolScope";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
+import { createNativeHarnessShell } from "./nativeHarnessShell";
+import type { NativeHarnessShellPort } from "./nativeHarnessTools";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
@@ -37,13 +50,34 @@ const thread = {
 } as unknown as CodeThread;
 
 describe("native harness composition", () => {
-  it.each([true, false])(
-    "offers child questions through either harness and refuses tools after authority is revoked (%s)",
-    async (isHarness) => {
+  it.each([
+    { isHarness: true, grouped: false },
+    { isHarness: false, grouped: false },
+    { isHarness: true, grouped: true },
+    { isHarness: false, grouped: true },
+  ])(
+    "offers questions through either harness and refuses tools after authority is revoked ($isHarness, $grouped)",
+    async ({ isHarness, grouped }) => {
+      const questionnaire = {
+        questions: [
+          {
+            id: "design",
+            prompt: "Which parts?",
+            selection: "multiple",
+            options: [{ id: "existing", label: "Existing design" }],
+          },
+        ],
+      };
+      const response = {
+        version: 1,
+        answers: [{ questionId: "design", selectedOptionIds: ["existing"] }],
+        comment: "Keep the spacing",
+      };
+      const answer = grouped ? JSON.stringify(response) : "Use the existing design";
       let authorized = true;
       const ask = vi.fn(async () => ({
         status: "answered" as const,
-        answer: "Use the existing design",
+        answer,
       }));
       const composition = createNativeHarnessComposition({
         isChildAuthorityCurrent: () => authorized,
@@ -91,11 +125,16 @@ describe("native harness composition", () => {
       expect(
         await tools?.execute({
           name: "ask-user",
-          inputJson: JSON.stringify({ prompt: "Which design?", options: [] }),
+          inputJson: JSON.stringify({
+            prompt: "Which design?",
+            options: [],
+            ...(grouped ? { questionnaire } : {}),
+          }),
           signal: new AbortController().signal,
         }),
-      ).toMatchObject({ result: { answer: "Use the existing design" } });
+      ).toMatchObject({ result: { answer: grouped ? response : answer } });
       expect(ask).toHaveBeenCalledOnce();
+      if (grouped) expect(ask).toHaveBeenCalledWith(expect.objectContaining({ questionnaire }));
       authorized = false;
       expect(
         await tools?.execute({
@@ -487,7 +526,6 @@ describe("native harness composition", () => {
     const productionPorts = {
       goals: { read: async () => undefined, execute: async () => undefined } as never,
       questions: { ask: async () => undefined } as never,
-      delegate: () => ({}) as never,
       webFetch: (async () => undefined) as never,
       resolveWebSearch: () => (async () => undefined) as never,
     };
@@ -525,7 +563,6 @@ describe("native harness composition", () => {
         "context-remaining",
         "journal-lookup",
         "second-opinion",
-        "delegate",
         "ask-user",
         "goal",
       ];
@@ -558,14 +595,7 @@ describe("native harness composition", () => {
         );
         const readOnly = ["read", "grep", "glob"];
         const web = ["web-fetch", "web-search"];
-        const lead = [
-          "todo-write",
-          "context-remaining",
-          "second-opinion",
-          "delegate",
-          "ask-user",
-          "goal",
-        ];
+        const lead = ["todo-write", "context-remaining", "second-opinion", "ask-user", "goal"];
         expect(code).toEqual(
           writes
             ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check"]
@@ -651,21 +681,93 @@ describe("native harness composition", () => {
       ]);
     });
 
-    it("gives a Side Chat no delegation in the tool set it finally receives", () => {
+    it("gives every Harness thread exactly one child-run tool, octant_agents, and a Side Chat none", () => {
       const { composition } = harness(false, productionPorts);
       const agents = (): AppManagedToolSet => ({
         definitions: [{ name: "octant_agents" } as never],
         execute: async () => ({ result: {} }),
       });
+      const chatSet = (sideChat: boolean) =>
+        combineAppManagedToolSets(
+          composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
+          withheldFromSideChat({ sideChat, tools: agents }),
+        );
+      const childRunTools = (set: AppManagedToolSet | undefined) =>
+        names(set!).filter((name) => name === "octant_agents" || name === "delegate");
+      expect(childRunTools(chatSet(false))).toEqual(["octant_agents"]);
+      expect(childRunTools(chatSet(true))).toEqual([]);
+      // Work and Code add `octant_agents` beside the harness set the same way,
+      // so the harness set itself must carry no child-run tool of its own.
+      for (const set of [
+        composition.forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" }),
+        composition.forCode({ thread: codeThread, checkoutRoot: "/nonexistent", windowId: "w" }),
+      ]) {
+        expect(childRunTools(combineAppManagedToolSets(set, agents()))).toEqual(["octant_agents"]);
+      }
+    });
+
+    it("gives a Side Chat only the advice tools and its file reads in the tool set it finally receives", () => {
+      const { composition } = harness(false, { ...productionPorts, journal: noJournal });
+      const offered = (...toolNames: ReadonlyArray<string>): AppManagedToolSet => ({
+        definitions: toolNames.map((name) => ({ name }) as never),
+        execute: async () => ({ result: {} }),
+      });
+      // The same sources a Chat turn is composed from, in the order it uses.
       const finalSet = (sideChat: boolean) =>
         combineAppManagedToolSets(
           composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
-          childAgentTools({ sideChat, tools: agents }),
+          sideChat
+            ? offered("octant_side_chat_list_files", "octant_side_chat_read_file")
+            : undefined,
+          withheldFromSideChat({
+            sideChat,
+            tools: () =>
+              offered(
+                "octant_ask_thread",
+                "octant_create_image",
+                "octant_offer_side_task",
+                "octant_canvas",
+                "octant_past_threads",
+                "octant_agents",
+                "octant_computer",
+              ),
+          }),
         );
-      expect(names(finalSet(true))).not.toContain("delegate");
-      expect(names(finalSet(true))).not.toContain("octant_agents");
-      // An ordinary Chat thread keeps both.
-      expect(names(finalSet(false))).toEqual(expect.arrayContaining(["delegate", "octant_agents"]));
+      expect(names(finalSet(true))).toEqual([
+        "context-remaining",
+        "second-opinion",
+        "octant_side_chat_list_files",
+        "octant_side_chat_read_file",
+      ]);
+      // An ordinary Chat thread keeps every one of them.
+      expect(names(finalSet(false))).toEqual(
+        expect.arrayContaining([
+          "octant_ask_thread",
+          "octant_create_image",
+          "octant_offer_side_task",
+          "octant_canvas",
+          "octant_past_threads",
+          "octant_agents",
+          "octant_computer",
+        ]),
+      );
+    });
+
+    it("leaves a provider runtime's Chat thread with octant_agents and no harness tools", () => {
+      const { composition } = harness(false, {
+        ...productionPorts,
+        isHarnessProvider: () => false,
+      });
+      const agents = (): AppManagedToolSet => ({
+        definitions: [{ name: "octant_agents" } as never],
+        execute: async () => ({ result: {} }),
+      });
+      expect(composition.forChat({ thread: chatThread, windowId: "window-1" })).toBeUndefined();
+      const finalSet = combineAppManagedToolSets(
+        composition.forChat({ thread: chatThread, windowId: "window-1" }),
+        withheldFromSideChat({ sideChat: false, tools: agents }),
+      );
+      expect(names(finalSet!)).toEqual(["octant_agents"]);
     });
 
     it("keeps the composition call site supplying every port the offered set depends on", () => {
@@ -687,7 +789,6 @@ describe("native harness composition", () => {
         "goals:",
         "questions:",
         "secondOpinion:",
-        "delegate:",
         "shell:",
         "resolveWebSearch:",
         "webFetch:",
@@ -976,6 +1077,9 @@ describe("native harness composition", () => {
       readonly withoutEgressRules?: boolean;
       /** How each push or pull-request change's record goes. */
       readonly forgeRecord?: "recorded" | "unavailable";
+      readonly shell?: NativeHarnessShellPort;
+      readonly checkoutRoot?: string;
+      readonly branchesUnavailable?: boolean;
     }) => {
       const recorded = vi.fn((_record: unknown) => input.remoteRecord ?? ("not-remote" as const));
       const forgeRecorded = vi.fn((_record: unknown) => input.forgeRecord ?? ("recorded" as const));
@@ -1002,7 +1106,7 @@ describe("native harness composition", () => {
           readThreadTaint: () => ({ externalContentIngested: false }) as never,
         }),
         isHarnessProvider: () => true,
-        shell: {
+        shell: input.shell ?? {
           run: async (call) => {
             ran.push(call.command);
             return { status: "ran", exitCode: 0, output: "up 3 days", truncated: false };
@@ -1013,10 +1117,10 @@ describe("native harness composition", () => {
           ? {}
           : {
               forgeChanges: {
-                branches: () => ({
-                  ownBranch: "feature/mine",
-                  otherThreadBranches: ["feature/theirs"],
-                }),
+                branches: () => {
+                  if (input.branchesUnavailable) throw new Error("Repository unavailable");
+                  return { ownBranch: "feature/mine", otherThreadBranches: ["feature/theirs"] };
+                },
                 record: forgeRecorded,
               },
             }),
@@ -1051,7 +1155,7 @@ describe("native harness composition", () => {
       });
       const tools = composition.forCode({
         thread: autoThread,
-        checkoutRoot: "/Users/dev/app",
+        checkoutRoot: input.checkoutRoot ?? "/Users/dev/app",
         windowId: "window-1",
       })!;
       const bash = (command: string) =>
@@ -1086,6 +1190,64 @@ describe("native harness composition", () => {
       );
     });
 
+    it("refuses a push when the other threads' branch authority cannot be read", async () => {
+      const harness = setup({
+        fullAccessTag: "not-tagged",
+        forgeRecord: "recorded",
+        branchesUnavailable: true,
+      });
+      expect(await harness.bash("git push origin feature/theirs")).toMatchObject({
+        isError: true,
+        result: { error: "forge-authority-unavailable" },
+      });
+      expect(harness.ran).toEqual([]);
+    });
+
+    it("stops a native forge executable before the script runner can write its sentinel", async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-forge-boundary-"));
+      const checkout = join(root, "checkout");
+      mkdirSync(checkout);
+      const scripts = join(root, "scripts");
+      const work = join(root, "work");
+      mkdirSync(scripts);
+      mkdirSync(work);
+      const executable = join(checkout, "gh");
+      const sentinel = join(checkout, "ran");
+      writeFileSync(executable, '#!/bin/sh\nprintf ran > "$(dirname "$0")/ran"\n', { mode: 0o700 });
+      const shell = createNativeHarnessShell({
+        scriptDirectory: scripts,
+        process: new RepositoryTestProcessPort({
+          harnessShellScriptDirectory: scripts,
+          temporaryDirectory: work,
+          receiptDirectory: join(root, "receipts"),
+          networkEgress: "allow",
+          // The Full access process port; forge refusal precedes OS confinement.
+          confinement: { prepare: ({ executable, args }) => ({ command: executable, args }) },
+        }),
+      });
+      const command = `${executable} -R other/repository pr merge 7 --squash`;
+      try {
+        const baseline = await shell.run({ command, cwd: checkout, timeoutMs: 5000 });
+        expect(baseline.output).toBe("");
+        expect(baseline).toMatchObject({ status: "ran", exitCode: 0 });
+        expect(existsSync(sentinel)).toBe(true);
+        rmSync(sentinel);
+        const harness = setup({
+          verdict: "allow",
+          forgeRecord: "recorded",
+          shell,
+          checkoutRoot: checkout,
+        });
+        expect(await harness.bash(command)).toMatchObject({
+          isError: true,
+          result: { error: "forge-tool-required" },
+        });
+        expect(existsSync(sentinel)).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("runs and journals an ordinary push at Full access, and withholds its output when the record fails", async () => {
       const harness = setup({ fullAccessTag: "not-tagged", forgeRecord: "recorded" });
       expect(await harness.bash("git push -u origin feature/mine")).toMatchObject({
@@ -1098,14 +1260,26 @@ describe("native harness composition", () => {
       expect(JSON.stringify(await failing.bash("git push"))).not.toContain("sent");
     });
 
-    it("leaves a merge below Full access to Shield and journals it once it ran", async () => {
-      const harness = setup({ verdict: "allow", forgeRecord: "recorded" });
-      await harness.bash("gh pr merge 7");
-      expect(harness.ran).toEqual(["gh pr merge 7"]);
-      expect(harness.forgeRecorded).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: "ran" }),
-      );
-    });
+    it.each([
+      "gh pr merge 7",
+      "gh -R other/repo pr merge 7 --squash",
+      "git -C ../other push -f origin main",
+      "git push origin feature/mine",
+      "gh pr create --fill",
+    ])(
+      "sends a forge write below Full access through its scoped tool even when Shield allowed %s",
+      async (command) => {
+        const harness = setup({ verdict: "allow", forgeRecord: "recorded" });
+        expect(await harness.bash(command)).toMatchObject({
+          isError: true,
+          result: { error: "forge-tool-required" },
+        });
+        expect(harness.ran).toEqual([]);
+        expect(harness.forgeRecorded).toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: "refused", command }),
+        );
+      },
+    );
 
     it("tags a Full access command that sends a secret out, and runs it all the same", async () => {
       const harness = setup({ verdict: "allow", fullAccessTag: "recorded" });

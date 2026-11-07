@@ -1,14 +1,13 @@
 import {
   decodeAutomationThreadId,
-  decodeAutomationTrigger,
+  decodeAutomationScheduledTrigger,
   decodeProjectId,
   MAX_AUTOMATION_DISPLAY_NAME_LENGTH,
   MAX_AUTOMATION_TASK_PROMPT_LENGTH,
   ROUTINE_PROPOSAL_TOOL_NAME,
   type AutomationMissedRunPolicy,
   type OctantMode,
-  type AutomationTrigger,
-  type ProviderExecutionPolicy,
+  type AutomationScheduledTrigger,
   type ProviderToolDefinition,
   type UtcTimestamp,
   type WindowId,
@@ -66,9 +65,11 @@ function refused(reason: string, message: string) {
  * The routine-proposal tool for one Work or Code thread's turn. It only asks:
  * the proposal waits for the person in the thread, and the routine, if any,
  * is created by their confirmation through the ordinary Automation create
- * path, never by this tool. Chat is never offered it, and a routine's own
- * unattended turn is refused it, because automation-origin execution cannot
- * author a routine.
+ * path, never by this tool. Plan mode may propose, as it may offer a side
+ * task: recording a proposal changes nothing, and the routine the person
+ * confirms takes none of the thread's posture. Chat is never offered it, and
+ * a routine's own unattended turn is refused it, because automation-origin
+ * execution cannot author a routine.
  */
 export function createRoutineProposalTools(input: {
   readonly windowId: WindowId;
@@ -77,11 +78,6 @@ export function createRoutineProposalTools(input: {
     readonly mode: OctantMode;
     readonly projectId: string;
   };
-  /**
-   * Code only: the turn's posture when a call runs. Plan is read-only, so it
-   * proposes nothing.
-   */
-  readonly readPosture?: () => ProviderExecutionPolicy | undefined;
   /**
    * Whether this turn runs as the host rather than for a person: a routine's
    * run, or a usage-limit resume the host replays. Nobody is there to confirm.
@@ -107,12 +103,6 @@ export function createRoutineProposalTools(input: {
         return refused(
           "automation-recursion",
           "A turn the host runs on its own, such as a routine's run, cannot create routines. Mention the idea in your reply instead.",
-        );
-      }
-      if (input.readPosture?.() === "plan") {
-        return refused(
-          "plan-read-only",
-          "Plan mode is read-only and cannot propose a routine. Describe it in the plan instead.",
         );
       }
       const parsed = parseInput(inputJson, input.now());
@@ -179,7 +169,7 @@ type ParsedInput =
       readonly kind: "ok";
       readonly name: string;
       readonly prompt: string;
-      readonly trigger: AutomationTrigger;
+      readonly trigger: AutomationScheduledTrigger;
       readonly missedRunPolicy: AutomationMissedRunPolicy;
       readonly followUp: boolean;
       readonly firstRunAt: UtcTimestamp;
@@ -243,7 +233,7 @@ function parseTrigger(
   fields: ReadonlyMap<string, unknown>,
   nowMs: number,
 ):
-  | { readonly kind: "ok"; readonly trigger: AutomationTrigger }
+  | { readonly kind: "ok"; readonly trigger: AutomationScheduledTrigger }
   | { readonly kind: "invalid"; readonly message: string } {
   try {
     switch (fields.get("trigger")) {
@@ -257,7 +247,10 @@ function parseTrigger(
           };
         }
         if (Date.parse(at) <= nowMs) return { kind: "invalid", message: "`at` is in the past." };
-        return { kind: "ok", trigger: decodeAutomationTrigger({ kind: "once", scheduledAt: at }) };
+        return {
+          kind: "ok",
+          trigger: decodeAutomationScheduledTrigger({ kind: "once", scheduledAt: at }),
+        };
       }
       case "interval": {
         const minutes = fields.get("everyMinutes");
@@ -279,7 +272,7 @@ function parseTrigger(
         }
         return {
           kind: "ok",
-          trigger: decodeAutomationTrigger({
+          trigger: decodeAutomationScheduledTrigger({
             kind: "interval",
             anchorAt: anchor,
             intervalMinutes: minutes,
@@ -289,7 +282,7 @@ function parseTrigger(
       case "weekly":
         return {
           kind: "ok",
-          trigger: decodeAutomationTrigger({
+          trigger: decodeAutomationScheduledTrigger({
             kind: "weekly-local",
             weekdays: fields.get("weekdays"),
             localTime: fields.get("localTime"),

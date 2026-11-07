@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeOwnerBrowserTarget,
+  decodeOwnerBrowserControlId,
+} from "@octant/contracts/owner-browser";
+import {
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
@@ -241,6 +245,79 @@ describe("owner client from a browser", () => {
 });
 
 describe("owner client", () => {
+  it("always unlocks selected Browser takeover separately from administration and signs stop without prompting again", async () => {
+    const keys = await p256();
+    const unlock = await rawSigner(keys);
+    const target = decodeOwnerBrowserTarget({
+      hostMemberId: HOST_ID,
+      threadId: MEMBER_ID,
+      contextId: ALERT_ID,
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://fixture.invalid",
+      profile: "private",
+    });
+    const control = {
+      id: decodeOwnerBrowserControlId(CHALLENGE_ID),
+      target,
+      controllerName: "Synthetic phone",
+      nextSequence: 1,
+      expiresAt: "2026-10-29T10:01:00.000Z",
+    };
+    const host = fakeHost({
+      unlockPublicKey: keys.publicKey,
+      answers: {
+        "/api/hub/owner/session": openedSession(SESSION_ENDS),
+        "/api/hub/owner/browser/targets": Response.json({ status: "targets", targets: [] }),
+        "/api/hub/owner/browser/take-over": Response.json({ status: "controlled", control }),
+        "/api/hub/owner/browser/control": Response.json({ status: "released" }),
+      },
+    });
+    const client = await ownerFixture(host, unlock.signer);
+    await client.openSession();
+    expect((await client.browser({ kind: "targets" })).status).toBe("targets");
+    expect((await client.browser({ kind: "take-over", target })).status).toBe("controlled");
+    expect(unlock.sessions.opened).toBe(2);
+    const take = host.requests.find((entry) => entry.path === "/api/hub/owner/browser/take-over");
+    expect(take?.headers.has(OWNER_SESSION_HEADER)).toBe(false);
+    expect(take?.headers.has(OWNER_UNLOCK_HEADER)).toBe(true);
+    expect(await client.browser({ kind: "stop", controlId: control.id, sequence: 1 })).toEqual({
+      status: "released",
+    });
+    expect(unlock.sessions.opened).toBe(2);
+    const stop = host.requests.at(-1);
+    expect(stop?.headers.has(OWNER_UNLOCK_HEADER)).toBe(false);
+    expect(stop?.headers.has(OWNER_IDENTITY_KEY_HEADER)).toBe(true);
+  });
+
+  it("refuses oversized streamed Browser replies before parsing or retaining a frame", async () => {
+    let cancelled = false;
+    const client = clientFor(
+      () => ({
+        status: "available",
+        fetch: async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                controller.enqueue(new Uint8Array(6 * 1024 * 1024));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
+      }),
+      { shape: "raw", publicKey: "AA", open: async () => ({ status: "unavailable" }) },
+    );
+    expect(
+      await client.browser({
+        kind: "frame",
+        controlId: decodeOwnerBrowserControlId(CHALLENGE_ID),
+        sequence: 1,
+      }),
+    ).toEqual({ status: "refused", reason: "unavailable" });
+    expect(cancelled).toBe(true);
+  });
   it("asks for a challenge bound to the action, signs it with the unlock key, and sends the action with the proof", async () => {
     const keys = await p256();
     const unlock = await rawSigner(keys);
@@ -579,6 +656,7 @@ const openedSession = (expiresAt: number) =>
   Response.json({ status: "opened", session: { sessionId: SESSION_ID, expiresAt } });
 const postureRequest = (posture: "plan" | "full-access") =>
   decodeOwnerPostureChangeRequest({
+    expectedVersion: "a".repeat(64),
     subject: { kind: "code-thread", threadId: "77777777-7777-4777-8777-777777777777" },
     posture,
     persistence: "current-session",

@@ -64,3 +64,29 @@ describe("createFileMentionIo", () => {
     });
   });
 });
+
+it("locates a Unicode folder without reading contents and refuses deleted or escaping folder links", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "octant-dropped-folder-"));
+  try {
+    const root = join(parent, "root");
+    const outside = join(parent, "outside");
+    await mkdir(root);
+    await mkdir(outside);
+    await mkdir(join(root, "日本語 folder"));
+    await symlink(outside, join(root, "escape"));
+    const pinned = await pinFileMentionRoot(root);
+    expect(pinned.kind).toBe("ok");
+    if (pinned.kind !== "ok") return;
+    const io = createFileMentionIo();
+    expect(await io.locate(root, "日本語 folder", pinned.rootIdentity)).toMatchObject({
+      kind: "directory",
+    });
+    expect(await io.locate(root, "escape", pinned.rootIdentity)).toEqual({ kind: "escapes-root" });
+    await rm(join(root, "日本語 folder"), { recursive: true });
+    expect(await io.locate(root, "日本語 folder", pinned.rootIdentity)).toEqual({
+      kind: "missing",
+    });
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});

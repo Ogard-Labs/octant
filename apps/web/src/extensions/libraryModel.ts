@@ -5,6 +5,7 @@ import type {
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionCapability } from "@octant/contracts/extensions";
 import {
+  PAPER_LOCAL_SETUP,
   CONNECTOR_CATEGORY_LABEL,
   connectorCatalog,
   connectorPackageName,
@@ -75,6 +76,7 @@ export interface LibraryItem {
     readonly desired: boolean;
   };
   readonly connectorId?: string;
+  readonly localSetupId?: "paper";
   /** How a connector signs in, so its detail can take a key or start a sign-in. */
   readonly connectorAuth?: ConnectorAuth;
   /** The connector server's component, once connected, for its sign-in control. */
@@ -250,6 +252,7 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
     (entry) => pkg.addedInSettings === true && pkg.slug === connectorPackageName(entry.id),
   );
   const server = components.find((component) => component.kind === "mcp-server");
+  const paper = pkg.addedInSettings === true && pkg.localSetupId === "paper";
   const kind: LibraryKind =
     connector !== undefined
       ? "connector"
@@ -286,7 +289,11 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
     kind,
     name: String(name),
     summary,
-    source: connector !== undefined ? "Connector" : packageSource(pkg.source),
+    source: paper
+      ? "Local Paper setup"
+      : connector !== undefined
+        ? "Connector"
+        : packageSource(pkg.source),
     provider: providers.join(", "),
     providers,
     ...(only === undefined ? {} : { providerLogo: only }),
@@ -308,6 +315,25 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
       desired,
     },
     version: String(pkg.version),
+    ...(paper
+      ? {
+          name: PAPER_LOCAL_SETUP.name,
+          summary: PAPER_LOCAL_SETUP.description,
+          authority: {
+            level: "high" as const,
+            lines: [
+              "Reaches Paper Desktop on this host; tool calls follow the task's approval policy",
+            ],
+          },
+          localSetupId: "paper" as const,
+          address: PAPER_LOCAL_SETUP.url,
+          stateLabel: state === "on" ? "Installed · on" : LIBRARY_STATE_LABEL[state],
+          stateNote:
+            state === "blocked"
+              ? `Installed; tools unavailable${blockedBy?.effectiveState.kind === "blocked" ? `: ${blockedBy.effectiveState.reason.replaceAll("-", " ")}` : ""}. Paper Desktop and a file must also be open.`
+              : "Installed; connection not checked. Paper Desktop and a file must be open before using its tools.",
+        }
+      : {}),
     ...(connector === undefined
       ? {}
       : {
@@ -489,12 +515,39 @@ export function buildLibrary(sources: LibrarySources): ReadonlyArray<LibraryItem
     ...installed,
     ...(sources.snapshot?.skills ?? []).map(skillItem),
     ...connectors.filter((entry) => !connected.has(entry.id)).map(connectorItem),
+    ...(installed.some((item) => item.localSetupId === "paper") ? [] : [paperSetupItem()]),
     ...(sources.marketplace ?? [])
       .filter((entry) => !installedIds.has(String(entry.extensionId)))
       .map(marketplaceItem),
     ...(sources.discovered === undefined ? [] : discoveredItems(sources.discovered)),
   ];
   return items;
+}
+
+function paperSetupItem(): LibraryItem {
+  return {
+    id: "local-setup:paper",
+    category: "On this computer",
+    kind: "mcp-server",
+    name: PAPER_LOCAL_SETUP.name,
+    summary: PAPER_LOCAL_SETUP.description,
+    source: "Local Paper setup",
+    provider: EVERY_PROVIDER,
+    providers: [EVERY_PROVIDER],
+    featured: false,
+    state: "available",
+    stateLabel: "Not added",
+    steps: stepsFor(false, false, false),
+    stateNote: "Requires Paper Desktop with a file open; availability has not been checked.",
+    abilities: ["Read and edit the open design through Paper's local tools"],
+    authority: {
+      level: "high",
+      lines: ["Reaches Paper Desktop on this host; tool calls follow the task's approval policy"],
+    },
+    handoff: "installed",
+    localSetupId: "paper",
+    address: PAPER_LOCAL_SETUP.url,
+  };
 }
 
 export interface LibraryFilter {

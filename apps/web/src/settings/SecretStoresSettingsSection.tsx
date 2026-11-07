@@ -1,3 +1,4 @@
+import { CommandCredentialBindingsSettings } from "./CommandCredentialBindingsSettings";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type {
   AwsCliKeyReference,
@@ -11,6 +12,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { GoogleCliAccountSettings } from "./GoogleCliAccountSettings";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
 /** What each state of the tool means for the person, in plain words. */
@@ -35,6 +37,7 @@ const REFERENCE_PLACEHOLDER = "op://Vault/Item/field";
 export interface SecretStoresSettingsSectionProps {
   /** Absent off this host: linking a store is host authority. */
   readonly client: SecretStoresClient | undefined;
+  readonly projectNames?: ReadonlyMap<string, string>;
   readonly focusedSetting?: string | undefined;
 }
 
@@ -374,6 +377,14 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
         </SettingsSection>
       ) : null}
 
+      {view?.brokerAvailable === true ? (
+        <GoogleCliAccountSettings
+          client={client}
+          linkedStore={linkedStore}
+          focusedSetting={props.focusedSetting}
+        />
+      ) : null}
+
       {unlinking === undefined ? null : (
         <OctantConfirmDialog
           confirmLabel={`Unlink ${unlinking.label}`}
@@ -392,6 +403,10 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
           you link it again. Nothing in {unlinking.label} is changed or deleted.
         </OctantConfirmDialog>
       )}
+      <CommandCredentialBindingsSettings
+        client={client.commandBindings}
+        projectNames={props.projectNames ?? new Map()}
+      />
     </div>
   );
 }

@@ -1,15 +1,54 @@
+import { Schema } from "effect";
+import {
+  CredentialRequestResolution,
+  type CredentialRequestReference,
+} from "@octant/contracts/credential-request";
+import {
+  decodeCommandCredentialHostRequest,
+  decodeCommandCredentialHostResult,
+  type CommandCredentialHostRequest,
+  type CommandCredentialHostResult,
+} from "@octant/contracts/command-credentials";
 /**
  * The server's handle on the host credential broker's linked-secret-store
  * routes. Every call answers with a value: a broker that is down, refuses, or
  * answers in an unexpected shape is `broker-unavailable`, never an exception
- * and never a guess. No answer carries what an item resolves to.
+ * and never a guess. Only the private request-card lookup and scoped cloud sessions carry transient credential material; they are never renderer responses.
  */
 
 import type {
   AwsCliKeyReference,
+  GoogleCliAccountReference,
   SecretStoreKind,
   SecretStoreToolState,
 } from "@octant/contracts/secret-stores";
+import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts";
+
+import {
+  decodeGoogleCliAccountReference,
+  decodeGoogleCliAccountIdentity,
+} from "@octant/contracts/secret-stores";
+import {
+  decodeBrowserCredentialMetadata,
+  type BrowserCredentialItem,
+  type BrowserCredentialMetadata,
+  decodeBrowserCredentialHostResult,
+  type BrowserCredentialHostCommand,
+  type BrowserCredentialHostResult,
+} from "@octant/contracts/browser-credential-use";
+
+export type BrowserMetadataAnswer =
+  | { readonly status: "described"; readonly metadata: BrowserCredentialMetadata }
+  | {
+      readonly status:
+        | "invalid-item"
+        | "locked"
+        | "missing"
+        | "unavailable"
+        | "not-linked"
+        | "uncertain"
+        | "changed";
+    };
 
 export type SecretStoreNamespace = "provider" | "mcp-server";
 export type SecretStoreBrokerDown = { readonly status: "broker-unavailable" };
@@ -63,7 +102,57 @@ export type AwsCliSessionAnswer =
         | "refused";
     };
 
+export type GoogleCliReferenceAnswer =
+  | { readonly status: "none" }
+  | {
+      readonly status: "linked";
+      readonly pointer: GoogleCliAccountReference;
+      readonly sessionExpiresAt?: UtcTimestamp;
+    };
+export type GoogleCliPointStatus =
+  | Exclude<StoreCheckStatus, "found">
+  | "pointed"
+  | "refused"
+  | "superseded";
+export type GoogleCliSessionAnswer =
+  | {
+      readonly status: "issued";
+      readonly accessToken: string;
+      readonly expiration: string;
+      readonly serviceAccountEmail: string;
+      readonly scopes: ReadonlyArray<string>;
+    }
+  | { readonly status: "none" | "refused" | Exclude<StoreCheckStatus, "found"> };
 export interface SecretStoreBrokerClient {
+  /** Transient lookup for an already claimed local credential card; never expose to a client. */
+  readonly requestCardRead?: (
+    reference: CredentialRequestReference,
+    signal: AbortSignal,
+  ) => Promise<CredentialRequestResolution>;
+  readonly googleCliReference?: (
+    signal?: AbortSignal,
+  ) => Promise<GoogleCliReferenceAnswer | SecretStoreBrokerDown>;
+  readonly pointGoogleCli?: (
+    pointer: GoogleCliAccountReference,
+  ) => Promise<{ readonly status: GoogleCliPointStatus } | SecretStoreBrokerDown>;
+  readonly restoreGoogleCli?: (
+    pointer: GoogleCliAccountReference,
+  ) => Promise<{ readonly status: GoogleCliPointStatus } | SecretStoreBrokerDown>;
+  readonly clearGoogleCli?: () => Promise<
+    | { readonly status: "none" }
+    | { readonly status: "cleared"; readonly pointer: GoogleCliAccountReference }
+    | SecretStoreBrokerDown
+  >;
+  readonly googleCliSession?: (
+    signal?: AbortSignal,
+  ) => Promise<GoogleCliSessionAnswer | SecretStoreBrokerDown>;
+  readonly browserFill?: (
+    command: BrowserCredentialHostCommand,
+  ) => Promise<BrowserCredentialHostResult>;
+  readonly browserMetadata?: (item: BrowserCredentialItem) => Promise<BrowserMetadataAnswer>;
+  readonly commandUse?: (
+    request: CommandCredentialHostRequest,
+  ) => Promise<CommandCredentialHostResult>;
   readonly awsCliReference: () => Promise<AwsCliReferenceAnswer | SecretStoreBrokerDown>;
   /** Points the AWS command line at two items, after the broker proved both resolve now. */
   readonly pointAwsCli: (
@@ -152,6 +241,8 @@ export function makeSecretStoreBrokerClient(
   const post = async (
     operation: string,
     body: object,
+    signal?: AbortSignal,
+    maxBytes?: number,
   ): Promise<Record<string, unknown> | undefined> => {
     try {
       const response = await fetchPort(
@@ -162,6 +253,7 @@ export function makeSecretStoreBrokerClient(
         {
           method: "POST",
           redirect: "error",
+          ...(signal === undefined ? {} : { signal }),
           headers: {
             "content-type": "application/json",
             "x-octant-credential-broker-token": options.token,
@@ -170,7 +262,25 @@ export function makeSecretStoreBrokerClient(
         },
       );
       if (!response.ok) return undefined;
-      const parsed: unknown = await response.json();
+      let parsed: unknown;
+      if (maxBytes === undefined) parsed = await response.json();
+      else {
+        if (response.body === null) return undefined;
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let length = 0;
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          length += chunk.value.byteLength;
+          if (length > maxBytes) {
+            await reader.cancel();
+            return undefined;
+          }
+          chunks.push(chunk.value);
+        }
+        parsed = JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
+      }
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : undefined;
@@ -191,7 +301,187 @@ export function makeSecretStoreBrokerClient(
       : undefined;
   const AWS = "/v1/cloud-cli/aws/";
 
+  const GOOGLE = "/v1/cloud-cli/google/";
+  const googlePointer = (
+    answer: Record<string, unknown>,
+  ): GoogleCliAccountReference | undefined => {
+    try {
+      return decodeGoogleCliAccountReference({
+        store: answer.store,
+        reference: answer.reference,
+        serviceAccountEmail: answer.serviceAccountEmail,
+        scopes: answer.scopes,
+      });
+    } catch {
+      return undefined;
+    }
+  };
+  const pointGoogle = async (
+    operation: "point" | "restore",
+    pointer: GoogleCliAccountReference,
+  ): Promise<{ readonly status: GoogleCliPointStatus } | SecretStoreBrokerDown> => {
+    const status = (await post(`${GOOGLE}${operation}`, pointer))?.status;
+    if (
+      status === "pointed" ||
+      status === "refused" ||
+      status === "superseded" ||
+      status === "locked" ||
+      status === "missing" ||
+      status === "unavailable" ||
+      status === "not-linked" ||
+      status === "invalid-reference"
+    )
+      return { status };
+    return DOWN;
+  };
   return {
+    requestCardRead: async (reference, signal) => {
+      try {
+        return Schema.decodeUnknownSync(CredentialRequestResolution)(
+          await post("request-card-read", reference, signal, 32_768),
+        );
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
+    googleCliReference: async (signal) => {
+      const answer = await post(`${GOOGLE}reference`, {}, signal);
+      if (answer?.status === "none") return { status: "none" };
+      if (answer === undefined || answer.status !== "linked") return DOWN;
+      const pointer = googlePointer(answer);
+      if (pointer === undefined) return DOWN;
+      let sessionExpiresAt: UtcTimestamp | undefined;
+      try {
+        if (answer.sessionExpiresAt !== undefined)
+          sessionExpiresAt = decodeUtcTimestamp(answer.sessionExpiresAt);
+      } catch {
+        return DOWN;
+      }
+      return {
+        status: "linked",
+        pointer,
+        ...(sessionExpiresAt === undefined ? {} : { sessionExpiresAt }),
+      };
+    },
+    pointGoogleCli: (pointer) => pointGoogle("point", pointer),
+    restoreGoogleCli: (pointer) => pointGoogle("restore", pointer),
+    clearGoogleCli: async () => {
+      const answer = await post(`${GOOGLE}clear`, {});
+      if (answer?.status === "none") return { status: "none" };
+      const pointer = answer?.status === "cleared" ? googlePointer(answer) : undefined;
+      return pointer === undefined ? DOWN : { status: "cleared", pointer };
+    },
+    googleCliSession: async (signal) => {
+      const answer = await post(`${GOOGLE}session`, {}, signal);
+      if (answer === undefined) return DOWN;
+      const status = answer.status;
+      if (status === "issued") {
+        try {
+          const identity = decodeGoogleCliAccountIdentity({
+            serviceAccountEmail: answer.serviceAccountEmail,
+            scopes: answer.scopes,
+          });
+          const expiration = decodeUtcTimestamp(answer.expiration);
+          if (
+            typeof answer.accessToken !== "string" ||
+            answer.accessToken.length === 0 ||
+            answer.accessToken.length > 16384 ||
+            !/^[A-Za-z0-9._~+/-]+=*$/.test(answer.accessToken)
+          )
+            return DOWN;
+          return {
+            status,
+            accessToken: answer.accessToken,
+            expiration,
+            ...identity,
+          };
+        } catch {
+          return DOWN;
+        }
+      }
+      return status === "none" ||
+        status === "refused" ||
+        status === "locked" ||
+        status === "missing" ||
+        status === "unavailable" ||
+        status === "not-linked" ||
+        status === "invalid-reference"
+        ? { status }
+        : DOWN;
+    },
+    browserFill: async (command) => {
+      const answer = await post("browser-fill", command, undefined, 32 * 1024);
+      try {
+        return decodeBrowserCredentialHostResult(answer);
+      } catch {
+        return { status: "refused", reason: "unavailable" };
+      }
+    },
+    browserMetadata: async (item) => {
+      const answer = await post("browser-metadata", item, undefined, 32 * 1024);
+      if (answer?.status === "described") {
+        try {
+          const { status: _status, ...value } = answer;
+          const metadata = decodeBrowserCredentialMetadata(value);
+          if (
+            metadata.item.accountId !== item.accountId ||
+            metadata.item.vaultId !== item.vaultId ||
+            metadata.item.itemId !== item.itemId
+          )
+            return { status: "uncertain" };
+          return { status: "described", metadata };
+        } catch {
+          return { status: "uncertain" };
+        }
+      }
+      const status = answer?.status;
+      return status === "invalid-item" ||
+        status === "locked" ||
+        status === "missing" ||
+        status === "not-linked" ||
+        status === "uncertain" ||
+        status === "changed"
+        ? { status }
+        : { status: "unavailable" };
+    },
+    commandUse: async (request) => {
+      try {
+        const body = decodeCommandCredentialHostRequest(request);
+        const response = await fetchPort(
+          new URL("/v1/secret-stores/command-use", options.url).toString(),
+          {
+            method: "POST",
+            redirect: "error",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-credential-broker-token": options.token,
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10000),
+          },
+        );
+        if (!response.ok || response.body === null) return { status: "unavailable" };
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const part = await reader.read();
+            if (part.done) break;
+            bytes += part.value.byteLength;
+            if (bytes > 4096) return { status: "unavailable" };
+            chunks.push(part.value);
+          }
+          return decodeCommandCredentialHostResult(
+            JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          );
+        } finally {
+          await reader.cancel().catch(() => undefined);
+        }
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
     awsCliReference: async () => {
       const answer = await post(`${AWS}reference`, {});
       if (answer?.status === "none") return { status: "none" };

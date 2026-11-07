@@ -1,3 +1,4 @@
+import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeClient, CodeFileSaveResult } from "@octant/client-runtime/code-client";
 import type {
   CodeCheckoutId,
@@ -8,12 +9,23 @@ import type {
   CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ProjectId } from "@octant/contracts/projects";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   MonacoEditorAdapter,
   type MonacoAdapterRuntime,
   type MonacoEditorRange,
+  type MonacoEditorPosition,
+  type MonacoEditorView,
   type MonacoLanguageBridge,
 } from "./MonacoEditorAdapter";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -30,7 +42,12 @@ import {
   toDefinitionLinks,
   toEditorMarkers,
   toLanguagePosition,
+  toEditorRange,
 } from "./codeLanguageEditor";
+import { CodeReferences } from "./CodeReferences";
+import { CodeEditPreviews } from "./CodeEditPreviews";
+import type { CodeLanguageDefinitionTarget } from "@octant/contracts/code-language";
+import type { CodeLanguageReferencesOutcome } from "./useCodeLanguageServices";
 import { useCodeLanguageServices } from "./useCodeLanguageServices";
 import {
   MAX_CODE_DEBUG_BREAKPOINT_FILES,
@@ -38,10 +55,11 @@ import {
 } from "@octant/contracts/code-debug";
 import {
   codeDebugThreadKey,
-  codeDebugWindowState,
+  activeBreakpoints,
   useCodeDebugThreadState,
   type BreakpointToggle,
 } from "../debug/codeDebugWindowState";
+import { useCodeDebugWindowStore } from "../debug/CodeDebugWindowProvider";
 
 interface CodeEditorFileFields {
   readonly checkoutId: CodeCheckoutId;
@@ -68,6 +86,8 @@ export type CodeEditorFileProjection = CodeEditorFileFields &
   );
 
 export interface MonacoEditorPaneProps {
+  readonly checkoutLabel?: string;
+  readonly debugProjectId?: ProjectId;
   /**
    * The language methods are optional: without them the editor keeps
    * Monaco's own single-file services and shows no language state.
@@ -112,6 +132,8 @@ function AvailableEditor(
     readonly file: Extract<CodeEditorFileProjection, { readonly state: "available" }>;
   },
 ) {
+  const viewStore = useContext(WorkspaceViewStateContext);
+
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [draft, setDraft] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -122,6 +144,20 @@ function AvailableEditor(
   const dirtyRef = useRef(false);
   const draftRef = useRef("");
   const metadataRef = useRef(props.file.metadata);
+  const viewKey = `editor:${JSON.stringify([props.file.threadId, props.file.checkoutId, props.file.fileId, metadataRef.current.identity, metadataRef.current.digest])}`;
+  const savedView = viewStore?.read(viewKey);
+  const debugLoadedFile = useRef<
+    { readonly key: string; readonly metadata: CodeFileMetadata } | undefined
+  >(undefined);
+  const debugFileKey = JSON.stringify([
+    props.file.threadId,
+    props.file.checkoutId,
+    props.file.fileId,
+    props.file.path,
+    props.file.content.contentId,
+  ]);
+  const currentDebugFileKey = useRef(debugFileKey);
+  currentDebugFileKey.current = debugFileKey;
   const requestGeneration = useRef(0);
   const mounted = useRef(true);
   // Manual edits are the user's own action; only Plan mode is read-only.
@@ -148,6 +184,7 @@ function AvailableEditor(
       return;
     }
     metadataRef.current = props.file.metadata;
+    debugLoadedFile.current = undefined;
     const request = ++requestGeneration.current;
     setLoadState({ kind: "loading" });
     setConflict(undefined);
@@ -162,6 +199,7 @@ function AvailableEditor(
           throw new Error("The file is not valid UTF-8 and cannot be edited.");
         }
         if (!mounted.current || request !== requestGeneration.current) return;
+        debugLoadedFile.current = { key: debugFileKey, metadata: props.file.metadata };
         const restoredDraft = props.draftStore?.read(draftKey);
         const nextDraft = restoredDraft ?? text;
         const nextDirty = nextDraft !== text;
@@ -185,6 +223,7 @@ function AvailableEditor(
     props.file.metadata,
     reloadGeneration,
     draftKey,
+    debugFileKey,
   ]);
 
   const save = useCallback(async () => {
@@ -214,6 +253,8 @@ function AvailableEditor(
       switch (result.status) {
         case "completed":
           metadataRef.current = result.metadata;
+          if (currentDebugFileKey.current === debugFileKey)
+            debugLoadedFile.current = { key: debugFileKey, metadata: result.metadata };
           setLoadState({ kind: "ready", text: savedDraft });
           const nextDirty = draftRef.current !== savedDraft;
           setDirty(nextDirty);
@@ -234,6 +275,7 @@ function AvailableEditor(
     }
   }, [
     dirty,
+    debugFileKey,
     draftKey,
     loadState.kind,
     props.client,
@@ -254,6 +296,7 @@ function AvailableEditor(
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
 
   const { checkoutId, path, threadId } = props.file;
+  const onOpenFile = props.onOpenFile;
   const language = useCodeLanguageServices({
     client: props.client,
     enabled: loadState.kind === "ready",
@@ -265,13 +308,100 @@ function AvailableEditor(
   });
   const [languageNotice, setLanguageNotice] = useState<string>();
   const [reveal, setReveal] = useState<{ readonly range: MonacoEditorRange }>();
+  const cursor = useRef<MonacoEditorPosition>({ lineNumber: 1, column: 1 });
+  const referenceSequence = useRef(0);
+  const referenceTrigger = useRef<HTMLButtonElement>(null);
+  const restoreReferenceFocus = useRef(false);
+  const referenceKey = JSON.stringify([
+    threadId,
+    checkoutId,
+    props.file.fileId,
+    path,
+    props.file.content.contentId,
+  ]);
+  const currentReferenceKey = useRef(referenceKey);
+  currentReferenceKey.current = referenceKey;
+  const [referenceView, setReferenceView] = useState<{
+    readonly key: string;
+    readonly text: string;
+    readonly client: MonacoEditorPaneProps["client"];
+    readonly position: MonacoEditorPosition;
+    readonly busy: boolean;
+    readonly result?: CodeLanguageReferencesOutcome;
+  }>();
+  const { references: readReferences, cancelReferences } = language;
+  const findReferences = useCallback(
+    async (position: MonacoEditorPosition) => {
+      const sequence = ++referenceSequence.current;
+      const currentText = draftRef.current;
+      setReferenceView({
+        key: referenceKey,
+        text: currentText,
+        client: props.client,
+        position,
+        busy: true,
+      });
+      const result = await readReferences(toLanguagePosition(position));
+      if (
+        !mounted.current ||
+        sequence !== referenceSequence.current ||
+        currentReferenceKey.current !== referenceKey ||
+        draftRef.current !== currentText
+      )
+        return;
+      setReferenceView(
+        result === undefined
+          ? undefined
+          : {
+              key: referenceKey,
+              text: currentText,
+              client: props.client,
+              position,
+              busy: false,
+              result,
+            },
+      );
+    },
+    [props.client, readReferences, referenceKey],
+  );
+  const visibleReferences =
+    referenceView?.key === referenceKey &&
+    referenceView.text === draft &&
+    referenceView.client === props.client
+      ? referenceView
+      : undefined;
+  const closeReferences = useCallback(() => {
+    referenceSequence.current += 1;
+    cancelReferences();
+    restoreReferenceFocus.current = true;
+    setReferenceView(undefined);
+  }, [cancelReferences]);
+  useLayoutEffect(() => {
+    if (visibleReferences === undefined && restoreReferenceFocus.current) {
+      restoreReferenceFocus.current = false;
+      referenceTrigger.current?.focus();
+    }
+  }, [visibleReferences]);
+  const chooseReference = useCallback(
+    (target: Extract<CodeLanguageDefinitionTarget, { readonly kind: "checkout-location" }>) => {
+      const range = toEditorRange(target.range);
+      if (target.path === path) setReveal({ range });
+      else if (onOpenFile !== undefined) {
+        requestCodeEditorReveal(
+          codeEditorRevealKey(String(threadId), String(checkoutId), target.path),
+          range,
+        );
+        onOpenFile(target.path);
+      }
+    },
+    [checkoutId, onOpenFile, path, threadId],
+  );
   const languageMarkers = useMemo(
     () =>
       language.diagnostics === undefined ? undefined : toEditorMarkers(language.diagnostics, path),
     [language.diagnostics, path],
   );
   const { definition, refresh: refreshLanguage, retry: retryLanguage } = language;
-  const onOpenFile = props.onOpenFile;
   const languageBridge = useMemo<MonacoLanguageBridge>(
     () => ({
       definitions: async (position) => {
@@ -334,32 +464,86 @@ function AvailableEditor(
 
   // Breakpoints are this window's state for the thread, shared with the Run
   // and debug panel, which sends them at Start and while a session runs.
+  const debugStore = useCodeDebugWindowStore();
   const debugKey = codeDebugThreadKey(String(threadId), String(checkoutId));
-  const debugState = useCodeDebugThreadState(debugKey);
-  const breakpointLines = debugState.breakpoints.get(path);
+  const debugState = useCodeDebugThreadState(debugKey, debugStore);
+  const debugEditorOwner = useRef({});
+  useEffect(() => {
+    let active = true;
+    const release = debugStore.trackEditor(
+      debugKey,
+      path,
+      debugEditorOwner.current,
+      () => active && dirtyRef.current,
+    );
+    return () => {
+      active = false;
+      release();
+      // A live pane owns its own dirty ref. After release, only the existing
+      // retained draft store may keep a hold, never another pane's clean ref.
+      if (props.draftStore !== undefined)
+        debugStore.trackEditor(
+          debugKey,
+          path,
+          props.draftStore,
+          () => props.draftStore?.read(draftKey) !== undefined,
+        )();
+    };
+  }, [debugStore, debugKey, path, props.draftStore, draftKey]);
+  const breakpointLines = activeBreakpoints(debugState).get(path);
+  const unresolvedLines =
+    debugState.breakpointFiles?.get(path)?.status === "unresolved"
+      ? debugState.breakpoints
+          .get(path)
+          ?.filter(
+            (line) =>
+              loadState.kind === "ready" &&
+              debugLoadedFile.current?.key === debugFileKey &&
+              line <= loadState.text.split("\n").length,
+          )
+      : undefined;
   const stoppedLine = debugState.stopped?.path === path ? debugState.stopped.line : undefined;
   const debugDecorations = useMemo(
     () => ({
       breakpoints: breakpointLines ?? [],
+      ...(unresolvedLines?.length ? { unresolvedBreakpoints: unresolvedLines } : {}),
       ...(stoppedLine === undefined ? {} : { stoppedLine }),
     }),
-    [breakpointLines, stoppedLine],
+    [breakpointLines, unresolvedLines, stoppedLine],
   );
+  const debugObservation = useCallback(() => {
+    const loaded = debugLoadedFile.current;
+    return props.debugProjectId === undefined ||
+      loadState.kind !== "ready" ||
+      loaded?.key !== debugFileKey
+      ? undefined
+      : {
+          projectId: props.debugProjectId,
+          fileId: props.file.fileId,
+          metadata: loaded.metadata,
+          lineCount: loadState.text.split("\n").length,
+          clean: !dirty,
+        };
+  }, [props.debugProjectId, props.file.fileId, debugFileKey, loadState, dirty]);
+  useEffect(() => {
+    if (props.debugProjectId !== undefined)
+      debugStore.observeFile(debugKey, path, debugObservation(), "unavailable");
+  }, [props.debugProjectId, debugStore, debugKey, path, debugObservation]);
   // A toggle past the bounds the host takes at Start sets nothing; the
   // person hears why rather than seeing the gutter ignore them.
   const [breakpointNotice, setBreakpointNotice] = useState<string>();
   const toggleBreakpoint = useCallback(
     (lineNumber: number) => {
-      const outcome = codeDebugWindowState.toggleBreakpoint(debugKey, path, lineNumber);
+      const outcome = debugStore.toggleBreakpoint(debugKey, path, lineNumber, debugObservation());
       setBreakpointNotice(breakpointLimitText(outcome));
     },
-    [debugKey, path],
+    [debugKey, path, debugStore, debugObservation],
   );
   // The panel's launch file proposals fill `${file}` from the file the person
   // last had in front of them.
   useEffect(() => {
-    if (ready) codeDebugWindowState.setCurrentFile(debugKey, path);
-  }, [debugKey, path, ready]);
+    if (ready) debugStore.setCurrentFile(debugKey, path);
+  }, [debugKey, path, ready, debugStore]);
 
   return (
     <section
@@ -371,7 +555,7 @@ function AvailableEditor(
         // on in Settings; focus moving within the pane is neither.
         const from = event.relatedTarget;
         if (from instanceof Node && event.currentTarget.contains(from)) return;
-        codeDebugWindowState.setCurrentFile(debugKey, path);
+        debugStore.setCurrentFile(debugKey, path);
         if (language.state.kind === "ready") refreshLanguage();
         else if (language.state.kind === "off") retryLanguage();
       }}
@@ -467,6 +651,112 @@ function AvailableEditor(
         </div>
       )}
 
+      {props.client.readLanguage === undefined ||
+      props.client.syncLanguageDocument === undefined ? null : (
+        <div className="code-editor-pane__language">
+          <OctantButton
+            ref={referenceTrigger}
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={loadState.kind !== "ready" || visibleReferences?.busy === true}
+            onClick={() => void findReferences(cursor.current)}
+          >
+            Find references in checkout
+          </OctantButton>
+        </div>
+      )}
+      {props.client.readLanguage === undefined ||
+      props.client.syncLanguageDocument === undefined ? null : (
+        <CodeEditPreviews
+          key={referenceKey}
+          text={draft}
+          checkout={props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
+          writable={writable && props.draftStore !== undefined}
+          prepare={(query) => language.prepareEdits(toLanguagePosition(cursor.current), query)}
+          apply={async (preview) => {
+            if (!writable || props.draftStore === undefined)
+              return "The editor cannot confirm draft safety. Reopen the file in its workspace.";
+            let completed = 0;
+            const held = () => mounted.current && currentReferenceKey.current === referenceKey;
+            for (const file of preview.files) {
+              if (!held())
+                return `Stopped after ${completed} saved files because the editor changed.`;
+              const draft = props.draftStore.read(modelUri(checkoutId, file.fileId));
+              if (
+                (draft !== undefined && draft !== file.before) ||
+                (file.path === path && draftRef.current !== file.before)
+              )
+                return `Unsaved changes in ${file.path}. Nothing further was saved; ${completed} files were saved.`;
+            }
+            for (const file of preview.files) {
+              if (!held())
+                return `Stopped after ${completed} saved files because the editor changed.`;
+              const draft = props.draftStore.read(modelUri(checkoutId, file.fileId));
+              if (
+                (draft !== undefined && draft !== file.before) ||
+                (file.path === path && draftRef.current !== file.before)
+              )
+                return `Stopped at unsaved changes in ${file.path}; ${completed} files were saved.`;
+              const result = await props.client.save({
+                threadId,
+                checkoutId,
+                path: file.path,
+                expectedIdentity: file.identity,
+                expectedDigest: file.digest,
+                text: file.after,
+              });
+              if (result.status !== "completed") {
+                props.onRequestRefresh?.();
+                return `Stopped at ${file.path}: ${result.status}. ${completed} files were saved. Check the files before preparing again.`;
+              }
+              completed++;
+              if (file.path === path && held()) {
+                metadataRef.current = result.metadata;
+                setLoadState({ kind: "ready", text: file.after });
+                if (draftRef.current === file.before) {
+                  draftRef.current = file.after;
+                  setDraft(file.after);
+                  dirtyRef.current = false;
+                  setDirty(false);
+                  props.draftStore.clear(draftKey);
+                }
+              }
+            }
+            props.onRequestRefresh?.();
+            return `Saved ${completed} reviewed files.`;
+          }}
+          {...(props.onOpenExternalEditor === undefined
+            ? {}
+            : { onOpenExternal: props.onOpenExternalEditor })}
+        />
+      )}
+      {visibleReferences === undefined ? null : (
+        <CodeReferences
+          onReloadLanguage={() => {
+            closeReferences();
+            retryLanguage();
+          }}
+          checkout={props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
+          busy={visibleReferences.busy}
+          {...(visibleReferences.result === undefined ? {} : { result: visibleReferences.result })}
+          onChoose={chooseReference}
+          canOpen={(target) => target === path || onOpenFile !== undefined}
+          onRecheck={() => void findReferences(visibleReferences.position)}
+          onClose={closeReferences}
+          {...(props.onOpenExternalEditor === undefined
+            ? {}
+            : {
+                onOpenExternal: () => {
+                  void props
+                    .onOpenExternalEditor?.()
+                    .catch(() =>
+                      setMessage("Octant could not open the configured external editor."),
+                    );
+                },
+              })}
+        />
+      )}
       {breakpointNotice === undefined ? null : <p role="status">{breakpointNotice}</p>}
 
       {loadState.kind === "loading" ? <p role="status">Loading file…</p> : null}
@@ -476,12 +766,28 @@ function AvailableEditor(
       {loadState.kind === "ready" ? (
         <MonacoEditorAdapter
           ariaLabel={`Editor for ${props.file.path}`}
+          viewState={savedView?.kind === "editor" ? savedView : undefined}
+          {...(viewStore === undefined
+            ? {}
+            : {
+                onViewState: (view: MonacoEditorView) =>
+                  viewStore.write(viewKey, { kind: "editor", ...view }),
+              })}
           language={props.file.language}
           {...(props.client.readLanguage === undefined ? {} : { languageBridge })}
           languageMarkers={languageMarkers}
           reveal={reveal}
           {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
           modelUri={modelUri(props.file.checkoutId, props.file.fileId)}
+          {...(props.client.readLanguage === undefined ||
+          props.client.syncLanguageDocument === undefined
+            ? {}
+            : {
+                onCursorPosition: (position: MonacoEditorPosition) => {
+                  cursor.current = position;
+                },
+                onReferences: (position: MonacoEditorPosition) => void findReferences(position),
+              })}
           onChange={(value) => {
             setDraft(value);
             draftRef.current = value;
@@ -512,6 +818,8 @@ function breakpointLimitText(outcome: BreakpointToggle): string | undefined {
       return `This file already has ${MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE} breakpoints, the most a debug session takes. Remove one to add another.`;
     case "files-full":
       return `Breakpoints are already set in ${MAX_CODE_DEBUG_BREAKPOINT_FILES} files, the most a debug session takes. Clear another file's breakpoints to set one here.`;
+    case "invalid-line":
+      return "This is not a valid breakpoint line.";
   }
 }
 

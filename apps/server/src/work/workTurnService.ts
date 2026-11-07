@@ -1,5 +1,10 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
+import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
+import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -24,6 +29,7 @@ import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import {
   ActorId,
+  type AutomationRunReference,
   CorrelationId,
   EventId,
   MAX_WORK_TRANSCRIPT_TURNS,
@@ -75,7 +81,6 @@ import {
   type ProviderResumeCursor,
   type ProviderInstance,
   type ProviderModel,
-  type ProviderSwitchConversationHandoff,
   type ThreadTaskProgressList,
   type ThreadWorkingDirectory,
   type WindowId,
@@ -145,6 +150,8 @@ import {
   type WorkTurnRuntimeOutcome,
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
+import { workExternalInputReceipt, sameWorkExternalInput } from "./workExternalInput";
+import type { WorkExternalInputReceipt } from "@octant/contracts/work-turns";
 import { WorkTurnLiveStore } from "./workTurnLiveStore";
 import { WorkTurnUsageStore } from "./workTurnUsageStore";
 import { isRoutineHostScope } from "../routineHostScope";
@@ -157,13 +164,26 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 /**
  * The standing rule for every turn in a Work Project that keeps a status
- * file, plus the resume brief when the
- * status has gone quiet or a date is close. Says what to do with `STATUS.md`,
- * never what the status is; the file itself is in the context beside it.
+ * file. Says what to do with `STATUS.md`, never what the status is; the file
+ * itself is in the context beside it. Its text never changes, so a session
+ * holds it once and a provider's cached prompt prefix is never invalidated by
+ * it.
  */
-function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string {
-  const standing = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. Before you finish this task, update ${WORK_STATUS_FILE_NAME}: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today.`;
-  if (reasons.length === 0) return standing;
+const STATUS_UPKEEP_INSTRUCTION = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. When this turn changes where the work stands, update ${WORK_STATUS_FILE_NAME} before you finish: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Leave it unchanged for questions and conversation.`;
+
+/** Identifies the status file's block, so a newer version replaces the one a session holds. */
+const STATUS_FILE_CONTEXT_KEY = "work-status-file";
+
+/**
+ * Asks a task that opens on a quiet or dated status to take stock first.
+ *
+ * A one-turn instruction, not part of the standing rule: folded into it, the
+ * rule's text changed whenever the status crossed a staleness or date
+ * threshold, which withdrew the held rule and sent the whole standing context
+ * again.
+ */
+function takeStockInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string | undefined {
+  if (reasons.length === 0) return undefined;
   const why = [
     reasons.includes("stale") ? "the status has not been updated for a while" : undefined,
     reasons.includes("overdue") ? "at least one deadline or follow-up date has passed" : undefined,
@@ -171,7 +191,7 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
   ]
     .filter((part) => part !== undefined)
     .join(", and ");
-  return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request.`;
+  return `Take stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request. When the request is a greeting or unrelated to this work, answer it first and offer the update at the end instead.`;
 }
 
 /**
@@ -204,6 +224,8 @@ interface WorkUsageFacts {
 }
 
 export interface WorkTurnStartOptions {
+  /** Required framed data from an owned host workflow, never a wire-supplied instruction. */
+  readonly externalData?: { readonly content: FramedExternalContent; readonly referenceId: string };
   /**
    * The most this turn may run at, for a caller whose own authority may be
    * narrower than the thread's (a goal-loop round, a routine, a delegation):
@@ -219,6 +241,12 @@ export interface WorkTurnStartOptions {
   readonly limitRecovery?: boolean;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
+  /**
+   * Set by the routine dispatcher for the turn it starts for a run, and only
+   * there: the turn may report that run's result. Host-only: the wire command
+   * cannot carry it.
+   */
+  readonly routineRun?: AutomationRunReference;
 }
 
 /**
@@ -239,6 +267,7 @@ export interface ServerWorkTurns {
 }
 
 export interface WorkTurnServiceDependencies {
+  readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
   readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
@@ -288,6 +317,7 @@ export interface WorkTurnServiceDependencies {
   };
   readonly projection: WorkTurnProjection;
   readonly workingDirectories: {
+    readonly current?: (root: string, directory: string) => () => boolean;
     readonly resolve: (
       authoritativeRoot: string,
       workingDirectory: ThreadWorkingDirectory,
@@ -318,6 +348,7 @@ export interface WorkTurnServiceDependencies {
    * refuses a turn that names attachments when this is false, rather than
    * sending the prompt with its pictures quietly removed.
    */
+  readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   readonly supportsAttachments?: (input: {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
@@ -353,6 +384,8 @@ export interface WorkTurnServiceDependencies {
     /** The Project's extra folders, which file tools treat as the root. */
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Work threads in a Project on a registered server, whose turns act there. */
   readonly serverProjects?: ServerWorkTurns;
@@ -504,6 +537,7 @@ export class WorkTurnService {
   readonly #workingDirectories: WorkTurnServiceDependencies["workingDirectories"];
   readonly #resolveDriver: WorkTurnServiceDependencies["resolveDriver"];
   readonly #attachments: WorkAttachmentStore | undefined;
+  readonly #conversationInputTransfer: WorkTurnServiceDependencies["conversationInputTransfer"];
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
@@ -526,6 +560,7 @@ export class WorkTurnService {
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
   readonly #statusStaleAfterDays: number;
+  readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
@@ -558,6 +593,7 @@ export class WorkTurnService {
     this.#workingDirectories = dependencies.workingDirectories;
     this.#resolveDriver = dependencies.resolveDriver;
     this.#attachments = dependencies.attachments;
+    this.#conversationInputTransfer = dependencies.conversationInputTransfer;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
@@ -578,6 +614,7 @@ export class WorkTurnService {
     this.#statusStaleAfterDays =
       dependencies.statusStaleAfterDays ?? DEFAULT_WORK_STATUS_STALE_AFTER_DAYS;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
+    this.#resolveSideChatReturns = dependencies.resolveSideChatReturns;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     if (dependencies.takeIssueContextFramed !== undefined) {
       this.#takeIssueContextFramed = dependencies.takeIssueContextFramed;
@@ -612,6 +649,7 @@ export class WorkTurnService {
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
     readonly record: WorkTurnHandoff;
+    readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }>;
   } {
     const refuse = (refusal: ConversationHandoffRefusal): never => {
       throw this.#failure(
@@ -640,10 +678,12 @@ export class WorkTurnService {
     if (reason !== "provider-switch")
       return {
         blocks: selection.blocks,
+        selection,
         record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
       };
     return {
       blocks: selection.blocks,
+      selection,
       record: providerSwitchHandoffRecord(
         selection,
         // A handoff that never completed is made again from the provider the
@@ -712,7 +752,13 @@ export class WorkTurnService {
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
     if (existing !== undefined && command.delivery === undefined) {
-      return this.#lookupMatching(command, existing);
+      return this.#lookupMatching(
+        command,
+        existing,
+        options?.externalData === undefined
+          ? undefined
+          : workExternalInputReceipt(options.externalData),
+      );
     }
     // The turn reads the conversation it plans from while it is prepared, so
     // no compaction may be under way when it starts, and none may start until
@@ -759,6 +805,9 @@ export class WorkTurnService {
         projectId: thread.projectId,
         bindingRevisionId: currentBinding?.revisionId ?? last.bindingRevisionId,
         workingDirectory: thread.workingDirectory ?? last.workingDirectory,
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       },
@@ -780,6 +829,15 @@ export class WorkTurnService {
     command: StartWorkThreadTurnCommand,
     options: WorkTurnStartOptions | undefined,
   ): Promise<WorkTurnLookupResult> {
+    const externalData =
+      options?.externalData === undefined
+        ? undefined
+        : {
+            referenceId: options.externalData.referenceId,
+            content: { ...options.externalData.content },
+          };
+    const externalInput =
+      externalData === undefined ? undefined : workExternalInputReceipt(externalData);
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
@@ -908,14 +966,32 @@ export class WorkTurnService {
       projectRoot = server.folder;
     } else {
       try {
+        const root =
+          project === undefined
+            ? undefined
+            : approvedWorkingFolderRoot(project, command.authority.workingFolderId);
+        if (root === undefined) throw new Error("Working folder is unavailable");
         projectRoot = await this.#workingDirectories.resolve(
-          project?.binding.canonicalRoot ?? "",
+          root,
           command.authority.workingDirectory,
         );
       } catch {
         throw this.#failure("invalid", "Work working directory is unavailable.");
       }
     }
+
+    const extraFolders =
+      project === undefined
+        ? []
+        : [
+            ...new Set([
+              ...(command.authority.workingFolderId !== undefined &&
+              projectRoot !== project.binding.canonicalRoot
+                ? [project.binding.canonicalRoot]
+                : []),
+              ...projectExtraFolderRoots(project),
+            ]),
+          ].filter((folder) => folder !== projectRoot);
 
     const provider = this.#persistence.readProviderInstance(command.authority.providerInstanceId);
     if (provider === undefined || !provider.enabled) {
@@ -953,7 +1029,7 @@ export class WorkTurnService {
         "The selected model does not support images. Choose a vision model, or remove the attachments.",
       );
     }
-    const attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
+    let attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
     if (attachmentInputs === undefined) {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
     }
@@ -992,149 +1068,267 @@ export class WorkTurnService {
       skillContext = resolved.context;
       extensionTools = resolved.tools;
     }
-    const acceptedAt = decodeTimestamp(this.#clock());
-    const nativeConversation = driver.conversationOwnership === "provider";
-    const resumableHost = driver.conversationOwnership === "host-resumable";
-    const previous = this.#projection.latestForThread(command.threadId);
-    const sessionDecision = decideConversationSession({
-      recipient: {
-        providerInstanceId: String(command.authority.providerInstanceId),
-        owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
-      },
-      ...(previous === undefined
-        ? {}
-        : {
-            previous: {
-              providerInstanceId: String(previous.authority.providerInstanceId),
-              continuable:
-                previous.providerSessionId !== undefined &&
-                previous.resumeCursor !== undefined &&
-                (resumableHost
-                  ? // A harness session resumes on the model it was opened
-                    // with, and is taken up only as it stands: after a turn
-                    // that ended cleanly, was cancelled, or was cut off by a
-                    // restart, and before any host compaction it would not read.
-                    previous.authority.modelId === command.authority.modelId &&
-                    (previous.status === "completed" ||
-                      previous.status === "cancelled" ||
-                      (previous.status === "failed" &&
-                        previous.failure?.category === "interrupted")) &&
-                    this.#contextHarness?.hostCompactedSince(
-                      decodeContextSubjectRef({
-                        aggregateType: "work-thread",
-                        aggregateId: String(command.threadId),
-                      }),
-                      previous.updatedAt,
-                    ) !== true
-                  : previous.authority.modelId === command.authority.modelId ||
-                    this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
+    const hostTools =
+      server !== undefined
+        ? server.tools
+        : thread === undefined
+          ? undefined
+          : this.#resolveAppManagedTools?.({
+              thread,
+              projectRoot,
+              ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              windowId: authenticatedWindowId,
+              ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
+            });
+    const preparedTools =
+      extensionTools === undefined
+        ? hostTools
+        : combineAppManagedToolSets(hostTools, extensionTools);
+    let toolsLaunched = false;
+    try {
+      const acceptedAt = decodeTimestamp(this.#clock());
+      const nativeConversation = driver.conversationOwnership === "provider";
+      const resumableHost = driver.conversationOwnership === "host-resumable";
+      const previous = this.#projection.latestForThread(command.threadId);
+      const catalogChanged =
+        previous?.resumeCursor !== undefined &&
+        String(previous.authority.providerInstanceId) ===
+          String(command.authority.providerInstanceId) &&
+        driver.toolCatalogContinuation?.({
+          resumeCursor: previous.resumeCursor,
+          tools: preparedTools?.definitions ?? [],
+        }) === "handoff-required";
+      if (catalogChanged && command.toolCatalogHandoff !== true) {
+        throw this.#failure(
+          "tools-changed",
+          "The saved session has different tools. Choose Continue with updated tools to start a fresh session with the conversation handed over as text. Your draft and saved conversation are preserved.",
+        );
+      }
+      if (command.toolCatalogHandoff === true && isRoutineHostScope(authenticatedWindowId)) {
+        throw this.#failure(
+          "unauthorized",
+          "Only a person can choose to replace a native session's tools.",
+        );
+      }
+      const sessionDecision = decideConversationSession({
+        recipient: {
+          providerInstanceId: String(command.authority.providerInstanceId),
+          owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
+        },
+        ...(previous === undefined
+          ? {}
+          : {
+              previous: {
+                ...(command.toolCatalogHandoff === true &&
+                driver.toolCatalogContinuation !== undefined &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
-                previous.authority.workingDirectory === command.authority.workingDirectory,
-              ...(this.#projection.rewoundSinceLatest(command.threadId) ? { rewound: true } : {}),
-              // A same-provider model swap the provider cannot carry on starts
-              // a fresh session with a handoff instead of refusing the turn.
-              ...(previous.authority.modelId !== command.authority.modelId &&
-              this.#supportsModelSwitch?.(command.authority.providerInstanceId) !== true
-                ? { modelSwitchHandoff: true }
-                : {}),
-              // The session cursor is recorded when the session starts, before
-              // the provider is sent anything, so a turn that carried a
-              // handoff and did not complete may never have delivered it.
-              ...(previous.handoff !== undefined && previous.status !== "completed"
-                ? {
-                    undeliveredHandoff:
-                      previous.handoff.reason === "fork" ? "branch" : previous.handoff.reason,
-                  }
-                : // A restart that cut the turn off before its session recorded a
-                  // cursor left no session of the provider's to resume, so the
-                  // conversation goes to a fresh one as text.
-                  previous.failure?.category === "interrupted" &&
-                    previous.resumeCursor === undefined
-                  ? { undeliveredHandoff: "provider-switch" as const }
+                previous.authority.workingDirectory === command.authority.workingDirectory
+                  ? { toolCatalogHandoff: true }
                   : {}),
-            },
-          }),
-      // A fork whose turns are all carried copies has no session of its own:
-      // those turns ran in the source.
-      ...(previous?.carriedFrom !== undefined ? { branchWithoutSession: true } : {}),
-      handoff: "allowed",
-    });
-    if (sessionDecision.kind === "refuse") {
-      throw this.#failure(
-        "unavailable",
-        "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
-      );
-    }
-    let continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
-    if (sessionDecision.kind === "new-session-with-handoff" && thread === undefined) {
-      // Without the thread there is no conversation to read, and a session
-      // started anyway would answer as if it had never been given one.
-      throw this.#failure(
-        "unavailable",
-        conversationHandoffRefusalMessage("thread-unavailable", {
-          thread: "Work task",
-          cause: "switch",
-        }),
-      );
-    }
-    const handoff =
-      sessionDecision.kind === "new-session-with-handoff" &&
-      previous !== undefined &&
-      thread !== undefined
-        ? this.#selectConversationHandoff(thread, previous, sessionDecision.reason)
-        : undefined;
-    const harnessContext =
-      thread === undefined
-        ? []
-        : (this.#nativeHarness?.contextFor({
-            threadId: String(thread.id),
-            mode: "work",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-            projectId: thread.projectId,
-          }) ?? []);
-    // A continued harness session already holds the earlier turns, but they
-    // are still planned: the plan is what a requested compaction summarizes
-    // from and what decides whether the conversation still fits. Only the
-    // send leaves them out (see `sessionHolds`).
-    const preparedFeedback =
-      thread === undefined ||
-      server !== undefined ||
-      command.delivery !== undefined ||
-      options?.limitRecovery === true ||
-      options?.accessCeiling !== undefined
-        ? undefined
-        : this.#prepareProductFeedbackForTurn?.({
-            windowId: authenticatedWindowId,
-            threadId: String(command.threadId),
-            operationId: String(command.turnId),
-            supportsImages: this.#modelReadsImages(command.authority),
-            current: options?.admissionCurrent ?? (() => true),
-          });
-    const priorTranscript = nativeConversation
-      ? []
-      : this.#priorTranscriptContributions(command.threadId);
-    const planned = planWorkTurnContext({
-      threadId: command.threadId,
-      providerInstanceId: command.authority.providerInstanceId,
-      modelId: command.authority.modelId,
-      uuid: this.#uuid,
-      createdAt: this.#clock(),
-      safeInputBudget: this.#safeInputBudgetTokens,
-      contributions: [
-        ...(preparedFeedback?.context === undefined
-          ? []
-          : [
-              {
-                text: preparedFeedback.context,
-                sourceKind: "message" as const,
-                referenceId: `product-feedback:${command.turnId}`,
-                category: "workspace-context" as const,
-                posture: "required" as const,
-                block: { kind: "user-message" as const, text: preparedFeedback.context },
+                providerInstanceId: String(previous.authority.providerInstanceId),
+                continuable:
+                  previous.providerSessionId !== undefined &&
+                  previous.resumeCursor !== undefined &&
+                  (resumableHost
+                    ? // A harness session resumes on the model it was opened
+                      // with, and is taken up only as it stands: after a turn
+                      // that ended cleanly, was cancelled, or was cut off by a
+                      // restart, and before any host compaction it would not read.
+                      previous.authority.modelId === command.authority.modelId &&
+                      (previous.status === "completed" ||
+                        previous.status === "cancelled" ||
+                        (previous.status === "failed" &&
+                          previous.failure?.category === "interrupted")) &&
+                      this.#contextHarness?.hostCompactedSince(
+                        decodeContextSubjectRef({
+                          aggregateType: "work-thread",
+                          aggregateId: String(command.threadId),
+                        }),
+                        previous.updatedAt,
+                      ) !== true
+                    : previous.authority.modelId === command.authority.modelId ||
+                      this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
+                  previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
+                  previous.authority.workingDirectory === command.authority.workingDirectory,
+                ...(this.#projection.rewoundSinceLatest(command.threadId) ? { rewound: true } : {}),
+                // A same-provider model swap the provider cannot carry on starts
+                // a fresh session with a handoff instead of refusing the turn.
+                ...(previous.authority.modelId !== command.authority.modelId &&
+                this.#supportsModelSwitch?.(command.authority.providerInstanceId) !== true
+                  ? { modelSwitchHandoff: true }
+                  : {}),
+                // The session cursor is recorded when the session starts, before
+                // the provider is sent anything, so a turn that carried a
+                // handoff and did not complete may never have delivered it.
+                ...(previous.handoff !== undefined && previous.status !== "completed"
+                  ? {
+                      undeliveredHandoff:
+                        previous.handoff.reason === "fork" ? "branch" : previous.handoff.reason,
+                    }
+                  : // A restart that cut the turn off before its session recorded a
+                    // cursor left no session of the provider's to resume, so the
+                    // conversation goes to a fresh one as text.
+                    previous.failure?.category === "interrupted" &&
+                      previous.resumeCursor === undefined
+                    ? { undeliveredHandoff: "provider-switch" as const }
+                    : {}),
               },
-            ]),
-        ...harnessContext.map(
+            }),
+        // A fork whose turns are all carried copies has no session of its own:
+        // those turns ran in the source.
+        ...(previous?.carriedFrom !== undefined ? { branchWithoutSession: true } : {}),
+        handoff: "allowed",
+      });
+      if (sessionDecision.kind === "refuse") {
+        throw this.#failure(
+          "unavailable",
+          "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
+        );
+      }
+      let continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
+      if (sessionDecision.kind === "new-session-with-handoff" && thread === undefined) {
+        // Without the thread there is no conversation to read, and a session
+        // started anyway would answer as if it had never been given one.
+        throw this.#failure(
+          "unavailable",
+          conversationHandoffRefusalMessage("thread-unavailable", {
+            thread: "Work task",
+            cause: "switch",
+          }),
+        );
+      }
+      let handoff =
+        sessionDecision.kind === "new-session-with-handoff" &&
+        previous !== undefined &&
+        thread !== undefined
+          ? this.#selectConversationHandoff(thread, previous, sessionDecision.reason)
+          : undefined;
+      const inputHandoff =
+        handoff ??
+        (sessionDecision.kind === "host-rebuild" &&
+        this.#projection
+          .listForThread(command.threadId)
+          .some((turn) => (turn.attachments?.length ?? 0) > 0) &&
+        previous !== undefined &&
+        thread !== undefined &&
+        (previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
+          previous.authority.modelId !== command.authority.modelId ||
+          previous.carriedFrom !== undefined ||
+          this.#projection.rewoundSinceLatest(command.threadId))
+          ? this.#selectConversationHandoff(
+              thread,
+              previous,
+              previous.carriedFrom !== undefined
+                ? "branch"
+                : this.#projection.rewoundSinceLatest(command.threadId)
+                  ? "rewind"
+                  : "provider-switch",
+            )
+          : undefined);
+      let inputReceipt: ConversationInputReceipt | undefined;
+      let inputsCurrent: (() => boolean) | undefined;
+      const inputOnlyBlocks: ProviderContextBlock[] = [];
+      if (inputHandoff !== undefined) {
+        const transfer = this.#conversationInputTransfer;
+        const previousReceipt =
+          previous?.carriedFrom === undefined &&
+          previous?.status !== "completed" &&
+          previous?.inputReceipt?.purpose === inputHandoff.record.reason
+            ? previous.inputReceipt
+            : undefined;
+        if (
+          transfer === undefined &&
+          ((inputHandoff.selection.inputs?.length ?? 0) > 0 ||
+            inputHandoff.selection.inputUnavailable === true ||
+            previousReceipt !== undefined)
+        )
+          throw this.#failure(
+            "unavailable",
+            "Original source inputs cannot be transferred on this host. Nothing was sent.",
+          );
+        const prepared = await transfer?.prepare({
+          owner: {
+            mode: "work",
+            threadId: String(command.threadId),
+            projectId: String(command.authority.projectId),
+          },
+          purpose: inputHandoff.record.reason,
+          selection: inputHandoff.selection,
+          ...(previousReceipt === undefined ? {} : { previous: previousReceipt }),
+          ...(command.contextInputPolicy === undefined
+            ? {}
+            : { policy: command.contextInputPolicy }),
+          target: {
+            providerInstanceId: String(command.authority.providerInstanceId),
+            modelId: String(command.authority.modelId),
+          },
+          current: () => options?.admissionCurrent?.() !== false,
+        });
+        if (prepared?.status === "refused") throw this.#failure("unavailable", prepared.message);
+        if (prepared?.status === "ready" && prepared.receipt !== undefined) {
+          inputsCurrent = prepared.inputsCurrent;
+          attachmentInputs = [...attachmentInputs, ...prepared.attachments];
+          inputReceipt = prepared.receipt;
+          if (handoff === undefined)
+            inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
+          else
+            handoff = {
+              ...handoff,
+              blocks: [...handoff.blocks, conversationInputReceiptBlock(prepared.manifest)],
+              record: {
+                ...handoff.record,
+                inputReceipt: prepared.receipt,
+                omissions: {
+                  ...handoff.record.omissions,
+                  attachments: Math.max(
+                    0,
+                    handoff.record.omissions.attachments - prepared.receipt.included,
+                  ),
+                },
+              },
+            };
+        }
+      }
+
+      const harnessContext =
+        thread === undefined
+          ? []
+          : (this.#nativeHarness?.contextFor({
+              threadId: String(thread.id),
+              mode: "work",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              projectId: thread.projectId,
+            }) ?? []);
+      // A continued harness session already holds the earlier turns, but they
+      // are still planned: the plan is what a requested compaction summarizes
+      // from and what decides whether the conversation still fits. Only the
+      // send leaves them out (see `sessionHolds`).
+      const preparedFeedback =
+        thread === undefined ||
+        server !== undefined ||
+        command.delivery !== undefined ||
+        options?.limitRecovery === true ||
+        options?.accessCeiling !== undefined
+          ? undefined
+          : this.#prepareProductFeedbackForTurn?.({
+              windowId: authenticatedWindowId,
+              threadId: String(command.threadId),
+              operationId: String(command.turnId),
+              supportsImages: this.#modelReadsImages(command.authority),
+              current: options?.admissionCurrent ?? (() => true),
+            });
+      const priorTranscript = nativeConversation
+        ? []
+        : this.#priorTranscriptContributions(command.threadId);
+      const planned = planWorkTurnContext({
+        threadId: command.threadId,
+        providerInstanceId: command.authority.providerInstanceId,
+        modelId: command.authority.modelId,
+        uuid: this.#uuid,
+        createdAt: this.#clock(),
+        safeInputBudget: this.#safeInputBudgetTokens,
+        leading: harnessContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
             sourceKind: "instruction",
@@ -1144,216 +1338,305 @@ export class WorkTurnService {
             block,
           }),
         ),
-        ...skillContext.map(
-          (block, index): WorkTurnContextContribution => ({
-            text: block.text,
-            sourceKind: "instruction",
-            referenceId: `selected-skill:${index}`,
-            category: "workspace-context",
+        contributions: [
+          ...(preparedFeedback?.context === undefined
+            ? []
+            : [
+                {
+                  text: preparedFeedback.context,
+                  sourceKind: "message" as const,
+                  referenceId: `product-feedback:${command.turnId}`,
+                  category: "workspace-context" as const,
+                  posture: "required" as const,
+                  block: { kind: "user-message" as const, text: preparedFeedback.context },
+                },
+              ]),
+          ...skillContext.map(
+            (block, index): WorkTurnContextContribution => ({
+              text: block.text,
+              sourceKind: "instruction",
+              referenceId: `selected-skill:${index}`,
+              category: "workspace-context",
+              posture: "required",
+              block,
+            }),
+          ),
+          ...personMemoryContributions(
+            thread === undefined
+              ? undefined
+              : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
+          ),
+          ...(project === undefined ? [] : extraFolderContributions(project)),
+          ...(project === undefined
+            ? []
+            : await this.#projectBriefContributions(
+                project,
+                command.threadId,
+                previous === undefined,
+              )),
+          ...priorTranscript,
+          ...(handoff === undefined
+            ? []
+            : handoff.blocks.map(
+                (block, index): WorkTurnContextContribution => ({
+                  text: block.text,
+                  sourceKind: "message",
+                  referenceId: `conversation-handoff:${command.threadId}:${index}`,
+                  category: "conversation",
+                  posture: "required",
+                  block,
+                }),
+              )),
+          ...inputOnlyBlocks.map(
+            (block, index): WorkTurnContextContribution => ({
+              text: block.text,
+              sourceKind: "message",
+              referenceId: `conversation-inputs:${command.threadId}:${index}`,
+              category: "conversation",
+              posture: "required",
+              block,
+            }),
+          ),
+
+          ...(await this.#sideChatReturnContributions(
+            command.threadId,
+            command.sideChatReturns,
+            authenticatedWindowId,
+          )),
+          ...(await this.#threadMentionContributions(
+            command.threadId,
+            command.threadMentionIds,
+            authenticatedWindowId,
+          )),
+          ...(await this.#fileMentionContributions(
+            command.fileMentionPaths,
+            authenticatedWindowId,
+            command.threadId,
+          )),
+          ...this.#issueContextContribution(command.threadId),
+          ...(externalData === undefined
+            ? []
+            : [
+                {
+                  text: externalData.content.text,
+                  sourceKind: "message" as const,
+                  referenceId: externalData.referenceId,
+                  category: "workspace-context" as const,
+                  posture: "required" as const,
+                  block: { kind: "user-message" as const, text: externalData.content.text },
+                },
+              ]),
+          {
+            text: command.prompt,
+            sourceKind: "message",
+            referenceId: `prompt:${command.turnId}`,
+            category: "current-request",
             posture: "required",
-            block,
-          }),
-        ),
-        ...personMemoryContributions(
-          thread === undefined
-            ? undefined
-            : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
-        ),
-        ...(project === undefined ? [] : extraFolderContributions(project)),
-        ...(project === undefined
-          ? []
-          : await this.#projectBriefContributions(project, command.threadId)),
-        ...priorTranscript,
-        ...(handoff === undefined
-          ? []
-          : handoff.blocks.map(
-              (block, index): WorkTurnContextContribution => ({
-                text: block.text,
-                sourceKind: "message",
-                referenceId: `conversation-handoff:${command.threadId}:${index}`,
-                category: "conversation",
-                posture: "required",
-                block,
-              }),
-            )),
-        ...(await this.#threadMentionContributions(
-          command.threadId,
-          command.threadMentionIds,
-          authenticatedWindowId,
-        )),
-        ...(await this.#fileMentionContributions(
-          command.fileMentionPaths,
-          authenticatedWindowId,
-          command.threadId,
-        )),
-        ...this.#issueContextContribution(command.threadId),
-        {
-          text: command.prompt,
-          sourceKind: "message",
-          referenceId: `prompt:${command.turnId}`,
-          category: "current-request",
-          posture: "required",
-          block: { kind: "user-message", text: command.prompt },
-        },
-      ],
-    });
-    if (planned.kind === "blocked") {
-      throw this.#failure("invalid", planned.message);
-    }
-    // A plan that leaves earlier turns out to fit cannot be met by the
-    // continued session, which would carry them all and drop older exchanges
-    // on its own. The host rebuilds the history in a fresh session instead,
-    // so what the model reads is what the plan journals.
-    if (
-      resumableHost &&
-      continuing !== undefined &&
-      planned.manifest.entries.some(
-        (entry) =>
-          entry.category === "conversation" &&
-          (entry.state === "omitted" || entry.state === "truncated"),
-      )
-    ) {
-      continuing = undefined;
-    }
-    const resumeCursor = continuing?.resumeCursor;
-    const providerSessionId =
-      continuing?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
-    // Blocks of the earlier turns the continued session already holds; sending
-    // them again would duplicate every earlier message inside the session.
-    const sessionHolds = new Set<ProviderContextBlock>(
-      resumableHost && continuing !== undefined ? priorTranscript.map((item) => item.block) : [],
-    );
-
-    // The turn journals on its own aggregate, so a Done mark committed while
-    // the turn was prepared raises no version conflict. Reread the thread
-    // last: nothing after this awaits before the acceptance is journaled.
-    const markedWhilePreparing =
-      thread !== undefined &&
-      (await this.#threads.read(authenticatedWindowId, command.threadId))?.completionConfirmed ===
-        true;
-
-    // Preparation awaits filesystem and provider context; recheck the journal before admission.
-    const afterPreparation = this.#agentResultDelivery(command);
-    if (afterPreparation !== undefined) return afterPreparation;
-
-    // Context and attachment reads can outlive the host's queue admission.
-    if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
-      await Effect.runPromise(
-        Effect.promise(async () => {
-          await extensionTools?.close?.();
-        }).pipe(
-          Effect.timeout("2 seconds"),
-          Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
-        ),
-      );
-      if (markedWhilePreparing) {
-        throw this.#failure("invalid", WORK_THREAD_MARKED_DONE_TURN_REFUSAL);
+            block: { kind: "user-message", text: command.prompt },
+          },
+        ],
+      });
+      if (planned.kind === "blocked") {
+        throw this.#failure("invalid", planned.message);
       }
-      throw this.#failure("unauthorized", "Work turn admission is no longer current.");
-    }
-
-    const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
-    const spendAdmission = this.#spendCeiling?.admit({
-      reservationId: spendReservationId,
-      threadId: String(command.threadId),
-      threadType: "work-thread",
-      projectId: String(command.authority.projectId),
-      turnUpperBoundTokens: this.#safeInputBudgetTokens,
-    });
-    if (spendAdmission?.status === "refused") {
-      throw this.#failure("unavailable", spendAdmission.refusal.message);
-    }
-    if (spendAdmission !== undefined) {
-      this.#spendReservations.set(String(command.requestId), spendReservationId);
-    }
-
-    try {
-      this.#append(
-        command.requestId,
-        0,
-        "work.turn-accepted@1",
-        {
-          kind: "turn-accepted",
-          requestId: command.requestId,
-          threadId: command.threadId,
-          turnId: command.turnId,
-          projectId: command.authority.projectId,
-          authority: command.authority,
-          providerSessionId,
-          ...(resumeCursor === undefined ? {} : { resumeCursor }),
-          ...(handoff === undefined ? {} : { handoff: handoff.record }),
-          prompt: command.prompt,
-          ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
-          ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
-            ? {}
-            : { extensionSelections: command.extensionSelections }),
-          capabilities: workTurnCapabilityFacts(turnAccess),
-          ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
-          acceptedAt,
-        },
-        isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
-      );
-    } catch (error) {
-      this.#settleSpendReservation(command.requestId);
-      if (error instanceof ConcurrencyConflict) {
-        const duplicate = this.#projection.lookup(command.requestId);
-        if (duplicate !== undefined) return this.#lookupMatching(command, duplicate);
-        throw this.#failure("stale", "Work turn already exists.");
-      }
-      throw this.#mapFailure(error);
-    }
-    this.#consumeIssueContextFramed?.(String(command.threadId));
-
-    const accepted = this.#projection.lookup(command.requestId);
-    if (accepted === undefined) {
-      this.#settleSpendReservation(command.requestId);
-      throw this.#failure("unavailable", "Work turn acceptance could not be projected.");
-    }
-    if (starting.attachments.length > 0) {
-      this.#attachments?.release(
-        command.threadId,
-        starting.attachments.map((attachment) => attachment.attachmentId),
-      );
-    }
-
-    const controller = new AbortController();
-    this.#controllers.set(String(command.requestId), controller);
-    const launch = this.#runTurn({
-      command,
-      ...(thread === undefined ? {} : { thread }),
-      ...(thread === undefined ? {} : { access: turnAccess }),
-      windowId: authenticatedWindowId,
-      providerSessionId,
-      ...(resumeCursor === undefined ? {} : { resumeCursor }),
-      projectRoot,
-      projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
-      extraFolders: project === undefined ? [] : projectExtraFolderRoots(project),
-      ...(server === undefined ? {} : { serverTools: server.tools }),
-      driver,
-      attachments: attachmentInputs,
-      ...(preparedFeedback === undefined ? {} : { preparedProductFeedback: preparedFeedback }),
-      contextPlan: planned,
-      sessionHolds,
-      ...(options?.admissionCurrent === undefined
-        ? {}
-        : { admissionCurrent: options.admissionCurrent }),
-      ...(extensionTools === undefined ? {} : { extensionTools }),
-      signal: controller.signal,
-    }).finally(() => {
+      // A plan that leaves earlier turns out to fit cannot be met by the
+      // continued session, which would carry them all and drop older exchanges
+      // on its own. The host rebuilds the history in a fresh session instead,
+      // so what the model reads is what the plan journals.
       if (
-        this.#runningAccess.get(String(command.threadId))?.requestId === String(command.requestId)
+        resumableHost &&
+        continuing !== undefined &&
+        planned.manifest.entries.some(
+          (entry) =>
+            entry.category === "conversation" &&
+            (entry.state === "omitted" || entry.state === "truncated"),
+        )
       ) {
-        this.#runningAccess.delete(String(command.threadId));
+        continuing = undefined;
       }
-      this.#settleSpendReservation(command.requestId);
-      this.#controllers.delete(String(command.requestId));
-      this.#inflight.delete(String(command.requestId));
-      this.#liveResponses.delete(String(command.requestId));
-      this.#liveTasks.delete(String(command.requestId));
-      this.#liveToolSteps.delete(String(command.requestId));
-    });
-    this.#inflight.set(String(command.requestId), launch);
-    return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
+      const resumeCursor = continuing?.resumeCursor;
+      const providerSessionId =
+        continuing?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
+      // Blocks of the earlier turns the continued session already holds; sending
+      // them again would duplicate every earlier message inside the session.
+      const sessionHolds = new Set<ProviderContextBlock>(
+        resumableHost && continuing !== undefined ? priorTranscript.map((item) => item.block) : [],
+      );
+
+      // The turn journals on its own aggregate, so a Done mark committed while
+      // the turn was prepared raises no version conflict. Reread the thread
+      // last: nothing after this awaits before the acceptance is journaled.
+      const markedWhilePreparing =
+        thread !== undefined &&
+        (await this.#threads.read(authenticatedWindowId, command.threadId))?.completionConfirmed ===
+          true;
+
+      // Preparation awaits filesystem and provider context; recheck the journal before admission.
+      const afterPreparation = this.#agentResultDelivery(command);
+      if (afterPreparation !== undefined) return afterPreparation;
+
+      // Context and attachment reads can outlive the host's queue admission.
+      if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
+        if (markedWhilePreparing) {
+          throw this.#failure("invalid", WORK_THREAD_MARKED_DONE_TURN_REFUSAL);
+        }
+        throw this.#failure("unauthorized", "Work turn admission is no longer current.");
+      }
+
+      const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
+      const spendAdmission = this.#spendCeiling?.admit({
+        reservationId: spendReservationId,
+        threadId: String(command.threadId),
+        threadType: "work-thread",
+        projectId: String(command.authority.projectId),
+        turnUpperBoundTokens: this.#safeInputBudgetTokens,
+      });
+      if (spendAdmission?.status === "refused") {
+        throw this.#failure("unavailable", spendAdmission.refusal.message);
+      }
+      if (spendAdmission !== undefined) {
+        this.#spendReservations.set(String(command.requestId), spendReservationId);
+      }
+
+      try {
+        this.#append(
+          command.requestId,
+          0,
+          "work.turn-accepted@1",
+          {
+            kind: "turn-accepted",
+            ...(command.toolCatalogHandoff === undefined
+              ? {}
+              : { toolCatalogHandoff: command.toolCatalogHandoff }),
+            requestId: command.requestId,
+            threadId: command.threadId,
+            turnId: command.turnId,
+            projectId: command.authority.projectId,
+            authority: command.authority,
+            providerSessionId,
+            ...(resumeCursor === undefined ? {} : { resumeCursor }),
+            ...(handoff === undefined ? {} : { handoff: handoff.record }),
+            ...(inputReceipt === undefined ? {} : { inputReceipt }),
+            ...(externalInput === undefined ? {} : { externalInput }),
+            prompt: command.prompt,
+            ...(command.sideChatReturns === undefined
+              ? {}
+              : { sideChatReturns: command.sideChatReturns }),
+            ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
+            ...(command.extensionSelections === undefined ||
+            command.extensionSelections.length === 0
+              ? {}
+              : { extensionSelections: command.extensionSelections }),
+            capabilities: workTurnCapabilityFacts(turnAccess),
+            ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
+            acceptedAt,
+          },
+          isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+        );
+      } catch (error) {
+        this.#settleSpendReservation(command.requestId);
+        if (error instanceof ConcurrencyConflict) {
+          const duplicate = this.#projection.lookup(command.requestId);
+          if (duplicate !== undefined)
+            return this.#lookupMatching(command, duplicate, externalInput);
+          throw this.#failure("stale", "Work turn already exists.");
+        }
+        throw this.#mapFailure(error);
+      }
+      this.#consumeIssueContextFramed?.(String(command.threadId));
+
+      const accepted = this.#projection.lookup(command.requestId);
+      if (accepted === undefined) {
+        this.#settleSpendReservation(command.requestId);
+        throw this.#failure("unavailable", "Work turn acceptance could not be projected.");
+      }
+      if (starting.attachments.length > 0) {
+        this.#attachments?.release(
+          command.threadId,
+          starting.attachments.map((attachment) => attachment.attachmentId),
+        );
+      }
+
+      const controller = new AbortController();
+      this.#controllers.set(String(command.requestId), controller);
+      const selectedRoot =
+        project === undefined
+          ? undefined
+          : approvedWorkingFolderRoot(project, command.authority.workingFolderId);
+      const physicalCurrent =
+        selectedRoot === undefined
+          ? undefined
+          : this.#workingDirectories.current?.(selectedRoot, projectRoot);
+      const folderCurrent = () => {
+        try {
+          if (command.authority.workingFolderId === undefined || project === undefined) return true;
+          const latest = this.#persistence.readProject(project.id);
+          return (
+            latest?.type === "work" &&
+            latest.lifecycle === "active" &&
+            approvedWorkingFolderRoot(latest, command.authority.workingFolderId) === selectedRoot &&
+            physicalCurrent?.() !== false
+          );
+        } catch {
+          return false;
+        }
+      };
+      const folderWatch =
+        command.authority.workingFolderId === undefined
+          ? undefined
+          : setInterval(() => {
+              if (!folderCurrent())
+                controller.abort("Working folder is unavailable; nothing is redirected.");
+            }, 250);
+      const launch = this.#runTurn({
+        command,
+        ...(thread === undefined ? {} : { thread }),
+        ...(thread === undefined ? {} : { access: turnAccess }),
+        windowId: authenticatedWindowId,
+        providerSessionId,
+        ...(resumeCursor === undefined ? {} : { resumeCursor }),
+        projectRoot,
+        projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
+        extraFolders,
+        ...(server === undefined ? {} : { serverTools: server.tools }),
+        driver,
+        ...(preparedTools === undefined ? {} : { preparedTools }),
+        attachments: attachmentInputs,
+        ...(preparedFeedback === undefined ? {} : { preparedProductFeedback: preparedFeedback }),
+        contextPlan: planned,
+        sessionHolds,
+        admissionCurrent: () =>
+          folderCurrent() && options?.admissionCurrent?.() !== false && inputsCurrent?.() !== false,
+        ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
+        signal: controller.signal,
+      }).finally(() => {
+        clearInterval(folderWatch);
+        if (
+          this.#runningAccess.get(String(command.threadId))?.requestId === String(command.requestId)
+        ) {
+          this.#runningAccess.delete(String(command.threadId));
+        }
+        this.#settleSpendReservation(command.requestId);
+        this.#controllers.delete(String(command.requestId));
+        this.#inflight.delete(String(command.requestId));
+        this.#liveResponses.delete(String(command.requestId));
+        this.#liveTasks.delete(String(command.requestId));
+        this.#liveToolSteps.delete(String(command.requestId));
+      });
+      this.#inflight.set(String(command.requestId), launch);
+      toolsLaunched = true;
+      return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
+    } finally {
+      if (!toolsLaunched)
+        await Effect.runPromise(
+          Effect.promise(async () => {
+            await preparedTools?.close?.();
+          }).pipe(
+            Effect.timeout("2 seconds"),
+            Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+          ),
+        );
+    }
   }
 
   /**
@@ -1478,6 +1761,45 @@ export class WorkTurnService {
     if (turn.status === "completed" || turn.status === "cancelled" || turn.status === "failed") {
       return decodeWorkTurnCancelResult({
         kind: "turn-already-terminal",
+        requestId: turn.requestId,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        status: turn.status,
+      });
+    }
+    const requestKey = String(command.requestId);
+    const controller = this.#controllers.get(requestKey);
+    if (command.kind === "force-stop-work-turn") {
+      if (
+        controller === undefined ||
+        !controller.signal.aborted ||
+        this.#turnRuntime.canForceStop?.(requestKey) !== true ||
+        this.#turnRuntime.forceStop === undefined
+      )
+        throw this.#failure(
+          "invalid",
+          "Only the exact stopped attempt of a supported runtime can be force-stopped.",
+        );
+      if (!(await this.#turnRuntime.forceStop(requestKey)))
+        throw this.#failure("unavailable", "The owned runtime process could not be force-stopped.");
+      const current = this.#projection.lookup(command.requestId);
+      if (
+        current !== undefined &&
+        (current.status === "completed" ||
+          current.status === "failed" ||
+          current.status === "cancelled")
+      )
+        return decodeWorkTurnCancelResult({
+          kind: "turn-already-terminal",
+          requestId: current.requestId,
+          threadId: current.threadId,
+          turnId: current.turnId,
+          status: current.status,
+        });
+    } else if (controller !== undefined && this.#turnRuntime.canForceStop?.(requestKey) === true) {
+      controller.abort();
+      return decodeWorkTurnCancelResult({
+        kind: "stop-requested",
         requestId: turn.requestId,
         threadId: turn.threadId,
         turnId: turn.turnId,
@@ -1686,9 +2008,10 @@ export class WorkTurnService {
      */
     readonly serverTools?: AppManagedToolSet;
     readonly driver: ProviderDriver;
+    readonly preparedTools?: AppManagedToolSet;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-    readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
     readonly preparedProductFeedback?: PreparedProductFeedbackTurn;
+    readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
     /**
      * Planned blocks a continued session already holds. They stay in the plan,
      * so the context meter, a requested compaction and the plan's own fit see
@@ -1698,8 +2021,7 @@ export class WorkTurnService {
      */
     readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
     readonly admissionCurrent?: () => boolean;
-    /** The selected MCP servers' tools, resolved when the turn was accepted. */
-    readonly extensionTools?: AppManagedToolSet;
+    readonly routineRun?: AutomationRunReference;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
@@ -1715,21 +2037,7 @@ export class WorkTurnService {
         ? this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders)
         : undefined;
 
-    const hostTools =
-      input.serverTools !== undefined
-        ? input.serverTools
-        : input.thread === undefined
-          ? undefined
-          : this.#resolveAppManagedTools?.({
-              thread: input.thread,
-              projectRoot: input.projectRoot,
-              ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
-              windowId: input.windowId,
-            });
-    const appManagedTools =
-      input.extensionTools === undefined
-        ? hostTools
-        : combineAppManagedToolSets(hostTools, input.extensionTools);
+    const appManagedTools = input.preparedTools;
     // Only a thread whose person chose the runtime's artifact tool is offered
     // it; every other thread of the account keeps Canvas and its launch keeps
     // every guard. A Work turn never runs in Plan: it runs at its thread's
@@ -1853,6 +2161,9 @@ export class WorkTurnService {
         });
       }
       const outcome = await this.#turnRuntime.run({
+        ...(input.admissionCurrent === undefined
+          ? {}
+          : { admissionCurrent: input.admissionCurrent }),
         command: input.command,
         providerSessionId: input.providerSessionId,
         ...(this.#outsideContentMarks === undefined
@@ -2228,14 +2539,18 @@ export class WorkTurnService {
    *
    * `STATUS.md` is read from the bound root on every turn, so a task started
    * two weeks later knows where the work stands without the person
-   * re-explaining. A missing file is seeded here. When the status is stale or
-   * a dated line is overdue or near, the turn is also told to take stock
-   * first — summarize, ask what happened, update the file — before doing what
-   * it was asked.
+   * re-explaining. It is keyed standing context: a runtime that keeps its own
+   * conversation is sent it again only when the file changed, where it once
+   * received a full copy every turn. A missing file is seeded here. When a
+   * task opens on a stale status or a dated line overdue or near, that first
+   * turn is also told to take stock — summarize, ask what happened, update the
+   * file — before doing what it was asked, unless the request is a greeting or
+   * unrelated to the work.
    */
   async #projectBriefContributions(
     project: Extract<Project, { readonly type: "work" }>,
     threadId: WorkThreadId,
+    opensTask: boolean,
   ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
     const files = this.#projectStatusFiles;
     if (files === undefined || !workProjectKeepsStatusFile(project)) return [];
@@ -2261,28 +2576,40 @@ export class WorkTurnService {
         category: "workspace-context",
         posture: "compressible",
         block: {
-          kind: "user-message",
+          kind: "project-memory",
+          key: STATUS_FILE_CONTEXT_KEY,
           text: `Contents of ${WORK_STATUS_FILE_NAME} at the top of this Project's folder:\n\n${status.text}`,
         },
       });
     }
-    const instruction = statusUpkeepInstruction(
-      status === undefined
-        ? []
-        : decideWorkResumeBrief(
-            parseWorkStatus(status.text, today),
-            today,
-            this.#statusStaleAfterDays,
-          ),
-    );
     contributions.push({
-      text: instruction,
+      text: STATUS_UPKEEP_INSTRUCTION,
       sourceKind: "instruction",
       referenceId: `project-brief:instruction:${String(threadId)}`,
       category: "octant-policy",
       posture: "required",
-      block: { kind: "instructions", text: instruction },
+      block: { kind: "instructions", text: STATUS_UPKEEP_INSTRUCTION },
     });
+    const takeStock =
+      !opensTask || status === undefined
+        ? undefined
+        : takeStockInstruction(
+            decideWorkResumeBrief(
+              parseWorkStatus(status.text, today),
+              today,
+              this.#statusStaleAfterDays,
+            ),
+          );
+    if (takeStock !== undefined) {
+      contributions.push({
+        text: takeStock,
+        sourceKind: "instruction",
+        referenceId: `project-brief:take-stock:${String(threadId)}`,
+        category: "octant-policy",
+        posture: "required",
+        block: { kind: "turn-instructions", text: takeStock },
+      });
+    }
     return contributions;
   }
 
@@ -2410,6 +2737,38 @@ export class WorkTurnService {
             turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
         )
     );
+  }
+
+  async #sideChatReturnContributions(
+    threadId: WorkThreadId,
+    references: ReadonlyArray<import("@octant/contracts").SideChatDraftReturnReference> | undefined,
+    windowId: WindowId,
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
+    if ((references?.length ?? 0) === 0) return [];
+    if (this.#resolveSideChatReturns === undefined)
+      throw this.#failure("unavailable", SIDE_CHAT_RETURN_UNAVAILABLE);
+    let text: string;
+    try {
+      text = await this.#resolveSideChatReturns({
+        references: references ?? [],
+        readerThreadId: String(threadId),
+        mode: "work",
+        windowId,
+      });
+    } catch {
+      throw this.#failure("unavailable", SIDE_CHAT_RETURN_UNAVAILABLE);
+    }
+    if (text.trim().length === 0) throw this.#failure("unavailable", SIDE_CHAT_RETURN_UNAVAILABLE);
+    return [
+      {
+        text,
+        sourceKind: "message",
+        referenceId: `side-chat-return:${threadId}`,
+        category: "workspace-context",
+        posture: "required",
+        block: { kind: "user-message", text },
+      },
+    ];
   }
 
   async #threadMentionContributions(
@@ -2629,14 +2988,28 @@ export class WorkTurnService {
   #lookupMatching(
     command: ReturnType<typeof decodeStartWorkThreadTurnCommand>,
     existing: WorkTurnState,
+    externalInput?: WorkExternalInputReceipt,
   ): WorkTurnLookupResult {
+    if (
+      externalInput !== undefined &&
+      !sameWorkExternalInput(existing.externalInput, externalInput)
+    )
+      throw this.#failure(
+        "stale",
+        "External input acceptance is unconfirmed for this Work request. Open the existing task; do not resend automatically.",
+      );
     if (
       String(existing.threadId) !== String(command.threadId) ||
       String(existing.turnId) !== String(command.turnId) ||
       existing.prompt !== command.prompt ||
+      (existing.toolCatalogHandoff === true) !== (command.toolCatalogHandoff === true) ||
+      (existing.inputReceipt !== undefined &&
+        existing.inputReceipt.policy !== (command.contextInputPolicy ?? "preserve")) ||
       JSON.stringify(existing.delivery ?? null) !== JSON.stringify(command.delivery ?? null) ||
       JSON.stringify(existing.extensionSelections ?? []) !==
         JSON.stringify(command.extensionSelections ?? []) ||
+      JSON.stringify(existing.sideChatReturns ?? []) !==
+        JSON.stringify(command.sideChatReturns ?? []) ||
       !sameAttachmentIds(existing.attachments, command.attachmentIds)
     ) {
       throw this.#failure("stale", "Work turn request identity conflict.");
@@ -2831,6 +3204,9 @@ function workTurnThreadFacts(
           thread.bindingRevisionId === undefined ? undefined : String(thread.bindingRevisionId),
         workingDirectory:
           thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
+        ...(thread.workingFolderId === undefined
+          ? {}
+          : { workingFolderId: thread.workingFolderId }),
       };
 }
 

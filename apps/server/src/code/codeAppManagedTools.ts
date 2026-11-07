@@ -1,8 +1,19 @@
+import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
+import type { StoredBrowserProfile } from "@octant/contracts";
+import type {
+  BrowserAppManagedToolsOptions,
+  BrowserModelBinding,
+} from "../browser/browserAppManagedTools";
+import type { BrowserPageScriptInput } from "../browser/browserAutomationService";
+import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
+import { browserSignInOriginRefusal } from "../browser/browserRecoveryMessages";
 import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import { browserDownloadQuestion } from "@octant/domain";
 import {
+  browserOperationRefusedInPlan,
   browserToolAction,
+  browserPageScriptToolResult,
   browserDownloadSavedResult,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -12,9 +23,12 @@ import {
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
+  runRecordedBrowserCall,
   signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
+  type BrowserToolOperationName,
+  type BrowserToolRecordingOperation,
 } from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
 import {
@@ -29,11 +43,10 @@ import type {
   BrowserAutomationSnapshot,
   BrowserThreadId,
   CodeApprovalId,
-  CodeBoardView,
   CodeMergeStandingSource,
   CodeOperationCommand,
   CodeOperationResult,
-  CodePlannerWorkProposal,
+  CodeProjectPullRequestSwitchTarget,
   CodeTerminalId,
   CodeThread,
   EventActor,
@@ -43,7 +56,7 @@ import type {
   ToolApprovalId,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
@@ -76,7 +89,9 @@ import type {
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { pullRequestChangeNeedsPerActApproval } from "@octant/domain/code-pull-request-action-policy";
+import { isRoutineHostScope } from "../routineHostScope";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
+import type { PullRequestWatchAnswer, PullRequestWatchOutcome } from "./pullRequestWatchPort";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 // A pull-request body is often longer than any other tool input.
@@ -90,16 +105,7 @@ export const CODE_BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
 export const CODE_TERMINAL_TOOL_NAME = "octant_terminal";
 export const CODE_APPLE_TOOL_NAME = "octant_apple";
 export const CODE_ANDROID_TOOL_NAME = "octant_android";
-export const CODE_BOARD_TOOL_NAME = "octant_board";
-export const CODE_PROPOSE_THREAD_TOOL_NAME = "octant_propose_thread";
 export const CODE_PULL_REQUEST_TOOL_NAME = "octant_pull_request";
-
-/**
- * Ceiling on cards one board read hands the provider. The board is ordered by
- * most recent meaningful activity, so the planner always sees the live end of
- * a Project that has outgrown the bound.
- */
-const MAX_BOARD_TOOL_CARDS = 100;
 
 /** How long one agent-driven Apple action may run before it is given up on. */
 const APPLE_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -107,40 +113,17 @@ const APPLE_BOOT_TIMEOUT_MS = 120_000;
 const APPLE_SIMULATOR_TIMEOUT_MS = 30_000;
 const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 
-const boardDefinition = {
-  name: CODE_BOARD_TOOL_NAME,
-  description:
-    "Read the current Project's server-authoritative task board as its designated planner. Use the returned task states, delivery evidence, checks, and child-agent activity to decide what needs attention. The result is a bounded recent list; check truncation before claiming it covers every task. This tool does not change task status or create work.",
-  inputSchema: {
-    type: "object",
-    properties: { operation: { type: "string", enum: ["read"] } },
-    required: ["operation"],
-  },
-} as const;
-
-const proposeThreadDefinition = {
-  name: CODE_PROPOSE_THREAD_TOOL_NAME,
-  description:
-    "Propose a new Code task to the user from the current Project's designated planner. Supply a clear title, the intended outcome in intent, and an optional rationale. The proposal waits for user acceptance; it does not create or start a task, checkout, or pull request. Report proposed work as proposed, not running or completed.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      title: { type: "string" },
-      intent: { type: "string" },
-      rationale: { type: "string" },
-    },
-    required: ["title", "intent"],
-  },
-} as const;
-
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
-    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment always asks the person first, at every access level, because it acts under their name; merge asks unless a stored choice allows it. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses. This tool cannot create labels, approve or request changes, delete a branch, or change any other branch's pull request.",
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment always asks the person first, at every access level, because it acts under their name; merge asks unless a stored choice allows it. watch asks the person, at every access level, to let Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling; unwatch stops that without asking. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
-      operation: { type: "string", enum: ["create", "update", "comment", "merge"] },
+      operation: {
+        type: "string",
+        enum: ["create", "update", "comment", "merge", "watch", "unwatch", "help"],
+      },
       title: { type: "string" },
       body: { type: "string" },
       draft: { type: "boolean" },
@@ -173,7 +156,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, logs, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -189,6 +172,7 @@ const appleDefinition = {
           "open",
           "shutdown",
           "screenshot",
+          "logs",
           "tap",
           "swipe",
           "type-text",
@@ -209,6 +193,8 @@ const appleDefinition = {
       durationMs: { type: "number" },
       text: { type: "string" },
       key: { type: "string" },
+      sinceSeconds: { type: "number" },
+      includeCrashes: { type: "boolean" },
     },
     required: ["operation"],
   },
@@ -217,7 +203,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, describe-ui, logs, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -230,6 +216,8 @@ const androidDefinition = {
           "boot",
           "shutdown",
           "screenshot",
+          "describe-ui",
+          "logs",
           "tap",
           "swipe",
           "type-text",
@@ -240,6 +228,7 @@ const androidDefinition = {
         ],
       },
       emulatorId: { type: "string" },
+      target: { type: "string" },
       x: { type: "number" },
       y: { type: "number" },
       toX: { type: "number" },
@@ -249,6 +238,8 @@ const androidDefinition = {
       key: { type: "string" },
       apkPath: { type: "string" },
       packageName: { type: "string" },
+      sinceSeconds: { type: "number" },
+      includeCrashes: { type: "boolean" },
     },
     required: ["operation"],
   },
@@ -262,13 +253,13 @@ const androidDefinition = {
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
   [CODE_PULL_REQUEST_TOOL_NAME]:
-    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment asks the person for each act at every access level. merge asks too, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. Approving, requesting changes, creating labels, and deleting the branch are not available.",
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment asks the person for each act at every access level. merge asks too, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and asks the person, at every access level, to let it start a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. Approving, requesting changes, creating labels, and deleting the branch are not available.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Tapping an element by name (target) and describing the UI are Android-only for now: on a Simulator, read the screen from a screenshot and tap a point. logs takes simulatorId and bundleIdentifier and returns the app's unified-log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600, rounded up to whole minutes) sets how far back, five minutes by default, and includeCrashes adds the start of the app's newest three crash reports. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   [CODE_ANDROID_TOOL_NAME]:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. describe-ui lists the labelled elements on screen as text in the result, one line each with its class, text, desc (content-desc), id (resource-id), center, and bounds, in the pixels tap takes; at most 300 elements, with truncated set when cut. tap takes either a point (x, y) in the pixels of the live screen or a target: an element's resource-id, content-desc, or text, matched exactly in that order, and it taps that element's center; a target that no element or several elements carry is refused with the count. swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. logs takes packageName and returns that running app's log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600) sets how far back, and includeCrashes adds the device's crash buffer, which also answers for an app that is no longer running. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, describe-ui, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
 };
 
 /**
@@ -279,7 +270,7 @@ const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
  * decides. The tool takes no shortcut a person operating the workbench could
  * not take, and mints no destination of its own.
  */
-interface CodeDeviceScreenshotPort {
+interface CodeDeviceEvidencePort {
   readonly readScreenshot: (
     windowId: WindowId,
     scope: {
@@ -289,9 +280,19 @@ interface CodeDeviceScreenshotPort {
     },
     reference: string,
   ) => Promise<Uint8Array | undefined>;
+  /** The text a read's log artifact holds, through the same thread and checkout authority. */
+  readonly readLog: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    reference: string,
+  ) => Promise<string | undefined>;
 }
 
-export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
+export interface CodeAppleToolPort extends CodeDeviceEvidencePort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -333,7 +334,7 @@ export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
   ) => boolean;
 }
 
-export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
+export interface CodeAndroidToolPort extends CodeDeviceEvidencePort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -381,8 +382,19 @@ export interface CodeAppManagedToolsOptions {
   readonly thread: CodeThread;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly uuid: () => string;
+  readonly browserProfiles?: {
+    readonly approvals: NonNullable<BrowserAppManagedToolsOptions["approvals"]>;
+    readonly readBinding: (contextId: string) => BrowserModelBinding | undefined;
+    readonly rememberBinding: (contextId: string, binding: BrowserModelBinding) => void;
+    readonly forgetBinding: (contextId: string) => void;
+  };
+  /** Host-only notification after an admitted checkout command completes or times out; never mutation proof. */
+  readonly onCheckoutActivity?: () => void;
   readonly browserApproval?: {
     readonly isApproved: (contextId: string) => boolean;
+    /** Identity-only receipts for expiry recovery; these never satisfy an approval. */
+    readonly isBound?: (contextId: string) => boolean;
+    readonly rememberBinding?: (contextId: string) => void;
     readonly request: (
       origin: string,
       signal?: AbortSignal,
@@ -440,6 +452,23 @@ export interface CodeAppManagedToolsOptions {
    * each act. The tool only names it; the host checks it again before merging.
    */
   readonly standingMerge?: () => CodeMergeStandingSource | undefined;
+  /**
+   * This thread's watch on its own pull request. The host resolves which pull
+   * request and checks the window before it calls `ask`; `request` asks the
+   * person in the thread to allow this one watch. Absent on a host that cannot
+   * watch, where watch and unwatch are refused.
+   */
+  readonly pullRequestWatch?: {
+    readonly watch: (
+      ask: (target: CodeProjectPullRequestSwitchTarget) => Promise<PullRequestWatchAnswer>,
+      signal?: AbortSignal,
+    ) => Promise<PullRequestWatchOutcome>;
+    readonly unwatch: () => Promise<PullRequestWatchOutcome>;
+    readonly request: (
+      target: CodeProjectPullRequestSwitchTarget,
+      signal?: AbortSignal,
+    ) => Promise<PullRequestWatchAnswer>;
+  };
   readonly executeOperation: (
     windowId: WindowId,
     command: CodeOperationCommand,
@@ -471,6 +500,7 @@ export interface CodeAppManagedToolsOptions {
     ) => Promise<CodeOperationTerminalSnapshot>;
   };
   readonly browser?: {
+    readonly runScript?: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
     readonly resolveAuthority: (
       threadId: BrowserThreadId,
       mode: "code",
@@ -484,6 +514,7 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly action: ToolActionRequest;
       readonly policy: {
+        readonly profile?: StoredBrowserProfile;
         readonly profileMode: "isolated";
         readonly allowedOrigins: readonly string[];
         readonly credentialFieldProtection: true;
@@ -496,6 +527,8 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId?: BrowserThreadId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
+      /** On a `record-stop`: end the recording and keep nothing; see the service. */
+      readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
@@ -546,6 +579,7 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: string;
       readonly authority: ToolActionAuthority;
       readonly origin: string;
+      readonly profile?: StoredBrowserProfile;
       readonly signIn: { readonly reason?: string };
       readonly signal?: AbortSignal;
     }) => Promise<"approved" | "denied" | "cancelled" | "expired">;
@@ -578,42 +612,10 @@ export interface CodeAppManagedToolsOptions {
   };
   readonly apple?: CodeAppleToolPort;
   readonly android?: CodeAndroidToolPort;
-  /**
-   * What the planner capability lends one thread's agent: a read of its own
-   * Project's server-authoritative board, and an advisory work proposal that
-   * waits for the user. Both re-resolve the planner designation on every call,
-   * so only the currently designated planner thread ever gets an answer, and
-   * neither can mutate a thread, a checkout, or GitHub.
-   */
-  readonly planner?: CodePlannerToolPort;
   readonly wait?: (milliseconds: number) => Promise<void>;
   readonly recordExternalContentIngestion?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
-}
-
-export interface CodePlannerToolPort {
-  /**
-   * Whether this thread is currently its Project's designated planner. Used
-   * only to decide whether the planner tools are advertised at all; every
-   * call still re-validates through {@link board} and {@link propose}.
-   */
-  readonly isPlannerThread: (threadId: CodeThread["id"]) => boolean;
-  readonly board: (
-    windowId: WindowId,
-    threadId: CodeThread["id"],
-  ) => Promise<
-    | { readonly status: "ok"; readonly board: CodeBoardView }
-    | { readonly status: "refused"; readonly reason: string; readonly message: string }
-  >;
-  readonly propose: (
-    windowId: WindowId,
-    threadId: CodeThread["id"],
-    draft: { readonly title: string; readonly intent: string; readonly rationale?: string },
-  ) => Promise<
-    | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
-    | { readonly status: "refused"; readonly reason: string; readonly message: string }
-  >;
 }
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
@@ -627,12 +629,6 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
       ...(options.pullRequestApproval === undefined ? [] : [pullRequestDefinition]),
-      // The planner tools appear only in the currently designated planner
-      // thread. Any other thread that calls them anyway is refused by name
-      // below with a value, never a throw.
-      ...(options.planner !== undefined && options.planner.isPlannerThread(options.thread.id)
-        ? [boardDefinition, proposeThreadDefinition]
-        : []),
     ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
@@ -642,19 +638,10 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (profileFailure !== undefined) {
         return failure("profile-tool-refused", profileFailure);
       }
-      // The planner tools sit before the posture gate: a board read and an
-      // advisory proposal work under any posture, because neither has an
-      // effect an approval could gate. Designation is re-validated inside.
-      if (name === CODE_BOARD_TOOL_NAME && options.planner !== undefined) {
-        return plannerBoardTool(options, parseBoardInput(inputJson));
-      }
-      if (name === CODE_PROPOSE_THREAD_TOOL_NAME && options.planner !== undefined) {
-        return plannerProposeTool(options, parseProposeThreadInput(inputJson));
-      }
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(
           options,
-          parseBrowserToolInput(inputJson, { allowProfile: false }),
+          parseBrowserToolInput(inputJson, { allowProfile: true }),
           signal,
         );
       }
@@ -702,73 +689,6 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
   );
 }
 
-async function plannerBoardTool(
-  options: CodeAppManagedToolsOptions,
-  input: { readonly operation: "read" } | undefined,
-) {
-  if (input === undefined || options.planner === undefined) return failure("invalid-board-input");
-  let outcome: Awaited<ReturnType<CodePlannerToolPort["board"]>>;
-  try {
-    outcome = await options.planner.board(options.windowId, options.thread.id);
-  } catch {
-    return failure("planner-unavailable");
-  }
-  if (outcome.status === "refused") return failure(outcome.reason, outcome.message);
-  const cards = outcome.board.cards.slice(0, MAX_BOARD_TOOL_CARDS);
-  return {
-    result: {
-      generatedAt: String(outcome.board.generatedAt),
-      cards: cards.map((card) => ({
-        threadId: String(card.threadId),
-        title: card.title,
-        status: card.status,
-        statusReason: card.statusReason,
-        outcomeKind: card.outcomeKind,
-        deliverySatisfaction: card.deliverySatisfaction,
-        executing: card.executing,
-        changedFiles: card.changedFiles,
-        linkedPullRequest: card.linkedPullRequest,
-        checks: card.checks,
-        reviewState: card.reviewState,
-        childAgents: card.childAgents,
-        planProgress: card.planProgress,
-        followUp: card.followUp,
-        ...(card.blockingReason === undefined ? {} : { blockingReason: card.blockingReason }),
-        lastMeaningfulActivityAt: card.lastMeaningfulActivityAt,
-      })),
-      ...(outcome.board.cards.length > cards.length ? { truncated: true } : {}),
-    },
-    isError: false,
-  };
-}
-
-async function plannerProposeTool(
-  options: CodeAppManagedToolsOptions,
-  input: ProposeThreadToolInput | undefined,
-) {
-  if (input === undefined || options.planner === undefined) {
-    return failure("invalid-proposal-input");
-  }
-  let outcome: Awaited<ReturnType<CodePlannerToolPort["propose"]>>;
-  try {
-    outcome = await options.planner.propose(options.windowId, options.thread.id, input);
-  } catch {
-    return failure("planner-unavailable");
-  }
-  if (outcome.status === "refused") return failure(outcome.reason, outcome.message);
-  return {
-    result: {
-      status: "pending-user-confirmation",
-      proposalId: String(outcome.proposal.id),
-      title: outcome.proposal.title,
-      // The proposal executes nothing; only the user's explicit confirmation
-      // creates the thread, through the ordinary creation command.
-      note: "Proposed. The user decides whether this thread is created.",
-    },
-    isError: false,
-  };
-}
-
 export type PullRequestToolCommand = Extract<
   CodeOperationCommand,
   {
@@ -806,7 +726,9 @@ type PullRequestToolInput =
       readonly operation: "merge";
       readonly method: "merge" | "squash" | "rebase";
       readonly headSha: string;
-    };
+    }
+  | { readonly operation: "watch" }
+  | { readonly operation: "unwatch" };
 
 /**
  * Opens or changes the pull request of this thread's own delivery branch.
@@ -826,8 +748,11 @@ async function pullRequestTool(
   if (input === undefined || options.pullRequestApproval === undefined) {
     return failure("invalid-pull-request-input");
   }
+  // Stopping a watch only takes reach away, so Plan allows it.
+  if (input.operation === "unwatch") return unwatchPullRequestTool(options);
   const posture = currentPosture(options);
   if (posture === "plan") return failure("plan-mode-read-only", postureRefusal("plan"));
+  if (input.operation === "watch") return watchPullRequestTool(options, signal);
   const scope = {
     operationId: operationId(options),
     threadId: options.thread.id,
@@ -950,6 +875,108 @@ async function pullRequestTool(
   };
 }
 
+/**
+ * Lets the host wake this thread when its own pull request changes. The host
+ * resolves which pull request; the person allows each watch, at every level,
+ * because it lets the host start turns here later, when nobody may be watching
+ * the thread. A turn the host started on its own has nobody to ask, and a
+ * watch from a wake would let one watch renew itself, so it is refused there.
+ */
+async function watchPullRequestTool(options: CodeAppManagedToolsOptions, signal?: AbortSignal) {
+  const port = options.pullRequestWatch;
+  if (port === undefined) return failure("pull-request-watch-unavailable");
+  if (isRoutineHostScope(options.windowId)) {
+    return failure(
+      "automation-recursion",
+      "A turn Octant started on its own, such as a watch wake or a routine's run, cannot start a watch: nobody is there to allow it. Mention it in your reply instead.",
+    );
+  }
+  let outcome: PullRequestWatchOutcome;
+  try {
+    outcome = await port.watch(async (target) => {
+      if (!pullRequestChangeNeedsPerActApproval("watch")) return "approved";
+      const answer = await port.request(target, signal);
+      if (answer !== "approved") return answer;
+      // The person answered while the thread could have moved on.
+      const changed =
+        currentThreadIdentityFailure(options) !== undefined ||
+        currentPosture(options) === "plan" ||
+        signal?.aborted === true;
+      return changed ? "cancelled" : "approved";
+    }, signal);
+  } catch {
+    return failure("pull-request-watch-unavailable");
+  }
+  return pullRequestWatchResult(outcome);
+}
+
+async function unwatchPullRequestTool(options: CodeAppManagedToolsOptions) {
+  const port = options.pullRequestWatch;
+  if (port === undefined) return failure("pull-request-watch-unavailable");
+  try {
+    return pullRequestWatchResult(await port.unwatch());
+  } catch {
+    return failure("pull-request-watch-unavailable");
+  }
+}
+
+function pullRequestWatchResult(outcome: PullRequestWatchOutcome) {
+  switch (outcome.status) {
+    case "watching":
+      return {
+        result: {
+          status: "watching",
+          number: outcome.target.number,
+          until: outcome.until,
+          note: outcome.alreadyWatching
+            ? "This thread was already watching its pull request; nothing new was turned on."
+            : "Octant starts a new turn here when something changes. End this turn normally; do not poll.",
+        },
+        isError: false,
+      };
+    case "unwatched":
+      return { result: { status: "unwatched", number: outcome.target.number }, isError: false };
+    case "not-watching":
+      return { result: { status: "not-watching" }, isError: false };
+    case "declined":
+      return failure(
+        `pull-request-watch-${outcome.answer}`,
+        outcome.answer === "denied"
+          ? "The person declined the watch. Nothing is watched."
+          : undefined,
+      );
+    case "refused":
+      return failure(
+        `pull-request-watch-${outcome.reason}`,
+        pullRequestWatchRefusal(outcome.reason),
+      );
+    case "unavailable":
+      return failure(
+        "pull-request-watch-unavailable",
+        "GitHub could not be read, so nothing is watched. Check that GitHub access is signed in.",
+      );
+  }
+}
+
+function pullRequestWatchRefusal(
+  reason: Extract<PullRequestWatchOutcome, { status: "refused" }>["reason"],
+): string {
+  switch (reason) {
+    case "no-pull-request":
+      return "This thread has no open pull request Octant knows of. Create one first, or ask the person to open the Pull requests list so Octant sees it.";
+    case "ambiguous-pull-request":
+      return "More than one open pull request is linked to this thread, so Octant cannot tell which one to watch.";
+    case "not-authorized":
+      return "This Project does not connect that pull request's repository on this window.";
+    case "not-open":
+      return "That pull request is not open.";
+    case "thread-unavailable":
+      return "This thread is archived or completed, so nothing can wake it.";
+    case "watched-by-another-thread":
+      return "Another thread is already watching this pull request.";
+  }
+}
+
 function pullRequestRefusal(code: string | undefined): string {
   switch (code) {
     case "invalid-base":
@@ -1067,9 +1094,16 @@ async function terminalTool(
     });
     if (written.kind === "operation-failed") return operationResult(written, options, scope);
     if (marker !== undefined) {
-      return waitForTerminalCommand(options, scope, marker, signal);
+      try {
+        return await waitForTerminalCommand(options, scope, marker, signal);
+      } finally {
+        if (!signal?.aborted && terminalAuthorityFailure(options) === undefined)
+          options.onCheckoutActivity?.();
+      }
     }
     await (options.wait ?? defaultWait)(200);
+    if (!signal?.aborted && terminalAuthorityFailure(options) === undefined)
+      options.onCheckoutActivity?.();
   }
   return terminalSnapshot(await options.terminal.read(options.windowId, scope));
 }
@@ -1178,8 +1212,20 @@ async function browserTool(
   signal?: AbortSignal,
 ): Promise<BrowserToolAnswer> {
   if (input === undefined || options.browser === undefined) return failure("invalid-browser-input");
+  // The stop runs without the turn's signal, so a turn that ends mid-call
+  // still ends its recording and keeps what was recorded; see Work's tool. A
+  // thread that moved into Plan while the call ran (a read in flight finishes
+  // there) still stops it, keeping nothing.
+  const record = async (operation: BrowserToolRecordingOperation) => {
+    if (operation === "record-start") return browserToolOne(options, { operation }, signal);
+    if (currentPosture(options) !== "plan") return browserToolOne(options, { operation });
+    const stopped = await browserToolOne(options, { operation, discard: true });
+    return stopped.isError ? stopped : failure("plan-mode-read-only");
+  };
   if (input.operation === "steps") {
-    return runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+    const batch = () =>
+      runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+    return input.record === true ? runRecordedBrowserCall(batch, record) : batch();
   }
   const browser = options.browser;
   const threadId = browserThreadIdOf(options);
@@ -1193,17 +1239,21 @@ async function browserTool(
     if (flows === undefined) return failure("browser-flows-unavailable");
     const flowAuthority = browser.resolveAuthority(threadId, "code");
     if (flowAuthority === undefined) return failure("browser-authority-unavailable");
-    const flowPosture = browserAuthorityFailure(options);
+    const flowPosture = browserAuthorityFailure(options, input.operation);
     if (flowPosture !== undefined) return failure(flowPosture);
-    return runBrowserFlowOperation(input, {
-      flows,
-      projectId: flowAuthority.projectId,
-      caller: flows.caller(options.windowId),
-      actor: () => browserFlowAgentActor(flowAuthority, String(threadId)),
-      contextId,
-      refs,
-      run: (step) => browserTool(options, step, signal),
-    });
+    const replay = () =>
+      runBrowserFlowOperation(input, {
+        flows,
+        projectId: flowAuthority.projectId,
+        caller: flows.caller(options.windowId),
+        actor: () => browserFlowAgentActor(flowAuthority, String(threadId)),
+        contextId,
+        refs,
+        run: (step) => browserTool(options, step, signal),
+      });
+    return input.operation === "flow-run" && input.record === true
+      ? runRecordedBrowserCall(replay, record)
+      : replay();
   }
   // Every operation of the agent passes here, so a flow records what ran and a
   // replay runs each step exactly as a call of its own would.
@@ -1220,6 +1270,7 @@ async function browserToolOne(
   options: CodeAppManagedToolsOptions,
   input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
   signal?: AbortSignal,
+  afterSignIn = false,
 ): Promise<BrowserToolAnswer> {
   if (options.browser === undefined) return failure("invalid-browser-input");
   const threadId = browserThreadIdOf(options);
@@ -1227,16 +1278,73 @@ async function browserToolOne(
   if (authority === undefined) return failure("browser-authority-unavailable");
   if (input.operation === "stop") {
     const context = options.browser.inspectThread(options.windowId, threadId).context;
-    if (context !== undefined) options.browserApproval?.forget(String(context.contextId));
+    if (context !== undefined) {
+      options.browserApproval?.forget(String(context.contextId));
+      options.browserProfiles?.forgetBinding(String(context.contextId));
+    }
     const released = await options.browser.releaseThread(options.windowId, threadId);
     return browserToolResult(released);
   }
-  const postureFailure = browserAuthorityFailure(options);
+  const postureFailure = browserAuthorityFailure(options, input.operation);
   if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
   // While the person signs in, the page is theirs; see Work's tool.
   if (snapshot.waitingForPerson !== undefined) {
     return heldForPersonAnswer(snapshot.waitingForPerson);
+  }
+  if (input.operation === "run-script") {
+    const refusal = currentAuthorityFailure(options);
+    if (refusal !== undefined) return failure(refusal);
+    if (
+      options.browserSignIn === undefined ||
+      options.browserSignIn.refusal(options.windowId) !== undefined
+    )
+      return failure("script-needs-a-local-person");
+    const context = snapshot.context;
+    if (context?.state !== "active" || context.presentation !== "native-live")
+      return failure("script-needs-the-app-browser");
+    const run = options.browser.runScript;
+    if (run === undefined) return failure("script-unavailable");
+    const callerIsCurrent = () =>
+      currentThreadIdentityFailure(options) === undefined &&
+      currentPosture(options) === "full-access" &&
+      options.browserSignIn?.refusal(options.windowId) === undefined;
+    const receipt = await run({
+      windowId: options.windowId,
+      threadId,
+      contextId: context.contextId,
+      source: input.source,
+      expectedObservationRevision: input.expectedObservationRevision,
+      turnExecutionPolicy: currentPosture(options),
+      callerIsCurrent,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    return browserPageScriptToolResult(
+      callerIsCurrent() && !signal?.aborted
+        ? receipt
+        : { status: "refused", effect: receipt.effect, reason: "stale" },
+    );
+  }
+  if (snapshot.failure?.category === "context-expired" && input.operation !== "navigate") {
+    const context = snapshot.context;
+    if (
+      context === undefined ||
+      !sameToolActionAuthority(context.authority, authority) ||
+      options.browserApproval?.isBound?.(String(context.contextId)) !== true
+    ) {
+      return failure("browser-navigation-required");
+    }
+    if (context.policy.profile?.kind === "project" || context.policy.profile?.kind === "personal") {
+      const callerRefusal = options.browserSignIn?.refusal(options.windowId);
+      if (options.browserSignIn === undefined || callerRefusal !== undefined) {
+        return failure(
+          callerRefusal === "sign-in-needs-this-computer"
+            ? "profile-not-local"
+            : "profile-needs-a-person",
+        );
+      }
+    }
+    return browserToolResult(snapshot);
   }
   if (input.operation === "sign-in") {
     const refusal =
@@ -1259,12 +1367,95 @@ async function browserToolOne(
     return failure(
       input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
     );
+  const profiles = options.browserProfiles;
+  const defaultChoice = options.readThread(options.windowId, options.thread.id)?.browserTaskProfile;
+  const choice =
+    input.operation === "navigate"
+      ? (input.profile ??
+        options.readThread(options.windowId, options.thread.id)?.browserTaskProfile)
+      : undefined;
+  const requested: StoredBrowserProfile | undefined =
+    choice === "personal"
+      ? { kind: "personal" }
+      : choice === "project" && authority.projectId !== undefined
+        ? { kind: "project", projectId: authority.projectId }
+        : undefined;
+  if (choice === "project" && requested === undefined) return failure("profile-unavailable");
+  if (
+    existing !== undefined &&
+    input.operation === "navigate" &&
+    input.profile !== undefined &&
+    browserProfileKey(existing.policy.profile) !== browserProfileKey(requested)
+  )
+    return failure("browser-profile-differs-stop-first");
+  const profile =
+    existing === undefined ? requested : storedBrowserProfile(existing.policy.profile);
+  if (
+    profile !== undefined &&
+    (profiles === undefined || profiles.approvals.isUnattendedScope?.(options.windowId) === true)
+  )
+    return failure("profile-needs-a-person");
+  if (
+    profile !== undefined &&
+    defaultChoice !== undefined &&
+    defaultChoice !== "private" &&
+    (input.operation !== "navigate" || input.profile === undefined) &&
+    profiles?.approvals.isPairedDevice?.(options.windowId) === true
+  )
+    return failure("profile-not-local");
+  const binding =
+    existing === undefined ? undefined : profiles?.readBinding(String(existing.contextId));
+  const boundIdentity =
+    binding !== undefined &&
+    binding.modelId === String(options.thread.modelId) &&
+    sameToolActionAuthority(binding.authority, authority);
+  const usesProfileBinding = profile !== undefined || binding !== undefined;
+  if (usesProfileBinding) {
+    if (profiles === undefined) return failure("browser-approval-required");
+    const approved = boundIdentity && binding?.approval !== "pending";
+    const remembered =
+      (existing === undefined || (boundIdentity && binding?.approval === "pending")) &&
+      profiles.approvals.isRemembered?.(origin, profile) === true;
+    // Full access still authorizes a new Private page. It never grants a stored
+    // profile or lets a different model inherit a person-switched page.
+    const privatePending =
+      profile === undefined &&
+      boundIdentity &&
+      binding?.approval === "pending" &&
+      currentAuthorityFailure(options) === undefined;
+    if (!approved && !remembered && !privatePending) {
+      const outcome = await profiles.approvals.request({
+        windowId: options.windowId,
+        threadId: String(threadId),
+        authority,
+        origin,
+        ...(profile === undefined ? {} : { profile }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+    }
+    const changed = browserAuthorityFailure(options, input.operation);
+    const freshAuthority = options.browser.resolveAuthority(threadId, "code");
+    if (
+      signal?.aborted ||
+      changed !== undefined ||
+      freshAuthority === undefined ||
+      !sameToolActionAuthority(authority, freshAuthority)
+    )
+      return failure(changed ?? (signal?.aborted ? "tool-interrupted" : "browser-authority-stale"));
+    if (existing !== undefined)
+      profiles.rememberBinding(String(existing.contextId), {
+        modelId: String(options.thread.modelId),
+        authority,
+      });
+  }
   const requiresApproval = currentAuthorityFailure(options) !== undefined;
   const remembered =
     existing === undefined &&
     options.browserApproval?.isOriginRemembered !== undefined &&
     options.browserApproval.isOriginRemembered(origin);
   if (
+    !usesProfileBinding &&
     requiresApproval &&
     (existing === undefined ||
       options.browserApproval?.isApproved(String(existing.contextId)) !== true) &&
@@ -1273,19 +1464,20 @@ async function browserToolOne(
     if (options.browserApproval === undefined) return failure("browser-approval-required");
     const outcome = await options.browserApproval.request(origin, signal);
     if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
-    const changed = browserAuthorityFailure(options);
+    const changed = browserAuthorityFailure(options, input.operation);
     if (changed !== undefined || signal?.aborted === true)
       return failure(changed ?? "tool-interrupted");
     if (existing !== undefined) options.browserApproval.remember(String(existing.contextId));
   }
   if (existing === undefined) {
     const action = actionRequest(options, authority);
-    const created = await guardedBrowserEffect(options, threadId, signal, () =>
+    const created = await guardedBrowserEffect(options, threadId, input.operation, signal, () =>
       options.browser!.create({
         windowId: options.windowId,
         threadId,
         action,
         policy: {
+          ...(profile === undefined ? {} : { profile }),
           profileMode: "isolated",
           allowedOrigins: [origin],
           credentialFieldProtection: true,
@@ -1296,8 +1488,16 @@ async function browserToolOne(
     );
     if (created.kind === "failure") return failure(created.reason);
     snapshot = created.snapshot;
-    if (requiresApproval && snapshot.context?.state === "active") {
-      options.browserApproval?.remember(String(snapshot.context.contextId));
+    if (snapshot.context?.state === "active") {
+      const contextId = String(snapshot.context.contextId);
+      if (usesProfileBinding && !signal?.aborted) {
+        profiles?.rememberBinding(contextId, {
+          modelId: String(options.thread.modelId),
+          authority,
+        });
+      }
+      if (requiresApproval) options.browserApproval?.remember(contextId);
+      options.browserApproval?.rememberBinding?.(contextId);
     }
   }
   const context = snapshot.context;
@@ -1315,10 +1515,11 @@ async function browserToolOne(
           threadId: String(threadId),
           authority,
           origin,
+          ...(profile === undefined ? {} : { profile }),
           signIn: input.reason === undefined ? {} : { reason: input.reason },
           ...(signal === undefined ? {} : { signal }),
         }),
-      snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal),
+      snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal, true),
     });
   }
   if (input.operation === "download-save") {
@@ -1358,7 +1559,7 @@ async function browserToolOne(
     releaseUpload = admitted.release;
   }
   if (releaseUpload !== undefined) {
-    const changed = browserAuthorityFailure(options);
+    const changed = browserAuthorityFailure(options, input.operation);
     if (changed !== undefined || signal?.aborted === true) {
       await releaseUpload();
       return failure(changed ?? "tool-interrupted");
@@ -1372,12 +1573,15 @@ async function browserToolOne(
   }
   // The service keeps the copies until the page closes; see Work's tool.
   const release = releaseUpload;
-  const acted = await guardedBrowserEffect(options, threadId, signal, () =>
+  const acted = await guardedBrowserEffect(options, threadId, input.operation, signal, () =>
     options.browser!.act({
       windowId: options.windowId,
       threadId,
       request,
       capturedBy: "agent",
+      ...(input.operation === "record-stop" && input.discard === true
+        ? { discardRecording: true }
+        : {}),
       refuseStaleRevision: true,
       // Held only where the question about saving one can be answered.
       ...(options.browserDownload === undefined ||
@@ -1393,11 +1597,21 @@ async function browserToolOne(
   if (heldInQueue !== undefined) return heldForPersonAnswer(heldInQueue);
   if (
     input.operation === "screenshot" &&
+    acted.snapshot.failure === undefined &&
     browserToolImage(acted.snapshot.observation?.screenshotDataUrl) === undefined
   ) {
     return failure("browser-screenshot-unavailable");
   }
-  return browserToolResult(acted.snapshot, browserToolWantsScreenshot(input));
+  if (acted.snapshot.failure === undefined)
+    options.browserApproval?.rememberBinding?.(String(context.contextId));
+  return browserToolResult(
+    afterSignIn &&
+      acted.snapshot.failure?.category === "policy-denied" &&
+      acted.snapshot.failure.reason === "origin-not-approved"
+      ? { ...acted.snapshot, failure: browserSignInOriginRefusal() }
+      : acted.snapshot,
+    browserToolWantsScreenshot(input),
+  );
 }
 
 /**
@@ -1554,6 +1768,14 @@ async function appleTool(
   const evidence = await apple.execute(options.windowId, request);
   if (evidence === undefined) return failure("apple-unavailable");
   const result = appleEvidenceResult(evidence, opensPane);
+  if (input.operation === "logs" && evidence.outcome === "succeeded") {
+    if (signal?.aborted) return failure("tool-interrupted");
+    const reference = evidence.artifacts.find((artifact) => artifact.kind === "log")?.reference;
+    const text =
+      reference === undefined ? undefined : await apple.readLog(options.windowId, scope, reference);
+    if (signal?.aborted) return failure("tool-interrupted");
+    return deviceTextResult(result, evidence.truncated === true, text);
+  }
   if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
   if (signal?.aborted) return failure("tool-interrupted");
   const reference = evidence.artifacts.find(
@@ -1707,6 +1929,19 @@ async function androidTool(
   const evidence = await android.execute(options.windowId, request);
   if (evidence === undefined) return failure("android-unavailable");
   const result = androidEvidenceResult(evidence, opensPane);
+  if (
+    (input.operation === "describe-ui" || input.operation === "logs") &&
+    evidence.outcome === "succeeded"
+  ) {
+    if (signal?.aborted) return failure("tool-interrupted");
+    const reference = evidence.artifacts.find((artifact) => artifact.kind === "log")?.reference;
+    const text =
+      reference === undefined
+        ? undefined
+        : await android.readLog(options.windowId, scope, reference);
+    if (signal?.aborted) return failure("tool-interrupted");
+    return deviceTextResult(result, evidence.truncated === true, text);
+  }
   if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
   if (signal?.aborted) return failure("tool-interrupted");
   const reference = evidence.artifacts.find(
@@ -1778,10 +2013,21 @@ function androidActionRequest(
     case "boot":
     case "shutdown":
     case "screenshot":
+    case "describe-ui":
       return {
         ...base,
         kind: input.operation,
         timeoutMs: input.operation === "boot" ? ANDROID_BOOT_TIMEOUT_MS : ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "logs":
+      if (input.packageName === undefined) return undefined;
+      return {
+        ...base,
+        kind: "logs",
+        packageName: input.packageName as AndroidEmulatorRequest["packageName"],
+        ...(input.sinceSeconds === undefined ? {} : { sinceSeconds: input.sinceSeconds }),
+        ...(input.includeCrashes === undefined ? {} : { includeCrashes: input.includeCrashes }),
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
       };
     case "install":
       if (input.apkPath === undefined) return undefined;
@@ -1829,6 +2075,18 @@ function androidActionRequest(
         };
       }
       if (input.operation === "tap") {
+        // A named element or a point, never both: the host would not know
+        // which one the agent meant.
+        if (input.target !== undefined) {
+          if (input.x !== undefined || input.y !== undefined) return undefined;
+          return {
+            ...base,
+            kind: "tap",
+            requestedBy,
+            target: input.target,
+            timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+          };
+        }
         if (input.x === undefined || input.y === undefined) return undefined;
         return {
           ...base,
@@ -1945,6 +2203,20 @@ function appleActionRequest(
         timeoutMs: input.operation === "boot" ? APPLE_BOOT_TIMEOUT_MS : APPLE_SIMULATOR_TIMEOUT_MS,
       } as AppleActionRequest;
     }
+    case "logs": {
+      if (input.simulatorId === undefined || input.bundleIdentifier === undefined) {
+        return undefined;
+      }
+      return {
+        ...base,
+        kind: "logs",
+        simulatorId: input.simulatorId as never,
+        bundleIdentifier: input.bundleIdentifier,
+        ...(input.sinceSeconds === undefined ? {} : { sinceSeconds: input.sinceSeconds }),
+        ...(input.includeCrashes === undefined ? {} : { includeCrashes: input.includeCrashes }),
+        timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
     case "tap":
     case "swipe":
     case "type-text":
@@ -2036,6 +2308,7 @@ function agentEventActor(
 async function guardedBrowserEffect(
   options: CodeAppManagedToolsOptions,
   threadId: BrowserThreadId,
+  operation: BrowserToolOperationName | BrowserToolRecordingOperation,
   signal: AbortSignal | undefined,
   effect: () => Promise<BrowserAutomationSnapshot>,
 ): Promise<
@@ -2052,7 +2325,7 @@ async function guardedBrowserEffect(
     while (!settled) {
       await defaultWait(25);
       if (settled) break;
-      const reason = browserAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options, operation);
       if (reason !== undefined) return reason;
     }
     return new Promise<string>(() => undefined);
@@ -2066,7 +2339,7 @@ async function guardedBrowserEffect(
     ]);
     settled = true;
     if (outcome.kind === "snapshot") {
-      const reason = browserAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options, operation);
       if (reason === undefined && signal?.aborted !== true) return outcome;
       await options.browser?.releaseThread(options.windowId, threadId);
       return { kind: "failure", reason: signal?.aborted === true ? "tool-interrupted" : reason! };
@@ -2156,6 +2429,7 @@ interface AppleToolInput {
     | "open"
     | "shutdown"
     | "screenshot"
+    | "logs"
     | "tap"
     | "swipe"
     | "type-text"
@@ -2173,6 +2447,8 @@ interface AppleToolInput {
   readonly durationMs?: number;
   readonly text?: string;
   readonly key?: string;
+  readonly sinceSeconds?: number;
+  readonly includeCrashes?: boolean;
 }
 
 interface AndroidToolInput {
@@ -2183,6 +2459,8 @@ interface AndroidToolInput {
     | "boot"
     | "shutdown"
     | "screenshot"
+    | "describe-ui"
+    | "logs"
     | "tap"
     | "swipe"
     | "type-text"
@@ -2190,6 +2468,7 @@ interface AndroidToolInput {
     | "install"
     | "launch";
   readonly emulatorId?: string;
+  readonly target?: string;
   readonly x?: number;
   readonly y?: number;
   readonly toX?: number;
@@ -2199,30 +2478,8 @@ interface AndroidToolInput {
   readonly key?: string;
   readonly apkPath?: string;
   readonly packageName?: string;
-}
-
-interface ProposeThreadToolInput {
-  readonly title: string;
-  readonly intent: string;
-  readonly rationale?: string;
-}
-
-function parseBoardInput(value: string): { readonly operation: "read" } | undefined {
-  const parsed = parseObject(value, new Set(["operation"]));
-  if (parsed === undefined || parsed.operation !== "read") return undefined;
-  return { operation: "read" };
-}
-
-function parseProposeThreadInput(value: string): ProposeThreadToolInput | undefined {
-  const parsed = parseObject(value, new Set(["title", "intent", "rationale"]));
-  if (parsed === undefined) return undefined;
-  if (typeof parsed.title !== "string" || typeof parsed.intent !== "string") return undefined;
-  if (parsed.rationale !== undefined && typeof parsed.rationale !== "string") return undefined;
-  return {
-    title: parsed.title,
-    intent: parsed.intent,
-    ...(typeof parsed.rationale === "string" ? { rationale: parsed.rationale } : {}),
-  };
+  readonly sinceSeconds?: number;
+  readonly includeCrashes?: boolean;
 }
 
 function parsePullRequestInput(value: string): PullRequestToolInput | undefined {
@@ -2275,6 +2532,10 @@ function parsePullRequestInput(value: string): PullRequestToolInput | undefined 
   const remove = labels(removeLabels);
   if (add === null || remove === null) return undefined;
   if (state !== undefined && state !== "closed" && state !== "open") return undefined;
+  if (operation === "watch" || operation === "unwatch") {
+    // The host names the pull request; a watch carries nothing else.
+    return Object.keys(parsed).length === 1 ? { operation } : undefined;
+  }
   if (operation === "create") {
     if (
       typeof title !== "string" ||
@@ -2379,6 +2640,8 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
       "durationMs",
       "text",
       "key",
+      "sinceSeconds",
+      "includeCrashes",
     ]),
   );
   if (parsed === undefined) return undefined;
@@ -2393,6 +2656,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "open" &&
     operation !== "shutdown" &&
     operation !== "screenshot" &&
+    operation !== "logs" &&
     operation !== "tap" &&
     operation !== "swipe" &&
     operation !== "type-text" &&
@@ -2429,6 +2693,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
   ) {
     return undefined;
   }
+  if (!validLogWindow(parsed)) return undefined;
   return parsed as unknown as AppleToolInput;
 }
 
@@ -2438,6 +2703,7 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
     new Set([
       "operation",
       "emulatorId",
+      "target",
       "x",
       "y",
       "toX",
@@ -2447,6 +2713,8 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
       "key",
       "apkPath",
       "packageName",
+      "sinceSeconds",
+      "includeCrashes",
     ]),
   );
   if (parsed === undefined) return undefined;
@@ -2458,6 +2726,8 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
     operation !== "boot" &&
     operation !== "shutdown" &&
     operation !== "screenshot" &&
+    operation !== "describe-ui" &&
+    operation !== "logs" &&
     operation !== "tap" &&
     operation !== "swipe" &&
     operation !== "type-text" &&
@@ -2467,7 +2737,7 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
   ) {
     return undefined;
   }
-  for (const field of ["emulatorId", "text", "key", "apkPath", "packageName"] as const) {
+  for (const field of ["emulatorId", "target", "text", "key", "apkPath", "packageName"] as const) {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
   for (const field of ["x", "y", "toX", "toY", "durationMs"] as const) {
@@ -2482,7 +2752,32 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
   ) {
     return undefined;
   }
+  // The contract's own bound on the element name; past it the host would
+  // refuse the request as unreachable rather than say why.
+  if (
+    typeof parsed.target === "string" &&
+    (parsed.target.trim() === "" || parsed.target.length > 512)
+  ) {
+    return undefined;
+  }
+  if (!validLogWindow(parsed)) return undefined;
   return parsed as unknown as AndroidToolInput;
+}
+
+/**
+ * A log read's window and crash choice, checked here against the contract's
+ * bounds: left to the host's decoder, a window past ten minutes came back as
+ * the host being unreachable.
+ */
+function validLogWindow(parsed: Readonly<Record<string, unknown>>): boolean {
+  const since = parsed.sinceSeconds;
+  if (
+    since !== undefined &&
+    !(Number.isInteger(since) && Number(since) >= 1 && Number(since) <= 600)
+  ) {
+    return false;
+  }
+  return parsed.includeCrashes === undefined || typeof parsed.includeCrashes === "boolean";
 }
 
 function profileToolConstraintFailure(thread: CodeThread, toolName: string): string | undefined {
@@ -2494,7 +2789,16 @@ function profileToolConstraintFailure(thread: CodeThread, toolName: string): str
   return decision.status === "refused" ? decision.reason : undefined;
 }
 
-function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+/**
+ * What keeps a Browser operation from running now: a stale thread, or Plan
+ * for an operation that changes something (see `BROWSER_OPERATION_EFFECT`).
+ * Asked again after every wait, so a thread that moved into Plan meanwhile
+ * still refuses an effect and still admits a read.
+ */
+function browserAuthorityFailure(
+  options: CodeAppManagedToolsOptions,
+  operation: BrowserToolOperationName | BrowserToolRecordingOperation,
+): string | undefined {
   const stale = currentThreadIdentityFailure(options);
   if (stale !== undefined) return stale;
   const current = options.readThread(options.windowId, options.thread.id);
@@ -2502,7 +2806,9 @@ function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
     requested: options.thread.executionPolicy,
     thread: current?.executionPolicy ?? options.thread.executionPolicy,
   });
-  return posture === "plan" ? "plan-mode-read-only" : undefined;
+  return posture === "plan" && browserOperationRefusedInPlan(operation)
+    ? "plan-mode-read-only"
+    : undefined;
 }
 
 /**
@@ -2592,7 +2898,13 @@ async function askPersonForDevice(
 
 /** Whether an operation only reads the toolchain, the runtime, or a screen. */
 function isDeviceRead(operation: string): boolean {
-  return operation === "status" || operation === "discover" || operation === "screenshot";
+  return (
+    operation === "status" ||
+    operation === "discover" ||
+    operation === "screenshot" ||
+    operation === "describe-ui" ||
+    operation === "logs"
+  );
 }
 
 /**
@@ -2708,6 +3020,30 @@ function postureRefusal(error: string) {
 
 function defaultWait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * A `describe-ui` or `logs` result carries the text the host kept, so the
+ * agent reads the screen or the log in the result itself; an artifact
+ * reference alone tells it nothing it can act on.
+ */
+function deviceTextResult<T extends { readonly result: object; readonly isError: boolean }>(
+  evidence: T,
+  truncated: boolean,
+  text: string | undefined,
+) {
+  if (text === undefined) {
+    return {
+      result: {
+        ...evidence.result,
+        error: "device-text-unavailable",
+        message:
+          "The host kept no readable text for this read. Do not infer the screen or the log from the artifact reference.",
+      },
+      isError: true,
+    };
+  }
+  return { ...evidence, result: { ...evidence.result, truncated, text } };
 }
 
 function deviceScreenshotResult<T extends { readonly result: object; readonly isError: boolean }>(

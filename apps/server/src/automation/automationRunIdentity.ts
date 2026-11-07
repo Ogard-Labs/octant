@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   decodeAutomationRun,
+  decodeCodeOperationId,
   deriveAutomationOccurrenceKey,
   type AutomationDefinition,
+  type AutomationDefinitionSnapshot,
   type AutomationFirstTurnRequestId,
   type AutomationOccurrence,
   type AutomationOccurrenceKeyText,
@@ -23,6 +25,12 @@ export function deterministicAutomationUuid(seed: string): string {
   bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80;
   const hex = bytes.subarray(0, 16).toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+export function automationCodeOperationId(run: AutomationRun) {
+  return decodeCodeOperationId(
+    deterministicAutomationUuid(`automation-code-op:${String(run.occurrenceKey)}`),
+  );
 }
 
 /** The durable one-run-per-occurrence claim identity. */
@@ -66,26 +74,7 @@ export function buildAutomationRunForOccurrence(
     occurrenceKey,
     scheduledAt: occurrence.kind === "scheduled" ? occurrence.scheduledAt : null,
     claimedAt: now,
-    definitionSnapshot: {
-      automationId: definition.id,
-      definitionRevision: definition.definitionRevision,
-      displayName: definition.displayName,
-      taskPrompt: definition.taskPrompt,
-      hostId: definition.hostId,
-      mode: definition.mode,
-      projectId: definition.projectId,
-      projectVersion: definition.projectVersion,
-      binding: definition.binding,
-      executionProfile: definition.executionProfile,
-      authorityProfile: definition.authorityProfile,
-      deliveryTarget: definition.deliveryTarget,
-      trigger: definition.trigger,
-      missedRunPolicy: definition.missedRunPolicy,
-      targetPolicy: definition.targetPolicy,
-      ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
-      ...(definition.runLevel === undefined ? {} : { runLevel: definition.runLevel }),
-      ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
-    },
+    definitionSnapshot: captureAutomationDefinitionSnapshot(definition),
     authoritySnapshot: {
       profileId: definition.authorityProfile.profileId,
       profileVersion: definition.authorityProfile.profileVersion,
@@ -101,4 +90,30 @@ export function buildAutomationRunForOccurrence(
     createdAt: now,
     updatedAt: now,
   });
+}
+
+/** Capture the same closed definition used by dispatch and source preflight. */
+export function captureAutomationDefinitionSnapshot(
+  definition: AutomationDefinition,
+): AutomationDefinitionSnapshot {
+  return {
+    automationId: definition.id,
+    definitionRevision: definition.definitionRevision,
+    displayName: definition.displayName,
+    taskPrompt: definition.taskPrompt,
+    hostId: definition.hostId,
+    mode: definition.mode,
+    projectId: definition.projectId,
+    projectVersion: definition.projectVersion,
+    binding: definition.binding,
+    executionProfile: definition.executionProfile,
+    authorityProfile: definition.authorityProfile,
+    deliveryTarget: definition.deliveryTarget,
+    trigger: definition.trigger,
+    missedRunPolicy: definition.missedRunPolicy,
+    targetPolicy: definition.targetPolicy,
+    ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
+    ...(definition.runLevel === undefined ? {} : { runLevel: definition.runLevel }),
+    ...(definition.agentMerge === undefined ? {} : { agentMerge: definition.agentMerge }),
+  };
 }

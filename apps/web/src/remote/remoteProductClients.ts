@@ -1,4 +1,8 @@
 import {
+  createConversationInputClient,
+  type ConversationInputClient,
+} from "@octant/client-runtime/conversation-input-client";
+import {
   createDefaultDeviceKeyStore,
   createRemoteProductFetch,
   type RemoteSessionBridge,
@@ -24,11 +28,16 @@ import {
   type ReplicaSyncStatusClient,
 } from "@octant/client-runtime/replica-sync-status-client";
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import {
+  createReplyDetailClient,
+  type ReplyDetailClient,
+} from "@octant/client-runtime/reply-detail-client";
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
 
 export interface RemoteProductClients {
+  readonly conversationInputs?: ConversationInputClient;
   readonly chat: ChatClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
@@ -39,6 +48,8 @@ export interface RemoteProductClients {
   readonly workRequest: WorkRequestClient;
   /** Read-only sync status; setting up, joining, and revoking stay on the host. */
   readonly syncStatus: ReplicaSyncStatusClient;
+  /** Read-only Reply detail; changing a level stays with a window on the host. */
+  readonly replyDetail: ReplyDetailClient;
 }
 
 // The Work and Code clients refuse a non-loopback base URL because the window
@@ -60,6 +71,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     windowCapability: NO_WINDOW_CAPABILITY,
   };
   return {
+    conversationInputs: createConversationInputClient(port),
     chat: createChatClient(port),
     // A host may ask this paired browser's merge for an owner unlock first;
     // the browser gives it with its passkey if it is an owner of that host.
@@ -78,6 +90,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     workTurn: createWorkTurnClient(port),
     workMutation: createWorkMutationClient(port),
     workRequest: createWorkRequestClient(port),
+    replyDetail: createReplyDetailClient(port),
     syncStatus: createReplicaSyncStatusClient(port),
   };
 }

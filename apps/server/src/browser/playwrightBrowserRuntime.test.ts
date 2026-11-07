@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { deflateSync } from "node:zlib";
+import { crc32 } from "@octant/domain";
 import type { BrowserActionRequest, BrowserContextId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -88,6 +90,7 @@ function harness() {
     newPage: vi.fn(async () => page),
     close: vi.fn(async () => undefined),
   }));
+  const created = [...contexts];
   let disconnected: (() => void) | undefined;
   const browser: PlaywrightBrowserPort = {
     pid: 4321,
@@ -105,6 +108,7 @@ function harness() {
   });
   return {
     browser,
+    contexts: created,
     disconnected: () => disconnected?.(),
     launch,
     pages,
@@ -603,6 +607,119 @@ describe("PlaywrightBrowserRuntime", () => {
     ).rejects.toThrow("sensitive or credential field");
   });
 
+  it("keeps a frame whose credential check was still running when the recording stopped", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    // The check settles only once the stop has reached the screencast, so the
+    // stop arrives while the frame is still being looked at.
+    recorder.onStopScreencast(() => checks.settle(false));
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    expect(stopped.recording).toMatchObject({ status: "recorded", frames: 1 });
+  });
+
+  it("drops a frame whose credential check outlasts the drain bound", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+    checks.settle(false);
+
+    expect(stopped.recording).toEqual({ status: "empty" });
+  });
+
+  it("ends a recording when the batch opens another tab, and keeps the recorded tab's address", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    await runtime.act(
+      firstId,
+      action("tab-open", "https://example.com/other"),
+      new AbortController().signal,
+    );
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    // The observation is of the tab in front; the recording is of the one it started on.
+    expect(stopped.url).toBe("https://example.com/other");
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      frames: 1,
+      truncated: "tab-changed",
+      url: "https://example.com/start",
+      title: "first",
+    });
+  });
+
+  it("takes no frame from the recorded tab once another is in front", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    await runtime.act(
+      firstId,
+      action("tab-open", "https://example.com/other"),
+      new AbortController().signal,
+    );
+    recorder.frame();
+    checks.settle(false);
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    expect(checks.pending).toBe(0);
+    expect(stopped.recording).toEqual({ status: "empty" });
+  });
+
+  it("keeps a recording a bound cut short under the page it showed, not the one the tab moved to", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    // A frame of another size ends the recording, as a resize does.
+    recorder.frame(2);
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    await vi.waitFor(() => expect(recorder.looked()).toBe(2));
+    await runtime.act(
+      firstId,
+      action("navigate", "https://example.com/next"),
+      new AbortController().signal,
+    );
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    expect(stopped.url).toBe("https://example.com/next");
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      frames: 1,
+      truncated: "viewport-changed",
+      url: "https://example.com/start",
+    });
+  });
+
+  it("labels a recording that ran on across a navigation with the page it stopped on", async () => {
+    const { checks, recorder, runtime } = await recordingHarness();
+    recorder.frame();
+    await vi.waitFor(() => expect(checks.pending).toBe(1));
+    checks.settle(false);
+    await vi.waitFor(() => expect(recorder.looked()).toBe(1));
+    await runtime.act(
+      firstId,
+      action("navigate", "https://example.com/next"),
+      new AbortController().signal,
+    );
+
+    const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
+
+    // Still recording at the stop, so its last frame is of the page it stopped on.
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      url: "https://example.com/next",
+    });
+    expect(stopped.recording).not.toHaveProperty("truncated");
+  });
+
   it("reports process death and closes all owned contexts", async () => {
     const { browser, disconnected, runtime } = harness();
     const listener = vi.fn();
@@ -693,6 +810,104 @@ function harnessWithReceipt(options: {
     shutdownTimeoutMs: 1,
   });
   return { browser, disconnected: () => disconnected?.(), runtime };
+}
+
+/** A context recording its page, each frame's credential check held open until a test settles it. */
+async function recordingHarness() {
+  const { contexts, pages, runtime } = harness();
+  const page = pages[0]!;
+  const waiting: Array<(sensitive: boolean) => void> = [];
+  // Only a frame's check is held: the page's own observations answer at once.
+  let holdNextCheck = false;
+  const checks = {
+    get pending() {
+      return waiting.length;
+    },
+    settle(sensitive: boolean) {
+      for (const resolve of waiting.splice(0)) resolve(sensitive);
+    },
+  };
+  vi.mocked(page.frames).mockReturnValue([
+    {
+      evaluate: vi.fn(async () => {
+        if (!holdNextCheck) return false;
+        holdNextCheck = false;
+        return new Promise((resolve) => waiting.push(resolve));
+      }),
+      locator: page.locator,
+    },
+  ] as any);
+  let frameListener: ((parameters: unknown) => void) | undefined;
+  let stopScreencast = () => {};
+  const session = {
+    send: vi.fn(async (method: string) => {
+      if (method === "Page.stopScreencast") stopScreencast();
+    }),
+    on: vi.fn((_event: string, listener: (parameters: unknown) => void) => {
+      frameListener = listener;
+    }),
+    detach: vi.fn(async () => undefined),
+  };
+  Object.assign(page, { context: () => ({ newCDPSession: async () => session }) });
+  await runtime.createContext(
+    firstId,
+    { ...policy, maxConcurrentTabs: 2 },
+    new AbortController().signal,
+  );
+  // A tab the batch opens is the harness's second page.
+  vi.mocked(contexts[0]!.newPage).mockResolvedValue(pages[1]!);
+  await runtime.act(
+    firstId,
+    action("navigate", "https://example.com/start"),
+    new AbortController().signal,
+  );
+  await runtime.act(firstId, action("record-start"), new AbortController().signal);
+  const recorder = {
+    /** Send a frame `width` pixels wide; a different width is a resized page. */
+    frame(width = 1) {
+      holdNextCheck = true;
+      frameListener?.({ data: Buffer.from(onePixelPng(width)).toString("base64"), sessionId: 1 });
+    },
+    /** How many frames the runtime has finished looking at. */
+    looked() {
+      return session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")
+        .length;
+    },
+    onStopScreencast(listener: () => void) {
+      stopScreencast = listener;
+    },
+  };
+  return { checks, recorder, runtime };
+}
+
+/** A one-pixel RGBA PNG, the shape a page's screencast sends. */
+function onePixelPng(width = 1): Uint8Array {
+  const chunk = (type: string, data: Buffer) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, "ascii");
+    data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(1, 4);
+  header[8] = 8;
+  header[9] = 6;
+  return Uint8Array.from(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", header),
+      chunk(
+        "IDAT",
+        deflateSync(
+          Buffer.from([0, ...Array.from({ length: width }, () => [255, 0, 0, 255]).flat()]),
+        ),
+      ),
+      chunk("IEND", Buffer.alloc(0)),
+    ]),
+  );
 }
 
 describe("bounded headless element feedback", () => {

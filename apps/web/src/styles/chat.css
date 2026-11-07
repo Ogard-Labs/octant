@@ -87,6 +87,16 @@
   margin-inline-start: auto;
 }
 
+/* The thread's Reply detail choice sits just before Thread actions, so the
+   header's two controls stay together at its trailing edge. */
+.chat-workspace__reply-detail {
+  margin-inline-start: auto;
+}
+
+.chat-workspace__reply-detail ~ .chat-workspace__thread-actions {
+  margin-inline-start: 0;
+}
+
 .chat-workspace__canvas {
   margin-block: 8px 0;
 }
@@ -184,6 +194,20 @@
   white-space: nowrap;
 }
 
+.terminal-session-picker__source {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: var(--oct-space-1);
+}
+
+.terminal-session-picker__folder {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* The terminal session a Work or Code thread started from: folded above the
    thread's own turns, in the provenance tint, since it is a record of what
    was said elsewhere rather than turns of this thread. */
@@ -215,6 +239,7 @@
 }
 
 .imported-history__note {
+  overflow-wrap: anywhere;
   padding: 0 var(--oct-space-3);
   margin: 0 0 var(--oct-space-2);
 }

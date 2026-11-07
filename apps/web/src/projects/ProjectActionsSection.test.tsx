@@ -48,6 +48,26 @@ function client() {
 afterEach(cleanup);
 
 describe("Project actions editor", () => {
+  it("saves automatic setup only after the person reviews a single recipe", async () => {
+    const onChange = vi.fn(async () => true);
+    render(
+      <ProjectActionsSection
+        client={client()}
+        onChange={onChange}
+        project={project([
+          { id: ACTION_ID, name: "Prepare", command: "bun install", directory: "." },
+        ])}
+      />,
+    );
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+    await userEvent.click(checkbox);
+    await userEvent.click(screen.getByRole("button", { name: "Save actions" }));
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ preparesWorktrees: true, command: "bun install" }),
+    ]);
+  });
+
   it("saves a suggestion the person confirms, and stops offering it once added", async () => {
     const onChange = vi.fn(async () => true);
     render(<ProjectActionsSection client={client()} onChange={onChange} project={project()} />);

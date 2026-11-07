@@ -200,6 +200,8 @@ describe("Journal", () => {
         transcriptTextSize: "medium",
         transcriptWidth: "narrow",
         usageBars: "smooth",
+        replyDetail: "low",
+        threadReplyDetail: [],
         showThreadProviderIcons: true,
         showThreadStats: true,
         homeCards: { order: [], visibility: [] },
@@ -327,6 +329,16 @@ describe("Journal", () => {
     journal.append(appendRequest([pendingEvent(ids.event2)], 1));
 
     expect(published).toEqual([first]);
+    connection.close();
+  });
+
+  it("persists and replays an unlocked owner's member identity", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const memberId = "10000000-0000-4000-8000-000000000010";
+    const actor = { kind: "owner-unlock", actorId: ids.actor, memberId } as const;
+    journal.append(appendRequest([pendingEvent(ids.event1, { actor })]));
+    expect(journal.replay(replayCursor({ afterSequence: 0, limit: 10 }))[0]?.actor).toEqual(actor);
     connection.close();
   });
 

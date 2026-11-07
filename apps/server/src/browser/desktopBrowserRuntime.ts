@@ -1,3 +1,19 @@
+import {
+  decodeOwnerBrowserNativeResult,
+  type OwnerBrowserNativeCommand,
+} from "@octant/contracts/owner-browser";
+import {
+  decodeBrowserPageScriptPreparation,
+  type BrowserPageScriptNativeCommand,
+} from "@octant/contracts/browser-page-script";
+import {
+  decodeBrowserCredentialNativeResult,
+  type BrowserCredentialFillPreparation,
+} from "@octant/contracts/browser-credential-use";
+import {
+  decodeHumanBrowserResult,
+  type HumanBrowserRequest,
+} from "@octant/contracts/browser-presentation";
 import { storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type {
@@ -10,6 +26,7 @@ import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import { decodeProductFeedbackPointObservation } from "@octant/contracts/product-feedback";
 import {
   BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
   BrowserTargetStaleError,
   BrowserWaitTimedOutError,
   type BrowserProfileStorePort,
@@ -70,6 +87,12 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#eventPollIntervalMs = options.eventPollIntervalMs ?? 250;
     this.#extensionsFor = options.extensionsFor;
+  }
+
+  async humanPresentation(request: HumanBrowserRequest, windowId: WindowId, signal: AbortSignal) {
+    return decodeHumanBrowserResult(
+      await this.#request("/v1/contexts/human-presentation", { request, windowId }, signal),
+    );
   }
 
   async available(): Promise<boolean> {
@@ -150,6 +173,88 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     return "native-live";
   }
 
+  async prepareCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    origin: string,
+  ): Promise<BrowserCredentialFillPreparation> {
+    const result = decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "prepare",
+        contextId,
+        owner,
+        origin,
+      }),
+    );
+    return result.status === "prepared" || result.status === "refused"
+      ? result
+      : { status: "refused", reason: "unavailable" };
+  }
+  async validateCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+  ): Promise<boolean> {
+    const result = decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "validate",
+        contextId,
+        owner,
+        planId,
+      }),
+    );
+    return result.status === "validated" && result.valid;
+  }
+  async cancelCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+  ): Promise<import("@octant/contracts/browser-credential-use").BrowserCredentialNativeResult> {
+    return decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "cancel",
+        contextId,
+        owner,
+        planId,
+      }),
+    );
+  }
+  async submitCredentialFill(
+    contextId: BrowserContextId,
+    owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
+    planId: string,
+    expiresAt: string,
+  ) {
+    return decodeBrowserCredentialNativeResult(
+      await this.#request("/v1/contexts/credential-fill", {
+        kind: "submit",
+        contextId,
+        owner,
+        planId,
+        expiresAt,
+      }),
+    );
+  }
+
+  async ownerControl(command: OwnerBrowserNativeCommand, signal: AbortSignal) {
+    return decodeOwnerBrowserNativeResult(
+      await this.#request<unknown>(
+        "/v1/contexts/owner-control",
+        command,
+        AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+      ),
+    );
+  }
+
+  async runPageScript(command: BrowserPageScriptNativeCommand, signal: AbortSignal) {
+    const reply = await this.#request<unknown>("/v1/contexts/page-script", command, signal);
+    try {
+      return decodeBrowserPageScriptPreparation(reply);
+    } catch {
+      throw new Error("Octant desktop Browser rejected the page script reply.");
+    }
+  }
+
   inspectTarget(
     contextId: BrowserContextId,
     selector: string,
@@ -213,6 +318,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.diagnosticsWarnings === undefined
             ? {}
             : { diagnosticsWarnings: request.diagnosticsWarnings }),
+          ...(request.auditKind === undefined ? {} : { auditKind: request.auditKind }),
           ...(request.downloads === undefined ? {} : { downloads: request.downloads }),
         },
       },
@@ -333,6 +439,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
       if (refused?.error === "navigation-blocked" && refused.url !== undefined) {
         throw new BrowserNavigationBlockedError(refused.url);
       }
+      if (refused?.error === "recording-unavailable") throw new BrowserRecordingUnavailableError();
     }
     if (!response.ok) throw new Error("Octant desktop Browser broker rejected the request.");
     return (await response.json()) as T;

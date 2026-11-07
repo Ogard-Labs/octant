@@ -43,8 +43,7 @@ real hub or a real Tailscale certificate. Nothing here has been run on a real ph
 passkey, or Android. An owner device's one unlock covers five minutes of
 administration (the host keeps the session in memory), copies an API-key
 sign-in between two spokes, reads a Code posture, and applies or dismisses a
-provisioning proposal, read narrowly as slice 5 and slice 10 record; a host
-changes no posture for an owner device yet. A Mac's Touch ID unlock key is built
+provisioning proposal, read narrowly as slice 5 and slice 10 record; an owner can change an active Code thread or Code Project posture through the existing owner route, with host-local current-state checks and owner-device journal attribution. A Mac's Touch ID unlock key is built
 (a Secure Enclave key made through the desktop's native helper and registered
 when the Mac joins a hub, read narrowly as slice 5 records); the real Touch ID
 prompt has not been run. The wake service is built (the hub's own
@@ -79,13 +78,12 @@ view of the provider's own app, never against a real provider sign-in. After thi
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub, a real Claude or Codex sign-in on a
-second computer started from the hub), Windows, and the post-preview
-tracks.
+second computer started from the hub) and Windows.
 The hub uses only the Roster and Status grant items, the Owners item for
 owner devices, the Standby item for naming a standby, the Wake item for the
 wake service, the Push item for push, the Provision item for offers, and the Sign-in item for sign-in requests. The maintainer
-asked for this design and authorized it as post-preview, design-first work on
-2026-10-28, and set its shape the same day: a running instance enabled as hub,
+asked for this design and authorized it as design-first work on
+2026-10-28 (in scope for the first preview since 2026-11-06), and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
 a standby hub for failover, personal devices only, phones as guests that run
 no agents, and a hub that runs as a server without the desktop app and serves
@@ -509,6 +507,16 @@ from their phone or laptop what they could do sitting at any of them. An
   says. An owner device reads them from the spoke it concerns; the hub holds no
   alert and cannot clear or write one. Rationale: the party that might be
   compromised cannot be the one that reports.
+- **Browser control is its own finite action.** Selecting an already-open Code
+  Private page is an owner administration read. Taking control requires a fresh
+  own-class unlock even when an administration session is open. The resulting
+  target-bound controller lasts at most 60 seconds and authorizes only signed,
+  sequenced person frames and fixed inputs for that exact native resource.
+  It cannot administer the host, select a profile, create a page or lend a local
+  window capability. Stop/reclaim/expiry leave the agent's person hold in place;
+  only explicit Hand back releases it. See [Owner control of an open Code
+  page](browser-agent-tool.md#owner-control-of-an-open-code-page) for the supported
+  resource, volatile credential-bearing frames, cancellation and audit rules.
 - **Confirming a new member is signed by the unlock key.** The owner's unlock
   key signs a note naming the spoke, the member, its identity-key fingerprint,
   the owner, and the unlock key's fingerprint, and the spoke checks it against
@@ -572,6 +580,22 @@ from their phone or laptop what they could do sitting at any of them. An
   everywhere at the next roster. A thief holding the device without the
   person's face, finger, passcode, or passkey has only ordinary member powers
   until then.
+
+#### Recovery inventory
+
+Code posture recovery is the bounded owner-device path. It does not grant an
+owner device every action that can unblock a task. The inventory below keeps
+those decisions separate. A refused request has no effect; retry requires a
+new authoritative reading and the proof required for that action.
+
+| Request                                  | Eligible responder and current boundary                                                                                                                                                                     | Queue and resume                                                                                     | Additional authority needed                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token. | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn. | Built through the existing posture routes and Settings/phone controls; no other grant follows.               |
+| Work level                               | The existing host-local controls; the Code posture routes do not accept Work subjects.                                                                                                                      | No owner recovery queue or automatic resume is added.                                                | A separate Work posture decision and route.                                                                  |
+| Approval answer                          | A paired device may approve once or deny prompts its own turns raised. A prompt raised by a local window stays local. The existing approval service checks the recorded turn and Project.                   | Existing prompt expiry and settlement apply; an owner unlock does not transfer a prompt.             | A separate decision for any additional eligible responder; no general owner approval route is granted.       |
+| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                   | An owner posture change neither approves nor retries a restore.                                      | Any owner recovery path must reuse those checks and define its own proof.                                    |
+| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                         | No automatic relaunch after a lost reply or posture change.                                          | Server action delivery remains a separate slice; posture recovery adds no launch grant.                      |
+| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                              | Preserve the existing pause, hand-back and disconnect rules.                                         | A separate owner browser decision must name permitted operations, controller arbitration and local recovery. |
 
 Rationale: the earlier rule, that only a window on the host may administer it
 or hold its most sensitive powers, assumed every other device might belong to
@@ -1052,11 +1076,26 @@ maintainer's hardware, or names the maintainer gate.
      guardrail levels ([Modes](../architecture.md#modes-chat-work-and-code)), but the
      owner routes read and change only a Code posture; reading a Work thread's level
      is not built. Reading one asks for an unlock or an open session, which is stricter
-     than reading an alert. The route accepts a change, holds Full access to its
-     own unlock, and journals it with the owner device, but the host as it runs
-     today answers every change `unsupported`: the Code service's Full access
-     confirmation is bound to a local window, and a window-free path for an owner
-     device is not built. The routes are proved against a fake host.
+     than reading an alert. The same read route lists active Code targets by name.
+     Every reading carries a digest of the current thread, Project, binding and
+     checkout records. The signed change names that digest, the target and the
+     requested posture and persistence. The host re-reads these records and
+     refuses a changed version or target before calling the synchronous Code or
+     Project service transaction. Full access requires this action's own fresh
+     unlock; an administration session cannot satisfy it. The services journal
+     the actual `owner-unlock` member, including any lowered guardrail, and
+     never mint a window or cache a grant. A thread change discards legacy
+     session grants everywhere. Settings and the phone show named targets and
+     current/requested postures, including an existing automatic reviewer, and discard their reading after any apply;
+     retry begins with an authoritative refresh and the required proof. Readings,
+     selections and pending UI results belong to the selected member and client
+     incarnation. A roster removal or client replacement clears that state before
+     display and ignores old completions; it never transfers or retries a signed
+     command against the replacement host. A
+     running turn keeps the posture it launched with. The Project path changes
+     its remembered Full access default; it does not change existing threads.
+     Actual signed routes, Code/Project services and SQLite readback/replay are
+     proved with deterministic unlocks. Physical-device unlock remains unrun.
    - **A sign-in copy is two unlocks on two hosts.** Each host keeps its own owner
      list, so the owner device unlocks on the receiving host first, which makes
      a one-time ticket (two minutes) naming the sending host and the receiving

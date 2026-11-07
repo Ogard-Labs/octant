@@ -1,4 +1,13 @@
+import { Schema } from "effect";
+import { CredentialRequestReference } from "@octant/contracts/credential-request";
+import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  decodeBrowserCredentialHostCommand,
+  decodeBrowserCredentialHostResult,
+  type BrowserCredentialHostCommand,
+  type BrowserCredentialHostResult,
+} from "@octant/contracts/browser-credential-use";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ensureSshKey, signSshLogin, sshPublicKey } from "./sshKeyBroker";
@@ -22,6 +31,11 @@ import {
   type LinkedSecretStores,
 } from "./linkedSecretStores";
 import {
+  createGoogleCliSessions,
+  handleGoogleCliBrokerRoute,
+  type GoogleCliSessions,
+} from "./googleCliSessions";
+import {
   createAwsCliSessions,
   handleAwsCliBrokerRoute,
   type AwsCliSessions,
@@ -41,6 +55,8 @@ const BODY_LIMIT = 16 * 1_024;
 const TOKEN_HEADER = "x-octant-credential-broker-token";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ROUTES = new Set([
+  "/v1/secret-stores/command-use",
+  "/v1/secret-stores/request-card-read",
   "/v1/credentials/has",
   "/v1/credentials/resolve",
   "/v1/credentials/set",
@@ -78,19 +94,28 @@ const ROUTES = new Set([
   "/v1/secret-stores/link",
   "/v1/secret-stores/unlink",
   "/v1/secret-stores/check",
+  "/v1/secret-stores/browser-metadata",
+  "/v1/secret-stores/browser-fill",
   "/v1/secret-stores/point",
   "/v1/secret-stores/reference",
   "/v1/secret-stores/clear",
   "/v1/secret-stores/restore",
+  "/v1/cloud-cli/google/reference",
+  "/v1/cloud-cli/google/point",
+  "/v1/cloud-cli/google/restore",
+  "/v1/cloud-cli/google/clear",
+  "/v1/cloud-cli/google/session",
   "/v1/cloud-cli/aws/reference",
   "/v1/cloud-cli/aws/point",
   "/v1/cloud-cli/aws/restore",
   "/v1/cloud-cli/aws/clear",
   "/v1/cloud-cli/aws/session",
   "/v1/oauth/begin",
+  "/v1/oauth/cancel",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",
+  "/v1/oauth/github-actions-source",
   "/v1/oauth/revoke",
   "/v1/cloud-iam/begin",
   "/v1/cloud-iam/status",
@@ -98,6 +123,7 @@ const ROUTES = new Set([
   "/v1/cloud-iam/revoke",
 ]);
 const SECRET_STORE_PREFIX = "/v1/secret-stores/";
+const GOOGLE_CLI_PREFIX = "/v1/cloud-cli/google/";
 const AWS_CLI_PREFIX = "/v1/cloud-cli/aws/";
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
@@ -120,6 +146,13 @@ const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], 
 interface LinkedBrokerStores {
   readonly stores: LinkedSecretStores;
   readonly awsCli: AwsCliSessions;
+  readonly googleCli: GoogleCliSessions;
+  readonly browserFill?: BrowserCredentialFillHostPort;
+}
+
+export interface BrowserCredentialFillHostPort {
+  readonly execute: (command: BrowserCredentialHostCommand) => Promise<BrowserCredentialHostResult>;
+  readonly close: () => void;
 }
 
 export interface CredentialBroker {
@@ -196,10 +229,25 @@ export async function startCredentialBroker(
    * public line and signs a login request for that key, nothing else.
    */
   sshKeys?: CredentialStore,
+  browserFill?: BrowserCredentialFillHostPort,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
     store,
+    ...(mcpServerCredentials === undefined
+      ? {}
+      : {
+          resolveClientSecret: async (secretRef: string) => {
+            const material = await mcpServerCredentials.resolve(secretRef);
+            if (!isLinkedSecretMaterial(material)) return material;
+            const pointer = decodeLinkedSecretPointer(material);
+            if (pointer === undefined || linkedSecretStores === undefined)
+              throw new CredentialStoreFailure("unavailable");
+            const result = await linkedSecretStores.read(pointer.store, pointer.reference);
+            if (result.status !== "read") throw new CredentialStoreFailure("unavailable");
+            return result.value;
+          },
+        }),
     ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
     ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
@@ -220,6 +268,13 @@ export async function startCredentialBroker(
       ? undefined
       : {
           stores: linkedSecretStores,
+          googleCli: createGoogleCliSessions({
+            linked: linkedSecretStores,
+            ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
+            ...(oauth?.now === undefined ? {} : { now: oauth.now }),
+            ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
+          }),
+          ...(browserFill === undefined ? {} : { browserFill }),
           awsCli: createAwsCliSessions({
             linked: linkedSecretStores,
             ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
@@ -286,16 +341,24 @@ export async function startCredentialBroker(
   const close = (): Promise<void> => {
     if (closing !== undefined) return closing;
     closing = (async () => {
-      await runtime.close();
-      await cloudIam.close();
-      await new Promise<void>((resolve, reject) => {
-        if (!server.listening) {
-          resolve();
-          return;
+      linked?.googleCli.forget();
+      browserFill?.close();
+      try {
+        await runtime.close();
+      } finally {
+        try {
+          await cloudIam.close();
+        } finally {
+          await new Promise<void>((resolve, reject) => {
+            if (!server.listening) {
+              resolve();
+              return;
+            }
+            server.close((error) => (error === undefined ? resolve() : reject(error)));
+            server.closeAllConnections();
+          });
         }
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
-      });
+      }
     })();
     return closing;
   };
@@ -423,6 +486,19 @@ async function handleBrokerRequest(
     return handleCloudIamBrokerRoute(url.pathname, request, cloudIam);
   }
 
+  if (url.pathname.startsWith(GOOGLE_CLI_PREFIX)) {
+    if (linked === undefined) return failure("not-found", 404);
+    const body = await readJsonRecord(request);
+    if (body.kind === "too-large") return failure("too-large", 413);
+    if (body.kind === "invalid") return failure("invalid-request", 400);
+    return handleGoogleCliBrokerRoute(
+      url.pathname.slice(GOOGLE_CLI_PREFIX.length),
+      body.value,
+      linked.stores,
+      linked.googleCli,
+    );
+  }
+
   if (url.pathname.startsWith(AWS_CLI_PREFIX)) {
     if (linked === undefined) return failure("not-found", 404);
     const body = await readJsonRecord(request);
@@ -436,8 +512,74 @@ async function handleBrokerRequest(
     );
   }
 
+  if (url.pathname === "/v1/secret-stores/request-card-read") {
+    if (linked?.stores.commandLinkRevision === undefined)
+      return Response.json({ status: "unavailable" });
+    const body = await readJsonRecord(request);
+    if (body.kind !== "ok") return failure("invalid-request", 400);
+    try {
+      const reference = Schema.decodeUnknownSync(CredentialRequestReference)(body.value);
+      const revision = await linked.stores.commandLinkRevision();
+      if (revision === undefined) return Response.json({ status: "not-linked" });
+      const result = await linked.stores.read(reference.store, reference.reference);
+      // An unlink/relink during lookup must not revive the earlier consent.
+      if ((await linked.stores.commandLinkRevision()) !== revision)
+        return Response.json({ status: "changed" });
+      if (result.status === "read" && Buffer.byteLength(result.value) > 4096)
+        return Response.json({ status: "invalid-reference" });
+      return Response.json(result, { headers: { "cache-control": "no-store" } });
+    } catch {
+      return Response.json({ status: "unavailable" });
+    }
+  }
+  if (url.pathname === "/v1/secret-stores/command-use") {
+    if (linked?.stores.commandLinkRevision === undefined)
+      return Response.json({ status: "unavailable" });
+    const body = await readJsonRecord(request);
+    if (body.kind !== "ok") return failure("invalid-request", 400);
+    let command;
+    try {
+      command = decodeCommandCredentialHostRequest(body.value);
+    } catch {
+      return failure("invalid-request", 400);
+    }
+    const revision = await linked.stores.commandLinkRevision();
+    if (revision === undefined) return Response.json({ status: "not-linked" });
+    if (command.expectedRevision !== undefined && command.expectedRevision !== revision)
+      return Response.json({ status: "changed" });
+    for (const field of command.environment) {
+      const reference = `op://${field.vaultId}/${field.itemId}/${field.sectionId === undefined ? "" : `${field.sectionId}/`}${field.fieldId}`;
+      if (!linked.stores.isValidReference("onepassword", reference))
+        return Response.json({ status: "invalid" });
+    }
+    const final = await linked.stores.commandLinkRevision();
+    return Response.json(
+      final === revision ? { status: "authorized", revision } : { status: "changed" },
+    );
+  }
   if (url.pathname.startsWith(SECRET_STORE_PREFIX)) {
+    if (url.pathname === `${SECRET_STORE_PREFIX}unlink`) linked?.googleCli.forget();
     if (linked === undefined) return failure("not-found", 404);
+    if (url.pathname === "/v1/secret-stores/browser-fill") {
+      const body = await readJsonRecord(request);
+      if (body.kind === "too-large") return failure("too-large", 413);
+      if (body.kind === "invalid") return failure("invalid-request", 400);
+      let command: BrowserCredentialHostCommand;
+      try {
+        command = decodeBrowserCredentialHostCommand(body.value);
+      } catch {
+        return failure("invalid-request", 400);
+      }
+      if (linked.browserFill === undefined)
+        return Response.json({ status: "refused", reason: "unavailable" });
+      try {
+        return Response.json(
+          decodeBrowserCredentialHostResult(await linked.browserFill.execute(command)),
+        );
+      } catch {
+        return Response.json({ status: "refused", reason: "unavailable" });
+      }
+    }
     return handleSecretStoreRoute(
       url.pathname.slice(SECRET_STORE_PREFIX.length),
       request,
@@ -732,6 +874,34 @@ async function handleSecretStoreRoute(
   const value = body.value;
   const keys = Object.keys(value).sort().join(",");
   const store = value.store;
+
+  if (operation === "browser-metadata") {
+    if (
+      keys !== "accountId,itemId,store,vaultId" ||
+      store !== "onepassword" ||
+      typeof value.accountId !== "string" ||
+      typeof value.vaultId !== "string" ||
+      typeof value.itemId !== "string" ||
+      ![value.accountId, value.vaultId, value.itemId].every((id) => /^[a-z0-9]{26}$/i.test(id))
+    )
+      return failure("invalid-request", 400);
+    const result = await linked.browserMetadata?.({
+      store,
+      accountId: value.accountId,
+      vaultId: value.vaultId,
+      itemId: value.itemId,
+    });
+    if (result?.status !== "described")
+      return Response.json({ status: result?.status ?? "unavailable" });
+    return Response.json({
+      status: "described",
+      item: result.item,
+      title: result.title,
+      version: result.version,
+      websiteOrigins: result.websiteOrigins,
+      storeRevision: result.storeRevision,
+    });
+  }
 
   if (operation === "status") {
     if (keys !== "") return failure("invalid-request", 400);

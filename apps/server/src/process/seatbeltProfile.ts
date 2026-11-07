@@ -36,6 +36,7 @@ import {
   secretGuardSeatbeltRules,
 } from "./secretGuard";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
+import { pinnedRecipientAdmission } from "./pinnedRecipientAdmission";
 
 export class ProcessConfinementError extends Error {
   override readonly name = "ProcessConfinementError";
@@ -134,6 +135,8 @@ export interface SeatbeltProfileInput {
    * account home by name.
    */
   readonly ownAccountPaths?: ReadonlyArray<string>;
+  /** Fixed credential recipients never inherit a provider's own-account exemption. */
+  readonly ownAccountAccess?: "none";
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
@@ -154,6 +157,8 @@ export interface ConfinedProcessLaunch {
 export interface ProcessConfinementPrepareInput {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
+  /** Fixed host code rechecks this recipient after credential-tool authentication. */
+  readonly recipientAdmission?: Readonly<{ digest: string; identity: string }>;
   readonly boundRoot: string;
   /** See {@link SeatbeltProfileInput.extraBoundRoots}; Bubblewrap binds them as it binds the root. */
   readonly extraBoundRoots?: ReadonlyArray<string>;
@@ -180,6 +185,8 @@ export interface ProcessConfinementPrepareInput {
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.ownAccountPaths}. */
   readonly ownAccountPaths?: ReadonlyArray<string>;
+  /** See {@link SeatbeltProfileInput.ownAccountAccess}. */
+  readonly ownAccountAccess?: "none";
   readonly extraRules?: ReadonlyArray<string>;
   /**
    * Whether this launch is an interactive shell on a pseudo-terminal, and where
@@ -921,10 +928,14 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
  * temporary directory, which a person or the host chose for other reasons.
  */
 export function ownAccountRoots(
-  input: Pick<SeatbeltProfileInput, "boundRoot" | "temporaryDirectory" | "ownAccountPaths">,
+  input: Pick<
+    SeatbeltProfileInput,
+    "boundRoot" | "temporaryDirectory" | "ownAccountPaths" | "ownAccountAccess"
+  >,
   readRoots: ReadonlyArray<string>,
   additionalWriteRoots: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
+  if (input.ownAccountAccess === "none") return [];
   const shared = new Set([
     ...resolvedRootForms(input.boundRoot),
     ...resolvedRootForms(input.temporaryDirectory),
@@ -1030,7 +1041,11 @@ function prepareSeatbeltLaunch(
   }
   const interpreterSearchPath =
     input.interpreterSearchPath ?? options.interpreterSearchPath ?? process.env.PATH;
-  const executablePaths = confinedExecutableExecPaths(input.executable, interpreterSearchPath);
+  const admission = pinnedRecipientAdmission(input);
+  const executablePaths = uniqueAbsolutePaths([
+    ...confinedExecutableExecPaths(input.executable, interpreterSearchPath),
+    ...(admission === undefined ? [] : [admission.runtime, "/usr/bin/env"]),
+  ]);
   const readRoots = input.readRoots ?? [];
   const privateHomeAllowPaths = uniqueAbsolutePaths([
     ...(input.privateHomeAllowPaths ?? [
@@ -1072,6 +1087,7 @@ function prepareSeatbeltLaunch(
     ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
     privateHomeAllowPaths,
     ...(input.ownAccountPaths === undefined ? {} : { ownAccountPaths: input.ownAccountPaths }),
+    ...(input.ownAccountAccess === undefined ? {} : { ownAccountAccess: input.ownAccountAccess }),
     ...(input.extraRules === undefined && input.terminal === undefined
       ? {}
       : {
@@ -1088,8 +1104,8 @@ function prepareSeatbeltLaunch(
   return wrapCommandInSandboxExec({
     sandboxPath,
     profile,
-    executable: input.executable,
-    args: input.args,
+    executable: admission?.launch.command ?? input.executable,
+    args: admission?.launch.args ?? input.args,
   });
 }
 

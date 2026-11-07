@@ -3,7 +3,7 @@ import { createGithubCloneRouteHandler } from "./githubCloneRoutes";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 
 const store = {
-  authenticate: vi.fn(() => {
+  authenticateAuthority: vi.fn(() => {
     throw new Error("unauthorized");
   }),
 } as never;

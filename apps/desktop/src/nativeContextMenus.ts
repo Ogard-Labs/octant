@@ -17,7 +17,18 @@ function keys(value: Record<string, unknown>, expected: ReadonlyArray<string>): 
   return Object.keys(value).length === expected.length && expected.every((key) => key in value);
 }
 
-export function decodeNativeMenuRequest(value: unknown): NativeMenuRequest | undefined {
+/** What only Nightly's main may add to a popup it builds itself, never a renderer. */
+export interface NativeMenuPresentation {
+  /** A page select list may list more entries than a renderer menu. */
+  readonly maxEntries?: number;
+  /** macOS places this item under the point, as a select list does. */
+  readonly positioningItem?: number;
+}
+
+export function decodeNativeMenuRequest(
+  value: unknown,
+  maxEntries = 160,
+): NativeMenuRequest | undefined {
   if (
     !record(value) ||
     !keys(value, ["x", "y", "items", ...(value.placement === undefined ? [] : ["placement"])]) ||
@@ -33,10 +44,11 @@ export function decodeNativeMenuRequest(value: unknown): NativeMenuRequest | und
   let count = 0;
   const ids = new Set<string>();
   function entries(raw: unknown, depth: number): ReadonlyArray<NativeMenuEntry> | undefined {
-    if (!Array.isArray(raw) || raw.length === 0 || raw.length > 160 || depth > 4) return undefined;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > maxEntries || depth > 4)
+      return undefined;
     const result: NativeMenuEntry[] = [];
     for (const item of raw) {
-      if (++count > 160 || !record(item)) return undefined;
+      if (++count > maxEntries || !record(item)) return undefined;
       if (item.kind === "separator" && keys(item, ["kind"])) {
         result.push({ kind: "separator" });
         continue;
@@ -131,9 +143,18 @@ export function nativeMenuTemplate(
 
 const activeMenus = new WeakMap<BrowserWindow, () => void>();
 
-export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<NativeMenuOutcome> {
-  const request = decodeNativeMenuRequest(value);
-  if (request === undefined || window.isDestroyed()) return Promise.resolve({ kind: "refused" });
+export function popupNativeMenu(
+  window: BrowserWindow,
+  value: unknown,
+  signal?: AbortSignal,
+  presentation: NativeMenuPresentation = {},
+): Promise<NativeMenuOutcome> {
+  const request = decodeNativeMenuRequest(value, Math.min(presentation.maxEntries ?? 160, 1_024));
+  if (request === undefined || window.isDestroyed() || signal?.aborted)
+    return Promise.resolve({ kind: "refused" });
+  // BrowserWindow.webContents throws once the window's closed event fires.
+  // Keep the original emitter for teardown instead of consulting that getter.
+  const contents = window.webContents;
   activeMenus.get(window)?.();
   return new Promise((resolve) => {
     let outcome: NativeMenuOutcome = { kind: "dismissed" };
@@ -146,15 +167,23 @@ export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<
     const finish = () => {
       if (settled) return;
       settled = true;
-      activeMenus.delete(window);
+      if (activeMenus.get(window) === dismiss) activeMenus.delete(window);
+      signal?.removeEventListener("abort", dismiss);
       window.removeListener("closed", dismiss);
-      window.webContents.removeListener("did-start-navigation", navigated);
+      contents.removeListener("did-start-navigation", navigated);
       resolve(outcome);
     };
     const dismiss = () => {
       outcome = { kind: "dismissed" };
-      menu.closePopup(window);
-      finish();
+      try {
+        // This Menu instance belongs only to this popup. Omitting an already
+        // destroyed window closes its own menu without a dead native argument.
+        menu.closePopup(window.isDestroyed() ? undefined : window);
+      } catch {
+        outcome = { kind: "refused" };
+      } finally {
+        finish();
+      }
     };
     const navigated = (
       _event: Electron.Event,
@@ -164,15 +193,19 @@ export function popupNativeMenu(window: BrowserWindow, value: unknown): Promise<
     ) => {
       if (isMainFrame) dismiss();
     };
+    signal?.addEventListener("abort", dismiss, { once: true });
     activeMenus.set(window, dismiss);
     window.once("closed", dismiss);
-    window.webContents.on("did-start-navigation", navigated);
-    const zoom = window.webContents.getZoomFactor();
+    contents.on("did-start-navigation", navigated);
+    const zoom = contents.getZoomFactor();
     menu.popup({
       window,
       x: Math.round(request.x * zoom),
       y: Math.round(request.y * zoom),
       ...(request.placement === "above" ? { positioningItem: menu.items.length - 1 } : {}),
+      ...(presentation.positioningItem === undefined
+        ? {}
+        : { positioningItem: presentation.positioningItem }),
       // Electron's close callback can precede the selected item's click on some
       // platforms. Settle after that native dispatch has returned.
       callback: () => {

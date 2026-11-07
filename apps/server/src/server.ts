@@ -1,3 +1,39 @@
+import { createConversationInputRoutes } from "./attachments/conversationInputRoutes";
+import type { ConversationInputOwner } from "./attachments/conversationInputTransfer";
+import type {
+  ConversationInputQuery,
+  ConversationInputReceipt,
+} from "@octant/contracts/conversation-inputs";
+import { isToolAllowedByAllowlist } from "@octant/domain";
+import { commandCredentialPostureAllowed } from "@octant/domain/command-credential-policy";
+import { CommandCredentialBindings } from "./secretStores/commandCredentialBindings";
+import { commandCredentialContext } from "./secretStores/commandCredentialContext";
+import { commandCredentialRoutes } from "./secretStores/commandCredentialRoutes";
+import { savedCredentialCommands } from "./secretStores/commandCredentialTools";
+import {
+  createCommandCredentialExecution,
+  commandCredentialRecipientPin,
+} from "./secretStores/commandCredentialExecution";
+import {
+  readCommandCredentialHistory,
+  secretStoresJournal,
+} from "./secretStores/secretStoresJournal";
+import { makeSecretStoreBrokerClient } from "./secretStores/secretStoreBrokerClient";
+import {
+  decodeProjectId,
+  decodeWindowId,
+  decodeChatThreadId,
+  decodeWorkTurnRequestId,
+  decodeCodeThreadId,
+  decodeCodeOperationId,
+  MAX_CODE_OPERATION_REPLAY_LIMIT,
+} from "@octant/contracts";
+import { randomUUID } from "node:crypto";
+import { CredentialRequests } from "./credentials/credentialRequests";
+import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
+import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
+import { createCredentialTool } from "./credentials/credentialTool";
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import {
   startupFailedOutput,
   UNCLASSIFIED_STARTUP_FAILURE,
@@ -61,8 +97,10 @@ import { wireContinuation } from "./wiring/continuation";
 import { wireZen } from "./wiring/zen";
 import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
+import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
@@ -165,6 +203,7 @@ export function startOctantServer(
     const startedAt = Date.now();
 
     const {
+      conversationInputTransfer,
       browserAuthority,
       codeBoardEventStore,
       codeEvidence,
@@ -178,8 +217,10 @@ export function startOctantServer(
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
+      agentRunRequestOwner,
       agentRunPersistence,
       androidInputGrants,
+      automationEventStore,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -222,6 +263,7 @@ export function startOctantServer(
       threadAwaitsHarnessQuestion,
     } = wireHarnessState({
       agentRunParentAuthority,
+      agentRunRequestOwner,
       agentRunPersistence,
       persistence,
       workThreadProjection,
@@ -229,7 +271,6 @@ export function startOctantServer(
     const {
       agentRunAdmission,
       agentRunChildWorktree,
-      agentRunEligibleTargets,
       agentRunLiveConversations,
       agentRunOrchestration,
       agentRunProcessSupervisor,
@@ -243,7 +284,6 @@ export function startOctantServer(
       managedWorktreeReceipts,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
-      remoteDelegation,
       remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
@@ -285,8 +325,10 @@ export function startOctantServer(
       githubIntegrationIsEffective,
       githubIssueContextService,
       githubReadToolService,
+      linearRoutineEventSources,
       githubRoutes,
       integrationRoutes,
+      credentialOperations,
       linearIssueContextService,
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
@@ -299,6 +341,7 @@ export function startOctantServer(
       safeNetworkRoutes,
       safeNetworkStore,
     } = yield* wireIntegrations({
+      managedWorktreeReceipts,
       codeActiveTurns,
       externalContentIngestionStore,
       options,
@@ -369,6 +412,7 @@ export function startOctantServer(
       projectBindingRoutes,
       projectRootPort,
       projectService,
+      replyDetailRoutes,
       shellRoutes,
       shellService,
       shipRoutes,
@@ -403,6 +447,7 @@ export function startOctantServer(
     });
     const {
       agentPluginMcpSessionManager,
+      githubRoutineEventSources,
       chatAttachmentStore,
       chatDataDirectory,
       claudeResumeIdentityStore,
@@ -422,6 +467,9 @@ export function startOctantServer(
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      worktreePreparation,
+      childWorktreeSources,
+      resolveChildWorktree,
       managedWorktreeSourcePreview,
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
@@ -463,6 +511,11 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      readHarnessProcessReceipts,
+      beginGoogleCliChange,
+      recoverGoogleCliCommands,
+      credentialCommandProcess,
+      prepareCredentialCommand,
       personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
@@ -475,6 +528,7 @@ export function startOctantServer(
       shieldServerRoutes,
       shieldServerStore,
       serverProjectRoutes,
+      serverPreviewTunnels,
       nativeHarnessSessionRoutes,
       onHarnessPausedByPerson,
       onHarnessRecoveryLifted,
@@ -498,14 +552,9 @@ export function startOctantServer(
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
-      agentRunAdmission,
-      agentRunEligibleTargets,
-      agentRunOrchestration,
       agentRunParentAuthority,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
-      remoteDelegation,
-      agentRunPersistence,
       codeBoardEventStore,
       codeParentActiveTurn,
       codeSessionAuthority,
@@ -528,6 +577,7 @@ export function startOctantServer(
       workThreadProjection,
       workTurnProjection,
     });
+    yield* Effect.promise(recoverGoogleCliCommands);
     const {
       agentProfileRoutes,
       buildCodeService,
@@ -622,6 +672,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      browserCredentialUseService,
       browserAutomationService,
       browserExtensionService,
       browserFlowService,
@@ -630,12 +681,14 @@ export function startOctantServer(
       browserToolApprovalService,
       liveProjectBrowsers,
       productFeedbackRoutes,
+      nativeBrowserPresentationRoutes,
       productFeedbackService,
       projectBrowserService,
       resolveFeedbackThread,
       windowHoldsProject,
     } = yield* wireBrowser({
       browserAuthority,
+      codeSessionAuthority,
       machineChangeFeed,
       onWindowRevoked,
       browserCaptures,
@@ -677,6 +730,9 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      worktreePreparation,
+      conversationInputTransfer,
+      browserModelBindings,
       personMemoryAccess,
       serverConnection,
       serverProjectStore,
@@ -790,6 +846,11 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      workThreadProjection,
+      agentRunPersistence,
+      worktreePreparation,
+      childWorktreeSources,
+      resolveChildWorktree,
       browserAuthority,
       serverConnection,
       serverProjectStore,
@@ -828,6 +889,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      conversationInputTransfer,
       personMemoryAccess,
       workRequestRuntime,
       threadAwaitsHarnessApproval,
@@ -892,6 +954,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      conversationInputTransfer,
       personMemoryAccess,
       runtimeForgeChanges,
       nativeHarnessSessions,
@@ -908,6 +971,7 @@ export function startOctantServer(
       agentRunPersistence,
       agentsManagedToolsFor,
       authorizeWorkThreadForWindow,
+      automationEventStore,
       browserAuthority,
       browserCaptures,
       browserModelBindings,
@@ -956,6 +1020,7 @@ export function startOctantServer(
       routineProposalService,
       sideTaskFirstMessage,
       sideTasks,
+      siblingThreadsService,
       spendCeiling,
       threadMentionService,
       threadOutsideContentMarks,
@@ -1004,7 +1069,9 @@ export function startOctantServer(
       });
     const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
       wireContext({
+        browserCredentialUseService,
         agentMessageProjection,
+        browserModelBindings,
         browserAuthority,
         browserAutomationService,
         browserCaptures,
@@ -1015,8 +1082,10 @@ export function startOctantServer(
         capacityScheduler,
         chatService,
         codeOperationRuntime,
+        codeSessionAuthority,
         configuredDriverOptions,
         contextHarness,
+        hostShield,
         liveProjectBrowsers,
         nativeHarnessHooks,
         persistence,
@@ -1024,6 +1093,7 @@ export function startOctantServer(
         providerRuntimeRegistry,
         browserToolApprovalService,
         routeCodeService,
+        serverProjectStore,
         spendCeilingService,
         windowAuthorityStore,
         workThreadProjection,
@@ -1070,6 +1140,16 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      integrationEventSources: integrationEventSources([
+        githubRoutineEventSources,
+        linearRoutineEventSources,
+      ]),
+      automationEventStore,
+      codeEvidence,
+      codeBoardEventStore,
+      agentRunOrchestration,
+      externalContentIngestionStore,
+      readHarnessProcessReceipts,
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
@@ -1081,6 +1161,7 @@ export function startOctantServer(
       routineProposalService,
       windowAuthorityStore,
       workThreadProjection,
+      workTurnProjection,
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
@@ -1149,7 +1230,243 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const commandBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeSecretStoreBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const commandJournal = secretStoresJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      now: () => new Date().toISOString(),
+    });
+    const commands = new CommandCredentialBindings({
+      now: () => performance.now(),
+      uuid: randomUUID,
+      canConfigure: (window, project) => {
+        try {
+          return (
+            windowAuthorityStore.listWindowIds().some((id) => String(id) === window) &&
+            canAccessCodeProject(decodeWindowId(window), decodeProjectId(project))
+          );
+        } catch {
+          return false;
+        }
+      },
+      context: commandCredentialContext({
+        persistence,
+        read: async (window, thread) => (await codeService.read(window, thread)).thread,
+        roots,
+        session: codeSessionAuthority,
+        providerRevision: (thread) => {
+          const provider = persistence.readProviderInstance(thread.providerInstanceId);
+          return provider?.enabled === true && isCodeProviderModelAllowed(thread)
+            ? provider.version
+            : undefined;
+        },
+        windowCurrent: (window) =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(window)),
+        runtime: codeOperationRuntime,
+        canAccess: canAccessCodeProject,
+      }),
+      pin: commandCredentialRecipientPin(credentialCommandProcess),
+      execute: createCommandCredentialExecution({
+        process: credentialCommandProcess,
+        broker: commandBroker,
+        prepare: prepareCredentialCommand,
+      }),
+      record: (record) => commandJournal.record(record),
+      records: readCommandCredentialHistory(persistence.journal),
+    });
+    onWindowRevoked((window) => commands.windowRevoked(String(window)));
+    yield* Effect.addFinalizer(() => Effect.sync(() => commands.close()));
+    const commandRoutes = commandCredentialRoutes(
+      commands,
+      windowAuthorityStore,
+      options.allowedRendererHttpOrigin,
+    );
+    const credentialRequests = new CredentialRequests(
+      commandBroker?.requestCardRead === undefined
+        ? {}
+        : { resolveLinked: commandBroker.requestCardRead },
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    const credentialRequestRoutes = createCredentialRequestRoutes(
+      credentialRequests,
+      windowAuthorityStore,
+    );
+    // One credential tool, composed from two sides that each keep their own
+    // authority check: registered integration operations and saved commands.
+    contributeCodeTools(({ windowId, thread, readThread }) => {
+      const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
+      const windowCurrent = () =>
+        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId));
+      return createCredentialTool({
+        registered: registeredCredentialOperations({
+          service: credentialRequests,
+          windowId: String(windowId),
+          thread,
+          readThread,
+          operations: credentialOperations,
+          windowCurrent,
+        }),
+        saved: savedCredentialCommands({
+          service: commands,
+          windowId: String(windowId),
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+          current: () => {
+            try {
+              const current = readThread();
+              return (
+                current !== undefined &&
+                providerVersion !== undefined &&
+                persistence.readProviderInstance(current.providerInstanceId)?.enabled === true &&
+                persistence.readProviderInstance(current.providerInstanceId)?.version ===
+                  providerVersion &&
+                isCodeProviderModelAllowed(current) &&
+                windowCurrent() &&
+                isToolAllowedByAllowlist(
+                  current.toolConstraints ?? [],
+                  OCTANT_CREDENTIAL_TOOL.name,
+                ) &&
+                JSON.stringify([
+                  current.checkoutId,
+                  current.bindingRevisionId,
+                  current.providerInstanceId,
+                  current.modelId,
+                  current.profileId,
+                  current.toolConstraints,
+                ]) ===
+                  JSON.stringify([
+                    thread.checkoutId,
+                    thread.bindingRevisionId,
+                    thread.providerInstanceId,
+                    thread.modelId,
+                    thread.profileId,
+                    thread.toolConstraints,
+                  ]) &&
+                current.lifecycle === "active" &&
+                commandCredentialPostureAllowed(
+                  (
+                    codeOperationRuntime?.threadWithActiveTurnPosture?.(
+                      codeSessionAuthority.effectiveThread(windowId, current),
+                    ) ?? codeSessionAuthority.effectiveThread(windowId, current)
+                  ).executionPolicy,
+                ) &&
+                canAccessCodeProject(windowId, current.projectId) &&
+                String(current.projectId) === String(thread.projectId)
+              );
+            } catch {
+              return false;
+            }
+          },
+        }),
+      });
+    });
+    const admittedInputReceipt = async (
+      windowId: WindowId,
+      query: ConversationInputQuery,
+    ): Promise<
+      | { readonly owner: ConversationInputOwner; readonly receipt: ConversationInputReceipt }
+      | undefined
+    > => {
+      if (query.mode === "chat") {
+        const view = chatService.read(decodeChatThreadId(query.threadId));
+        const attempt = view.turns
+          .flatMap((turn) => turn.attempts)
+          .find((item) => String(item.id) === query.admissionId);
+        return attempt?.inputReceipt?.snapshotId !== query.snapshotId
+          ? undefined
+          : {
+              owner: {
+                mode: "chat",
+                threadId: query.threadId,
+                projectId:
+                  view.thread.projectId === undefined ? null : String(view.thread.projectId),
+              },
+              receipt: attempt.inputReceipt,
+            };
+      }
+      if (query.mode === "work") {
+        const result = await workTurnService.lookupFirstTurn(
+          windowId,
+          String(decodeWorkTurnRequestId(query.admissionId)),
+        );
+        if (
+          result.kind !== "accepted" ||
+          String(result.turn.threadId) !== query.threadId ||
+          result.turn.inputReceipt?.snapshotId !== query.snapshotId
+        )
+          return undefined;
+        return {
+          owner: {
+            mode: "work",
+            threadId: query.threadId,
+            projectId: String(result.turn.projectId),
+          },
+          receipt: result.turn.inputReceipt,
+        };
+      }
+      if (codeOperationRuntime === undefined) return undefined;
+      const threadId = decodeCodeThreadId(query.threadId);
+      const frames = await codeOperationRuntime.subscribe(
+        windowId,
+        threadId,
+        decodeCodeOperationId(query.admissionId),
+        0,
+        MAX_CODE_OPERATION_REPLAY_LIMIT,
+      );
+      const receipt = frames
+        .flatMap((frame) =>
+          (frame.event.kind === "context-handoff-attached" ||
+            frame.event.kind === "fork-context-delivered") &&
+          "inputReceipt" in frame.event &&
+          frame.event.inputReceipt !== undefined
+            ? [frame.event.inputReceipt]
+            : [],
+        )
+        .find((item) => item.snapshotId === query.snapshotId);
+      const thread = persistence.readCodeThread(threadId);
+      return receipt === undefined || thread === undefined
+        ? undefined
+        : {
+            owner: { mode: "code", threadId: query.threadId, projectId: String(thread.projectId) },
+            receipt,
+          };
+    };
+    const conversationInputRoutes = createConversationInputRoutes({
+      windowAuthorityStore,
+      read: async (windowId, query) => {
+        const admitted = await admittedInputReceipt(windowId, query);
+        if (admitted === undefined) return undefined;
+        const manifest = await conversationInputTransfer.read(admitted.owner, admitted.receipt);
+        const current = await admittedInputReceipt(windowId, query);
+        return current === undefined || JSON.stringify(current) !== JSON.stringify(admitted)
+          ? undefined
+          : manifest;
+      },
+    });
+    const cloudSessions = wireProviderCloudSessions({
+      persistence,
+      credentialResolver,
+      codeProjectAccess,
+      codeSessionAuthority,
+      windowAuthorityStore,
+      spendCeilingService,
+      configuredDriverOptions,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
+    yield* Effect.addFinalizer(() => Effect.promise(() => cloudSessions.service.close()));
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
+      conversationInputRoutes,
+      providerCloudSessionRoutes: cloudSessions.routes,
+      credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
       agentRunRouteDependencies,
@@ -1204,6 +1521,7 @@ export function startOctantServer(
       previewRoutes,
       safeNetworkRoutes,
       productFeedbackRoutes,
+      nativeBrowserPresentationRoutes,
       projectBindingRoutes,
       projectRoutes,
       personMemoryRoutes,
@@ -1214,6 +1532,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       replicaSyncStatusRoutes,
       scaffoldRoutes,
+      replyDetailRoutes,
       shellRoutes,
       shipRoutes,
       sidebarBackgroundRoutes,
@@ -1246,6 +1565,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      ownerBrowserControlService,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -1260,6 +1580,11 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      beginGoogleCliChange,
+      onSecretStoreLinkChange: () => commands.linkChanged(),
+      browserAutomationService,
+      codeService,
+      projectService,
       browserExtensionService,
       browserFlowService,
       browserProfileService,
@@ -1313,6 +1638,7 @@ export function startOctantServer(
       agentRunAdmission,
     });
 
+    yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
     // closes: an acquisition that lands after `closeAll()` would leave a warm
@@ -1386,6 +1712,7 @@ export function startOctantServer(
                 (await delegationAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??
+                (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
@@ -1484,10 +1811,23 @@ export function startOctantServer(
             category: "server-unavailable",
             message: "Octant could not bind the local server.",
           }),
-      }),
+      }).pipe(Effect.onError(() => Effect.promise(() => cloudSessions.service.close()))),
       (server) =>
         Effect.promise(async () => {
           let shutdownFailure: unknown;
+          try {
+            windowAuthorityStore.revokeNativeLeases();
+          } catch (error) {
+            shutdownFailure = error;
+          }
+          try {
+            const previewCleanup = await serverPreviewTunnels.close();
+            if (previewCleanup.status === "unsettled") {
+              shutdownFailure = new Error("Server Project preview cleanup could not be confirmed.");
+            }
+          } catch (error) {
+            shutdownFailure = error;
+          }
           let httpStop: void | Promise<void> = undefined;
           try {
             githubAuthenticationPort.close();
@@ -1550,6 +1890,13 @@ export function startOctantServer(
             httpStop = server.stop(true);
           } catch (error) {
             shutdownFailure = error;
+          }
+          try {
+            // Stop admission first, then request owned cloud cancellation while
+            // both the journal and provider transport are still available.
+            await cloudSessions.service.close();
+          } catch (error) {
+            shutdownFailure ??= error;
           }
           try {
             unsubscribeMachineChanges();

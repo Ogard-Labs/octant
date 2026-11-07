@@ -39,8 +39,28 @@ export async function saveBrowserProofScreenshots(input: {
   return await save.call(input.bridge, pictures);
 }
 
+/**
+ * The save control's words. A recording is saved with the screenshots (an
+ * animated PNG keeps `.png`), so the control names both once there is one.
+ */
+export function browserProofSaveLabel(captures: ReadonlyArray<BrowserCapture>): string {
+  return captures.some((capture) => capture.recording !== undefined)
+    ? "Save screenshots and recordings…"
+    : "Save screenshots…";
+}
+
 /** One sentence for the result of a save, or nothing when the person cancelled. */
-export function browserProofSaveMessage(result: BrowserProofSaveResult): string | undefined {
+export function browserProofSaveMessage(
+  result: BrowserProofSaveResult,
+  captures: ReadonlyArray<BrowserCapture> = [],
+): string | undefined {
   if (result.kind === "cancelled") return undefined;
-  return `Saved ${result.count} ${result.count === 1 ? "screenshot" : "screenshots"} to “${result.folderName}”.`;
+  const noun = captures.some((capture) => capture.recording !== undefined)
+    ? result.count === 1
+      ? "file"
+      : "files"
+    : result.count === 1
+      ? "screenshot"
+      : "screenshots";
+  return `Saved ${result.count} ${noun} to “${result.folderName}”.`;
 }

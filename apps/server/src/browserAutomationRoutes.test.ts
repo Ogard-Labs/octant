@@ -81,6 +81,194 @@ describe("browser automation routes", () => {
     });
   });
 
+  describe("task default profile transaction", () => {
+    const choice = { threadId, mode: "work", expectedVersion: 1, profile: "personal" };
+    const post = (path: string, value: unknown) =>
+      new Request(`http://127.0.0.1/api/browser/${path}`, {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify(value),
+      });
+    function fixture() {
+      let version = 1;
+      let model = "model-a";
+      let profile = "private" as "private" | "personal";
+      const save = vi.fn(async (_windowId, _command, commit) => {
+        commit(() => {
+          version += 1;
+          profile = "personal";
+        });
+        return { status: "saved" as const };
+      });
+      const bind = vi.fn();
+      const switchTaskProfile = vi.fn(async (input) => {
+        expect(input.isCurrent()).toBe(true);
+        expect(input.profile).toEqual({ kind: "personal" });
+        const saved = await input.save((persist: () => void) => {
+          persist();
+          return true;
+        });
+        if (saved.status === "refused") return saved;
+        input.bind(contextId, authority);
+        return { status: "changed", browser: snapshot };
+      });
+      const read = vi.fn(() => ({ version: version as never, modelId: model, profile }));
+      const handler = createBrowserAutomationRouteHandler({
+        service: { ...service, switchTaskProfile } as any,
+        taskProfiles: { read, save, bind },
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      return {
+        handler,
+        save,
+        bind,
+        read,
+        switchTaskProfile,
+        edit: () => {
+          version += 1;
+          model = "model-b";
+        },
+      };
+    }
+    it("reads only the task selection and saves through the shared switch boundary", async () => {
+      const f = fixture();
+      const current = await f.handler(post("task-profile/current", { threadId, mode: "work" }));
+      expect(await current?.json()).toMatchObject({ threadId, version: 1, profile: "private" });
+      const changed = await f.handler(post("task-profile", choice));
+      expect(changed?.status).toBe(200);
+      expect(await changed?.json()).toMatchObject({
+        selection: { profile: "personal", version: 2 },
+      });
+      expect(f.save).toHaveBeenCalledOnce();
+      expect(f.bind).toHaveBeenCalledWith(contextId, "model-a", authority);
+    });
+    it("detects a concurrent task/model edit while staging", async () => {
+      const f = fixture();
+      f.switchTaskProfile.mockImplementationOnce(async (input) => {
+        f.edit();
+        expect(input.isCurrent()).toBe(false);
+        return {
+          status: "refused",
+          failure: { category: "stale", message: "Task changed." },
+        } as any;
+      });
+      expect((await f.handler(post("task-profile", choice)))?.status).toBe(409);
+      expect(f.save).not.toHaveBeenCalled();
+      expect(f.bind).not.toHaveBeenCalled();
+    });
+    it("refuses stale versions and strict extra fields before creating any context", async () => {
+      const f = fixture();
+      expect(
+        (await f.handler(post("task-profile", { ...choice, expectedVersion: 2 })))?.status,
+      ).toBe(409);
+      expect((await f.handler(post("task-profile", { ...choice, cookies: "never" })))?.status).toBe(
+        400,
+      );
+      expect(f.switchTaskProfile).not.toHaveBeenCalled();
+    });
+    it("refuses paired devices before reading the stored selection", async () => {
+      const f = fixture();
+      const request = post("task-profile/current", { threadId, mode: "work" });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          hostId: "local" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+        }),
+        scopeId: windowId,
+      } as any);
+      expect((await f.handler(request))?.status).toBe(403);
+      expect(f.read).not.toHaveBeenCalled();
+    });
+  });
+
+  it("keeps login-permission commands local, authenticated and strictly decoded", async () => {
+    const execute = vi.fn(async () => ({ kind: "browser-credential-grants" as const, grants: [] }));
+    const login = createBrowserAutomationRouteHandler({
+      service: {
+        create: async () => snapshot,
+        act: async () => snapshot,
+        cancel: async () => snapshot,
+        stop: async () => snapshot,
+        inspect: () => snapshot,
+        inspectThread: () => snapshot,
+        releaseThread: async () => snapshot,
+      },
+      credentialUse: { execute },
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 4096,
+    });
+    const payload = { kind: "list-browser-credential-grants", contextId, threadId, mode: "work" };
+    const request = (host: string, authenticated = true, data: object = payload) =>
+      new Request(`http://${host}/api/browser/credential-use`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(authenticated ? { "x-octant-window-capability": capability } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+    expect((await login(request("127.0.0.1", false)))?.status).toBe(401);
+    expect((await login(request("outside.example")))?.status).toBe(403);
+    const paired = request("127.0.0.1");
+    bindPrincipalRouteContext(paired, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000001" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+      }),
+      scopeId: windowId,
+    });
+    expect((await login(paired))?.status).toBe(403);
+    expect(
+      (await login(request("127.0.0.1", true, { ...payload, topOrigin: "https://forged.example" })))
+        ?.status,
+    ).toBe(400);
+    expect(
+      (
+        await login(
+          request("127.0.0.1", true, {
+            kind: "confirm-browser-credential-fill",
+            contextId,
+            threadId,
+            mode: "work",
+            planId: contextId,
+            password: "fixture-private",
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (
+        await login(
+          request("127.0.0.1", true, {
+            kind: "stage-browser-credential-fill",
+            contextId,
+            threadId,
+            mode: "work",
+            planId: contextId,
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(execute).not.toHaveBeenCalled();
+    const response = await login(request("127.0.0.1"));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ kind: "browser-credential-grants", grants: [] });
+    expect(execute).toHaveBeenCalledWith(windowId, payload, expect.any(AbortSignal));
+  });
+
   it("rejects an unauthenticated browser scope request", async () => {
     const response = await handler(
       new Request("http://127.0.0.1/api/browser/scope", {
@@ -343,6 +531,43 @@ describe("browser automation routes", () => {
       expect(response?.status).toBe(403);
     }
     expect(service.act).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a paired device that asks to record the host's page", async () => {
+    for (const kind of ["record-start", "record-stop"]) {
+      const request = new Request("http://127.0.0.1/api/browser/actions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          actionId: "70000000-0000-4000-8000-000000000001",
+          contextId,
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          kind,
+        }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+        }),
+        scopeId: windowId,
+      });
+      const response = await handler(request);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({
+        message: "Recording the host's browser is not a remote action.",
+      });
+    }
+    expect(service.act).not.toHaveBeenCalled();
   });
 
   describe("taking the page over from the agent", () => {

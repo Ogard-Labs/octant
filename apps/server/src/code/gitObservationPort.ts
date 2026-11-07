@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -125,6 +126,7 @@ function whitespaceArguments(options: GitDiffOptions): readonly string[] {
 interface CommandResult {
   readonly exitCode: number;
   readonly stdout: string;
+  readonly utf8Valid?: boolean;
 }
 
 export interface GitObservationDependencies {
@@ -145,7 +147,7 @@ const liveDependencies: GitObservationDependencies = {
         file,
         [...args],
         {
-          encoding: "utf8",
+          encoding: "buffer",
           env: environment,
           shell: false,
           signal,
@@ -154,7 +156,8 @@ const liveDependencies: GitObservationDependencies = {
         (error, stdout) => {
           resolve({
             exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
-            stdout,
+            stdout: stdout.toString("utf8"),
+            utf8Valid: isUtf8(stdout),
           });
         },
       );
@@ -218,7 +221,7 @@ export class GitObservationPort {
   async observe(
     root: string,
     signal?: AbortSignal,
-    options: GitDiffOptions = {},
+    options: GitDiffOptions & { readonly untrackedFiles?: "normal" | "all" } = {},
   ): Promise<GitObservationResult> {
     if (!Number.isSafeInteger(this.#maxDiffBytes) || this.#maxDiffBytes < 1)
       return { status: "failed" };
@@ -264,7 +267,7 @@ export class GitObservationPort {
         "status",
         "--porcelain=v1",
         "-z",
-        "--untracked-files=normal",
+        `--untracked-files=${options.untrackedFiles ?? "normal"}`,
       ]);
       if (statusResult.exitCode !== 0) return { status: "failed" };
       const statusEntries = parseStatus(statusResult.stdout);
@@ -400,11 +403,16 @@ export class GitObservationPort {
       readonly checkoutRoot: string;
       readonly scope:
         | { readonly kind: "staged" }
+        | { readonly kind: "unstaged" }
         | { readonly kind: "branch"; readonly baseRef: string };
       readonly ignoreWhitespace?: boolean;
+      /** Exact native bytes/header identities for hunk mutation; never whitespace-normalized. */
+      readonly canonicalHunks?: boolean;
     },
     signal?: AbortSignal,
   ): Promise<GitScopedDiffResult> {
+    if (input.canonicalHunks === true && input.ignoreWhitespace === true)
+      return { status: "unavailable" };
     if (!Number.isSafeInteger(this.#maxDiffBytes) || this.#maxDiffBytes < 1)
       return { status: "unavailable" };
     let checkoutRoot: string;
@@ -417,23 +425,42 @@ export class GitObservationPort {
     // happened on the base — a plain two-dot diff would describe other people's
     // work as this pull request's.
     const revisions =
-      input.scope.kind === "staged" ? ["--cached"] : [`${input.scope.baseRef}...HEAD`];
+      input.scope.kind === "staged"
+        ? ["--cached"]
+        : input.scope.kind === "unstaged"
+          ? []
+          : [`${input.scope.baseRef}...HEAD`];
     const run = (args: readonly string[]) => this.#run(["-C", checkoutRoot, ...args], signal);
     try {
       const base = [
+        ...(input.canonicalHunks === true ? ["-c", "core.quotePath=false"] : []),
         "diff",
         "--no-ext-diff",
         "--no-color",
+        ...(input.canonicalHunks === true
+          ? ["--no-textconv", "--full-index", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/"]
+          : []),
         ...whitespaceArguments(input),
         ...revisions,
       ];
-      const names = await run([...base, "--name-only", "--"]);
+      const names = await run([
+        ...base,
+        "--name-only",
+        ...(input.canonicalHunks === true ? ["-z"] : []),
+        "--",
+      ]);
       if (names.exitCode !== 0) return { status: "unavailable" };
       const text = await run([...base, "--"]);
-      if (text.exitCode !== 0) return { status: "unavailable" };
+      if (
+        text.exitCode !== 0 ||
+        (input.canonicalHunks === true && (text.utf8Valid !== true || names.utf8Valid !== true))
+      )
+        return { status: "unavailable" };
       return {
         status: "ready",
-        paths: names.stdout.split("\n").filter((path) => path.length > 0),
+        paths: names.stdout
+          .split(input.canonicalHunks === true ? "\0" : "\n")
+          .filter((path) => path.length > 0),
         diff: boundUtf8(text.stdout, this.#maxDiffBytes),
       };
     } catch {

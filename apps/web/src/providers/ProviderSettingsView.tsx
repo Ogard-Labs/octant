@@ -51,6 +51,7 @@ import type { LocateBinaryOutcome } from "./useDiscoveryController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderSettingsViewProps {
+  readonly providerCloudSessionClient?: import("@octant/client-runtime/provider-cloud-session-client").ProviderCloudSessionClient;
   readonly status: "loading" | "ready" | "disconnected";
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly usageLimitsClient?: ProviderUsageLimitsClient;

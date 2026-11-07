@@ -145,10 +145,11 @@ roughly how often it is open. The ring is part of the address rather than a
 parameter, so the path itself says whether you follow stable or preview. That
 is more than an IP alone.
 
-Automatic checking is a switch in **Settings → General → Updates**. Off
-means no request is made at all. The desktop process starts with checking
-off until the saved preference loads; a store that never recorded the
-setting decodes to on. When it is on, the first check waits ten minutes
+Automatic checking is a switch in **Settings → General → Updates**, off by
+default. Off means no request is made at all. The desktop process starts
+with checking off until the saved preference loads, and a store that never
+recorded the setting decodes to off as well — an unrecorded preference never
+turns into a request. When you turn it on, the first check waits ten minutes
 after launch, then repeats once a day. You can still check by hand when
 automatic checking is off.
 
@@ -221,8 +222,12 @@ downloads the page. Take a page down on claude.ai. See
 [Claude artifacts](/advanced/providers#claude-artifacts).
 
 A Canvas published as a public link goes to the public Canvas share service.
-Octant operates that service, at `https://canvas.octant.sh` unless you enter
-another URL in **Settings › Permissions › Public links**, which is off by default.
+The service is operated by **Ogard Labs** (organisation number 996 198 510,
+Stavanger, Norway), at `https://canvas.octant.sh` unless you enter another URL
+in **Settings › Permissions › Public links**, which is off by default. It is
+hosted in **Norway (EEA)** on Ogard Labs' own infrastructure (Gigahost AS),
+with encrypted offsite backups in Finland (EEA); no data leaves the EEA for
+this service.
 Turning it on sends nothing; the first request is your first publish, after you
 approve a card that shows the exact content, the audience (anyone with the
 link), the expiry, and an optional password. The service receives the Canvas's
@@ -238,10 +243,9 @@ stays for 90 days. The service writes no IP address or user-agent logs and
 keeps an aggregate view count. Anyone can report a link, without giving their
 address. See [Share a Canvas with a public link](/guide/public-links).
 
-::: warning Draft
-Before the service launches the maintainer must fill in: the abuse contact
-address, the hosting region, and the final legal wording of this disclosure.
-:::
+The abuse contact shown on link pages is `hello@octant.sh`. The operator can
+take a link down; a removed link answers "removed". Reports are stored without
+the reporter's address.:
 
 ### Provider update checks
 

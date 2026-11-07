@@ -1,3 +1,4 @@
+import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -54,6 +55,43 @@ const defaultProps = {
 };
 
 describe("CodeComposerAdapter", () => {
+  it("keeps a reviewed proposal exact and names the create-and-start decision", async () => {
+    const onCreateThread = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        fixedPrompt="Fix only the described parser issue."
+        createLabel="Approve and start described task"
+        onCreateThread={onCreateThread}
+      />,
+    );
+    const prompt = screen.getByRole("textbox", { name: "First message" });
+    expect(prompt).toHaveAttribute("readonly");
+    await userEvent.type(prompt, " and something else");
+    expect(prompt).toHaveValue("Fix only the described parser issue.");
+    await userEvent.click(screen.getByRole("button", { name: "Approve and start described task" }));
+    await waitFor(() =>
+      expect(onCreateThread).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: "Fix only the described parser issue." }),
+      ),
+    );
+  });
+
+  it("keeps provider controls available while an unavailable provider prevents approval", () => {
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        fixedPrompt="Reviewed task"
+        createLabel="Approve and start described task"
+        createDisabledReason="Choose an available provider and model before approving this task."
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Approve and start described task" })).toBeDisabled();
+    expect(
+      screen.getByText("Choose an available provider and model before approving this task."),
+    ).toBeVisible();
+  });
+
   it("submits the chosen reasoning level with a new Code thread", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
@@ -245,6 +283,17 @@ describe("CodeComposerAdapter", () => {
       ([value]) => value.composerId,
     );
     expect(new Set(composerIds).size).toBe(2);
+  });
+
+  it("shows a caller's decision heading in place of the start screen's question", () => {
+    const { rerender } = render(<CodeComposerAdapter {...defaultProps} />);
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    rerender(<CodeComposerAdapter {...defaultProps} heading={<h2>Review the proposal</h2>} />);
+    expect(screen.getByRole("heading", { name: "Review the proposal" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "What are we building today?" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/just start typing/)).not.toBeInTheDocument();
   });
 
   it("asks in the same plain words as every start screen rather than opening on a tip", () => {
@@ -1248,4 +1297,11 @@ describe("CodeComposerAdapter interactions", () => {
       expect(onCreateThread).not.toHaveBeenCalled();
     });
   });
+});
+
+it("refuses a native folder as an attachment when the desktop extraction bridge is unavailable", async () => {
+  render(<CodeComposerAdapter {...defaultProps} />);
+  const input = screen.getByRole("textbox", { name: "First message" });
+  fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
+  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
 });

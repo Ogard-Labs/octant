@@ -1,3 +1,8 @@
+import type {
+  HumanBrowserRequest,
+  HumanBrowserResult,
+} from "@octant/contracts/browser-presentation";
+import type { WindowId } from "@octant/contracts/shell";
 import type { BrowserContextId } from "@octant/contracts/browser-automation";
 import { BrowserProfileUnavailableError, type BrowserRuntimePort } from "./browserRuntimePort";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
@@ -13,6 +18,20 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
   }) {
     this.#native = options.native;
     this.#headless = options.headless;
+  }
+
+  async humanPresentation(
+    request: HumanBrowserRequest,
+    windowId: WindowId,
+    signal: AbortSignal,
+  ): Promise<HumanBrowserResult> {
+    const backend = this.#backend.get(request.contextId);
+    if (backend !== this.#native || backend.humanPresentation === undefined || signal.aborted)
+      return { status: "refused" };
+    const result = await backend.humanPresentation(request, windowId, signal);
+    return !signal.aborted && this.#backend.get(request.contextId) === backend
+      ? result
+      : { status: "refused" };
   }
 
   async available(): Promise<boolean> {
@@ -63,6 +82,42 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
       return presentation;
     }
   }
+
+  ownerControl: NonNullable<BrowserRuntimePort["ownerControl"]> = async (command, signal) => {
+    const owner = this.#owned(command.contextId);
+    if (owner !== this.#native || owner.ownerControl === undefined) return { status: "refused" };
+    return owner.ownerControl(command, signal);
+  };
+
+  runPageScript: NonNullable<BrowserRuntimePort["runPageScript"]> = async (command, signal) => {
+    const owner = this.#owned(command.contextId);
+    if (owner !== this.#native || owner.runPageScript === undefined)
+      return { status: "refused", effect: "none", reason: "unavailable" };
+    return owner.runPageScript(command, signal);
+  };
+
+  prepareCredentialFill: NonNullable<BrowserRuntimePort["prepareCredentialFill"]> = async (
+    ...args
+  ) =>
+    this.#owned(args[0]).prepareCredentialFill?.(...args) ?? {
+      status: "refused",
+      reason: "unavailable",
+    };
+  validateCredentialFill: NonNullable<BrowserRuntimePort["validateCredentialFill"]> = async (
+    ...args
+  ) => this.#owned(args[0]).validateCredentialFill?.(...args) ?? false;
+  cancelCredentialFill: NonNullable<BrowserRuntimePort["cancelCredentialFill"]> = async (
+    ...args
+  ) => {
+    return (
+      (await this.#owned(args[0]).cancelCredentialFill?.(...args)) ?? {
+        status: "cancelled",
+        effect: "none",
+      }
+    );
+  };
+  submitCredentialFill: NonNullable<BrowserRuntimePort["submitCredentialFill"]> = async (...args) =>
+    this.#owned(args[0]).submitCredentialFill?.(...args) ?? { status: "failed", effect: "none" };
 
   inspectTarget(...args: Parameters<BrowserRuntimePort["inspectTarget"]>) {
     return this.#owned(args[0]).inspectTarget(...args);

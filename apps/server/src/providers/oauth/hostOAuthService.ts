@@ -45,6 +45,12 @@ export interface HostOAuthService {
     /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
     readonly credentialRef?: string;
   }) => Promise<HostOAuthSignInState>;
+  readonly cancel: (input: {
+    readonly principalKind: PrincipalKind;
+    readonly actorId: string;
+    readonly attemptId: string;
+    readonly descriptor: HostOAuthDescriptor;
+  }) => Promise<{ readonly kind: "cancelled" } | { readonly kind: "unavailable" } | Refused>;
   readonly status: (input: {
     readonly principalKind: PrincipalKind;
     readonly attemptId: string;
@@ -296,6 +302,26 @@ export function createHostOAuthService(options: {
       }
       return noteState(input.descriptor, state);
     },
+    cancel: async (input) => {
+      const decision = authorize({
+        principalKind: input.principalKind,
+        action: "provider.oauth.begin",
+      });
+      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      if (options.broker.cancel === undefined) return { kind: "unavailable" };
+      try {
+        const result = await options.broker.cancel({
+          actorId: input.actorId,
+          attemptId: input.attemptId,
+          descriptorId: input.descriptor.descriptorId,
+        });
+        return isRecord(result) && result.kind === "cancelled"
+          ? { kind: "cancelled" }
+          : { kind: "unavailable" };
+      } catch {
+        return { kind: "unavailable" };
+      }
+    },
     status: async (input) => {
       const decision = authorize({
         principalKind: input.principalKind,
@@ -303,10 +329,19 @@ export function createHostOAuthService(options: {
       });
       if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
       let raw: unknown;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        raw = await options.broker.status(input.attemptId);
+        // A failed status read is not a terminal broker attempt or a reason to block cancellation.
+        raw = await Promise.race([
+          options.broker.status(input.attemptId),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("Sign-in status timed out.")), 10_000);
+          }),
+        ]);
       } catch {
         return refuse(input.descriptor, "unavailable", input.attemptId);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
       }
       const state = decodeState(raw);
       if (state === undefined) return refuse(input.descriptor, "unavailable", input.attemptId);
@@ -371,6 +406,15 @@ export function createHostOAuthService(options: {
           } else {
             return { kind: "unavailable" };
           }
+        } else if (
+          input.descriptor.dialect === "mcp-authorization" ||
+          input.descriptor.dialect === "slack-mcp-user" ||
+          input.descriptor.dialect === "github-mcp-oauth-app"
+        ) {
+          // The runtime joins an in-flight refresh/write before deleting this MCP grant.
+          const retired = await options.broker.revoke(input.credentialRef);
+          if (!isRecord(retired) || retired.kind !== "revoked") return { kind: "unavailable" };
+          result = { kind: "signed-out" };
         } else {
           await options.broker.forget(input.credentialRef);
           result = { kind: "signed-out" };
@@ -442,7 +486,20 @@ function wireDescriptor(
       : { extAgentHostId: descriptor.extAgentHostId }),
     ...(descriptor.agentNameHint === undefined ? {} : { agentNameHint: descriptor.agentNameHint }),
     ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
+    ...(descriptor.mcpTransportUrl === undefined
+      ? {}
+      : { mcpTransportUrl: descriptor.mcpTransportUrl }),
+    ...(descriptor.mcpIssuer === undefined ? {} : { mcpIssuer: descriptor.mcpIssuer }),
+    ...(descriptor.mcpPermissionProfile === undefined
+      ? {}
+      : { mcpPermissionProfile: descriptor.mcpPermissionProfile }),
+    ...(descriptor.redirectHostname === undefined
+      ? {}
+      : { redirectHostname: descriptor.redirectHostname }),
     ...(descriptor.redirectPort === undefined ? {} : { redirectPort: descriptor.redirectPort }),
+    ...(descriptor.clientAuthentication === undefined
+      ? {}
+      : { clientAuthentication: descriptor.clientAuthentication }),
     ...(descriptor.tenantId === undefined ? {} : { tenantId: descriptor.tenantId }),
     ...(descriptor.audience === undefined ? {} : { audience: descriptor.audience }),
     ...(descriptor.endpointOrigin === undefined

@@ -86,6 +86,59 @@ describe("evaluateAndroidEmulatorRequest", () => {
     ).toMatchObject({ reason: "approval-required" });
   });
 
+  it("describes the screen and reads an app's log under Plan, and only on a booted emulator", () => {
+    const plan = { ...scope, executionPolicy: "plan" as const, approvalValid: false };
+    const read = {
+      ...tap,
+      point: undefined,
+      requestedBy: undefined,
+      approval: { kind: "not-required" as const },
+    };
+    const describeUi = { ...read, kind: "describe-ui" as const };
+    const logs = { ...read, kind: "logs" as const, packageName: "com.example.app" };
+    expect(evaluateAndroidEmulatorRequest(describeUi, plan, [booted], sdk)).toEqual({
+      kind: "allowed",
+    });
+    expect(evaluateAndroidEmulatorRequest(logs, plan, [booted], sdk)).toEqual({ kind: "allowed" });
+    const shutDown = { ...booted, state: "shutdown" as const };
+    expect(evaluateAndroidEmulatorRequest(describeUi, plan, [shutDown], sdk)).toMatchObject({
+      reason: "destination-not-booted",
+    });
+    expect(evaluateAndroidEmulatorRequest(logs, plan, [shutDown], sdk)).toMatchObject({
+      reason: "destination-not-booted",
+    });
+  });
+
+  it("asks before a tap on a named element exactly as before a tap at a point", () => {
+    const byTarget = {
+      ...tap,
+      point: undefined,
+      target: "com.example:id/sign_in",
+      approval: { kind: "not-required" as const },
+    };
+    expect(evaluateAndroidEmulatorRequest(byTarget, scope, [booted], sdk)).toMatchObject({
+      reason: "approval-required",
+    });
+    expect(
+      evaluateAndroidEmulatorRequest(byTarget, { ...scope, inputGranted: true }, [booted], sdk),
+    ).toEqual({ kind: "allowed" });
+    expect(
+      evaluateAndroidEmulatorRequest(
+        byTarget,
+        { ...scope, executionPolicy: "plan" },
+        [booted],
+        sdk,
+      ),
+    ).toMatchObject({ reason: "read-only-policy" });
+  });
+
+  it("names the element a tap was aimed at alongside the point it landed on", () => {
+    expect(
+      redactedAndroidInputDiagnostic({ kind: "tap", target: "Sign in", point: { x: 5, y: 9 } })
+        .message,
+    ).toBe("tap completed (target=Sign in, x=5, y=9)");
+  });
+
   it("redacts typed characters from durable diagnostic copy", () => {
     expect(redactedAndroidInputDiagnostic({ kind: "type-text", text: "secret" }).message).toBe(
       "type-text completed (length=6; redacted); the emulator does not report what the field received, so check the screen",

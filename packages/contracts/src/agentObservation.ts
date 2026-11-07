@@ -45,6 +45,7 @@ export const AgentRunResultPacket = Schema.Struct({
     ),
     truncated: Schema.Boolean,
   }).annotations(strict),
+  workingTime: AgentRunResultEvidence.fields.workingTime,
   files: AgentRunResultEvidence.fields.files,
   checks: AgentRunResultEvidence.fields.checks,
   review: Schema.optional(AgentRunReviewMetadata),

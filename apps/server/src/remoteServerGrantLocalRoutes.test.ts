@@ -15,11 +15,13 @@ const body = JSON.stringify({
 });
 
 function store(): WindowAuthorityStore {
+  const authenticate = (capability: string): WindowId => {
+    if (capability !== "capability") throw new WindowAuthorityError("unauthorized", "No window.");
+    return windowId;
+  };
   return {
-    authenticate: (capability: string): WindowId => {
-      if (capability !== "capability") throw new WindowAuthorityError("unauthorized", "No window.");
-      return windowId;
-    },
+    authenticate,
+    authenticateAuthority: (capability: string) => ({ windowId: authenticate(capability) }),
   } as unknown as WindowAuthorityStore;
 }
 

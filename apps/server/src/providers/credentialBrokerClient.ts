@@ -1,5 +1,9 @@
 import type { CredentialPurgeAttempt } from "@octant/domain";
-import { credentialStoreFailureCauseOf, type KeyRejection } from "@octant/host-runtime";
+import {
+  credentialStoreFailureCauseOf,
+  type CredentialStoreFailureCause,
+  type KeyRejection,
+} from "@octant/host-runtime";
 import { noteIssuedSecret } from "../process/secretRedaction";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -444,3 +448,51 @@ const LINKED_SECRET_MESSAGES: Readonly<Record<string, string>> = {
   "linked-item-missing":
     "The item this provider's key points at was not found in the linked secret store.",
 };
+
+/** Whether a provider's stored key is a pointer into a linked secret store. */
+export type ProviderKeyReference =
+  | { readonly status: "linked" | "none" }
+  | { readonly status: "unavailable"; readonly cause?: CredentialStoreFailureCause };
+
+/**
+ * Reads only the kind of a provider's stored key, never the key or the
+ * linked item. A broker started without linked secret stores answers its
+ * secret-store routes 404, which means nothing can be linked; a store
+ * failure keeps the keyring's own cause so the person is told what to fix.
+ */
+export function makeProviderKeyReferenceReader(
+  options: CredentialBrokerClientOptions,
+): (providerInstanceId: string) => Promise<ProviderKeyReference> {
+  const fetch = options.fetch ?? globalThis.fetch;
+  return async (providerInstanceId) => {
+    if (!UUID_PATTERN.test(providerInstanceId)) return { status: "unavailable" };
+    let response: Response;
+    let value: unknown;
+    try {
+      response = await fetch(new URL("/v1/secret-stores/reference", options.url).toString(), {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-credential-broker-token": options.token,
+        },
+        body: JSON.stringify({ namespace: "provider", id: providerInstanceId }),
+      });
+      value = await response.json();
+    } catch {
+      return { status: "unavailable" };
+    }
+    const record =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    if (response.ok) {
+      return record.status === "linked" || record.status === "none"
+        ? { status: record.status }
+        : { status: "unavailable" };
+    }
+    if (response.status === 404 && record.error === "not-found") return { status: "none" };
+    const cause = credentialStoreFailureCauseOf(record.cause);
+    return cause === undefined ? { status: "unavailable" } : { status: "unavailable", cause };
+  };
+}

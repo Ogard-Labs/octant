@@ -1,3 +1,4 @@
+import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
   refusesTerminalSessionImport,
@@ -179,11 +180,12 @@ import {
 import { Schema } from "effect";
 import type { CodeDebugService } from "./code/codeDebugService";
 import type { CodeLanguageService } from "./code/codeLanguageService";
-import type { CodeService } from "./code/codeService";
+import type { CodeService, CodeServiceExecutionContext } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
+import { resolveLocalWindowPrincipal, WINDOW_CAPABILITY_HEADER } from "./clientPrincipal";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -250,6 +252,7 @@ export interface CodeFileWatchInput {
   readonly checkoutId: typeof CodeCheckoutId.Type;
   /** An extra folder of the Project, by absolute path, in place of the checkout. */
   readonly folder?: CodeRelativePath | undefined;
+  readonly folders?: ReadonlyArray<CodeRelativePath | ".">;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -288,6 +291,7 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     command: CodeCommand,
     signal?: AbortSignal,
+    executionContext?: CodeServiceExecutionContext,
   ) => Promise<CodeCommandResult> | CodeCommandResult;
   readonly executeOperation?: (
     authenticatedWindowId: WindowId,
@@ -430,10 +434,12 @@ export interface CodeRouteService {
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     contentId: string,
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeContentRead> | CodeContentRead;
   readonly readOperationContents?: (
     authenticatedWindowId: WindowId,
     input: CodeEvidenceBatchRequest,
+    admissionCurrent?: () => boolean,
   ) => Promise<CodeEvidenceBatchResponse> | CodeEvidenceBatchResponse;
   readonly saveFile: (
     authenticatedWindowId: WindowId,
@@ -612,6 +618,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // route directly.
     let operationInitiator: "user" | "agent";
     let callerKind: "local-window" | "remote-device";
+    let liveAdmissionCurrent: () => boolean;
+    let principalAbortSignal: AbortSignal | undefined;
+    const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
     let admissionCurrent: () => boolean;
     try {
       if (url.searchParams.has("windowId")) {
@@ -624,7 +633,24 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       });
       authenticatedWindowId = principalContext.scopeId;
       callerKind = principalContext.principal.kind;
+      principalAbortSignal = principalContext.abortSignal;
       operationInitiator = callerKind === "local-window" ? "user" : "agent";
+      const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
+      // Review and selected-hunk requests recheck that this same window still
+      // holds the authority it presented, at each awaited step of the request.
+      liveAdmissionCurrent = () => {
+        if (request.signal.aborted || principalContext.abortSignal?.aborted === true) return false;
+        if (principalContext.principal.kind === "remote-device") return true;
+        try {
+          return (
+            String(dependencies.windowAuthorityStore.authenticate(capability, now())) ===
+              String(principalContext.scopeId) &&
+            String(principalContext.principal.windowId) === String(principalContext.scopeId)
+          );
+        } catch {
+          return false;
+        }
+      };
       admissionCurrent = retainRouteAdmissionCurrent({
         request,
         context: principalContext,
@@ -711,6 +737,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          if (command?.kind === "change-code-thread-browser-profile") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Choose the default Browser profile through this task’s Browser control.",
+              },
+              403,
+              origin,
+            );
+          }
           // Full access no longer asks for a native confirmation, so the
           // confirmation no longer keeps a paired device from reaching it.
           // A device may lower a thread; raising one to Full access is chosen
@@ -775,7 +811,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
-              ...(operation.kind === "start-provider-turn" ? { admissionCurrent } : {}),
+              ...(operation.kind === "start-provider-turn" ||
+              requiresLiveCodeReviewAuthority(operation) ||
+              [
+                "prepare-git-hunks",
+                "stage-git-hunks",
+                "unstage-git-hunks",
+                "reverse-git-hunks",
+              ].includes(operation.kind)
+                ? { admissionCurrent: () => liveAdmissionCurrent() && admissionCurrent() }
+                : {}),
             }),
           );
           if (operationResult.operationId !== operation.operationId) {
@@ -961,12 +1006,55 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
           }
           const caller = { scopeId: authenticatedWindowId, principal: callerKind };
+          let featureActive = true;
+          const assertFeatureCaller = () => {
+            if (!featureActive || request.signal.aborted || principalAbortSignal?.aborted)
+              throw new CodeRouteRejected("Code language read is unauthorized.", 401);
+            // A cached transport principal identifies the original window; it
+            // cannot authorize a new feature after body/read awaits.
+            if (callerKind === "local-window") {
+              try {
+                if (request.headers.get(WINDOW_CAPABILITY_HEADER) !== originalWindowCapability)
+                  throw new Error("Capability changed");
+                const live = resolveLocalWindowPrincipal({
+                  request,
+                  store: dependencies.windowAuthorityStore,
+                  now: now(),
+                });
+                if (live.windowId !== String(authenticatedWindowId))
+                  throw new Error("Window changed");
+              } catch {
+                throw new CodeRouteRejected("Code language read is unauthorized.", 401);
+              }
+            }
+          };
+          const featureCaller = {
+            ...caller,
+            isCurrent: () => {
+              try {
+                assertFeatureCaller();
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          };
           if (route.kind === "language-documents") {
             let document: CodeLanguageDocumentRequest;
             try {
               document = decodeCodeLanguageDocumentRequest(value);
             } catch {
               throw new CodeRouteRejected("Code language document request is invalid.", 400);
+            }
+            if (document.kind === "change" && document.expectedRevision !== undefined) {
+              try {
+                assertFeatureCaller();
+                const answer = await dependencies.language.syncDocument(featureCaller, document);
+                assertFeatureCaller();
+                return jsonResponse(decodeCodeLanguageDocumentResult(answer), 200, origin);
+              } finally {
+                featureActive = false;
+              }
             }
             return jsonResponse(
               decodeCodeLanguageDocumentResult(
@@ -981,6 +1069,17 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             read = decodeCodeLanguageReadRequest(value);
           } catch {
             throw new CodeRouteRejected("Code language read is invalid.", 400);
+          }
+
+          if (read.kind === "references" || read.kind === "capabilities") {
+            try {
+              assertFeatureCaller();
+              const answer = await dependencies.language.read(featureCaller, read);
+              assertFeatureCaller();
+              return jsonResponse(decodeCodeLanguageReadResult(answer), 200, origin);
+            } finally {
+              featureActive = false;
+            }
           }
           return jsonResponse(
             decodeCodeLanguageReadResult(await dependencies.language.read(caller, read)),
@@ -1815,6 +1914,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               threadId,
               operationId,
               contentId,
+              liveAdmissionCurrent,
             ),
             origin,
           );
@@ -1945,15 +2045,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           const watchInput = decodeFileWatchQuery(url);
+          const closed = new AbortController();
           // Awaited here, not inside the stream: a watch the host refuses must
           // fail while this call can still answer with a status. Once the
           // response exists the only thing left to say is "the stream ended",
           // which the client cannot tell from a dropped connection.
           const notices = await dependencies.service.watchFiles(authenticatedWindowId, {
             ...watchInput,
-            signal: request.signal,
+            signal: AbortSignal.any([request.signal, closed.signal]),
           });
-          return noticeStreamResponse(notices, request.signal, origin);
+          return noticeStreamResponse(notices, request.signal, origin, () => closed.abort());
         }
         case "test-listing": {
           if (request.method !== "GET") {
@@ -2053,7 +2154,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           return jsonResponse(
             decodeCodeEvidenceBatchResponse(
-              await dependencies.service.readOperationContents(authenticatedWindowId, input),
+              await dependencies.service.readOperationContents(
+                authenticatedWindowId,
+                input,
+                liveAdmissionCurrent,
+              ),
             ),
             200,
             origin,
@@ -2124,7 +2229,13 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         return failureResponse(
           {
             category:
-              error.status === 409 ? "stale" : error.status === 503 ? "unavailable" : "invalid",
+              error.status === 401
+                ? "unauthorized"
+                : error.status === 409
+                  ? "stale"
+                  : error.status === 503
+                    ? "unavailable"
+                    : "invalid",
             message: error.message,
           },
           error.status,
@@ -2590,19 +2701,40 @@ function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
   const threadId = url.searchParams.get("threadId");
   const checkoutId = url.searchParams.get("checkoutId");
   const folder = url.searchParams.get("folder");
+  const folders = url.searchParams.get("folders");
   if (
     threadId === null ||
     checkoutId === null ||
-    url.searchParams.size > (folder === null ? 2 : 3)
+    (folder !== null && folders !== null) ||
+    url.searchParams.size > (folder === null && folders === null ? 2 : 3)
   ) {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
   }
   try {
     if (folder !== null && !folder.startsWith("/")) throw new Error("not absolute");
+    const values: unknown = folders === null ? undefined : JSON.parse(folders);
+    if (
+      values !== undefined &&
+      (!Array.isArray(values) ||
+        values.length < 1 ||
+        values.length > 17 ||
+        new Set(values).size !== values.length ||
+        values.some(
+          (value) => typeof value !== "string" || (value !== "." && !value.startsWith("/")),
+        ))
+    )
+      throw new Error("invalid folders");
     return {
       threadId: decodeCodeThreadId(threadId),
       checkoutId: decodeCheckoutId(checkoutId),
       ...(folder === null ? {} : { folder: decodeCodeProjectFilePath(folder) }),
+      ...(Array.isArray(values)
+        ? {
+            folders: values.map((value) =>
+              value === "." ? ("." as const) : decodeCodeProjectFilePath(value),
+            ),
+          }
+        : {}),
     };
   } catch {
     throw new CodeRouteRejected("Code file watch query is invalid.", 400);
@@ -2778,6 +2910,7 @@ function noticeStreamResponse(
   notices: AsyncIterable<CodeFileChangeNotice>,
   signal: AbortSignal,
   origin: string | null,
+  onCancel?: () => void,
 ): Response {
   const encoder = new TextEncoder();
   const iterator = notices[Symbol.asyncIterator]();
@@ -2804,6 +2937,7 @@ function noticeStreamResponse(
       }
     },
     async cancel() {
+      onCancel?.();
       await iterator.return?.(undefined);
     },
   });

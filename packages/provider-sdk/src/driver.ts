@@ -22,6 +22,7 @@ import type {
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
+import type { CloudSessionDriver } from "./cloudSessions";
 
 export type {
   ProviderAttachmentInput,
@@ -119,7 +120,11 @@ export interface ProviderSessionHandle {
 }
 
 export interface ProviderSessionResume {
-  /** Current allowed catalogue, reattached without changing native history. */
+  /**
+   * Current allowed catalogue. Mutable runtimes reattach it without changing
+   * native history; a fixed-catalogue driver refuses new or changed definitions
+   * and exposes `toolCatalogContinuation` for the host's explicit text handoff.
+   */
   readonly tools?: ReadonlyArray<ProviderToolDefinition>;
   readonly sessionId: ProviderSessionId;
   readonly resumeCursor: ProviderResumeCursor;
@@ -197,6 +202,7 @@ export interface ProviderUserInputAnswer {
 }
 
 export interface ProviderDriver {
+  readonly cloudSessions?: CloudSessionDriver;
   /**
    * Provider-owned conversations must resume; host-owned APIs receive planned
    * history. `host-resumable` is host-owned, but the runtime keeps each
@@ -207,6 +213,11 @@ export interface ProviderDriver {
    */
   readonly conversationOwnership?: "provider" | "host" | "host-resumable";
   readonly kind: ProviderDriverKind;
+  /** A fixed native catalogue needs a disclosed text handoff before it can change. */
+  readonly toolCatalogContinuation?: (input: {
+    readonly resumeCursor: ProviderResumeCursor;
+    readonly tools: ReadonlyArray<ProviderToolDefinition>;
+  }) => "unchanged" | "handoff-required";
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;

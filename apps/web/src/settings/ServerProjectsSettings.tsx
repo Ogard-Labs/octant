@@ -1,3 +1,4 @@
+import { ServerProjectPreviewTunnel } from "./ServerProjectPreviewTunnel";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsCommand, ServerProjectsView } from "@octant/contracts/server-projects";
@@ -12,7 +13,9 @@ import { ShieldServersSettings } from "./ShieldServersSettings";
 
 export interface ServerProjectsSettingsProps {
   /** Absent off this computer: the catalog is host authority. */
-  readonly client: Pick<ServerProjectsClient, "read" | "command"> | undefined;
+  readonly client:
+    | Pick<ServerProjectsClient, "read" | "command" | "previewRead" | "previewCommand">
+    | undefined;
   readonly servers: Pick<ShieldServersClient, "read"> | undefined;
   /** Bumped when the registry above changes, so the server choices are read again. */
   readonly registryRevision?: number;
@@ -136,6 +139,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     Remove
                   </OctantButton>
                 </span>
+                <ServerProjectPreviewTunnel client={client} project={project} />
               </li>
             ))}
           </ul>
@@ -234,7 +238,9 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
  */
 export function ServerAccessSettings(props: {
   readonly servers: ShieldServersClient | undefined;
-  readonly projects: Pick<ServerProjectsClient, "read" | "command"> | undefined;
+  readonly projects:
+    | Pick<ServerProjectsClient, "read" | "command" | "previewRead" | "previewCommand">
+    | undefined;
   readonly focusedSetting?: string | undefined;
   /** Project names by id, for the registry's Project picker. */
   readonly projectNames: ReadonlyMap<string, string>;

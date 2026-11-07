@@ -1,7 +1,19 @@
+import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  CHILD_WORKTREE_SOURCE_UPDATED,
+  ChildWorktreeSourceUpdated,
+  CHILD_WORKTREE_SEED_UPDATED,
+  ChildWorktreeSeedUpdated,
+} from "@octant/contracts";
+import {
+  OWNER_BROWSER_AUDIT_EVENT,
+  OwnerBrowserAuditRecord,
+} from "@octant/contracts/owner-browser";
 import {
   registerThreadMessageQueueEvents,
   ThreadMessageQueueProjection,
 } from "../messageQueue/threadMessageQueuePersistence";
+import { registerProviderCloudSessionEvents } from "../cloud/providerCloudSessionStore";
 import {
   CONTEXT_COMPACTION_EVENT_NAMES,
   ContextCapacityReservationUpdated,
@@ -39,6 +51,8 @@ import {
   CodeProjectPullRequestMergeWhenReadyRecorded,
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
   CodeProjectPullRequestAutoFixRecorded,
+  CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
+  CodeProjectPullRequestWatchRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
   WorkProjectDeveloperToolsChanged,
@@ -158,6 +172,8 @@ import {
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   ProductFeedbackUpdated,
+  WORKTREE_PREPARATION_UPDATED,
+  WorktreePreparationUpdated,
   PROJECT_TERMINAL_EVENT_NAMES,
   ProjectTerminalEnded,
   ProjectTerminalStarted,
@@ -226,6 +242,7 @@ import {
   AgentMessageSent,
   AgentMessageDelivered,
   AgentMessageRefused,
+  AgentMessageExpired,
   AgentMessageAcknowledged,
   ThreadEgressDecisionsRecordedPayload,
   ThreadEgressLaunchStartedPayload,
@@ -451,6 +468,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestMergeWhenReadyRecorded,
     )
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
+    .register(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, 1, CodeProjectPullRequestWatchRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
@@ -480,6 +498,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
+    .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
@@ -606,6 +625,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
     .register(AGENT_MESSAGE_EVENT_NAMES.refused, 1, AgentMessageRefused)
+    .register(AGENT_MESSAGE_EVENT_NAMES.expired, 1, AgentMessageExpired)
     .register(AGENT_MESSAGE_EVENT_NAMES.acknowledged, 1, AgentMessageAcknowledged)
     .register("automation-notification-preferences-updated@1", 1, AutomationNotificationPreferences)
     .register(
@@ -664,6 +684,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
     .register(PRODUCT_FEEDBACK_UPDATED, 1, ProductFeedbackUpdated)
+    .register(WORKTREE_PREPARATION_UPDATED, 1, WorktreePreparationUpdated)
+    .register(CHILD_WORKTREE_SOURCE_UPDATED, 1, ChildWorktreeSourceUpdated)
+    .register(CHILD_WORKTREE_SEED_UPDATED, 1, ChildWorktreeSeedUpdated)
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)
@@ -676,6 +699,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
+    .register(OWNER_BROWSER_AUDIT_EVENT, 1, OwnerBrowserAuditRecord)
     .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
@@ -725,6 +749,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
+  registerProviderCloudSessionEvents(events);
   registerReplicaMembershipEvents(events);
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);

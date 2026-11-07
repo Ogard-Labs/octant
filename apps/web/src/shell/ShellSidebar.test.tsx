@@ -11,6 +11,52 @@ import { ShellSidebar } from "./ShellSidebar";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 
 describe("ShellSidebar", () => {
+  it("names Nightly quietly beside its application name below the native controls", () => {
+    const { container } = render(
+      <ShellSidebar
+        applicationIdentity={{ flavor: "nightly", productName: "Octant Nightly" }}
+        nativeHost
+        onAddFolder={vi.fn()}
+        onCollapseSidebar={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+    const identity = screen.getByLabelText("Octant Nightly");
+    expect(identity).toHaveTextContent("Octant");
+    expect(within(identity).getByText("Nightly")).toHaveAttribute("data-variant", "secondary");
+    expect(container.querySelector(".sidebar__native-leading")).not.toContainElement(identity);
+    expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
+  });
+
+  it("labels Nightly's test data quietly beside the Nightly label", () => {
+    render(
+      <ShellSidebar
+        applicationIdentity={{
+          flavor: "nightly",
+          productName: "Octant Nightly",
+          data: "test-data",
+        }}
+        nativeHost
+        onAddFolder={vi.fn()}
+        onCollapseSidebar={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+    const identity = screen.getByLabelText("Octant Nightly, test data");
+    expect(within(identity).getByText("Test data")).toHaveAttribute("data-variant", "outline");
+    expect(within(identity).getByText("Nightly")).toBeTruthy();
+  });
+
   it("restores the saved sidebar decoration after workspace coverage ends", () => {
     const props = {
       projectSection: <nav aria-label="Project threads">Project threads</nav>,
@@ -78,6 +124,7 @@ describe("ShellSidebar", () => {
     );
 
     expect(container.querySelector(".sidebar__brand-mark")).toBeNull();
+    expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
     expect(container.querySelector(".sidebar__brand")).toBeNull();
     expect(container.querySelector("[data-traffic-light-safe-space]")).toBeInTheDocument();
     expect(container.querySelector(".sidebar__drag-surface")).toBeInTheDocument();

@@ -65,9 +65,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("app-update-ring"),
-          label: "Release ring",
+          label: "Update channel",
           scope: "app",
-          keywords: "release ring stable preview candidate nightly beta channel updates",
+          keywords:
+            "update channel release ring stable preview candidate nightly beta channel updates",
+        },
+        {
+          id: settingId("app-update-nightly"),
+          label: "Octant Nightly",
+          scope: "app",
+          keywords: "octant nightly install open remove second app builds preview updates",
+        },
+        {
+          id: settingId("app-nightly-data"),
+          label: "Data",
+          scope: "app",
+          keywords: "octant nightly test separate host development testing relaunch",
+        },
+        {
+          id: settingId("app-nightly-test-data"),
+          label: "Test data",
+          scope: "app",
+          keywords: "octant nightly test folder development testing",
         },
       ],
     },
@@ -145,6 +164,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Transcript width",
           scope: "app",
           keywords: "transcript conversation composer width narrow medium wide centered",
+        },
+        {
+          id: settingId("reply-detail"),
+          label: "Reply detail",
+          scope: "app",
+          keywords:
+            "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
         {
           id: settingId("thread-stats"),
@@ -719,6 +745,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "model endpoints add endpoint api openai-compatible anthropic-compatible ollama azure ai foundry amazon bedrock base url address api key replace key sign in with chatgpt plan openrouter subscription sign out check now try again can't connect not working key refused no models diagnostics remove endpoint where your data goes eu zero data retention models shown hidden reads images chat only verify tools",
         },
         {
+          id: settingId("provider-cloud-sessions"),
+          label: "Allow provider cloud sessions",
+          scope: "host",
+          keywords:
+            "provider cloud sessions remote sandbox execution opt in endpoint consent model charges",
+        },
+        {
           id: settingId("model-roles"),
           label: "Model roles",
           scope: "host",
@@ -742,6 +775,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Helper agents at once in one thread",
           scope: "app",
           keywords: "helper agents subagents concurrency at once limit parallel thread",
+        },
+        {
+          id: settingId("subagent-working-minutes"),
+          label: "Working minutes per helper attempt",
+          scope: "app",
+          keywords:
+            "helper agents subagents working time minutes limit budget retry resume approval question waits",
         },
         {
           id: settingId("default-model"),
@@ -1174,6 +1214,32 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "AWS secret access key item",
           scope: "host",
           keywords: "aws secret access key item reference op vault",
+        },
+        {
+          id: settingId("secret-store-google-cli"),
+          label: "Google Cloud command line",
+          scope: "host",
+          keywords:
+            "google gcloud cli command line current service account short-lived token expiry credentials shell read remove",
+        },
+        {
+          id: settingId("secret-store-google-cli-email"),
+          label: "Google Cloud service account email",
+          scope: "host",
+          keywords: "google gcloud service account email identity iam",
+        },
+        {
+          id: settingId("secret-store-google-cli-reference"),
+          label: "Google Cloud service-account JSON item",
+          scope: "host",
+          keywords:
+            "google gcloud service account json item reference linked secret store broker op vault private key",
+        },
+        {
+          id: settingId("secret-store-google-cli-scopes"),
+          label: "Google Cloud OAuth scopes",
+          scope: "host",
+          keywords: "google gcloud oauth scopes permissions access iam cloud platform readonly",
         },
       ],
     },

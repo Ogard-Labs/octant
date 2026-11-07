@@ -98,7 +98,7 @@ the page never infers them from what a picker can mention.
   when the runtime cannot reopen an earlier session.
 - **Context window** is **Reported** when the runtime's turns report what they
   use, so a thread shows how full its window is; **Not reported** when the
-  runtime never reports usage (the ACP agents), so its threads show no window
+  runtime never reports usage (most ACP agents), so its threads show no window
   and a spend limit leaves their turns out; or **Not confirmed** when the last
   check did not establish it.
 - **Compaction** is **By Octant** when Octant plans the conversation from the
@@ -134,7 +134,7 @@ policy.
 Supported app-tool adapters can request an isolated browser session under
 **Ask for approvals** without changing the task to Full access. The request
 names the origin. Cancelling the task revokes its browser grant, and Plan mode
-refuses browser effects. The native OpenCode CLI adapter offers Octant tools
+refuses browser effects while still reading the page already open. The native OpenCode CLI adapter offers Octant tools
 only on macOS and only on the OpenCode releases whose isolated configuration
 was verified (1.18.21, 2.0.22 and 2.0.27); on any other release it reports app-managed
 tools as unsupported, and its text and native-tool support do not imply an
@@ -228,7 +228,7 @@ it instead of imitating it.
 | Approval prompts from the runtime | Yes         | Yes                         | Yes                        | Yes           | Yes                   | No                                       | No                                       |
 | Questions from the agent          | Yes         | No                          | Yes (not on 2.x)           | No            | Most                  | No                                       | No                                       |
 | Reasoning shown                   | Yes         | Yes                         | Yes                        | Yes           | If the agent sends it | If the model sends it                    | If the endpoint sends it                 |
-| Token usage counted               | Yes         | Yes                         | Yes                        | Yes           | No                    | After a reply                            | After a reply                            |
+| Token usage counted               | Yes         | Yes                         | Yes                        | Yes           | Vibe 3.0.3 only       | After a reply                            | After a reply                            |
 | File changes and diffs            | Yes         | Yes                         | 2.2.0 or newer, else diffs | No            | No                    | No                                       | No                                       |
 | Attachments sent natively         | No          | Image models                | Non-text models            | No            | No                    | Vision models                            | No                                       |
 | Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases       | After a check | macOS, some agents    | Verified models                          | Verified models                          |
@@ -241,7 +241,12 @@ it instead of imitating it.
   the model is therefore fine.
 - **Most** for ACP agents: they reopen a session only when the agent offers to,
   and they ask questions on every agent except Mistral Vibe.
-- **Token usage** is not measured for ACP agents. A spend ceiling leaves their
+- **Token usage** is measured for Mistral Vibe 3.0.3 when the runtime supplies
+  a valid session baseline and final usage receipt. Accounting appears after
+  the turn; its context meter uses a matching runtime context reading when
+  available. Provider cost stays unavailable; the
+  normal token-based estimate applies where pricing is known. Other ACP
+  agents and unverified Vibe releases report no usage. A spend ceiling leaves their
   turns out and says so, and a thread's context meter, in Code, Work, or
   Chat, says the runtime reports no usage rather than waiting for a figure
   that will not come.
@@ -552,6 +557,16 @@ listed and no turn is offered. Octant never falls back to an unconfined
 session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
+
+Eligible official OpenAI bearer API-key endpoints also offer an independent
+**Allow cloud sessions** switch on their detail page. It is off by default and
+does not start a task. The separately reviewed
+[Code cloud-session workflow](/guide/code#provider-cloud-sessions) sends only
+the task text to the provider's sandbox and has its own cost/execution consent.
+Subscription sign-ins and compatible gateways are unavailable for this first
+protocol. An outside driver may implement the same published closed codec,
+subject to normal activation and observed capability checks. No generic HTTP
+or credential authority follows from enabling it.
 
 Direct API endpoints are added in **Settings → Octant Harness → Model
 endpoints → Add endpoint**. After the one-click sign-ins and the presets, the

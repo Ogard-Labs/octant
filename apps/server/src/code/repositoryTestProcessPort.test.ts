@@ -40,6 +40,31 @@ function confinedOptions(
 }
 
 describe("RepositoryTestProcessPort", () => {
+  it("refuses revoked named-command authority after asynchronous executable preparation and before spawn", async () => {
+    const cwd = temporaryDirectory();
+    const bin = temporaryDirectory();
+    symlinkSync(process.execPath, join(bin, "qa-revoked-command"));
+    vi.stubEnv("PATH", bin);
+    let current = true;
+    const spawn = vi.fn();
+    const started = vi.fn();
+    const port = new RepositoryTestProcessPort(confinedOptions({ spawn }));
+    const admission = vi.fn(() => current);
+    const pending = port.execute({
+      argv: ["qa-revoked-command"],
+      cwd: realpathSync(cwd),
+      environment: {},
+      timeoutMs: 1000,
+      admitStart: admission,
+      onStarted: started,
+    });
+    current = false;
+    expect((await pending).termination).toBe("cancelled");
+    expect(admission).toHaveBeenCalledOnce();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(started).not.toHaveBeenCalled();
+  });
+
   it("runs a discovered command name through confinement using the host executable path", async () => {
     const cwd = temporaryDirectory();
     const bin = temporaryDirectory();
@@ -935,6 +960,90 @@ describe("RepositoryTestProcessPort", () => {
     expect(result.stdout.byteLength + result.stderr.byteLength).toBe(9);
     expect(new TextDecoder().decode(result.stdout)).toBe("123456");
     expect(new TextDecoder().decode(result.stderr)).toBe("abc");
+  });
+
+  it("keeps the newest output over the bound for a launch that asks for it, without splitting a character", async () => {
+    const child = fakeChild(4321);
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => child), maxOutputBytes: 8 }),
+    );
+
+    const execution = port.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    child.stdout.write("old line\n");
+    child.stderr.write("é");
+    child.stdout.write("new line\n");
+    child.close(0, null);
+    const result = await execution;
+
+    expect(new TextDecoder().decode(result.stdout)).toBe("new line\n");
+    expect(result.stderr.byteLength).toBe(0);
+    expect(result.parserFailed).toBe(false);
+
+    const split = fakeChild(4322);
+    const splitPort = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => split), maxOutputBytes: 2 }),
+    );
+    const splitExecution = splitPort.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    split.stdout.write("aé\nb");
+    split.close(0, null);
+    const splitResult = await splitExecution;
+    // The three bytes kept from "aé\nb" would start inside "é"; the cut drops its rest.
+    expect(new TextDecoder().decode(splitResult.stdout)).toBe("\nb");
+    expect(splitResult.parserFailed).toBe(false);
+
+    // Dropping a whole chunk that ends inside "é" leaves the next chunk
+    // starting with its continuation byte, and no partial cut follows.
+    const whole = fakeChild(4323);
+    const wholePort = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => whole), maxOutputBytes: 4 }),
+    );
+    const wholeExecution = wholePort.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    whole.stdout.write(new Uint8Array([97, 98, 99, 195]));
+    whole.stdout.write(new Uint8Array([169, 120, 120, 120, 120]));
+    whole.close(0, null);
+    const wholeResult = await wholeExecution;
+    expect(new TextDecoder().decode(wholeResult.stdout)).toBe("xxxx");
+    expect(wholeResult.parserFailed).toBe(false);
+
+    // With stderr between them, the stdout chunk left starting inside "é" is
+    // not the oldest chunk retained, and is repaired all the same.
+    const interleaved = fakeChild(4324);
+    const interleavedPort = new RepositoryTestProcessPort(
+      confinedOptions({ spawn: vi.fn(() => interleaved), maxOutputBytes: 5 }),
+    );
+    const interleavedExecution = interleavedPort.execute({
+      argv: ["/usr/bin/test"],
+      cwd: "/repo",
+      environment: {},
+      timeoutMs: 5_000,
+      outputRetention: "newest",
+    });
+    interleaved.stdout.write(new Uint8Array([97, 98, 99, 195]));
+    interleaved.stderr.write(new Uint8Array([119]));
+    interleaved.stdout.write(new Uint8Array([169, 120, 120, 120, 120]));
+    interleaved.close(0, null);
+    const interleavedResult = await interleavedExecution;
+    expect(new TextDecoder().decode(interleavedResult.stdout)).toBe("xxxx");
+    expect(new TextDecoder().decode(interleavedResult.stderr)).toBe("w");
+    expect(interleavedResult.parserFailed).toBe(false);
   });
 
   it("escalates timeout and cancellation from process-group TERM to KILL", async () => {

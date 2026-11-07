@@ -1,3 +1,7 @@
+import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
+import { workspaceContentStorageKey } from "./workspaceContentPersistence";
+import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
+import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { autoReviewFor, type AutoReview } from "../code/autoReview";
@@ -15,6 +19,8 @@ import {
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
+import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
+import { decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
@@ -294,7 +300,7 @@ export interface WorkspaceViewProps {
     readonly relativePath: import("@octant/contracts/code").CodeRelativePath;
   }) => void;
   /** Opens Review in the dock for this Code thread, keeping the transcript in view. */
-  readonly onOpenReview?: (threadId: CodeThreadId) => void;
+  readonly onOpenReview?: (threadId: CodeThreadId, request?: CodeReviewFileRequest) => void;
   /** Selects a pull request named on a pane tab for the dock's Review pane. */
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Opens the rail's complete Pull requests overview across Projects. */
@@ -537,6 +543,7 @@ export interface WorkspaceViewProps {
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
     terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
+    workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -550,6 +557,7 @@ export interface WorkspaceViewProps {
   readonly onDraftCreateCodeThread?: (
     input: import("../code/composer/CodeComposerAdapter").CodeComposerSubmitInput,
     projectId?: ProjectId,
+    plannerReview?: import("../code/plannerProposalCreation").PlannerProposalReview,
   ) => boolean | void | Promise<boolean | void>;
   /**
    * Records a Code Project's remembered new-thread workspace habit
@@ -578,6 +586,8 @@ export interface WorkspaceViewProps {
   readonly onOpenDraftThread?: (mode: "work" | "code") => void;
   readonly onOpenCodeSettings?: () => void;
   readonly onOpenProviderSettings?: () => void;
+  readonly onOpenReviewerSettings?: () => void;
+  readonly onOpenProtectedFilesSettings?: () => void;
   /** Opens Settings at Image generation, where a thread's Create image action points. */
   readonly onOpenImageSettings?: () => void;
   readonly onOpenSettings?: () => void;
@@ -766,103 +776,139 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     return facts;
   }, [codeNavigation, props.projects]);
 
+  const keptViews = useWorkspaceViewStore(
+    workspaceContentStorageKey(
+      props.projectServerUrl ?? globalThis.location?.origin ?? "",
+      props.workspace.windowId,
+    ),
+    JSON.stringify(props.workspace.contextByMode[props.mode]),
+  );
+  const continuityScreen = useMemo(() => {
+    const host = props.workspace.contextByMode[props.mode].host;
+    const bridge =
+      host === "local" &&
+      props.hostBridge?.getPrivateListenerStatus !== undefined &&
+      props.hostBridge.getRemoteDeviceInventory !== undefined
+        ? {
+            getPrivateListenerStatus: props.hostBridge.getPrivateListenerStatus,
+            getRemoteDeviceInventory: props.hostBridge.getRemoteDeviceInventory,
+          }
+        : undefined;
+    return {
+      hostLabel:
+        props.hosts?.find((item) => String(item.hostId) === String(host))?.displayName ??
+        (host === "local" ? "This computer" : String(host)),
+      screenLabel: "This workspace window",
+      ...(bridge === undefined ? {} : { bridge }),
+    };
+  }, [props.mode, props.workspace.contextByMode, props.hosts, props.hostBridge]);
   return (
-    <TabActivationProvider
-      {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
-    >
-      <main className="workspace" hidden={props.hidden}>
-        {inlineNotice ? null : contextNotice}
-        <SplitWorkspace
-          key={JSON.stringify(props.workspace.contextByMode[props.mode])}
-          {...(props.contentTabs === undefined ? {} : { contentTabs: props.contentTabs })}
-          {...(props.onActivateContentTab === undefined
-            ? {}
-            : { onActivateContentTab: props.onActivateContentTab })}
-          {...(props.onKeepContentTab === undefined
-            ? {}
-            : { onKeepContentTab: props.onKeepContentTab })}
-          {...(props.onArrangeSideBySide === undefined
-            ? {}
-            : { onArrangeSideBySide: props.onArrangeSideBySide })}
-          {...(props.onCloseContentTab === undefined
-            ? {}
-            : { onCloseContentTab: props.onCloseContentTab })}
-          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
-          {...(props.environmentNames === undefined
-            ? {}
-            : { environmentNames: props.environmentNames })}
-          paneFactsByThreadId={paneFactsByThreadId}
-          drag={props.drag}
-          layout={props.layout}
-          mode={props.mode}
-          onActivatePane={props.onActivatePane}
-          onClearFocus={props.onClearFocus}
-          onClosePane={(paneId) => void closePane(paneId)}
-          onCommitResize={props.onCommitResize}
-          onFocus={props.onFocus}
-          {...(props.onSelectPullRequest === undefined
-            ? {}
-            : { onSelectPullRequest: props.onSelectPullRequest })}
-          onPreviewResize={props.onPreviewResize}
-          onSplitPane={props.onSplitPane}
-          activePaneId={props.workspace.activePaneIds[props.mode]}
-          {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
-          renderSurface={(surface, paneId) => (
-            <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
-              <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
-                <ComposerNoticeProvider
-                  value={paneId === activePaneId && inlineNotice ? contextNotice : null}
-                >
-                  <ComposerContextMeterGate
-                    enabled={
-                      paneId === props.workspace.activePaneIds[props.mode] &&
-                      offersThreadComposer(surface)
-                    }
-                  >
-                    <SurfaceLinkActionsProvider
-                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                      {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
-                      paneId={paneId}
-                      surface={surface}
+    <WorkspaceViewStateContext.Provider value={keptViews}>
+      <ContinuityScreenContext.Provider value={continuityScreen}>
+        <TabActivationProvider
+          {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
+        >
+          <main className="workspace" hidden={props.hidden}>
+            {inlineNotice ? null : contextNotice}
+            <SplitWorkspace
+              key={JSON.stringify(props.workspace.contextByMode[props.mode])}
+              {...(props.contentTabs === undefined ? {} : { contentTabs: props.contentTabs })}
+              {...(props.onActivateContentTab === undefined
+                ? {}
+                : { onActivateContentTab: props.onActivateContentTab })}
+              {...(props.onKeepContentTab === undefined
+                ? {}
+                : { onKeepContentTab: props.onKeepContentTab })}
+              {...(props.onArrangeSideBySide === undefined
+                ? {}
+                : { onArrangeSideBySide: props.onArrangeSideBySide })}
+              {...(props.onCloseContentTab === undefined
+                ? {}
+                : { onCloseContentTab: props.onCloseContentTab })}
+              {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+              {...(props.environmentNames === undefined
+                ? {}
+                : { environmentNames: props.environmentNames })}
+              paneFactsByThreadId={paneFactsByThreadId}
+              drag={props.drag}
+              layout={props.layout}
+              mode={props.mode}
+              onActivatePane={props.onActivatePane}
+              onClearFocus={props.onClearFocus}
+              onClosePane={(paneId) => void closePane(paneId)}
+              onCommitResize={props.onCommitResize}
+              onFocus={props.onFocus}
+              {...(props.onSelectPullRequest === undefined
+                ? {}
+                : { onSelectPullRequest: props.onSelectPullRequest })}
+              onPreviewResize={props.onPreviewResize}
+              onSplitPane={props.onSplitPane}
+              activePaneId={props.workspace.activePaneIds[props.mode]}
+              {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
+              renderSurface={(surface, paneId) => (
+                <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
+                  <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
+                    <ComposerNoticeProvider
+                      value={paneId === activePaneId && inlineNotice ? contextNotice : null}
                     >
-                      <OutsideContentContext
-                        value={outsideContentFor(surface, props.contextClient)}
+                      <ComposerContextMeterGate
+                        enabled={
+                          paneId === props.workspace.activePaneIds[props.mode] &&
+                          offersThreadComposer(surface)
+                        }
                       >
-                        {onWelcomeGround(
-                          surface,
-                          props.welcomeBackdrop,
-                          renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                        )}
-                      </OutsideContentContext>
-                    </SurfaceLinkActionsProvider>
-                  </ComposerContextMeterGate>
-                </ComposerNoticeProvider>
-              </ComposerSubagentsContext>
-            </FollowUpSuggestionContext>
-          )}
-          {...(props.liveThreadTitles === undefined
-            ? {}
-            : { liveThreadTitles: props.liveThreadTitles })}
-          {...(props.providerByThreadId === undefined
-            ? {}
-            : { providerByThreadId: props.providerByThreadId })}
-          {...(props.runningThreadIds === undefined
-            ? {}
-            : { runningThreadIds: props.runningThreadIds })}
-          {...(props.waitingThreadIds === undefined
-            ? {}
-            : { waitingThreadIds: props.waitingThreadIds })}
-          {...(props.showProviderIcons === undefined
-            ? {}
-            : { showProviderIcons: props.showProviderIcons })}
-          totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
-            (count, layout) => count + countPanes(layout),
-            0,
-          )}
-          showSinglePaneHeader={singlePaneSurfaceNeedsHeader(activeSurface)}
-        />
-      </main>
-    </TabActivationProvider>
+                        <SurfaceLinkActionsProvider
+                          {...(props.hostBridge === undefined
+                            ? {}
+                            : { hostBridge: props.hostBridge })}
+                          {...(props.onOpenLink === undefined
+                            ? {}
+                            : { onOpenLink: props.onOpenLink })}
+                          paneId={paneId}
+                          surface={surface}
+                        >
+                          <TaskAccessContext value={taskAccessFor(surface, props)}>
+                            <OutsideContentContext
+                              value={outsideContentFor(surface, props.contextClient)}
+                            >
+                              {onWelcomeGround(
+                                surface,
+                                props.welcomeBackdrop,
+                                renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
+                              )}
+                            </OutsideContentContext>
+                          </TaskAccessContext>
+                        </SurfaceLinkActionsProvider>
+                      </ComposerContextMeterGate>
+                    </ComposerNoticeProvider>
+                  </ComposerSubagentsContext>
+                </FollowUpSuggestionContext>
+              )}
+              {...(props.liveThreadTitles === undefined
+                ? {}
+                : { liveThreadTitles: props.liveThreadTitles })}
+              {...(props.providerByThreadId === undefined
+                ? {}
+                : { providerByThreadId: props.providerByThreadId })}
+              {...(props.runningThreadIds === undefined
+                ? {}
+                : { runningThreadIds: props.runningThreadIds })}
+              {...(props.waitingThreadIds === undefined
+                ? {}
+                : { waitingThreadIds: props.waitingThreadIds })}
+              {...(props.showProviderIcons === undefined
+                ? {}
+                : { showProviderIcons: props.showProviderIcons })}
+              totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
+                (count, layout) => count + countPanes(layout),
+                0,
+              )}
+              showSinglePaneHeader={singlePaneSurfaceNeedsHeader(activeSurface)}
+            />
+          </main>
+        </TabActivationProvider>
+      </ContinuityScreenContext.Provider>
+    </WorkspaceViewStateContext.Provider>
   );
 }
 
@@ -980,6 +1026,34 @@ function outsideContentFor(
   if ("hostId" in surface && surface.hostId !== undefined) return undefined;
   if (!("threadId" in surface)) return undefined;
   return { client, mode: surface.mode, threadId: String(surface.threadId) };
+}
+
+function taskAccessFor(
+  surface: WorkspaceTab,
+  props: WorkspaceViewProps,
+): TaskAccessContextValue | undefined {
+  const thread = outsideContentFor(surface, props.contextClient);
+  if (thread === undefined || thread.mode === "chat") return undefined;
+  try {
+    return {
+      client: thread.client,
+      subject: decodeContextSubjectRef({
+        aggregateType: `${thread.mode}-thread`,
+        aggregateId: thread.threadId,
+      }),
+      ...(props.onOpenProviderSettings === undefined
+        ? {}
+        : { onOpenProviders: props.onOpenProviderSettings }),
+      ...(props.onOpenReviewerSettings === undefined
+        ? {}
+        : { onOpenAccess: props.onOpenReviewerSettings }),
+      ...(props.onOpenProtectedFilesSettings === undefined
+        ? {}
+        : { onOpenProtectedFiles: props.onOpenProtectedFilesSettings }),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1226,7 +1300,10 @@ function renderCodeTab(
           : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
         {...(props.onOpenReview === undefined
           ? {}
-          : { onOpenReview: () => props.onOpenReview?.(tab.threadId) })}
+          : {
+              onOpenReview: (request?: CodeReviewFileRequest) =>
+                props.onOpenReview?.(tab.threadId, request),
+            })}
         onOpenSurface={(kind, options) =>
           options?.terminalId === undefined
             ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
@@ -1645,6 +1722,7 @@ function renderNonCodeTab(
             permissionPersistence,
             modelOptionValues,
             terminalSession,
+            workingFolder,
           ) => {
             // Returning quietly here made a wired-up composer look dead: the user
             // pressed Create thread and nothing happened anywhere. A missing
@@ -1668,6 +1746,7 @@ function renderNonCodeTab(
               modelOptionValues,
               paneId,
               terminalSession,
+              workingFolder,
             );
           }}
           {...(props.onCreateProject === undefined
@@ -2123,9 +2202,9 @@ function renderNonCodeTab(
                     const thread = props.codeController.bootstrap?.threads.find(
                       (candidate) => candidate.id === threadId,
                     );
-                    if (thread !== undefined) {
-                      props.onOpenCodeThread(thread.id, thread.title, thread.projectId);
-                    }
+                    // A planner result can precede the navigation refresh.
+                    // The host still resolves this id and its Project on open.
+                    props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
                   }}
                   projectId={project.id}
                   projectName={project.name}

@@ -6,6 +6,7 @@ import {
   type CredentialStore,
   type CredentialStoreFailureCause,
 } from "./credentialStore";
+import type { KeychainServiceFamily } from "./desktopIdentity";
 import { isExecutable } from "./executableCheck";
 
 const execFileAsync = promisify(execFile);
@@ -81,6 +82,26 @@ const NAMESPACES = {
     label: "Octant SSH key",
   },
 } as const;
+export type SecretServiceNamespace = keyof typeof NAMESPACES;
+export const SECRET_SERVICE_NAMESPACES = Object.keys(
+  NAMESPACES,
+) as ReadonlyArray<SecretServiceNamespace>;
+/**
+ * Octant Nightly's own test host names every item `service` with this prefix
+ * and its namespace. Secret Service items carry no store scope, so this
+ * attribute is what keeps test-data items from ever matching Octant's.
+ */
+export const SECRET_SERVICE_TEST_DATA_PREFIX = "octant-nightly-test-data.";
+
+/** The `service` value of one namespace's items for one family. */
+export function secretServiceAttribute(
+  family: KeychainServiceFamily,
+  namespace: SecretServiceNamespace,
+): string {
+  return family === "octant"
+    ? NAMESPACES[namespace].attribute
+    : `${SECRET_SERVICE_TEST_DATA_PREFIX}${namespace}`;
+}
 const DEFAULT_TIMEOUT_MS = 2_000;
 const MAX_OUTPUT_BYTES = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -141,7 +162,9 @@ export async function probeSecretService(
 export interface MakeSecretServiceCredentialStoreOptions {
   readonly execute?: SecretToolCommandExecutor;
   readonly timeoutMs?: number;
-  readonly namespace?: keyof typeof NAMESPACES;
+  readonly namespace?: SecretServiceNamespace;
+  /** Octant's items, or Octant Nightly's separate test-data items. */
+  readonly family?: KeychainServiceFamily;
 }
 
 export function makeSecretServiceCredentialStore(
@@ -155,7 +178,13 @@ export function makeSecretServiceCredentialStore(
   if (!isAbsolute(SECRET_TOOL_PATH) || limits.timeoutMs <= 0) {
     throw new CredentialStoreFailure("invalid");
   }
-  const { attribute: serviceAttribute, label } = NAMESPACES[options.namespace ?? "provider"];
+  const namespace = options.namespace ?? "provider";
+  const family = options.family ?? "octant";
+  const serviceAttribute = secretServiceAttribute(family, namespace);
+  const label =
+    family === "octant"
+      ? NAMESPACES[namespace].label
+      : `Octant Nightly test data: ${NAMESPACES[namespace].label}`;
 
   const invoke = async (
     operation: "set" | "has" | "resolve" | "delete",
@@ -242,6 +271,35 @@ export function makeSecretServiceCredentialStore(
       }
     },
   };
+}
+
+/**
+ * Removes every Octant Nightly test-data item, one namespace at a time. Each
+ * `clear` names only a test-data `service` value, so it can never match one
+ * of Octant's items. A missing item is not a failure.
+ */
+export async function clearSecretServiceTestData(
+  options: { readonly execute?: SecretToolCommandExecutor; readonly timeoutMs?: number } = {},
+): Promise<void> {
+  const execute = options.execute ?? executeSecretTool;
+  const limits = { maxBytes: MAX_OUTPUT_BYTES, timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS };
+  for (const namespace of SECRET_SERVICE_NAMESPACES) {
+    let result: SecretToolCommandResult;
+    try {
+      result = await execute(
+        {
+          command: SECRET_TOOL_PATH,
+          args: ["clear", "service", secretServiceAttribute("octant-nightly-test-data", namespace)],
+        },
+        limits,
+      );
+    } catch (error) {
+      throw new CredentialStoreFailure("unavailable", executionCause(error));
+    }
+    if (result.exitCode !== 0 && !isMissingSecret(result.stderr)) throw commandFailure(result);
+    if (result.stdout !== "" || (result.stderr !== "" && !isMissingSecret(result.stderr)))
+      throw new CredentialStoreFailure("failed");
+  }
 }
 
 function normalizeProviderInstanceId(providerInstanceId: string): string {

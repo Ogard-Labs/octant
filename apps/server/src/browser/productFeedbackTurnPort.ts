@@ -25,6 +25,7 @@ export interface ProductFeedbackTurnInput {
   readonly threadId: string;
   readonly operationId: string;
   readonly supportsImages: boolean;
+  readonly maxAttachments?: number;
 }
 
 export interface ProductFeedbackTurnDelivery {
@@ -34,7 +35,7 @@ export interface ProductFeedbackTurnDelivery {
 
 export interface PreparedProductFeedbackTurn extends ProductFeedbackTurnDelivery {
   /** Claims only this exact prepared version; never a later edited note. */
-  readonly take: () => ProductFeedbackTurnDelivery;
+  readonly take: (maxAttachments?: number) => ProductFeedbackTurnDelivery;
 }
 
 export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps) {
@@ -86,7 +87,11 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
   };
   const take = (input: ProductFeedbackTurnInput): ProductFeedbackTurnDelivery =>
     format(
-      deps.service.deliver({ threadId: input.threadId, operationId: input.operationId }),
+      deps.service.deliver({
+        threadId: input.threadId,
+        operationId: input.operationId,
+        ...(input.maxAttachments === undefined ? {} : { maxImages: input.maxAttachments }),
+      }),
       input.supportsImages,
     );
   return Object.assign(take, {
@@ -107,7 +112,9 @@ export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps)
       let taken = false;
       return {
         ...delivery,
-        take: () => {
+        take: (maxAttachments) => {
+          if (maxAttachments !== undefined && delivery.attachments.length > maxAttachments)
+            throw new Error("Selected product notes exceed the remaining attachment budget.");
           if (taken || !current()) throw new Error("Prepared feedback is no longer current.");
           taken = true;
           const carried = deps.service.deliver({

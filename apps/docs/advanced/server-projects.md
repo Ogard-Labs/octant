@@ -115,3 +115,33 @@ servers**. Choose it to start a Work thread there.
 
 - **Tested on a throwaway local server only.** Octant's tests ran this against
   an `sshd` started on this computer for the test, never a real server.
+
+## Open a dev-server preview
+
+In **Settings › Access › Servers**, expand **Dev server preview** under the
+bound Project. Start the dev server on your server first. Enter its port on
+`127.0.0.1` and choose a local port, or leave **Local port** at `0` to use an
+available port. Select **Start preview**, then **Open preview**.
+
+The preview shows both endpoints and belongs to the local window that opened
+it. HTTP and WebSocket hot reload use the same tunnel. It listens only on this
+computer's loopback, supports eight simultaneous connections and closes after
+one hour. If the server is already a paired Octant host, use its existing
+paired-host preview instead.
+
+**Stop preview** closes the tunnel and leaves the dev server running. Removing
+the Project or its registered server, or revoking the window, also closes it.
+After the owning window closes or the hour runs out, another window can start a
+new preview for the Project.
+A dropped SSH connection shows **lost**. **Reconnect same endpoint** keeps the
+same ports and server binding and never restarts the remote program. A local
+port collision refuses; stop the preview before selecting another port.
+Unknown or changed SSH host keys still require your ordinary SSH trust decision.
+Listening locally means the tunnel is ready to connect; the remote application
+is checked when you open it. Previews are not restored after restarting Octant.
+
+Stop and reconnect wait for the previous listener and SSH connections to close.
+If Octant reports `cleanup-unsettled`, it could not confirm cleanup within three
+seconds. It keeps ownership of the old connection and refuses to replace it.
+You can try Stop again after the process has ended. Shutdown reports this
+failure rather than claiming that all owned resources closed successfully.

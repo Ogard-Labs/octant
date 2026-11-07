@@ -8,6 +8,22 @@ are built from and the provider card on Providers & Models;
 credential boundaries. Update this specification with an approved change,
 following the [design workflow](README.md#changing-the-design).
 
+## Provider cloud opt-in
+
+An eligible model endpoint's detail page includes **Provider cloud sessions**
+after its data settings. **Allow cloud sessions** is a separate host setting,
+off by default for each instance. Turning it on never starts a task or changes
+the endpoint used by an existing thread. Unsupported endpoints show an
+unavailable switch; an already-enabled endpoint can still be turned off after
+it becomes unsupported. Turning it off blocks new submissions and requests
+cancellation of known active jobs, without promising remote termination.
+
+The Code thread's separate disclosure reviews the exact text and asks for
+remote execution and cost consent per job. No key is entered in that review.
+Only a local window can change the setting or submit a job. Protocol and account
+eligibility follow [Provider cloud sessions](provider-runtimes.md#provider-cloud-sessions);
+this toggle is not evidence of API access or a successful billed call.
+
 ## Provider catalog
 
 Provider catalog, the section of Providers & Models under the providers this
@@ -297,6 +313,8 @@ telemetry exception in
 Add endpoint opens a dialog: the sign-ins first, then the presets, then a guided flow with a numbered strip of steps. A preset is a named service added with a pasted key (OpenCode Go, OpenCode Zen, Mistral, Requesty): its row sits in the same list as the sign-ins with a one-line description and Add with key, which opens Connect with the name, address and protocol filled in and the key hint naming the page where the key is made, as a link; the address stays editable, and the result is an ordinary endpoint of its kind. On the first-run page the same row opens the dialog on Connect. Kind is five cards (Azure AI Foundry, Amazon Bedrock, OpenAI-compatible, Anthropic-compatible, Local (Ollama)); Amazon Bedrock has its own Connect and ends there (below). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are checked the same way on this computer: the button says the requests run locally rather than that the service may bill, and a model Ollama says takes no tools reads Chat only without a generating request, with that reason. Ollama stays a loopback-only endpoint; a cloud, LAN, or tunnelled Ollama address is refused. When the endpoint lists a voice model (a preset's known transcription or speech model, or an id that reads as one), the last step and the endpoint's Voice section (after Models) say so in one line and offer Use for Transcription, which makes that model Voice's choice at once and then reads "Transcription uses <model> on <endpoint>"; a speech model is named with what it still needs, a voice from the provider, and Open Voice settings. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.
 
 ## Endpoint address and stored key
+
+A remote model endpoint must use HTTPS. Plain HTTP is accepted only for a loopback address.
 
 A model endpoint's API key belongs to the address it was entered for, so the
 host deletes it when the saved address changes. The address field says so

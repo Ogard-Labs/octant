@@ -46,6 +46,7 @@ export function createComputerUseDesktopService(options: {
   let state: ComputerUseStatus["driver"] = "unavailable";
   let replacing = false;
   let closed = false;
+  let closing: Promise<void> | undefined;
   const shutdown = new AbortController();
 
   async function initialize() {
@@ -263,13 +264,30 @@ export function createComputerUseDesktopService(options: {
       if (supported) await updates.check();
       return status();
     },
-    close: async () => {
-      closed = true;
-      shutdown.abort();
-      await updates.close();
-      await controls.close();
-      await runtime?.close();
-      runtime = undefined;
+    close: () => {
+      closing ??= (async () => {
+        closed = true;
+        shutdown.abort();
+        let failed = false;
+        try {
+          await updates.close();
+        } catch {
+          failed = true;
+        }
+        try {
+          await controls.close();
+        } catch {
+          failed = true;
+        }
+        try {
+          await runtime?.close();
+          runtime = undefined;
+        } catch {
+          failed = true;
+        }
+        if (failed) throw new Error("Octant could not close computer-use resources.");
+      })();
+      return closing;
     },
   };
 }

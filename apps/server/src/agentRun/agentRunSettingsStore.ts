@@ -48,6 +48,7 @@ export interface AgentRunSettingsStoreOptions {
 }
 
 export interface UpdateAgentRunSettingsInput {
+  readonly workingTimeLimitMinutes?: number | undefined;
   readonly creationPosture: AgentRunSelectableCreationPosture;
   /** Absent keeps the current limits. */
   readonly concurrency?: AgentRunConcurrency | undefined;
@@ -103,6 +104,12 @@ export class AgentRunSettingsStore {
       const concurrency = input.concurrency ?? this.#current.concurrency;
       settings = decodeAgentRunPolicySettings({
         creationPosture: input.creationPosture,
+        ...((input.workingTimeLimitMinutes ?? this.#current.workingTimeLimitMinutes) === undefined
+          ? {}
+          : {
+              workingTimeLimitMinutes:
+                input.workingTimeLimitMinutes ?? this.#current.workingTimeLimitMinutes,
+            }),
         ...(concurrency === undefined ? {} : { concurrency }),
         version: decodeAggregateVersion(this.#current.version + 1),
         updatedAt,

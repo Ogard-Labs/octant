@@ -1,3 +1,4 @@
+import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeBootstrap,
@@ -12,6 +13,7 @@ import type {
 import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeConversationTurn,
+  type CodeTurnReviewPreview,
   type CodeConversationTurnHandoff,
   type CodeConversationTurnUsage,
   type CodeConversationUsageTotals,
@@ -54,6 +56,8 @@ export interface CodeConversationMessage {
   readonly text: string;
   readonly operationId?: CodeOperationId;
   readonly sourceThreadId?: CodeThreadId;
+  readonly checkoutId?: CodeConversationTurn["checkoutId"];
+  readonly reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
@@ -83,6 +87,7 @@ export interface CodeConversationMessage {
    * is not the same as "nothing changed".
    */
   readonly changedFiles?: CodeTurnChangedFiles;
+  readonly reviewPreview?: CodeTurnReviewPreview;
   /**
    * The text handoff this reply's turn started its new provider session
    * with, as the host journaled it. Present only on the reply of a turn that
@@ -105,7 +110,9 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       ...(event.localPersonOnly === true ? { localPersonOnly: true } : {}),
     };
   }
-  if (event.kind === "input-requested") {
+  // App questionnaires follow the session read so answers from another window
+  // withdraw the card here too; provider-native questions keep their event path.
+  if (event.kind === "input-requested" && event.questionnaire === undefined) {
     return {
       kind: "input",
       requestId: event.requestId,
@@ -521,6 +528,10 @@ async function projectConversationTurns(
       role: "user",
       text: prompt ?? "Conversation prompt evidence is unavailable.",
       operationId: turn.operationId,
+      ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
+      ...(turn.reviewFindingReferences === undefined
+        ? {}
+        : { reviewFindingReferences: turn.reviewFindingReferences }),
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,
@@ -548,12 +559,17 @@ async function projectConversationTurns(
       role: "assistant",
       text: parts.join("") || turn.failure?.message || conversationFallback(turn.status),
       operationId: turn.operationId,
+      ...(turn.checkoutId === undefined ? {} : { checkoutId: turn.checkoutId }),
+      ...(turn.reviewFindingReferences === undefined
+        ? {}
+        : { reviewFindingReferences: turn.reviewFindingReferences }),
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,
       startedAt: String(turn.startedAt),
       at: String(turn.updatedAt),
       ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
+      ...(turn.reviewPreview === undefined ? {} : { reviewPreview: turn.reviewPreview }),
       ...(turn.handoff === undefined ? {} : { handoff: turn.handoff }),
       ...(turn.forkMergeBacks === undefined ? {} : { forkMergeBacks: turn.forkMergeBacks }),
     });
@@ -679,3 +695,39 @@ export {
   readConversationText,
   projectConversationTurns,
 };
+
+/** Only shared reply metadata; stream ownership and terminal states stay with their callers. */
+export function codeReplyMetadataUpdate(
+  event: CodeOperationEvent,
+): ((message: CodeConversationMessage) => CodeConversationMessage) | undefined {
+  switch (event.kind) {
+    case "conversation-turn-review-preview":
+      return (message) => {
+        const capture = event.preview.capture ?? message.reviewPreview?.capture;
+        return {
+          ...message,
+          reviewPreview: {
+            ...event.preview,
+            ...(capture === undefined ? {} : { capture }),
+          },
+        };
+      };
+    case "conversation-turn-changed-files":
+      return (message) => ({ ...message, changedFiles: event.changedFiles });
+    case "context-handoff-attached":
+      return (message) => ({ ...message, handoff: handoffSummary(event) });
+    case "fork-context-delivered":
+      return (message) => {
+        const mergeBack = forkMergeBackSummary(event);
+        const existing = message.forkMergeBacks ?? [];
+        const known = existing.some(
+          (candidate) =>
+            String(candidate.forkThreadId) === String(mergeBack.forkThreadId) &&
+            String(candidate.throughOperationId) === String(mergeBack.throughOperationId),
+        );
+        return known ? message : { ...message, forkMergeBacks: [...existing, mergeBack] };
+      };
+    default:
+      return undefined;
+  }
+}

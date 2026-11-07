@@ -55,6 +55,24 @@ function brokerRequest(url: string, token: string, path: string, init: RequestIn
 }
 
 describe("startCredentialBroker", () => {
+  it("refuses a cancellation body that supplies a caller-selected grant reference", async () => {
+    const broker = await startCredentialBroker(memoryStore());
+    try {
+      const response = await broker.fetchForTest(
+        brokerRequest(broker.url, broker.token, "/v1/oauth/cancel", {
+          body: JSON.stringify({
+            attemptId: randomUUID(),
+            actorId: randomUUID(),
+            descriptorId: "mcp-fixture",
+            credentialRef: providerInstanceId,
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    } finally {
+      await broker.close();
+    }
+  });
   it("binds a random loopback port and creates a distinct launch token", async () => {
     const first = await startCredentialBroker(memoryStore());
     const second = await startCredentialBroker(memoryStore());

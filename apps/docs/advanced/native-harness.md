@@ -10,11 +10,13 @@ every mode and on every surface: web, desktop, phone, and the `octant` CLI.
 ## What the model gets
 
 Nine working tools — `read`, `grep`, `glob`, `bash`, `edit`, `write`,
-`web-fetch`, `web-search`, `todo-write` — three harness reads:
-`context-remaining`, `second-opinion`, and `delegate` — and
-`ask-user`, which lets the lead stop and ask you something — plus `goal` and
-`goal-check` for the thread's goal (see [Goals](#goals)). Each mode trims
-the set to what it may reach:
+`web-fetch`, `web-search`, `todo-write` — the harness reads
+`context-remaining` and `second-opinion`, and `ask-user`, which lets the lead
+stop and ask you something — plus `goal` and `goal-check` for the thread's
+goal (see [Goals](#goals)). Beside them the lead gets Octant's own tools, the
+same ones a provider runtime gets, including `octant_agents` for helper
+agents (see [Delegation](#delegation)). Each mode trims the set to what it
+may reach:
 
 | Mode | Files                   | Shell     | Web                 | Delegation |
 | ---- | ----------------------- | --------- | ------------------- | ---------- |
@@ -29,7 +31,10 @@ asks you to review one.
 
 Web means `web-fetch`, plus `web-search` once a SearXNG search endpoint is
 set. A Chat thread gets neither, and cannot open a page, until you turn
-research on for it.
+research on for it. `web-search` is the same search a Chat thread on any
+other provider uses while its research searches through SearXNG, so the
+model sees one search tool, never two. A search with no query is refused
+rather than run on your message.
 
 `context-remaining`, `second-opinion`, and `journal-lookup` are offered in
 every mode and reach none of those. `journal-lookup` re-reads earlier
@@ -289,22 +294,26 @@ move to another model mid-request.
 
 ## Delegation
 
-The lead can hand a bounded task to a child with `delegate`: research,
-implementation, or review. Provider harnesses use `octant_agents` for the same
-host-managed workflow. Either parent can choose an Octant-harness or a
-provider-harness child. The child runs on the model its role's slot names, or
+The lead hands a bounded task to a child with `octant_agents`, the same tool
+a provider runtime's agent uses: research, implementation, or review. It is
+the lead's only way to start a child. Either kind of parent can choose an
+Octant-harness or a provider-harness child. The child runs on the model its role's slot names, or
 an explicit eligible provider/model selected for that task, under authority no
 wider than its parent. Code children have separate worktrees. An unconfigured
 route can inherit the parent's eligible model; a configured but unavailable
 route reports its refusal.
 
-Both tools can collect replies and send a bounded follow-up to a completed
-child, using its current version. A follow-up resumes the same conversation
-and produces a new result to acknowledge. It never starts a fresh session
-silently. The child status reports the identity and version needed for the
-next request. The earlier reply must reach the parent or be explicitly collected
-first. Status inspection does not consume replies, and collection refuses an
-oversized response without marking it consumed.
+Its operations are `capabilities`, `delegate`, `status`, `wait`, `cancel`, and
+`follow-up`. `wait` returns a child's reply once it finishes (with a timeout of
+0 it only reads a reply that is already there), and `cancel` stops a child the
+lead started; you can stop any of them from **Agents** too. `follow-up` sends a
+bounded instruction to a completed child, using its current version. A
+follow-up resumes the same conversation and produces a new result to
+acknowledge. It never starts a fresh session silently. The child status
+reports the identity and version needed for the next request. The earlier
+reply must reach the parent or be read with `wait` first. Status inspection
+does not consume replies, and `wait` refuses an oversized response without
+marking it consumed.
 Whether one may start at all is **Let the agent start helper agents** under
 **Settings → Octant Harness → Helper agents**: on by default, and when it is
 off the lead is told subagents are turned off and does the work itself.
@@ -313,8 +322,8 @@ Children can wait on each other, so the lead can run a small graph. It starts
 independent tasks side by side, then starts a task that needs their output with
 `after`. That task begins only once all of them have finished, with their
 replies in front of it; if one of them fails or is cancelled, it never runs.
-`delegate wait` blocks until the children finish, and `status` shows what each
-one is waiting on. How many children run at once is a setting (below); a
+The lead then waits for each child in turn, and `status` shows what each one is
+waiting on. How many children run at once is a setting (below); a
 child that is only waiting does not take a slot.
 
 This is how a frontier model plans and reviews while cheaper models read and
@@ -565,3 +574,26 @@ table.
   compacted, so the turn that carries it does not summarize it again. An endpoint that never reports the model's window,
   such as some Azure AI Foundry deployments, gives the lead no figure: the tool
   says the context is unavailable instead of reporting room against an estimate.
+
+## Answering a questionnaire
+
+An agent can ask a few related questions together, inline in your thread.
+Choose one option for a single-choice question, or tick several for a
+multiple-choice question. A recommended option starts unselected. When
+available, **Write another answer** lets you supply an alternative.
+Use **Anything to add?** to qualify your choices with an optional comment.
+
+Your unsent choices and comment stay on this screen when you navigate away
+and reopen the same question, including after deferring it. Another window
+starts with its own empty draft. Closing or reloading the screen discards these
+unsent answers.
+
+Nothing is sent while you make your choices. **Send answers** sends the
+complete set and lets the agent continue. If delivery fails, your draft stays
+available. Submitted questionnaires become an expandable **Answers sent**
+summary, including your comment, and remain readable after reopening the
+thread. Another window answering the same request settles it everywhere.
+
+Questionnaires use Octant's app-owned question tool across providers that
+support app tools. They create no Canvas and grant no extra permissions.
+Never enter a password or API key in a questionnaire.

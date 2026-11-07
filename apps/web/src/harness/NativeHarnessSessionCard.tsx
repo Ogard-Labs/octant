@@ -1,3 +1,5 @@
+import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
+import { QuestionnaireCard, QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessRouteDecision, NativeHarnessSessionView } from "@octant/contracts";
 import {
@@ -87,7 +89,24 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     [],
   );
 
-  const pendingQuestion = view?.questions.find((question) => question.status === "pending");
+  const draftScope = `harness:${props.threadId}`;
+  useRetainQuestionnaireDrafts(
+    draftScope,
+    view === undefined || (view !== null && String(view.session.threadId) !== props.threadId)
+      ? undefined
+      : view === null || view.session.status === "recovery-required"
+        ? []
+        : view.questions
+            .filter((entry) => entry.status === "pending")
+            .map((entry) => String(entry.id)),
+  );
+  const pendingQuestion =
+    view === null ||
+    view === undefined ||
+    view.session.status === "recovery-required" ||
+    String(view.session.threadId) !== props.threadId
+      ? undefined
+      : view.questions.find((question) => question.status === "pending");
   const pendingApproval = view?.approvals?.find((approval) => approval.status === "pending");
   useEffect(() => {
     let inFlight = false;
@@ -133,7 +152,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
 
   const answerQuestion = useCallback(
     async (answer: string) => {
-      if (pendingQuestion === undefined || busy) return;
+      if (pendingQuestion === undefined || busy) return false;
       setBusy(true);
       try {
         const result = await props.client.answerQuestion(props.threadId, {
@@ -143,6 +162,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         if (result.kind === "question-refused") setError(result.message);
         setDraftAnswer("");
         await load();
+        return result.kind === "question-answered";
       } finally {
         setBusy(false);
       }
@@ -241,7 +261,29 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
           ))}
         </ul>
       )}
-      {pendingQuestion === undefined ? null : (
+      {view.questions
+        .filter(
+          (question) => question.status === "answered" && question.questionnaire !== undefined,
+        )
+        .map((question) =>
+          question.questionnaire === undefined || question.answer === undefined ? null : (
+            <QuestionnaireSummary
+              key={String(question.id)}
+              prompt={question.prompt}
+              questionnaire={question.questionnaire}
+              answer={question.answer}
+            />
+          ),
+        )}
+      {pendingQuestion === undefined ? null : pendingQuestion.questionnaire !== undefined ? (
+        <QuestionnaireCard
+          key={String(pendingQuestion.id)}
+          draftIdentity={{ scope: draftScope, requestId: String(pendingQuestion.id) }}
+          prompt={pendingQuestion.prompt}
+          questionnaire={pendingQuestion.questionnaire}
+          onAnswer={answerQuestion}
+        />
+      ) : (
         <form
           aria-label={
             pendingQuestion.source === undefined

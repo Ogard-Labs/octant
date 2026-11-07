@@ -837,3 +837,18 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 });
+
+it("admits only child request reads and responses from the harness session surface", () => {
+  const base = "http://127.0.0.1/api/native-harness/sessions/00000000-0000-4000-8000-000000000020";
+  expect(classifyProductAction(new Request(base))).toBe("agent-run.request.answer-once");
+  expect(classifyProductAction(new Request(`${base}/approvals`, { method: "POST" }))).toBe(
+    "agent-run.request.answer-once",
+  );
+  expect(classifyProductAction(new Request(`${base}/questions`, { method: "POST" }))).toBe(
+    "agent-run.request.answer-once",
+  );
+  for (const suffix of ["commands", "steering", "follow-ups", "unrecognized"])
+    expect(
+      classifyProductAction(new Request(`${base}/${suffix}`, { method: "POST" })),
+    ).toBeUndefined();
+});

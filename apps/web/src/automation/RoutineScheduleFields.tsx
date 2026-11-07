@@ -1,8 +1,15 @@
-import type { AutomationMissedRunPolicy, AutomationTrigger } from "@octant/contracts";
+import {
+  DEFAULT_AUTOMATION_FILE_START_LIMIT,
+  type AutomationEventSourceChoice,
+  type AutomationMissedRunPolicy,
+  type AutomationTrigger,
+} from "@octant/contracts";
 import { useId } from "react";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { RoutineFileArrivalFields } from "./RoutineFileArrivalFields";
+import { RoutineEventFields } from "./RoutineEventFields";
 import type { AutomationTriggerFormValue } from "./automationCenterModel";
 
 /**
@@ -11,6 +18,12 @@ import type { AutomationTriggerFormValue } from "./automationCenterModel";
  * and validates the same wherever a person sets one.
  */
 export interface RoutineScheduleFormState {
+  readonly integrationId: string;
+  readonly sourceId: string;
+  readonly sourceLabel: string;
+  readonly sourceIdentity: string;
+  readonly eventFilters: Readonly<Record<string, string>>;
+  readonly pollMinutes: string;
   readonly kind: AutomationTriggerFormValue["kind"];
   readonly onceLocal: string;
   readonly anchorLocal: string;
@@ -18,6 +31,11 @@ export interface RoutineScheduleFormState {
   readonly weekdays: ReadonlySet<number>;
   readonly localTime: string;
   readonly timeZone: string;
+  readonly fileDirectory: string;
+  readonly fileExtensions: string;
+  readonly fileExclusions: string;
+  readonly settleSeconds: string;
+  readonly automaticStartLimit: string;
 }
 
 export function utcInstantFromLocalInput(value: string): string | undefined {
@@ -56,7 +74,18 @@ export function initialRoutineScheduleState(
   defaults: Partial<RoutineScheduleFormState> = {},
 ): RoutineScheduleFormState {
   const base: RoutineScheduleFormState = {
+    integrationId: "",
+    sourceId: "",
+    sourceLabel: "",
+    sourceIdentity: "",
+    eventFilters: {},
+    pollMinutes: "1",
     kind: "once",
+    fileDirectory: "",
+    fileExtensions: "",
+    fileExclusions: "",
+    settleSeconds: "5",
+    automaticStartLimit: String(DEFAULT_AUTOMATION_FILE_START_LIMIT),
     onceLocal: "",
     anchorLocal: "",
     intervalMinutes: "60",
@@ -67,6 +96,28 @@ export function initialRoutineScheduleState(
   };
   if (initial === undefined) return base;
   switch (initial.kind) {
+    case "integration-event":
+      return {
+        ...base,
+        kind: initial.kind,
+        integrationId: initial.integrationId,
+        sourceId: initial.sourceId,
+        sourceLabel: initial.sourceLabel ?? "",
+        sourceIdentity: initial.sourceIdentity ?? "",
+        eventFilters: initial.filters,
+        pollMinutes: String(initial.pollMinutes),
+        automaticStartLimit: String(initial.automaticStartLimit),
+      };
+    case "file-arrival":
+      return {
+        ...base,
+        kind: "file-arrival",
+        fileDirectory: initial.directory,
+        fileExtensions: initial.includeExtensions.join(", "),
+        fileExclusions: initial.excludeDirectories.join(", "),
+        settleSeconds: String(initial.settleSeconds),
+        automaticStartLimit: String(initial.automaticStartLimit),
+      };
     case "once":
       return {
         ...base,
@@ -95,6 +146,32 @@ export function routineScheduleFormValue(
   trigger: RoutineScheduleFormState,
 ): AutomationTriggerFormValue {
   switch (trigger.kind) {
+    case "integration-event":
+      return {
+        kind: "integration-event",
+        integrationId: trigger.integrationId,
+        sourceId: trigger.sourceId,
+        filters: trigger.eventFilters,
+        pollMinutes: Number(trigger.pollMinutes),
+        automaticStartLimit: Number(trigger.automaticStartLimit),
+        ...(trigger.sourceIdentity === "" ? {} : { sourceIdentity: trigger.sourceIdentity }),
+        ...(trigger.sourceLabel === "" ? {} : { sourceLabel: trigger.sourceLabel }),
+      };
+    case "file-arrival":
+      return {
+        kind: "file-arrival",
+        directory: trigger.fileDirectory.trim(),
+        includeExtensions: trigger.fileExtensions
+          .split(",")
+          .map((value) => value.trim().toLowerCase().replace(/^\./, ""))
+          .filter((value) => value !== ""),
+        excludeDirectories: trigger.fileExclusions
+          .split(",")
+          .map((value) => value.trim())
+          .filter((value) => value !== ""),
+        settleSeconds: Number(trigger.settleSeconds),
+        automaticStartLimit: Number(trigger.automaticStartLimit),
+      };
     case "once":
       return { kind: "once", scheduledAt: utcInstantFromLocalInput(trigger.onceLocal) ?? "" };
     case "interval":
@@ -114,6 +191,10 @@ export function routineScheduleFormValue(
 }
 
 export function RoutineScheduleFields(props: {
+  readonly fileMode?: "work" | "code";
+  readonly allowIntegrationEvents?: boolean;
+  readonly eventSources?: ReadonlyArray<AutomationEventSourceChoice>;
+  readonly allowFileArrivals?: boolean;
   readonly trigger: RoutineScheduleFormState;
   readonly onTriggerChange: (
     update: (previous: RoutineScheduleFormState) => RoutineScheduleFormState,
@@ -149,10 +230,32 @@ export function RoutineScheduleFields(props: {
             { id: "once", label: "Run once" },
             { id: "interval", label: "Repeat on an interval" },
             { id: "weekly-local", label: "Weekly on chosen days" },
+            ...(props.allowFileArrivals
+              ? [{ id: "file-arrival", label: "When files arrive or change" }]
+              : []),
+            ...(props.allowIntegrationEvents
+              ? [{ id: "integration-event", label: "When an integration event arrives" }]
+              : []),
           ]}
           value={trigger.kind}
         />
       </div>
+
+      {trigger.kind === "integration-event" && props.allowIntegrationEvents ? (
+        <RoutineEventFields
+          trigger={trigger}
+          sources={props.eventSources ?? []}
+          onChange={setTrigger}
+        />
+      ) : null}
+
+      {trigger.kind === "file-arrival" && props.allowFileArrivals ? (
+        <RoutineFileArrivalFields
+          trigger={trigger}
+          onChange={setTrigger}
+          {...(props.fileMode === undefined ? {} : { mode: props.fileMode })}
+        />
+      ) : null}
 
       {trigger.kind === "once" ? (
         <div className="automation-editor__field">
@@ -264,8 +367,20 @@ export function RoutineScheduleFields(props: {
             props.onMissedRunPolicyChange(value as AutomationMissedRunPolicy)
           }
           options={[
-            { id: "skip", label: "Skip missed runs" },
-            { id: "run-once", label: "Run the newest missed occurrence once" },
+            {
+              id: "skip",
+              label:
+                trigger.kind === "file-arrival"
+                  ? "Skip net changes after a coverage gap"
+                  : "Skip missed runs",
+            },
+            {
+              id: "run-once",
+              label:
+                trigger.kind === "file-arrival"
+                  ? "Run one surviving final-state batch after a gap"
+                  : "Run the newest missed occurrence once",
+            },
           ]}
           value={props.missedRunPolicy}
         />

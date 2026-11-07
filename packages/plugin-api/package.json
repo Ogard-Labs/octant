@@ -16,7 +16,8 @@
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
     "./language-server-package": "./src/languageServerPackage.ts",
     "./debug-adapter-package": "./src/debugAdapterPackage.ts",
-    "./outside-provider-driver": "./src/outsideProviderDriver.ts"
+    "./outside-provider-driver": "./src/outsideProviderDriver.ts",
+    "./credential-request": "./src/credentialRequest.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

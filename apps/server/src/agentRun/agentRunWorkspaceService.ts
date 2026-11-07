@@ -10,6 +10,7 @@ import {
   type AgentRunWorkspacePreparationResult,
   type AgentRunWorkspaceRefusalReason,
   type OctantMode,
+  type ChildWorktreeSnapshot,
 } from "@octant/contracts";
 import {
   admitAgentRunWorkspace,
@@ -43,6 +44,7 @@ export type AgentRunChildWorktreePrepareResult =
       readonly checkoutRoot: string;
       readonly worktreeRoot: string;
       readonly state: "creating" | "ready";
+      readonly source?: ChildWorktreeSnapshot;
     }
   | { readonly status: "refused"; readonly reason: AgentRunWorkspaceRefusalReason };
 
@@ -388,6 +390,7 @@ export class AgentRunWorkspaceService {
       checkoutRoot: prepared.checkoutRoot,
       worktreeRoot: prepared.worktreeRoot,
       worktreeState: prepared.state,
+      ...(prepared.source === undefined ? {} : { source: prepared.source }),
     });
     return { status: "prepared", workspace: toHandle(issued) };
   }

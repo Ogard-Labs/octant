@@ -17,6 +17,7 @@ import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
 import type { ProviderController } from "../providers/useProviderController";
+import type { OctantHostBridge } from "./hostBridge";
 
 const now = "2026-07-20T08:00:00.000Z";
 
@@ -120,6 +121,49 @@ function defaultProps(): SettingsViewProps {
 }
 
 describe("SettingsView", () => {
+  it.each([false, true])(
+    "keeps exactly one Nightly identity in standalone Settings (narrow: %s)",
+    (isNarrow) => {
+      const hostBridge: OctantHostBridge = {
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+        projectWindowCapability: "C".repeat(43),
+        clearProviderCredential: vi.fn(),
+        close: vi.fn(),
+        maximizeOrRestore: vi.fn(),
+        minimize: vi.fn(),
+        providerCredentialStatus: vi.fn(async () => "missing" as const),
+        resetBounds: vi.fn(),
+        selectProjectRoot: vi.fn(),
+        setProviderCredential: vi.fn(),
+        addProviderApiKey: vi.fn(),
+        listProviderApiKeys: vi.fn(async () => []),
+        renameProviderApiKey: vi.fn(),
+        replaceProviderApiKey: vi.fn(),
+        removeProviderApiKey: vi.fn(),
+        setActiveProviderApiKey: vi.fn(),
+        moveProviderApiKey: vi.fn(),
+        setSidebarMaterialPreference: vi.fn(),
+        subscribeResolvedMaterial: vi.fn(() => () => undefined),
+      };
+      const { container, rerender, props } = renderSettings({
+        hostBridge,
+        isNarrow,
+        reservesTitlebarInset: true,
+      });
+      expect(screen.getAllByLabelText("Octant Nightly")).toHaveLength(1);
+      const identity = screen.getByLabelText("Octant Nightly");
+      expect(
+        container.querySelector(
+          isNarrow ? ".settings-view__mobile-titlebar" : ".settings-view__sidebar",
+        ),
+      ).toContainElement(identity);
+      expect(identity.querySelector("button, a, [tabindex]")).toBeNull();
+      const { hostBridge: _bridge, ...remote } = props;
+      rerender(<SettingsView {...remote} />);
+      expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
+    },
+  );
+
   it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
@@ -239,6 +283,24 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Pixelated" }));
 
     expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
+  });
+
+  it("shows replies at low detail until another level is chosen in Appearance", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    const replyDetail = screen.getByRole("group", { name: "Reply detail" });
+    expect(within(replyDetail).getByRole("button", { name: "Low" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("group", { name: "Reply detail setting" })).toHaveAccessibleDescription(
+      "Where every thread starts unless it sets its own. Thinking stays folded, and a finished turn's tool calls fold behind one line.",
+    );
+    await user.click(within(replyDetail).getByRole("button", { name: "High" }));
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ replyDetail: "high" });
   });
 
   it("shows the stats line switch off when the saved preference is off", () => {
@@ -383,6 +445,22 @@ describe("SettingsView", () => {
       .getByRole("heading", { level: 1, name: "Remote access" })
       .closest("header")!;
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
+  });
+
+  it("shows one Managed in Octant line where a Nightly client's remote access would be", () => {
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      hostBridge: {
+        managedInOctant: true,
+        applicationIdentity: { flavor: "nightly", productName: "Octant Nightly" },
+      } as never,
+    });
+
+    const section = screen.getByRole("region", { name: "Remote access" });
+    expect(section).toHaveTextContent(/^Managed in Octant\./);
+    expect(within(section).getAllByRole("paragraph")).toHaveLength(1);
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(section).not.toHaveTextContent(/happen on the host machine/);
   });
 
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {
@@ -1540,13 +1618,83 @@ describe("SettingsView", () => {
     expect(diagnosticsExportClient.exportSupportBundle).not.toHaveBeenCalled();
   });
 
+  it("refreshes selected-root status through the actual Skills Settings view without changing settings or skill authority", async () => {
+    let readable = false;
+    const snapshot = () => ({
+      sequence: 1,
+      snapshotAt: now,
+      packages: [],
+      collisions: [],
+      skillRoots: [
+        {
+          sourceRef: "folder:opaque",
+          displayName: "future-skills",
+          status: readable ? "ready" : "missing",
+          skillCount: readable ? 1 : 0,
+          watching: true,
+        },
+      ],
+    });
+    const execute = vi.fn(async (_command: { readonly kind: string }) => ({
+      kind: "extension-state-updated",
+      snapshot: snapshot(),
+    }));
+    const onSettingsChange = vi.fn();
+    renderSettings({
+      initialDeepLink: { section: "skills" },
+      onSettingsChange,
+      extensionClient: {
+        snapshot: async () => snapshot(),
+        listDiscoveredTooling: async () => ({ servers: [], plugins: [], notes: [] }),
+        execute,
+        effectiveState: async () => ({
+          sequence: 1,
+          snapshotAt: now,
+          scope: {
+            hostId: "local",
+            mode: "code",
+            projectId: null,
+            threadId: null,
+            providerFamily: "openai-compatible",
+          },
+          catalogEpoch: `sha256:${"a".repeat(64)}`,
+          catalogStatus: "available",
+          stale: false,
+          packages: [],
+          collisions: [],
+        }),
+      } as never,
+    });
+    expect(await screen.findByText(/future-skills: Folder does not exist yet/)).toBeVisible();
+    const before = execute.mock.calls.length;
+    readable = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh folder status" }));
+    expect(await screen.findByText(/future-skills: Folder is readable/)).toHaveTextContent(
+      "1 skill entry indexed",
+    );
+    expect(execute.mock.calls.length).toBeGreaterThan(before);
+    expect(execute.mock.calls.every(([command]) => command.kind === "reconcile-skills")).toBe(true);
+    expect(onSettingsChange).not.toHaveBeenCalled();
+  });
+
   it("mounts the Skills & Extensions settings view when an extension client is provided", async () => {
+    const onSettingsChange = vi.fn(async () => true);
+    const pickSkillFolder = vi.fn(async () => "/tmp/selected-skills");
     const extensionClient = {
       snapshot: vi.fn(async () => ({
         sequence: 1,
         snapshotAt: now,
         packages: [],
         collisions: [],
+        skillRoots: [
+          {
+            sourceRef: "folder:opaque",
+            displayName: "missing-skills",
+            status: "missing",
+            skillCount: 0,
+            watching: true,
+          },
+        ],
       })),
       effectiveState: vi.fn(async () => ({
         sequence: 1,
@@ -1572,7 +1720,11 @@ describe("SettingsView", () => {
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
     };
-    renderSettings({ extensionClient: extensionClient as never });
+    renderSettings({
+      extensionClient: extensionClient as never,
+      onSettingsChange,
+      pickSkillFolder,
+    });
     navigateTo("Skills & Extensions");
     expect(await screen.findAllByRole("heading", { name: "Skills & Extensions" })).toHaveLength(1);
     expect(
@@ -1580,6 +1732,14 @@ describe("SettingsView", () => {
         name: /installed/i,
       }),
     ).toBeVisible();
+    expect(await screen.findByText(/missing-skills: Folder does not exist yet/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+    await waitFor(() =>
+      expect(onSettingsChange).toHaveBeenCalledWith({
+        skillFolders: { providers: [], folders: ["/tmp/selected-skills"] },
+      }),
+    );
+    expect(pickSkillFolder).toHaveBeenCalledTimes(1);
   });
 
   it("mounts the Host section when a host control client is provided", async () => {

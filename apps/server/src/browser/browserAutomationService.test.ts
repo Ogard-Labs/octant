@@ -1,3 +1,19 @@
+import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
+import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
+import { Schema } from "effect";
+import { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import {
+  decodeOwnerBrowserControlId,
+  OwnerBrowserNativeTarget,
+} from "@octant/contracts/owner-browser";
+function importPlanId() {
+  const result = decodeBrowserPageScriptPreparation({
+    status: "prepared",
+    planId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  });
+  if (result.status !== "prepared") throw new Error("expected prepared");
+  return result.planId;
+}
 import type {
   BrowserActionRequest,
   BrowserCaptureId,
@@ -8,16 +24,25 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_THREAD_CONTEXTS } from "@octant/contracts";
+import {
+  decodeBrowserAutomationFailure,
+  decodeWindowId,
+  MAX_BROWSER_THREAD_CONTEXTS,
+} from "@octant/contracts";
+import { decodeBrowserCredentialCommand } from "@octant/contracts/browser-credential-use";
 import { decodeToolActionRequest } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
 import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browserAutomationService";
+import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
-import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
+import {
+  BrowserNavigationBlockedError,
+  BrowserRecordingUnavailableError,
+  type BrowserRuntimePort,
+} from "./browserRuntimePort";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 const otherWindowId = "10000000-0000-4000-8000-000000000002" as WindowId;
@@ -70,7 +95,12 @@ function request(overrides: Partial<BrowserActionRequest> = {}): BrowserActionRe
 
 function harness(
   options: {
+    readonly authority?: ToolActionAuthority;
+    readonly ownerControl?: BrowserRuntimePort["ownerControl"];
     readonly access?: boolean;
+    readonly pageScriptPolicy?: ConstructorParameters<
+      typeof BrowserAutomationService
+    >[0]["pageScriptPolicy"];
     readonly recordExternalContentIngestion?: ConstructorParameters<
       typeof BrowserAutomationService
     >[0]["recordExternalContentIngestion"];
@@ -91,11 +121,14 @@ function harness(
   const timers: Array<{ delay: number; run: () => void }> = [];
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const baseRuntime: BrowserRuntimePort = {
+    ...(options.ownerControl === undefined ? {} : { ownerControl: options.ownerControl }),
     available: vi.fn(async () => true),
     nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     ...(options.describePoint === undefined ? {} : { describePoint: options.describePoint }),
+    validateCredentialFill: vi.fn(async () => true),
+    runPageScript: vi.fn(async () => ({ status: "refused" as const, effect: "none" as const })),
     act: vi.fn(async (contextId, input) => {
       if (!contexts.has(contextId)) throw new Error("missing context");
       return {
@@ -135,13 +168,16 @@ function harness(
   const ids = [contextOne, "30000000-0000-4000-8000-000000000002"];
   const service = new BrowserAutomationService({
     runtime,
+    ...(options.pageScriptPolicy === undefined
+      ? {}
+      : { pageScriptPolicy: options.pageScriptPolicy }),
     authority: {
       canAccessWindow: () => options.access ?? true,
       resolve: (threadId) =>
         revokedThreads.has(threadId)
           ? undefined
           : threadId === threadOne
-            ? authorityOne
+            ? (options.authority ?? authorityOne)
             : threadId === threadTwo
               ? authorityTwo
               : undefined,
@@ -182,103 +218,552 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
-  it.each(["principal", "authority", "person-input"] as const)(
-    "does not return a late point capture after its original %s changes",
-    async (changed) => {
-      let release: (() => void) | undefined;
-      let principalCurrent = true;
-      const f = harness({
-        describePoint: async () => {
-          await new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          return {
-            status: "described",
-            element: {
-              selector: "#private-new-content",
-              bounds: { x: 0, y: 0, width: 0.1, height: 0.1 },
-            },
-            cropDataUrl: "data:image/jpeg;base64,/9j/AA==",
-          };
-        },
+  it.each([
+    { mode: "work" as const, unattended: false, dedicated: false },
+    { mode: "code" as const, unattended: true, dedicated: false },
+    { mode: "code" as const, unattended: false, dedicated: true },
+  ])(
+    "does not offer an owner target for excluded resource %j",
+    async ({ mode, unattended, dedicated }) => {
+      const authority = { ...authorityOne, mode };
+      const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(async () => ({
+        status: "refused",
+      }));
+      const f = harness({ authority, unattended, ownerControl });
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.contexts.add(id);
+        return "native-live";
       });
-      try {
-        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
-        const capture = f.service.describePoint({
-          windowId,
-          threadId: threadOne,
-          contextId: contextOne,
-          point: { x: 0.25, y: 0.25 },
-          current: () => principalCurrent,
-        });
-        await vi.waitFor(() => expect(release).toBeDefined());
-        if (changed === "principal") principalCurrent = false;
-        if (changed === "authority") f.revoke(threadOne);
-        if (changed === "person-input") f.personTyped();
-        release?.();
-        await expect(capture).resolves.toEqual({ status: "unavailable" });
-      } finally {
-        release?.();
-        await f.service.close();
-      }
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(authority),
+        policy,
+        dedicated,
+      });
+      const host = f.service.ownerBrowserHost({
+        hostMemberId: () =>
+          Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+        threadTitle: () => "Synthetic task",
+      });
+      expect(await host.targets()).toEqual([]);
+      expect(ownerControl).not.toHaveBeenCalled();
+      await f.service.close();
     },
   );
 
-  it("settles a hung point read at its finite deadline and releases the queue without reopening", async () => {
-    vi.useFakeTimers();
-    let release: (() => void) | undefined;
-    const f = harness({
-      describePoint: async () => {
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        return { status: "no-element" };
-      },
+  it("does not let an old delayed native release hand back a successor's person hold", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const authority = { ...authorityOne, mode: "code" as const };
+    const target = Schema.decodeUnknownSync(OwnerBrowserNativeTarget)({
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://example.com",
     });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const firstId = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000002");
+    const secondId = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000003");
+    const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(async (command) => {
+      if (command.operation === "inspect") return { status: "target", target };
+      if (command.operation === "claim") return { status: "claimed" };
+      if (command.operation === "release") {
+        if (command.controlId === firstId) {
+          entered.resolve();
+          await release.promise;
+        }
+        return { status: "released" };
+      }
+      return { status: "refused" };
+    });
+    const f = harness({ authority, ownerControl });
     try {
-      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
-      const capture = f.service.describePoint({
-        windowId,
-        threadId: threadOne,
-        contextId: contextOne,
-        point: { x: 0.25, y: 0.25 },
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.contexts.add(id);
+        return "native-live";
       });
-      await vi.waitFor(() => expect(release).toBeDefined());
-      const next = f.service.act({ windowId, capturedBy: "agent", request: request() });
-      await vi.advanceTimersByTimeAsync(10_000);
-      await expect(capture).resolves.toEqual({ status: "unavailable" });
-      await next;
-      expect(f.runtime.createContext).toHaveBeenCalledOnce();
-      expect(f.runtime.act).toHaveBeenCalledOnce();
-      release?.();
-      await Promise.resolve();
+      await f.service.create({ windowId, threadId: threadOne, action: action(authority), policy });
+      const host = f.service.ownerBrowserHost({
+        hostMemberId: () =>
+          Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+        threadTitle: () => "Synthetic task",
+      });
+      const page = (await host.targets())[0]?.target;
+      if (page === undefined) throw new Error("Expected native page");
+      expect(
+        await host.claim(
+          page,
+          firstId,
+          "First owner",
+          Schema.decodeUnknownSync(UtcTimestamp)(new Date(now + 60_000).toISOString()),
+        ),
+      ).toBe(true);
+      const old = host.release(page, firstId, "hand-back");
+      await entered.promise;
+      clock.mockReturnValue(now + 61_000);
+      expect(
+        await host.claim(
+          page,
+          secondId,
+          "Second owner",
+          Schema.decodeUnknownSync(UtcTimestamp)(new Date(now + 120_000).toISOString()),
+        ),
+      ).toBe(true);
+      release.resolve();
+      await old;
+      expect(f.service.inspectThread(windowId, threadOne).ownerController?.name).toBe(
+        "Second owner",
+      );
+      expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
     } finally {
-      release?.();
+      release.resolve();
       await f.service.close();
-      vi.useRealTimers();
+      clock.mockRestore();
     }
   });
 
-  it("reaches the actual routed page when a person describes a selected point", async () => {
-    const describePoint = vi.fn(async () => ({ status: "no-element" as const }));
-    const f = harness({
-      describePoint,
-      wrapRuntime: (native) => new RoutingBrowserRuntime({ native, headless: native }),
+  it("keeps the person hold when revocation overlaps a delayed native handback", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const authority = { ...authorityOne, mode: "code" as const };
+    const target = Schema.decodeUnknownSync(OwnerBrowserNativeTarget)({
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://example.com",
     });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const revokeRelease = Promise.withResolvers<void>();
+    const firstId = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000002");
+    let releases = 0;
+    const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(async (command) => {
+      if (command.operation === "inspect") return { status: "target", target };
+      if (command.operation === "claim") return { status: "claimed" };
+      if (command.operation === "release") {
+        if (releases++ === 0) {
+          entered.resolve();
+          await release.promise;
+        } else {
+          await revokeRelease.promise;
+        }
+        return { status: "released" };
+      }
+      return { status: "refused" };
+    });
+    const f = harness({ authority, ownerControl });
     try {
-      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+        f.contexts.add(id);
+        return "native-live";
+      });
+      await f.service.create({ windowId, threadId: threadOne, action: action(authority), policy });
+      const host = f.service.ownerBrowserHost({
+        hostMemberId: () =>
+          Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+        threadTitle: () => "Synthetic task",
+      });
+      const page = (await host.targets())[0]?.target;
+      if (page === undefined) throw new Error("Expected native page");
       expect(
-        await f.service.describePoint({
-          windowId,
-          threadId: threadOne,
-          contextId: contextOne,
-          point: { x: 0.25, y: 0.25 },
-        }),
-      ).toEqual({ status: "no-element" });
-      expect(describePoint).toHaveBeenCalledOnce();
+        await host.claim(
+          page,
+          firstId,
+          "First owner",
+          Schema.decodeUnknownSync(UtcTimestamp)(new Date(now + 60_000).toISOString()),
+        ),
+      ).toBe(true);
+      const old = host.release(page, firstId, "hand-back");
+      await entered.promise;
+      const revoke = host.release(page, firstId, "revoke");
+      release.resolve();
+      await old;
+      expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
+      revokeRelease.resolve();
+      await revoke;
     } finally {
+      release.resolve();
+      revokeRelease.resolve();
       await f.service.close();
+      clock.mockRestore();
     }
+  });
+
+  it("keeps a person hold when native owner release is refused and combines request and resource lifetimes", async () => {
+    const authority = { ...authorityOne, mode: "code" as const };
+    const target = Schema.decodeUnknownSync(OwnerBrowserNativeTarget)({
+      targetVersion: "a".repeat(64),
+      documentRevision: 1,
+      origin: "https://example.com",
+    });
+    const started = Promise.withResolvers<AbortSignal>();
+    const settle = Promise.withResolvers<void>();
+    const ownerControl = vi.fn<NonNullable<BrowserRuntimePort["ownerControl"]>>(
+      async (command, signal) => {
+        if (command.operation === "inspect") return { status: "target", target };
+        if (command.operation === "claim") return { status: "claimed" };
+        if (command.operation === "release") return { status: "refused" };
+        if (command.operation === "frame") {
+          started.resolve(signal);
+          await settle.promise;
+        }
+        return { status: "refused" };
+      },
+    );
+    const f = harness({ authority, ownerControl });
+    vi.mocked(f.runtime.createContext).mockImplementationOnce(async (id) => {
+      f.contexts.add(id);
+      return "native-live";
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(authority), policy });
+    const host = f.service.ownerBrowserHost({
+      hostMemberId: () =>
+        Schema.decodeUnknownSync(HubMemberId)("a7880000-0000-4000-8000-000000000001"),
+      threadTitle: () => "Synthetic Code task",
+    });
+    const page = (await host.targets())[0]?.target;
+    if (page === undefined) throw new Error("Expected eligible native page");
+    const id = decodeOwnerBrowserControlId("a7880000-0000-4000-8000-000000000002");
+    expect(
+      await host.claim(
+        page,
+        id,
+        "Synthetic owner phone",
+        Schema.decodeUnknownSync(UtcTimestamp)(new Date(Date.now() + 60_000).toISOString()),
+      ),
+    ).toBe(true);
+    expect(f.service.inspectThread(windowId, threadOne).ownerController?.name).toBe(
+      "Synthetic owner phone",
+    );
+    expect(await host.release(page, id, "hand-back")).toEqual({ status: "refused" });
+    expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
+    const caller = new AbortController();
+    const pending = host.frame(page, id, 1, caller.signal);
+    const signal = await started.promise;
+    await f.service.close();
+    expect(caller.signal.aborted).toBe(false);
+    expect(signal.aborted).toBe(true);
+    settle.resolve();
+    await pending;
+  });
+  it("rechecks Full access after native realm preparation and cancels the unstarted script when revoked", async () => {
+    let full = true;
+    const f = harness({ pageScriptPolicy: () => (full ? "full-access" : "approval-gated") });
+    let finishPrepare:
+      | ((value: {
+          readonly status: "prepared";
+          readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+        }) => void)
+      | undefined;
+    const prepared = new Promise<{
+      readonly status: "prepared";
+      readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+    }>((resolve) => {
+      finishPrepare = resolve;
+    });
+    const planId = importPlanId();
+    const calls: string[] = [];
+    if (f.runtime.runPageScript === undefined) throw new Error("native script fake missing");
+    vi.mocked(f.runtime.runPageScript).mockImplementation(async (command) => {
+      calls.push(command.operation);
+      return command.operation === "prepare" ? prepared : { status: "cancelled", effect: "none" };
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    expect(observed.failure).toBeUndefined();
+    expect(observed.observation).toBeDefined();
+    const run = f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.dataset.effect='ran'",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prepare"]));
+    full = false;
+    finishPrepare?.({ status: "prepared", planId });
+    expect(await run).toMatchObject({
+      status: "refused",
+      effect: "none",
+      reason: "full-access-required",
+    });
+    expect(calls).toEqual(["prepare", "cancel"]);
+    await f.service.close();
+  });
+
+  it("refuses a stale observation even when its new revision is obtained from the public snapshot", async () => {
+    const f = harness({ pageScriptPolicy: () => "full-access" });
+    const native = f.runtime.runPageScript;
+    if (native === undefined) throw new Error("expected native script fake");
+    vi.mocked(native).mockImplementation(async (command) =>
+      command.operation === "prepare"
+        ? { status: "prepared", planId: importPlanId() }
+        : { status: "completed", effect: "possible", valueJson: "42" },
+    );
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    const input = {
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "42",
+      turnExecutionPolicy: "full-access" as const,
+      callerIsCurrent: () => true,
+    };
+    expect(
+      (
+        await f.service.runScript({
+          ...input,
+          expectedObservationRevision: observed.observation?.revision ?? 0,
+        })
+      ).status,
+    ).toBe("completed");
+    const exposed = f.service.inspectThread(windowId, threadOne).observation;
+    expect(exposed?.stale).toBe(true);
+    expect(
+      await f.service.runScript({ ...input, expectedObservationRevision: exposed?.revision ?? 0 }),
+    ).toMatchObject({ status: "refused", effect: "none", reason: "stale" });
+    expect(native).toHaveBeenCalledTimes(2);
+    await f.service.close();
+  });
+
+  it("records only script provenance before publishing page data and withholds it when journaling refuses", async () => {
+    let refuse = false;
+    const record = vi.fn(
+      (): import("../context/externalContentIngestionStore").ExternalContentIngestionResult =>
+        refuse
+          ? { kind: "refused", reason: "contended" }
+          : {
+              kind: "recorded",
+              taint: { externalContentIngested: true, ingestedSources: ["browser-observation"] },
+            },
+    );
+    const f = harness({
+      pageScriptPolicy: () => "full-access",
+      recordExternalContentIngestion: record,
+    });
+    const native = f.runtime.runPageScript;
+    if (native === undefined) throw new Error("expected native script fake");
+    vi.mocked(native).mockImplementation(async (command) =>
+      command.operation === "prepare"
+        ? { status: "prepared", planId: importPlanId() }
+        : { status: "completed", effect: "possible", valueJson: '"private-script-result"' },
+    );
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    record.mockClear();
+    refuse = true;
+    const receipt = await f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.textContent",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    expect(receipt).toMatchObject({ status: "refused", effect: "possible" });
+    expect(record).toHaveBeenCalledOnce();
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private-script-result");
+    expect(JSON.stringify(record.mock.calls)).not.toContain("document.body.textContent");
+    expect(JSON.stringify(receipt)).not.toContain("private-script-result");
+    await f.service.close();
+  });
+
+  it("withholds a completed script value when a person takes and hands back the page during its reply", async () => {
+    const f = harness({ pageScriptPolicy: () => "full-access" });
+    let finish:
+      | ((value: import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt) => void)
+      | undefined;
+    const result = new Promise<
+      import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt
+    >((resolve) => {
+      finish = resolve;
+    });
+    const native = f.runtime.runPageScript;
+    if (native === undefined) throw new Error("native script fake missing");
+    vi.mocked(native).mockImplementation(async (command) =>
+      command.operation === "prepare" ? { status: "prepared", planId: importPlanId() } : result,
+    );
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    const pending = f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.textContent",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    await vi.waitFor(() => expect(native).toHaveBeenCalledTimes(2));
+    f.service.takeOver(windowId, threadOne);
+    f.service.handBack(windowId, threadOne);
+    finish?.({ status: "completed", effect: "possible", valueJson: '"late-private-page-value"' });
+    const receipt = await pending;
+    expect(receipt).toMatchObject({ status: "refused", effect: "possible" });
+    expect(JSON.stringify(receipt)).not.toContain("late-private-page-value");
+    await f.service.close();
+  });
+
+  it("withholds a peek that overlaps a fill epoch even after release and defers handing the page back", async () => {
+    const f = harness();
+    vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {
+      f.contexts.add(id);
+      return "native-live";
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await f.service.act({ windowId, request: request() });
+    const releasePerson = f.service.holdForPerson(windowId, threadOne);
+    const target = await f.service.credentialUseTarget(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "list-browser-credential-grants",
+        contextId: contextOne,
+        threadId: threadOne,
+        mode: "work",
+      }),
+      true,
+    );
+    if (target.kind !== "browser-credential-target") throw new Error("Expected native held target");
+    const peek = f.runtime.peek;
+    if (peek === undefined) throw new Error("Expected peek");
+    let finish:
+      | ((value: {
+          readonly url: string;
+          readonly title: string;
+          readonly screenshotDataUrl: string;
+        }) => void)
+      | undefined;
+    vi.mocked(peek).mockImplementation(
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    f.advance(10_000);
+    const pending = f.service.peekThread(windowId, threadOne);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const held = f.service.holdCredentialFill(
+      windowId,
+      target.target,
+      "00000000-0000-4000-8000-000000000099",
+    );
+    if (held.kind !== "held") throw new Error("Expected fill hold");
+    releasePerson?.();
+    expect(held.signal.aborted).toBe(true);
+    expect(f.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("sign-in");
+    held.release();
+    finish?.({
+      url: "https://example.com",
+      title: "overlapping-private-observation",
+      screenshotDataUrl: "data:image/jpeg;base64,PRIVATE",
+    });
+    const result = await pending;
+    expect(JSON.stringify(result)).not.toContain("overlapping-private-observation");
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(result.waitingForPerson).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    "refuses credential metadata for headless or unattended contexts",
+    async (unattended) => {
+      const f = harness({ unattended });
+      if (unattended)
+        vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {
+          f.contexts.add(id);
+          return "native-live";
+        });
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      f.service.holdForPerson(windowId, threadOne);
+      const command = decodeBrowserCredentialCommand({
+        kind: "list-browser-credential-grants",
+        contextId: contextOne,
+        threadId: threadOne,
+        mode: "work",
+      });
+      expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+        reason: unattended ? "unauthorized" : "unsupported",
+      });
+    },
+  );
+
+  it("verifies a held native target after its address await and refuses stale ownership", async () => {
+    const f = harness();
+    vi.mocked(f.runtime.createContext).mockImplementation(async (id) => {
+      f.contexts.add(id);
+      return "native-live";
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const command = decodeBrowserCredentialCommand({
+      kind: "list-browser-credential-grants",
+      contextId: contextOne,
+      threadId: threadOne,
+      mode: "work",
+    });
+    expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+      reason: "hold-required",
+    });
+    f.service.holdForPerson(windowId, threadOne);
+    expect(await f.service.credentialUseTarget(otherWindowId, command, true)).toMatchObject({
+      reason: "unauthorized",
+    });
+    expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+      kind: "browser-credential-target",
+      target: {
+        topOrigin: "https://example.com",
+        frame: { kind: "top", origin: "https://example.com" },
+      },
+    });
+    const peek = f.runtime.peek;
+    if (peek === undefined) throw new Error("Missing fixture peek");
+    vi.mocked(peek).mockImplementation(async () => {
+      f.revoke(threadOne);
+      return { url: "https://example.com" };
+    });
+    expect(await f.service.credentialUseTarget(windowId, command, true)).toMatchObject({
+      reason: "stale",
+    });
+  });
+
+  it("uses current thread authority and deadline for human presentation without an agent observation", async () => {
+    const fixture = harness();
+    vi.spyOn(fixture.runtime, "createContext").mockImplementation(async (id) => {
+      fixture.contexts.add(id);
+      return "native-live";
+    });
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const peek = fixture.runtime.peek;
+    if (peek === undefined) throw new Error("Expected fixture peek");
+    const peeks = vi.mocked(peek).mock.calls.length;
+    expect(fixture.service.ownsHumanPresentation(windowId, contextOne, threadOne)).toBe(true);
+    expect(fixture.service.ownsHumanPresentation(otherWindowId, contextOne, threadOne)).toBe(false);
+    expect(fixture.service.ownsHumanPresentation(windowId, contextOne, threadTwo)).toBe(false);
+    fixture.advance(policy.sessionTimeoutMs);
+    expect(fixture.service.ownsHumanPresentation(windowId, contextOne, threadOne)).toBe(false);
+    expect(vi.mocked(peek).mock.calls).toHaveLength(peeks);
   });
 
   it("refuses to create a context when the window is not scoped to the thread", async () => {
@@ -725,6 +1210,83 @@ describe("BrowserAutomationService", () => {
     expect(afterNavigation.failure?.category).toBe("stale");
   });
 
+  it("answers an audit in its shaped form, naming a finding by the ref the latest snapshot gave its element", async () => {
+    const ingested = vi.fn(() => ({ kind: "recorded" as const }));
+    const { runtime, service } = harness({ recordExternalContentIngestion: ingested as never });
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/start",
+      snapshot: '- textbox [ref=e1]\n- button "Save" [ref=e2]',
+      snapshotRefs: [
+        { ref: "e1", selector: "#name", role: "textbox", name: "" },
+        { ref: "e2", selector: "#save", role: "button", name: "Save" },
+      ],
+    });
+    await service.act({ windowId, request: request({ kind: "snapshot", target: undefined }) });
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/start",
+      title: "Start",
+      audit: {
+        kind: "accessibility",
+        reading: {
+          findings: [
+            { rule: "field-name", selector: "#name", role: "textbox" },
+            {
+              rule: "color-contrast",
+              selector: "main > p",
+              text: "Faint",
+              detail: { ratio: 2.1, required: 4.5 },
+            },
+          ],
+          found: [
+            { rule: "field-name", count: 1 },
+            { rule: "color-contrast", count: 1 },
+          ],
+          touch: false,
+          contrastNotMeasured: 0,
+          frames: 0,
+          truncated: false,
+        },
+      },
+    });
+    const audited = await service.act({
+      windowId,
+      capturedBy: "agent",
+      request: request({ kind: "audit", target: undefined, auditKind: "accessibility" }),
+    });
+    expect(audited.failure).toBeUndefined();
+    expect(audited.observation?.change).toBeUndefined();
+    expect(audited.observation?.audit).toMatchObject({
+      kind: "accessibility",
+      findings: [
+        { rule: "field-name", ref: "e1" },
+        { rule: "color-contrast", selector: "main > p", text: "Faint" },
+      ],
+    });
+    // Reading the page as outside content marks the thread, as any read does.
+    expect(ingested).toHaveBeenCalledTimes(2);
+    // The audit changed nothing, so the snapshot's refs still act.
+    expect(service.snapshotRefs(windowId, threadOne).map((entry) => entry.ref)).toEqual([
+      "e1",
+      "e2",
+    ]);
+  });
+
+  it("refuses an audit the Browser cannot run rather than answering as if the page were clean", async () => {
+    const { service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const refused = await service.act({
+      windowId,
+      capturedBy: "agent",
+      request: request({ kind: "audit", target: undefined, auditKind: "performance" }),
+    });
+    expect(refused.failure).toEqual({
+      category: "unavailable",
+      message: "This Browser cannot audit pages.",
+    });
+    expect(refused.observation?.audit).toBeUndefined();
+  });
+
   it("refuses an upload that did not come with the agent tool's approved files", async () => {
     const { runtime, service } = harness();
     await service.create({ windowId, threadId: threadOne, action: action(), policy });
@@ -867,7 +1429,7 @@ describe("BrowserAutomationService", () => {
     fixture.advance(150_000);
     fixture.expire();
     await Promise.resolve();
-    expect(fixture.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+    expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
   });
 
   describe("person and agent together", () => {
@@ -1273,6 +1835,172 @@ describe("BrowserAutomationService", () => {
       expect(captures.keep).not.toHaveBeenCalled();
       expect(completed.observation?.capture).toEqual({ status: "not-kept", reason: "no-picture" });
     });
+
+    describe("recordings", () => {
+      const recorded = {
+        status: "recorded" as const,
+        dataUrl: "data:image/png;base64,BBBB",
+        frames: 6,
+        durationMs: 1_500,
+        truncated: "size-limit" as const,
+      };
+
+      it("keeps the agent's recording with its frames, and leaves the page's revision where it was", async () => {
+        const captures = {
+          keep: vi.fn(async (input: KeepBrowserCaptureInput) => ({
+            status: "kept" as const,
+            captureId,
+            ...(input.recording === undefined ? {} : { recording: input.recording }),
+          })),
+          recordStep: vi.fn(),
+        };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        const read = await service.act({ windowId, request: request(), capturedBy: "agent" });
+        const revision = read.observation?.revision;
+        const started = await service.act({
+          windowId,
+          request: request({ kind: "record-start" }),
+          capturedBy: "agent",
+        });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/start",
+          title: "Thread one",
+          contentHash: "after",
+          recording: recorded,
+        });
+        const stopped = await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+        });
+
+        expect(started.observation?.revision).toBe(revision);
+        expect(stopped.observation?.revision).toBe(revision);
+        expect(captures.keep).toHaveBeenCalledOnce();
+        expect(captures.keep).toHaveBeenCalledWith(
+          expect.objectContaining({
+            dataUrl: recorded.dataUrl,
+            recording: { frames: 6, durationMs: 1_500, truncated: "size-limit" },
+            takenBy: "agent",
+          }),
+        );
+        expect(stopped.observation?.capture).toEqual({
+          status: "kept",
+          captureId,
+          recording: { frames: 6, durationMs: 1_500, truncated: "size-limit" },
+        });
+        // Starting and stopping a recording are not steps of the proof.
+        expect(captures.recordStep).toHaveBeenCalledOnce();
+      });
+
+      it("ends a recording the agent discards and keeps nothing of it", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/start",
+          title: "Thread one",
+          recording: recorded,
+        });
+        const stopped = await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+          discardRecording: true,
+        });
+
+        // The stop reached the runtime, so the screencast ended.
+        expect(vi.mocked(runtime.act).mock.calls.at(-1)?.[1]).toMatchObject({
+          kind: "record-stop",
+        });
+        expect(stopped.failure).toBeUndefined();
+        expect(captures.keep).not.toHaveBeenCalled();
+        expect(stopped.observation?.capture).toBeUndefined();
+      });
+
+      it("keeps a recording under the address of the tab it recorded, not the tab in front", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockResolvedValueOnce({
+          url: "https://example.com/other",
+          title: "Other tab",
+          recording: {
+            ...recorded,
+            truncated: "tab-changed",
+            url: "https://example.com/start",
+            title: "Recorded tab",
+          },
+        });
+        await service.act({
+          windowId,
+          request: request({ kind: "record-stop" }),
+          capturedBy: "agent",
+        });
+
+        expect(captures.keep).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: "https://example.com/start",
+            title: "Recorded tab",
+            recording: { frames: 6, durationMs: 1_500, truncated: "tab-changed" },
+          }),
+        );
+      });
+
+      it("records only for the agent's own call, never for the pane or an unnamed caller", async () => {
+        const captures = { keep: keep() };
+        const { runtime, service } = harness({ captures });
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        for (const capturedBy of ["person", undefined] as const) {
+          const refused = await service.act({
+            windowId,
+            request: request({ kind: "record-start" }),
+            ...(capturedBy === undefined ? {} : { capturedBy }),
+          });
+          expect(refused.failure).toMatchObject({ category: "policy-denied" });
+        }
+        expect(runtime.act).not.toHaveBeenCalled();
+        expect(captures.keep).not.toHaveBeenCalled();
+      });
+
+      it("says in words when the Browser cannot record", async () => {
+        const { runtime, service } = harness();
+        await service.create({ windowId, threadId: threadOne, action: action(), policy });
+        vi.mocked(runtime.act).mockRejectedValueOnce(new BrowserRecordingUnavailableError());
+        const refused = await service.act({
+          windowId,
+          request: request({ kind: "record-start" }),
+          capturedBy: "agent",
+        });
+        expect(refused.failure).toEqual({
+          category: "unavailable",
+          message: "This Browser cannot record the page.",
+        });
+      });
+
+      it("keeps nothing when the recording showed a credential field or painted nothing", async () => {
+        for (const status of ["withheld", "empty"] as const) {
+          const captures = { keep: keep() };
+          const { runtime, service } = harness({ captures });
+          await service.create({ windowId, threadId: threadOne, action: action(), policy });
+          vi.mocked(runtime.act).mockResolvedValueOnce({
+            url: "https://example.com/sign-in",
+            recording: { status },
+          });
+          const stopped = await service.act({
+            windowId,
+            request: request({ kind: "record-stop" }),
+            capturedBy: "agent",
+          });
+          expect(captures.keep).not.toHaveBeenCalled();
+          expect(stopped.observation?.capture).toEqual({
+            status: "not-kept",
+            reason: "no-picture",
+          });
+        }
+      });
+    });
   });
 
   describe("thread proof steps", () => {
@@ -1465,6 +2193,190 @@ describe("BrowserAutomationService", () => {
     expect(runtime.act).not.toHaveBeenCalled();
     expect(refreshed).toEqual(current);
     expect(refreshed.observation?.revision).toBe(1);
+  });
+
+  it("switches the task's shared Browser only after staging and saving its choice", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await fixture.service.act({ windowId, request: request() });
+    let saved = false;
+    const bind = vi.fn(() => {
+      expect(saved).toBe(true);
+      expect(fixture.service.inspectThread(windowId, threadOne).context?.contextId).toBe(
+        contextOne,
+      );
+    });
+    const result = await fixture.service.switchTaskProfile({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" },
+      expectedContextId: contextOne,
+      isCurrent: () => true,
+      save: async (commit) => {
+        commit(() => {
+          saved = true;
+        });
+        return { status: "saved" };
+      },
+      bind,
+    });
+    expect(result.status).toBe("changed");
+    const current = fixture.service.inspectThread(windowId, threadOne);
+    expect(current.context?.contextId).not.toBe(contextOne);
+    expect(current.context?.policy.profile).toEqual({ kind: "personal" });
+    expect(fixture.contexts.has(contextOne)).toBe(false);
+    expect(fixture.contexts.size).toBe(1);
+    expect(bind).toHaveBeenCalledOnce();
+    expect(fixture.service.snapshotRefs(windowId, threadOne)).toEqual([]);
+    await fixture.service.close();
+  });
+
+  it.each(["creation", "storage", "revision"] as const)(
+    "keeps the original shared page and choice when %s fails",
+    async (failure) => {
+      const fixture = harness();
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await fixture.service.act({ windowId, request: request() });
+      let current = true;
+      if (failure === "creation")
+        vi.mocked(fixture.runtime.createContext).mockRejectedValueOnce(
+          new Error("Native profile unavailable"),
+        );
+      if (failure === "revision")
+        vi.mocked(fixture.runtime.act).mockImplementationOnce(async () => {
+          current = false;
+          return { url: "https://example.com/start", title: "Replacement" };
+        });
+      const save = vi.fn(async () => ({
+        status: "refused" as const,
+        failure: { category: "failed" as const, message: "Storage write failed." },
+      }));
+      const bind = vi.fn();
+      const result = await fixture.service.switchTaskProfile({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        profile: { kind: "personal" },
+        expectedContextId: contextOne,
+        isCurrent: () => current,
+        save,
+        bind,
+      });
+      expect(result.status).toBe("refused");
+      const original = fixture.service.inspectThread(windowId, threadOne);
+      expect(original.context?.contextId).toBe(contextOne);
+      expect(original.context?.policy.profile).toBeUndefined();
+      expect(fixture.contexts.size).toBe(1);
+      expect(fixture.contexts.has(contextOne)).toBe(true);
+      expect(bind).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledTimes(failure === "storage" ? 1 : 0);
+      await fixture.service.close();
+    },
+  );
+
+  it.each(["input", "take-over", "stop", "authority", "task"] as const)(
+    "refuses a %s change during delayed persistence before writing or retiring the original page",
+    async (change) => {
+      const fixture = harness();
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await fixture.service.act({ windowId, request: request() });
+      let finish!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      let entered = false;
+      let current = true;
+      const persist = vi.fn();
+      const bind = vi.fn();
+      const switching = fixture.service.switchTaskProfile({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        profile: { kind: "personal" },
+        expectedContextId: contextOne,
+        isCurrent: () => current,
+        bind,
+        save: async (commit) => {
+          entered = true;
+          await ready; // Like Work's asynchronous Project-folder authorization.
+          return commit(persist)
+            ? { status: "saved" }
+            : {
+                status: "refused",
+                failure: { category: "stale", message: "Changed before commit." },
+              };
+        },
+      });
+      await vi.waitFor(() => expect(entered).toBe(true));
+      expect(fixture.service.inspectThread(windowId, threadOne).context?.contextId).toBe(
+        contextOne,
+      );
+      if (change === "input") fixture.personTyped();
+      if (change === "take-over") fixture.service.takeOver(windowId, threadOne);
+      if (change === "stop") await fixture.service.releaseThread(windowId, threadOne);
+      if (change === "authority") fixture.revoke(threadOne);
+      if (change === "task") current = false;
+      finish();
+      expect((await switching).status).toBe("refused");
+      expect(persist).not.toHaveBeenCalled();
+      expect(bind).not.toHaveBeenCalled();
+      expect(fixture.contexts.size).toBe(change === "stop" ? 0 : 1);
+      if (change !== "stop") expect(fixture.contexts.has(contextOne)).toBe(true);
+      await fixture.service.close();
+    },
+  );
+
+  it("acknowledges a completed switch when a later edit changes the task before save resolves", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    let current = true;
+    const persisted = vi.fn();
+    const result = await fixture.service.switchTaskProfile({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" },
+      expectedContextId: contextOne,
+      isCurrent: () => current,
+      bind: vi.fn(),
+      save: async (commit) => {
+        expect(commit(persisted)).toBe(true);
+        current = false; // A subsequent thread edit is not a failed profile switch.
+        return { status: "saved" };
+      },
+    });
+    expect(result.status).toBe("changed");
+    expect(persisted).toHaveBeenCalledOnce();
+    expect(fixture.contexts.has(contextOne)).toBe(false);
+    expect(fixture.service.inspectThread(windowId, threadOne).context?.policy.profile).toEqual({
+      kind: "personal",
+    });
+    await fixture.service.close();
+  });
+
+  it("leaves a person handoff and an unavailable profile untouched", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const release = fixture.service.holdForPerson(windowId, threadOne);
+    const save = vi.fn(async () => ({ status: "saved" as const }));
+    const input = {
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" as const },
+      expectedContextId: contextOne,
+      isCurrent: () => true,
+      save,
+      bind: vi.fn(),
+    };
+    expect((await fixture.service.switchTaskProfile(input)).status).toBe("refused");
+    release?.();
+    vi.mocked(fixture.runtime.nativeAvailable!).mockResolvedValue(false);
+    expect((await fixture.service.switchTaskProfile(input)).status).toBe("refused");
+    expect(save).not.toHaveBeenCalled();
+    expect(fixture.contexts.has(contextOne)).toBe(true);
+    await fixture.service.close();
   });
 
   it("cancels and destroys the owned context", async () => {
@@ -1815,7 +2727,7 @@ describe("BrowserAutomationService", () => {
         if (gesture === "input") f.personTyped();
         else f.service.takeOver(windowId, threadOne);
         await vi.waitFor(() => expect(f.contexts.size).toBe(0));
-        expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+        expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
         await f.service.close();
       }
     });
@@ -1920,7 +2832,7 @@ describe("BrowserAutomationService", () => {
       expect(f.timers.at(-1)?.delay).toBe(policy.sessionTimeoutMs);
       f.advance(policy.sessionTimeoutMs);
       f.expire();
-      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
       expect((await creation).context?.state).toBe("expired");
       finish();
       await vi.waitFor(() => expect(f.contexts.size).toBe(0));
@@ -1949,7 +2861,7 @@ describe("BrowserAutomationService", () => {
           policy,
         });
         expect(result.context?.state).toBe("expired");
-        expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+        expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
         await vi.waitFor(() => expect(f.contexts.size).toBe(0));
         if (phase === "availability") expect(f.runtime.createContext).not.toHaveBeenCalled();
         await f.service.close();
@@ -1972,7 +2884,7 @@ describe("BrowserAutomationService", () => {
       const result = await f.service.act({ windowId, capturedBy: "agent", request: request() });
       expect(result.failure?.category).toBe("context-expired");
       f.personTyped();
-      expect(f.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("expired");
       await f.service.close();
     });
 
@@ -1996,14 +2908,215 @@ describe("BrowserAutomationService", () => {
     advance(policy.sessionTimeoutMs);
     expire();
     await vi.waitFor(() =>
-      expect(service.inspectThread(windowId, threadOne)).toEqual({
-        status: "ready",
-        threadId: threadOne,
+      expect(service.inspectThread(windowId, threadOne)).toMatchObject({
+        status: "stale",
+        context: { state: "expired" },
+        failure: { category: "context-expired" },
         evidence: [],
       }),
     );
     expect(runtime.closeContext).toHaveBeenCalledWith(contextOne);
     expect(contexts.has(contextOne)).toBe(false);
+  });
+
+  it("keeps only the former profile on an expired page and clears it on stop or reopening", async () => {
+    const fixture = harness();
+    await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy: { ...policy, profile: { kind: "personal" } },
+    });
+    await fixture.service.act({ windowId, request: request() });
+    fixture.advance(policy.sessionTimeoutMs);
+    fixture.expire();
+    await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+    const expired = fixture.service.inspectThread(windowId, threadOne);
+    expect(expired.failure).toMatchObject({
+      category: "context-expired",
+      message: expect.stringContaining('profile "personal"'),
+    });
+    expect(expired.observation).toBeUndefined();
+    expect(expired.evidence).toEqual([]);
+    expect(fixture.service.inspectThread(otherWindowId, threadOne).failure).toBeUndefined();
+    expect(fixture.service.inspectThread(windowId, threadTwo).failure).toBeUndefined();
+    await fixture.service.releaseThread(windowId, threadOne);
+    expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    fixture.advance(policy.sessionTimeoutMs);
+    fixture.expire();
+    await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+    const reopened = await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    expect(reopened.context?.state).toBe("active");
+    expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
+    await fixture.service.close();
+  });
+
+  it("does not reveal the expired profile after authority revocation or profile clearing", async () => {
+    for (const clear of ["authority", "profile", "window", "host"] as const) {
+      const fixture = harness();
+      await fixture.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: { kind: "personal" } },
+      });
+      fixture.advance(policy.sessionTimeoutMs);
+      fixture.expire();
+      await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+      if (clear === "authority") fixture.revoke(threadOne);
+      if (clear === "profile") await fixture.service.closeProfile({ kind: "personal" });
+      if (clear === "window") await fixture.service.revokeWindow(windowId);
+      if (clear === "host") await fixture.service.close();
+      const inspected = fixture.service.inspectThread(windowId, threadOne);
+      expect(inspected.context).toBeUndefined();
+      expect(inspected.failure?.category).not.toBe("context-expired");
+      expect(JSON.stringify(inspected)).not.toContain("personal");
+      await fixture.service.close();
+    }
+  });
+
+  it("bounds expiry receipts and forgets the oldest window's metadata", async () => {
+    const fixture = harness();
+    const windows = Array.from({ length: 257 }, (_, index) =>
+      decodeWindowId(`ba000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
+    );
+    for (const scopedWindow of windows) {
+      await fixture.service.create({
+        windowId: scopedWindow,
+        threadId: threadOne,
+        action: action(),
+        policy,
+      });
+      fixture.advance(policy.sessionTimeoutMs);
+      fixture.expire();
+    }
+    const first = windows[0];
+    const last = windows.at(-1);
+    if (first === undefined || last === undefined) throw Error("Missing test window");
+    expect(fixture.service.inspectThread(first, threadOne).failure).toBeUndefined();
+    expect(fixture.service.inspectThread(last, threadOne).failure?.category).toBe(
+      "context-expired",
+    );
+    await fixture.service.close();
+  });
+
+  it("carries a real tool page's expired profile across turns without reopening it", async () => {
+    const fixture = harness();
+    const modelBindings = new Map<string, BrowserModelBinding>();
+    const makeTools = () =>
+      createBrowserAppManagedTools({
+        windowId,
+        threadId: threadOne,
+        mode: "work",
+        modelId: "model-a",
+        resolveModelId: () => "model-a",
+        resolveAuthority: () => authorityOne,
+        modelBindings,
+        executionPolicy: "approval-gated",
+        browser: {
+          inspectThread: fixture.service.inspectThread.bind(fixture.service),
+          create: fixture.service.create.bind(fixture.service),
+          act: fixture.service.act.bind(fixture.service),
+          releaseThread: fixture.service.releaseThread.bind(fixture.service),
+        },
+        approvals: { request: async () => "approved" },
+        uuid: () => crypto.randomUUID(),
+      });
+    const call = (tools: ReturnType<typeof makeTools>, input: Record<string, unknown>) =>
+      tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+    await call(makeTools(), {
+      operation: "navigate",
+      url: "https://example.com/start",
+      profile: "personal",
+    });
+    fixture.advance(600_001);
+    fixture.expire();
+    await vi.waitFor(() => expect(fixture.contexts.size).toBe(0));
+    for (const operation of ["snapshot", "read-page", "screenshot"]) {
+      expect(await call(makeTools(), { operation })).toMatchObject({
+        isError: true,
+        result: {
+          failure: {
+            category: "context-expired",
+            message: expect.stringContaining('profile "personal"'),
+          },
+        },
+      });
+    }
+    expect(fixture.runtime.createContext).toHaveBeenCalledTimes(1);
+    expect(fixture.runtime.act).toHaveBeenCalledTimes(1);
+    await call(makeTools(), {
+      operation: "navigate",
+      url: "https://example.com/start",
+      profile: "personal",
+    });
+    expect(fixture.runtime.createContext).toHaveBeenCalledTimes(2);
+    expect(fixture.service.inspectThread(windowId, threadOne).failure).toBeUndefined();
+    await fixture.service.close();
+  });
+
+  it("says when Continue leaves the real Browser tool on an unapproved site", async () => {
+    const fixture = harness();
+    vi.mocked(fixture.runtime.createContext).mockImplementation(async (contextId) => {
+      fixture.contexts.add(contextId);
+      return "native-live";
+    });
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId: threadOne,
+      mode: "work",
+      modelId: "model-a",
+      resolveModelId: () => "model-a",
+      resolveAuthority: () => authorityOne,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      browser: {
+        inspectThread: fixture.service.inspectThread.bind(fixture.service),
+        create: fixture.service.create.bind(fixture.service),
+        act: fixture.service.act.bind(fixture.service),
+        releaseThread: fixture.service.releaseThread.bind(fixture.service),
+        holdForPerson: fixture.service.holdForPerson.bind(fixture.service),
+      },
+      approvals: {
+        request: async (input) => {
+          if (input.signIn !== undefined)
+            vi.mocked(fixture.runtime.act).mockRejectedValueOnce(
+              new BrowserNavigationBlockedError("https://identity.example/private?code=secret"),
+            );
+          return "approved";
+        },
+      },
+      uuid: () => crypto.randomUUID(),
+    });
+    const call = (input: Record<string, unknown>) =>
+      tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+    await call({ operation: "navigate", url: "https://example.com/start", profile: "personal" });
+    const answer = await call({ operation: "sign-in" });
+    expect(answer).toMatchObject({
+      isError: true,
+      result: {
+        failure: {
+          category: "policy-denied",
+          reason: "origin-not-approved",
+          message: expect.stringContaining(
+            "The person left the page on an unapproved site after Continue.",
+          ),
+        },
+      },
+    });
+    expect(JSON.stringify(answer)).not.toContain("secret");
+    expect(JSON.stringify(answer)).not.toContain("identity.example");
+    expect(
+      fixture.service.inspectThread(windowId, threadOne).context?.policy.allowedOrigins,
+    ).toEqual(["https://example.com"]);
+    expect(fixture.runtime.createContext).toHaveBeenCalledTimes(1);
+    await fixture.service.close();
   });
 
   it("reports synchronous reconnect inspection as stale when expiry is discovered", async () => {
@@ -2149,6 +3262,24 @@ describe("BrowserAutomationService", () => {
     });
   });
 
+  it("explains a new site's approval without navigating outside the existing origin", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const refused = await fixture.service.act({
+      windowId,
+      request: request({ target: "https://other.example/private?code=secret" }),
+    });
+    expect(refused.failure).toMatchObject({
+      category: "policy-denied",
+      reason: "origin-not-approved",
+      message: expect.stringContaining("Call stop, then navigate"),
+    });
+    expect(refused.failure?.message).toContain("sign-in");
+    expect(JSON.stringify(refused.failure)).not.toContain("secret");
+    expect(fixture.runtime.act).not.toHaveBeenCalled();
+    await fixture.service.close();
+  });
+
   it("names the refused origin when a navigation redirects outside the allowlist", async () => {
     const { runtime, service } = harness();
     vi.mocked(runtime.act).mockRejectedValueOnce(
@@ -2156,11 +3287,13 @@ describe("BrowserAutomationService", () => {
     );
     await service.create({ windowId, threadId: threadOne, action: action(), policy });
     const failed = await service.act({ windowId, request: request() });
-    expect(failed.failure).toEqual({
+    expect(failed.failure).toMatchObject({
       category: "policy-denied",
-      message:
-        "The page moved to https://www.example.com, which is outside this session's allowed origin. Open https://www.example.com/ directly to browse it there.",
+      reason: "origin-not-approved",
+      message: expect.stringContaining("Call stop, then navigate"),
     });
+    expect(failed.failure?.message).toContain("sign-in");
+    expect(decodeBrowserAutomationFailure(failed.failure)).toEqual(failed.failure);
   });
 
   it("carries what the page logged and failed to load into the observation", async () => {
@@ -2241,4 +3374,103 @@ describe("BrowserAutomationService", () => {
     expect(snapshot.contexts?.length).toBe(MAX_BROWSER_THREAD_CONTEXTS);
     release();
   });
+
+  it("reaches the actual routed page when a person describes a selected point", async () => {
+    const describePoint = vi.fn(async () => ({ status: "no-element" as const }));
+    const f = harness({
+      describePoint,
+      wrapRuntime: (native) => new RoutingBrowserRuntime({ native, headless: native }),
+    });
+    try {
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      expect(
+        await f.service.describePoint({
+          windowId,
+          threadId: threadOne,
+          contextId: contextOne,
+          point: { x: 0.25, y: 0.25 },
+        }),
+      ).toEqual({ status: "no-element" });
+      expect(describePoint).toHaveBeenCalledOnce();
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("settles a hung point read at its finite deadline and releases the queue without reopening", async () => {
+    vi.useFakeTimers();
+    let release: (() => void) | undefined;
+    const f = harness({
+      describePoint: async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { status: "no-element" };
+      },
+    });
+    try {
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const capture = f.service.describePoint({
+        windowId,
+        threadId: threadOne,
+        contextId: contextOne,
+        point: { x: 0.25, y: 0.25 },
+      });
+      await vi.waitFor(() => expect(release).toBeDefined());
+      const next = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(capture).resolves.toEqual({ status: "unavailable" });
+      await next;
+      expect(f.runtime.createContext).toHaveBeenCalledOnce();
+      expect(f.runtime.act).toHaveBeenCalledOnce();
+      release?.();
+      await Promise.resolve();
+    } finally {
+      release?.();
+      await f.service.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["principal", "authority", "person-input"] as const)(
+    "does not return a late point capture after its original %s changes",
+    async (changed) => {
+      let release: (() => void) | undefined;
+      let principalCurrent = true;
+      const f = harness({
+        describePoint: async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return {
+            status: "described",
+            element: {
+              selector: "#private-new-content",
+              bounds: { x: 0, y: 0, width: 0.1, height: 0.1 },
+            },
+            cropDataUrl: "data:image/jpeg;base64,/9j/AA==",
+          };
+        },
+      });
+      try {
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        const capture = f.service.describePoint({
+          windowId,
+          threadId: threadOne,
+          contextId: contextOne,
+          point: { x: 0.25, y: 0.25 },
+          current: () => principalCurrent,
+        });
+        await vi.waitFor(() => expect(release).toBeDefined());
+        if (changed === "principal") principalCurrent = false;
+        if (changed === "authority") f.revoke(threadOne);
+        if (changed === "person-input") f.personTyped();
+        release?.();
+        await expect(capture).resolves.toEqual({ status: "unavailable" });
+      } finally {
+        release?.();
+        await f.service.close();
+      }
+    },
+  );
 });

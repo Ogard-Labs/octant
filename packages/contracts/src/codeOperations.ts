@@ -1,3 +1,13 @@
+import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
+import { Questionnaire } from "./questionnaire";
+import { SideChatDraftReturnReferences } from "./sideChatReturn";
+import {
+  CodeGitHunk,
+  CodeGitHunkScope,
+  CodeGitHunkUnavailable,
+  MAX_CODE_GIT_HUNKS,
+  MAX_CODE_SELECTED_GIT_HUNKS,
+} from "./gitHunks";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
@@ -311,6 +321,59 @@ export const CodeReviewProvenance = Schema.Union(
 );
 export type CodeReviewProvenance = typeof CodeReviewProvenance.Type;
 
+/** A host-observed comparison identity; reconstructed hunks are never whole-file snapshots. */
+export const CodeReviewRevision = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("working-tree"),
+    stateToken: boundedNonEmptyText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("branch"),
+    head: boundedNonEmptyText(128),
+    base: Schema.optional(boundedNonEmptyText(128)),
+    baseRef: boundedNonEmptyText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("turn-capture"),
+    operationId: CodeOperationId,
+    captureCursor: Schema.Int.pipe(Schema.positive()),
+    version: Schema.Int.pipe(Schema.positive()),
+    baseline: GitObjectId,
+    tree: GitObjectId,
+  }).annotations(strict),
+);
+export type CodeReviewRevision = typeof CodeReviewRevision.Type;
+export const CodeReviewDiffAnchor = Schema.Struct({
+  kind: Schema.Literal("captured-diff"),
+  reviewOperationId: CodeOperationId,
+  diff: CodeEvidenceReference,
+  revision: CodeReviewRevision,
+  side: Schema.Literal("original", "modified"),
+  capturedAt: UtcTimestamp,
+}).annotations(strict);
+export type CodeReviewDiffAnchor = typeof CodeReviewDiffAnchor.Type;
+export const CodeReviewTarget = Schema.Struct({
+  fileId: CodeFileId,
+  path: CodeRelativePath,
+  /** For a captured-diff anchor this hashes the compared side's regions AND original line mapping. */
+  fileDigest: CodeDigest,
+  location: CodeReviewLocation,
+  anchor: CodeReviewDiffAnchor,
+}).annotations(strict);
+export type CodeReviewTarget = typeof CodeReviewTarget.Type;
+export const MAX_CODE_REVIEW_CORRECTION_FINDINGS = 16;
+export const CodeReviewFindingReference = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  findingId: CodeReviewFindingId,
+  version: AggregateVersion,
+  anchorDigest: CodeDigest,
+}).annotations(strict);
+export type CodeReviewFindingReference = typeof CodeReviewFindingReference.Type;
+export const CodeReviewFindingReferences = Schema.Array(CodeReviewFindingReference).pipe(
+  Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS),
+);
+
 export const CodeReviewFinding = Schema.Struct({
   id: CodeReviewFindingId,
   threadId: CodeThreadId,
@@ -318,6 +381,7 @@ export const CodeReviewFinding = Schema.Struct({
   fileId: CodeFileId,
   path: CodeRelativePath,
   fileDigest: CodeDigest,
+  anchor: Schema.optional(CodeReviewDiffAnchor),
   location: CodeReviewLocation,
   severity: Schema.Literal("note", "warning", "error"),
   author: CodeReviewAuthor,
@@ -432,6 +496,30 @@ const ObserveGit = Schema.Struct({
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
   /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+const PrepareGitHunks = Schema.Struct({
+  kind: Schema.Literal("prepare-git-hunks"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  scope: CodeGitHunkScope,
+}).annotations(strict);
+const SelectedGitHunkFields = {
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  comparisonOperationId: CodeOperationId,
+  selected: uniqueArray(CodeDigest, MAX_CODE_SELECTED_GIT_HUNKS).pipe(Schema.minItems(1)),
+};
+const StageGitHunks = Schema.Struct({
+  kind: Schema.Literal("stage-git-hunks"),
+  ...SelectedGitHunkFields,
+}).annotations(strict);
+const UnstageGitHunks = Schema.Struct({
+  kind: Schema.Literal("unstage-git-hunks"),
+  ...SelectedGitHunkFields,
+}).annotations(strict);
+const ReverseGitHunks = Schema.Struct({
+  kind: Schema.Literal("reverse-git-hunks"),
+  ...SelectedGitHunkFields,
 }).annotations(strict);
 const StageGit = Schema.Struct({
   kind: Schema.Literal("stage-git"),
@@ -592,6 +680,33 @@ export const CodeTurnChangedFiles = Schema.Struct({
   truncated: Schema.Boolean,
 }).annotations(strict);
 export type CodeTurnChangedFiles = typeof CodeTurnChangedFiles.Type;
+
+/** A bounded immutable comparison from the turn's original checkpoint, not exclusive authorship. */
+export const CodeTurnReviewCapture = Schema.Struct({
+  checkoutId: CodeCheckoutId,
+  version: Schema.Int.pipe(Schema.positive()),
+  cursor: Schema.Int.pipe(Schema.positive()),
+  baseline: GitObjectId,
+  tree: GitObjectId,
+  diff: CodeEvidenceReference,
+  changedFiles: CodeTurnChangedFiles,
+  capturedAt: UtcTimestamp,
+  final: Schema.Boolean,
+}).annotations(strict);
+export type CodeTurnReviewCapture = typeof CodeTurnReviewCapture.Type;
+export const CodeTurnReviewPreview = Schema.Struct({
+  status: Schema.Literal("capturing", "ready", "unavailable"),
+  /** Last valid capture remains readable while a later capture waits or fails. */
+  capture: Schema.optional(CodeTurnReviewCapture),
+  explanation: boundedNonEmptyText(1_024),
+  /** Added by a scoped metadata read from the owning turn's recorded outcome. */
+  settled: Schema.optional(Schema.Boolean),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((preview) => preview.status !== "ready" || preview.capture !== undefined));
+export type CodeTurnReviewPreview = typeof CodeTurnReviewPreview.Type;
+export const decodeCodeTurnReviewCapture = Schema.decodeUnknownSync(CodeTurnReviewCapture);
+export const decodeCodeTurnReviewPreview = Schema.decodeUnknownSync(CodeTurnReviewPreview);
 /**
  * Put the checkout's files back the way a checkpoint recorded them.
  *
@@ -818,6 +933,7 @@ const CreateReviewFinding = Schema.Struct({
   fileId: CodeFileId,
   path: CodeRelativePath,
   fileDigest: CodeDigest,
+  anchor: Schema.optional(CodeReviewDiffAnchor),
   location: CodeReviewLocation,
   severity: Schema.Literal("note", "warning", "error"),
   summary: boundedNonEmptyText(4_096),
@@ -829,8 +945,42 @@ const UpdateReviewFinding = Schema.Struct({
   expectedVersion: AggregateVersion,
   state: Schema.Literal("open", "resolved", "dismissed"),
 }).annotations(strict);
+const PrepareReviewTarget = Schema.Struct({
+  kind: Schema.Literal("prepare-review-target"),
+  ...OperationScope,
+  reviewOperationId: CodeOperationId,
+  /** Exact immutable preview frame; absent for ordinary captured checkout/branch comparisons. */
+  captureCursor: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  path: CodeRelativePath,
+  side: Schema.Literal("original", "modified"),
+  line: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+const ObserveTurnReview = Schema.Struct({
+  kind: Schema.Literal("observe-turn-review"),
+  ...OperationScope,
+  turnOperationId: CodeOperationId,
+  /** False reads durable metadata only. True explicitly requests a bounded fresh capture of this live turn. */
+  refresh: Schema.Boolean,
+}).annotations(strict);
+const ListReviewFindings = Schema.Struct({
+  kind: Schema.Literal("list-review-findings"),
+  ...OperationScope,
+}).annotations(strict);
+const PrepareReviewCorrection = Schema.Struct({
+  kind: Schema.Literal("prepare-review-correction"),
+  ...OperationScope,
+  findings: Schema.Array(
+    Schema.Struct({
+      findingId: CodeReviewFindingId,
+      expectedVersion: AggregateVersion,
+    }).annotations(strict),
+  ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
+}).annotations(strict);
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
+  /** Explicit consent to a fresh native session with a bounded conversation handoff. */
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
+  contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...OperationScope,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
@@ -858,6 +1008,8 @@ const StartProviderTurn = Schema.Struct({
   attachmentIds: Schema.optional(
     Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
+  reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -896,6 +1048,11 @@ const AnswerProviderApproval = Schema.Struct({
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
 }).annotations(strict);
+const ForceStopProviderTurn = Schema.Struct({
+  kind: Schema.Literal("force-stop-provider-turn"),
+  ...OperationScope,
+  turnOperationId: CodeOperationId,
+}).annotations(strict);
 const CancelProviderTurn = Schema.Struct({
   kind: Schema.Literal("cancel-provider-turn"),
   ...OperationScope,
@@ -912,6 +1069,10 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "observe-git",
   "review-run",
   "merge-run",
+  "prepare-git-hunks",
+  "stage-git-hunks",
+  "unstage-git-hunks",
+  "reverse-git-hunks",
   "stage-git",
   "commit-git",
   "push-git",
@@ -922,13 +1083,22 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "observe-pull-request",
   "create-review-finding",
   "update-review-finding",
+  "prepare-review-target",
+  "observe-turn-review",
+  "list-review-findings",
+  "prepare-review-correction",
   "start-provider-turn",
   "answer-provider-input",
   "answer-provider-approval",
   "cancel-provider-turn",
+  "force-stop-provider-turn",
 ] as const;
 
 export const CodeOperationCommand = Schema.Union(
+  PrepareReviewTarget,
+  ObserveTurnReview,
+  ListReviewFindings,
+  PrepareReviewCorrection,
   ReviewRun,
   MergeRun,
   StartTerminal,
@@ -941,6 +1111,10 @@ export const CodeOperationCommand = Schema.Union(
   CancelRepositoryTest,
   RunScaffold,
   ObserveGit,
+  PrepareGitHunks,
+  StageGitHunks,
+  UnstageGitHunks,
+  ReverseGitHunks,
   StageGit,
   DiscardGitChanges,
   CommitGit,
@@ -961,6 +1135,7 @@ export const CodeOperationCommand = Schema.Union(
   AnswerProviderInput,
   AnswerProviderApproval,
   CancelProviderTurn,
+  ForceStopProviderTurn,
 );
 export type CodeOperationCommand = typeof CodeOperationCommand.Type;
 
@@ -986,6 +1161,9 @@ const GitRemoteEndpoint = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("local") }).annotations(strict),
 );
 const GitObservation = Schema.Struct({
+  reviewScope: Schema.optional(
+    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }).annotations(strict),
+  ),
   kind: Schema.Literal("git-observed"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
@@ -1015,6 +1193,21 @@ const GitObservation = Schema.Struct({
       state: Schema.Literal("active", "locked", "prunable", "unavailable"),
     }).annotations(strict),
   ).pipe(Schema.filter((worktrees) => worktrees.length <= 1_000)),
+}).annotations(strict);
+const GitHunksResult = Schema.Struct({
+  kind: Schema.Literal("git-hunks"),
+  operationId: CodeOperationId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  gitOperationId: CodeGitOperationId,
+  scope: CodeGitHunkScope,
+  stateToken: GitStateToken,
+  digest: CodeDigest,
+  /** Opaque host root/binding witness; never a renderer path or inode. */
+  rootDigest: CodeDigest,
+  diff: CodeEvidenceReference,
+  hunks: Schema.Array(CodeGitHunk).pipe(Schema.maxItems(MAX_CODE_GIT_HUNKS)),
+  unavailable: Schema.Array(CodeGitHunkUnavailable).pipe(Schema.maxItems(MAX_CODE_OPERATION_PATHS)),
 }).annotations(strict);
 const TerminalStateFields = {
   operationId: CodeOperationId,
@@ -1091,6 +1284,9 @@ const GitMutationResult = Schema.Struct({
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
   mutation: Schema.Literal(
+    "stage-hunks",
+    "unstage-hunks",
+    "reverse-hunks",
     "stage",
     "unstage",
     "discard",
@@ -1118,6 +1314,12 @@ const GitMutationResult = Schema.Struct({
       "unconfirmed-target",
       "ignored-path-collision",
       "identity-missing",
+      "stale-state",
+      "unlisted-path",
+      "untracked-path",
+      "invalid-hunks",
+      "hunk-offset",
+      "read-only",
     ),
   ),
   /**
@@ -1296,6 +1498,48 @@ const PullRequestReviewResult = Schema.Union(
     failureCode: Schema.optional(Schema.Literal("no-remote")),
   }).annotations(strict),
 );
+export const CodeReviewFindingAssessment = Schema.Struct({
+  finding: CodeReviewFinding,
+  anchorState: Schema.Literal("current", "outdated", "unavailable", "legacy"),
+  explanation: boundedNonEmptyText(512),
+}).annotations(strict);
+export type CodeReviewFindingAssessment = typeof CodeReviewFindingAssessment.Type;
+export const CodeReviewCorrectionPrepared = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  text: boundedNonEmptyText(64_000),
+  references: CodeReviewFindingReferences,
+  omissions: Schema.Array(boundedNonEmptyText(512)).pipe(Schema.maxItems(16)),
+}).annotations(strict);
+export type CodeReviewCorrectionPrepared = typeof CodeReviewCorrectionPrepared.Type;
+const ReviewTargetResult = Schema.Struct({
+  kind: Schema.Literal("review-target-state"),
+  operationId: CodeOperationId,
+  target: CodeReviewTarget,
+  anchorState: Schema.Literal("current", "outdated", "unavailable"),
+  explanation: boundedNonEmptyText(512),
+}).annotations(strict);
+const TurnReviewPreviewResult = Schema.Struct({
+  kind: Schema.Literal("turn-review-preview"),
+  operationId: CodeOperationId,
+  turnOperationId: CodeOperationId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  preview: CodeTurnReviewPreview,
+}).annotations(strict);
+const ReviewFindingsResult = Schema.Struct({
+  kind: Schema.Literal("review-findings-state"),
+  operationId: CodeOperationId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  findings: Schema.Array(CodeReviewFindingAssessment).pipe(Schema.maxItems(256)),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+const ReviewCorrectionResult = Schema.Struct({
+  kind: Schema.Literal("review-correction-prepared"),
+  operationId: CodeOperationId,
+  prepared: CodeReviewCorrectionPrepared,
+}).annotations(strict);
 const ReviewFindingResult = Schema.Struct({
   kind: Schema.Literal("review-finding-state"),
   operationId: CodeOperationId,
@@ -1354,6 +1598,9 @@ const GitDraftResult = Schema.Struct({
 }).annotations(strict);
 
 const RunReviewResult = Schema.Struct({
+  reviewScope: Schema.optional(
+    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }).annotations(strict),
+  ),
   kind: Schema.Literal("run-reviewed"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
@@ -1415,12 +1662,17 @@ const ThreadRewoundResult = Schema.Struct({
 }).annotations(strict);
 
 export const CodeOperationResult = Schema.Union(
+  ReviewTargetResult,
+  TurnReviewPreviewResult,
+  ReviewFindingsResult,
+  ReviewCorrectionResult,
   RunReviewResult,
   OperationAccepted,
   TerminalStateResult,
   RepositoryTestResult,
   ScaffoldResult,
   GitObservation,
+  GitHunksResult,
   GitMutationResult,
   GitDraftResult,
   PullRequestResult,
@@ -1448,11 +1700,15 @@ const OperationStateEvent = Schema.Struct({
   failure: Schema.optional(CodeOperationFailure),
 }).annotations(strict);
 const ConversationTurnStartedEvent = Schema.Struct({
+  toolCatalogHandoff: Schema.optional(Schema.Boolean),
   kind: Schema.Literal("conversation-turn-started"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /** The host's actual checkout binding; legacy turns did not record it. */
+  checkoutId: Schema.optional(CodeCheckoutId),
+  reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
@@ -1552,6 +1808,7 @@ const ApprovalReviewedEvent = Schema.Struct({
 }).annotations(strict);
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
+  questionnaire: Schema.optional(Questionnaire),
   requestId: ProviderRequestId,
   prompt: CodeQuestionPromptText,
   options: Schema.Array(CodeQuestionOptionText).pipe(
@@ -1566,6 +1823,10 @@ const QuestionEvent = Schema.Struct({
 const ConversationTurnChangedFilesEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-changed-files"),
   changedFiles: CodeTurnChangedFiles,
+}).annotations(strict);
+const ConversationTurnReviewPreviewEvent = Schema.Struct({
+  kind: Schema.Literal("conversation-turn-review-preview"),
+  preview: CodeTurnReviewPreview,
 }).annotations(strict);
 const FileChangeEvent = Schema.Struct({
   kind: Schema.Literal("file-change"),
@@ -1688,6 +1949,7 @@ const handoffMessages = Schema.Int.pipe(
  * in the content store the event names.
  */
 const ProviderSwitchHandoff = Schema.Struct({
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   /**
    * `rewind`: the thread was rewound in place and its provider cannot cut its
    * own session back, so the next turn started a fresh session with the kept
@@ -1725,6 +1987,7 @@ const ProviderSwitchHandoff = Schema.Struct({
  * it, so the summary does not repeat them.
  */
 const ForkTextHandoff = Schema.Struct({
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   reason: Schema.Literal("fork"),
   forkedFrom: CodeThreadForkOrigin,
   messages: handoffMessages,
@@ -1769,6 +2032,7 @@ export const MAX_CODE_FORK_MERGE_BACKS_PER_TURN = 2;
  * fork's file changes reach the source only through Git review.
  */
 export const CodeForkMergeBack = Schema.Struct({
+  inputReceipt: Schema.optional(ConversationInputReceipt),
   forkThreadId: CodeThreadId,
   /** The fork turn the previous merge back ended at; absent for the first one. */
   afterOperationId: Schema.optional(CodeOperationId),
@@ -1808,6 +2072,7 @@ const ProviderSwitchHandoffAttachedEvent = Schema.Struct({
   content: CodeEvidenceReference,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 
 /**
@@ -1823,6 +2088,7 @@ const ForkTextHandoffAttachedEvent = Schema.Struct({
   content: CodeEvidenceReference,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 
 /**
@@ -1849,6 +2115,7 @@ const ForkContextMergedEvent = Schema.Struct({
   content: CodeEvidenceReference,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 
 /**
@@ -1885,6 +2152,7 @@ export const CodeOperationEvent = Schema.Union(
   ForkContextDeliveredEvent,
   ConversationTurnStartedEvent,
   ConversationTurnChangedFilesEvent,
+  ConversationTurnReviewPreviewEvent,
   OperationStateEvent,
   ContentEvent,
   TerminalOutputEvent,
@@ -2013,6 +2281,9 @@ export const CodeConversationTurn = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  checkoutId: Schema.optional(CodeCheckoutId),
+  reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  reviewPreview: Schema.optional(CodeTurnReviewPreview),
   /** Images the user attached to this turn. Absent when it attached none. */
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
@@ -2636,6 +2907,9 @@ export type CodeBoardView = typeof CodeBoardView.Type;
  * back out of the index or off the disk.
  */
 const APPROVAL_GATED_OPERATION_KINDS = new Set([
+  "stage-git-hunks",
+  "unstage-git-hunks",
+  "reverse-git-hunks",
   "start-terminal",
   "run-repository-test",
   "cancel-repository-test",
@@ -2801,3 +3075,11 @@ export const decodePersistedCodeThreadFollowUpUpdated = Schema.decodeUnknownSync
   PersistedCodeThreadFollowUpUpdated,
 );
 export const decodeCodeThreadFollowUpView = Schema.decodeUnknownSync(CodeThreadFollowUpView);
+
+export const decodeCodeReviewTarget = Schema.decodeUnknownSync(CodeReviewTarget);
+export const decodeCodeReviewFindingReferences = Schema.decodeUnknownSync(
+  CodeReviewFindingReferences,
+);
+export const decodeCodeReviewCorrectionPrepared = Schema.decodeUnknownSync(
+  CodeReviewCorrectionPrepared,
+);

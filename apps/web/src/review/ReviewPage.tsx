@@ -294,13 +294,17 @@ export function ReviewPage(props: ReviewPageProps) {
 
   // The decision the selected thread's finished turn asked, answered here as
   // its next turn. The row's number keys pick an option while it has focus.
-  const { rows: requestRows, answer: answerDecision } = usePendingRequestRows(props.decisions);
+  const {
+    rows: requestRows,
+    answer: answerDecision,
+    defer,
+  } = usePendingRequestRows(props.decisions);
   const decision =
     selected === undefined
       ? undefined
       : requestRows?.find(
           (entry) =>
-            entry.request.kind === "decision" &&
+            (entry.request.kind === "decision" || entry.request.kind === "question") &&
             entry.request.mode === selected.mode &&
             String(entry.request.threadId) === selected.threadId,
         );
@@ -676,9 +680,17 @@ export function ReviewPage(props: ReviewPageProps) {
               ) : (
                 <>
                   {decision === undefined ? null : (
-                    <section aria-label="Decision" className="review-section">
-                      <h3 className="oct-section-label">Asks you to decide</h3>
+                    <section
+                      aria-label={decision.request.kind === "question" ? "Question" : "Decision"}
+                      className="review-section"
+                    >
+                      <h3 className="oct-section-label">
+                        {decision.request.kind === "question"
+                          ? "Waiting for your answer"
+                          : "Asks you to decide"}
+                      </h3>
                       <PendingRequestRow
+                        onDefer={defer}
                         embedded
                         key={pendingRequestKey(decision.request)}
                         now={props.now}

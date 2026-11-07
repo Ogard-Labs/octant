@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,6 +24,7 @@ import {
   type CodeLanguageReadRequest,
   type CodeLanguageReadResult,
   type CodeLanguageRefusalReason,
+  type CodeLanguageReferenceSupport,
   type CodeLanguageUnavailableReason,
 } from "@octant/contracts/code-language";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
@@ -33,6 +34,10 @@ import {
   type PrincipalKind,
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
+import { languageEditPreview } from "./languageEditPreview";
+import { CodeFileListingService } from "./codeFileListingService";
+import { boundedDiagnosticMessage } from "./languageServerResults";
+import { foldersHoldCoveredFile } from "./codeLanguageCoverage";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
 import { pathInResolvedRoot, type CodeFolderRootResolution } from "./codeProjectFolderRoot";
@@ -46,7 +51,7 @@ import type {
   LanguageServerLaunchOutcome,
   LanguageServerProcess,
 } from "./languageServerProcess";
-import { toDefinitionTargets, toDiagnostics } from "./languageServerResults";
+import { toDefinitionTargets, toDiagnostics, toReferenceTargets } from "./languageServerResults";
 
 /**
  * Language reads for Code threads, answered by confined language servers the
@@ -175,6 +180,8 @@ export interface CodeLanguageAuthority {
 export interface CodeLanguageCaller {
   readonly scopeId: WindowId;
   readonly principal: PrincipalKind;
+  /** Host-owned original request proof; never decoded from a document or read body. */
+  readonly isCurrent?: () => boolean;
 }
 
 /** The shell-command approvals `repo-tooling` servers need, journaled per Project. */
@@ -210,6 +217,14 @@ export type CodeLanguageAgentRead =
       readonly checkoutId: CodeCheckoutId;
       readonly path: CodeRelativePath;
       readonly position: CodeLanguagePosition;
+    }
+  | {
+      readonly kind: "references";
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly path: CodeRelativePath;
+      readonly position: CodeLanguagePosition;
+      readonly includeDeclaration: boolean;
     };
 
 /**
@@ -289,6 +304,8 @@ interface OpenDocument {
   readonly languageId: string;
   text: string;
   version: number;
+  /** Ephemeral acknowledgement for this document on this connection; never authority. */
+  revision: string;
   /** The file references holding it open; threads on one checkout share it. */
   readonly holders: Set<string>;
   lastTouched: number;
@@ -300,6 +317,7 @@ interface ServerRecord {
   readonly projectId: ProjectId;
   readonly component: CodeLanguageServerComponent;
   readonly rootPath: string;
+  readonly rootIdentity: CodeFolderRootResolution["rootIdentity"];
   /** Whether the root is an extra folder: it has no checkout to watch, and its own server. */
   readonly extraFolder: boolean;
   /** A thread on the checkout, to label the file watch the server is fed from. */
@@ -310,6 +328,9 @@ interface ServerRecord {
   process: LanguageServerProcess | undefined;
   connection: LanguageServerConnection | undefined;
   pullsDiagnostics: boolean;
+  referencesSupport: CodeLanguageReferenceSupport;
+  renameSupport: CodeLanguageReferenceSupport;
+  quickFixesSupport: CodeLanguageReferenceSupport;
   watch: AbortController | undefined;
   readonly documents: Map<string, OpenDocument>;
   readonly pushed: Map<string, ReadonlyArray<unknown>>;
@@ -407,7 +428,77 @@ export class CodeLanguageService {
     }
     if (request.kind === "close") {
       this.#release(record, document, String(request.fileId));
-      return { status: "synced", ...scope };
+      return {
+        status: "synced",
+        ...scope,
+        documentVersion: document.version,
+        documentRevision: document.revision,
+      };
+    }
+    if (request.expectedRevision !== undefined) {
+      // Foreground reference preparation must not become an implicit restart.
+      if (caller.isCurrent === undefined) return { status: "refused", reason: "no-reach" };
+      if (document.revision !== request.expectedRevision) return { status: "stale" };
+      if (!fitsFrame(request.text)) return { status: "too-large", ...scope };
+      const connection = record.connection;
+      const generation = record.generation;
+      const admitted = await this.#readFeature(caller, { kind: "capabilities", ...scope });
+      const fresh = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (fresh.status === "refused") return fresh;
+      if (admitted.status === "refused" || admitted.status === "unavailable") return admitted;
+      if (
+        admitted.status !== "capabilities" ||
+        (admitted.references !== "supported" &&
+          admitted.rename !== "supported" &&
+          admitted.quickFixes !== "supported") ||
+        fresh.thread.projectId !== authorized.thread.projectId ||
+        fresh.thread.bindingRevisionId !== authorized.thread.bindingRevisionId ||
+        this.#documentReference(request) !== reference ||
+        this.#servers.get(record.key) !== record ||
+        record.documents.get(reference.uri) !== document ||
+        record.state !== "ready" ||
+        record.generation !== generation ||
+        connection === undefined ||
+        connection.closed ||
+        record.connection !== connection ||
+        document.revision !== request.expectedRevision
+      )
+        return { status: "stale" };
+      const chosen = this.#componentFor(document.path);
+      if (chosen.status === "refused") return chosen;
+      if (
+        chosen.component.componentKey !== record.component.componentKey ||
+        chosen.component.approvalKey !== record.component.approvalKey
+      )
+        return { status: "stale" };
+      const decision = decideLanguageServerLaunch({
+        launchClass: chosen.component.launchClass,
+        posture: fresh.thread.executionPolicy,
+        platform: this.#platform,
+        startedBy: caller.principal,
+        shellCommandApproval: this.#approvalHolds(
+          fresh.thread.projectId,
+          fresh.checkout.id,
+          chosen.component,
+        )
+          ? "granted"
+          : "absent",
+      });
+      if (decision.status === "refused") return decision;
+      document.text = request.text;
+      document.version += 1;
+      document.revision = randomUUID();
+      document.lastTouched = this.#now();
+      connection.notify("textDocument/didChange", {
+        textDocument: { uri: document.uri, version: document.version },
+        contentChanges: [{ text: document.text }],
+      });
+      return {
+        status: "synced",
+        ...scope,
+        documentVersion: document.version,
+        documentRevision: document.revision,
+      };
     }
     // The change goes to the server that owns the document: an extra folder's
     // document is served from its own folder, not from the checkout.
@@ -418,18 +509,31 @@ export class CodeLanguageService {
     if (!fitsFrame(request.text)) return { status: "too-large", ...scope };
     document.text = request.text;
     document.version += 1;
+    document.revision = randomUUID();
     document.lastTouched = this.#now();
     served.record.connection?.notify("textDocument/didChange", {
       textDocument: { uri: document.uri, version: document.version },
       contentChanges: [{ text: document.text }],
     });
-    return { status: "synced", ...scope };
+    return {
+      status: "synced",
+      ...scope,
+      documentVersion: document.version,
+      documentRevision: document.revision,
+    };
   }
 
   async read(
     caller: CodeLanguageCaller,
     request: CodeLanguageReadRequest,
   ): Promise<CodeLanguageReadResult> {
+    if (
+      request.kind === "references" ||
+      request.kind === "capabilities" ||
+      request.kind === "rename" ||
+      request.kind === "quick-fixes"
+    )
+      return this.#readFeature(caller, request);
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
     const reference = this.#documentReference(request);
@@ -453,6 +557,373 @@ export class CodeLanguageService {
       threadId: request.threadId,
       checkoutId: request.checkoutId,
       fileId: request.fileId,
+    });
+  }
+
+  #referencesSupport(record: ServerRecord, document: OpenDocument): CodeLanguageReferenceSupport {
+    const registered =
+      record.connection?.referencesRegistrationSupport(document.languageId) ?? "unsupported";
+    if (registered === "supported" || record.referencesSupport === "supported") return "supported";
+    return registered === "unknown" || record.referencesSupport === "unknown"
+      ? "unknown"
+      : "unsupported";
+  }
+
+  /** New companion features retain the acknowledged document and caller through every await. */
+  async #readFeature(
+    caller: CodeLanguageCaller,
+    request: Extract<
+      CodeLanguageReadRequest,
+      { readonly kind: "references" | "capabilities" | "rename" | "quick-fixes" }
+    >,
+  ): Promise<CodeLanguageReadResult> {
+    const deadline = performance.now() + this.#requestDeadlineMs;
+    const controller = new AbortController();
+    const expired = () => controller.signal.aborted || performance.now() >= deadline;
+    const timeout: CodeLanguageReadResult = { status: "unavailable", reason: "timed-out" };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const operation = async (): Promise<CodeLanguageReadResult> => {
+      const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (authorized.status === "refused") return authorized;
+      const reference = this.#documentReference(request);
+      const originalRecord =
+        reference === undefined ? undefined : this.#servers.get(reference.serverKey);
+      const document =
+        reference === undefined ? undefined : originalRecord?.documents.get(reference.uri);
+      if (document === undefined || originalRecord === undefined)
+        return { status: "refused", reason: "file-outside-thread" };
+      const version = document.version;
+      const revision = document.revision;
+      if (
+        request.kind !== "capabilities" &&
+        (version !== request.expectedVersion || revision !== request.expectedRevision)
+      )
+        return { status: "stale" };
+      const contained = await this.#containedRoot(caller, authorized, document.path);
+      if (expired()) return timeout;
+      const fresh = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (fresh.status === "refused") return fresh;
+      if (contained.status === "refused") return contained;
+      if (
+        fresh.thread.projectId !== authorized.thread.projectId ||
+        fresh.thread.bindingRevisionId !== authorized.thread.bindingRevisionId
+      )
+        return { status: "stale" };
+      // These reads consume the initialized document. Only open/sync may
+      // start or retarget a server when its component or folder changes.
+      const record = originalRecord;
+      if (
+        contained.root.rootPath !== record.rootPath ||
+        contained.root.rootIdentity.device !== record.rootIdentity.device ||
+        contained.root.rootIdentity.inode !== record.rootIdentity.inode
+      )
+        return { status: "stale" };
+      const chosen = this.#componentFor(document.path);
+      if (chosen.status === "refused") return chosen;
+      if (
+        chosen.component.componentKey !== record.component.componentKey ||
+        chosen.component.approvalKey !== record.component.approvalKey
+      )
+        return { status: "stale" };
+      const admission = decideLanguageServerLaunch({
+        launchClass: chosen.component.launchClass,
+        posture: fresh.thread.executionPolicy,
+        platform: this.#platform,
+        startedBy: caller.principal,
+        shellCommandApproval: this.#approvalHolds(
+          fresh.thread.projectId,
+          fresh.checkout.id,
+          chosen.component,
+        )
+          ? "granted"
+          : "absent",
+      });
+      if (admission.status === "refused") return admission;
+      if (record.state !== "ready" || record.connection === undefined || record.connection.closed)
+        return {
+          status: "unavailable",
+          reason: record.state === "crashed" ? "crashed" : "starting",
+        };
+      const generation = record.generation;
+      const connection = record.connection;
+      const current = (): boolean =>
+        !expired() &&
+        document.version === version &&
+        document.revision === revision &&
+        record === originalRecord &&
+        this.#servers.get(record.key) === record &&
+        record.generation === generation &&
+        connection !== undefined &&
+        !connection.closed &&
+        record.connection === connection &&
+        record.documents.get(document.uri) === document &&
+        this.#documentReference(request) === reference;
+      if (!current()) return { status: "stale" };
+      const scope = {
+        threadId: request.threadId,
+        checkoutId: request.checkoutId,
+        fileId: request.fileId,
+      };
+      const afterStart = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (afterStart.status === "refused") return afterStart;
+      const support = this.#referencesSupport(record, document);
+      let mapped: Awaited<ReturnType<typeof toReferenceTargets>> | undefined;
+      let editPreviews:
+        | Extract<CodeLanguageReadResult, { status: "edit-previews" }>["previews"]
+        | undefined;
+      if (request.kind === "rename" || request.kind === "quick-fixes") {
+        const editSupport =
+          request.kind === "rename" ? record.renameSupport : record.quickFixesSupport;
+        if (editSupport !== "supported")
+          return { status: "unsupported", capability: request.kind, support: editSupport };
+        // A language response can name a previously closed file. Retain bounded
+        // metadata before asking; post-response contents cannot establish its baseline.
+        const listing = await new CodeFileListingService().list({
+          threadId: request.threadId,
+          checkoutId: request.checkoutId,
+          rootPath: record.rootPath,
+          signal: controller.signal,
+        });
+        if (listing.status !== "listed")
+          return { status: "edit-unavailable", reason: "unsafe-edit" };
+        const originalFiles = new Map<string, string>();
+        for (const entry of listing.listing.entries) {
+          if (!current()) return { status: "stale" };
+          if (entry.kind !== "file") continue;
+          const path = join(record.rootPath, String(entry.path));
+          const placed = await resolveContainedPath(this.#files, record.rootPath, path);
+          const facts = placed?.canonical === path ? placed.stat : undefined;
+          if (facts?.changeStamp !== undefined && !facts.isSymbolicLink)
+            originalFiles.set(pathToFileURL(path).href, facts.changeStamp);
+        }
+        let diagnostics = record.pushed.get(document.uri) ?? [];
+        if (request.kind === "quick-fixes" && record.pullsDiagnostics) {
+          const pulled = await connection.request(
+            "textDocument/diagnostic",
+            { textDocument: { uri: document.uri } },
+            Math.max(1, deadline - performance.now()),
+          );
+          if (!current()) return { status: "stale" };
+          if (pulled.status !== "answered") return unavailable(pulled);
+          diagnostics =
+            isRecord(pulled.result) && Array.isArray(pulled.result.items)
+              ? pulled.result.items
+              : [];
+        }
+        const response = await connection.request(
+          request.kind === "rename" ? "textDocument/rename" : "textDocument/codeAction",
+          request.kind === "rename"
+            ? {
+                textDocument: { uri: document.uri },
+                position: request.position,
+                newName: request.newName,
+              }
+            : {
+                textDocument: { uri: document.uri },
+                range: { start: request.position, end: request.position },
+                context: {
+                  diagnostics: diagnostics.slice(0, 1000),
+                  only: ["quickfix"],
+                },
+              },
+          Math.max(1, deadline - performance.now()),
+        );
+        if (expired()) return timeout;
+        if (!current()) return { status: "stale" };
+        if (response.status !== "answered") return unavailable(response);
+        const candidates =
+          request.kind === "rename"
+            ? [{ title: `Rename to ${request.newName}`, edit: response.result }]
+            : Array.isArray(response.result)
+              ? response.result
+              : [];
+        if (candidates.length > 16) return { status: "edit-unavailable", reason: "too-large" };
+        const previews: Array<
+          Extract<CodeLanguageReadResult, { status: "edit-previews" }>["previews"][number]
+        > = [];
+        for (const candidate of candidates) {
+          if (
+            !isRecord(candidate) ||
+            typeof candidate.title !== "string" ||
+            candidate.edit === undefined ||
+            candidate.command !== undefined ||
+            candidate.disabled !== undefined ||
+            (candidate.kind !== undefined &&
+              (typeof candidate.kind !== "string" ||
+                (candidate.kind !== "quickfix" && !candidate.kind.startsWith("quickfix."))))
+          )
+            continue;
+          const preview = await languageEditPreview({
+            result: candidate.edit,
+            root: record.rootPath,
+            extraFolder: record.extraFolder,
+            port: this.#files,
+            threadId: request.threadId,
+            checkoutId: request.checkoutId,
+            current,
+            openText: (uri) => record.documents.get(uri)?.text,
+            openVersion: (uri) => record.documents.get(uri)?.version,
+            originalFiles,
+          });
+          if (preview.status === "refused")
+            return { status: "edit-unavailable", reason: preview.reason };
+          if (
+            previews
+              .flatMap((item) => item.files)
+              .reduce((sum, file) => sum + file.before.length + file.after.length, 0) +
+              preview.files.reduce((sum, file) => sum + file.before.length + file.after.length, 0) >
+            1024 * 1024
+          )
+            return { status: "edit-unavailable", reason: "too-large" };
+          previews.push({
+            title: boundedDiagnosticMessage(candidate.title, record.rootPath).slice(0, 256),
+            files: preview.files,
+          });
+        }
+        if (!current()) return { status: "stale" };
+        editPreviews = previews;
+      }
+      if (request.kind === "references" && support === "supported") {
+        if (connection === undefined) return { status: "unavailable", reason: "starting" };
+        const response = await connection.request(
+          "textDocument/references",
+          {
+            textDocument: { uri: document.uri },
+            position: request.position,
+            context: { includeDeclaration: request.includeDeclaration },
+          },
+          Math.max(1, deadline - performance.now()),
+        );
+        if (expired()) return timeout;
+        const afterAnswer = this.#authorize(caller, request.threadId, request.checkoutId);
+        if (afterAnswer.status === "refused") return afterAnswer;
+        if (!current()) return { status: "stale" };
+        if (response.status !== "answered") return unavailable(response);
+        mapped = await toReferenceTargets({
+          result: response.result,
+          roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
+          realpath: (path) => realpath(path),
+          current,
+        });
+        if (expired()) return timeout;
+      }
+      const afterMapping = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (afterMapping.status === "refused") return afterMapping;
+      if (!current()) return { status: "stale" };
+      const root = await this.#containedRoot(caller, afterMapping, document.path);
+      if (expired()) return timeout;
+      const afterRoot = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (afterRoot.status === "refused") return afterRoot;
+      if (!current()) return { status: "stale" };
+      if (root.status === "refused") return root;
+      if (
+        root.root.rootPath !== contained.root.rootPath ||
+        root.root.rootIdentity.device !== contained.root.rootIdentity.device ||
+        root.root.rootIdentity.inode !== contained.root.rootIdentity.inode
+      )
+        return { status: "stale" };
+      const final = this.#authorize(caller, request.threadId, request.checkoutId);
+      if (final.status === "refused") return final;
+      if (
+        final.thread.projectId !== authorized.thread.projectId ||
+        final.thread.bindingRevisionId !== authorized.thread.bindingRevisionId
+      )
+        return { status: "stale" };
+      const component = this.#componentFor(document.path);
+      if (component.status === "refused") return component;
+      if (
+        component.component.componentKey !== record.component.componentKey ||
+        component.component.approvalKey !== record.component.approvalKey
+      )
+        return { status: "stale" };
+      const launch = decideLanguageServerLaunch({
+        launchClass: component.component.launchClass,
+        posture: final.thread.executionPolicy,
+        platform: this.#platform,
+        startedBy: caller.principal,
+        shellCommandApproval: this.#approvalHolds(
+          final.thread.projectId,
+          final.checkout.id,
+          component.component,
+        )
+          ? "granted"
+          : "absent",
+      });
+      if (launch.status === "refused") return launch;
+      if (!current()) return { status: "stale" };
+      const finalSupport = this.#referencesSupport(record, document);
+      if (request.kind === "capabilities")
+        return {
+          status: "capabilities",
+          ...scope,
+          references: finalSupport,
+          rename: record.renameSupport,
+          quickFixes: record.quickFixesSupport,
+        };
+      if (request.kind === "rename" || request.kind === "quick-fixes")
+        return {
+          status: "edit-previews",
+          ...scope,
+          documentVersion: version,
+          documentRevision: revision,
+          previews: editPreviews ?? [],
+        };
+      if (finalSupport !== "supported")
+        return { status: "unsupported", capability: "references", support: finalSupport };
+      if (mapped === undefined) return { status: "stale" };
+      const targets = record.extraFolder
+        ? mapped.targets.map((target) =>
+            target.kind === "checkout-location"
+              ? { ...target, path: decodeCodeProjectFilePath(`${record.rootPath}/${target.path}`) }
+              : target,
+          )
+        : mapped.targets;
+      return {
+        status: "references",
+        ...scope,
+        documentVersion: version,
+        documentRevision: revision,
+        targets,
+        truncated: mapped.truncated,
+      };
+    };
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise<CodeLanguageReadResult>((resolve) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            resolve(timeout);
+          }, this.#requestDeadlineMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
+  }
+
+  /**
+   * Whether an agent's language read could be answered for any file of these
+   * folders, judged when a Code turn's tools are composed: some server
+   * effective now that an agent may start (`static`) covers a file a bounded
+   * scan finds there. The Settings switch is read through the effective set,
+   * so a bundled server turned off covers nothing, and a `repo-tooling`
+   * server never counts because an agent's read never starts or reads
+   * through one. It decides only whether the tool is offered; every read is
+   * still checked as it runs.
+   */
+  servesAgentsIn(folders: ReadonlyArray<string>): boolean {
+    if (this.#platform !== "macos" && this.#platform !== "linux") return false;
+    const languages = new Set(
+      this.#components()
+        .filter((component) => component.launchClass === "static")
+        .flatMap((component) => component.languages),
+    );
+    if (languages.size === 0) return false;
+    return foldersHoldCoveredFile(folders, (fileName) => {
+      const languageId = languageOf(fileName);
+      return languageId !== undefined && languages.has(languageId);
     });
   }
 
@@ -516,6 +987,7 @@ export class CodeLanguageService {
         languageId: languageOf(request.path) ?? "plaintext",
         text,
         version: 1,
+        revision: randomUUID(),
         holders: new Set([holder]),
         lastTouched: now,
       };
@@ -527,6 +999,7 @@ export class CodeLanguageService {
         if (editorHolds(document)) return { status: "unsaved-edits" };
         document.text = text;
         document.version += 1;
+        document.revision = randomUUID();
         // What the server pushed was for the old text.
         record.pushed.delete(uri);
         record.connection?.notify("textDocument/didChange", {
@@ -557,7 +1030,12 @@ export class CodeLanguageService {
     document: OpenDocument,
     request:
       | { readonly kind: "diagnostics" }
-      | { readonly kind: "definition"; readonly position: CodeLanguagePosition },
+      | { readonly kind: "definition"; readonly position: CodeLanguagePosition }
+      | {
+          readonly kind: "references";
+          readonly position: CodeLanguagePosition;
+          readonly includeDeclaration: boolean;
+        },
     scope: {
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
@@ -594,6 +1072,9 @@ export class CodeLanguageService {
       return { status: "diagnostics", ...scope, ...mapped };
     }
 
+    if (request.kind === "references")
+      return this.#answerReferences(record, document, request, scope);
+
     const response = await connection.request("textDocument/definition", {
       textDocument: { uri: document.uri },
       position: request.position,
@@ -615,6 +1096,64 @@ export class CodeLanguageService {
         )
       : targets;
     return { status: "definition", ...scope, targets: named };
+  }
+
+  /**
+   * Where the name at a position of a document the server holds is used, for
+   * an agent's read of the saved file. The editor's references read is staged
+   * against a document revision it acknowledged; an agent holds no revision,
+   * so its read is answered here for the text it just brought up to the saved
+   * file, under the same bounds, and refused as unsupported by a server that
+   * does not report references.
+   */
+  async #answerReferences(
+    record: ServerRecord,
+    document: OpenDocument,
+    request: { readonly position: CodeLanguagePosition; readonly includeDeclaration: boolean },
+    scope: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly fileId: CodeFileId;
+    },
+  ): Promise<CodeLanguageReadResult> {
+    const connection = record.connection;
+    if (connection === undefined) return { status: "unavailable", reason: "starting" };
+    const support = this.#referencesSupport(record, document);
+    if (support !== "supported") {
+      return { status: "unsupported", capability: "references", support };
+    }
+    const version = document.version;
+    const current = () => record.connection === connection && document.version === version;
+    const response = await connection.request("textDocument/references", {
+      textDocument: { uri: document.uri },
+      position: request.position,
+      context: { includeDeclaration: request.includeDeclaration },
+    });
+    if (response.status !== "answered") return unavailable(response);
+    const mapped = await toReferenceTargets({
+      result: response.result,
+      roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
+      realpath: (path) => realpath(path),
+      current,
+    });
+    // Mapping stops early once the text or the server changed, and what it
+    // kept places names in text the agent no longer reads.
+    if (!current()) return { status: "stale" };
+    const targets = record.extraFolder
+      ? mapped.targets.map((target) =>
+          target.kind === "checkout-location"
+            ? { ...target, path: decodeCodeProjectFilePath(`${record.rootPath}/${target.path}`) }
+            : target,
+        )
+      : mapped.targets;
+    return {
+      status: "references",
+      ...scope,
+      documentVersion: document.version,
+      documentRevision: document.revision,
+      targets,
+      truncated: mapped.truncated,
+    };
   }
 
   /**
@@ -714,6 +1253,7 @@ export class CodeLanguageService {
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
   ): Authorized {
+    if (caller.isCurrent?.() === false) return { status: "refused", reason: "no-reach" };
     const thread = this.#authority.readThread(threadId);
     // A thread the caller cannot reach reads the same as one that does not
     // exist, so a refusal never says which threads are on this host.
@@ -804,6 +1344,7 @@ export class CodeLanguageService {
         languageId: languageOf(request.path) ?? "plaintext",
         text: request.text,
         version: 1,
+        revision: randomUUID(),
         holders: new Set([fileKey]),
         lastTouched: now,
       };
@@ -816,6 +1357,7 @@ export class CodeLanguageService {
       if (existing.text !== request.text) {
         existing.text = request.text;
         existing.version += 1;
+        existing.revision = randomUUID();
         record.connection?.notify("textDocument/didChange", {
           textDocument: { uri, version: existing.version },
           contentChanges: [{ text: existing.text }],
@@ -828,7 +1370,14 @@ export class CodeLanguageService {
       threadId: request.threadId,
       checkoutId: request.checkoutId,
     });
-    return { status: "synced", ...scope };
+    const opened = record.documents.get(uri);
+    return {
+      status: "synced",
+      ...scope,
+      ...(opened === undefined
+        ? {}
+        : { documentVersion: opened.version, documentRevision: opened.revision }),
+    };
   }
 
   /**
@@ -873,13 +1422,15 @@ export class CodeLanguageService {
       record = undefined;
     }
     if (record === undefined) {
-      if (rootPath === undefined) return { status: "refused", reason: "file-outside-thread" };
+      if (rootPath === undefined || resolved === undefined)
+        return { status: "refused", reason: "file-outside-thread" };
       record = {
         key,
         checkoutId: authorized.checkout.id,
         projectId: authorized.thread.projectId,
         component,
         rootPath,
+        rootIdentity: resolved.rootIdentity,
         extraFolder,
         watchThreadId: authorized.thread.id,
         state: "stopped",
@@ -888,6 +1439,9 @@ export class CodeLanguageService {
         process: undefined,
         connection: undefined,
         pullsDiagnostics: false,
+        referencesSupport: "unknown",
+        renameSupport: "unknown",
+        quickFixesSupport: "unknown",
         watch: undefined,
         documents: new Map(),
         pushed: new Map(),
@@ -1083,11 +1637,18 @@ export class CodeLanguageService {
       isRecord(initialized.result) && isRecord(initialized.result.capabilities)
         ? initialized.result.capabilities
         : {};
+    record.referencesSupport =
+      isRecord(initialized.result) && isRecord(initialized.result.capabilities)
+        ? referenceSupport(capabilities.referencesProvider)
+        : "unknown";
+    record.renameSupport = referenceSupport(capabilities.renameProvider);
+    record.quickFixesSupport = quickFixSupport(capabilities.codeActionProvider);
     record.pullsDiagnostics =
       capabilities.diagnosticProvider !== undefined && capabilities.diagnosticProvider !== null;
     connection.notify("initialized", {});
     // A restart after a crash reopens what the editor still holds.
     for (const document of record.documents.values()) {
+      document.revision = randomUUID();
       connection.notify("textDocument/didOpen", { textDocument: documentItem(document) });
     }
     record.state = "ready";
@@ -1208,28 +1769,54 @@ export class CodeLanguageService {
 
   #watch(record: ServerRecord, connection: LanguageServerConnection, generation: number): void {
     const watcher = this.#watcher;
-    if (watcher === undefined || record.extraFolder) return;
+    if (watcher === undefined) return;
     const controller = new AbortController();
     record.watch = controller;
+    const notify = (paths: ReadonlyArray<CodeRelativePath>) => {
+      if (connection.registered("workspace/didChangeWatchedFiles"))
+        connection.notify("workspace/didChangeWatchedFiles", {
+          changes: paths.map((path) => ({
+            uri: pathToFileURL(join(record.rootPath, path)).href,
+            type: 2,
+          })),
+        });
+    };
     void (async () => {
-      try {
-        for await (const notice of watcher.watch({
-          threadId: record.watchThreadId,
-          checkoutId: record.checkoutId,
-          rootPath: record.rootPath,
-          signal: controller.signal,
-        })) {
-          if (record.generation !== generation || controller.signal.aborted) return;
-          if (!connection.registered("workspace/didChangeWatchedFiles")) continue;
-          connection.notify("workspace/didChangeWatchedFiles", {
-            changes: notice.paths.map((path) => ({
-              uri: pathToFileURL(join(record.rootPath, path)).href,
-              type: 2,
-            })),
-          });
+      while (record.generation === generation && !controller.signal.aborted) {
+        try {
+          for await (const notice of watcher.watch({
+            threadId: record.watchThreadId,
+            checkoutId: record.checkoutId,
+            rootPath: record.rootPath,
+            signal: controller.signal,
+          })) {
+            if (record.generation !== generation || controller.signal.aborted) return;
+            notify(
+              notice.truncated
+                ? [
+                    ...new Set([
+                      ...notice.paths,
+                      ...[...record.documents.values()].map((document) => document.path),
+                    ]),
+                  ]
+                : notice.paths,
+            );
+          }
+        } catch {
+          // A dropped watcher reconciles open documents before reconnecting.
         }
-      } catch {
-        // A watch that fails leaves the server reading files as it finds them.
+        if (record.generation !== generation || controller.signal.aborted) return;
+        notify([...record.documents.values()].map((document) => document.path));
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            clearTimeout(timer);
+            controller.signal.removeEventListener("abort", finish);
+            resolve();
+          };
+          const timer = setTimeout(finish, 2000);
+          controller.signal.addEventListener("abort", finish, { once: true });
+          if (controller.signal.aborted) finish();
+        });
       }
     })();
   }
@@ -1313,9 +1900,16 @@ function initializeParams(rootPath: string) {
         diagnostic: { dynamicRegistration: false },
         publishDiagnostics: {},
         definition: { dynamicRegistration: false, linkSupport: true },
+        references: { dynamicRegistration: true },
+        rename: { dynamicRegistration: false },
+        codeAction: {
+          dynamicRegistration: false,
+          codeActionLiteralSupport: { codeActionKind: { valueSet: ["quickfix"] } },
+        },
       },
       workspace: {
         configuration: true,
+        workspaceEdit: { documentChanges: true, resourceOperations: [] },
         didChangeWatchedFiles: { dynamicRegistration: true },
       },
       window: { workDoneProgress: true },
@@ -1345,4 +1939,32 @@ function unavailable(
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function quickFixSupport(value: unknown): CodeLanguageReferenceSupport {
+  if (isRecord(value) && value.codeActionKinds !== undefined) {
+    if (
+      !Array.isArray(value.codeActionKinds) ||
+      !value.codeActionKinds.every((kind) => typeof kind === "string")
+    )
+      return "unknown";
+    if (
+      !value.codeActionKinds.some(
+        (kind) => kind === "" || kind === "quickfix" || kind.startsWith("quickfix."),
+      )
+    )
+      return "unsupported";
+  }
+  return referenceSupport(value);
+}
+
+function referenceSupport(value: unknown): CodeLanguageReferenceSupport {
+  if (value === undefined || value === false) return "unsupported";
+  if (
+    value === true ||
+    (isRecord(value) &&
+      (value.workDoneProgress === undefined || typeof value.workDoneProgress === "boolean"))
+  )
+    return "supported";
+  return "unknown";
 }

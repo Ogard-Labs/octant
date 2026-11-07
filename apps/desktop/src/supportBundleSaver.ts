@@ -33,7 +33,8 @@ interface DialogPort<TWindow extends OwnedWindowPort> {
 }
 
 interface SupportBundleSaverOptions<TWindow extends OwnedWindowPort> {
-  readonly desktopBridgeSecret: string;
+  /** Stable's bridge secret, or a native Nightly main's own window authority. */
+  readonly brokerHeaders: () => Readonly<Record<string, string>>;
   readonly dialog: DialogPort<TWindow>;
   /** The folder the dialog opens in, usually the person's Downloads. */
   readonly defaultDirectory: string;
@@ -93,7 +94,7 @@ export function createSupportBundleSaver<TWindow extends OwnedWindowPort>(
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-octant-desktop-secret": options.desktopBridgeSecret,
+            ...options.brokerHeaders(),
           },
           body: JSON.stringify({ absolutePath: path }),
         },

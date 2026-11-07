@@ -3,6 +3,7 @@ import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { describe, expect, it } from "vitest";
 import { chatShellBootstrap } from "../App.test-fixtures";
 import { rememberWorkspaceContent, settleThreadPreview } from "./workspaceContentTabs";
+import { encodeWorkspaceContent, decodeWorkspaceContent } from "./workspaceContentPersistence";
 
 const THREADS = [
   "00000000-0000-4000-8000-000000000901",
@@ -43,6 +44,38 @@ function tabsAfter(opens: ReadonlyArray<number>, preview: ReadonlySet<string>) {
 }
 
 describe("opening threads into a pane's tabs", () => {
+  it("restores kept references in order only in the same authority context and omits temporary previews", () => {
+    const first = open(chatShellBootstrap().workspace, 0);
+    const second = open(first, 1);
+    const tabs = rememberWorkspaceContent(
+      rememberWorkspaceContent(new Map(), first, first),
+      first,
+      second,
+    );
+    const encoded = encodeWorkspaceContent(second, tabs, new Set([THREADS[1]]));
+    expect(
+      [...decodeWorkspaceContent(encoded, second).values()].flat().map((tab) => tab.title),
+    ).toEqual(["Thread 0"]);
+    const moved = {
+      ...second,
+      contextByMode: {
+        ...second.contextByMode,
+        chat: { ...second.contextByMode.chat, boundRoot: "/another/root" },
+      },
+    };
+    expect([...decodeWorkspaceContent(encoded, moved).values()].flat()).toEqual([]);
+    expect([...decodeWorkspaceContent("invalid", second).values()]).toEqual([]);
+    expect(
+      [
+        ...decodeWorkspaceContent(
+          encodeWorkspaceContent(second, new Map(), new Set()),
+          second,
+        ).values(),
+      ].flat(),
+    ).toEqual([]);
+    expect(second.layouts.chat).toEqual(open(first, 1).layouts.chat);
+  });
+
   it("lets a single-clicked thread take over the open tab instead of adding one", () => {
     expect(tabsAfter([0, 1, 2], new Set(THREADS))).toEqual(["Thread 2"]);
   });

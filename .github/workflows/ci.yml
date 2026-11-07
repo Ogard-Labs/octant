@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run fmt:check
       - run: bun run lint
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       # scripts tests build the Swift helpers and package the app; they run on the macOS job.
       # The web and server suites have their own sharded jobs below.
@@ -90,7 +90,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run test --filter=@octant/web -- --shard=${{ matrix.shard }}/5
 
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       # The suite imports the workspace packages from their built output.
       - run: bun run build --filter='@octant/server^...'
@@ -146,7 +146,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
@@ -183,6 +183,16 @@ jobs:
       # app pins. Electron's package downloads its binary only on demand, not
       # at install, so it is fetched here; without it that case would skip.
       - run: node node_modules/electron/install.js
+      # The ordinary Nightly client, in this Electron, against a development
+      # host on a throwaway folder and port that a synthetic Stable owns with
+      # Stable's own lease owner and client lifetime: the renderer, a Chat
+      # turn, brokered pickers, keys and approvals, the embedded Browser,
+      # lease loss, a host restart, two separate hosts, and quit-one and
+      # quit-last. Only the signed native binding is stood in for, so it needs
+      # no signing secret; the harness it builds is never packaged.
+      - name: Nightly client smoke
+        timeout-minutes: 10
+        run: bun scripts/smoke-nightly-client.ts
       # An outside provider driver runs under its own Seatbelt profile and
       # Linux refuses to start one, so its escape tests (network, files
       # outside its package, the home folder, exec, host variables) skip on
@@ -194,3 +204,45 @@ jobs:
           bun run --cwd apps/server test --
           src/providers/outsideDriverProcess.escape.test.ts
           src/computerUse/desktopDaemonPort.test.ts
+
+  desktop-linux:
+    name: Desktop Linux client trust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      # Bubblewrap needs unprivileged user namespaces, which Ubuntu's AppArmor
+      # restricts by default. Only this throwaway runner relaxes it; the user
+      # guide gives people an AppArmor profile instead.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          bubblewrap dbus gnome-keyring libsecret-tools
+      # The kernel peer checks on a real path socket: a same-user peer is
+      # admitted under SO_PEERPIDFD and under the forced pidfd_open fallback;
+      # a bwrap --unshare-all peer, another user (sudo -u nobody) and a
+      # descriptor handed over with SCM_RIGHTS are refused; a pidfd exit and
+      # an EOF each revoke leases; a stale socket is unlinked only under its
+      # lock; and a moved, loosened or linked launcher target refuses.
+      # Required here, so a missing bwrap or sudo fails instead of skipping.
+      - env:
+          OCTANT_REQUIRE_LINUX_ISOLATION: "1"
+        run: bun run --cwd scripts test -- build-desktop-peer-linux.test.ts
+      # The real-page Browser suite drives the runner's Chrome through
+      # Playwright; its launch hook timed out on ubuntu-24.04 (run
+      # 42205818274). It is not part of Linux client trust, and the macOS job
+      # above runs it with the rest of the desktop suite.
+      - run: bun run --cwd apps/desktop test -- --exclude=src/browserSurfaceHost.realPage.test.ts
+      # Nightly's test data and Octant's credentials in one real unlocked
+      # keyring: neither reads, replaces nor clears the other.
+      - env:
+          OCTANT_SECRET_SERVICE_KEYRING_TEST: "1"
+        run: >-
+          dbus-run-session -- sh -c
+          'printf octant-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+          bun run --cwd packages/host-runtime test -- src/secretServiceKeyringSeparation.test.ts'

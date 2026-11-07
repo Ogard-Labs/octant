@@ -13,7 +13,7 @@
       "@xterm/addon-fit": "0.11.0",
       "@xterm/addon-webgl": "0.19.0",
       "@xterm/xterm": "6.0.0",
-      "@types/bun": "1.3.14",
+      "@types/bun": "1.4.4",
       "@types/better-sqlite3": "7.6.13",
       "@types/node": "26.1.1",
       "@types/react": "19.2.17",
@@ -46,6 +46,9 @@
     "lint": "oxlint --report-unused-disable-directives",
     "package:desktop": "bun scripts/package-desktop.ts",
     "feed:sign": "bun scripts/sign-update-feed.ts",
+    "nightly:preflight": "bun scripts/nightly-preflight.ts",
+    "smoke:nightly-client": "bun scripts/smoke-nightly-client.ts",
+    "smoke:packaged-nightly-unsigned": "bun scripts/smoke-packaged-nightly-unsigned.ts",
     "smoke:packaged-chat": "bun scripts/smoke-packaged-chat.ts",
     "smoke:packaged-desktop": "bun scripts/smoke-packaged-desktop.ts",
     "smoke:packaged-openai-compatible": "bun scripts/smoke-packaged-openai-compatible.ts",
@@ -73,5 +76,5 @@
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
-  "packageManager": "bun@1.3.14"
+  "packageManager": "bun@1.4.4"
 }

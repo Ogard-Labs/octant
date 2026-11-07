@@ -33,6 +33,7 @@ export function decideWorkTurnAuthority(input: {
         readonly modelId: string;
         readonly bindingRevisionId: string | undefined;
         readonly workingDirectory: string | undefined;
+        readonly workingFolderId?: string;
       }
     | undefined;
 }): WorkTurnAuthorityDecision {
@@ -104,6 +105,13 @@ export function decideWorkTurnAuthority(input: {
       kind: "deny",
       category: "stale",
       message: "Work thread binding changed; reload and retry.",
+    };
+  }
+  if (input.thread.workingFolderId !== input.authority.workingFolderId) {
+    return {
+      kind: "deny",
+      category: "stale",
+      message: "Work working folder changed; reload and retry.",
     };
   }
   if (

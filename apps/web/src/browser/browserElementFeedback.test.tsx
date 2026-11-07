@@ -19,6 +19,14 @@ afterEach(() => {
 });
 
 describe("the shared host element reader", () => {
+  it("names the document element when the selected point is outside body content", () => {
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => document.documentElement,
+    });
+    expect(readBrowserFeedbackElement(point)?.element.selector).toBe("html");
+  });
+
   it("reads the selected structure/styles without adjacent page text or form values", () => {
     select(
       `<main><p>Unrelated private page text</p><button id="save" style="font-size:14px;color:rgb(1, 2, 3)">Save<textarea>secret form value</textarea><span contenteditable="true">edited secret</span></button></main>`,

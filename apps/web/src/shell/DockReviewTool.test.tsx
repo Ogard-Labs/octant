@@ -1,6 +1,6 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
@@ -51,7 +51,7 @@ describe("Review beside the active thread", () => {
     const fixture = runtime();
     render(<DockReviewTool {...bound()} loadRuntime={fixture.loadRuntime} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading diff");
+    expect(screen.getByText("Loading diff")).toBeVisible();
     await chooseSideBySide();
     const files = await screen.findByRole("navigation", { name: "Changed files" });
     expect(
@@ -171,7 +171,7 @@ describe("Review beside the active thread", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /src\/index\.ts/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Loading diff");
+    expect(screen.getByText("Loading diff")).toBeVisible();
     resolveNext(dirtyObservation(ids.operation));
     await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
@@ -395,3 +395,39 @@ function runtime() {
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
+
+it("maps a selected side-by-side hunk row to its original source coordinate", async () => {
+  const f = runtime();
+  const props = bound();
+  render(<DockReviewTool {...props} loadRuntime={f.loadRuntime} />);
+  await chooseSideBySide();
+  await waitFor(() => expect(f.options?.onSelectLine).toBeDefined());
+  await act(async () => f.options?.onSelectLine?.({ side: "original", line: 1 }));
+  await waitFor(() =>
+    expect(props.client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "prepare-review-target",
+        path: "src/index.ts",
+        side: "original",
+        line: 12,
+      }),
+      expect.any(AbortSignal),
+    ),
+  );
+});
+
+it("refuses receipt navigation whose recorded checkout is no longer current", () => {
+  const props = bound();
+  render(
+    <DockReviewTool
+      {...props}
+      requestedCodeReviewFile={{
+        checkoutId: ids.otherCheckout as never,
+        path: "src/index.ts",
+        receiptOperationId: ids.operation as never,
+      }}
+    />,
+  );
+  expect(screen.getByText(/earlier checkout binding/)).toBeVisible();
+  expect(props.client.executeOperation).not.toHaveBeenCalled();
+});

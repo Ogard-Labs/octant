@@ -13,6 +13,11 @@ export interface MonacoDiffAdapterProps {
   readonly modified: string;
   readonly original: string;
   readonly renderSideBySide: boolean;
+  readonly ignoreTrimWhitespace?: boolean;
+  readonly onSelectLine?: (selection: {
+    readonly side: "original" | "modified";
+    readonly line: number;
+  }) => void;
   readonly typography?: EditorTypographyProjection;
 }
 
@@ -53,6 +58,15 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
           original: latestProps.current.original,
           modified: latestProps.current.modified,
           renderSideBySide: latestProps.current.renderSideBySide,
+          ...(latestProps.current.ignoreTrimWhitespace === undefined
+            ? {}
+            : { ignoreTrimWhitespace: latestProps.current.ignoreTrimWhitespace }),
+          ...(latestProps.current.onSelectLine === undefined
+            ? {}
+            : {
+                onSelectLine: (selection: { side: "original" | "modified"; line: number }) =>
+                  latestProps.current.onSelectLine?.(selection),
+              }),
           typography: latestTypography.current,
         });
         if (disposed) mounted.dispose();
@@ -78,6 +92,10 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
   );
   useEffect(() => session.current?.setTypography?.(typography), [typography]);
   useEffect(() => session.current?.setColors?.(colors), [colors]);
+  useEffect(() => {
+    if (props.ignoreTrimWhitespace !== undefined)
+      session.current?.setIgnoreTrimWhitespace?.(props.ignoreTrimWhitespace);
+  }, [props.ignoreTrimWhitespace]);
 
   return (
     <>

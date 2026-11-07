@@ -1,4 +1,6 @@
+import { GithubMcpPermissionProfile, McpOAuthClientRegistration } from "./hostOAuth";
 import { ApprovalOutsideContent } from "./contentProvenance";
+import { SkillFolderPath } from "./shell";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AggregateVersion, EventVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -149,6 +151,8 @@ export const UserAddedMcpServerRequest = Schema.Struct({
    * it, so the package stays recognizable whatever its display name is.
    */
   connectorId: Schema.optional(boundedText(64)),
+  /** A bundled local setup; never a hosted OAuth connector. */
+  localSetupId: Schema.optional(Schema.Literal("paper")),
   server: Schema.Union(
     Schema.Struct({
       type: Schema.Literal("stdio"),
@@ -224,7 +228,38 @@ const signInTarget = {
   extensionId: ToolExtensionId,
   componentId: ExtensionComponentId,
 };
+/** A linked store item address, never the secret value or a caller-created broker id. */
+export const McpClientSetupInput = Schema.Struct({
+  binding: Schema.Struct({
+    resource: boundedText(2048),
+    issuer: boundedText(2048),
+    tokenEndpoint: boundedText(2048),
+    callback: boundedText(256),
+    mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
+  }).annotations(strict),
+  kind: Schema.Literal("registered", "metadata-document"),
+  clientId: boundedText(2048),
+  authentication: Schema.Literal("none", "client_secret_post", "client_secret_basic"),
+  secret: Schema.optional(
+    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }).annotations(
+      strict,
+    ),
+  ),
+}).annotations(strict);
+export type McpClientSetupInput = typeof McpClientSetupInput.Type;
+
 export const McpServerSignInRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("prepare-client"), ...signInTarget }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("save-client"),
+    ...signInTarget,
+    setup: McpClientSetupInput,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("configure-client"),
+    ...signInTarget,
+    registration: McpOAuthClientRegistration,
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("status"), ...signInTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("begin"), ...signInTarget }).annotations(strict),
   Schema.Struct({
@@ -236,10 +271,53 @@ export const McpServerSignInRequest = Schema.Union(
 );
 export type McpServerSignInRequest = typeof McpServerSignInRequest.Type;
 export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(McpServerSignInRequest);
+/** Optional last-reported account facts; never token/JWT fields or inferred names. */
+export const McpReportedAccount = Schema.Struct({
+  workspaceId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9]{1,128}$/))),
+  userId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9]{1,128}$/))),
+  grantedScopes: Schema.optional(
+    Schema.Array(
+      Schema.String.pipe(Schema.maxLength(128), Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]+$/)),
+    ).pipe(Schema.maxItems(64)),
+  ),
+}).annotations(strict);
+export type McpReportedAccount = typeof McpReportedAccount.Type;
+export const decodeMcpReportedAccount = Schema.decodeUnknownSync(McpReportedAccount);
+
 export const McpServerSignInView = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("client-configured") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("client-setup"),
+    mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
+    resource: boundedText(2048),
+    issuer: boundedText(2048),
+    tokenEndpoint: boundedText(2048),
+    callback: boundedText(256),
+    metadataClientSupported: Schema.Boolean,
+    authenticationMethods: Schema.Array(
+      Schema.Literal("none", "client_secret_post", "client_secret_basic"),
+    ),
+    secretStoreAvailable: Schema.Boolean,
+    registration: Schema.optional(McpOAuthClientRegistration),
+  }).annotations(strict),
   /** A server reached by a command, or one that answered without asking for a sign-in. */
   Schema.Struct({ kind: Schema.Literal("not-applicable") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("signed-out") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("client-setup-required"),
+    message: boundedText(512),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("cancel-pending"), message: boundedText(512) }).annotations(
+    strict,
+  ),
+  Schema.Struct({
+    kind: Schema.Literal("sign-out-pending"),
+    message: boundedText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("status-unavailable"),
+    message: boundedText(512),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("awaiting-consent"),
     attemptId: Schema.UUID,
@@ -250,10 +328,19 @@ export const McpServerSignInView = Schema.Union(
     kind: Schema.Literal("signed-in"),
     /** The authorization server that issued the grant, for the row. */
     issuer: boundedText(256),
+    account: Schema.optional(McpReportedAccount),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("sign-in-again"),
-    reason: Schema.Literal("revoked", "expired", "refresh-reused"),
+    reason: Schema.Literal(
+      "revoked",
+      "expired",
+      "refresh-reused",
+      "account-changed",
+      "permission-missing",
+      "permission-mismatch",
+      "identity-unavailable",
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("refused"),
@@ -453,11 +540,29 @@ export const ExtensionCommand = Schema.Union(
 );
 export type ExtensionCommand = typeof ExtensionCommand.Type;
 
+/** Host diagnostics for explicitly enabled provider/added skill roots; never a path or grant. */
+export const SkillRootStatus = Schema.Struct({
+  sourceRef: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(256),
+    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  ),
+  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  status: Schema.Literal("ready", "missing", "unreadable", "symlink", "not-directory"),
+  skillCount: Schema.Int.pipe(Schema.nonNegative()),
+  watching: Schema.Boolean,
+}).annotations(strict);
+export type SkillRootStatus = typeof SkillRootStatus.Type;
+export const SkillFolderSelection = Schema.Struct({ folderPath: SkillFolderPath }).annotations(
+  strict,
+);
+export type SkillFolderSelection = typeof SkillFolderSelection.Type;
+
 export const ExtensionSnapshot = Schema.Struct({
   sequence: GlobalSequence,
   snapshotAt: UtcTimestamp,
   packages: Schema.Array(ExtensionPackageState).pipe(Schema.maxItems(4096)),
   skills: Schema.optional(Schema.Array(StandaloneSkillRecord).pipe(Schema.maxItems(4096))),
+  skillRoots: Schema.optional(Schema.Array(SkillRootStatus).pipe(Schema.maxItems(34))),
   collisions: Schema.Array(ExtensionSkillCollision).pipe(Schema.maxItems(4096)),
 }).annotations(strict);
 export type ExtensionSnapshot = typeof ExtensionSnapshot.Type;

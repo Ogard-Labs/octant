@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./provider-cloud-session-client": "./src/providerCloudSessionClient.ts",
     "./git-history-client": "./src/gitHistoryClient.ts",
     ".": "./src/index.ts",
     "./agent-run-client": "./src/agentRunClient.ts",
@@ -57,6 +58,7 @@
     "./side-task-client": "./src/sideTaskClient.ts",
     "./mobile-native-harness-client": "./src/mobileNativeHarnessClient.ts",
     "./mobile-speech-client": "./src/mobileSpeechClient.ts",
+    "./reply-detail-client": "./src/replyDetailClient.ts",
     "./ship-client": "./src/shipClient.ts",
     "./plan-client": "./src/planClient.ts",
     "./product-feedback-client": "./src/productFeedbackClient.ts",
@@ -105,7 +107,9 @@
     "./mobile-inbox-client": "./src/mobileInboxClient.ts",
     "./mobile-code-operations-client": "./src/mobileCodeOperationsClient.ts",
     "./mobile-push-token-client": "./src/mobilePushTokenClient.ts",
-    "./zen-client": "./src/zenClient.ts"
+    "./zen-client": "./src/zenClient.ts",
+    "./command-credentials-client": "./src/commandCredentialsClient.ts",
+    "./conversation-input-client": "./src/conversationInputClient.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

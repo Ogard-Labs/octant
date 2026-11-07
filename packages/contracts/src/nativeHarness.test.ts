@@ -46,8 +46,8 @@ describe("native harness tools", () => {
     ).toThrow();
   });
 
-  it("offers the nine working tools, the three harness reads, delegation, and the goal tools", () => {
-    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(16);
+  it("offers the nine working tools, the three harness reads, the question, and the goal tools", () => {
+    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(15);
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("journal-lookup");
     // A lookup names only a message number; it can never point at another thread.
     expect(() =>
@@ -63,49 +63,6 @@ describe("native harness tools", () => {
     ).toThrow();
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("edit");
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("context-remaining");
-  });
-
-  it("accepts explicit child targets, reasoning and dependency context on the delegate transport", () => {
-    const input = {
-      operation: "start",
-      role: "research",
-      task: "Look",
-      providerInstanceId: lead.providerInstanceId,
-      modelId: "small",
-      reasoning: "high",
-      after: [turn],
-      includeParentContext: true,
-    };
-    expect(decodeNativeHarnessToolArguments("delegate", input)).toEqual(input);
-    expect(decodeNativeHarnessToolArguments("delegate", { operation: "capabilities" })).toEqual({
-      operation: "capabilities",
-    });
-    for (const invalid of [
-      { ...input, modelId: undefined },
-      { ...input, reasoning: " " },
-    ]) {
-      expect(() => decodeNativeHarnessToolArguments("delegate", invalid)).toThrow();
-    }
-  });
-
-  it("requires an explicit version and bounded message to follow up a child", () => {
-    const input = {
-      operation: "follow-up",
-      runId: turn,
-      expectedVersion: 4,
-      message: "Compare the results",
-    };
-    expect(decodeNativeHarnessToolArguments("delegate", input)).toEqual(input);
-    for (const invalid of [
-      { ...input, expectedVersion: undefined },
-      { ...input, expectedVersion: 0 },
-      { ...input, expectedVersion: 1.5 },
-      { ...input, message: undefined },
-      { ...input, message: " " },
-      { ...input, message: "x".repeat(4097) },
-      { ...input, providerInstanceId: lead.providerInstanceId },
-    ])
-      expect(() => decodeNativeHarnessToolArguments("delegate", invalid)).toThrow();
   });
 
   it("a truncated tool result always says how much was omitted and where to continue", () => {
@@ -246,6 +203,38 @@ describe("native harness turns and sessions", () => {
     expect(() =>
       decodeNativeHarnessTurnRecord({ ...record, startedAt: later, endedAt: at }),
     ).toThrow();
+  });
+
+  it("still reads a turn record and an approval that name the retired delegate tool", () => {
+    // `octant_agents` is now the one child-run tool, so the harness offers no
+    // `delegate`; what a journal recorded of it must still replay.
+    expect(NATIVE_HARNESS_TOOL_NAMES).not.toContain("delegate");
+    const call = { name: "delegate", summary: "delegate: start", status: "ok", durationMs: 4, at };
+    const record = {
+      turnId: turn,
+      sessionId: session,
+      sequence: 1,
+      job: "lead",
+      route,
+      toolCalls: 1,
+      tools: [call],
+      stopReason: "end-of-turn",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      startedAt: at,
+      endedAt: later,
+    };
+    expect(decodeNativeHarnessTurnRecord(record).tools?.[0]?.name).toBe("delegate");
+    expect(
+      decodeNativeHarnessApproval({
+        id: "00000000-0000-4000-8000-000000000031",
+        toolName: "delegate",
+        summary: "delegate: start",
+        approvalClass: "child-agent-creation",
+        status: "expired",
+        askedAt: at,
+        settledAt: later,
+      }).toolName,
+    ).toBe("delegate");
   });
 
   it("a running session has nothing to explain and a paused one always does", () => {

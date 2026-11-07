@@ -9,7 +9,7 @@ import type {
   ArtifactSyncedResult,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId } from "@octant/contracts";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface SyncedArtifactsOptions {
   readonly serverUrl?: string;
@@ -118,6 +118,7 @@ export function useSyncedArtifacts(options: SyncedArtifactsOptions): SyncedArtif
           return;
         case "artifact-synced-detail":
           setDetail(result);
+          onChanged();
           return;
         case "artifact-synced-opened":
           setSelected(undefined);
@@ -157,6 +158,35 @@ export function useSyncedArtifacts(options: SyncedArtifactsOptions): SyncedArtif
     },
     [run, selected],
   );
+
+  const publicationRunning = detail?.publication?.backfill?.state === "running";
+  useEffect(() => {
+    if (selected === undefined || !publicationRunning || busy) return;
+    let disposed = false;
+    let pending = false;
+    const timer = setInterval(() => {
+      if (pending) return;
+      pending = true;
+      const request = latest.current;
+      void send({ kind: "detail", canvasId: selected })
+        .then((result) => {
+          if (
+            !disposed &&
+            request === latest.current &&
+            typeof result !== "string" &&
+            result.kind === "artifact-synced-detail"
+          )
+            setDetail(result);
+        })
+        .finally(() => {
+          pending = false;
+        });
+    }, 1_000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [busy, publicationRunning, selected, send]);
 
   const close = useCallback(() => {
     latest.current += 1;

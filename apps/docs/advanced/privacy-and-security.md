@@ -150,6 +150,32 @@ Grants are scoped and recorded. Child agents can never exceed their parent's
 policy. A remote principal can never convert to a local principal or mint
 native receipts; desktop admin routes are loopback-only.
 
+### Understand a task's access
+
+In a Work or Code task, open **Access details** beside the level indicator.
+It reads the host's selected level, effective level, any narrower limit on the
+current turn or window session, current default, reviewer and account/model,
+and the selected runtime's readiness and reported capabilities. An inactive
+or Done task must be restored or reopened before another turn. A current
+default match does not establish which setting originally created an older task.
+
+**Unsupported** means the runtime does not offer a capability; **unavailable**
+means it cannot be used now. A turned-off account needs enabling or another
+eligible choice, and an unavailable reviewer may require your answer. If the
+chosen Shield account is unavailable, Octant asks you instead of moving the
+review to another account. Follow **Open provider settings** or **Open reviewer
+settings** when offered. A remote view keeps the host's read-only facts and
+asks the host owner to make a local change. Missing observations say **Not
+reported**. **Refresh access report** reads again without granting permission.
+
+These reports are snapshots, including the runtime observation time. Every
+operation is checked again on the host. Full access removes the command
+sandbox; Octant's direct file tools still refuse protected files. **Protected
+file guidance** opens the existing list and authorized credential channels.
+A refused direct read is not a reason to try another tool or copy a sign-in
+file into the task. The existing outside-content Review/Clear action remains
+a separate choice when the task is idle.
+
 ### Outside content
 
 When a thread reads content from outside, such as a web page, a tool's result,
@@ -265,9 +291,24 @@ keeps working:
 - **The AWS command line** in Octant's own shell gets a session that lasts one
   hour once you point its key pair at items in a linked password manager
   ([Use API keys from a secret store](../guide/secret-stores.md)).
+- **Google Cloud `gcloud`** in Octant's own shell gets a temporary token file
+  and private configuration after you confirm the linked service account and
+  OAuth scopes. The reusable key stays in the broker. Cloud IAM roles can
+  reach several Projects. Removing the reference blocks pending and future
+  commands; tokens already received by running commands may last until expiry.
 
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.
+
+Claude Code's native Grep, Glob and listing tools can refuse a whole search
+when its folder contains a protected entry, including at Full access. The row
+names the search folder and protected rule, and says that no results were
+returned. Narrow that search to an ordinary subfolder containing no protected
+entry; use the named credential channel for the protected material. Relative
+folder names and Glob patterns that leave a folder are checked against their
+resolved location, and linked folders are checked again if their target changes.
+A refused search is not a partial result with safe exclusions. The Octant
+Harness's own search already skips protected entries without opening them.
 
 Octant Shield watches for this too. Any call of Octant's own tools that names
 a protected file, refused or not, gets an "Outside content" tag on its tool
@@ -484,9 +525,11 @@ remote listener, approved export, or other integration you turned on.
 A signed desktop build may ask a static HTTPS feed whether a newer build
 exists. The request is a GET with the running version, platform, and
 architecture, a User-Agent of `Octant` with no version, and no cookies.
-Automatic checks wait ten minutes after launch, then repeat once a day, and
-start only after the saved preference is loaded. Turn them off in
-**Settings → General → Updates**; off means no request is made. Manual
+Automatic checks are off by default — a store that never recorded the
+preference decodes to off — and when on, wait ten minutes after launch, then
+repeat once a day, starting only after the saved preference is loaded. Turn
+them on or off in **Settings → General → Updates**; off means no request is
+made. Manual
 **Check for updates** still contacts the feed when you ask. Details, including
 what a server can infer, live under [Installation](/guide/installation#updates)
 and are **provisional** until signed self-updating releases are final.
@@ -520,7 +563,7 @@ no request is made. Octant runs a tool's own updater only when you click
 There is no app-level database encryption in the current preview; Octant
 relies on owner-only filesystem permissions plus host storage protection.
 Provider secrets are explicitly outside the journal. The multi-host
-federation and hosted relay models are post-preview.
+federation and hosted relay models are not built.
 
 ## Next steps
 

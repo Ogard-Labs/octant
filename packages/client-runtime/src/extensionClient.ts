@@ -1,4 +1,5 @@
 import {
+  SkillFolderSelection,
   decodeExtensionCommand,
   decodeExtensionEffectiveStateQuery,
   decodeExtensionToolApprovalDecision,
@@ -30,6 +31,8 @@ export interface ExtensionClientOptions {
 }
 
 export interface ExtensionClient {
+  /** Local person only: resolves a one-use native skill-purpose receipt, granting no enablement. */
+  resolveSkillFolder?(receiptId: string, signal?: AbortSignal): Promise<string>;
   snapshot(): Promise<ExtensionSnapshot>;
   effectiveState(query: ExtensionEffectiveStateQuery): Promise<ExtensionEffectiveSnapshot>;
   execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult>;
@@ -77,6 +80,26 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
   const toolGrantsAvailable = isLoopbackHttp(options.baseUrl);
   return {
     toolGrantsAvailable,
+    resolveSkillFolder(receiptId, signal) {
+      if (!toolGrantsAvailable || !/^[A-Za-z0-9_-]{43}$/.test(receiptId))
+        return Promise.reject(
+          new ExtensionClientFailure(
+            "invalid",
+            "Choose a skill folder in the local desktop window.",
+          ),
+        );
+      return request(
+        fetch,
+        new URL("/api/extensions/skill-folder-selection", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ receiptId }),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        decodeHostAnswer(SkillFolderSelection),
+      ).then((result) => result.folderPath);
+    },
     snapshot() {
       return request(
         fetch,
@@ -230,17 +253,37 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionProjectPinListing),
       );
     },
-    mcpServerSignIn(signIn) {
-      return request(
-        fetch,
-        new URL("/api/extensions/sign-in", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(signIn),
-        },
-        decodeHostAnswer(McpServerSignInView),
-      );
+    async mcpServerSignIn(signIn) {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          request(
+            fetch,
+            new URL("/api/extensions/sign-in", options.baseUrl).toString(),
+            {
+              method: "POST",
+              signal: controller.signal,
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify(signIn),
+            },
+            decodeHostAnswer(McpServerSignInView),
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(
+                new ExtensionClientFailure(
+                  "unavailable",
+                  "Sign-in response was not confirmed. Check the existing attempt before trying again.",
+                ),
+              );
+            }, 30_000);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     },
     listDiscoveredTooling() {
       return request(

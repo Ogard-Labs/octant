@@ -1,3 +1,6 @@
+import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
+import type { CodeReviewLineSelection } from "./CodeLocalReview";
+import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeApprovalId,
@@ -11,15 +14,17 @@ import type {
   CodeEvidenceReference,
   CodeOperationId,
   CodeOperationResult,
+  CodeTurnReviewCapture,
 } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
-import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
+import { parseUnifiedDiff, diffModelRowSources, type ParsedDiffFile } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
+import { CodeSelectedHunks } from "./CodeSelectedHunks";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -31,6 +36,14 @@ type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observe
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
 
 export type CodeDiffProjection =
+  | {
+      readonly state: "turn";
+      readonly checkoutId: CodeCheckoutId;
+      readonly threadId: CodeThreadId;
+      readonly operationId: CodeOperationId;
+      readonly capture: CodeTurnReviewCapture;
+      readonly text: string;
+    }
   | {
       readonly state: "available";
       readonly checkoutId: CodeCheckoutId;
@@ -48,6 +61,8 @@ export type CodeDiffProjection =
   | { readonly state: "unavailable"; readonly message: string };
 
 export interface CodeDiffPaneProps {
+  readonly onSelectReviewLine?: (selection: CodeReviewLineSelection) => void;
+  readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   readonly client: Pick<CodeClient, "operationContent" | "executeOperation">;
   readonly createGitOperationId?: () => CodeGitOperationId;
   readonly createOperationId?: () => CodeOperationId;
@@ -97,6 +112,7 @@ type DiffSnapshot = {
   readonly status: GitObservation["status"];
   readonly stateToken?: GitObservation["stateToken"];
   readonly title: string;
+  readonly captureCursor?: number;
 };
 
 const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
@@ -107,14 +123,22 @@ const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
 };
 
 export function CodeDiffPane(props: CodeDiffPaneProps) {
-  if (props.diff.state === "available" || props.diff.state === "run") {
+  if (
+    props.diff.state === "available" ||
+    props.diff.state === "run" ||
+    props.diff.state === "turn"
+  ) {
     const summary = snapshot(props.diff);
     if (summary.changedPaths.length === 0) {
       return (
         <ShellState
-          message="This checkout has no local changes to review."
+          message={
+            props.diff.state === "turn"
+              ? "This captured version has no readable changed paths. Later checkout edits may be uncaptured."
+              : "This checkout has no local changes to review."
+          }
           state="neutral"
-          title="Checkout is clean"
+          title={props.diff.state === "turn" ? "No paths in this capture" : "Checkout is clean"}
         />
       );
     }
@@ -133,12 +157,33 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
 
 function AvailableDiff(
   props: CodeDiffPaneProps & {
-    readonly diff: Extract<CodeDiffProjection, { readonly state: "available" | "run" }>;
+    readonly diff: Extract<CodeDiffProjection, { readonly state: "available" | "run" | "turn" }>;
     readonly snapshot: DiffSnapshot;
   },
 ) {
-  const [content, setContent] = useState<ContentState>({ kind: "loading" });
-  const [selectedId, setSelectedId] = useState<string>();
+  const viewStore = useContext(WorkspaceViewStateContext);
+  const viewKey = `review:${props.diff.threadId}:${props.diff.checkoutId}:${props.snapshot.evidence.digest}`;
+  const savedReview = useMemo(() => viewStore?.read(viewKey), [viewStore, viewKey]);
+  const reviewStack = useRef<HTMLDivElement>(null);
+  const [loadedContent, setContent] = useState<ContentState>({ kind: "loading" });
+  const content: ContentState =
+    props.diff.state === "turn" ? { kind: "ready", text: props.diff.text } : loadedContent;
+  const [selectedPath, setSelectedPath] = useState<string | undefined>(() =>
+    savedReview?.kind === "review" ? savedReview.path : undefined,
+  );
+  function choosePath(path: string) {
+    setSelectedPath(path);
+    viewStore?.write(viewKey, {
+      kind: "review",
+      path,
+      scrollTop: reviewStack.current?.scrollTop ?? 0,
+    });
+  }
+  useLayoutEffect(() => {
+    if (content.kind === "ready" && savedReview?.kind === "review" && reviewStack.current !== null)
+      reviewStack.current.scrollTop = savedReview.scrollTop;
+  }, [viewKey, content.kind]);
+  const navigatedRequest = useRef<CodeReviewFileRequest | undefined>(undefined);
   // The stacked unified list is how a change is read; side by side is how one
   // file is studied, so it keeps the file list and the editor.
   const [layout, setLayout] = useState<CodeDiffLayout>(
@@ -222,6 +267,7 @@ function AvailableDiff(
   }
 
   useEffect(() => {
+    if (props.diff.state === "turn") return;
     const request = ++generation.current;
     let active = true;
     setContent({ kind: "loading" });
@@ -250,13 +296,35 @@ function AvailableDiff(
       active = false;
       generation.current += 1;
     };
-  }, [evidence.contentId, operationId, props.client, threadId]);
+  }, [evidence.contentId, operationId, props.client, threadId, props.diff.state]);
 
   const files = useMemo(
     () => (content.kind === "ready" ? parseUnifiedDiff(content.text) : []),
-    [content],
+    [content.kind, content.kind === "ready" ? content.text : undefined],
   );
-  const selected = files.find((file) => file.id === selectedId) ?? files[0];
+  const displayFiles = useMemo(
+    () =>
+      props.diff.state === "turn" && props.ignoreWhitespace?.value === true
+        ? hideEdgeWhitespaceChanges(files)
+        : files,
+    [files, props.diff.state, props.ignoreWhitespace?.value],
+  );
+  useEffect(() => {
+    const requested = props.requestedCodeReviewFile;
+    if (requested === undefined) return;
+    const file = files.find((item) => item.path === requested.path);
+    if (file !== undefined && navigatedRequest.current !== requested) {
+      choosePath(file.path);
+      navigatedRequest.current = requested;
+    }
+  }, [files, props.requestedCodeReviewFile]);
+
+  const selectionMissing =
+    props.diff.state === "turn" &&
+    selectedPath !== undefined &&
+    !files.some((file) => file.path === selectedPath);
+  const selected =
+    files.find((file) => file.path === selectedPath) ?? (selectionMissing ? undefined : files[0]);
   const trackedPath = selected === undefined ? undefined : tracked.get(selected.path);
 
   return (
@@ -289,10 +357,29 @@ function AvailableDiff(
               checked={props.ignoreWhitespace.value}
               onChange={(event) => props.ignoreWhitespace?.onChange(event.target.checked)}
             />
-            <span>Ignore whitespace</span>
+            <span>
+              {props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace"}
+            </span>
           </label>
         )}
       </header>
+
+      {props.diff.state === "available" &&
+      props.createOperationId !== undefined &&
+      props.createGitOperationId !== undefined &&
+      props.executionPolicy !== undefined ? (
+        <CodeSelectedHunks
+          client={props.client}
+          threadId={props.diff.threadId}
+          checkoutId={props.diff.checkoutId}
+          executionPolicy={props.executionPolicy}
+          createOperationId={props.createOperationId}
+          createGitOperationId={props.createGitOperationId}
+          {...(props.requestApproval === undefined
+            ? {}
+            : { requestApproval: props.requestApproval })}
+        />
+      ) : null}
 
       {props.staleNotice === undefined ? null : (
         <OctantAlert className="code-diff-pane__warning" tone="warning">
@@ -319,14 +406,71 @@ function AvailableDiff(
       {content.kind === "unavailable" ? (
         <OctantAlert tone="warning">{content.message}</OctantAlert>
       ) : null}
+      {content.kind === "ready" &&
+      props.requestedCodeReviewFile !== undefined &&
+      !files.some((file) => file.path === props.requestedCodeReviewFile?.path) ? (
+        <OctantAlert tone="warning">
+          The receipt’s file is not in this current comparison. Its original per-turn diff was not
+          retained here; no line has been retargeted.
+        </OctantAlert>
+      ) : null}
       {content.kind === "ready" && files.length === 0 ? (
         <p role="status">This checkout has no textual changes.</p>
       ) : null}
 
-      {selected === undefined ? null : !sideBySide ? (
-        <div className="code-diff-pane__stack">
+      {selectionMissing ? (
+        <OctantAlert tone="warning">
+          The previously selected file is absent from this captured version. Existing notes keep
+          their original anchors; choose another file.
+        </OctantAlert>
+      ) : null}
+      {selected === undefined ? (
+        files.length === 0 ? null : (
+          <nav aria-label="Choose a captured file">
+            <ul>
+              {files.map((file) => (
+                <li key={file.path}>
+                  <OctantButton type="button" variant="bare" onClick={() => choosePath(file.path)}>
+                    {file.path}
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )
+      ) : !sideBySide ? (
+        <div
+          className="code-diff-pane__stack"
+          ref={reviewStack}
+          onScroll={(event) =>
+            viewStore?.write(viewKey, {
+              kind: "review",
+              ...(selectedPath === undefined ? {} : { path: selectedPath }),
+              scrollTop: event.currentTarget.scrollTop,
+            })
+          }
+        >
           <UnifiedDiffList
-            files={files}
+            files={displayFiles}
+            {...(props.requestedCodeReviewFile === undefined
+              ? {}
+              : { requestedFile: props.requestedCodeReviewFile })}
+            {...(props.onSelectReviewLine === undefined
+              ? {}
+              : {
+                  onSelectLine: (line: {
+                    path: string;
+                    side: "original" | "modified";
+                    line: number;
+                  }) =>
+                    props.onSelectReviewLine?.({
+                      ...line,
+                      reviewOperationId: operationId,
+                      ...(props.snapshot.captureCursor === undefined
+                        ? {}
+                        : { captureCursor: props.snapshot.captureCursor }),
+                    }),
+                })}
             {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           />
         </div>
@@ -339,7 +483,7 @@ function AvailableDiff(
                   <OctantButton
                     aria-current={file.id === selected.id}
                     className="code-diff-pane__file"
-                    onClick={() => setSelectedId(file.id)}
+                    onClick={() => choosePath(file.path)}
                     type="button"
                     variant="bare"
                   >
@@ -418,10 +562,34 @@ function AvailableDiff(
                 ariaLabel={`Diff for ${selected.path}`}
                 language="plaintext"
                 {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
-                modelUriBase={modelUriBase(props.diff.checkoutId, evidence.contentId, selected.id)}
+                modelUriBase={modelUriBase(
+                  props.diff.checkoutId,
+                  props.diff.state === "turn" ? String(operationId) : evidence.contentId,
+                  props.diff.state === "turn" ? selected.path : selected.id,
+                )}
                 modified={selected.modified}
                 original={selected.original}
                 renderSideBySide={sideBySide}
+                {...(props.diff.state === "turn"
+                  ? { ignoreTrimWhitespace: props.ignoreWhitespace?.value === true }
+                  : {})}
+                {...(props.onSelectReviewLine === undefined
+                  ? {}
+                  : {
+                      onSelectLine: (line: { side: "original" | "modified"; line: number }) => {
+                        const source = diffModelRowSources(selected, line.side)[line.line - 1];
+                        if (source !== undefined)
+                          props.onSelectReviewLine?.({
+                            reviewOperationId: operationId,
+                            ...(props.snapshot.captureCursor === undefined
+                              ? {}
+                              : { captureCursor: props.snapshot.captureCursor }),
+                            path: selected.path,
+                            side: line.side,
+                            line: source.line,
+                          });
+                      },
+                    })}
               />
             )}
           </div>
@@ -432,8 +600,17 @@ function AvailableDiff(
 }
 
 function snapshot(
-  diff: Extract<CodeDiffProjection, { readonly state: "available" | "run" }>,
+  diff: Extract<CodeDiffProjection, { readonly state: "available" | "run" | "turn" }>,
 ): DiffSnapshot {
+  if (diff.state === "turn")
+    return {
+      operationId: diff.operationId,
+      changedPaths: diff.capture.changedFiles.files.map((file) => file.path),
+      evidence: diff.capture.diff,
+      status: [],
+      title: `${diff.capture.final ? "Final" : "Turn"} capture ${diff.capture.version}`,
+      captureCursor: diff.capture.cursor,
+    };
   if (diff.state === "run") {
     return {
       operationId: diff.run.operationId,
@@ -455,4 +632,47 @@ function snapshot(
 
 function modelUriBase(checkoutId: CodeCheckoutId, contentId: string, fileId: string): string {
   return `octant-code://${checkoutId}/diff/${contentId}/${encodeURIComponent(fileId)}`;
+}
+
+/** Only a view transform. Canonical sides, source numbers and evidence identity stay untouched. */
+function hideEdgeWhitespaceChanges(
+  files: ReadonlyArray<ParsedDiffFile>,
+): ReadonlyArray<ParsedDiffFile> {
+  return files.map((file) => ({
+    ...file,
+    hunks: file.hunks.map((hunk) => {
+      const lines: Array<ParsedDiffFile["hunks"][number]["lines"][number]> = [];
+      let at = 0;
+      while (at < hunk.lines.length) {
+        const first = hunk.lines[at];
+        if (first === undefined) break;
+        if (first.kind === "context") {
+          lines.push(first);
+          at++;
+          continue;
+        }
+        const start = at;
+        while (at < hunk.lines.length && hunk.lines[at]?.kind !== "context") at++;
+        const run = hunk.lines.slice(start, at);
+        const removed = run.filter((line) => line.kind === "removed");
+        const added = run.filter((line) => line.kind === "added");
+        if (
+          removed.length > 0 &&
+          removed.length === added.length &&
+          removed.every((line, index) => line.text.trim() === added[index]?.text.trim())
+        ) {
+          removed.forEach((line, index) => {
+            const next = added[index];
+            lines.push({
+              kind: "context",
+              text: next?.text ?? line.text,
+              ...(line.oldNumber === undefined ? {} : { oldNumber: line.oldNumber }),
+              ...(next?.newNumber === undefined ? {} : { newNumber: next.newNumber }),
+            });
+          });
+        } else lines.push(...run);
+      }
+      return { ...hunk, lines };
+    }),
+  }));
 }

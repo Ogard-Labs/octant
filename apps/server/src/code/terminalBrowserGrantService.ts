@@ -482,6 +482,9 @@ export class TerminalBrowserGrantService {
       const current = this.#options.readThread(thread.id);
       return clampTurnAccessPosture({ thread: current?.executionPolicy ?? thread.executionPolicy });
     };
+    // Plan is decided once per call, here: in Plan the tool refuses every
+    // effect before it asks, so only a read of the open page reaches a question.
+    const posture = readPosture();
     const tools = createBrowserAppManagedTools({
       windowId,
       threadId: browserThreadId,
@@ -492,8 +495,9 @@ export class TerminalBrowserGrantService {
         return current === undefined ? undefined : String(current.modelId);
       },
       modelBindings,
+      resolveTaskProfile: () => this.#options.readThread(thread.id)?.browserTaskProfile,
       resolveAuthority: lent.resolveAuthority,
-      executionPolicy: readPosture(),
+      executionPolicy: posture,
       // A CLI in a terminal drives this thread's Private pages only; a signed-in
       // page needs the person, who is not the one typing into that CLI.
       profileCaller: "terminal-grant",
@@ -515,8 +519,10 @@ export class TerminalBrowserGrantService {
         request: async (request) => {
           const outcome = await lent.approvals.request(request);
           // An answer given while the thread moved into Plan is not an answer
-          // to the question that was asked.
-          return outcome === "approved" && readPosture() === "plan" ? "cancelled" : outcome;
+          // to the question that was asked, which may have been for an effect.
+          return outcome === "approved" && posture !== "plan" && readPosture() === "plan"
+            ? "cancelled"
+            : outcome;
         },
         ...(lent.approvals.isRemembered === undefined
           ? {}

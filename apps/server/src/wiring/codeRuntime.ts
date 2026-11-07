@@ -1,3 +1,6 @@
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
@@ -28,6 +31,7 @@ import {
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -58,12 +62,12 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   createCodeThreadMentionDirectory,
   threadMentionContextResolver,
+  sideChatReturnContextResolver,
   ThreadMentionService,
 } from "../chat/threadMentionService";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
-import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
-import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
+import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
   readThreadExternalContentTaint,
@@ -90,7 +94,7 @@ import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
 
-function withCodeOperationRuntime(
+export function withCodeOperationRuntime(
   service: CodeRouteService,
   runtime: CodeOperationRuntime,
 ): CodeRouteService {
@@ -99,7 +103,8 @@ function withCodeOperationRuntime(
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
-    execute: (windowId, command) => service.execute(windowId, command),
+    execute: (windowId, command, signal, context) =>
+      service.execute(windowId, command, signal, context),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
     watchTerminal: (windowId, input) => runtime.watchTerminal(windowId, input),
@@ -114,11 +119,20 @@ function withCodeOperationRuntime(
     conversationWindow: (windowId, threadId, request) =>
       runtime.conversationWindow(windowId, threadId, request),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    readOperationContent: (windowId, threadId, operationId, contentId) =>
-      runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
+    readOperationContent: (windowId, threadId, operationId, contentId, admissionCurrent) =>
+      runtime.readEvidence(
+        windowId,
+        threadId,
+        operationId,
+        decodeCodeEvidenceContentId(contentId),
+        admissionCurrent,
+      ),
     ...(readEvidenceBatch === undefined
       ? {}
-      : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
+      : {
+          readOperationContents: (windowId, input, admissionCurrent) =>
+            readEvidenceBatch(windowId, input, admissionCurrent),
+        }),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
@@ -159,7 +173,8 @@ function withCodeBoard(
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
-    execute: (windowId, command, signal) => service.execute(windowId, command, signal),
+    execute: (windowId, command, signal, context) =>
+      service.execute(windowId, command, signal, context),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
@@ -242,6 +257,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "browserModelBindings"
     | "agentRunPersistence"
     | "androidInputGrants"
     | "codeActiveTurns"
@@ -308,6 +324,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "providerDataDirectory"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
+    | "worktreePreparation"
   > &
   Pick<
     BrowserWiring,
@@ -334,6 +351,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     readonly threadMentionService: () => ThreadMentionService;
   } & Pick<
     FoundationsWiring,
+    | "conversationInputTransfer"
     | "browserAuthority"
     | "codeBoardEventStore"
     | "codeEvidence"
@@ -343,6 +361,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
+    conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
     agentRunPersistence,
@@ -352,6 +371,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
+    browserModelBindings,
     browserAutomationService,
     browserFlows,
     browserToolApprovalService,
@@ -409,6 +429,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     recordAppleEvidence,
     resolveSelectedExtensions,
     pinnedExtensionIds,
+    worktreePreparation,
     roots,
     runtimeOutsideContentMarks,
     selectCodeConversation,
@@ -427,6 +448,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    let pullRequestWatchService: PullRequestWatchPort | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.
     const codeToolContributors: Array<
@@ -562,6 +584,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        prepareWorktree: async (thread, root, current) => {
+          const checkout = persistence.readCodeCheckout(thread.checkoutId);
+          if (checkout?.kind !== "managed-worktree") return undefined;
+          const context = await worktreePreparation.context({
+            receiptId: String(checkout.ownershipReceiptId),
+            threadId: String(thread.id),
+            checkoutId: String(checkout.id),
+            projectId: String(thread.projectId),
+            root,
+            executionPolicy: thread.executionPolicy,
+            current: () =>
+              current() && persistence.readCodeThread(thread.id)?.lifecycle === "active",
+          });
+          return context === undefined
+            ? "Worktree setup ownership is unavailable."
+            : worktreePreparation.ensure(context);
+        },
+        conversationInputTransfer,
         shield: hostShield,
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({
@@ -630,6 +670,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
+          currentProjectAccess: (windowId, projectId) =>
+            codeProjectAccess.standingAuthority(() => canAccessCodeProject(windowId, projectId)),
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
@@ -641,12 +683,32 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             return serverCodeCheckoutRoot(serverProjectStore, thread);
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
           if (root === undefined) return undefined;
-          const workingDirectory = await resolveThreadWorkingDirectory(
+          const project = persistence.readProject(thread.projectId);
+          if (project?.type !== "code") return undefined;
+          const selectedRoot = approvedWorkingFolderRoot(
+            project,
+            thread.workingFolderId,
             root.rootPath,
+          );
+          if (selectedRoot === undefined) return undefined;
+          const workingDirectory = await resolveThreadWorkingDirectory(
+            selectedRoot,
             thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           );
+          const directoryCurrent = threadWorkingDirectoryCurrent(selectedRoot, workingDirectory);
           return {
             checkoutRoot: root.rootPath,
+            rootIdentity: root.rootIdentity,
+            rootCurrent: () => {
+              const latest = persistence.readProject(thread.projectId);
+              return (
+                directoryCurrent() &&
+                root.current?.() !== false &&
+                latest?.type === "code" &&
+                approvedWorkingFolderRoot(latest, thread.workingFolderId, root.rootPath) ===
+                  selectedRoot
+              );
+            },
             workingDirectory,
             shell: defaultTerminalShell(),
             credentialReferences: [],
@@ -850,6 +912,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           );
         },
         browserAutomation: {
+          runScript: (input) => browserAutomationService.runScript(input),
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           inspectThread: (windowId, threadId) =>
             browserAutomationService.inspectThread(windowId, threadId),
@@ -864,6 +927,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
         browserFlows,
+        browserProfiles: {
+          approvals: browserToolApprovalService,
+          readBinding: (contextId) => browserModelBindings.get(contextId),
+          rememberBinding: (contextId, binding) =>
+            rememberModelBinding(browserModelBindings, contextId, binding),
+          forgetBinding: (contextId) => {
+            browserModelBindings.delete(contextId);
+          },
+        },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>
@@ -934,6 +1006,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             if (context === undefined) return undefined;
             const artifact = await appleToolchainService.readScreenshotArtifact(reference, context);
             return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
+          readLog: async (windowId, scope, reference) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return await appleToolchainService.readLogArtifact(reference, context);
           },
           snapshot: async (windowId, scope) => {
             const context = await resolveAppleContext(windowId, scope, {
@@ -1018,6 +1100,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             );
             return artifact.kind === "found" ? artifact.bytes : undefined;
           },
+          readLog: async (windowId, scope, reference) => {
+            const context = await resolveAndroidContext(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return await androidToolchainService.readLogArtifact(reference, context);
+          },
           snapshot: async (windowId, scope) => {
             const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
@@ -1045,6 +1137,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             }),
         },
         credentialResolver: { resolve: async () => undefined },
+        resolveSideChatReturns: sideChatReturnContextResolver(
+          () => threadMentionService(),
+          threadOutsideContentMarks,
+        ),
         resolveThreadMentionContext: threadMentionContextResolver(
           () => threadMentionService(),
           threadOutsideContentMarks,
@@ -1119,14 +1215,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
-        agentMessages: ({ thread, readPosture }) =>
-          createAgentMessageTools({
-            service: agentMessageService,
-            senderThreadId: String(thread.id),
-            toolConstraints: thread.toolConstraints ?? [],
-            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
-            readPosture,
-          }),
         contributedTools: (input) =>
           codeToolContributors.length === 0
             ? undefined
@@ -1136,8 +1224,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
-        siblingThreads: ({ windowId, thread }) =>
-          createSiblingThreadTools({
+        threads: ({ windowId, thread, readPosture, planner }) =>
+          createThreadsTools({
+            mode: "code",
+            windowId,
             service: siblingThreadsService,
             source: codeSiblingThreadSource(
               {
@@ -1163,11 +1253,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             callerThreadId: String(thread.id),
             toolConstraints: thread.toolConstraints ?? [],
             profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+            readPosture,
+            messaging: agentMessageService,
+            ...(planner === undefined ? {} : { planner }),
+            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+            uuid: randomUUID,
           }),
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
           agentMessageService.confirmDelivered(messageIds),
-        sideTasks: ({ thread }) =>
+        sideTasks: ({ windowId, thread, planner }) =>
           createSideTaskTools({
             store: sideTasks,
             threadId: String(thread.id),
@@ -1176,6 +1271,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             suggestedBy: thread,
             uuid: randomUUID,
             clock: () => new Date().toISOString(),
+            ...(planner === undefined ? {} : { planner: { port: planner, windowId } }),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
           }),
         canvas: ({ windowId, thread }) =>
           createCanvasAgentTools({
@@ -1204,8 +1302,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             mode: "code",
             executionPolicy: thread.executionPolicy,
           }),
-        // Planner tools resolve their designation on every call through the
-        // services declared after this runtime; the closures run only once a
+        // The planner's board read and board offers resolve their designation
+        // on every call through the services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
         planner: {
           isPlannerThread: (threadId) => codePlannerService.isPlannerThread(threadId),
@@ -1260,6 +1358,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 : persistence.automationProjection.getDefinition(run.automationId),
           });
         },
+        // The switch service wakes threads through this runtime, so it is
+        // built after it; a watch asked for before then is unavailable.
+        pullRequestWatch: {
+          watch: async (input) =>
+            pullRequestWatchService === undefined
+              ? { status: "unavailable", reason: "unavailable" }
+              : pullRequestWatchService.watch(input),
+          unwatch: async (input) =>
+            pullRequestWatchService === undefined
+              ? { status: "not-watching" }
+              : pullRequestWatchService.unwatch(input),
+        },
         reviewFiles: {
           resolve: (input) => {
             const reference = persistence.readCodeFileReference(input.fileId);
@@ -1302,6 +1412,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         threadId,
         questionId: String(question.id),
         prompt: question.prompt,
+        ...(question.questionnaire === undefined ? {} : { questionnaire: question.questionnaire }),
         options: question.options,
       });
     });
@@ -1372,12 +1483,32 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       canAccessProject: canAccessCodeProject,
       createThread: async (windowId, creation, signal, executionContext) => {
         if (codeService instanceof CodeService) {
-          return codeService.execute(windowId, creation, signal, executionContext);
+          let creationStarted = false;
+          try {
+            return await codeService.execute(windowId, creation, signal, {
+              ...executionContext,
+              onCreationBoundary: () => {
+                creationStarted = true;
+              },
+            });
+          } catch (error) {
+            if (
+              !creationStarted &&
+              codeService.execute === CodeService.prototype.execute &&
+              error instanceof CodeServiceError
+            )
+              return { kind: "creation-not-started", failure: error.failure };
+            throw error;
+          }
         }
         if (executionContext.inheritedMark !== undefined) {
-          throw new CodeServiceError(
-            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
-          );
+          return {
+            kind: "creation-not-started",
+            failure: decodeCodeFailure({
+              category: "unavailable",
+              message: INHERITED_MARK_REFUSAL,
+            }),
+          };
         }
         return codeService.execute(windowId, creation, signal);
       },
@@ -1511,10 +1642,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 ),
           };
         },
-        markOutsideContent: (threadId, contentReference) => {
+        markOutsideContent: (threadId, contentReference, sourceLabel) => {
           const marked = externalContentIngestionStore.record({
             threadId,
-            provenance: { origin: "external-content", sourceLabel: "pull-request-auto-fix" },
+            provenance: { origin: "external-content", sourceLabel },
             contentReference,
             correlationId: randomUUID(),
             authorized: true,
@@ -1563,7 +1694,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       journal: persistence.journal,
       uuid: randomUUID,
     });
-    // Host-local and idle-free: the forge is read only while a switch is on.
+    pullRequestWatchService = pullRequestSwitchService;
+    // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
     const pullRequestSwitchTimer = setInterval(() => {
       if (!pullRequestSwitchService.watching) return;

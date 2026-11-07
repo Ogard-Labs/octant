@@ -1,9 +1,10 @@
 import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import { EventActor } from "@octant/contracts";
 import { AGENT_MESSAGE_UNREACHABLE, MAX_OPEN_AGENT_MESSAGES_PER_SENDER } from "@octant/domain";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   EXTERNAL_CONTENT_FRAME_CLOSE,
   EXTERNAL_CONTENT_FRAME_OPEN_PREFIX,
@@ -13,11 +14,7 @@ import {
   hydrateAgentMessageProjectionFromJournal,
 } from "./agentMessageProjection";
 import { AgentMessageBodyStore } from "./agentMessageBodyStore";
-import {
-  AGENT_MESSAGE_TOOL_NAME,
-  MAX_JOURNALED_REFUSALS_PER_TURN,
-  createAgentMessageTools,
-} from "./agentMessageTools";
+import { MAX_JOURNALED_REFUSALS_PER_TURN, createAgentMessageOperations } from "./agentMessageTools";
 import {
   AgentMessageService,
   type AgentMessageEndpointFacts,
@@ -30,9 +27,11 @@ const actor = decodeActor({
   actorId: "00000000-0000-4000-8000-000000000001",
 });
 
-const senderThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000a");
-const recipientThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000b");
-const otherProjectThreadId = decodeEndpoint("work-0000-0000-4000-8000-00000000000c");
+const PROJECT_A = "a0000000-0000-4000-8000-0000000000aa";
+const PROJECT_B = "b0000000-0000-4000-8000-0000000000bb";
+const senderThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000a");
+const recipientThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000b");
+const otherProjectThreadId = decodeEndpoint("f0000000-0000-4000-8000-00000000000c");
 
 const inProject = (projectId: string): AgentMessageEndpointFacts => ({
   mode: "code",
@@ -69,30 +68,39 @@ function journal(events: Array<{ readonly eventName: string; readonly payload: u
 }
 
 interface FixtureOptions {
+  readonly clock?: () => string;
   readonly resolveEndpoint?: AgentMessageEndpointResolver;
   readonly ingestion?: "recorded" | "refused";
   readonly projection?: AgentMessageProjection;
   readonly root?: string;
 }
 
+const fixtureRoots = new Set<string>();
+afterEach(async () => {
+  await Promise.all([...fixtureRoots].map((root) => rm(root, { recursive: true, force: true })));
+  fixtureRoots.clear();
+});
+
 function fixture(options: FixtureOptions = {}) {
   const events: Array<{ readonly eventName: string; readonly payload: unknown }> = [];
   const ingested: Array<{ readonly threadId: unknown; readonly contentReference: unknown }> = [];
   const root = options.root ?? join("/tmp", `octant-agent-message-test-${randomUUID()}`);
+  fixtureRoots.add(root);
   const projection = options.projection ?? new AgentMessageProjection();
   // The sender and the recipient share a Project; a third thread sits in
   // another one. A test moves or closes a thread by replacing its entry.
   const endpoints = new Map<string, AgentMessageEndpointFacts>([
-    [String(senderThreadId), inProject("project-a")],
-    [String(recipientThreadId), inProject("project-a")],
-    [String(otherProjectThreadId), { mode: "work", projectId: "project-b", terminal: false }],
+    [String(senderThreadId), inProject(PROJECT_A)],
+    [String(recipientThreadId), inProject(PROJECT_A)],
+    [String(otherProjectThreadId), { mode: "work", projectId: PROJECT_B, terminal: false }],
   ]);
   const bodyStore = new AgentMessageBodyStore(root);
+  const journalPort = journal(events);
   const service = new AgentMessageService({
-    journal: journal(events) as never,
+    journal: journalPort as never,
     connection: connection(),
     uuid: randomUUID,
-    clock: () => "2026-09-10T12:00:00.000Z",
+    clock: options.clock ?? (() => "2026-09-10T12:00:00.000Z"),
     actor,
     projection,
     bodyStore,
@@ -108,12 +116,61 @@ function fixture(options: FixtureOptions = {}) {
     openModes: ["chat", "work", "code"],
   });
   const names = () => events.map((event) => event.eventName);
-  return { service, events, names, ingested, projection, root, endpoints, bodyStore };
+  return { service, events, names, ingested, projection, root, endpoints, bodyStore, journalPort };
 }
 
 const handoff = "Handoff: CI on the branch head is green.";
 
 describe("the agent message delivery service", () => {
+  it("expires a queued message after its recorded 24-hour deadline before carrying it", async () => {
+    let now = "2026-11-06T12:00:00.000Z";
+    const { service, projection, events, bodyStore, journalPort, root } = fixture({
+      clock: () => now,
+    });
+    await service.send({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      body: handoff,
+    });
+    const record = projection.inFlight()[0];
+    expect(record).toMatchObject({ expiresAt: "2026-11-07T12:00:00.000Z" });
+    now = "2026-11-07T12:00:00.000Z";
+    const append = journalPort.append;
+    journalPort.append = () => {
+      throw new Error("journal unavailable");
+    };
+    await expect(service.expireQueued()).rejects.toThrow("journal unavailable");
+    expect(await bodyStore.read(record?.bodyReference.contentReference ?? "missing")).toBe(handoff);
+    expect(projection.lookup(String(record?.messageId))?.state).toBe("in-flight");
+    journalPort.append = append;
+    expect(await service.carryIntoTurn(String(recipientThreadId))).toEqual([]);
+    expect(projection.lookup(String(record?.messageId))?.state).toBe("expired");
+    expect(events.at(-1)?.eventName).toBe("agent.message-expired@1");
+    const replay = new AgentMessageProjection();
+    hydrateAgentMessageProjectionFromJournal({
+      replay: () =>
+        events.map((event, index) => ({
+          ...event,
+          globalSequence: index + 1,
+          aggregateType: "agent-message",
+          eventVersion: 1,
+        })),
+      projection: replay,
+    });
+    const restarted = fixture({ projection: replay, root, clock: () => now });
+    await restarted.service.confirmDelivered([String(record?.messageId)]);
+    expect(replay.lookup(String(record?.messageId))?.state).toBe("expired");
+    expect(replay.messagingFacts(20)).toMatchObject({
+      openInFlight: 0,
+      delivered: 0,
+      refused: 0,
+      recent: [{ state: "expired" }],
+    });
+    expect(
+      await bodyStore.read(record?.bodyReference.contentReference ?? "missing"),
+    ).toBeUndefined();
+  });
+
   it("tells the sender a message is sent, and delivers nothing until a turn carries it", async () => {
     const { service, events, names, ingested, projection } = fixture();
     const outcomes = await service.send({
@@ -229,7 +286,7 @@ describe("the agent message delivery service", () => {
 
   it("refuses a thread of another Project, an unknown id, and the sender itself in the same words, storing and tainting nothing", async () => {
     const { service, names, ingested, projection } = fixture();
-    const unknownThreadId = decodeEndpoint("code-0000-0000-4000-8000-0000000000ff");
+    const unknownThreadId = decodeEndpoint("c0000000-0000-4000-8000-0000000000ff");
     const outcomes = await service.send({
       senderThreadId,
       recipients: [
@@ -286,7 +343,7 @@ describe("the agent message delivery service", () => {
       bodyStore: new AgentMessageBodyStore(
         join("/tmp", `octant-agent-message-test-${randomUUID()}`),
       ),
-      resolveEndpoint: () => inProject("project-a"),
+      resolveEndpoint: () => inProject(PROJECT_A),
       recordExternalContentIngestion: () => ({
         kind: "recorded",
         taint: { externalContentIngested: true, ingestedSources: [] },
@@ -312,7 +369,7 @@ describe("the agent message delivery service", () => {
       body: handoff,
     });
     const record = projection.lookup(String(outcome!.messageId))!;
-    endpoints.set(String(senderThreadId), { ...inProject("project-a"), terminal: true });
+    endpoints.set(String(senderThreadId), { ...inProject(PROJECT_A), terminal: true });
 
     expect(await service.carryIntoTurn(String(recipientThreadId))).toEqual([]);
 
@@ -332,7 +389,7 @@ describe("the agent message delivery service", () => {
       recipients: [{ threadId: recipientThreadId }],
       body: handoff,
     });
-    endpoints.set(String(recipientThreadId), inProject("project-b"));
+    endpoints.set(String(recipientThreadId), inProject(PROJECT_B));
 
     expect(await service.carryIntoTurn(String(recipientThreadId))).toEqual([]);
     expect(projection.lookup(String(outcome!.messageId))).toMatchObject({
@@ -358,9 +415,9 @@ describe("the agent message delivery service", () => {
   });
 
   it("gives each recipient of one send its own message, delivered on its own", async () => {
-    const secondRecipientThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000d");
+    const secondRecipientThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000d");
     const { service, projection, endpoints } = fixture();
-    endpoints.set(String(secondRecipientThreadId), inProject("project-a"));
+    endpoints.set(String(secondRecipientThreadId), inProject(PROJECT_A));
     const outcomes = await service.send({
       senderThreadId,
       recipients: [{ threadId: recipientThreadId }, { threadId: secondRecipientThreadId }],
@@ -416,9 +473,9 @@ describe("the agent message delivery service", () => {
     expect(await send()).toMatchObject({ status: "refused", reason: "policy" });
 
     // The recipient is archived with eight messages no turn will ever carry.
-    endpoints.set(String(recipientThreadId), { ...inProject("project-a"), terminal: true });
-    const secondRecipientThreadId = decodeEndpoint("code-0000-0000-4000-8000-00000000000d");
-    endpoints.set(String(secondRecipientThreadId), inProject("project-a"));
+    endpoints.set(String(recipientThreadId), { ...inProject(PROJECT_A), terminal: true });
+    const secondRecipientThreadId = decodeEndpoint("c0000000-0000-4000-8000-00000000000d");
+    endpoints.set(String(secondRecipientThreadId), inProject(PROJECT_A));
     const [outcome] = await service.send({
       senderThreadId,
       recipients: [{ threadId: secondRecipientThreadId }],
@@ -534,6 +591,157 @@ describe("the agent message delivery service", () => {
     ).rejects.toMatchObject({ reason: "policy" });
   });
 
+  it("carries an identified message, records only provider delivery, then reads an explicit recipient receipt at its sender", async () => {
+    const { service, events, projection, bodyStore, root } = fixture();
+    const toolsFor = (threadId: string) =>
+      createAgentMessageOperations({
+        service,
+        senderThreadId: threadId,
+        senderProjectId: () => PROJECT_A,
+      });
+    const sender = toolsFor(String(senderThreadId));
+    const recipient = toolsFor(String(recipientThreadId));
+    const sent = await sender.send({
+      operation: "send",
+      recipients: [`${String(recipientThreadId)}@${PROJECT_A}`],
+      message: handoff,
+    });
+    const messageId = (sent.result as ReadonlyArray<{ readonly messageId: string }>)[0]?.messageId;
+    if (messageId === undefined) throw new Error("Expected a durable message id");
+    const read = () => sender.receipts({ operation: "receipts", messageIds: [messageId] });
+    const acknowledge = () =>
+      recipient.acknowledge({ operation: "acknowledge", messageIds: [messageId] }, () => true);
+    expect(await read()).toMatchObject({
+      result: [{ status: "ok", receipt: { state: "in-flight" } }],
+    });
+    expect(await acknowledge()).toMatchObject({ isError: true, result: [{ status: "refused" }] });
+    const carried = await service.carryIntoTurn(String(recipientThreadId));
+    expect(carried[0]?.text).toContain(`Message id: ${messageId}`);
+    expect(carried[0]?.text).toContain(EXTERNAL_CONTENT_FRAME_OPEN_PREFIX);
+    const acks = () => events.filter((event) => event.eventName === "agent.message-acknowledged@1");
+    expect(acks()).toHaveLength(0);
+    await service.confirmDelivered(carried.map((message) => message.messageId));
+    expect(await read()).toMatchObject({
+      result: [{ status: "ok", receipt: { state: "delivered" } }],
+    });
+    expect(acks()).toHaveLength(0);
+    expect(await acknowledge()).toMatchObject({
+      result: [{ status: "ok", receipt: { state: "acknowledged" } }],
+    });
+    expect(await read()).toMatchObject({
+      result: [
+        { status: "ok", receipt: { state: "acknowledged", senderThreadId, recipientThreadId } },
+      ],
+    });
+    await acknowledge();
+    expect(acks()).toHaveLength(1);
+    const record = projection.lookup(messageId);
+    if (record === undefined) throw new Error("Missing receipt");
+    expect(await bodyStore.read(record.bodyReference.contentReference)).toBeUndefined();
+    const replayed = new AgentMessageProjection();
+    expect(
+      hydrateAgentMessageProjectionFromJournal({
+        replay: ({ afterSequence, limit }) =>
+          events
+            .map((event, index) => ({
+              globalSequence: index + 1,
+              aggregateType: "agent-message",
+              eventName: event.eventName,
+              eventVersion: 1,
+              payload: event.payload,
+            }))
+            .filter((event) => event.globalSequence > afterSequence)
+            .slice(0, limit),
+        projection: replayed,
+      }),
+    ).toBe("ok");
+    const restarted = fixture({ projection: replayed, root });
+    expect(
+      await restarted.service.acknowledge({
+        messageId,
+        recipientThreadId: String(recipientThreadId),
+      }),
+    ).toMatchObject({ status: "ok", receipt: { state: "acknowledged" } });
+    expect(restarted.events).toHaveLength(0);
+    expect(
+      restarted.service.statusForSender({
+        senderThreadId: String(senderThreadId),
+        messageIds: [messageId],
+      }),
+    ).toMatchObject([{ status: "ok", receipt: { state: "acknowledged" } }]);
+  });
+
+  it("keeps sender reads to its own receipts including refusal before admission", async () => {
+    const { service } = fixture();
+    const [refused] = await service.send({
+      senderThreadId,
+      recipients: [{ threadId: otherProjectThreadId }],
+      body: handoff,
+    });
+    const messageId = String(refused?.messageId);
+    expect(
+      service.statusForSender({ senderThreadId: String(senderThreadId), messageIds: [messageId] }),
+    ).toMatchObject([
+      { status: "ok", receipt: { state: "refused", refuseReason: "unauthorized" } },
+    ]);
+    expect(
+      service.statusForSender({
+        senderThreadId: String(recipientThreadId),
+        messageIds: [messageId],
+      }),
+    ).toMatchObject([{ status: "refused", reason: "unauthorized" }]);
+  });
+
+  it.each(["moved", "closed", "missing", "non-code"])(
+    "refuses acknowledgement when current recipient authority is %s",
+    async (change) => {
+      const { service, events, endpoints } = fixture();
+      const [sent] = await service.send({
+        senderThreadId,
+        recipients: [{ threadId: recipientThreadId }],
+        body: handoff,
+      });
+      const messageId = String(sent?.messageId);
+      await service.confirmDelivered(
+        (await service.carryIntoTurn(String(recipientThreadId))).map(
+          (message) => message.messageId,
+        ),
+      );
+      if (change === "missing") endpoints.delete(String(recipientThreadId));
+      else
+        endpoints.set(String(recipientThreadId), {
+          ...inProject(change === "moved" ? PROJECT_B : PROJECT_A),
+          terminal: change === "closed",
+          mode: change === "non-code" ? "work" : "code",
+        });
+      expect(
+        await service.acknowledge({ messageId, recipientThreadId: String(recipientThreadId) }),
+      ).toMatchObject({ status: "refused", reason: "unauthorized" });
+      expect(events.some((event) => event.eventName === "agent.message-acknowledged@1")).toBe(
+        false,
+      );
+    },
+  );
+
+  it("refuses a receipt claimed by the sender instead of its actual recipient", async () => {
+    const { service, events } = fixture();
+    const [sent] = await service.send({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      body: "Handoff.",
+    });
+    const messageId = String(sent?.messageId);
+    await service.confirmDelivered(
+      (await service.carryIntoTurn(String(recipientThreadId))).map((message) => message.messageId),
+    );
+    expect(
+      await service.acknowledge({ messageId, recipientThreadId: String(senderThreadId) }),
+    ).toMatchObject({ status: "refused", reason: "unauthorized" });
+    expect(
+      events.filter((event) => event.eventName === "agent.message-acknowledged@1"),
+    ).toHaveLength(0);
+  });
+
   it("acknowledges a delivered message once and ignores an unknown or undelivered one", async () => {
     const { service, events } = fixture();
     const [outcome] = await service.send({
@@ -544,17 +752,20 @@ describe("the agent message delivery service", () => {
     const messageId = String(outcome?.messageId);
     const acknowledged = () =>
       events.filter((event) => event.eventName === "agent.message-acknowledged@1");
-    await service.acknowledge({ messageId });
+    await service.acknowledge({ messageId, recipientThreadId: String(recipientThreadId) });
     expect(acknowledged()).toHaveLength(0);
 
     await service.confirmDelivered(
       (await service.carryIntoTurn(String(recipientThreadId))).map((message) => message.messageId),
     );
-    await service.acknowledge({ messageId });
-    await service.acknowledge({ messageId });
+    await service.acknowledge({ messageId, recipientThreadId: String(recipientThreadId) });
+    await service.acknowledge({ messageId, recipientThreadId: String(recipientThreadId) });
     expect(acknowledged()).toHaveLength(1);
 
-    await service.acknowledge({ messageId: "99999999-9999-4999-8999-999999999999" });
+    await service.acknowledge({
+      messageId: "99999999-9999-4999-8999-999999999999",
+      recipientThreadId: String(recipientThreadId),
+    });
     expect(acknowledged()).toHaveLength(1);
   });
 
@@ -576,7 +787,7 @@ describe("the agent message delivery service", () => {
   it("refuses a petition naming too many recipients as a refusal, journaling the first few", async () => {
     const { service, names, projection } = fixture();
     const recipients = Array.from({ length: 5 }, (_unused, index) => ({
-      threadId: decodeEndpoint(`code-0000-0000-4000-8000-${String(index).padStart(12, "0")}`),
+      threadId: decodeEndpoint(`c0000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
     }));
     const outcomes = await service.send({ senderThreadId, recipients, body: "Any body." });
 
@@ -603,24 +814,16 @@ describe("the agent message delivery service", () => {
 
   it("journals no more refusals than a turn's cap when the model loops on refused and malformed calls", async () => {
     const { service, names } = fixture();
-    const tools = createAgentMessageTools({
+    const operations = createAgentMessageOperations({
       service,
       senderThreadId: String(senderThreadId),
-      toolConstraints: [],
-      profileDisplayName: "Reviewer",
-      readPosture: () => "approval-gated",
+      senderProjectId: () => PROJECT_A,
     });
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      const unknown = `code-0000-0000-4000-8000-${String(attempt).padStart(12, "0")}`;
-      await tools.execute({
-        name: AGENT_MESSAGE_TOOL_NAME,
-        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }], message: handoff }),
-      });
+      const unknown = `c0000000-0000-4000-8000-${String(attempt).padStart(12, "0")}@${PROJECT_A}`;
+      await operations.send({ operation: "send", recipients: [unknown], message: handoff });
       // A call that names a recipient but carries no message.
-      await tools.execute({
-        name: AGENT_MESSAGE_TOOL_NAME,
-        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }] }),
-      });
+      await operations.send({ operation: "send", recipients: [unknown] });
     }
     expect(names().length).toBe(MAX_JOURNALED_REFUSALS_PER_TURN);
   });

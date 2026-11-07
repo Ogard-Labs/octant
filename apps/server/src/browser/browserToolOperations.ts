@@ -1,3 +1,4 @@
+import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -8,12 +9,14 @@ import {
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
   MAX_BROWSER_FLOW_NAME_LENGTH,
+  type BrowserAuditKind,
   MAX_BROWSER_UPLOAD_FILES,
   MAX_BROWSER_WAIT_MS,
   type BrowserDevicePreset,
   type BrowserWaitCondition,
   type BrowserWaitFor,
 } from "@octant/contracts";
+import type { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import { browserToolImage } from "./browserToolImage";
 
 /**
@@ -46,12 +49,28 @@ export type BrowserToolStep = Exclude<
       | "upload"
       | "stop"
       | "sign-in"
+      | "run-script"
       | "download-save"
       | "flow-save"
       | "flow-list"
-      | "flow-run";
+      | "flow-run"
+      | BrowserToolRecordingOperation;
   }
 >;
+
+/**
+ * The two operations that start and end a recording around a call that asked
+ * for one with `record`. The model never writes them: the parser accepts
+ * neither, and only `runRecordedBrowserCall` issues them, through the same
+ * admission path as any single operation.
+ */
+export type BrowserToolRecordingOperation = "record-start" | "record-stop";
+
+export function isBrowserToolRecordingInput(
+  input: BrowserToolInput,
+): input is Extract<BrowserToolInput, { readonly operation: BrowserToolRecordingOperation }> {
+  return input.operation === "record-start" || input.operation === "record-stop";
+}
 
 /** The operations that save, list, and replay the Project's flows. */
 export type BrowserToolFlowInput = Extract<
@@ -67,6 +86,96 @@ export function isBrowserToolFlowInput(input: BrowserToolInput): input is Browse
   );
 }
 
+/** Every operation the tool advertises, `help` included. */
+export type BrowserToolOperationName =
+  (typeof BROWSER_TOOL_DEFINITION.inputSchema.properties.operation.enum)[number];
+
+/**
+ * What each operation does, which is what Plan mode decides on. Plan may look
+ * and propose but changes nothing, so it admits an operation that only
+ * `reads` the page already open in this thread's own Browser (or the
+ * Project's saved flows) and sends no request, `releases`, which closes only
+ * this thread's own Browser, and `cleanup`, which ends what a call started
+ * before Plan began. It refuses every operation that `changes` something: a
+ * request, input, the page's state or size, a tab, the workspace, the
+ * Project's flows, or a recording the thread would keep.
+ * `each-step` is a batch whose steps are each admitted as a call of their
+ * own. The table is keyed by the advertised operations and the two the host
+ * issues for a recording, so a new operation does not compile until it takes
+ * a row here; one that is admitted exactly where `diagnostics` or
+ * `screenshot` is takes their row, `reads`.
+ */
+export const BROWSER_OPERATION_EFFECT = {
+  // The page's outline and refs, read from the open page.
+  snapshot: "reads",
+  // The text of the page or of one element.
+  "read-page": "reads",
+  // A picture of the open page, kept as this thread's own capture.
+  screenshot: "reads",
+  // What the page already logged and failed to load; reading clears nothing.
+  diagnostics: "reads",
+  // Accessibility findings or the browser's own record of the load, read
+  // from the open page; it never navigates, reloads, or changes it.
+  audit: "reads",
+  // This Browser's tabs, by id and address.
+  "tab-list": "reads",
+  // Waits for the page to reach a state; it presses, types, and loads nothing.
+  wait: "reads",
+  // The Project's saved flows by name; no page is touched.
+  "flow-list": "reads",
+  // The tool's own usage text.
+  help: "reads",
+  stop: "releases",
+  steps: "each-step",
+  // Loads a page: a request.
+  navigate: "changes",
+  // Input reaches the page and may submit, send, or change it.
+  click: "changes",
+  type: "changes",
+  press: "changes",
+  select: "changes",
+  drag: "changes",
+  // Moves the pointer, which runs the page's hover handlers and opens menus.
+  hover: "changes",
+  // Moves the page, which can load more of it.
+  scroll: "changes",
+  // Changes the page's size and emulation, which it may answer with requests.
+  resize: "changes",
+  // Sends files from the workspace.
+  upload: "changes",
+  // Writes a file into the workspace.
+  "download-save": "changes",
+  // Opens a page, closes one, or changes which one is shown.
+  "tab-open": "changes",
+  "tab-close": "changes",
+  "tab-switch": "changes",
+  // Hands the page to the person to act on.
+  "sign-in": "changes",
+  // Arbitrary page JavaScript.
+  "run-script": "changes",
+  // Writes the Project's flows.
+  "flow-save": "changes",
+  // Replays steps that act.
+  "flow-run": "changes",
+  // Host-issued around a call with `record`: the thread keeps the recording
+  // as an artifact, which Plan does not make, so a recorded call does not run.
+  "record-start": "changes",
+  // Ends a recording already running. It must reach the runtime in every
+  // posture, or the screencast runs on to its own bound holding frames and
+  // the page's debugger; in Plan the adapters stop it keeping nothing.
+  "record-stop": "cleanup",
+} as const satisfies Record<
+  BrowserToolOperationName | BrowserToolRecordingOperation,
+  "reads" | "releases" | "cleanup" | "changes" | "each-step"
+>;
+
+/** Whether Plan mode refuses this operation; see `BROWSER_OPERATION_EFFECT`. */
+export function browserOperationRefusedInPlan(
+  operation: BrowserToolOperationName | BrowserToolRecordingOperation,
+): boolean {
+  return BROWSER_OPERATION_EFFECT[operation] === "changes";
+}
+
 /** How many operations one `steps` call may carry. */
 export const MAX_BROWSER_TOOL_STEPS = 10;
 
@@ -78,11 +187,12 @@ export type BrowserToolInput = {
       readonly operation: "navigate";
       readonly url: string;
       /** Ask for a page in the Project's or the Personal profile; absent is Private. */
-      readonly profile?: "project" | "personal";
+      readonly profile?: "private" | "project" | "personal";
     }
   | ({ readonly operation: "read-page" } & Partial<BrowserToolTarget>)
   | { readonly operation: "snapshot" | "screenshot" | "stop" }
   | { readonly operation: "diagnostics"; readonly since?: number; readonly warnings?: boolean }
+  | { readonly operation: "audit"; readonly kind: BrowserAuditKind }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
   | ({ readonly operation: "click" } & BrowserToolTarget)
   | ({ readonly operation: "wait" } & BrowserToolTarget)
@@ -107,11 +217,36 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-list" }
   | { readonly operation: "tab-open"; readonly url?: string }
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
-  | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
+  | {
+      readonly operation: "steps";
+      readonly steps: ReadonlyArray<BrowserToolStep>;
+      /** Record the page while the batch runs; see `runRecordedBrowserCall`. */
+      readonly record?: true;
+    }
+  | { readonly operation: "record-start" }
+  | {
+      readonly operation: "record-stop";
+      /**
+       * End the recording and keep nothing: the thread moved into Plan while
+       * the recorded call ran, and Plan keeps no artifact.
+       */
+      readonly discard?: true;
+    }
   | { readonly operation: "sign-in"; readonly reason?: string }
+  | {
+      readonly operation: "run-script";
+      readonly source: string;
+      readonly expectedObservationRevision: number;
+    }
   /** Save a download the page started, named by the id an answer reported. */
   | { readonly operation: "download-save"; readonly downloadId: string }
-  | { readonly operation: "flow-save" | "flow-run"; readonly name: string }
+  | { readonly operation: "flow-save"; readonly name: string }
+  | {
+      readonly operation: "flow-run";
+      readonly name: string;
+      /** Record the page while the replay runs; see `runRecordedBrowserCall`. */
+      readonly record?: true;
+    }
   | { readonly operation: "flow-list" }
 );
 
@@ -138,8 +273,10 @@ export function parseBrowserToolInput(
   // alone. It never opens a signed-in page, nests, uploads, or stops: those
   // need a call, and a question to the person, of their own.
   const steps = record.steps;
+  const recorded = parseRecord(record.record);
   if (
-    Object.keys(record).some((key) => key !== "operation" && key !== "steps") ||
+    Object.keys(record).some((key) => key !== "operation" && key !== "steps" && key !== "record") ||
+    recorded === null ||
     !Array.isArray(steps) ||
     steps.length === 0 ||
     steps.length > MAX_BROWSER_TOOL_STEPS
@@ -155,13 +292,21 @@ export function parseBrowserToolInput(
       one.operation === "upload" ||
       one.operation === "stop" ||
       one.operation === "sign-in" ||
+      one.operation === "run-script" ||
       one.operation === "download-save" ||
+      isBrowserToolRecordingInput(one) ||
       isBrowserToolFlowInput(one)
     )
       return undefined;
     parsedSteps.push(one);
   }
-  return { operation: "steps", steps: parsedSteps };
+  return { operation: "steps", steps: parsedSteps, ...(recorded ? { record: true } : {}) };
+}
+
+/** `record` is a boolean; absent and false both mean no recording. Anything else is null. */
+function parseRecord(value: unknown): boolean | null {
+  if (value === undefined) return false;
+  return typeof value === "boolean" ? value : null;
 }
 
 function parseBrowserToolRecord(
@@ -216,7 +361,12 @@ function parseBrowserToolRecord(
   if (operation === "navigate" && only("url", "profile") && text("url", 4096)) {
     if (record.profile !== undefined) {
       if (!options.allowProfile) return undefined;
-      if (record.profile !== "project" && record.profile !== "personal") return undefined;
+      if (
+        record.profile !== "private" &&
+        record.profile !== "project" &&
+        record.profile !== "personal"
+      )
+        return undefined;
     }
     return {
       ...common,
@@ -329,16 +479,35 @@ function parseBrowserToolRecord(
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
   if (operation === "flow-list" && only()) return { ...common, operation };
-  if ((operation === "flow-save" || operation === "flow-run") && only("name")) {
+  if (
+    (operation === "flow-save" && only("name")) ||
+    (operation === "flow-run" && only("name", "record"))
+  ) {
     // The stored name is trimmed, so the call must already be: a name that
     // differs from itself once saved could never be run again.
     const name = record.name;
-    return typeof name === "string" &&
-      name !== "" &&
-      name === name.trim() &&
-      name.length <= MAX_BROWSER_FLOW_NAME_LENGTH
-      ? { ...common, operation, name }
-      : undefined;
+    const recorded = parseRecord(record.record);
+    if (
+      typeof name !== "string" ||
+      name === "" ||
+      name !== name.trim() ||
+      name.length > MAX_BROWSER_FLOW_NAME_LENGTH ||
+      recorded === null
+    )
+      return undefined;
+    return operation === "flow-run"
+      ? { ...common, operation, name, ...(recorded ? { record: true } : {}) }
+      : { ...common, operation, name };
+  }
+  if (
+    operation === "run-script" &&
+    only("source") &&
+    revision !== undefined &&
+    text("source", 8192)
+  ) {
+    const source = record.source;
+    if (typeof source !== "string" || Buffer.byteLength(source, "utf8") > 8192) return undefined;
+    return { operation, source, expectedObservationRevision: revision };
   }
   if (operation === "sign-in" && only("reason")) {
     if (record.reason !== undefined && !text("reason", 300)) return undefined;
@@ -392,6 +561,11 @@ function parseBrowserToolRecord(
       ...(typeof since === "number" ? { since } : {}),
       ...(typeof warnings === "boolean" ? { warnings } : {}),
     };
+  }
+  if (operation === "audit" && only("kind")) {
+    return record.kind === "accessibility" || record.kind === "performance"
+      ? { ...common, operation, kind: record.kind }
+      : undefined;
   }
   if ((operation === "snapshot" || operation === "screenshot" || operation === "stop") && only())
     return { ...common, operation };
@@ -580,6 +754,8 @@ export function browserToolAction(
         ...(input.since === undefined ? {} : { diagnosticsSince: input.since }),
         ...(input.warnings === undefined ? {} : { diagnosticsWarnings: input.warnings }),
       };
+    case "audit":
+      return { ...base, kind: "audit", auditKind: input.kind };
     case "hover":
       return { ...base, kind: "hover", ...element(input) };
     case "select":
@@ -607,8 +783,13 @@ export function browserToolAction(
       return { ...base, kind: "tab-select", tabId: input.tabId };
     case "tab-close":
       return { ...base, kind: "tab-close", tabId: input.tabId };
+    case "record-start":
+      return { ...base, kind: "record-start" };
+    case "record-stop":
+      return { ...base, kind: "record-stop" };
     case "stop":
     case "steps":
+    case "run-script":
     case "sign-in":
     case "download-save":
     case "flow-save":
@@ -763,6 +944,88 @@ export async function runBrowserToolSteps(
 }
 
 /**
+ * Run one call (a `steps` batch or a flow replay) with the page recorded
+ * while it runs. The recording starts and stops through `record`, the
+ * adapter's ordinary path for one operation, so each is admitted like a
+ * screenshot: the thread's authority, the model binding, the origin approval,
+ * and the person's hold. Plan refuses the start, because the recording is an
+ * artifact the thread keeps (see `BROWSER_OPERATION_EFFECT`). A start that is
+ * refused runs nothing. The stop always follows, whether the call succeeded,
+ * failed, or was interrupted, and in every posture: a thread that moved into
+ * Plan while the call ran has its recording stopped and discarded by the
+ * adapter, which answers the stop as `plan-mode-read-only`. The answer is the
+ * call's own with the recording's capture id and facts, or why it was not
+ * kept.
+ *
+ * Rationale: tying a recording to one call bounds it by that call as well as
+ * by its own limits, so a recording cannot outlive the turn or be left running
+ * by an agent that forgot to stop it, and nothing records between calls.
+ */
+export async function runRecordedBrowserCall(
+  run: () => Promise<BrowserToolAnswer>,
+  record: (operation: BrowserToolRecordingOperation) => Promise<BrowserToolAnswer>,
+): Promise<BrowserToolAnswer> {
+  const started = await record("record-start");
+  if (started.isError) {
+    return { result: { error: "recording-refused", answer: started.result }, isError: true };
+  }
+  let stopped: BrowserToolAnswer | undefined;
+  let answer: BrowserToolAnswer;
+  try {
+    answer = await run();
+  } finally {
+    stopped = await record("record-stop").catch(() => undefined);
+  }
+  const page = stopped?.isError === false ? recordingPageOf(stopped.result) : undefined;
+  const result = answer.result as Record<string, unknown>;
+  return {
+    ...answer,
+    result: {
+      ...result,
+      ...(page?.captureId !== undefined && page.recording !== undefined
+        ? { recording: { captureId: page.captureId, ...page.recording } }
+        : { recordingNotKept: page?.captureNotKept ?? refusalOf(stopped) }),
+    },
+  };
+}
+
+function recordingPageOf(result: unknown):
+  | {
+      readonly captureId?: string;
+      readonly recording?: Record<string, unknown>;
+      readonly captureNotKept?: string;
+    }
+  | undefined {
+  if (typeof result !== "object" || result === null || !("page" in result)) return undefined;
+  const page = result.page;
+  if (typeof page !== "object" || page === null) return undefined;
+  const fields = page as Record<string, unknown>;
+  return {
+    ...(typeof fields.captureId === "string" ? { captureId: fields.captureId } : {}),
+    ...(typeof fields.recording === "object" && fields.recording !== null
+      ? { recording: fields.recording as Record<string, unknown> }
+      : {}),
+    ...(typeof fields.captureNotKept === "string" ? { captureNotKept: fields.captureNotKept } : {}),
+  };
+}
+
+/** A short reason for a stop that did not answer with a kept recording. */
+function refusalOf(stopped: BrowserToolAnswer | undefined): string {
+  const result = stopped?.result;
+  if (typeof result !== "object" || result === null) return "unavailable";
+  if ("error" in result && typeof result.error === "string") return result.error;
+  if (
+    "failure" in result &&
+    typeof result.failure === "object" &&
+    result.failure !== null &&
+    "category" in result.failure &&
+    typeof result.failure.category === "string"
+  )
+    return result.failure.category;
+  return "unavailable";
+}
+
+/**
  * What the model reads back from one operation: the page's address, title,
  * revision, and what changed, plus whatever the operation read or the call
  * asked to include. A text hash is the server's to compare, not the model's.
@@ -828,6 +1091,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.diagnosticsCursor === undefined
                 ? {}
                 : { diagnosticsCursor: observation.diagnosticsCursor }),
+              ...(observation.audit === undefined ? {} : { audit: observation.audit }),
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
                 : {}),
@@ -835,6 +1099,10 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               // it the thread's Browser captures strip will not show it.
               ...(observation.capture?.status === "kept"
                 ? { captureId: observation.capture.captureId }
+                : {}),
+              ...(observation.capture?.status === "kept" &&
+              observation.capture.recording !== undefined
+                ? { recording: observation.capture.recording }
                 : {}),
               ...(observation.capture?.status === "not-kept"
                 ? { captureNotKept: observation.capture.reason }
@@ -860,4 +1128,11 @@ export function browserDownloadSavedResult(saved: {
     },
     isError: false,
   };
+}
+
+export function browserPageScriptToolResult(receipt: BrowserPageScriptReceipt): BrowserToolAnswer {
+  const result = { script: receipt };
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_TEXT_RESULT_BYTES)
+    return { result: { script: { status: "truncated", effect: receipt.effect } }, isError: false };
+  return { result, isError: receipt.status !== "completed" && receipt.status !== "truncated" };
 }

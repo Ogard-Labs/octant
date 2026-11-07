@@ -1,6 +1,7 @@
 import type {
   AutomationCommandResult,
   AutomationDefinition,
+  AutomationDetailResponse,
   AutomationId,
   AutomationRun,
   AutomationSummary,
@@ -42,6 +43,8 @@ export type AutomationDetailState =
   | {
       readonly status: "ready";
       readonly automation: AutomationDefinition;
+      readonly fileSource?: AutomationDetailResponse["fileSource"];
+      readonly eventSource?: AutomationDetailResponse["eventSource"];
       readonly runs: readonly AutomationRun[];
     }
   | { readonly status: "unavailable"; readonly automationId: string; readonly message: string };
@@ -78,7 +81,7 @@ export interface AutomationCenterController {
   setFilter(filter: AutomationCenterFilter): void;
   setSearch(search: string): void;
   retryList(): void;
-  select(automationId: string | undefined): void;
+  select(automationId: string | undefined, context?: { readonly fileSourceReview: true }): void;
   retryDetail(): void;
   expandHistory(): Promise<void>;
   collapseHistory(): void;
@@ -125,6 +128,7 @@ export function useAutomationCenterController(
 
   const listAbort = useRef<AbortController | undefined>(undefined);
   const detailAbort = useRef<AbortController | undefined>(undefined);
+  const detailContext = useRef<{ readonly fileSourceReview: true } | undefined>(undefined);
   const historyAbort = useRef<AbortController | undefined>(undefined);
   const historyCursorRef = useRef<string | undefined>(undefined);
 
@@ -190,11 +194,22 @@ export function useAutomationCenterController(
     const controller = new AbortController();
     detailAbort.current = controller;
     setDetail({ status: "loading", automationId: selectedId });
-    client
-      .get(selectedId as AutomationId, controller.signal)
+    const request =
+      detailContext.current === undefined
+        ? client.get(selectedId as AutomationId, controller.signal)
+        : client.get(selectedId as AutomationId, controller.signal, detailContext.current);
+    request
       .then((response) => {
         if (controller.signal.aborted) return;
-        setDetail({ status: "ready", automation: response.automation, runs: response.runs });
+        if (response.automation.trigger.kind === "file-arrival")
+          detailContext.current = { fileSourceReview: true };
+        setDetail({
+          status: "ready",
+          automation: response.automation,
+          ...(response.fileSource === undefined ? {} : { fileSource: response.fileSource }),
+          ...(response.eventSource === undefined ? {} : { eventSource: response.eventSource }),
+          runs: response.runs,
+        });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || isAbort(error)) return;
@@ -296,9 +311,13 @@ export function useAutomationCenterController(
 
   const retryList = useCallback(() => setListGeneration((generation) => generation + 1), []);
   const retryDetail = useCallback(() => setDetailGeneration((generation) => generation + 1), []);
-  const select = useCallback((automationId: string | undefined) => {
-    setSelectedId(automationId);
-  }, []);
+  const select = useCallback(
+    (automationId: string | undefined, context?: { readonly fileSourceReview: true }) => {
+      detailContext.current = context;
+      setSelectedId(automationId);
+    },
+    [],
+  );
   const clearNotice = useCallback(() => setNotice(undefined), []);
 
   return useMemo(

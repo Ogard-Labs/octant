@@ -1,3 +1,4 @@
+import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
 import {
@@ -149,6 +150,16 @@ export interface CodeComposerAdapterProps {
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
+  /** A reviewed planner proposal is sent exactly as shown, never edited in this form. */
+  readonly fixedPrompt?: string;
+  /**
+   * Replaces the start screen's question when the composer serves a decision
+   * rather than a new task: a review dialog asking "What are we building
+   * today?" above a fixed proposal reads as an invitation to write one.
+   */
+  readonly heading?: ReactNode;
+  readonly createLabel?: string;
+  readonly createDisabledReason?: string;
   readonly onCancelFirstTurn?: () => void;
   readonly folderControl?: ReactNode;
   readonly projectSetup?: ReactNode;
@@ -209,6 +220,7 @@ export interface CodeComposerSuggestion {
 }
 
 export interface CodeComposerSubmitInput {
+  readonly workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice;
   readonly modelOptionValues?: ProviderModelOptionValues;
   readonly computerUseSelection?: ExtensionSelection;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
@@ -254,7 +266,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     () => (isServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups),
     [props.providerGroups, isServer],
   );
-  const [prompt, setPrompt] = useNewTaskPrompt();
+  const [draftPrompt, setPrompt] = useNewTaskPrompt();
+  const prompt = props.fixedPrompt ?? draftPrompt;
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
   const storedCheckout =
@@ -509,6 +522,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     : undefined;
   const canSubmit =
     trimmed.length > 0 &&
+    props.createDisabledReason === undefined &&
     !props.creating &&
     !submitting &&
     !atMenu.resolving &&
@@ -701,6 +715,27 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     props,
   ]);
 
+  const folderDrops = useDroppedFolderMentions({
+    scope:
+      props.projectId === undefined
+        ? undefined
+        : { mode: "code-draft", projectId: props.projectId },
+    draft: prompt,
+    onDraftChange: (text) => setPrompt(text),
+    textarea: () => textareaRef.current,
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    hostId: props.fixedHostId ?? props.selectedHostId,
+    refused:
+      isServer ||
+      workspace === "managed-worktree" ||
+      props.fixedPrompt !== undefined ||
+      props.creating === true,
+    onFiles: (files) => {
+      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
+      else images.attach(files);
+    },
+  });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -788,7 +823,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading projectChosen={props.projectId !== undefined} />
+          {props.heading ?? <WelcomeHeading projectChosen={props.projectId !== undefined} />}
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (
@@ -796,6 +831,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           ) : null}
         </div>
         <div className="composer-stack">
+          {folderDrops.notice}
           <ThreadComposer
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
             planUsage={{
@@ -876,6 +912,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
+                readOnly={props.fixedPrompt !== undefined}
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
@@ -888,6 +925,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
+                    event.preventDefault();
+                }}
                 onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
@@ -980,7 +1022,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   </span>
                   {props.poolControl}
                   <ComposerVoiceButton
-                    disabled={props.creating === true}
+                    disabled={props.creating === true || props.fixedPrompt !== undefined}
                     onTranscript={(transcript) =>
                       setPrompt((current) => appendTranscript(current, transcript))
                     }
@@ -991,7 +1033,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 kind: "send",
                 send: {
                   ariaLabel:
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
+                    props.createLabel ??
+                    (props.errorMessage === undefined ? "Create thread" : "Retry creating thread"),
                   disabled: !canSubmit,
                   onSend: submit,
                 },
@@ -1011,6 +1054,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             {sendNotice}
           </OctantAlert>
         ) : null}
+        {props.createDisabledReason === undefined ? null : (
+          <p className="code-composer-adapter__notice" role="status">
+            {props.createDisabledReason}
+          </p>
+        )}
 
         {serverRefusal !== undefined && props.errorMessage === undefined ? (
           <p className="code-composer-adapter__notice" role="status">

@@ -697,7 +697,7 @@ function transportLabel(transport: AndroidScreenTransport): string {
   const reasons: Record<AndroidScreenFallbackReason, string> = {
     "no-desktop": "this host is not running in the Octant desktop app.",
     "not-emulator": "only emulators stream.",
-    "tool-missing": "serve-avd is not installed.",
+    "tool-missing": "serve-avd is unavailable on this host.",
     "tool-exited": "serve-avd stopped before it attached.",
     "timed-out": "serve-avd did not attach in time.",
     "desktop-unreachable": "the desktop app did not answer.",

@@ -91,7 +91,9 @@ export interface CodePlannerServiceOptions {
     creation: CodePlannerThreadCreation,
     signal: AbortSignal | undefined,
     executionContext: CodeServiceExecutionContext,
-  ) => Promise<CodeCommandResult>;
+  ) => Promise<
+    CodeCommandResult | { readonly kind: "creation-not-started"; readonly failure: CodeFailure }
+  >;
   /** Whether a thread is marked as having taken in outside content, as its mark reads now. */
   readonly isMarkedWithOutsideContent: (threadId: string) => boolean;
 }
@@ -120,6 +122,7 @@ export class CodePlannerService {
   readonly #createThread: CodePlannerServiceOptions["createThread"];
   readonly #canAccessProject: CodePlannerServiceOptions["canAccessProject"];
   readonly #isMarkedWithOutsideContent: CodePlannerServiceOptions["isMarkedWithOutsideContent"];
+  readonly #creating = new Set<string>();
 
   constructor(options: CodePlannerServiceOptions) {
     this.#persistence = options.persistence;
@@ -138,6 +141,10 @@ export class CodePlannerService {
       );
     }
     this.#assertWindowAccess(authenticatedWindowId, projectId);
+    for (const entry of readCodePlannerProposals(this.#persistence.connection, projectId)) {
+      if (!this.#creating.has(String(entry.proposal.id)))
+        this.#recoverCreatedProposal(entry.proposal, entry.proposalVersion);
+    }
     return decodeCodePlannerView({
       designation: this.#designation(projectId),
       designationVersion: readCodePlannerAggregateVersion(this.#persistence.connection, projectId),
@@ -242,7 +249,7 @@ export class CodePlannerService {
     });
   }
 
-  /** Used only to decide whether a turn advertises the planner tools. */
+  /** Used only to decide whether a turn advertises the planner's board operation and target. */
   isPlannerThread(threadId: CodeThreadId): boolean {
     return this.boardScope(threadId).status === "allowed";
   }
@@ -310,10 +317,23 @@ export class CodePlannerService {
         decodeCodeFailure({ category: "invalid", message: "Planner proposal command is invalid." }),
       );
     }
-    const projected = readCodePlannerProposal(this.#persistence.connection, command.proposalId);
+    let projected = readCodePlannerProposal(this.#persistence.connection, command.proposalId);
     if (projected !== undefined) {
       this.#assertWindowAccess(authenticatedWindowId, projected.proposal.projectId);
     }
+    const key = String(command.proposalId);
+    if (this.#creating.has(key))
+      return {
+        status: "refused",
+        reason: "proposal-changed",
+        message:
+          "This proposal is already creating its task. Inspect the submitted task and wait for its current state; no replacement was started.",
+      };
+    if (
+      projected !== undefined &&
+      this.#recoverCreatedProposal(projected.proposal, projected.proposalVersion)
+    )
+      projected = readCodePlannerProposal(this.#persistence.connection, command.proposalId);
     const decision = decideCodePlannerProposalResolution({
       proposal: projected?.proposal,
       action: command.kind === "confirm-planner-work-proposal" ? "confirm" : "decline",
@@ -329,6 +349,13 @@ export class CodePlannerService {
         message: "The proposal changed; reload and retry.",
       };
     }
+    if (decision.proposal.creationAttempt?.status === "creating")
+      return {
+        status: "refused",
+        reason: "proposal-changed",
+        message:
+          "The earlier creation outcome is unresolved. Inspect its submitted task; no replacement or decline was recorded.",
+      };
 
     if (command.kind === "decline-planner-work-proposal") {
       const declined: CodePlannerWorkProposal = {
@@ -353,28 +380,85 @@ export class CodePlannerService {
       return { status: "declined", proposal: this.#requireProposal(declined.id) };
     }
 
-    // Creation runs first, through the ordinary command path with its own
-    // journal events and failure modes. If it throws, the proposal stays
-    // pending and the user may confirm again once the cause is fixed; a mark
-    // that cannot be journaled is such a cause.
-    const creation = await this.#createThread(
-      authenticatedWindowId,
-      command.creation,
-      signal,
-      this.#inheritedMarkFor(decision.proposal),
-    );
-    const confirmed: CodePlannerWorkProposal = {
+    const submittedId = createdThreadId(command.creation);
+    if (this.#persistence.readCodeThread(submittedId) !== undefined)
+      return {
+        status: "refused",
+        reason: "proposal-changed",
+        message:
+          "That submitted task id is already in use. Refresh the proposal before continuing.",
+      };
+    const admitted: CodePlannerWorkProposal = {
       ...decision.proposal,
-      status: "confirmed",
-      resolvedAt: decodeTimestamp(this.#clock()),
-      createdThreadId: createdThreadId(command.creation),
+      creationAttempt: {
+        threadId: submittedId,
+        status: "creating",
+        admittedAt: decodeTimestamp(this.#clock()),
+      },
     };
+    const executionContext = this.#inheritedMarkFor(decision.proposal);
+    this.#creating.add(key);
+    let admittedVersion: number | undefined;
     try {
-      this.#appendProposal(confirmed, command.expectedVersion);
+      // The journal CAS is the admission owner across windows and restarts.
+      // It runs synchronously before ordinary creation can await anything.
+      this.#appendProposal(admitted, command.expectedVersion);
+      admittedVersion = Number(command.expectedVersion) + 1;
+      const creation = await this.#createThread(
+        authenticatedWindowId,
+        command.creation,
+        signal,
+        executionContext,
+      );
+      if (creation.kind === "creation-not-started") {
+        if (this.#persistence.readCodeThread(submittedId) !== undefined) {
+          this.#recoverCreatedProposal(admitted, admittedVersion);
+          return {
+            status: "refused",
+            reason: "proposal-changed",
+            message:
+              "A submitted task exists. Inspect it; this approval did not start its first message.",
+          };
+        }
+        this.#appendProposal(
+          {
+            ...admitted,
+            creationAttempt: {
+              threadId: submittedId,
+              status: "failed",
+              admittedAt: admitted.creationAttempt?.admittedAt ?? decodeTimestamp(this.#clock()),
+              message: `The host refused this attempt (${creation.failure.category}). Review the provider, Project and checkout settings before approving again.`,
+            },
+          },
+          admittedVersion,
+        );
+        return {
+          status: "refused",
+          reason: "creation-not-started",
+          message: creation.failure.message,
+        };
+      }
+      if (
+        (creation.kind !== "thread-created" && creation.kind !== "managed-thread-created") ||
+        String(creation.thread.id) !== String(submittedId) ||
+        String(creation.thread.projectId) !== String(decision.proposal.projectId)
+      )
+        return {
+          status: "refused",
+          reason: "proposal-changed",
+          message:
+            "The host did not confirm the submitted task identity. Inspect the unresolved attempt before continuing.",
+        };
+      const confirmed: CodePlannerWorkProposal = {
+        ...admitted,
+        status: "confirmed",
+        resolvedAt: decodeTimestamp(this.#clock()),
+        createdThreadId: submittedId,
+      };
+      this.#appendProposal(confirmed, admittedVersion);
+      return { status: "confirmed", proposal: this.#requireProposal(confirmed.id), creation };
     } catch (error) {
-      // A concurrent decline can land between the creation and this append.
-      // The thread the user explicitly confirmed exists either way; the
-      // refusal tells the caller the proposal record did not follow.
+      if (admittedVersion !== undefined) this.#recoverCreatedProposal(admitted, admittedVersion);
       if (error instanceof ConcurrencyConflict) {
         return {
           status: "refused",
@@ -382,9 +466,34 @@ export class CodePlannerService {
           message: "The proposal changed while the thread was being created.",
         };
       }
-      throw this.#unavailable();
+      throw error;
+    } finally {
+      this.#creating.delete(key);
     }
-    return { status: "confirmed", proposal: this.#requireProposal(confirmed.id), creation };
+  }
+
+  /** A stored task is recovery evidence, never permission to send a first turn. */
+  #recoverCreatedProposal(proposal: CodePlannerWorkProposal, version: number): boolean {
+    if (proposal.status !== "pending" || proposal.creationAttempt?.status !== "creating")
+      return false;
+    const thread = this.#persistence.readCodeThread(proposal.creationAttempt.threadId);
+    if (thread === undefined || String(thread.projectId) !== String(proposal.projectId))
+      return false;
+    try {
+      this.#appendProposal(
+        {
+          ...proposal,
+          status: "confirmed",
+          resolvedAt: decodeTimestamp(this.#clock()),
+          createdThreadId: thread.id,
+        },
+        version,
+        { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

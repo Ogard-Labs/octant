@@ -1,3 +1,4 @@
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserRuntime } from "./desktopBrowserRuntime";
 
@@ -11,6 +12,99 @@ const policy = {
 };
 
 describe("DesktopBrowserRuntime", () => {
+  it("sends pinned script source only during preparation and rejects malformed native replies without their contents", async () => {
+    const sent: unknown[] = [];
+    let malformed = false;
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        sent.push(body);
+        return Response.json(
+          malformed
+            ? {
+                status: "completed",
+                effect: "possible",
+                valueJson: "private-marker" + "x".repeat(24577),
+              }
+            : body.operation === "prepare"
+              ? { status: "prepared", planId: contextId }
+              : { status: "completed", effect: "possible", valueJson: "42" },
+        );
+      },
+    });
+    const base = { contextId, owner: { windowId: contextId, threadId: contextId } };
+    const prepare = decodeBrowserPageScriptNativeCommand({
+      ...base,
+      operation: "prepare",
+      source: "42",
+      expectedUrl: "https://example.com/",
+    });
+    const execute = decodeBrowserPageScriptNativeCommand({
+      ...base,
+      operation: "execute",
+      planId: contextId,
+    });
+    expect((await runtime.runPageScript(prepare, new AbortController().signal)).status).toBe(
+      "prepared",
+    );
+    expect((await runtime.runPageScript(execute, new AbortController().signal)).status).toBe(
+      "completed",
+    );
+    expect(sent).toEqual([prepare, execute]);
+    malformed = true;
+    const error = await runtime
+      .runPageScript(execute, new AbortController().signal)
+      .catch((error) => error);
+    expect(String(error)).toContain("rejected the page script reply");
+    expect(String(error)).not.toContain("private-marker");
+  });
+
+  it("sends only scoped form references and the finite deadline to native credential operations", async () => {
+    const sent: Array<Readonly<Record<string, unknown>>> = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      sent.push(body);
+      return Response.json(
+        body.kind === "prepare"
+          ? {
+              status: "prepared",
+              planId: contextId,
+              usernameLabel: "Email",
+              passwordLabel: "Password",
+              submissionOrigin: "https://example.com",
+              expiresAt: "2026-11-03T10:03:00.000Z",
+            }
+          : { status: "authentication-required", effect: "completed" },
+      );
+    });
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch,
+    });
+    const owner = { windowId: contextId, threadId: contextId };
+    const expiresAt = "2026-11-03T10:03:00.000Z";
+    expect(
+      await runtime.prepareCredentialFill(contextId, owner, "https://example.com"),
+    ).toMatchObject({ status: "prepared" });
+    expect(await runtime.submitCredentialFill(contextId, owner, contextId, expiresAt)).toEqual({
+      status: "authentication-required",
+      effect: "completed",
+    });
+    expect(sent).toEqual([
+      { kind: "prepare", contextId, owner, origin: "https://example.com" },
+      { kind: "submit", contextId, owner, planId: contextId, expiresAt },
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:41234/v1/contexts/credential-fill",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-octant-browser-broker-token": "broker-token" }),
+      }),
+    );
+  });
+
   it("authenticates every loopback broker request and forwards the exact context owner", async () => {
     const fetch = vi.fn(async () => Response.json({ ok: true }));
     const runtime = new DesktopBrowserRuntime({
@@ -129,6 +223,17 @@ describe("DesktopBrowserRuntime", () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ name: "BrowserTargetStaleError" });
+  });
+
+  it("reports a page the desktop Browser cannot record as that refusal, not a broker failure", async () => {
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: vi.fn(async () => Response.json({ error: "recording-unavailable" }, { status: 422 })),
+    });
+    await expect(
+      runtime.act(contextId, { kind: "record-start" }, new AbortController().signal),
+    ).rejects.toMatchObject({ name: "BrowserRecordingUnavailableError" });
   });
 
   it("reports a timed-out wait with the conditions that never held", async () => {

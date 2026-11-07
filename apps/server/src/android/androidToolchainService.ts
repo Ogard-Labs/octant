@@ -24,6 +24,9 @@ import {
   type ToolActionCancellation,
 } from "@octant/contracts";
 import {
+  boundedDeviceLogTail,
+  DEVICE_LOG_BUDGET,
+  DEVICE_LOG_BUDGET_BESIDE_CRASHES,
   deviceOpenUrlDiagnostic,
   evaluateAndroidEmulatorRequest,
   isAndroidEmulatorInputKind,
@@ -83,6 +86,7 @@ export interface AndroidToolchainServiceOptions {
       readonly cwd: string;
       readonly environment: Readonly<Record<string, string>>;
       readonly timeoutMs: number;
+      readonly outputRetention?: "first" | "newest";
     },
     signal?: AbortSignal,
   ) => Promise<AndroidProcessResult>;
@@ -161,6 +165,21 @@ const MAXIMUM_RECORDING_BYTES = 16 * 1024 * 1024;
 const RECORDING_BIT_RATE = 1_500_000;
 const RECORDING_START_GRACE_MS = 750;
 const RECORDING_FINISH_MS = 10_000;
+/**
+ * How much of the screen `describe-ui` hands back. A busy screen lists a few
+ * hundred labelled elements; past these the list says it was cut rather than
+ * filling the agent's context.
+ */
+const MAX_DESCRIBED_ELEMENTS = 300;
+const MAX_DESCRIBED_BYTES = 32 * 1024;
+/** A label longer than this is cut in the listing; matching a target still uses all of it. */
+const MAX_DESCRIBED_LABEL = 256;
+/** uiautomator's dump of a crowded screen is tens of kilobytes; anything far past that is not one. */
+const MAX_UI_DUMP_BYTES = 4 * 1024 * 1024;
+/** The crash buffer's share of a `logs` read that asked for crashes. */
+const CRASH_BUFFER_BUDGET = { lines: 200, bytes: 16 * 1024 } as const;
+/** A log artifact read back for a tool result; describe-ui and logs write far less. */
+const MAX_LOG_ARTIFACT_BYTES = 256 * 1024;
 
 export class AndroidToolchainService {
   readonly #options: AndroidToolchainServiceOptions;
@@ -480,6 +499,21 @@ export class AndroidToolchainService {
     return { kind: "found", bytes };
   }
 
+  /**
+   * The text a `describe-ui` or `logs` action kept, for the tool result that
+   * asked for it. Only log artifacts are read this way, and only within the
+   * thread and checkout that own them.
+   */
+  async readLogArtifact(
+    reference: string,
+    context: AndroidExecutionContext,
+  ): Promise<string | undefined> {
+    if (!reference.startsWith("android-log-")) return undefined;
+    const bytes = await this.#options.readArtifact(reference, context);
+    if (bytes === undefined || bytes.byteLength > MAX_LOG_ARTIFACT_BYTES) return undefined;
+    return text(bytes);
+  }
+
   async close(): Promise<void> {
     // Before the lifetime ends and commands stop running: finish each recorder
     // and delete its file so nothing of the screen stays on the device.
@@ -752,6 +786,74 @@ export class AndroidToolchainService {
         "complete",
       );
     }
+    if (request.kind === "describe-ui") {
+      const screen = await this.#readScreen(adb, serial, request, context, signal);
+      if (screen.kind === "failed") {
+        return await this.#logged(
+          request,
+          screen.outcome,
+          startedAt,
+          [{ severity: "note", message: screen.message }],
+          "complete",
+        );
+      }
+      const described = describedAndroidElements(screen.elements);
+      const reference = `android-log-${request.actionId}`;
+      await this.#options.writeArtifact(
+        reference,
+        new TextEncoder().encode(`${described.text}\n`),
+        request,
+      );
+      const total = screen.elements.length;
+      return evidence(
+        request,
+        "succeeded",
+        startedAt,
+        this.#options.now(),
+        [
+          {
+            severity: "note",
+            message: described.truncated
+              ? `describe-ui listed ${described.shown} of ${total} elements`
+              : `describe-ui listed ${total} elements`,
+          },
+        ],
+        [{ kind: "log", reference }],
+        "complete",
+        described.truncated,
+      );
+    }
+    if (request.kind === "logs") {
+      if (request.packageName === undefined) {
+        return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
+      }
+      const read = await this.#readLogs(adb, serial, request, request.packageName, context, signal);
+      if (read.kind === "failed") {
+        return await this.#logged(
+          request,
+          read.outcome,
+          startedAt,
+          [{ severity: "note", message: read.message }],
+          "complete",
+        );
+      }
+      const reference = `android-log-${request.actionId}`;
+      await this.#options.writeArtifact(
+        reference,
+        new TextEncoder().encode(`${read.text}\n`),
+        request,
+      );
+      return evidence(
+        request,
+        "succeeded",
+        startedAt,
+        this.#options.now(),
+        [{ severity: "note", message: read.note }],
+        [{ kind: "log", reference }],
+        "complete",
+        read.truncated,
+      );
+    }
     if (isAndroidEmulatorInputKind(request.kind)) {
       const emulatorKey = String(request.emulatorId);
       if (request.kind === "type-text") {
@@ -761,9 +863,33 @@ export class AndroidToolchainService {
         if (waitMs > 0) await sleep(waitMs, signal);
       }
       try {
-        const managed = await this.#serveAvdInput(request, serial, signal, startedAt);
+        // A tap on a named element becomes a tap at that element's centre,
+        // read from the screen as it is now, and then travels the same way a
+        // tap at a point does.
+        let input = request;
+        if (request.kind === "tap" && request.target !== undefined) {
+          const aimed = await this.#aimAtElement(
+            adb,
+            serial,
+            request,
+            request.target,
+            context,
+            signal,
+          );
+          if (aimed.kind === "refused") {
+            return await this.#logged(
+              request,
+              aimed.outcome,
+              startedAt,
+              [{ severity: "note", message: aimed.message }],
+              "complete",
+            );
+          }
+          input = { ...request, point: aimed.point };
+        }
+        const managed = await this.#serveAvdInput(input, serial, signal, startedAt);
         if (managed !== undefined) return managed;
-        const argv = inputArgv(adb, serial, request);
+        const argv = inputArgv(adb, serial, input);
         if (argv === undefined) {
           return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
         }
@@ -785,7 +911,7 @@ export class AndroidToolchainService {
           );
         }
         const note = succeeded(result)
-          ? redactedAndroidInputDiagnostic(request)
+          ? redactedAndroidInputDiagnostic(input)
           : { severity: "note" as const, message: `${request.kind} ${outcomeFor(result)}` };
         return await this.#logged(
           request,
@@ -1076,6 +1202,203 @@ export class AndroidToolchainService {
       return await this.#fromProcess(request, result, startedAt);
     }
     return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
+  }
+
+  /**
+   * Reads the elements on screen through uiautomator. The dump goes to a file
+   * named for this action, so two reads of one emulator never share a file,
+   * and the file is removed whatever happens to the read.
+   */
+  async #readScreen(
+    adb: string,
+    serial: string,
+    request: AndroidEmulatorRequest,
+    context: AndroidExecutionContext,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly kind: "read"; readonly elements: ReadonlyArray<AndroidScreenElement> }
+    | {
+        readonly kind: "failed";
+        readonly outcome: AndroidEmulatorEvidence["outcome"];
+        readonly message: string;
+      }
+  > {
+    const devicePath = `/data/local/tmp/octant-ui-${request.actionId}.xml`;
+    try {
+      const dumped = await this.#command(
+        [adb, "-s", serial, "shell", "uiautomator", "dump", devicePath],
+        context,
+        request.timeoutMs,
+        signal,
+      );
+      const said = `${text(dumped.stdout)}\n${text(dumped.stderr)}`;
+      // uiautomator waits for the screen to settle before it reads it, and
+      // gives up on a screen an animation or a busy app keeps changing. That
+      // passes on its own, so it is worth trying again, unlike a broken dump.
+      if (/could not get idle state/i.test(said)) {
+        return {
+          kind: "failed",
+          outcome: "failed",
+          message:
+            "ui-not-idle: the screen kept changing (an animation or a busy app), so uiautomator could not read it; try again in a moment",
+        };
+      }
+      if (!succeeded(dumped)) {
+        const reason = firstLine(said);
+        return {
+          kind: "failed",
+          outcome: outcomeFor(dumped),
+          message: `ui-dump-failed: ${reason === "" ? outcomeFor(dumped) : reason}`.slice(0, 2048),
+        };
+      }
+      const read = await this.#command(
+        [adb, "-s", serial, "exec-out", "cat", devicePath],
+        context,
+        request.timeoutMs,
+        signal,
+      );
+      const xml = read.stdout.byteLength > MAX_UI_DUMP_BYTES ? "" : text(read.stdout);
+      if (!succeeded(read) || !xml.includes("<hierarchy")) {
+        return {
+          kind: "failed",
+          outcome: succeeded(read) ? "failed" : outcomeFor(read),
+          message: "ui-dump-unreadable: uiautomator reported a dump that could not be read back",
+        };
+      }
+      return { kind: "read", elements: parseAndroidUiHierarchy(xml) };
+    } finally {
+      // Not tied to the action's signal: a cancelled read still removes its file.
+      await this.#command([adb, "-s", serial, "shell", "rm", "-f", devicePath], context, 15_000);
+    }
+  }
+
+  async #aimAtElement(
+    adb: string,
+    serial: string,
+    request: AndroidEmulatorRequest,
+    target: string,
+    context: AndroidExecutionContext,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly kind: "aimed"; readonly point: { readonly x: number; readonly y: number } }
+    | {
+        readonly kind: "refused";
+        readonly outcome: AndroidEmulatorEvidence["outcome"];
+        readonly message: string;
+      }
+  > {
+    const screen = await this.#readScreen(adb, serial, request, context, signal);
+    if (screen.kind === "failed") return { ...screen, kind: "refused" };
+    const match = matchAndroidElement(screen.elements, target);
+    if (match.kind === "refused") {
+      return { kind: "refused", outcome: "failed", message: match.message };
+    }
+    return { kind: "aimed", point: match.element.center };
+  }
+
+  /**
+   * An app's own log lines, by its process id, and the crash buffer when
+   * asked for. A process that is not running has no log of its own, but its
+   * crash may still be in the crash buffer, which is often why it stopped.
+   */
+  async #readLogs(
+    adb: string,
+    serial: string,
+    request: AndroidEmulatorRequest,
+    packageName: string,
+    context: AndroidExecutionContext,
+    signal: AbortSignal,
+  ): Promise<
+    | {
+        readonly kind: "read";
+        readonly text: string;
+        readonly note: string;
+        readonly truncated: boolean;
+      }
+    | {
+        readonly kind: "failed";
+        readonly outcome: AndroidEmulatorEvidence["outcome"];
+        readonly message: string;
+      }
+  > {
+    const includeCrashes = request.includeCrashes === true;
+    const budget = includeCrashes ? DEVICE_LOG_BUDGET_BESIDE_CRASHES : DEVICE_LOG_BUDGET;
+    const pidof = await this.#command(
+      [adb, "-s", serial, "shell", "pidof", "-s", packageName],
+      context,
+      15_000,
+      signal,
+    );
+    const pid = succeeded(pidof) ? text(pidof.stdout).trim() : "";
+    const running = /^[0-9]+$/.test(pid);
+    if (!running && !includeCrashes) {
+      return {
+        kind: "failed",
+        outcome: "failed",
+        message: `app-not-running: ${packageName} has no running process, so it has no log of its own; launch it, or ask for includeCrashes to read the crash buffer`,
+      };
+    }
+    const sections: string[] = [];
+    const notes: string[] = [];
+    let truncated = false;
+    let lines = 0;
+    if (running) {
+      let window = ["-t", "500"];
+      if (request.sinceSeconds !== undefined) {
+        // logcat filters by the device's clock, which need not match this host's.
+        const clock = await this.#command(
+          [adb, "-s", serial, "shell", "date", "+%s"],
+          context,
+          15_000,
+          signal,
+        );
+        const now = Number(text(clock.stdout).trim());
+        if (succeeded(clock) && Number.isSafeInteger(now) && now > request.sinceSeconds) {
+          window = ["-t", `${now - request.sinceSeconds}.000`];
+        } else {
+          notes.push("the emulator's clock was unreadable, so these are its newest lines instead");
+        }
+      }
+      const log = await this.#command(
+        [adb, "-s", serial, "logcat", "-d", "-v", "threadtime", ...window, `--pid=${pid}`],
+        context,
+        request.timeoutMs,
+        signal,
+        // `-t <time>` bounds the window but not its line count, so a chatty
+        // app can write more than the capture keeps; keep its newest lines.
+        "newest",
+      );
+      if (!succeeded(log)) return logReadFailure(log);
+      const bounded = boundedDeviceLogTail(text(log.stdout), budget);
+      sections.push(`--- ${packageName} (pid ${pid}) ---`, bounded.text || "(no lines)");
+      truncated ||= bounded.truncated;
+      lines += bounded.lines;
+    } else {
+      sections.push(`--- ${packageName} ---`, `(${packageName} is not running)`);
+    }
+    if (includeCrashes) {
+      const crashes = await this.#command(
+        [adb, "-s", serial, "logcat", "-d", "-b", "crash", "-v", "threadtime", "-t", "200"],
+        context,
+        request.timeoutMs,
+        signal,
+      );
+      if (!succeeded(crashes)) return logReadFailure(crashes);
+      const bounded = boundedDeviceLogTail(text(crashes.stdout), CRASH_BUFFER_BUDGET);
+      sections.push("--- crash buffer ---", bounded.text || "(no crashes)");
+      truncated ||= bounded.truncated;
+      lines += bounded.lines;
+    }
+    const from = includeCrashes ? `${packageName} and the crash buffer` : packageName;
+    return {
+      kind: "read",
+      text: sections.join("\n"),
+      note: [
+        `logs returned ${lines} ${lines === 1 ? "line" : "lines"} from ${from}`,
+        ...notes,
+      ].join("; "),
+      truncated,
+    };
   }
 
   async #discoverSdk(): Promise<AndroidSdkDiscovery> {
@@ -1417,6 +1740,7 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
     timeoutMs: number,
     signal?: AbortSignal,
+    outputRetention?: "newest",
   ): Promise<AndroidProcessResult> {
     const combined =
       signal === undefined
@@ -1436,6 +1760,7 @@ export class AndroidToolchainService {
         cwd: context.checkoutRoot,
         environment: androidEnv(this.#options.environment?.() ?? {}, this.#sdk),
         timeoutMs,
+        ...(outputRetention === undefined ? {} : { outputRetention }),
       },
       combined,
     );
@@ -1806,9 +2131,15 @@ function androidKey(key: string): string | undefined {
 
 function stepFor(kind: AndroidEmulatorRequest["kind"]): AndroidActionProgress["step"] {
   if (kind === "boot") return "preparing-destination";
-  if (kind === "screenshot" || kind === "start-recording" || kind === "stop-recording") {
+  if (
+    kind === "screenshot" ||
+    kind === "describe-ui" ||
+    kind === "start-recording" ||
+    kind === "stop-recording"
+  ) {
     return "capturing-screen";
   }
+  if (kind === "logs") return "collecting-logs";
   if (kind === "install") return "installing";
   if (kind === "launch") return "launching";
   if (isAndroidEmulatorInputKind(kind) || isAndroidEmulatorOpenInputKind(kind)) {
@@ -1879,6 +2210,7 @@ function evidence(
   diagnostics: AndroidEmulatorEvidence["diagnostics"],
   artifacts: AndroidEmulatorEvidence["artifacts"],
   cleanup: AndroidEmulatorEvidence["cleanup"],
+  truncated?: boolean,
 ): AndroidEmulatorEvidence {
   return decodeAndroidEmulatorEvidence({
     actionId: request.actionId,
@@ -1891,8 +2223,219 @@ function evidence(
     diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS),
     artifacts,
     cleanup,
+    ...(truncated === undefined ? {} : { truncated }),
     durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt) || 0),
     completedAt,
+  });
+}
+
+function firstLine(value: string): string {
+  return (
+    value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? ""
+  );
+}
+
+function logReadFailure(result: AndroidProcessResult): {
+  readonly kind: "failed";
+  readonly outcome: AndroidEmulatorEvidence["outcome"];
+  readonly message: string;
+} {
+  const outcome = outcomeFor(result);
+  const reason = firstLine(`${text(result.stderr)}\n${text(result.stdout)}`);
+  return {
+    kind: "failed",
+    outcome: outcome === "succeeded" ? "failed" : outcome,
+    message: `logs ${outcome}${reason === "" ? "" : `: ${reason}`}`.slice(0, 2048),
+  };
+}
+
+/**
+ * One element uiautomator reported on screen. Bounds and centre are in screen
+ * pixels in the current rotation, the space `input tap` takes, so a centre can
+ * be tapped as it is.
+ */
+export interface AndroidScreenElement {
+  readonly text: string;
+  readonly contentDesc: string;
+  readonly resourceId: string;
+  readonly className: string;
+  readonly clickable: boolean;
+  readonly enabled: boolean;
+  readonly bounds: {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+  };
+  /** The middle of the part of the element that is on screen. */
+  readonly center: { readonly x: number; readonly y: number };
+}
+
+/**
+ * The elements of a uiautomator dump as one flat list, in document order.
+ * Kept are elements with some part on screen that carry a label, an id, or a
+ * click: the layout containers between them have none of those, and on a
+ * typical screen they outnumber the elements an agent can name or tap.
+ */
+export function parseAndroidUiHierarchy(xml: string): ReadonlyArray<AndroidScreenElement> {
+  const nodes: Array<Omit<AndroidScreenElement, "center"> & { readonly topLevel: boolean }> = [];
+  let depth = 0;
+  // Attribute values are quoted and may hold `>`, so a tag ends only at a `>`
+  // outside quotes.
+  const tags = /<node\b((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|<\/node\s*>/g;
+  for (const tag of xml.matchAll(tags)) {
+    const attributes = tag[1];
+    if (attributes === undefined) {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    const values = new Map<string, string>();
+    for (const attribute of attributes.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+      const name = attribute[1];
+      if (name !== undefined) values.set(name, xmlText(attribute[2] ?? attribute[3] ?? ""));
+    }
+    const bounds = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/.exec(values.get("bounds") ?? "");
+    if (bounds !== null) {
+      nodes.push({
+        text: values.get("text") ?? "",
+        contentDesc: values.get("content-desc") ?? "",
+        resourceId: values.get("resource-id") ?? "",
+        className: values.get("class") ?? "",
+        clickable: values.get("clickable") === "true",
+        enabled: values.get("enabled") !== "false",
+        bounds: {
+          left: Number(bounds[1]),
+          top: Number(bounds[2]),
+          right: Number(bounds[3]),
+          bottom: Number(bounds[4]),
+        },
+        topLevel: depth === 0,
+      });
+    }
+    if (tag[2] !== "/") depth += 1;
+  }
+  // The windows at the top of the dump span the screen, so together they are
+  // its extent; anything outside it is scrolled away or off the display.
+  const windows = nodes.filter((node) => node.topLevel);
+  const screenRight = Math.max(0, ...windows.map((node) => node.bounds.right));
+  const screenBottom = Math.max(0, ...windows.map((node) => node.bounds.bottom));
+  const elements: AndroidScreenElement[] = [];
+  for (const { topLevel: _topLevel, ...node } of nodes) {
+    const left = Math.max(0, node.bounds.left);
+    const top = Math.max(0, node.bounds.top);
+    const right = Math.min(screenRight, node.bounds.right);
+    const bottom = Math.min(screenBottom, node.bounds.bottom);
+    if (right <= left || bottom <= top) continue;
+    if (node.text === "" && node.contentDesc === "" && node.resourceId === "" && !node.clickable) {
+      continue;
+    }
+    elements.push({
+      ...node,
+      center: { x: Math.round((left + right) / 2), y: Math.round((top + bottom) / 2) },
+    });
+  }
+  return elements;
+}
+
+/** One line per element, within the listing's element and byte bounds. */
+export function describedAndroidElements(elements: ReadonlyArray<AndroidScreenElement>): {
+  readonly text: string;
+  readonly shown: number;
+  readonly truncated: boolean;
+} {
+  const lines: string[] = [];
+  let bytes = 0;
+  for (const element of elements) {
+    if (lines.length >= MAX_DESCRIBED_ELEMENTS) break;
+    const line = describedElement(element);
+    const size = new TextEncoder().encode(line).byteLength + 1;
+    if (bytes + size > MAX_DESCRIBED_BYTES) break;
+    lines.push(line);
+    bytes += size;
+  }
+  return {
+    text: lines.join("\n"),
+    shown: lines.length,
+    truncated: lines.length < elements.length,
+  };
+}
+
+function describedElement(element: AndroidScreenElement): string {
+  const label = (value: string) => JSON.stringify(value.slice(0, MAX_DESCRIBED_LABEL));
+  const { left, top, right, bottom } = element.bounds;
+  return [
+    element.className.slice(element.className.lastIndexOf(".") + 1) || "View",
+    ...(element.text === "" ? [] : [`text=${label(element.text)}`]),
+    ...(element.contentDesc === "" ? [] : [`desc=${label(element.contentDesc)}`]),
+    ...(element.resourceId === "" ? [] : [`id=${label(element.resourceId)}`]),
+    `center=(${element.center.x},${element.center.y})`,
+    `bounds=[${left},${top}][${right},${bottom}]`,
+    ...(element.clickable ? ["clickable"] : []),
+    ...(element.enabled ? [] : ["disabled"]),
+  ].join(" ");
+}
+
+/**
+ * The one element a tap target names. A resource-id is the most specific
+ * name an app gives an element, then its content description, then its text;
+ * the first of those any element carries exactly decides, and a name more than
+ * one element carries is refused rather than guessed at.
+ */
+export function matchAndroidElement(
+  elements: ReadonlyArray<AndroidScreenElement>,
+  target: string,
+):
+  | {
+      readonly kind: "matched";
+      readonly element: AndroidScreenElement;
+      readonly by: "resource-id" | "content-desc" | "text";
+    }
+  | {
+      readonly kind: "refused";
+      readonly reason: "target-not-found" | "target-ambiguous";
+      readonly matches: number;
+      readonly message: string;
+    } {
+  const tiers = [
+    ["resource-id", (element: AndroidScreenElement) => element.resourceId],
+    ["content-desc", (element: AndroidScreenElement) => element.contentDesc],
+    ["text", (element: AndroidScreenElement) => element.text],
+  ] as const;
+  for (const [by, name] of tiers) {
+    const matches = elements.filter((element) => name(element) === target);
+    const [only] = matches;
+    if (only === undefined) continue;
+    if (matches.length === 1) return { kind: "matched", element: only, by };
+    return {
+      kind: "refused",
+      reason: "target-ambiguous",
+      matches: matches.length,
+      message: `target-ambiguous: ${matches.length} elements on screen have ${by} ${JSON.stringify(target)}; name one by an id only it has, or tap its point`,
+    };
+  }
+  return {
+    kind: "refused",
+    reason: "target-not-found",
+    matches: 0,
+    message: `target-not-found: no element on screen has the resource-id, content-desc, or text ${JSON.stringify(target)} (0 matches); describe-ui lists what is there`,
+  };
+}
+
+function xmlText(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos);/gi, (whole, entity: string) => {
+    const name = entity.toLowerCase();
+    if (name === "amp") return "&";
+    if (name === "lt") return "<";
+    if (name === "gt") return ">";
+    if (name === "quot") return '"';
+    if (name === "apos") return "'";
+    const code = name.startsWith("#x") ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
+    return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+      ? String.fromCodePoint(code)
+      : whole;
   });
 }
 

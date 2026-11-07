@@ -36,9 +36,9 @@ function handler(
   return {
     handle: createAgentMessageRouteHandler({
       windowAuthorityStore: {
-        authenticate: (capability: string) => {
+        authenticateAuthority: (capability: string) => {
           if (!authorized || capability === "") throw new Error("unauthorized");
-          return "00000000-0000-4000-8000-000000000001" as never;
+          return { windowId: "00000000-0000-4000-8000-000000000001" };
         },
       } as never,
       projection,
@@ -71,7 +71,15 @@ describe("the agent message facts route", () => {
       maxOpenInFlightPerSender: MAX_OPEN_AGENT_MESSAGES_PER_SENDER,
       delivered: 0,
       refused: 0,
-      recent: [],
+      recent: [
+        {
+          messageId: sent.messageId,
+          senderThreadId: sent.senderThreadId,
+          recipientThreadId: sent.recipientThreadId,
+          state: "in-flight",
+          occurredAt: sent.occurredAt,
+        },
+      ],
     });
   });
 

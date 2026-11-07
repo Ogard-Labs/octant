@@ -1,3 +1,4 @@
+import { SideChatDraftPrepared } from "./sideChatReturn";
 import { Schema } from "effect";
 import { ChatThreadId } from "./chat";
 import { UtcTimestamp } from "./events";
@@ -194,6 +195,14 @@ export const MAX_SIDE_CHAT_TOOL_READ_LINES = 400;
  */
 export const ThreadMentionCommand = Schema.Union(
   Schema.Struct({
+    kind: Schema.Literal("prepare-side-chat-return"),
+    requestId: ThreadMentionRequestId,
+    sidecarThreadId: MentionableThreadId,
+    expectedSourceThreadId: MentionableThreadId,
+    turnId: Schema.UUID,
+    attemptId: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("search-mentions"),
     requestId: ThreadMentionRequestId,
     query: Schema.String.pipe(Schema.maxLength(200)),
@@ -222,6 +231,9 @@ export type ThreadMentionCommand = typeof ThreadMentionCommand.Type;
  * caller already had.
  */
 export const ThreadMentionCommandResult = Schema.Union(
+  Schema.Struct({ ...SideChatDraftPrepared.fields, requestId: ThreadMentionRequestId }).annotations(
+    strict,
+  ),
   Schema.Struct({
     kind: Schema.Literal("mentions-searched"),
     requestId: ThreadMentionRequestId,

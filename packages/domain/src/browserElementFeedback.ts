@@ -166,7 +166,7 @@ export function readBrowserFeedbackElement(argument: {
   const role = element.getAttribute("role")?.trim();
   return {
     element: {
-      selector: path.join(" > ").slice(0, 1_024),
+      selector: path.length === 0 ? tag : path.join(" > ").slice(0, 1_024),
       role: (role || tag).slice(0, 64),
       ...(name === undefined || name.length === 0 ? {} : { accessibleName: name.slice(0, 512) }),
       ...(text.length === 0 ? {} : { text }),

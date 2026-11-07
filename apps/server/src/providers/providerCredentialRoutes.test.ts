@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decodeProviderInstance, decodeWindowId, type ProviderInstance } from "@octant/contracts";
 import { addApiKey } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import type { ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyJournal } from "./providerKeyJournal";
 import { createProviderCredentialRouteHandler } from "./providerCredentialRoutes";
 
@@ -57,9 +58,11 @@ function setup(
     readonly onRefuse?: (instances: ProviderInstance[]) => void;
     readonly providerRefusal?: string;
     readonly onRemoveProvider?: (instance: ProviderInstance) => void;
+    readonly keyReference?: ProviderKeyReference | { readonly rejects: unknown };
   } = {},
 ) {
   const records: Array<Record<string, unknown>> = [];
+  const reads: string[] = [];
   const journal: ProviderKeyJournal = {
     request: (request) => {
       if (input.journalFails === true) throw new Error("journal unavailable");
@@ -90,6 +93,15 @@ function setup(
     readProviderInstances: () => instances,
     readRemovedProviderInstanceIds: () => [REMOVED_ID],
     journal,
+    ...(input.keyReference === undefined
+      ? {}
+      : {
+          readKeyReference: async () => {
+            const reference = input.keyReference ?? { status: "none" };
+            if ("rejects" in reference) throw reference.rejects;
+            return reference;
+          },
+        }),
     reprobe: async (_window, instance) => input.onReprobe?.(instance),
     removeProvider: async (_window, instance) => {
       if (input.providerRefusal !== undefined) {
@@ -119,10 +131,13 @@ function setup(
                       stored.delete(id);
                     },
                   },
-            readStored: async (id) => stored.get(id) ?? "",
+            readStored: async (id) => {
+              reads.push(id);
+              return stored.get(id) ?? "";
+            },
           },
   });
-  return { handle, stored, instances, records };
+  return { handle, stored, instances, records, reads };
 }
 
 function hostLocal(
@@ -557,5 +572,167 @@ describe("host-local provider key routes", () => {
     expect(noCapability?.status).toBe(401);
     expect(instances).toHaveLength(1);
     expect(records).toEqual([]);
+  });
+});
+
+describe("host-local provider key pool routes", () => {
+  const keys = (path: string, body: unknown) =>
+    hostLocal(`/api/desktop/provider-credentials/keys/${path}`, body);
+
+  it("adds, renames, reorders, activates and removes keys, answering labels only", async () => {
+    const { handle, stored, records } = setup();
+    const first = await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }));
+    expect(first?.status).toBe(200);
+    const added = (await first?.json()) as { key: { id: string; label: string; active: boolean } };
+    expect(added.key).toMatchObject({ label: "Key 1", active: true });
+    expect(JSON.stringify(added)).not.toContain(KEY);
+    const second = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2`, label: "Backup" }))
+    )?.json()) as { key: { id: string } };
+    for (const [path, body] of [
+      ["rename", { instance: GATEWAY_ID, keyId: added.key.id, label: "Primary" }],
+      ["move", { instance: GATEWAY_ID, keyId: second.key.id, direction: "up" }],
+      ["set-active", { instance: GATEWAY_ID, keyId: added.key.id }],
+      ["replace", { instance: GATEWAY_ID, keyId: second.key.id, credential: `${KEY}-3` }],
+    ] as const) {
+      const response = await handle(keys(path, body));
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({ outcome: "changed" });
+    }
+    const list = (await (await handle(keys("list", { instance: GATEWAY_ID })))?.json()) as {
+      keys: Array<{ id: string; label: string; active: boolean }>;
+    };
+    expect(list.keys.map(({ label, active }) => ({ label, active }))).toEqual([
+      { label: "Backup", active: false },
+      { label: "Primary", active: true },
+    ]);
+    expect(stored.get(GATEWAY_ID)).toContain(`${KEY}-3`);
+    for (const key of list.keys)
+      await handle(keys("remove", { instance: GATEWAY_ID, keyId: key.id }));
+    expect(stored.has(GATEWAY_ID)).toBe(false);
+    // Each write is journaled before the store is touched, the last as a removal.
+    expect(records.filter((record) => record.name === "requested")).toHaveLength(8);
+    expect(records.at(-2)).toMatchObject({ name: "requested", action: "remove" });
+    expect(JSON.stringify(records)).not.toContain(KEY);
+  });
+
+  it("answers the pool's own refusal for a key that is no longer stored", async () => {
+    const { handle } = setup();
+    const response = await handle(
+      keys("rename", { instance: GATEWAY_ID, keyId: "default", label: "Work" }),
+    );
+    expect(response?.status).toBe(409);
+    expect(await response?.json()).toEqual({
+      category: "api-key-pool",
+      reason: "unknown-key",
+      message: "That API key is no longer stored.",
+    });
+  });
+
+  it("never replaces or clears a key that points into a linked secret store", async () => {
+    const { handle, stored, records, reads } = setup({ keyReference: { status: "linked" } });
+    stored.set(GATEWAY_ID, "linked-pointer");
+    for (const request of [
+      keys("add", { instance: GATEWAY_ID, credential: KEY }),
+      keys("remove", { instance: GATEWAY_ID, keyId: "default" }),
+      hostLocal("/api/desktop/provider-credentials/set", {
+        instance: GATEWAY_ID,
+        credential: KEY,
+        replace: true,
+      }),
+      hostLocal("/api/desktop/provider-credentials/remove", { instance: GATEWAY_ID }),
+    ]) {
+      const response = await handle(request);
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toMatchObject({ category: "linked-secret" });
+    }
+    expect(await (await handle(keys("list", { instance: GATEWAY_ID })))?.json()).toEqual({
+      keys: [],
+    });
+    expect(stored.get(GATEWAY_ID)).toBe("linked-pointer");
+    expect(records).toEqual([]);
+    // The linked item itself is never read, so no unlock prompt is raised.
+    expect(reads).toEqual([]);
+  });
+
+  it("changes nothing when the change cannot be journaled, and passes on the keyring's reason", async () => {
+    const unjournaled = setup({ journalFails: true });
+    expect(
+      (await unjournaled.handle(keys("add", { instance: GATEWAY_ID, credential: KEY })))?.status,
+    ).toBe(503);
+    expect(unjournaled.stored.size).toBe(0);
+    const locked = setup({ failingStore: true, failingCause: "locked" });
+    const response = await locked.handle(keys("list", { instance: GATEWAY_ID }));
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({
+      category: "credential-store-unavailable",
+      cause: "locked",
+    });
+  });
+
+  it("passes on the keyring's reason when the key's link cannot be read", async () => {
+    for (const keyReference of [
+      { status: "unavailable", cause: "locked" } as const,
+      { rejects: { category: "unavailable", cause: "locked" } },
+    ]) {
+      const { handle, records } = setup({ keyReference });
+      for (const request of [
+        keys("list", { instance: GATEWAY_ID }),
+        keys("add", { instance: GATEWAY_ID, credential: KEY }),
+        hostLocal("/api/desktop/provider-credentials/set", {
+          instance: GATEWAY_ID,
+          credential: KEY,
+          replace: true,
+        }),
+      ]) {
+        const response = await handle(request);
+        expect(response?.status).toBe(503);
+        expect(await response?.json()).toMatchObject({
+          category: "credential-store-unavailable",
+          cause: "locked",
+        });
+      }
+      expect(records).toEqual([]);
+    }
+  });
+
+  it("refuses a key over the broker's bound as too large, as set does", async () => {
+    const { handle, stored } = setup();
+    const large = "k".repeat(12 * 1_024 + 1);
+    for (const request of [
+      keys("add", { instance: GATEWAY_ID, credential: large }),
+      keys("replace", { instance: GATEWAY_ID, keyId: "default", credential: large }),
+    ]) {
+      const response = await handle(request);
+      expect(response?.status).toBe(413);
+      expect(await response?.json()).toMatchObject({ category: "too-large" });
+    }
+    expect(stored.size).toBe(0);
+  });
+
+  it("refuses a malformed request, an unknown provider and one without a stored key", async () => {
+    const { handle } = setup({
+      instances: [gateway(GATEWAY_ID, "Private gateway"), gateway(OTHER_ID, "Open", "none")],
+    });
+    for (const [request, status] of [
+      [keys("add", { instance: GATEWAY_ID, credential: KEY, extra: true }), 400],
+      [keys("move", { instance: GATEWAY_ID, keyId: "default", direction: "left" }), 400],
+      [keys("remove", { instance: GATEWAY_ID, keyId: "not-a-key" }), 400],
+      [keys("list", { instance: REMOVED_ID }), 404],
+      [keys("add", { instance: OTHER_ID, credential: KEY }), 409],
+    ] as const)
+      expect((await handle(request))?.status).toBe(status);
+  });
+
+  it("refuses a caller without the bridge secret or a native main's window authority", async () => {
+    const { handle } = setup();
+    const response = await handle(
+      hostLocal(
+        "/api/desktop/provider-credentials/keys/list",
+        { instance: GATEWAY_ID },
+        { headers: { "x-octant-desktop-secret": "wrong" } },
+      ),
+    );
+    expect(response?.status).toBe(401);
   });
 });

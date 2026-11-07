@@ -55,8 +55,10 @@ export function CreateFromTerminalSessionPicker(props: {
   return (
     <div className="create-from-issue">
       <p className="octant-popover-empty">
-        Sessions from Claude Code and Codex in this Project's folder. The new thread starts with the
-        conversation as read-only history.
+        Sessions from Claude Code and Codex in this Project's folders. Choose a text handoff to
+        start a new session with read-only visible conversation. Native adoption is unavailable
+        because this host cannot verify the source account and exclusive session ownership. Original
+        inputs, tool activity and hidden reasoning are omitted.
       </p>
       {listing.kind === "loading" ? (
         <p className="octant-popover-empty" role="status">
@@ -88,7 +90,14 @@ export function CreateFromTerminalSessionPicker(props: {
                     type="button"
                     variant="bare"
                   >
-                    <span className="github-picker__option-name">{session.title}</span>
+                    <span className="terminal-session-picker__source">
+                      <span className="github-picker__option-name">{session.title}</span>
+                      {session.workingDirectory === undefined ? null : (
+                        <span className="terminal-session-picker__folder">
+                          {session.workingDirectory}
+                        </span>
+                      )}
+                    </span>
                     <span className="github-picker__option-meta terminal-session-picker__meta">
                       {TERMINAL_SESSION_TOOL_NAMES[session.provider]} ·{" "}
                       <time dateTime={session.updatedAt}>

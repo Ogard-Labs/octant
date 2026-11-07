@@ -587,6 +587,7 @@ export class ProductFeedbackService {
   deliver(input: {
     readonly threadId: string;
     readonly operationId: string;
+    readonly maxImages?: number;
     readonly selected?: ReadonlyArray<{ readonly noteId: string; readonly version: number }>;
   }): ReadonlyArray<ProductFeedbackNote> {
     const all = this.pendingForTurn(input.threadId);
@@ -604,6 +605,13 @@ export class ProductFeedbackService {
       selected === undefined
         ? all
         : all.filter((note) => selected.some((ref) => ref.noteId === note.id));
+    if (
+      input.maxImages !== undefined &&
+      (!Number.isSafeInteger(input.maxImages) ||
+        input.maxImages < 0 ||
+        pending.filter((note) => note.crop !== undefined).length > input.maxImages)
+    )
+      return [];
     if (selected !== undefined && this.#options.transaction === undefined) return [];
     const claim = () => {
       const delivered: ProductFeedbackNote[] = [];

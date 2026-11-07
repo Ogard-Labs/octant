@@ -18,6 +18,8 @@ import {
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { IconButton } from "./IconButton";
+import { ApplicationIdentity } from "./ApplicationIdentity";
+import type { OctantHostBridge } from "./hostBridge";
 import type { WindowHistory } from "./windowHistory";
 import { WindowHistoryButtons } from "./WindowHistoryButtons";
 import { ModeSwitcher } from "./ModeSwitcher";
@@ -35,6 +37,7 @@ import {
 } from "./navigationModel";
 
 export interface ShellSidebarProps {
+  readonly applicationIdentity?: NonNullable<OctantHostBridge["applicationIdentity"]>;
   readonly backgroundCoveredByWorkspace?: boolean;
   readonly activeDestination?: SidebarNavigationProps["activeDestination"];
   /**
@@ -438,6 +441,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 />
               )}
               <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
+            </div>
+          ) : null}
+          {props.applicationIdentity !== undefined ? (
+            <div className="sidebar__application-identity">
+              <ApplicationIdentity
+                productName={props.applicationIdentity.productName}
+                testData={props.applicationIdentity.data === "test-data"}
+              />
             </div>
           ) : null}
           <div className="sidebar__content window-no-drag" data-octant-sidebar-content>

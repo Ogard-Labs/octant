@@ -1,4 +1,7 @@
+import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
+import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
+import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
   AgentRunParentThreadId,
@@ -9,6 +12,7 @@ import {
   decodeThreadMessageQueueScope,
   decodeWorkThreadId,
   LOCAL_HOST_ID,
+  HubMemberId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -23,7 +27,10 @@ import { createSignInHostPorts } from "../hub/signInHostPorts";
 import { SignInService } from "../hub/signInService";
 import { SpokeSignInService } from "../hub/spokeSignInService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
-import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
+import {
+  makeProviderKeyReferenceReader,
+  makePushPlatformCredentialBrokerClient,
+} from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
@@ -72,7 +79,7 @@ import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
-import { createReadingPostureHost } from "../hub/ownerPostureHost";
+import { createOwnerPostureHost } from "../hub/ownerPostureHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
@@ -109,6 +116,8 @@ import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListen
 import {
   boundHostRuntimeDiagnostics,
   createReleaseFeedVerifier,
+  decodeKeychainServiceFamily,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   type HostRuntimeDiagnostics,
 } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -116,6 +125,7 @@ import type { AuthorityWiring } from "./authority";
 import type { BrowserWiring } from "./browser";
 import type { FoundationsWiring } from "./foundations";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
+import type { HarnessWiring } from "./harness";
 import type { HarnessStateWiring } from "./harnessState";
 import { checkDelegationParent } from "../hub/delegationParentCheck";
 import type { IntegrationsWiring } from "./integrations";
@@ -142,10 +152,11 @@ const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
-export type RemoteDependencies = Pick<
+export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void } & Pick<
   ServerStart,
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
+  Pick<HarnessWiring, "beginGoogleCliChange"> &
   Pick<AuthorityWiring, "browserCaptureStore" | "personMemory" | "windowAuthorityStore"> &
   Pick<
     AgentRunsWiring,
@@ -165,8 +176,14 @@ export type RemoteDependencies = Pick<
     | "providerDataDirectory"
     | "providerService"
   > &
-  Pick<WorkspaceWiring, "shellService"> &
-  Pick<BrowserWiring, "browserExtensionService" | "browserFlowService" | "browserProfileService"> &
+  Pick<WorkspaceWiring, "shellService" | "projectService"> &
+  Pick<
+    BrowserWiring,
+    | "browserAutomationService"
+    | "browserExtensionService"
+    | "browserFlowService"
+    | "browserProfileService"
+  > &
   Pick<
     CodeToolingWiring,
     | "debugConfigurationApprovals"
@@ -195,7 +212,7 @@ export type RemoteDependencies = Pick<
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime">;
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
 
@@ -211,6 +228,7 @@ function deviceIsActive(
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
+    browserAutomationService,
     browserExtensionService,
     browserFlowService,
     browserProfileService,
@@ -440,7 +458,8 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const hubStateStore = createHubStateStore(providerDataDirectory);
   const hubTransport = createPinnedHubTransport();
-  const recordHubMembership = createHubMembershipJournal({
+  let ownerBrowserAuthorityChanged: (() => void) | undefined;
+  const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
     connection: persistence.connection,
     hostId: () => String(resolveHubIdentity().hostId),
@@ -448,6 +467,13 @@ export function wireRemote(deps: RemoteDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
   });
+  const recordHubMembership = (change: Parameters<typeof writeHubMembership>[0]): void => {
+    try {
+      writeHubMembership(change);
+    } finally {
+      ownerBrowserAuthorityChanged?.();
+    }
+  };
   const hubPairing = (): HubPairingPort | undefined => {
     const gateway = currentRemoteGateway;
     const administration = gateway?.localDeviceAdministration();
@@ -894,11 +920,45 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
+  const ownerBrowserControlService = new OwnerBrowserControlService({
+    host: browserAutomationService.ownerBrowserHost({
+      hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),
+      threadTitle: (threadId) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        return thread?.lifecycle === "active" ? thread.title : undefined;
+      },
+    }),
+    now: Date.now,
+    timestamp: () => new Date().toISOString(),
+    uuid: randomUUID,
+    onReclaim: (listener) => browserAutomationService.onOwnerControlReclaimed(listener),
+    onAuthorityChange: (listener) => {
+      ownerBrowserAuthorityChanged = listener;
+      const removeCommitted = persistence.journal.subscribeCommitted(listener);
+      return () => {
+        if (ownerBrowserAuthorityChanged === listener) ownerBrowserAuthorityChanged = undefined;
+        removeCommitted();
+      };
+    },
+    audit: createOwnerBrowserJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      localActorId: OCTANT_LOCAL_ACTOR_ID,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    }),
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
+    browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,
     unlock: ownerUnlock,
-    postures: createReadingPostureHost({
+    postures: createOwnerPostureHost({
+      readCodeThreads: () => persistence.readCodeThreads(),
+      readProjects: () => persistence.readProjects(),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      code: deps.codeService instanceof CodeService ? deps.codeService : undefined,
+      projects: deps.projectService,
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),
     }),
@@ -941,6 +1001,14 @@ export function wireRemote(deps: RemoteDependencies) {
         ? undefined
         : { store: credentialResolver, readStored: (id) => credentialBroker.resolve(id) },
     journal: providerKeyChangeJournal,
+    ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? {}
+      : {
+          readKeyReference: makeProviderKeyReferenceReader({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+        }),
     reprobe: async (windowId, instance) => {
       await providerService.probe(windowId, instance.id, { fresh: true });
     },
@@ -964,6 +1032,10 @@ export function wireRemote(deps: RemoteDependencies) {
   // the host journals each link and each change to a key's reference.
   const secretStoresRoutes = createSecretStoresRouteHandler({
     service: createSecretStoresService({
+      beginGoogleCliChange: deps.beginGoogleCliChange,
+      ...(deps.onSecretStoreLinkChange === undefined
+        ? {}
+        : { onLinkChange: deps.onSecretStoreLinkChange }),
       broker:
         options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? undefined
@@ -1049,6 +1121,22 @@ export function wireRemote(deps: RemoteDependencies) {
       })),
     forgetWorkThread: (threadId) => {
       workThreadProjection.forget(threadId as never);
+    },
+    // A purged thread's own Reply detail level goes with it. The purge has
+    // already happened; a settings write that loses a race is left to the
+    // 500-entry bound rather than failing the purge.
+    forgetThreadPresentation: (threads) => {
+      try {
+        shellService.forgetThreadReplyDetails(
+          threads.map((thread) => ({ mode: thread.mode, threadId: String(thread.threadId) })),
+        );
+      } catch (error) {
+        console.warn(
+          `Octant could not forget a purged thread's reply detail: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     },
     forgetCanvases: (canvasIds) => {
       persistence.canvasProjection.evict(canvasIds);
@@ -1202,7 +1290,12 @@ export function wireRemote(deps: RemoteDependencies) {
               ? {}
               : { browserProfilesDirectory: process.env.OCTANT_BROWSER_PROFILES_DIRECTORY }),
             ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
-              ? { credentialStore: desktopCredentialStore() }
+              ? {
+                  credentialStore: desktopCredentialStore(
+                    decodeKeychainServiceFamily(process.env[KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]) ??
+                      "octant",
+                  ),
+                }
               : {}),
             listProjects: () =>
               persistence.readProjects().map((project) => ({
@@ -1261,6 +1354,7 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   });
   return {
+    ownerBrowserControlService,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     externalContentRoutes,

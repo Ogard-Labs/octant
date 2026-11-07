@@ -75,6 +75,64 @@ function renderLibrary(overrides: Partial<React.ComponentProps<typeof LibraryVie
 }
 
 describe("the library view", () => {
+  it("adds Paper through the local package route and keeps Desktop/file readiness unclaimed", async () => {
+    const user = userEvent.setup();
+    const addUserMcpServer = vi.fn(async () => ({ kind: "extension-state-updated", snapshot }));
+    const mcpServerSignIn = vi.fn();
+    renderLibrary({
+      connectClient: { addUserMcpServer, mcpServerSignIn } as never,
+      localHost: true,
+    });
+    await user.click(screen.getByRole("button", { name: "Set up… Paper" }));
+    const dialog = screen.getByRole("dialog", { name: "Paper" });
+    expect(within(dialog).getByText(/availability has not been checked/)).toBeTruthy();
+    expect(within(dialog).getByText(/CLI is optional/)).toBeTruthy();
+    expect(within(dialog).getByText(/If Desktop is closed or no file is open/)).toBeTruthy();
+    expect(addUserMcpServer).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Add local server" }));
+    expect(addUserMcpServer).toHaveBeenCalledWith({
+      name: "Paper",
+      localSetupId: "paper",
+      server: { type: "streamable-http", url: "http://127.0.0.1:29979/mcp", headers: [] },
+    });
+    expect(mcpServerSignIn).not.toHaveBeenCalled();
+  });
+
+  it("keeps Paper uninstalled with a retry action when the local add is unavailable", async () => {
+    const user = userEvent.setup();
+    const onConnected = vi.fn();
+    const addUserMcpServer = vi.fn(async () => ({
+      kind: "extension-command-failed",
+      failure: { category: "unavailable", message: "Local server setup is unavailable." },
+    }));
+    renderLibrary({
+      connectClient: { addUserMcpServer, mcpServerSignIn: vi.fn() } as never,
+      localHost: true,
+      onConnected,
+    });
+    await user.click(screen.getByRole("button", { name: "Set up… Paper" }));
+    const dialog = screen.getByRole("dialog", { name: "Paper" });
+    await user.click(within(dialog).getByRole("button", { name: "Add local server" }));
+    expect(within(dialog).getByText("Local server setup is unavailable.")).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "Add local server" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(onConnected).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Paper setup local to the host window", async () => {
+    const user = userEvent.setup();
+    renderLibrary({ connectClient, localHost: false });
+    await user.click(screen.getByRole("button", { name: "Set up… Paper" }));
+    const dialog = screen.getByRole("dialog", { name: "Paper" });
+    expect(
+      within(dialog).getByRole("button", { name: "Add local server" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      within(dialog).getByText(/Add the local server from the Octant window on this host/),
+    ).toBeTruthy();
+  });
+
   it("leads with the hand-picked connectors, then installed items, then the catalog's categories", () => {
     renderLibrary({ connectClient, localHost: true });
     const lead = screen.getByRole("region", { name: "Featured" });

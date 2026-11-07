@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { constants as osConstants, homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -83,6 +83,7 @@ export interface TerminalProcessHandle {
 }
 
 export interface TerminalLaunchInput {
+  readonly command?: string;
   readonly shell: string;
   readonly cwd: string;
   /**
@@ -378,7 +379,7 @@ export class TerminalProcessPort {
         // A login shell, as the platform's own terminal opens one: the login
         // files are where PATH is assembled, and without them the tools a
         // person installed were missing from a shell that looked like theirs.
-        args: ["-l"],
+        args: input.command === undefined ? ["-l"] : ["-lc", input.command],
         boundRoot: input.cwd,
         ...(input.extraFolders === undefined || input.extraFolders.length === 0
           ? {}
@@ -653,9 +654,12 @@ function spawnBunPty(shell: string, args: readonly string[], options: PtyForkOpt
     onExit: (_subprocess, exitCode, signalCode) => {
       const trailing = decoder.decode();
       if (trailing.length > 0) publishData(trailing);
+      // Bun reports the terminating signal by name; the port keeps node-pty's
+      // numeric form so both runtimes publish the same exit event.
+      const signal = typeof signalCode === "string" ? osConstants.signals[signalCode] : signalCode;
       exitEvent = {
         exitCode: exitCode ?? 1,
-        ...(signalCode === null ? {} : { signal: signalCode }),
+        ...(signal === null || signal === undefined ? {} : { signal }),
       };
       for (const listener of exitListeners) listener(exitEvent);
       terminal?.close();
@@ -717,6 +721,12 @@ function resolveNodePtyPackageRoot(): string {
 }
 
 function validateLaunch(input: TerminalLaunchInput): void {
+  if (
+    input.command !== undefined &&
+    (input.command.includes("\0") ||
+      Buffer.byteLength(input.command, "utf8") > MAX_TERMINAL_INPUT_BYTES)
+  )
+    throw new Error("Terminal command is invalid.");
   if (!isAbsolute(input.shell) || !isAbsolute(input.cwd))
     throw new Error("Terminal launch is invalid.");
   validateGeometry(input.columns, input.rows);

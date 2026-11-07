@@ -1,3 +1,43 @@
+.provider-cloud-sessions {
+  min-width: 0;
+  margin-block: var(--oct-space-3);
+  padding-block: var(--oct-space-3);
+  border-top: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
+}
+
+.provider-cloud-sessions summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.provider-cloud-sessions > p,
+.provider-cloud-sessions > label,
+.provider-cloud-sessions > button {
+  margin-block: var(--oct-space-2);
+}
+
+.provider-cloud-sessions label {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.provider-cloud-sessions pre {
+  max-height: 18rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+}
+
+.provider-cloud-sessions article {
+  margin-top: var(--oct-space-3);
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border);
+}
+
 .code-file-explorer,
 .code-editor-pane,
 .code-diff-pane,
@@ -585,6 +625,35 @@ html:not([data-octant-reduced-transparency="true"])
 .code-editor-pane__language p {
   min-width: 0;
   margin: 0;
+}
+
+/* Reference results own their overflow; the editor and sibling panes keep their scrollers. */
+.code-editor-pane__references {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(40%, 24rem);
+  min-width: 0;
+  overflow: auto;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+  font-size: var(--oct-text-xs);
+}
+.code-editor-pane__reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+.code-editor-pane__references ul {
+  margin: var(--oct-space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.code-editor-pane__references button,
+.code-editor-pane__references p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .code-editor-pane__warning,
@@ -2055,6 +2124,15 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   font-size: var(--oct-text-xs);
 }
 
+.code-checkout-bar:has(.code-checkout-bar__working-folder) {
+  flex-wrap: wrap;
+}
+.code-checkout-bar__working-folder {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .code-checkout-bar__identity {
   display: flex;
   flex: 1 1 auto;
@@ -2637,4 +2715,32 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-2);
+}
+
+.code-diff-pane__hunk-selection {
+  min-width: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-diff-pane__hunk-selection > summary {
+  cursor: pointer;
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-diff-pane__hunk-selection > section {
+  margin-block: var(--oct-space-4);
+}
+
+.code-diff-pane__hunk-selection .check {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: center;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--oct-space-2);
+}
+
+/* The owned references list shares the pane with the editor. */
+.code-editor-pane:has(> .code-editor-pane__references) > [aria-label^="Editor for"] {
+  min-height: 0;
 }

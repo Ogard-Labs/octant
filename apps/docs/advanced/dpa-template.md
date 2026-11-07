@@ -28,26 +28,54 @@ controls. For that on-device store:
 
 A data processing agreement with Ogard Labs is therefore **not** the ordinary
 document for single-machine use of the technical preview. This template
-exists for the narrower case where Ogard Labs would process personal data
+exists for the narrower case where Ogard Labs processes personal data
 **on behalf of** a customer in connection with an Octant-operated hosted
-component that actually ships. Hosted relay is outside the current release
-boundary. Until such a component exists and counsel confirms the processing
-relationship, leave this draft unused as a live contract.
+component. The public Canvas share service (below) is that component and is
+in the current release boundary, so this DPA is its instrument from launch;
+hosted relay remains outside the release boundary. Until counsel signs it,
+this page remains a draft, not a live contract.
 
 A later shared-host design would still place controllership with the team
 that runs the host, not with Ogard Labs by default. That design is not the
 current preview.
 
+### The first hosted component in the release scope: public Canvas links
+
+The public Canvas share service (`https://canvas.octant.sh`, in the
+`octant-webapp` repository) is the one Octant-operated component in the
+current release boundary. It is off by default, and nothing reaches it
+until a person turns Public links on and approves a publish. When it does:
+
+- The **publisher stays controller** of the Canvas content they publish.
+  The payload is a frozen, filtered copy: no host, Project, thread, or
+  Canvas ids, no file contents, and a Canvas holding an action block is
+  refused outright.
+- **Ogard Labs operates the service**, stores the payload, and can read it
+  to draw the page and link previews — so for that published content Ogard
+  Labs is the **processor** acting on the publisher's documented
+  instruction (the approved publish card), and this DPA is the instrument
+  for it. Annex A below carries the service's current values; counsel
+  confirms them at sign-off.
+- The service is hosted in **Norway (EEA)** on Gigahost AS, with encrypted
+  offsite backups on Hetzner in Finland (EU), so no transfer tool is needed
+  while it stays EEA-hosted; see the [SCC position](/advanced/scc-position).
+  Moving it outside the EEA/UK requires the controller-to-processor SCC
+  module before that traffic starts.
+- The service writes no IP or user-agent logs and keeps an aggregate view
+  count; revoke, expiry, or deleting the Canvas deletes the content, with a
+  content-free tombstone kept 90 days. See
+  [Share a Canvas with a public link](/guide/public-links).
+
 ## Parties and roles
 
-| Field                 | Placeholder                                             |
-| --------------------- | ------------------------------------------------------- |
-| Controller (customer) | `[CUSTOMER LEGAL NAME]`                                 |
-| Controller contact    | `[CUSTOMER DPO / PRIVACY CONTACT]`                      |
-| Processor             | `[OGARD LABS LEGAL ENTITY, TO BE CONFIRMED BY COUNSEL]` |
-| Processor contact     | `[PROCESSOR PRIVACY CONTACT]`                           |
-| Effective date        | `[YYYY-MM-DD]`                                          |
-| Governing agreement   | `[MASTER AGREEMENT / ORDER / EULA REFERENCE]`           |
+| Field                 | Value                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Controller (customer) | `[CUSTOMER LEGAL NAME]`                                                                                            |
+| Controller contact    | `[CUSTOMER DPO / PRIVACY CONTACT]`                                                                                 |
+| Processor             | Ogard Labs, organisation number 996 198 510, Stavanger, Norway (proposed; counsel confirms the contracting entity) |
+| Processor contact     | `hello@octant.sh` (proposed; counsel confirms)                                                                     |
+| Effective date        | `[YYYY-MM-DD]`                                                                                                     |
+| Governing agreement   | `[MASTER AGREEMENT / ORDER / EULA REFERENCE]`                                                                      |
 
 **Roles for the on-device journal.** Even when this DPA is in force for a
 hosted component, the customer (or the named host-owner controller on a
@@ -81,7 +109,7 @@ Complete only for personal data that actually enters the hosted component.
 | Special categories       | `[NONE, or counsel-approved description]`                                                      |
 | Processing operations    | `[storage, transmission, support access; list only what the component does]`                   |
 
-Do not list journal transcripts, credential-store secrets, or provider payloads as
+Do not list journal transcripts, Keychain secrets, or provider payloads as
 Octant-processed categories unless the hosted component truly receives them.
 In the technical preview those stay on the host or travel only to providers
 the customer configured.
@@ -97,7 +125,7 @@ that constrain those clauses:
 2. **Confidentiality.** Persons authorized to process are bound to
    confidentiality.
 3. **Security.** Apply measures appropriate to the hosted component's actual
-   threat model. Owner-only host permissions and credential-store handling on the
+   threat model. Owner-only host permissions and Keychain handling on the
    customer's machine remain the customer's responsibility for local data.
 4. **Sub-processors.** Engage further processors only with prior notice and
    the customer's ability to object, under a written contract that imposes
@@ -118,16 +146,24 @@ that constrain those clauses:
    data outside the EEA/UK, use a lawful transfer tool. See the
    [SCC position](/advanced/scc-position).
 
-## Annex A: processing description (blank)
+## Annex A: processing description
 
-| Item                                          | Value                                |
-| --------------------------------------------- | ------------------------------------ |
-| Hosted component name                         | `[NAME OR "NONE: DPA NOT IN FORCE"]` |
-| Processing purposes                           | `[LIST]`                             |
-| Retention                                     | `[DURATION / TRIGGER]`               |
-| Sub-processors (Ogard Labs)                   | `[LIST OR NONE]`                     |
-| Transfer tools                                | `[SCC MODULES / ADEQUACY / NONE]`    |
-| Technical and organizational measures summary | `[POINTER TO SECURITY EXHIBIT]`      |
+For the public Canvas share service (the one hosted component in the current
+release scope), the current draft values are:
+
+| Item                                          | Value                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hosted component name                         | Public Canvas share service (`https://canvas.octant.sh`; self-hosted URLs are the customer's own deployment, not an Ogard Labs component)                                                                                                                                                                                                                                      |
+| Processing purposes                           | Store, serve, draw, and link-preview Canvas share documents the publisher approved; honour update, revoke, expiry, password, and abuse-report requests; count aggregate views                                                                                                                                                                                                  |
+| Retention                                     | Until the link expires (default 30 days, at most 365, or no expiry if the publisher chooses it) or is revoked/deleted; then a content-free tombstone (id and time) for 90 days                                                                                                                                                                                                 |
+| Sub-processors (Ogard Labs)                   | Gigahost AS — server hosting in Norway (EEA); Hetzner Online GmbH — encrypted offsite backups in Finland (EU)                                                                                                                                                                                                                                                                  |
+| Transfer tools                                | None while hosted in the EEA. If the service is ever moved outside the EEA/UK or a third-country sub-processor is added, execute the matching SCC module before that processing starts (see [SCC position](/advanced/scc-position))                                                                                                                                            |
+| Technical and organizational measures summary | TLS in front of two origins that must differ (public API/viewer and user-content frames); viewer CSP with no third-party loads; `noindex`, `no-referrer`; strict contract decoding; payload size caps; per-IP in-memory rate limits with no IP/user-agent logs; owner secret and password stored only as hashes; operator takedown via a loopback listener with a bearer token |
+
+For any later hosted component, replace these rows with that component's real
+values — `[NAME]`, `[LIST]`, `[DURATION / TRIGGER]`, `[LIST OR NONE]`,
+`[SCC MODULES / ADEQUACY / NONE]`, `[POINTER TO SECURITY EXHIBIT]` — or write
+`NONE: DPA NOT IN FORCE` when no such component exists.
 
 ## Annex B: relationship to local-first software
 

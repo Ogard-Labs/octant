@@ -668,7 +668,20 @@ function AgentsCenterDetail(props: {
         </div>
         <div>
           <dt>Workspace</dt>
-          <dd>{agentRunWorkspaceLabel(props.summary.workspaceKind)}</dd>
+          <dd>
+            {agentRunWorkspaceLabel(props.summary.workspaceKind)}
+            {props.summary.workspaceKind !== "code-worktree" ? null : props.summary.source ===
+              undefined ? (
+              <p>Committed revision</p>
+            ) : (
+              <p>
+                Current edits snapshot <code>{props.summary.source.id}</code>
+                <br />
+                Base <code>{props.summary.source.baseRevision.slice(0, 12)}</code> ·{" "}
+                {props.summary.source.files.length} changed files
+              </p>
+            )}
+          </dd>
         </div>
         <div>
           <dt>Authority</dt>

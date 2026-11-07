@@ -1,3 +1,4 @@
+export * from "./questionnaire";
 export * from "./chat";
 export * from "./code";
 export * from "./codePlanner";
@@ -12,6 +13,7 @@ export * from "./codeTestDefinitions";
 export * from "./context";
 export * from "./contextHandoff";
 export * from "./contextRpc";
+export * from "./taskAccess";
 export * from "./workArtifacts";
 export * from "./workFileListing";
 export * from "./workBoard";
@@ -196,3 +198,14 @@ export * from "./threadMessageQueue";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";
+
+export * from "./providerCloudSessions";
+export * from "./sideChatReturn";
+export * from "./gitHunks";
+export * from "./browserCredentialUse";
+
+export * from "./browserPageScript";
+
+export * from "./ownerBrowser";
+
+export * from "./childWorktreeSources";

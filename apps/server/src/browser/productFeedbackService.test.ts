@@ -311,6 +311,20 @@ describe("pointing at the running product", () => {
 });
 
 describe("handing a thread's notes to the turn about to run", () => {
+  it("keeps feedback pending when continuation inputs leave no room for its captured picture", () => {
+    const note = storedNote({
+      crop: { contentId: ids.content, digest: "a".repeat(64), byteLength: 64 },
+    });
+    const { service, journal } = harness({ notes: [note] });
+    expect(
+      service.deliver({ threadId: ids.thread, operationId: ids.operation, maxImages: 0 }),
+    ).toEqual([]);
+    expect(journal.append).not.toHaveBeenCalled();
+    expect(
+      service.deliver({ threadId: ids.thread, operationId: ids.operation, maxImages: 1 }),
+    ).toHaveLength(1);
+  });
+
   it("marks each note delivered against the turn that took it", async () => {
     const { service, journal } = harness({ notes: [storedNote()] });
 

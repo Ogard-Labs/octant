@@ -8,7 +8,7 @@ import {
   type ConnectorCategory,
 } from "@octant/domain";
 import { Search } from "lucide-react";
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -79,6 +79,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
     };
   };
 
+  const openedSetups = useRef(new Set<string>());
   const connect = useCallback(
     async (entry: ConnectorCatalogEntry, secret?: string) => {
       setBusyId(entry.id);
@@ -91,6 +92,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
       }
       if (result.extensionId !== undefined) {
         const extensionId = result.extensionId;
+        openedSetups.current.delete(entry.id);
         setConnected((current) => ({
           ...current,
           [entry.id]: { extensionId, componentId: result.componentId },
@@ -149,9 +151,10 @@ export function ConnectorsView(props: ConnectorsViewProps) {
           ) : null}
         </div>
         {!props.localHost ? (
-          <p className="extensions-settings__state" role="status">
+          <p className="extensions-settings__state" id={`${ids}-host-setup`} role="status">
             Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key
-            or run a sign-in.
+            or run a sign-in. On that computer, open Octant → Library → Connectors, find the service
+            and choose Connect. Ask the host owner if you cannot open that window.
           </p>
         ) : null}
         {CATEGORIES.map((category) => {
@@ -173,9 +176,48 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                       <span className="connectors__text">
                         <span className="connectors__name">{entry.displayName}</span>
                         <span className="connectors__detail">{entry.description}</span>
+                        {!props.localHost && installed === undefined ? (
+                          <span
+                            className="connectors__detail"
+                            id={`${ids}-${entry.id}-local-reason`}
+                          >
+                            Requires the Octant window on this host.{" "}
+                            {entry.auth.kind === "key"
+                              ? "Have this service's API key ready; it stays in the host credential store."
+                              : entry.auth.kind === "sign-in"
+                                ? entry.auth.clientSetup === "registered"
+                                  ? "Register the service's sign-in app on that host, then sign in with your account."
+                                  : "Sign in with your account on that host."
+                                : "This service needs no credential; adding it still happens on the host."}{" "}
+                            <a href={`#${ids}-host-setup`}>Host setup steps</a>
+                          </span>
+                        ) : null}
                         {installed?.componentId !== undefined && entry.auth.kind === "sign-in" ? (
                           <McpServerSignInControl
-                            autoBegin={connected[entry.id] !== undefined}
+                            autoBegin={
+                              connected[entry.id] !== undefined &&
+                              entry.auth.clientSetup !== "registered"
+                            }
+                            autoSetup={
+                              connected[entry.id] !== undefined &&
+                              entry.auth.clientSetup === "registered" &&
+                              !openedSetups.current.has(entry.id)
+                            }
+                            onAutoSetup={() => {
+                              openedSetups.current.add(entry.id);
+                            }}
+                            {...(entry.auth.clientSetup === "registered" &&
+                            entry.auth.setupGuide !== undefined
+                              ? {
+                                  registration: {
+                                    guideUrl: entry.auth.setupGuide,
+                                    requestedScopes: entry.auth.requestedScopes ?? [],
+                                    ...(entry.auth.permissionNotice === undefined
+                                      ? {}
+                                      : { permissionNotice: entry.auth.permissionNotice }),
+                                  },
+                                }
+                              : {})}
                             client={client}
                             componentId={installed.componentId}
                             disabled={props.disabled}
@@ -221,11 +263,17 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                       <span className="connectors__actions">
                         {installed !== undefined ? (
                           <span className="connectors__detail" role="status">
-                            Connected
+                            {entry.auth.kind === "sign-in" &&
+                            entry.auth.clientSetup === "registered"
+                              ? "Added"
+                              : "Connected"}
                           </span>
                         ) : (
                           <OctantButton
                             aria-label={`Connect ${entry.displayName}`}
+                            aria-describedby={
+                              !props.localHost ? `${ids}-${entry.id}-local-reason` : undefined
+                            }
                             disabled={!props.localHost || props.disabled || busyId !== undefined}
                             onClick={() => {
                               if (entry.auth.kind === "key") {

@@ -6,6 +6,7 @@ import {
   authenticateProjectRequest,
   createProjectBindingRouteHandler,
 } from "./projectBindingRoutes";
+import { NATIVE_MAIN_HOST_FEATURES } from "./desktopBrokerAdmission";
 import { ProjectRootError } from "./projectRootPort";
 import { WindowAuthorityError, WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -46,6 +47,76 @@ describe("project binding routes", () => {
       "work",
       "/unvalidated/private/path",
     );
+  });
+
+  it("mints and renews a short native lease only through authenticated desktop requests", async () => {
+    const dependencies = routeDependencies(secret);
+    const handle = createProjectBindingRouteHandler(dependencies);
+    const source = {
+      kind: "native-nightly",
+      processRegistration: randomBytes(32).toString("base64url"),
+      incarnation: "a".repeat(64),
+      generation: 3,
+    };
+    const nativeMainToken = randomBytes(32).toString("base64url");
+    const body = { windowId, capability, rendererIdentity, nativeMainToken, source };
+    const denied = await handle(
+      desktopRequest("/api/desktop/native-window-authorities", body, "wrong"),
+    );
+    expect(denied?.status).toBe(401);
+    const withoutMainToken = await handle(
+      desktopRequest("/api/desktop/native-window-authorities", {
+        windowId,
+        capability,
+        rendererIdentity,
+        source,
+      }),
+    );
+    expect(withoutMainToken?.status).toBe(400);
+    const minted = await handle(desktopRequest("/api/desktop/native-window-authorities", body));
+    expect(minted?.status).toBe(201);
+    expect(await minted?.json()).toEqual({
+      expiresAt: 16_000,
+      generation: 3,
+      leaseMs: 15_000,
+      hostFeatures: NATIVE_MAIN_HOST_FEATURES,
+    });
+    expect(
+      dependencies.windowAuthorityStore.authenticateNativeMain(capability, nativeMainToken, 15_999),
+    ).toBe(windowId);
+    const renewal = new Request("http://127.0.0.1:13773/api/desktop/native-window-authorities", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-octant-desktop-secret": secret },
+      body: JSON.stringify({ windowId, capability, source }),
+    });
+    expect((await handle(renewal))?.status).toBe(200);
+    expect(
+      dependencies.windowAuthorityStore.authenticateRenderer(capability, rendererIdentity, 15_999),
+    ).toBe(windowId);
+    expect(() => dependencies.windowAuthorityStore.authenticate(capability, 16_000)).toThrow(
+      WindowAuthorityError,
+    );
+  });
+
+  it("refuses caller-selected native lease lifetime or source shape without minting authority", async () => {
+    const dependencies = routeDependencies(secret);
+    const handle = createProjectBindingRouteHandler(dependencies);
+    const source = {
+      kind: "native-nightly",
+      processRegistration: randomBytes(32).toString("base64url"),
+      incarnation: "a".repeat(64),
+      generation: 1,
+    };
+    for (const body of [
+      { windowId, capability, rendererIdentity, source, expiresAt: Number.MAX_SAFE_INTEGER },
+      { windowId, capability, rendererIdentity, source: { ...source, pid: 1 } },
+      { windowId, capability, rendererIdentity, source: { ...source, generation: 0 } },
+    ]) {
+      expect(
+        (await handle(desktopRequest("/api/desktop/native-window-authorities", body)))?.status,
+      ).toBe(400);
+    }
+    expect(dependencies.windowAuthorityStore.size()).toBe(0);
   });
 
   it("fails closed for absent or mismatched secrets, renderer origins, foreign hosts, and excess input", async () => {
