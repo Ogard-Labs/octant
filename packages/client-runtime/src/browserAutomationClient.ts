@@ -1,4 +1,9 @@
 import {
+  BrowserUploadPermissionsResult,
+  decodeBrowserUploadPermissionsCommand,
+  type BrowserUploadPermissionsCommand,
+} from "@octant/contracts/browser-upload-permissions";
+import {
   BrowserSessionGrantsResult,
   decodeBrowserSessionGrantsCommand,
   type BrowserSessionGrantsCommand,
@@ -75,6 +80,10 @@ export interface BrowserAutomationClientOptions {
 }
 
 export interface BrowserAutomationClient {
+  manageUploadPermissions?(
+    command: BrowserUploadPermissionsCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserUploadPermissionsResult.Type>;
   manageSessionGrants?(
     command: BrowserSessionGrantsCommand,
     signal?: AbortSignal,
@@ -322,6 +331,14 @@ export function createBrowserAutomationClient(
         "/api/browser/extensions",
         decodeBrowserExtensionsCommand(command),
         decodeHostAnswer(BrowserExtensionsResult),
+        signal,
+      ),
+    manageUploadPermissions: (command, signal) =>
+      post(
+        options,
+        "/api/browser/upload-permissions",
+        decodeBrowserUploadPermissionsCommand(command),
+        decodeHostAnswer(BrowserUploadPermissionsResult),
         signal,
       ),
     manageSessionGrants: (command, signal) =>

@@ -41,6 +41,29 @@ describe("BrowserAutomationClient", () => {
     );
     await expect(manage({ kind: "list" })).rejects.toMatchObject({ category: "protocol" });
   });
+  it("sends local upload-manifest commands and rejects malformed permission scope", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ kind: "upload-permissions", permissions: [] }))
+      .mockResolvedValueOnce(
+        Response.json({ kind: "upload-permissions", permissions: [{ permissionId: "invalid" }] }),
+      );
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    const manage = client.manageUploadPermissions;
+    if (manage === undefined) throw Error("Missing session-permission route");
+    await expect(manage({ kind: "list" })).resolves.toEqual({
+      kind: "upload-permissions",
+      permissions: [],
+    });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:13773/api/browser/upload-permissions",
+    );
+    await expect(manage({ kind: "list" })).rejects.toMatchObject({ category: "protocol" });
+  });
   it("strictly decodes task-profile transaction results and preserves host refusals", async () => {
     const selection = { threadId, mode: "code", version: 2, profile: "personal" };
     const fetch = vi

@@ -675,6 +675,7 @@ export function startOctantServer(
     const {
       browserCredentialUseService,
       browserSessionGrants,
+      browserUploadPermissions,
       browserDelegatedChildren,
       bindTerminalBrowserSessions,
       terminalBrowserTools,
@@ -1081,6 +1082,7 @@ export function startOctantServer(
       wireContext({
         browserCredentialUseService,
         browserSessionGrants,
+        browserUploadPermissions,
         agentMessageProjection,
         browserModelBindings,
         browserAuthority,
@@ -1593,6 +1595,7 @@ export function startOctantServer(
     } = wireRemote({
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
+      browserUploadPermissions,
       browserAutomationService,
       codeService,
       projectService,
@@ -1952,6 +1955,7 @@ export function startOctantServer(
           try {
             projectBrowserService?.close();
             browserSessionGrants.close();
+            browserUploadPermissions.close();
             await browserDelegatedChildren.close();
             await browserAutomationService?.close();
           } catch (error) {

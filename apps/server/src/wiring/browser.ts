@@ -1,3 +1,6 @@
+import { BrowserUploadPermissions } from "../browser/browserUploadPermissions";
+import { browserUploadPermissionJournal } from "../browser/browserUploadPermissionJournal";
+import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   currentRoutineBrowserTarget,
   routineBrowserExecutionIsCurrent,
@@ -294,6 +297,42 @@ export function wireBrowser(deps: BrowserDependencies) {
           profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
       });
     };
+    const uploadRecipient = (routineId: AutomationId) => {
+      const recipient = routineSessionTarget(routineId);
+      if (recipient === undefined) return undefined;
+      const projectId = recipient.target.authority.projectId;
+      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
+      if (project === undefined || project.type === "chat") return undefined;
+      return {
+        recipient,
+        folders: approvedWorkingFolderChoices(project),
+        rootFor: (folderId: Parameters<typeof approvedWorkingFolderRoot>[1]) =>
+          approvedWorkingFolderRoot(project, folderId),
+      };
+    };
+    const browserUploadPermissions = new BrowserUploadPermissions({
+      now: Date.now,
+      uuid: randomUUID,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      canReview: (windowId, target) =>
+        target.authority.mode !== "chat" &&
+        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+      current: uploadRecipient,
+      targets: () =>
+        persistence.automationProjection.listDefinitions().flatMap((definition) => {
+          const row = uploadRecipient(definition.id);
+          return row === undefined ? [] : [row];
+        }),
+      record: browserUploadPermissionJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: Date.now,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
     let terminalSessionSource:
       | {
           readonly current: (
@@ -375,6 +414,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       return () => {
         if (terminalSessionSource === source) terminalSessionSource = undefined;
         browserSessionGrants.revalidate();
+        browserUploadPermissions.revalidate();
         void browserDelegatedChildren.settle();
       };
     };
@@ -438,6 +478,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       return browserDelegatedChildren.tools({
         target: initial.target,
         executionAuthority: () => (current() === undefined ? undefined : input.currentAuthority()),
+        uploadPermissions: browserUploadPermissions,
         executionId: String(input.routineRun.runId),
         contentThreadId: input.threadId,
         executionPolicy:
@@ -477,6 +518,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         return;
       const settle = () => {
         browserSessionGrants.revalidate();
+        browserUploadPermissions.revalidate();
         void browserDelegatedChildren.settle();
       };
       // SQLite-backed task authority is current at commit. Inspect it now so
@@ -488,6 +530,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeSessionAuthority));
     onWindowRevoked((windowId) => {
       browserSessionGrants.revokeWindow(windowId);
+      browserUploadPermissions.revokeWindow(windowId);
       void browserDelegatedChildren.closeWindow(windowId);
     });
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
@@ -675,6 +718,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       closePages: async (profile) => {
         browserSessionGrants.invalidateProfile(profile);
+        browserUploadPermissions.invalidateProfile(profile);
         if (!browserCredentialUseService.invalidateProfile(profile))
           throw new Error("Profile login permission revocations could not be recorded.");
         await Promise.all([
@@ -782,6 +826,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     return {
       nativeBrowserPresentationRoutes,
       browserSessionGrants,
+      browserUploadPermissions,
       routineBrowserTools,
       bindTerminalBrowserSessions,
       terminalBrowserTools,

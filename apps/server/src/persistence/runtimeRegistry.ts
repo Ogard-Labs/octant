@@ -1,3 +1,7 @@
+import {
+  BROWSER_UPLOAD_PERMISSION_EVENT,
+  BrowserUploadPermissionChanged,
+} from "@octant/contracts/browser-upload-permissions";
 import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import {
   BROWSER_SESSION_EVENT_NAMES,
@@ -721,6 +725,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.refused, 1, BrowserDownloadRefused)
+    .register(BROWSER_UPLOAD_PERMISSION_EVENT, 1, BrowserUploadPermissionChanged)
     .register(BROWSER_SESSION_EVENT_NAMES.granted, 1, BrowserSessionGranted)
     .register(BROWSER_SESSION_EVENT_NAMES.revoked, 1, BrowserSessionRevoked)
     .register(BROWSER_SESSION_EVENT_NAMES.expired, 1, BrowserSessionExpired)

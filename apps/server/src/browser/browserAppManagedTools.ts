@@ -1,3 +1,4 @@
+import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { browserProfileFromChoice } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
@@ -89,6 +90,8 @@ export interface BrowserAppManagedToolsOptions {
       /** On a `record-stop`: end the recording and keep nothing; see the service. */
       readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
+      readonly uploadSignal?: AbortSignal;
+      readonly uploadIsCurrent?: () => boolean;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
@@ -152,6 +155,12 @@ export interface BrowserAppManagedToolsOptions {
    * folder. Absent, both are refused.
    */
   readonly uploadRoot?: () => string | undefined;
+  readonly uploadPermission?: (input: {
+    readonly permissionId: string;
+    readonly profile: StoredBrowserProfile;
+    readonly origin: string;
+    readonly files: ReadonlyArray<string>;
+  }) => ReturnType<BrowserUploadPermissions["prepare"]>;
   readonly uuid: () => string;
 }
 
@@ -453,15 +462,31 @@ export function createBrowserAppManagedTools(
     if (signal?.aborted) return failure("tool-interrupted");
     let uploadFiles: ReadonlyArray<string> | undefined;
     let releaseUpload: (() => Promise<void>) | undefined;
+    let uploadSignal: AbortSignal | undefined;
+    let uploadIsCurrent: (() => boolean) | undefined;
     if (input.operation === "upload") {
       // A CLI in a terminal is not the person who would be asked.
       if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
       const approvals = options.approvals;
       if (approvals === undefined) return failure("browser-approval-required");
+      const permission =
+        input.uploadPermissionId === undefined || profile === undefined
+          ? undefined
+          : options.uploadPermission?.({
+              permissionId: input.uploadPermissionId,
+              profile,
+              origin,
+              files: input.files,
+            });
+      if (input.uploadPermissionId !== undefined && permission === undefined)
+        return failure("upload-permission-required");
+      uploadSignal = permission?.signal;
+      uploadIsCurrent = permission?.isCurrent;
       const admitted = await admitBrowserUpload({
-        workspaceRoot: options.uploadRoot?.(),
+        workspaceRoot: permission?.workspaceRoot ?? options.uploadRoot?.(),
         files: input.files,
         ask: (files) =>
+          permission?.approve(files) ??
           approvals.request({
             windowId: options.windowId,
             threadId: String(options.threadId),
@@ -521,6 +546,8 @@ export function createBrowserAppManagedTools(
         ? {}
         : { holdDownloads: true }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      ...(uploadSignal === undefined ? {} : { uploadSignal }),
+      ...(uploadIsCurrent === undefined ? {} : { uploadIsCurrent }),
       ...(releaseUpload === undefined ? {} : { releaseUpload }),
     });
     if (signal?.aborted) return failure("tool-interrupted");
@@ -599,7 +626,10 @@ export function createBrowserAppManagedTools(
         return failure("tool-unavailable");
       }
       if (signal?.aborted) return failure("tool-interrupted");
-      const input = parseBrowserToolInput(inputJson, { allowProfile: true });
+      const input = parseBrowserToolInput(inputJson, {
+        allowProfile: true,
+        allowUploadPermission: options.uploadPermission !== undefined,
+      });
       if (input === undefined) return failure("invalid-browser-input");
       // The stop runs without the turn's signal, so a turn that ends mid-call
       // still ends its recording and keeps what was recorded. It runs in Plan

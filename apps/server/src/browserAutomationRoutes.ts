@@ -1,3 +1,8 @@
+import {
+  decodeBrowserUploadPermissionsCommand,
+  decodeBrowserUploadPermissionsResult,
+} from "@octant/contracts/browser-upload-permissions";
+import type { BrowserUploadPermissions } from "./browser/browserUploadPermissions";
 import { browserProfileFromChoice } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
@@ -88,6 +93,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly uploadPermissions?: Pick<BrowserUploadPermissions, "execute">;
   readonly sessionGrants?: Pick<BrowserSessionGrants, "execute">;
   readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
   readonly service: Pick<
@@ -498,6 +504,32 @@ export function createBrowserAutomationRouteHandler(
                   reason: "not-found",
                   message: "That flow no longer exists.",
                 },
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/upload-permissions") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserUploadPermissionsResult({
+              kind: "upload-permission-refused",
+              reason: "not-local",
+              message: "Upload manifests are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.uploadPermissions === undefined)
+          return failure(
+            { category: "unavailable", message: "Recurring upload permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserUploadPermissionsResult(
+            await dependencies.uploadPermissions.execute(
+              windowId,
+              decodeBrowserUploadPermissionsCommand(decoded.value),
+            ),
           ),
           origin,
         );
