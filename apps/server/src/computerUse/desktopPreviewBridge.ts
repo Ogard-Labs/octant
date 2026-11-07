@@ -111,7 +111,13 @@ export async function createDesktopPreviewBridge(options: {
         response.destroy();
         return;
       }
-      response.writeHead(answered.status, Object.fromEntries(answered.headers));
+      const cookies = answered.headers.getSetCookie();
+      response.writeHead(answered.status, {
+        ...Object.fromEntries(answered.headers),
+        // Set-Cookie is repeatable and an Expires value can itself contain a
+        // comma. Preserve the relay's separate fields through Node's array form.
+        ...(cookies.length === 0 ? {} : { "set-cookie": cookies }),
+      });
       if (answered.body !== null) {
         const reader = answered.body.getReader();
         const cancel = () => {

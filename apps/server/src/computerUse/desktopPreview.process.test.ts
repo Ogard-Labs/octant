@@ -36,7 +36,15 @@ async function app() {
   const server = createServer((request, response) => {
     requests++;
     expect(request.headers["x-octant-preview-key"]).toBeUndefined();
-    response.writeHead(200, { "content-type": "text/plain" });
+    response.writeHead(200, {
+      "content-type": "text/plain",
+      "set-cookie": [
+        "preview_session=synthetic; Path=/; HttpOnly; SameSite=Lax",
+        "preview_csrf=synthetic; Path=/; Expires=Wed, 01 Jan 2031 00:00:00 GMT; SameSite=Lax",
+        "octant-fixture=blocked; Path=/",
+      ],
+      "x-octant-fixture": "blocked",
+    });
     response.write("selected ");
     setTimeout(() => response.end("app"), 5);
   });
@@ -202,7 +210,13 @@ describe("the actual lease preview proxy", () => {
       () => output,
       (text) => text.includes(`ready ${port}`),
     );
-    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe("selected app");
+    const received = await fetch(`http://127.0.0.1:${port}/`);
+    expect(await received.text()).toBe("selected app");
+    expect(received.headers.getSetCookie()).toEqual([
+      "preview_session=synthetic; Path=/; HttpOnly; SameSite=Lax",
+      "preview_csrf=synthetic; Path=/; Expires=Wed, 01 Jan 2031 00:00:00 GMT; SameSite=Lax",
+    ]);
+    expect(received.headers.get("x-octant-fixture")).toBeNull();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/hmr`);
     await new Promise<void>((resolve, reject) => {
       socket.onopen = () => resolve();
