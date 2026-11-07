@@ -1,3 +1,5 @@
+import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
+import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
 import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
 import { createServerPreviewTunnelRoutes } from "../serverProjects/serverPreviewTunnelRoutes";
 import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
@@ -133,6 +135,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     HarnessStateWiring,
     | "agentRunInteractions"
     | "serverProjectStore"
+    | "serverConnection"
     | "serverRegistry"
     | "shieldHolder"
     | "nativeHarnessApprovals"
@@ -156,6 +159,7 @@ export function wireHarness(deps: HarnessDependencies) {
     safeNetworkStore,
     agentRunInteractions,
     serverProjectStore,
+    serverConnection,
     serverRegistry,
     codeBoardEventStore,
     codeEvidence,
@@ -264,8 +268,16 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
   });
+  const setupCheckRoutes = createRemoteSetupCheckRoutes({
+    windows: windowAuthorityStore,
+    checks: new RemoteSetupChecks({
+      servers: () => shieldServerStore.servers(),
+      agentAvailable: () => sshAgentSocket() !== undefined,
+      connection: serverConnection,
+    }),
+  });
   const serverProjectRoutes = async (request: Request) =>
-    (await previewRoutes(request)) ?? catalogRoutes(request);
+    (await setupCheckRoutes(request)) ?? (await previewRoutes(request)) ?? catalogRoutes(request);
   const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
     shieldServerStore.recordRemoteCommand(input),
   );

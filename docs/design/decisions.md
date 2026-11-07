@@ -252,7 +252,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime
 
 ### Server SSH profiles
 
-- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Connection diagnosis and saved server actions remain separate outcomes. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
+- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Read-only connection checks distinguish host readiness, fresh SSH trust/authentication, directory access and supported server runtime, without accepting keys or restarting uncertain commands. Saved server actions remain a separate outcome. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
 
 The person registers their own servers with an action profile, and SSH to a registered server is judged by that profile in Work and Code alike.
 

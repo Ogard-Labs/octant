@@ -46,9 +46,42 @@ unverified host identities require correction through their existing owners.
 The entry explains unsupported server-Project capabilities and uncertain-result
 recovery without implying parity or retrying a command.
 
-This guide is an entry into existing setup, not a connection diagnostic service.
-It does not distinguish transport failures by parsing SSH text or accept a new
-host key. A future structured diagnostic must preserve those trust boundaries.
+**Read-only checks.** Each server journey can check a registered alias and user
+without binding a Project or starting a task. Only an authenticated local window
+may call `/api/remote-setup-check`; paired clients, agents and routines cannot
+borrow that authority. Strict input names only a registered server, an optional
+absolute folder and the runtime choice. No script, credential or SSH setting is
+accepted. At most four checks run concurrently, each with a twelve-second SSH
+deadline, 2 KiB response bound and owned-process cleanup. Stop cancels the check;
+changing the journey or inputs discards its result. Recheck is explicit and runs
+only this fixed read-only probe, never an earlier uncertain command.
+
+The probe requires the host's SSH agent and uses the existing connection encoder
+with `ControlMaster=no`, `ControlPath=none` and `ControlPersist=no`, so a cached
+login cannot stand in for fresh identity/authentication. Strict host checking,
+BatchMode and forwarding refusals remain in force. A fixed POSIX `sh` probe reads
+`pwd -P`, optionally after `cd` to the folder argument. It writes nothing. A
+changed registration invalidates even a successful response. Success proves this
+connection and directory at check time, not future connectivity or task authority.
+
+Unknown and changed/revoked identity, unavailable host, authentication refusal,
+missing agent, unavailable directory, unsupported runtime and incomplete probe
+have separate remedies. Bounded OpenSSH error text selects advisory copy only;
+it is never returned, journaled, accepted as trust or used to edit known hosts.
+The person verifies an unknown fingerprint through their own SSH connection;
+changed identity requires independent administrator verification. A check never
+creates a key: the kept-key workflow is explicitly unavailable to this
+agent-backed probe and points to the existing key controls. Server-Project
+runtime checks report Octant Harness support versus the native-provider refusal;
+they do not claim a provider binary is installed or run a provider request.
+
+Host control can reread the existing private-listener status without enabling or
+restarting it. This reports only host readiness; pairing and a request from the
+other device still establish actual device reachability. A missing host bridge,
+older client/host or failed host request shows unavailable with the appropriate
+host-window/network/awake-state remedy. Pending, reconnecting, connected for the
+check, disconnected and stopped states remain distinct. Results are transient;
+checks never change registry/configuration or journal state.
 
 ## Terms
 
