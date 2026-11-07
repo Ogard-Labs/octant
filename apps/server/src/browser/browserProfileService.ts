@@ -94,7 +94,23 @@ export class BrowserProfileService {
         "Browser profiles are kept by the Octant app, which is not running.",
       );
     }
-    if (command.kind === "list") return this.#list(store);
+    if (command.kind === "list") return this.#list(store, command.includeSizes);
+    if (command.kind === "create-account") {
+      if (store.createAccount === undefined)
+        return refused(
+          "profile-unavailable",
+          "This native Browser cannot create account profiles.",
+        );
+      const result = await store.createAccount(command.label);
+      return result.status === "created"
+        ? { kind: "browser-account-profile-created", profile: result.profile, label: result.label }
+        : refused(
+            "profile-unavailable",
+            result.reason === "limit-reached"
+              ? "This host already has 64 named account profiles."
+              : "The named account profile could not be created.",
+          );
+    }
     if (command.kind === "import-sources") {
       return decodeBrowserProfilesResult({
         kind: "browser-cookie-sources",
@@ -189,10 +205,13 @@ export class BrowserProfileService {
     );
   }
 
-  async #list(store: NonNullable<BrowserRuntimePort["profiles"]>): Promise<BrowserProfilesResult> {
+  async #list(
+    store: NonNullable<BrowserRuntimePort["profiles"]>,
+    includeSizes?: boolean,
+  ): Promise<BrowserProfilesResult> {
     let stored;
     try {
-      stored = await store.list();
+      stored = await (includeSizes === undefined ? store.list() : store.list(includeSizes));
     } catch {
       return refused("profile-unavailable", "The Browser profiles could not be read.");
     }
@@ -206,6 +225,15 @@ export class BrowserProfileService {
       sizeBytes: personal?.sizeBytes ?? 0,
     });
     for (const entry of stored) {
+      if (entry.profile.kind === "account") {
+        if (entry.label === undefined)
+          return refused(
+            "profile-unavailable",
+            "A named account profile has no readable local label.",
+          );
+        summaries.push({ profile: entry.profile, label: entry.label, sizeBytes: entry.sizeBytes });
+        continue;
+      }
       if (entry.profile.kind !== "project") continue;
       summaries.push({
         profile: entry.profile,

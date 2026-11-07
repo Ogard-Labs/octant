@@ -443,6 +443,42 @@ describe("BrowserAutomationService", () => {
     settle.resolve();
     await pending;
   });
+  it("refuses an unknown account identity before opening a native page", async () => {
+    const f = harness();
+    const account = {
+      kind: "account" as const,
+      profileId: "40000000-0000-4000-8000-000000000002" as never,
+    };
+    const list = vi.fn(
+      async (): Promise<
+        ReadonlyArray<{ profile: typeof account; label: string; sizeBytes: number }>
+      > => [],
+    );
+    Object.defineProperty(f.runtime, "profiles", {
+      value: { list, clear: async () => undefined, syncExtensions: async () => undefined },
+      configurable: true,
+    });
+    expect(
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: account },
+      }),
+    ).toMatchObject({ failure: { reason: "profile-unavailable" } });
+    expect(f.runtime.createContext).not.toHaveBeenCalled();
+    list.mockResolvedValue([{ profile: account, label: "Work account", sizeBytes: 0 }]);
+    expect(
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: account },
+      }),
+    ).toMatchObject({ status: "running", context: { policy: { profile: account } } });
+    await f.service.close();
+  });
+
   it("rechecks Full access after native realm preparation and cancels the unstarted script when revoked", async () => {
     let full = true;
     const f = harness({ pageScriptPolicy: () => (full ? "full-access" : "approval-gated") });

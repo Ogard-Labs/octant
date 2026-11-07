@@ -1258,6 +1258,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
         },
         {
+          id: settingId("browser-accounts"),
+          label: "Named account profiles",
+          scope: "host",
+          keywords: "browser named account profiles create separate sign-ins host local",
+        },
+        {
           id: settingId("browser-profiles"),
           label: "Browser profiles",
           scope: "host",

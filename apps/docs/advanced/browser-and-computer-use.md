@@ -84,11 +84,21 @@ A Browser page is **Private** by default: its cookies and site data live in
 memory and are forgotten when the page closes. To stay signed in to a site,
 choose a profile from the control at the left of the address bar:
 
-| Profile      | Kept                            | Shared by                                         |
-| ------------ | ------------------------------- | ------------------------------------------------- |
-| **Private**  | Until the page closes           | That page and the tabs it opens                   |
-| **Project**  | On this Mac, until you sign out | Every page of this Work or Code Project           |
-| **Personal** | On this Mac, until you sign out | Every page, in any Project, that chooses Personal |
+| Profile           | Kept                             | Shared by                                                        |
+| ----------------- | -------------------------------- | ---------------------------------------------------------------- |
+| **Private**       | Until the page closes            | That page and the tabs it opens                                  |
+| **Project**       | On this Mac, until you sign out  | Every page of this Work or Code Project                          |
+| **Personal**      | On this Mac, until you sign out  | Every page, in any Project, that chooses Personal                |
+| **Named account** | On this host, until you sign out | Every page that explicitly chooses that account, across Projects |
+
+Create a separate account profile with **New account profile…** in **Settings →
+Data & privacy → Browser profiles**, then explicitly choose it from the Browser
+profile control or this task's default. Each account keeps its own sign-ins and
+site approvals on this host. Creating or selecting one grants no site, Project,
+credential or delegated access. The approval names the account you selected.
+Account labels and stores are not exported or synced. If the native owner or
+account is unavailable, Octant refuses; it does not select a different account.
+Signing out clears its data and keeps the name for later use.
 
 - Sign in manually or approve a selected-item brokered fill through **Login
   permission**. Fill and submit are separate approvals; neither confirms
@@ -96,7 +106,7 @@ choose a profile from the control at the left of the address bar:
   that profile; the old page closes and nothing it held carries over.
 - The control remembers your last choice for each Project, for pages you open.
   It never changes a page the agent opened.
-- Project and Personal pages open only in the Octant app's own Browser. On a
+- Project, Personal and named account pages open only in the Octant app's own Browser. On a
   host without the app they are refused with a message, never opened in a copy
   that would disagree about who is signed in. Chat has no Browser, so it has no
   profile.

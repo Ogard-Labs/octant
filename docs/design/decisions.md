@@ -2511,6 +2511,8 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - The person may import every cookie in the chosen browser profile or only one site's and its parent domains'; the journal records only that the import was limited to a site.
 - A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
 
+- Named account profiles have host-assigned identities, native local labels and separate persistent stores. A local person explicitly selects one; task defaults never grant site, Project or credential authority. Approval names come from the native registry, and origin grants/extensions remain isolated per identity. Unknown identities, paired/unattended callers and a missing native owner refuse. Stores and the name registry are not exported or synced; Private, Project and Personal retain their behavior.
+
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
 
 ## Provider runtimes
