@@ -111,6 +111,12 @@ export class BrowserDelegatedChildren {
     const refusal = (error: string) => ({
       result: {
         error,
+        ...(error === "browser-needs-login"
+          ? {
+              message:
+                "A local person must sign in to the selected Browser profile on the execution host, then retry the task explicitly. This execution cannot enter credentials or take over a sign-in page.",
+            }
+          : {}),
         ...(error === "browser-needs-a-native-owner"
           ? {
               message:
@@ -170,7 +176,8 @@ export class BrowserDelegatedChildren {
         }
         if (operation.operation === "upload" || operation.operation === "download-save")
           return refusal("transfer-needs-separate-permission");
-        if (operation.operation === "sign-in" || operation.operation === "run-script")
+        if (operation.operation === "sign-in") return refusal("browser-needs-login");
+        if (operation.operation === "run-script")
           return refusal("browser-operation-needs-a-local-person");
         let entry = this.#active.get(ownerKey);
         if (operation.operation === "stop") {

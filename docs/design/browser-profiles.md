@@ -423,8 +423,9 @@ native views rather than another engine or copied cookies. Closing the last
 renderer closes ordinary window contexts and retains only opted-in execution
 ownership. Reopening a window does not replay a task, recover a grant or adopt a
 background page. These execution pages admit no renderer attach, human handoff,
-file transfers, sign-in, credential fill or page scripts. A workload requesting
-sign-in needs a local person; authentication is never inferred from cookies.
+file transfers, sign-in, credential fill or page scripts. A workload explicitly
+requesting sign-in receives `browser-needs-login` and needs a local person on
+the execution host; authentication is never inferred from cookies or page contents.
 Terminal profile grants remain window-bound.
 
 Cancellation/run end, grant revocation/expiry, changed task/model/authority,

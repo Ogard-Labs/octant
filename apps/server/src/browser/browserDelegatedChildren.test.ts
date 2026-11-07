@@ -235,6 +235,16 @@ it.each([
         await tools.execute(call);
       } else expect(runtime.createContext).toHaveBeenCalledOnce();
       expect(workRun.authority).toEqual(authority);
+      if (persistent)
+        expect(
+          await tools.execute({
+            name: call.name,
+            inputJson: JSON.stringify({
+              operation: "sign-in",
+              reason: "The task explicitly needs a local sign-in",
+            }),
+          }),
+        ).toMatchObject({ isError: true, result: { error: "browser-needs-login" } });
       const offSite = await tools.execute({
         name: call.name,
         inputJson: JSON.stringify({
