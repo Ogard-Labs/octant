@@ -5,6 +5,16 @@ import re
 import shutil
 
 
+def include_bridge(source: str) -> str:
+    # Some upstream files start with a multiline license comment, so inserting
+    # after their first newline would leave the declaration inside that comment.
+    anchor = re.search(r"(?m)^#include ", source)
+    if anchor is None:
+        raise ValueError("Pinned source has no include block")
+    at = anchor.start()
+    return source[:at] + '#include <linux/octant_mediation_bridge.h>\n' + source[at:]
+
+
 def instrument(source: str, name: str, condition: str = "true") -> str:
     declaration = re.compile(
         rf"(?m)^(?:static\s+)?(?:inline\s+)?(?:int|void|long|struct dentry \*|struct file \*)\s*{name}\s*\([^;{{]*?\)\s*\{{"
@@ -40,9 +50,7 @@ def install_epochs(kernel: Path, native: Path) -> None:
             # The non-atomic negative-dentry path invokes i_op->create
             # directly; it does not pass through vfs_create.
             source = instrument(source, "lookup_open", "(op->open_flag & O_CREAT) != 0")
-        first_line = source.index("\n") + 1
-        source = source[:first_line] + '#include <linux/octant_mediation_bridge.h>\n' + source[first_line:]
-        path.write_text(source)
+        path.write_text(include_bridge(source))
     shutil.copyfile(native / "bridge.h", kernel / "include/linux/octant_mediation_bridge.h")
     # The modern static-call allocation counts configured LSMs explicitly.
     # Register this original component in that count; selecting CONFIG_LSM
@@ -69,6 +77,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
         raise ValueError("Pinned native and compat AIO allocation definition differs")
     at = matches[0].end()
     source = source[:at] + "\n\tif (octant_mediation_restricted())\n\t\treturn ERR_PTR(-ENOSYS);\n" + source[at:]
-    first_line = source.index("\n") + 1
-    source = source[:first_line] + '#include <linux/octant_mediation_bridge.h>\n' + source[first_line:]
-    aio.write_text(source)
+    aio.write_text(include_bridge(source))
