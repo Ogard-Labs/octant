@@ -31,6 +31,12 @@ jobs:
           # branch. The default depth-1 checkout has no such history, so the
           # history half of that gate would skip on every run.
           fetch-depth: 0
+      - name: Keep guide source in octant-site
+        run: |
+          if git ls-files --error-unmatch -- apps/docs/ >/dev/null 2>&1; then
+            echo "::error::Update the guide in Ogard-Labs/octant-site/docs and link its companion PR."
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4

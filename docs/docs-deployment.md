@@ -14,6 +14,8 @@ checklist requires that link or a reason the guide needs no update. Keep
 unmerged behavior paired with its product PR rather than claiming it shipped.
 Existing in-flight guide edits must be transferred to that repository before
 their product PR lands; do not recreate `apps/docs`.
+CI refuses tracked files under that old path so an older branch cannot
+silently restore a second guide source.
 
 For semantic theme changes, commit the theme package changes first, then generate
 the guide's checked-in data projection. The exporter refuses uncommitted theme
