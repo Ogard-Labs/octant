@@ -156,6 +156,7 @@ import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
+import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import {
@@ -212,6 +213,14 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "side-tasks";
+      readonly key: string;
+      readonly turnId: string;
+      readonly running: boolean;
+      readonly last: boolean;
+      readonly loadedTurnIds: ReadonlySet<string>;
     }
   | { readonly kind: "status"; readonly key: "status"; readonly text: string }
   | {
@@ -1275,6 +1284,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const settledTurnCount = turns.filter(
     (turn) => turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting",
   ).length;
+  const sideTasks = useThreadSideTasks();
+  const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.turnId))), [turns]);
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
     // Only a settled first read can say the thread has no turns. Before it
@@ -1331,13 +1342,29 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           wrote: turn.wroteFiles,
         });
       }
+      // Offers sit after the reply that made them, the last one taking any
+      // whose turn is not in what is loaded.
+      const placement = {
+        turnId: String(turn.turnId),
+        last: turn === turns.at(-1),
+        loadedTurnIds,
+      };
+      if (sideTasksAfterTurn(sideTasks, placement).length > 0) {
+        rows.push({
+          kind: "side-tasks",
+          key: `${String(turn.requestId)}-side-tasks`,
+          running:
+            turn.status === "running" || turn.status === "accepted" || turn.status === "waiting",
+          ...placement,
+        });
+      }
     }
     for (const request of pendingRequests) {
       rows.push({ kind: "request", key: `request-${String(request.requestId)}`, request });
     }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
-  }, [firstPageSettled, pendingRequests, status, turns]);
+  }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;
@@ -2368,6 +2395,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </p>
                     ) : null}
                   </section>
+                );
+              }
+              if (row.kind === "side-tasks") {
+                return (
+                  <SideTaskInline
+                    last={row.last}
+                    loadedTurnIds={row.loadedTurnIds}
+                    running={row.running}
+                    turnId={row.turnId}
+                  />
                 );
               }
               if (row.kind === "tasks") {

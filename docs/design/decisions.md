@@ -252,6 +252,8 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime
 
 ### Server SSH profiles
 
+- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Connection diagnosis and saved server actions remain separate outcomes. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
+
 The person registers their own servers with an action profile, and SSH to a registered server is judged by that profile in Work and Code alike.
 
 - A server is a host alias from the person's SSH config, a user, and a profile: Read-only, Operate, or Admin.
@@ -304,6 +306,12 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 - Public Canvas links are in scope through the self-hostable reference app at `apps/share`; Ogard Labs operates no share-service instance (maintainer decision, 2026-11-07).
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+
+### External user guide and maintainer-owned publication
+
+The VitePress guide lives in `Ogard-Labs/octant-site/docs`, outside the application monorepo, and builds independently for `https://octant.sh/docs/`. Application changes update the guide through companion PRs linked in both descriptions. The site repository runs its docs gates and uploads a static artifact named for the commit. The application repository retains internal specifications and exports semantic theme defaults for the guide; its CI refuses tracked files under the former `apps/docs` path to prevent a second guide source. The maintainer configures and releases that artifact on their VPS; no workflow deploys it or treats an artifact upload as a live publication. Missing pages use the supported VitePress layout slot, and links retain the `/docs/` base.
+
+Status: Built. Since: 2026-11-07. Detail: [Documentation build and VPS handoff](../docs-deployment.md).
 
 ### First-preview tracks are design-first
 
@@ -739,8 +747,10 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are operations of one tool, `octant_threads` (maintainer decision, 2026-11-05): Work and Code turns see the other open threads of their own Project, and only Code turns message them.
 
-- A refusal reveals nothing about whether another thread exists, and sending starts no turn, grants no authority and returns no reply.
+- A refusal reveals nothing about whether another thread exists, and sending grants no authority and returns no reply.
+- A message wakes an idle recipient only when a person turned on its Wake when a message arrives switch (off by default): one `agent`-initiated turn under the thread's own posture, one at a time, at most six an hour, and none past three rounds of agents answering each other (maintainer request, 2026-11-07). _Designed, not built._
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
+- A tagged Code thread may message a tagged Code thread on another hub member under that member's Message peer-grant item; each host keeps its own end's rules and the receiver keeps the final say (maintainer request, 2026-11-07). _Designed, not built._ Detail: [Hub and spokes: messaging between members](hub-and-spokes.md#messaging-between-members).
 - A source turn may make at most three `octant_ask_thread` calls, and a target turn started by that tool is never offered the tool. _Here only._
 - Every operation names a thread by one reference, `<thread id>@<project id>`; a reference whose Project is not the caller's refuses like an unknown one, `send` included. A `send` with more than four recipients, a malformed reference, or one of another Project is refused whole; it never reaches a subset.
 - `list`, `read` and `wait` change nothing outside the caller's record and are offered in Plan; a `list` or `read` marks the caller, and a turn may make 8 reads and 4 waits. In Work they see only Work threads, and in Code only Code threads.
@@ -1298,7 +1308,10 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 Follow-up suggestions and offered side tasks are journaled offers that grant nothing. Both come from every provider, not only the harness.
 
 - A confirmed follow-up is created through the mode's ordinary creation command, and the prompt is never sent on the person's behalf.
-- Starting a side task is the person's confirmation, and its prompt is sent only on their click. A Code thread still starts approval-gated.
+- A side task is offered for out-of-scope work, for a split the person asked for, or for a real next step the reply recommends. It appears inline in the transcript after the offering turn, as a card asking whether to start it in a new thread or do it here.
+- Every answer is the person's click: a new thread (fresh, or forked from the conversation through the offering turn), do it here (the prompt goes to this thread now, or queued behind the running turn), or dismiss. The prompt is sent only on that click, and a Code thread still starts approval-gated.
+- A fork waits for the offering turn to finish. Chat, Code and Work each fork through their own command; a Work fork carries the conversation as a text handoff.
+- Do it here records a durable unconfirmed claim before dispatch. A known refusal reopens the offer; an uncertain delivery or failed receipt stays visibly unconfirmed across restart and is never retried automatically.
 - A Code Project's designated planner offers work to its board with the same tool and target `board`; that records a pending planner proposal, which only a person confirms.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
@@ -1850,7 +1863,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Pairin
 
 Multi-host views merge read models client-side without transferring authority. Federation shares no credentials; the explicit [Shared sign-ins](hub-and-spokes.md#shared-sign-ins) API-key copy requires a fresh own-unlock on each host and a one-use receiving ticket. Subscription sign-ins refuse copying.
 
-- Conflicting facts stay under their owning host; create and mutation routing name one destination and refuse when that host is not routable, and nothing queues offline work.
+- Conflicting facts stay under their owning host; create and mutation routing name one destination and refuse when that host is not routable, and nothing queues offline work. An agent message to another hub member is not offline work: it waits on the sender until that member answers, and the receiver admits it afresh.
 - An all-hosts list keeps every registered host; an unreachable host's cached items stay listed as stale and read-only.
 - A host is shown as an environment under the person's name for it, and the host a window runs on is always "Local". _Here only._
 - A row names its environment only when it is not this one; filtering and ordering by environment are client view state, and "All environments" includes hosts that connect later. _Here only._
@@ -2819,6 +2832,7 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 - Subscription sign-ins held by a provider's own app are never copied; the hub can ask a spoke to sign in itself, and the person finishes it there.
 - An owner with a fresh unlock may copy an API key between hosts; both hosts journal the copy without the value.
 - Delegated work is clamped to the smaller of the peer grant and the receiving spoke's own Project authority, and journaled with the requesting peer.
+- Agent messages between members reach only Code threads a person tagged Reachable on both ends, under the receiver's Message item; they grant nothing there, and the only turn one can start is a bounded, `agent`-initiated wake turn on an idle recipient whose person left Wake when a message arrives on. _Designed, not built._
 - Hub provisioning offers are data that land as proposals; auto-apply is per kind and off by default, and a routine always asks.
 - The hub's wake service and push sender are each off until turned on; the hub forwards sealed notifications unchanged.
 
@@ -2900,15 +2914,15 @@ Status: Built. Since: 2026-10-26. Detail: [Disposable desktops: model](disposabl
 
 ### Desktop isolation and transfer
 
-A desktop holds no host credential and no checkout. Only an explicit, journaled transfer of one checkout-relative file moves bytes in.
+A desktop holds no host credential and no checkout. Host files enter only through an explicit, journaled transfer of one checkout-relative file; the separately approved preview carries only the named application’s HTTP/WebSocket traffic.
 
 - A host-local desktop runs in a dedicated Linux sandbox with its own network namespace and no host loopback, and never has network: a recipe that asks for it is refused. Only a cloud recipe without a placement may allow network.
 - A cloud desktop's key stays in the host credential store and never enters the desktop.
 - Nothing is copied back except screenshots and recordings as host-held evidence.
 - Transfers to a cloud desktop always ask, in every posture, and Plan refuses transfers.
-- Forwarding a Local server port into a desktop is deferred (not built yet).
+- A local person may review and grant one healthy Octant-owned dev-server port from the Code task's own worktree to its ready host-local Linux lease. The portable provider seam exposes only bounded HTTP/WebSocket operations; an authenticated exact-socket IPC exception preserves the guest's separate network namespace and denies other host ports. Permissions expire with the original lease, invalidate with authority/binding/window/provider loss, never restore after restart and block replacement grants while cleanup is unconfirmed. E2B and Cua report this capability unavailable. The actual production-launch namespace proof is mandatory before enabling the new path.
 
-Status: Built. Since: 2026-10-26. Detail: [Disposable desktops: isolation](disposable-desktops.md#isolation) and [artifact transfer](disposable-desktops.md#artifact-transfer).
+Status: Built. Since: 2026-10-26; host-local lease-bound preview 2026-11-07. Detail: [Disposable desktops: isolation](disposable-desktops.md#isolation), [artifact transfer](disposable-desktops.md#artifact-transfer), and [lease-bound dev-server preview](disposable-desktops.md#lease-bound-dev-server-preview). The local adapter and grant path are covered by the required hosted production-launch namespace proof; packaged desktop GUI acceptance remains separate.
 
 ### Desktop lifecycle and teardown
 

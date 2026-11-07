@@ -698,6 +698,8 @@ export interface ChatServiceOptions {
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
+    /** The turn the tools serve; a retry or resume names the turn it runs again. */
+    readonly turnId?: ChatTurn["id"];
     readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
     readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
@@ -2658,7 +2660,7 @@ export class ChatService {
         command.threadMentionIds,
         command.extensionSelections,
         "send",
-        executionContext,
+        { ...executionContext, turnId },
         resolvedExtensions,
         command.sideChatReturns,
         command.toolCatalogHandoff === true,
@@ -2851,7 +2853,7 @@ export class ChatService {
         undefined,
         undefined,
         "send",
-        executionContext,
+        { ...executionContext, turnId },
         undefined,
       );
       const beforeAdmission = validateAgentResultDelivery({
@@ -3401,7 +3403,7 @@ export class ChatService {
         undefined,
         turn.extensionSelections,
         "replay",
-        executionContext,
+        { ...executionContext, turnId: command.turnId },
         undefined,
         turn.sideChatReturns,
         false,
@@ -3755,7 +3757,7 @@ export class ChatService {
         undefined,
         turn.extensionSelections,
         "resume",
-        executionContext,
+        { ...executionContext, turnId: command.turnId },
         undefined,
         turn.sideChatReturns,
         false,
@@ -4039,7 +4041,8 @@ export class ChatService {
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
     extensionPhase: "send" | "replay" | "resume" = "send",
-    executionContext?: ChatServiceExecutionContext,
+    /** The caller's context, with the turn being prepared for the tools that name it. */
+    executionContext?: ChatServiceExecutionContext & { readonly turnId?: ChatTurn["id"] },
     preResolvedExtensions?: {
       readonly selections: ReadonlyArray<ExtensionSelection>;
       readonly entries: ReadonlyArray<ResolvedChatExtensionContextEntry>;
@@ -4103,6 +4106,7 @@ export class ChatService {
         ? this.#resolveAppManagedTools({
             windowId: executionContext.windowId,
             thread,
+            ...(executionContext.turnId === undefined ? {} : { turnId: executionContext.turnId }),
             ...(threadMentionIds === undefined ? {} : { threadMentionIds }),
             ...(executionContext.coordinationDepth === undefined
               ? {}

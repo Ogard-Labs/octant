@@ -132,6 +132,12 @@ function bridge(
 }
 
 describe("RemoteAccessSettingsSection", () => {
+  it("focuses the real listener form when the setup journey continues here", async () => {
+    render(<RemoteAccessSettingsSection bridge={bridge(off)} focusedSetting="remote-listener" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Hostname")).toHaveFocus());
+  });
+
   it("states the listener prerequisite instead of a device-control failure while the listener is off", async () => {
     // The host has no remote gateway to answer a device inventory until the
     // listener exists, so its refusal here is the prerequisite the page

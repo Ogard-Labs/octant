@@ -305,10 +305,8 @@ describe("provider capability matrix", () => {
 
   it("is the one place the specifications say which providers are first-class", () => {
     const agents = read(join(repositoryRoot, "AGENTS.md"));
-    const guide = read(join(repositoryRoot, "apps", "docs", "advanced", "providers.md"));
     expect(agents).not.toMatch(/matrix is not written/i);
     expect(architecture).not.toMatch(/matrix is not written/i);
     expect(architecture).toContain("Claude Code, Codex, Mistral Vibe, and OpenCode are");
-    expect(guide).toContain("### What each provider can do");
   });
 });

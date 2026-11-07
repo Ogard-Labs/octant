@@ -28,5 +28,5 @@ audit, deletion/return). Do not reuse this stub as a contract.
 - [Shared-host controller footing](./shared-host-controller.md) — who is
   controller when a team shares one host
 - [EULA placeholders](./eula-placeholders.md) — the license terms that do ship
-- [Privacy notice](../apps/docs/advanced/privacy-notice.md) — what the product
+- [Privacy notice](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) — what the product
   actually does with data
