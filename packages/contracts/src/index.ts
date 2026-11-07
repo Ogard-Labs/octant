@@ -158,6 +158,7 @@ export * from "./threadExport";
 export * from "./threadHandOff";
 export * from "./usage";
 export * from "./turnMetrics";
+export * from "./turnDiagnosticsReport";
 export * from "./usageResume";
 export * from "./usageRpc";
 export * from "./usageDashboard";
