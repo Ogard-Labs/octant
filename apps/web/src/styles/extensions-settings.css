@@ -678,6 +678,13 @@
   overflow-wrap: anywhere;
 }
 
+/* The global reset strips link styling, so a guide link inside the row's prose read as more prose. */
+.connectors__detail a {
+  color: var(--oct-fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* A server's connection word, and for one that is not working, why. The
    reason wraps under the word at phone width rather than widening the row. */
 .connection-status {

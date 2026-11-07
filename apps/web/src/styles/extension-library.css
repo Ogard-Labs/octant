@@ -407,6 +407,12 @@
   font-size: var(--oct-text-xs);
 }
 
+.library-detail__guide {
+  font-size: var(--oct-text-xs);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .library-detail__actions {
   display: flex;
   flex-wrap: wrap;

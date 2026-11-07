@@ -191,7 +191,17 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                     >
                       <span className="connectors__text">
                         <span className="connectors__name">{entry.displayName}</span>
-                        <span className="connectors__detail">{entry.description}</span>
+                        <span className="connectors__detail">
+                          {entry.description}{" "}
+                          <a
+                            aria-label={`${entry.displayName} setup guide`}
+                            href={entry.docs}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Vendor setup guide
+                          </a>
+                        </span>
                         {connection !== undefined && connectionNeedsAttention(connection.state) ? (
                           <ConnectionStatus connection={connection} />
                         ) : null}

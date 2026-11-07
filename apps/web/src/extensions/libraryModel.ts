@@ -60,6 +60,8 @@ export interface LibraryItem {
   readonly providerLogo?: string;
   /** A catalog grouping, for items that have one. */
   readonly category?: string;
+  /** Extra words a search matches, beyond the name and summary. */
+  readonly keywords?: ReadonlyArray<string>;
   readonly featured: boolean;
   readonly state: LibraryState;
   readonly stateLabel: string;
@@ -90,6 +92,8 @@ export interface LibraryItem {
   /** The Marketplace entry this item is, so it can be reviewed and installed here. */
   readonly marketplaceExtensionId?: string;
   readonly address?: string;
+  /** The vendor's page on connecting to this service. */
+  readonly docsUrl?: string;
   readonly version?: string;
 }
 
@@ -372,6 +376,8 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
           connectorId: connector.id,
           connectorAuth: connector.auth,
           address: connector.url,
+          docsUrl: connector.docs,
+          ...(connector.keywords === undefined ? {} : { keywords: connector.keywords }),
           ...(server === undefined ? {} : { mcpComponentId: String(server.id) }),
         }),
   };
@@ -458,6 +464,8 @@ function connectorItem(entry: ConnectorCatalogEntry): LibraryItem {
     connectorId: entry.id,
     connectorAuth: entry.auth,
     address: entry.url,
+    docsUrl: entry.docs,
+    ...(entry.keywords === undefined ? {} : { keywords: entry.keywords }),
   };
 }
 
@@ -630,9 +638,14 @@ export function filterLibrary(
     .filter(
       (item) =>
         needle === "" ||
-        [item.name, item.summary ?? "", item.source, item.provider, item.category ?? ""].some(
-          (text) => text.toLocaleLowerCase().includes(needle),
-        ),
+        [
+          item.name,
+          item.summary ?? "",
+          item.source,
+          item.provider,
+          item.category ?? "",
+          ...(item.keywords ?? []),
+        ].some((text) => text.toLocaleLowerCase().includes(needle)),
     )
     .map((item, index) => ({ item, index }))
     .sort(

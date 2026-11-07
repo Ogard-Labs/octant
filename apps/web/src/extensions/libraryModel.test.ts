@@ -285,6 +285,13 @@ describe("the library model", () => {
     });
     expect(postgres.length).toBeGreaterThan(0);
     expect(postgres.every((item) => item.kind === "connector")).toBe(true);
+    const jira = filterLibrary(items, {
+      query: "jira",
+      kind: "all",
+      state: "all",
+      provider: ALL_PROVIDERS,
+    });
+    expect(jira.map((item) => item.connectorId)).toEqual(["atlassian"]);
   });
 
   it("offers what was found in Claude Code and Codex as not yet installed here", () => {

@@ -474,6 +474,9 @@ start another task or claim to refresh that provider's tools.
 **Settings → Skills & Extensions → Connectors** lists hosted services an
 agent can use once you connect them: issue trackers, docs, databases,
 deployment platforms, payments, design canvases such as Doop, and more, by category, with a search box.
+Search also matches what a service covers, so **Jira** finds Atlassian and
+**crm** finds HubSpot and Pipedrive. Each entry links to the vendor's own
+setup guide.
 The list ships with the app; nothing is fetched to show it. **Connect** adds
 the service's server to this host the way Add MCP server does, then opens
 its sign-in page, or asks for a key the service issues (kept in this
