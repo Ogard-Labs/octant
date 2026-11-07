@@ -51,6 +51,27 @@ describe("plugin starter", () => {
     expect(checked.components).toContainEqual({ kind: "mcp-server", name: "crm" });
   });
 
+  it("keeps a starter named like a YAML number, boolean, or null importable", async () => {
+    for (const name of ["123", "true", "null"]) {
+      const created = await createPluginStarter({ name, parent: workspace });
+      if (created.status !== "created") throw new Error(`starter ${name} was not created`);
+      expect(await checkPluginFolder(created.folder)).toMatchObject({
+        status: "valid",
+        components: [{ kind: "skill", name }],
+      });
+    }
+  });
+
+  it("refuses an MCP address with a fragment, which Octant would skip", async () => {
+    expect(
+      await createPluginStarter({
+        name: "crm",
+        parent: workspace,
+        mcpUrl: "https://mcp.example.com/mcp#tools",
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
   it("refuses an MCP address that is not https or this computer", async () => {
     const created = await createPluginStarter({
       name: "crm",

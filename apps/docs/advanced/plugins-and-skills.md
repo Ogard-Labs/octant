@@ -265,7 +265,7 @@ octant plugin create crm --mcp-url https://mcp.example.com/mcp
 ```
 
 That adds an `mcp.json` naming the server. The address must use `https`, or
-`http` to this computer, and cannot hold a user name or password; Octant asks
+`http` to this computer, and cannot hold a user name, a password, or a `#` fragment; Octant asks
 you to sign in when it first connects. The name uses lowercase letters, digits,
 and single hyphens, up to 64 characters. `create` never writes into a folder
 that already exists.

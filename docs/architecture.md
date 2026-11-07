@@ -8648,7 +8648,7 @@ fetches preference. The lookup sends only `Accept` and the constrained
 writes a starter Agent Plugins folder in the current folder: `plugin.json`,
 one skill under `skills/<name>/`, a short README, and, with an address, an
 `mcp.json` naming that one Streamable HTTP server (https, or http to this
-computer, with no credentials in the address). The name must suit both the
+computer, with no credentials or fragment in the address). The name must suit both the
 plugin and its skill folder, and an existing folder is refused, never written
 into. `octant plugin check <folder>` reads a folder by the host's folder-import
 rules (git history and links inside the folder left out, a link that leaves it

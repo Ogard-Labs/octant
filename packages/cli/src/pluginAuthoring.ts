@@ -111,7 +111,10 @@ function starterFiles(
   };
   const skill = [
     "---",
-    `name: ${name}`,
+    // Quoted: an accepted name such as `123`, `true`, or `null` would
+    // otherwise parse as a number, boolean, or null, and the loader refuses a
+    // skill whose name is not a string.
+    `name: ${JSON.stringify(name)}`,
     "description: Say when an agent should use this skill. The agent reads this line to decide, so name the task and the words a person would use.",
     "---",
     "",
@@ -170,6 +173,8 @@ function mcpAddressRefusal(address: string): string | undefined {
   if (url.username !== "" || url.password !== "") {
     return "An MCP address cannot carry a user name or password; Octant asks for sign-in when it connects.";
   }
+  // The loader skips a server whose address has a fragment (`mcp.ts`).
+  if (url.hash !== "") return "An MCP address cannot end in a #fragment.";
   const local =
     url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
   if (url.protocol === "https:" || (url.protocol === "http:" && local)) return undefined;
