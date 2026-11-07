@@ -72,6 +72,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
+import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
@@ -1369,6 +1370,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             className="chat-workspace__tool-approval thread-column"
             client={props.extensionClient}
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+            turnActive={turnActive}
+          />
+          <ImageGenerationOfferPrompt
+            className="chat-workspace__tool-approval thread-column"
+            client={props.imageGenerationClient}
+            profiles={props.imageGenerationProfiles ?? []}
+            scopeId={
+              activeThreadId === undefined
+                ? undefined
+                : decodeImageGenerationScopeId(String(activeThreadId))
+            }
+            threadKind="chat-thread"
             turnActive={turnActive}
           />
           {pendingBrowserApproval === undefined ? null : (

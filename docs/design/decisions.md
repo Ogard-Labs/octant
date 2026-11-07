@@ -1132,9 +1132,10 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - A provider credential goes only over HTTPS to hosts the driver declares, or to the origin of a base URL the person configured.
 - A custom image source is a provider, model and label from a bounded list. A request is accepted only for an exact listed pair, and a removed or disabled instance fails with a reason, never falling back. _Here only._
 - An image driver that cannot honour a requested image count or reference images fails closed as invalid configuration. A per-image safety failure turns the whole result into a refusal with no partial success. _Here only._
+- An agent generates an image in Chat, Work and Code only through a card in its thread: the person picks the profile and model, lets the agent draw it as SVG instead, or cancels, and may tell the thread not to ask again; that choice lives in host memory until a restart. The tool is offered only while an image profile is ready, never in Plan, a Side Chat or a routine's turn, and every provider is told to call it for a picture instead of drawing one (maintainer decision, 2026-11-07).
 - Voice persists nothing. A paired device reaches transcription but never synthesis.
 
-Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ## Context and usage
 

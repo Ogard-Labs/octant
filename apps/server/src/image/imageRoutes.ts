@@ -2,6 +2,9 @@ import {
   decodeImageArtifactId,
   decodeImageGenerationEnqueueRequest,
   decodeImageGenerationJobsResponse,
+  decodeImageGenerationOfferDecision,
+  decodeImageGenerationOfferDecisionResult,
+  decodeImageGenerationOffersResponse,
   decodeImageGenerationProfilesResponse,
   decodeImageGenerationSaveRequest,
   decodeImageGenerationSaveResult,
@@ -20,6 +23,7 @@ import { listEligibleImageProfiles } from "@octant/domain";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import type { ImageJobService, ImageJobServiceError } from "./imageJobService";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -30,6 +34,8 @@ const ARTIFACT_PATH =
 
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
+  /** Agents' requests to generate, answered from the thread's card. */
+  readonly offers?: Pick<ImageGenerationOfferService, "list" | "claim" | "remember">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly authorizeScope: (
@@ -151,6 +157,73 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
           ...(references.length === 0 ? {} : { references }),
         });
         return json(decodeImageJob(job), 200, origin);
+      }
+
+      if (route === "offers" && request.method === "GET") {
+        const threadKind = parseThreadKind(url.searchParams.get("threadKind"));
+        const scopeId = parseScopeId(url.searchParams.get("scopeId"));
+        if (threadKind === undefined || threadKind === "image-library" || scopeId === undefined) {
+          return failure("Image offers require a thread.", 400, origin);
+        }
+        if (!(await dependencies.authorizeScope(windowId, threadKind, scopeId))) {
+          return failure("Image offers are unavailable.", 404, origin);
+        }
+        return json(
+          decodeImageGenerationOffersResponse({
+            offers: dependencies.offers?.list(windowId, { threadKind, scopeId }) ?? [],
+          }),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "offers/decide" && request.method === "POST") {
+        const decoded = await readJson(request, 8_192);
+        if (decoded.kind === "too-large") return failure("Request body is too large.", 413, origin);
+        if (decoded.kind === "invalid") {
+          return failure("Request body must be valid JSON.", 400, origin);
+        }
+        let decision;
+        try {
+          decision = decodeImageGenerationOfferDecision(decoded.value);
+        } catch {
+          return failure("Image offer decision is invalid.", 400, origin);
+        }
+        const answer = (body: unknown) =>
+          json(decodeImageGenerationOfferDecisionResult(body), 200, origin);
+        // A chosen model is checked before the offer is claimed, so a refusal
+        // leaves the card waiting for another choice.
+        if (decision.decision === "generate") {
+          const eligible = listEligibleImageProfiles(
+            dependencies.listInstances(),
+            dependencies.readImageGenerationSettings().customSources,
+          ).some(
+            (profile) =>
+              String(profile.instanceId) === String(decision.profileInstanceId) &&
+              profile.modelAllowlist.some((id) => String(id) === String(decision.modelId)),
+          );
+          if (!eligible) {
+            return answer({
+              kind: "image-offer-refused",
+              reason: "That image model is not available. Choose another one.",
+            });
+          }
+        }
+        const claimed = dependencies.offers?.claim(windowId, decision.offerId);
+        if (claimed === undefined) return answer({ kind: "image-offer-gone" });
+        if (decision.decision === "generate") {
+          const choice = {
+            profileInstanceId: decision.profileInstanceId,
+            modelId: decision.modelId,
+          };
+          if (decision.rememberForThread) dependencies.offers?.remember(claimed.offer, choice);
+          claimed.settle({ status: "generate", ...choice });
+        } else {
+          claimed.settle({
+            status: decision.decision === "agent-draws" ? "agent-draws" : "cancelled",
+          });
+        }
+        return answer({ kind: "image-offer-answered" });
       }
 
       const artifactMatch = ARTIFACT_PATH.exec(route);

@@ -98,6 +98,7 @@ import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
+import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -2508,6 +2509,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           className="thread-column"
           client={props.automationClient}
           threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
+        <ImageGenerationOfferPrompt
+          className="thread-column"
+          client={props.imageGenerationClient}
+          profiles={props.imageGenerationProfiles ?? []}
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="work-thread"
           turnActive={turnRunning}
         />
         {pendingBrowserApproval === undefined ? null : (

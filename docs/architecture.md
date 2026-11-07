@@ -5241,8 +5241,22 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   images, which every renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
-  scoped to that thread, so the result lands there as a thread artifact; it is
-  a person-driven action only, because the agent's image tool stays in Chat.
+  scoped to that thread, so the result lands there as a thread artifact.
+  The agent's tool is offered in Chat, Work, and Code turns whose provider
+  carries app-managed tools (never a Side Chat or a routine's turn, which has
+  nobody to answer), and only while an enabled image profile exists; every
+  provider is also told, in the turn's tool host lines, to call it for a
+  picture instead of drawing one as SVG or HTML. A call spends nothing by
+  itself: the host holds an image offer for the window whose turn asked, and
+  the thread shows it as a card where the person picks the profile and model,
+  lets the agent draw the visual itself, or cancels. Generate runs only a
+  profile and model the host can run when the answer arrives, checked again
+  before the job is queued. "Don't ask again in this thread" keeps that
+  profile and model for the thread in host memory only, so a restart asks
+  again, and a kept choice the host can no longer run is dropped and asked
+  again rather than swapped. An offer lives at most ten minutes and is given
+  up when its turn stops or its window goes away; Plan refuses the call,
+  because a generation calls a paid provider and stores the result.
   With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in

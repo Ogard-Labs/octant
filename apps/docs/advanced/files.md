@@ -572,9 +572,16 @@ tools, not text saved with a different extension.
 Work includes this artifact guidance in the task's context budget even when
 the selected runtime uses its own file tools.
 
-Image generation uses a separate configured image profile. The agent's image
-tool returns a job id and status; queued or running work is not a finished
-image. Completed artifacts appear in the task for opening or attachment.
+Image generation uses a separate configured image profile. When you ask an
+agent for a picture in a Chat, Work, or Code thread, it asks to use your image
+model instead of drawing the picture itself as SVG. A card in the thread shows
+the prompt; choose the image model, then **Generate**, or **Let the agent draw
+it**. Nothing is billed until you choose Generate. Tick **Don't ask again in
+this thread** to let later images in that thread use the same model without
+asking; Octant forgets this when it restarts. The agent is offered image
+generation only when an image profile is ready, and never in Plan mode.
+Queued or running work is not a finished image. Completed images appear in the
+thread for opening or attachment.
 
 You can also start an image yourself. In an open Chat, Work, or Code thread, the
 **Create image** button beside the attach button opens the same sheet: choose an
