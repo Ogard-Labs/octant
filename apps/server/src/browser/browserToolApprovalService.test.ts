@@ -11,6 +11,41 @@ const authority = {
 } as never;
 
 describe("BrowserToolApprovalService", () => {
+  it("uses the host's account label and refuses a missing or revoked account lookup", async () => {
+    let label: string | undefined = "Work account";
+    let current = true;
+    const service = new BrowserToolApprovalService({
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+      authorityIsCurrent: () => current,
+      profileLabel: async () => label,
+    });
+    const input = {
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+      profile: {
+        kind: "account" as const,
+        profileId: "40000000-0000-4000-8000-000000000002" as never,
+      },
+    };
+    const first = service.request(input);
+    await vi.waitFor(() => expect(service.list(windowId)).toHaveLength(1));
+    const view = service.list(windowId)[0];
+    if (view === undefined) throw Error("Missing profile prompt");
+    expect(view.profileLabel).toBe("Work account");
+    service.decide(windowId, { approvalId: view.approvalId, decision: "approved" });
+    expect(await first).toBe("approved");
+    label = undefined;
+    expect(await service.request(input)).toBe("denied");
+    label = "Work account";
+    current = false;
+    expect(await service.request(input)).toBe("denied");
+    expect(service.list(windowId)).toEqual([]);
+    service.close();
+  });
+
   it("binds one approval to its requesting window and exact origin", async () => {
     const service = new BrowserToolApprovalService({
       uuid: () => "40000000-0000-4000-8000-000000000001",

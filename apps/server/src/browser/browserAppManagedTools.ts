@@ -1,3 +1,5 @@
+import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { browserProfileFromChoice } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
@@ -59,7 +61,7 @@ export interface BrowserAppManagedToolsOptions {
   /** Host-owned in-memory bindings that survive per-turn tool-set factories. */
   readonly modelBindings: Map<string, BrowserModelBinding>;
   /** Live task default, used only when navigate omits its explicit profile. */
-  readonly resolveTaskProfile?: () => "private" | "project" | "personal" | undefined;
+  readonly resolveTaskProfile?: () => BrowserProfileChoice | undefined;
   readonly resolveAuthority: (
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
@@ -631,14 +633,10 @@ function signInRefusal(options: BrowserAppManagedToolsOptions): string | undefin
 
 /** The stored profile a `profile` argument names for this thread, if it has one. */
 function requestedProfile(
-  choice: "private" | "project" | "personal",
+  choice: BrowserProfileChoice,
   authority: ToolActionAuthority,
 ): StoredBrowserProfile | undefined {
-  if (choice === "private") return undefined;
-  if (choice === "personal") return { kind: "personal" };
-  return authority.projectId === undefined
-    ? undefined
-    : { kind: "project", projectId: authority.projectId };
+  return storedBrowserProfile(browserProfileFromChoice(choice, authority.projectId));
 }
 
 function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {

@@ -401,6 +401,7 @@ export interface OctantHostBridge
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:
+      | { readonly kind: "account"; readonly profileId: string }
       | { readonly kind: "personal" }
       | { readonly kind: "project"; readonly projectId: string };
     readonly extensionId: string;

@@ -1,3 +1,7 @@
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantAlert } from "../ui/base/OctantAlert";
+import { announceBrowserAccountProfilesChanged } from "./useBrowserAccountProfiles";
+import { browserProfileKey } from "@octant/domain";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type {
   BrowserProfileSummary,
@@ -35,6 +39,9 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
   const [importingInto, setImportingInto] = useState<BrowserProfileSummary>();
   const [clearing, setClearing] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [newName, setNewName] = useState<string>();
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string>();
   const manage = client.manageProfiles;
 
   const refresh = useCallback(async () => {
@@ -82,6 +89,31 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
     }
   }
 
+  async function createAccount(): Promise<void> {
+    if (manage === undefined || newName === undefined) return;
+    setCreating(true);
+    setCreateError(undefined);
+    try {
+      const result = await manage.call(client, { kind: "create-account", label: newName.trim() });
+      if (result.kind !== "browser-account-profile-created") {
+        setCreateError(
+          result.kind === "browser-profiles-refused"
+            ? result.message
+            : "The account profile could not be created.",
+        );
+        return;
+      }
+      setNotice(`Created “${result.label}”. Choose it explicitly in a Browser profile control.`);
+      setNewName(undefined);
+      announceBrowserAccountProfilesChanged();
+      await refresh();
+    } catch {
+      setCreateError("The account profile could not be created. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <SettingsSection
       description="Sign-ins that Browser pages keep on this Mac. Private pages keep none."
@@ -91,17 +123,66 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
       {loaded.kind === "unavailable" ? (
         <SettingsState kind="empty">{loaded.message}</SettingsState>
       ) : null}
+      {loaded.kind !== "ready" ? null : (
+        <SettingRow
+          label="Named account profiles"
+          description="Separate sign-ins on this host, reusable across Projects only when you choose them. Creating a profile grants no site or task access."
+          scope="host"
+          settingId="browser-accounts"
+        >
+          <OctantButton
+            onClick={() => {
+              setNewName("");
+              setCreateError(undefined);
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            New account profile…
+          </OctantButton>
+        </SettingRow>
+      )}
+      {newName === undefined ? null : (
+        <OctantConfirmDialog
+          title="New account profile"
+          confirmLabel="Create profile"
+          confirmDisabled={newName.trim().length === 0 || newName.trim().length > 80}
+          pending={creating}
+          onCancel={() => setNewName(undefined)}
+          onConfirm={() => void createAccount()}
+          details={
+            <>
+              <label className="field">
+                <span className="field__label">Profile name</span>
+                <OctantInput
+                  aria-label="Profile name"
+                  value={newName}
+                  maxLength={80}
+                  onChange={(event) => setNewName(event.target.value)}
+                />
+              </label>
+              {createError === undefined ? null : (
+                <OctantAlert tone="danger">{createError}</OctantAlert>
+              )}
+            </>
+          }
+        >
+          This profile keeps its own sign-ins on this host. It is not exported or synced. Select it
+          explicitly before using it in a task.
+        </OctantConfirmDialog>
+      )}
       {loaded.kind === "ready" ? (
         <div className="setgroup">
           {loaded.profiles.map((summary, index) => (
             <SettingRow
               description={
-                summary.profile.kind === "personal"
+                summary.profile.kind !== "project"
                   ? "Shared by every Project that chooses it."
                   : "Shared by every page of this Project."
               }
               focused={props.focusedSetting === "browser-profiles" && index === 0}
-              key={summary.profile.kind === "personal" ? "personal" : summary.profile.projectId}
+              key={browserProfileKey(summary.profile)}
               label={`${summary.label} · ${formatProfileSize(summary.sizeBytes)}`}
               scope="host"
               settingId="browser-profiles"

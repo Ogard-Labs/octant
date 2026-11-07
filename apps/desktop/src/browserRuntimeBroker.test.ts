@@ -656,6 +656,15 @@ describe("BrowserRuntimeBroker profiles", () => {
   const projectId = "40000000-0000-4000-8000-000000000001";
   function store() {
     return {
+      createAccount: vi.fn(async (_label: string) => ({
+        status: "created" as const,
+        profile: {
+          kind: "account" as const,
+          profileId: "40000000-0000-4000-8000-000000000002" as never,
+        },
+        label: "Work account",
+      })),
+      hasAccountProfile: vi.fn(() => false),
       list: vi.fn(async () => [{ profile: { kind: "personal" as const }, sizeBytes: 12 }]),
       clear: vi.fn(async () => undefined),
       syncExtensions: vi.fn(async () => undefined),
@@ -670,6 +679,30 @@ describe("BrowserRuntimeBroker profiles", () => {
   }
   const post = (broker: { url: string; token: string }, path: string, body: unknown) =>
     request(broker.url, broker.token, body, path);
+
+  it("creates a named native store only through the authenticated bounded request", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const created = await broker.fetchForTest(
+        post(broker, "v1/profiles/create-account", { label: "Work account" }),
+      );
+      expect(created.status).toBe(200);
+      expect(await created.json()).toMatchObject({
+        status: "created",
+        label: "Work account",
+        profile: { kind: "account" },
+      });
+      expect(profiles.createAccount).toHaveBeenCalledWith("Work account");
+      const invalid = await broker.fetchForTest(
+        post(broker, "v1/profiles/create-account", { label: "Work account", profileId: projectId }),
+      );
+      expect(invalid.status).toBe(400);
+      expect(profiles.createAccount).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
 
   it("lists and clears stored profiles for the authenticated server only", async () => {
     const profiles = store();

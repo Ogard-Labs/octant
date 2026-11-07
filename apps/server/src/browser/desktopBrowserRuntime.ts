@@ -22,7 +22,10 @@ import type {
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
-import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
+import {
+  decodeBrowserAccountProfileCreateResult,
+  decodeStoredBrowserProfile,
+} from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
   BrowserRecordingUnavailableError,
@@ -108,8 +111,15 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   }
 
   readonly profiles: BrowserProfileStorePort = {
-    list: async () => {
-      const payload = await this.#request<unknown>("/v1/profiles/list", {});
+    createAccount: async (label) =>
+      decodeBrowserAccountProfileCreateResult(
+        await this.#request("/v1/profiles/create-account", { label }),
+      ),
+    list: async (includeSizes) => {
+      const payload = await this.#request<unknown>(
+        "/v1/profiles/list",
+        includeSizes === undefined ? {} : { includeSizes },
+      );
       if (
         typeof payload !== "object" ||
         payload === null ||
@@ -120,10 +130,20 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
       }
       return payload.profiles.flatMap((entry: unknown) => {
         try {
-          const row = entry as { profile: unknown; sizeBytes: unknown };
+          const row = entry as { profile: unknown; sizeBytes: unknown; label?: unknown };
           const profile = decodeStoredBrowserProfile(row.profile);
           return typeof row.sizeBytes === "number" && Number.isInteger(row.sizeBytes)
-            ? [{ profile, sizeBytes: Math.max(0, row.sizeBytes) }]
+            ? [
+                {
+                  profile,
+                  sizeBytes: Math.max(0, row.sizeBytes),
+                  ...(typeof row.label === "string" &&
+                  row.label.length <= 80 &&
+                  row.label.trim().length > 0
+                    ? { label: row.label }
+                    : {}),
+                },
+              ]
             : [];
         } catch {
           return [];
