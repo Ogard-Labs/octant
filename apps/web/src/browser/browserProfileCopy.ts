@@ -1,6 +1,6 @@
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { browserDownloadQuestion } from "@octant/domain";
+import { browserDownloadQuestion, browserProfileKey } from "@octant/domain";
 
 /** The file a download approval names; see the Browser approval contract. */
 interface BrowserDownloadRequest {
@@ -62,6 +62,7 @@ export function browserApprovalSummary(approval: {
 
 export function browserApprovalDetail(approval: {
   readonly profile?: StoredBrowserProfile | undefined;
+  readonly profileLabel?: string | undefined;
   readonly extensionCount?: number | undefined;
   readonly upload?: BrowserUploadRequest | undefined;
   readonly download?: BrowserDownloadRequest | undefined;
@@ -69,7 +70,19 @@ export function browserApprovalDetail(approval: {
   readonly script?: { readonly source: string } | undefined;
 }): string {
   if (approval.script !== undefined) {
-    return `Profile: ${approval.profile === undefined ? "Private" : BROWSER_PROFILE_LABELS[approval.profile.kind]}. This script can read and change the page using its signed-in account authority, even in Private. This permission covers this exact source once in this task and profile. Shell and file access stay unchanged.`;
+    const fallback =
+      approval.profile === undefined
+        ? "Private"
+        : approval.profile.kind === "personal" || approval.profile.kind === "project"
+          ? BROWSER_PROFILE_LABELS[approval.profile.kind]
+          : "Selected profile";
+    const key = browserProfileKey(approval.profile);
+    const identity = key.includes(":")
+      ? key.slice(key.indexOf(":") + 1, key.indexOf(":") + 9)
+      : key;
+    const label =
+      approval.profileLabel === undefined ? fallback : `${approval.profileLabel} (${identity})`;
+    return `Profile: ${label}. This script can read and change the page using its signed-in account authority, even in Private. This permission covers this exact source once in this task and profile. Shell and file access stay unchanged.`;
   }
   if (approval.download !== undefined) {
     return "The file comes from the page and is checked here first. This answer covers this file once";
