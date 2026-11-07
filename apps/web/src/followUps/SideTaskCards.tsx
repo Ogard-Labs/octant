@@ -47,7 +47,7 @@ interface SideTasksValue {
   readonly tasks: ReadonlyArray<SideTask>;
   readonly busy: { readonly id: string; readonly action: SideTaskAction } | undefined;
   readonly messages: ReadonlyMap<string, string>;
-  readonly deliveries: ReadonlyMap<string, "sent" | "queued">;
+  readonly deliveries: ReadonlyMap<string, NonNullable<SideTask["continuedDelivery"]>>;
   readonly act: (task: SideTask, action: SideTaskAction, context?: SideTaskContext) => void;
   readonly open: (task: SideTask) => void;
 }
@@ -68,7 +68,7 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
   const [busy, setBusy] = useState<SideTasksValue["busy"]>();
   const busyRef = useRef(false);
   const [messages, setMessages] = useState<ReadonlyMap<string, string>>(new Map());
-  const [deliveries, setDeliveries] = useState<ReadonlyMap<string, "sent" | "queued">>(new Map());
+  const [deliveries, setDeliveries] = useState<SideTasksValue["deliveries"]>(new Map());
   const requestGeneration = useRef(0);
   // The pane can move to another thread while an action is on its way.
   const currentThread = useRef(threadId);
@@ -277,7 +277,9 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
               )}
             </>
           ) : task.status === "continued-here" ? (
-            delivery === "queued" ? (
+            delivery === "unconfirmed" ? (
+              "Delivery is unconfirmed. Check this thread and its queued messages before sending the prompt yourself."
+            ) : delivery === "queued" ? (
               "Queued here, runs after the current reply"
             ) : (
               "Doing it here"

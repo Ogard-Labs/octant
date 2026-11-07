@@ -7,6 +7,7 @@ import {
   MAX_OPEN_SIDE_TASKS,
   MAX_SIDE_TASK_VIEW_ENTRIES,
   SideTaskContinuedHere,
+  SideTaskContinuationRefused,
   SideTaskDismissed,
   SideTaskOffer,
   SideTaskStarted,
@@ -34,17 +35,20 @@ export function registerSideTaskEvents(registry: EventRegistry): EventRegistry {
     .register(THREAD_SIDE_TASK_EVENT_NAMES.offered, 1, SideTaskOffer)
     .register(THREAD_SIDE_TASK_EVENT_NAMES.started, 1, SideTaskStarted)
     .register(THREAD_SIDE_TASK_EVENT_NAMES.dismissed, 1, SideTaskDismissed)
+    .register(THREAD_SIDE_TASK_EVENT_NAMES.continuationRefused, 1, SideTaskContinuationRefused)
     .register(THREAD_SIDE_TASK_EVENT_NAMES.continuedHere, 1, SideTaskContinuedHere);
 }
 
 export type SideTaskSettlement =
   | { readonly kind: "started"; readonly payload: SideTaskStarted }
   | { readonly kind: "continued-here"; readonly payload: SideTaskContinuedHere }
+  | { readonly kind: "continuation-refused"; readonly payload: SideTaskContinuationRefused }
   | { readonly kind: "dismissed"; readonly payload: SideTaskDismissed };
 
 const SETTLEMENT_EVENT_NAMES = {
   started: THREAD_SIDE_TASK_EVENT_NAMES.started,
   "continued-here": THREAD_SIDE_TASK_EVENT_NAMES.continuedHere,
+  "continuation-refused": THREAD_SIDE_TASK_EVENT_NAMES.continuationRefused,
   dismissed: THREAD_SIDE_TASK_EVENT_NAMES.dismissed,
 } as const;
 
@@ -114,7 +118,16 @@ export class SideTaskStore {
     const record = this.#records.get(threadId);
     const task = this.find(threadId, String(settlement.payload.sideTaskId));
     if (record === undefined || task === undefined) return "not-found";
-    if (task.status !== "offered") return "already-settled";
+    const completesClaim =
+      task.status === "continued-here" &&
+      task.continuedDelivery === "unconfirmed" &&
+      (settlement.kind === "continuation-refused" ||
+        (settlement.kind === "continued-here" && settlement.payload.delivery !== "unconfirmed"));
+    if (
+      (task.status !== "offered" && !completesClaim) ||
+      (settlement.kind === "continuation-refused" && !completesClaim)
+    )
+      return "already-settled";
     this.#append(threadId, record, SETTLEMENT_EVENT_NAMES[settlement.kind], settlement.payload);
     this.#applySettlement(record, settlement);
     return "settled";
@@ -183,6 +196,11 @@ export class SideTaskStore {
           kind: "dismissed",
           payload: envelope.payload as SideTaskDismissed,
         });
+      } else if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.continuationRefused) {
+        this.#applySettlement(record, {
+          kind: "continuation-refused",
+          payload: envelope.payload as SideTaskContinuationRefused,
+        });
       }
     }
   }
@@ -193,6 +211,7 @@ export class SideTaskStore {
  * was fresh, so it reads as one.
  */
 function settledTask(task: SideTask, settlement: SideTaskSettlement): SideTask {
+  if (settlement.kind === "continuation-refused") return { offer: task.offer, status: "offered" };
   if (settlement.kind === "started") {
     return {
       ...task,

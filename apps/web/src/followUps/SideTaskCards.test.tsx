@@ -139,6 +139,18 @@ describe("SideTaskInline", () => {
     expect(screen.getByRole("button", { name: "New worktree" })).toBeEnabled();
   });
 
+  it("shows an unconfirmed delivery after reopening without offering to send it again", async () => {
+    const { client } = setup(() => [
+      task({ status: "continued-here", continuedDelivery: "unconfirmed" }),
+    ]);
+    expect(await screen.findByText(/Delivery is unconfirmed/)).toBeVisible();
+    expect(screen.getByText(/Check this thread and its queued messages/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Do it here" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New worktree" })).toBeNull();
+    expect(client.continueHere).not.toHaveBeenCalled();
+    expect(client.start).not.toHaveBeenCalled();
+  });
+
   it("hands the prompt over when the new thread exists but its first message did not go out", async () => {
     const { onStarted } = setup(() => [task()], {
       start: vi.fn(async () => ({ ...started, sent: false })),

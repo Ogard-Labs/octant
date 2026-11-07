@@ -29,6 +29,7 @@ export type SideTaskForkOutcome =
 export type SideTaskHereOutcome =
   | { readonly kind: "sent" }
   | { readonly kind: "queued" }
+  | { readonly kind: "unconfirmed" }
   | { readonly kind: "refused"; readonly message: string };
 
 /** A prompt for a thread's next turn, sent on the confirming window. */
@@ -261,8 +262,8 @@ export async function startSideTask(
 /**
  * "Do it here": the offering thread takes the work on itself. The prompt goes
  * out as its next turn, or waits in its message queue behind the running
- * one, and the offer journals which. Nothing is journaled when the prompt
- * could not be delivered, so the card stays open.
+ * one. Its durable claim precedes dispatch: a lost response or failed receipt
+ * must never leave the offer available to deliver twice, even after restart.
  */
 export async function continueSideTaskHere(
   dependencies: Pick<SideTaskStartDependencies, "store" | "continueHere" | "clock">,
@@ -271,12 +272,37 @@ export async function continueSideTaskHere(
   const task = dependencies.store.find(input.threadId, input.sideTaskId);
   if (task === undefined) return refused(input.sideTaskId, "not-found");
   const key = `${input.threadId}:${input.sideTaskId}`;
+  const unconfirmed = (): SideTaskResult => ({
+    kind: "side-task-continued-here",
+    sideTaskId: task.offer.id,
+    threadId: task.offer.threadId,
+    delivery: "unconfirmed",
+  });
+  if (task.status === "continued-here" && task.continuedDelivery === "unconfirmed")
+    return unconfirmed();
   if (task.status !== "offered" || settling.has(key)) {
     return refused(input.sideTaskId, "already-settled");
   }
   const offer = task.offer;
   settling.add(key);
   try {
+    try {
+      const claimed = dependencies.store.settle(input.threadId, {
+        kind: "continued-here",
+        payload: {
+          sideTaskId: offer.id,
+          delivery: "unconfirmed",
+          continuedAt: decodeUtcTimestamp(dependencies.clock()),
+        },
+      });
+      if (claimed !== "settled") return refused(input.sideTaskId, "already-settled");
+    } catch {
+      return refused(
+        input.sideTaskId,
+        "target-unavailable",
+        "The host could not record this action. Nothing was sent. Try again when storage is available.",
+      );
+    }
     const delivered = await dependencies
       .continueHere({
         windowId: input.windowId,
@@ -284,23 +310,33 @@ export async function continueSideTaskHere(
         threadId: String(offer.threadId),
         prompt: offer.prompt,
       })
-      .catch(
-        (): SideTaskHereOutcome => ({
-          kind: "refused",
-          message: "The prompt could not be given to this thread.",
-        }),
-      );
+      .catch((): SideTaskHereOutcome => ({ kind: "unconfirmed" }));
+    if (delivered.kind === "unconfirmed") return unconfirmed();
     if (delivered.kind === "refused") {
+      try {
+        const released = dependencies.store.settle(input.threadId, {
+          kind: "continuation-refused",
+          payload: { sideTaskId: offer.id, refusedAt: decodeUtcTimestamp(dependencies.clock()) },
+        });
+        if (released !== "settled") return unconfirmed();
+      } catch {
+        return unconfirmed();
+      }
       return refused(input.sideTaskId, "target-unavailable", delivered.message);
     }
-    dependencies.store.settle(input.threadId, {
-      kind: "continued-here",
-      payload: {
-        sideTaskId: offer.id,
-        delivery: delivered.kind,
-        continuedAt: decodeUtcTimestamp(dependencies.clock()),
-      },
-    });
+    try {
+      const settled = dependencies.store.settle(input.threadId, {
+        kind: "continued-here",
+        payload: {
+          sideTaskId: offer.id,
+          delivery: delivered.kind,
+          continuedAt: decodeUtcTimestamp(dependencies.clock()),
+        },
+      });
+      if (settled !== "settled") return unconfirmed();
+    } catch {
+      return unconfirmed();
+    }
     return {
       kind: "side-task-continued-here",
       sideTaskId: offer.id,

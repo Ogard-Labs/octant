@@ -62,14 +62,35 @@ function uuidFactory() {
   return () => `aaaaaaaa-aaaa-4aaa-8aaa-${(++counter).toString(16).padStart(12, "0")}`;
 }
 
-function storeOn(connection: SqliteConnection) {
+function storeOn(
+  connection: SqliteConnection,
+  beforeAppend?: (
+    events: ReadonlyArray<{ readonly eventName: string; readonly payload: unknown }>,
+  ) => void,
+) {
+  const journal = new Journal({
+    connection,
+    registry: registerSideTaskEvents(new EventRegistry()),
+    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    clock: () => now,
+  });
   return new SideTaskStore({
-    journal: new Journal({
-      connection,
-      registry: registerSideTaskEvents(new EventRegistry()),
-      projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
-      clock: () => now,
-    }),
+    journal: {
+      append: (input) => {
+        if (beforeAppend !== undefined) {
+          const request = Schema.decodeUnknownSync(
+            Schema.Struct({
+              events: Schema.Array(
+                Schema.Struct({ eventName: Schema.String, payload: Schema.Unknown }),
+              ),
+            }),
+          )(input);
+          beforeAppend(request.events);
+        }
+        return journal.append(input);
+      },
+      replayAggregateType: journal.replayAggregateType.bind(journal),
+    },
     uuid: uuidFactory(),
     actor,
     clock: () => now,
@@ -601,6 +622,77 @@ describe("side tasks", () => {
   });
 
   describe("doing a side task here", () => {
+    it.each(["sent", "queued"] as const)(
+      "never repeats a %s delivery whose receipt could not be journaled, including after restart",
+      async (delivery) => {
+        const connection = openConnection();
+        const store = storeOn(connection, (events) => {
+          if (
+            events.some(
+              (event) =>
+                event.eventName === "side-task-continued-here@1" &&
+                typeof event.payload === "object" &&
+                event.payload !== null &&
+                "delivery" in event.payload &&
+                event.payload.delivery === delivery,
+            )
+          )
+            throw new Error("Receipt journal unavailable");
+        });
+        const sideTaskId = await offeredHere(store);
+        const continueHere = vi.fn(async () => ({ kind: delivery }));
+        const input = { threadId, windowId, sideTaskId };
+
+        expect(
+          await continueSideTaskHere(startDependencies(store, { continueHere }), input),
+        ).toMatchObject({ delivery: "unconfirmed" });
+        expect(store.read(threadId).tasks[0]).toMatchObject({
+          status: "continued-here",
+          continuedDelivery: "unconfirmed",
+        });
+        await continueSideTaskHere(startDependencies(store, { continueHere }), input);
+        const restarted = storeOn(connection);
+        expect(restarted.read(threadId).tasks[0]).toMatchObject({
+          status: "continued-here",
+          continuedDelivery: "unconfirmed",
+        });
+        await continueSideTaskHere(startDependencies(restarted, { continueHere }), input);
+        expect(continueHere).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it("dispatches nothing unless it can durably claim the offer first", async () => {
+      const store = storeOn(openConnection(), (events) => {
+        if (events.some((event) => event.eventName === "side-task-continued-here@1"))
+          throw new Error("Journal unavailable");
+      });
+      const sideTaskId = await offeredHere(store);
+      const continueHere = vi.fn(async () => ({ kind: "sent" as const }));
+      const result = await continueSideTaskHere(startDependencies(store, { continueHere }), {
+        threadId,
+        windowId,
+        sideTaskId,
+      });
+      expect(result).toMatchObject({ kind: "side-task-refused" });
+      expect(continueHere).not.toHaveBeenCalled();
+      expect(store.read(threadId).tasks[0]?.status).toBe("offered");
+    });
+
+    it("keeps thrown delivery uncertain after restart instead of offering a retry", async () => {
+      const connection = openConnection();
+      const store = storeOn(connection);
+      const sideTaskId = await offeredHere(store);
+      const continueHere = vi.fn(async () => {
+        throw new Error("Delivery response lost");
+      });
+      const input = { threadId, windowId, sideTaskId };
+      expect(
+        await continueSideTaskHere(startDependencies(store, { continueHere }), input),
+      ).toMatchObject({ delivery: "unconfirmed" });
+      await continueSideTaskHere(startDependencies(storeOn(connection), { continueHere }), input);
+      expect(continueHere).toHaveBeenCalledTimes(1);
+    });
+
     function queueFake(standing: "idle" | "active" | "unconfirmed" | "unavailable") {
       const snapshot = {
         scope: { mode: "chat", threadId },
@@ -692,7 +784,8 @@ describe("side tasks", () => {
     });
 
     it("sends nothing to a thread whose last message may not have gone out, and keeps the card open", async () => {
-      const store = storeOn(openConnection());
+      const connection = openConnection();
+      const store = storeOn(connection);
       const sideTaskId = await offeredHere(store);
       const queue = queueFake("unconfirmed");
       const sendTurn = vi.fn(async () => true);
@@ -709,6 +802,24 @@ describe("side tasks", () => {
       expect(sendTurn).not.toHaveBeenCalled();
       expect(queue.execute).not.toHaveBeenCalled();
       expect(store.read(threadId).tasks[0]?.status).toBe("offered");
+      expect(storeOn(connection).read(threadId).tasks[0]?.status).toBe("offered");
+    });
+
+    it("does not offer another send when an idle-thread delivery returned no confirmation", async () => {
+      const store = storeOn(openConnection());
+      const sideTaskId = await offeredHere(store);
+      const queue = queueFake("idle");
+      const sendTurn = vi.fn(async () => false);
+      const dependencies = startDependencies(store, {
+        continueHere: (input) => continueInThread({ queue, sendTurn, uuid: uuidFactory() }, input),
+      });
+      const input = { threadId, windowId, sideTaskId };
+      expect(await continueSideTaskHere(dependencies, input)).toMatchObject({
+        delivery: "unconfirmed",
+      });
+      await continueSideTaskHere(dependencies, input);
+      expect(sendTurn).toHaveBeenCalledTimes(1);
+      expect(queue.execute).not.toHaveBeenCalled();
     });
 
     it("refuses a window the offering thread does not authorize before sending anything", async () => {
