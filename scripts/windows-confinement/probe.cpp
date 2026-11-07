@@ -17,6 +17,7 @@ namespace fs = std::filesystem;
 
 struct Failure { DWORD code; const char* operation = "native fixture operation"; };
 static bool processes_exited = true;
+static DWORD lpac_query_error = 0;
 static void require(BOOL result, const char* operation = "native fixture operation") { if (!result) throw Failure{GetLastError(), operation}; }
 static void hresult(HRESULT result) { if (FAILED(result)) throw Failure{static_cast<DWORD>(result)}; }
 
@@ -111,14 +112,20 @@ static void private_directory(const fs::path& path) {
   if (!created) throw Failure{error};
 }
 
-static bool appcontainer_token(HANDLE process) {
+static bool appcontainer_token(HANDLE process, bool expected_lpac) {
   HANDLE raw = nullptr;
   require(OpenProcessToken(process, TOKEN_QUERY, &raw));
   Handle token(raw);
   DWORD app = 0, lpac = 0, length = 0;
   require(GetTokenInformation(token.get(), TokenIsAppContainer, &app, sizeof(app), &length), "query AppContainer token");
-  require(GetTokenInformation(token.get(), TokenIsLessPrivilegedAppContainer, &lpac, sizeof(lpac), &length), "query LPAC token");
-  return app != 0 && lpac != 0;
+  if (!GetTokenInformation(token.get(), TokenIsLessPrivilegedAppContainer, &lpac, sizeof(lpac), &length)) {
+    // Some native SDK/OS pairs expose this enum but reject the Win32 query.
+    // Record that limit; the independent ACL control measures opt-out behavior.
+    lpac_query_error = GetLastError();
+    if (lpac_query_error != ERROR_INVALID_PARAMETER) throw Failure{lpac_query_error, "query LPAC token"};
+    return app != 0;
+  }
+  return app != 0 && (lpac != 0) == expected_lpac;
 }
 
 class Child {
@@ -127,7 +134,7 @@ class Child {
   Handle gate_;
   Handle process_;
 public:
-  Child(const fs::path& binary, PSID sid, const std::wstring& arguments)
+  Child(const fs::path& binary, PSID sid, const std::wstring& arguments, bool lpac = true)
     : job_(CreateJobObjectW(nullptr, nullptr)), ready_(event()), gate_(event()) {
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -144,7 +151,7 @@ public:
     HANDLE inherited[] = {ready_.get(), gate_.get()};
     require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
       &capabilities, sizeof(capabilities), nullptr, nullptr), "set AppContainer creation attribute");
-    require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY,
+    if (lpac) require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY,
       &policy, sizeof(policy), nullptr, nullptr), "set LPAC creation attribute");
     require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
       inherited, sizeof(inherited), nullptr, nullptr), "set inherited handle allowlist");
@@ -163,7 +170,7 @@ public:
     try {
       // Verify the actual token and assign the Job before the first instruction.
       require(AssignProcessToJobObject(job_.get(), process_.get()), "assign suspended child to Job");
-      if (!appcontainer_token(process_.get())) throw Failure{ERROR_BAD_TOKEN_TYPE};
+      if (!appcontainer_token(process_.get(), lpac)) throw Failure{ERROR_BAD_TOKEN_TYPE};
       if (ResumeThread(thread.get()) == static_cast<DWORD>(-1)) throw Failure{GetLastError()};
       if (WaitForSingleObject(ready_.get(), 5000) != WAIT_OBJECT_0) throw Failure{WAIT_TIMEOUT};
     } catch (...) {
@@ -291,6 +298,19 @@ int wmain(int argc, wchar_t** argv) {
       fs::path binary = root / L"bin" / L"probe.exe";
       fs::copy_file(executable(), binary);
       write_file(root / L"allowed" / L"existing"); write_file(root / L"outside-secret");
+      write_file(root / L"all-packages-control");
+      std::vector<BYTE> all_packages(SECURITY_MAX_SID_SIZE);
+      DWORD sid_length = static_cast<DWORD>(all_packages.size());
+      require(CreateWellKnownSid(WinBuiltinAnyPackageSid, nullptr, all_packages.data(), &sid_length));
+      grant(root / L"all-packages-control", all_packages.data(), FILE_GENERIC_READ, NO_INHERITANCE);
+      {
+        Child regular(binary, sid, L"read " + quote((root / L"all-packages-control").wstring()), false);
+        measurements.push_back({"ordinary AppContainer reads all-packages ACL control", regular.run(), 0});
+      }
+      {
+        Child restricted(binary, sid, L"read " + quote((root / L"all-packages-control").wstring()));
+        measurements.push_back({"LPAC opt-out denies all-packages ACL control", restricted.run(), ERROR_ACCESS_DENIED});
+      }
       auto measure = [&](const char* label, const std::wstring& action, const fs::path& path, DWORD expected, bool late) {
         Child process(binary, sid, action + L" " + quote(path.wstring()));
         if (late) write_file(path);
@@ -334,6 +354,7 @@ int wmain(int argc, wchar_t** argv) {
     std::ofstream output{fs::path(argv[1])};
     output << "{\"productionReady\":false,\"status\":\"" << (failure ? "failed" : "measured")
       << "\",\"error\":" << failure << ",\"errorOperation\":\"" << failed_operation << "\",\"profileRemoved\":" << (profile_removed ? "true" : "false")
+      << ",\"lpacTokenQuerySupported\":" << (lpac_query_error ? "false" : "true") << ",\"lpacTokenQueryError\":" << lpac_query_error
       << ",\"processesExited\":" << (processes_exited ? "true" : "false")
       << ",\"fixtureRemoved\":" << (fixture_removed ? "true" : "false") << ",\"measurements\":[";
     for (size_t index = 0; index < measurements.size(); ++index) {

@@ -19,8 +19,12 @@ private temporary tree with sentinel files. Only the fixture executable and
 one read-only directory receive grants for that exact profile SID. ACL changes
 never affect another folder or profile. A suspended child receives no network
 capabilities and only two inherited control-event handles. The parent verifies
-its actual AppContainer and LPAC token and assigns its owned kill-on-close Job
-before resuming it. Each operation has a bounded wait. Job handles are never
+its actual AppContainer token and assigns its owned kill-on-close Job before
+resuming it. The LPAC token-query result is recorded explicitly: some Windows
+SDK/OS pairs reject that query with error 87. A separate ACL control compares
+ordinary AppContainer access to an ALL APPLICATION PACKAGES grant against
+the same access with LPAC opt-out. An unsupported token query is never described
+as a successful one. Each operation has a bounded wait. Job handles are never
 inherited. The descendant check retains process handles from the owned Job,
 closes the Job, and waits for both processes to exit. The profile and fixture
 tree are removed afterward. The workflow has a ten-minute outer deadline.
