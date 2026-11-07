@@ -83,6 +83,21 @@ export interface ExtensionToolCall {
   readonly signal?: AbortSignal;
 }
 
+/** What the manager last saw of one server, for the Settings connection listing. */
+export interface McpConnectionObservation {
+  readonly extensionId: string;
+  readonly componentId: string;
+  readonly state: "connected" | "connecting" | "failed" | "idle";
+  readonly reason?: string;
+  readonly at?: string;
+}
+
+function pick(
+  target: Pick<AgentPluginMcpSessionKey, "extensionId" | "componentId">,
+): Pick<McpConnectionObservation, "extensionId" | "componentId"> {
+  return { extensionId: String(target.extensionId), componentId: String(target.componentId) };
+}
+
 /** A component the manager should keep connected, with the server name its mcp.json uses. */
 type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
   readonly serverNameHint: string;
@@ -112,6 +127,8 @@ export interface AgentPluginMcpSessionManagerOptions {
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
   readonly uuid?: () => string;
+  /** The clock for when a connection opened or failed, as Settings shows it. */
+  readonly now?: () => Date;
   /**
    * Fills in the secret references in a launch for a package the host wrote
    * for a server the person added by hand. Only a package the host's own
@@ -167,7 +184,18 @@ export class AgentPluginMcpSessionManager {
     {
       readonly target: AgentPluginMcpSessionKey;
       readonly reason: string;
+      readonly at: string;
     }
+  >();
+  readonly #now: () => Date;
+  /**
+   * When each server last opened a session in any scope or version, keyed
+   * by extension and component. Kept after an idle close so Settings can say
+   * when it last worked; dropped with the component.
+   */
+  readonly #lastConnected = new Map<
+    string,
+    { readonly target: AgentPluginMcpSessionKey; readonly at: string }
   >();
 
   constructor(options: AgentPluginMcpSessionManagerOptions) {
@@ -182,6 +210,7 @@ export class AgentPluginMcpSessionManager {
     this.#authorizeToolCall = options.authorizeToolCall;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid ?? randomUUID;
+    this.#now = options.now ?? (() => new Date());
     this.#isUserAddedSource = options.isUserAddedSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
     this.#bindUserAddedAuthentication = options.bindUserAddedAuthentication;
@@ -201,6 +230,66 @@ export class AgentPluginMcpSessionManager {
       componentId: target.componentId,
       reason,
     }));
+  }
+
+  /**
+   * What the manager last saw of each server, across every authority scope:
+   * an open session, a connect in flight, a failure, or when it last
+   * connected. A read of memory only; it never connects or lists tools.
+   */
+  connectionObservations(): ReadonlyArray<McpConnectionObservation> {
+    // One server can hold sessions and failures in several task scopes and
+    // package versions; the row shows the newest fact. A connect in flight
+    // wins, then the latest failure unless a session connected after it.
+    type Facts = {
+      readonly target: AgentPluginMcpSessionKey;
+      connecting: boolean;
+      connected: boolean;
+      failure?: { readonly reason: string; readonly at: string };
+    };
+    const components = new Map<string, Facts>();
+    const entry = (target: AgentPluginMcpSessionKey): Facts => {
+      const key = authenticationKey(target);
+      const known = components.get(key);
+      if (known !== undefined) return known;
+      const created: Facts = { target, connecting: false, connected: false };
+      components.set(key, created);
+      return created;
+    };
+    for (const { target } of this.#lastConnected.values()) entry(target);
+    for (const { target, reason, at } of this.#failures.values()) {
+      const known = entry(target);
+      if (known.failure === undefined || known.failure.at < at) known.failure = { reason, at };
+    }
+    for (const { target } of this.#connections.values()) entry(target).connecting = true;
+    for (const record of this.#sessions.values()) entry(record).connected = true;
+    return [...components.entries()].map(([key, known]) => {
+      const lastConnected = this.#lastConnected.get(key)?.at;
+      const since = lastConnected === undefined ? {} : { at: lastConnected };
+      if (known.connecting) return { ...pick(known.target), state: "connecting", ...since };
+      if (
+        known.failure !== undefined &&
+        (!known.connected || lastConnected === undefined || known.failure.at >= lastConnected)
+      )
+        return {
+          ...pick(known.target),
+          state: "failed",
+          reason: known.failure.reason,
+          at: known.failure.at,
+        };
+      return { ...pick(known.target), state: known.connected ? "connected" : "idle", ...since };
+    });
+  }
+
+  /**
+   * A person's Reconnect: drop the server's sessions and failures in every
+   * task scope so the next task's authority reconciliation connects fresh;
+   * a task using it elsewhere connects again on its next turn. Nothing connects
+   * from here and no failed call is replayed; connecting stays with the task
+   * that has authority to use the server.
+   */
+  async reconnect(extensionId: string, componentId: string): Promise<void> {
+    await this.invalidateAuthentication(extensionId, componentId);
   }
 
   projectEffectiveState(effective: ExtensionEffectiveSnapshot): ExtensionEffectiveSnapshot {
@@ -385,6 +474,7 @@ export class AgentPluginMcpSessionManager {
               this.#failures.set(indexed.sessionKey, {
                 target: desired,
                 reason: "MCP tool transport closed; authority reconciliation is required.",
+                at: this.#now().toISOString(),
               });
             }
           }
@@ -536,6 +626,7 @@ export class AgentPluginMcpSessionManager {
         this.#failures.set(key, {
           target,
           reason: error instanceof Error ? error.message : "MCP connection failed.",
+          at: this.#now().toISOString(),
         });
       }
     }
@@ -621,6 +712,19 @@ export class AgentPluginMcpSessionManager {
     for (const key of this.#failures.keys()) {
       if (!retained.has(key)) this.#failures.delete(key);
     }
+    const installed = new Set(
+      snapshot.packages.flatMap((packageState) =>
+        packageState.components.map((componentState) =>
+          authenticationKey({
+            extensionId: packageState.extensionId,
+            componentId: componentState.component.id,
+          }),
+        ),
+      ),
+    );
+    for (const key of this.#lastConnected.keys()) {
+      if (!installed.has(key)) this.#lastConnected.delete(key);
+    }
   }
 
   async #connect(
@@ -645,9 +749,11 @@ export class AgentPluginMcpSessionManager {
       baseEnv: this.#baseEnv,
       supportedTransports: new Set(["stdio", "streamable-http"]),
     });
-    const selectedLaunch =
-      plan.launches.find((candidate) => candidate.name === target.serverNameHint) ??
-      plan.launches.find((candidate) => `mcp-${tokenize(candidate.name)}` === target.componentId);
+    const selectedLaunch = selectMcpServer(
+      plan.launches,
+      target.serverNameHint,
+      target.componentId,
+    );
     if (selectedLaunch === undefined) {
       throw new Error(`MCP server for ${target.componentId} is unavailable.`);
     }
@@ -759,6 +865,10 @@ export class AgentPluginMcpSessionManager {
       return;
     }
     this.#sessions.set(key, record);
+    this.#lastConnected.set(authenticationKey(target), {
+      target,
+      at: this.#now().toISOString(),
+    });
     this.#touchIdle(key);
     this.#reindex();
   }
@@ -801,6 +911,7 @@ export class AgentPluginMcpSessionManager {
     this.#failures.set(key, {
       target,
       reason: "MCP transport closed; authority reconciliation is required.",
+      at: this.#now().toISOString(),
     });
   }
 
@@ -1118,6 +1229,21 @@ function isContainedPath(root: string, candidate: string): boolean {
   if (!isAbsolute(root) || !isAbsolute(candidate)) return false;
   const child = relative(root, candidate);
   return child === "" || (!isAbsolute(child) && !child.split(/[\\/]/).includes(".."));
+}
+
+/**
+ * The entry of a shared mcp.json a component runs: the one its display name
+ * names, else the one whose name the component id was derived from.
+ */
+export function selectMcpServer<T extends { readonly name: string }>(
+  servers: ReadonlyArray<T>,
+  displayName: string,
+  componentId: string,
+): T | undefined {
+  return (
+    servers.find((candidate) => candidate.name === displayName) ??
+    servers.find((candidate) => `mcp-${tokenize(candidate.name)}` === componentId)
+  );
 }
 
 function tokenize(name: string): string {

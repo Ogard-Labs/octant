@@ -24,6 +24,7 @@ import type {
   ExtensionPackageReviewDebugAdapter,
   ExtensionPackageReviewLanguageServer,
   ExtensionProjectPinListing,
+  McpServerConnection,
 } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type {
@@ -36,6 +37,7 @@ import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 import { ConnectorsView } from "./ConnectorsView";
+import { ServerConnections } from "./ServerConnections";
 import { LibraryView, type LibraryInspection } from "./LibraryView";
 import { buildLibrary, type LibraryItem } from "./libraryModel";
 import { providerFit } from "./providerFit";
@@ -448,6 +450,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [snapshot, setSnapshot] = useState<ExtensionSnapshot | undefined>();
   const [effective, setEffective] = useState<ExtensionEffectiveSnapshot | undefined>();
+  // How each installed server is connecting; undefined when the host could not say.
+  const [connections, setConnections] = useState<ReadonlyArray<McpServerConnection> | undefined>();
+  // Only the newest read lands, so an older answer cannot replace a newer one.
+  const connectionsEpoch = useRef(0);
+  const loadConnections = useCallback(async () => {
+    const epoch = ++connectionsEpoch.current;
+    let next: ReadonlyArray<McpServerConnection> | undefined;
+    try {
+      next = (await props.client.mcpServerConnections()).servers;
+    } catch {
+      next = undefined;
+    }
+    if (epoch === connectionsEpoch.current) setConnections(next);
+  }, [props.client]);
   const [failure, setFailure] = useState<FailureBanner | undefined>();
   const [marketplaceQuery, setMarketplaceQuery] = useState("");
   const [marketplaceEntries, setMarketplaceEntries] = useState<
@@ -485,8 +501,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [libraryBusyId, setLibraryBusyId] = useState<string>();
   const [libraryInspection, setLibraryInspection] = useState<LibraryInspection>();
   const libraryItems = useMemo(
-    () => buildLibrary({ snapshot, marketplace: marketplaceEntries, discovered }),
-    [snapshot, marketplaceEntries, discovered],
+    () =>
+      buildLibrary({
+        snapshot,
+        marketplace: marketplaceEntries,
+        discovered,
+        ...(connections === undefined ? {} : { connections }),
+      }),
+    [snapshot, marketplaceEntries, discovered, connections],
   );
   // The same read-only look at Claude Code and Codex on this computer that
   // Installed makes; the Library shows what it found and adds nothing.
@@ -591,6 +613,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       rootStatusCallback.current?.(next.skillRoots ?? []);
       setEffective(scoped);
       setStatus("ready");
+      void loadConnections();
     } catch {
       if (epoch !== reloadEpoch.current) return;
       setStatus("unavailable");
@@ -599,7 +622,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         message: "Extensions could not be refreshed. The last loaded settings are shown.",
       });
     }
-  }, [props.client, scope]);
+  }, [props.client, scope, loadConnections]);
 
   useEffect(() => {
     // A different client or activation scope must load its own snapshot.
@@ -1159,11 +1182,15 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         />
       ) : view === "installed" ? (
         <>
-          <SettingsSection
+          <ServerConnections
+            client={props.client}
+            disabled={installing || importingLocal}
+            localHost={props.client.toolGrantsAvailable}
+            onChanged={() => void loadConnections()}
             actions={viewSwitch}
-            className="extensions-settings__section"
-            title="Extension packages"
-          >
+            servers={connections}
+          />
+          <SettingsSection className="extensions-settings__section" title="Extension packages">
             <div className="extensions-settings__body">
               {installedPackages.length === 0 ? (
                 <p className="extensions-settings__state" role="status">
@@ -1516,6 +1543,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             void reload();
           }}
           snapshot={snapshot}
+          {...(connections === undefined ? {} : { connections })}
         />
       ) : (
         <>
