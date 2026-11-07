@@ -435,16 +435,55 @@ turned on a switch, and then only after they answer for that file.
   host setting for the same reason the remembered sites are: an agent must not
   be able to widen its own reach. Cancelling at the cap, rather than checking
   afterwards, keeps a page from filling the disk with a file nobody asked for;
-  the headless runtime cannot tell which file in its download folder belongs
-  to which download, so when any file passes the cap it cancels the context's
-  running downloads. The person's own download in the pane stays blocked: this
+  the headless runtime watches the browser's shared download folder. A uniquely
+  attributed file cancels only its own download at the cap. When concurrent
+  arrivals cannot be attributed and an unclaimed file crosses the cap, every
+  still-running candidate is cancelled, including candidates in other contexts;
+  waiting for completion would leave the in-flight limit unenforced. Downloads
+  whose files are already attributed are not candidates. A native completion
+  that races a cancellation remains refused and its file is deleted. The person's own download in the pane stays blocked: this
   switch is for agents' downloads into the workspace only, and a file the
   person wants they can fetch themselves.
+- Destination creation holds the checked folder as a working directory,
+  verifies its physical location before creating a file, and writes only an
+  exclusive relative basename. A concurrent ancestor/directory-link swap
+  cannot redirect that creation or its cleanup to an outside folder. An
+  unavailable destination refuses without a saved receipt. Only macOS and
+  Linux have this save path; unsupported platforms refuse.
+- The save boundary accepts a trusted host-selected destination internally;
+  the ordinary `download-save` tool still passes only the workspace default.
+  The internal selection carries the current host-resolved approved Project
+  folder (main or extra), its canonical root, the exact reviewed bounded
+  relative directory (`.` for that root), and the reviewed directory's device
+  and inode. The directory must already exist. The host rechecks that this
+  folder identity still belongs to the Project; an unavailable selection never
+  falls back to the current checkout. Agent JSON cannot supply a root or these
+  callbacks. This port does not itself grant recurring transfer permission or
+  add a destination picker.
+- Root and destination proofs are read-only. The native writer checks the
+  root identity and its held destination's device/inode and physical canonical
+  position before exclusive relative creation. It uses native `realpath` so
+  Node's cached working-directory string cannot hide a rename. An ordinary
+  missing `downloads/` is made only inside that writer after admission; an
+  internal selected directory is never made implicitly.
+- The save checks cancellation and selection currentness after asynchronous
+  preparation. The final bytes must retain the sniffed prefix, so a held-file
+  rewrite cannot carry stale type facts into admission. Once all held bytes
+  and target proofs are available, a
+  synchronous host callback admits current source, authority and any quota
+  reservation immediately before writer dispatch. The ordinary service supplies
+  its current context/authority fence and combines context and caller
+  cancellation. Refusal before dispatch creates no file or directory. After
+  dispatch an unsuccessful writer may have written: this boundary never refunds
+  a reservation or dispatches a retry on an uncertain result.
+- Ordinary saved receipts and the existing journal remain workspace-relative.
+  A trusted selected save instead returns its opaque approved-folder id, a
+  path-free display label and an explicit `selected-root` path base: its path
+  is relative to that selected approved root, not to the thread's workspace.
+  A future selected-destination consumer must carry that receipt honestly;
+  it cannot write it as a legacy workspace-relative event.
 - Not covered: a person's own downloads in the Browser pane, and a download
-  that starts after an action's settling has ended (it is cancelled). The check that the file is not written through a
-  link is made on the folder's path before and after the write; a process of
-  the person's own that swaps `downloads/` for a link in between, which can
-  already write anywhere in the workspace, is not stopped.
+  that starts after an action's settling has ended (it is cancelled).
 
 ## Steps
 

@@ -546,6 +546,7 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
+      readonly signal?: AbortSignal;
       readonly ask: (
         facts: {
           readonly name: string;
@@ -1566,6 +1567,7 @@ async function browserToolOne(
       threadId,
       downloadId: input.downloadId,
       workspaceRoot: download.root,
+      ...(signal === undefined ? {} : { signal }),
       ask: (facts, pageOrigin) => {
         const question = browserDownloadQuestion(pageOrigin, facts);
         // Code journals bounded approval summaries. Refuse before that layer
