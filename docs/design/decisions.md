@@ -1326,6 +1326,7 @@ A component is active only when its package is installed, its source trusted, th
 - A structured mention cannot install, trust, enable or elevate anything.
 - A curated workspace preset may name skills, and naming is all it does. The host reports each named skill's state (in use, installed but not enabled, not installed). _Here only._
 - Marketplace network access happens only on user action, and opening Settings fetches no catalog.
+- An author writes a plugin without a running host: `octant plugin create` writes a starter Agent Plugins folder and `octant plugin check` reads a folder by the host's folder-import rules and shared loader. Neither installs, trusts or enables anything, and neither reaches the network (2026-11-07).
 
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
