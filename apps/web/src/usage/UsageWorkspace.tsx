@@ -41,7 +41,8 @@ export interface UsageWorkspaceProps {
    */
   readonly usageQuery?: Pick<UsageClient, "query">;
   /** Reads how turns went; without it the Diagnostics view is not offered. */
-  readonly diagnosticsClient?: Pick<UsageClient, "diagnostics">;
+  readonly diagnosticsClient?: Pick<UsageClient, "diagnostics"> &
+    Partial<Pick<UsageClient, "hostHealth">>;
   readonly providerLimitsClient?: ProviderUsageLimitsClient;
   readonly historyClient?: LocalUsageHistoryClient;
   readonly providers?: ReadonlyArray<ProviderInstance>;

@@ -90,6 +90,7 @@ describe("usage thread rows", () => {
       export: vi.fn(),
       reset: vi.fn(),
       diagnostics: vi.fn(),
+      hostHealth: vi.fn(),
       retain: vi.fn(),
     };
     render(<UsageDashboard client={client} />);

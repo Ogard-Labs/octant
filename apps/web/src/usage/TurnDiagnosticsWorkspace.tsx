@@ -23,12 +23,14 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { HostHealthSection } from "./HostHealthSection";
 import { UsageName } from "./UsageName";
 import "./usageWorkspace.css";
 import "./turnDiagnostics.css";
 
 export interface TurnDiagnosticsWorkspaceProps {
-  readonly client: Pick<UsageClient, "diagnostics">;
+  /** `hostHealth` adds the Host health section; without it the section is left out. */
+  readonly client: Pick<UsageClient, "diagnostics"> & Partial<Pick<UsageClient, "hostHealth">>;
   readonly providers?: ReadonlyArray<ProviderInstance>;
   readonly sourceControl?: ReactNode;
   readonly onBack?: () => void;
@@ -340,6 +342,14 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
         <ReportSections
           report={report}
           {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      )}
+      {props.client.hostHealth === undefined ? null : (
+        <HostHealthSection
+          client={{ hostHealth: props.client.hostHealth.bind(props.client) }}
+          from={request.filter.from}
+          readKey={request}
+          when={(timestamp) => formatWhen(timestamp, timeZone)}
         />
       )}
     </TimeZoneContext.Provider>

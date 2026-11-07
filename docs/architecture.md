@@ -4358,6 +4358,21 @@ flowchart LR
   (`debugSessions`, a version 3 packet, absent when there were none), with
   no session, thread, or Project named; the rule is in
   [Debugger session rules](design/language-services.md#debugger-session-rules).
+- **Host health over time.** Once a minute the host samples its own process:
+  resident and heap memory, event-loop stalls and slow database statements
+  since the previous sample (count and worst), the journal database's size,
+  and each host latency measurement's count, p50, p95 and maximum over the
+  minute, plus the process start, which marks restarts. Samples are numbers
+  only: no route, SQL, thread, or Project. They live in `host-health.sqlite3`
+  beside the journal, not in it, because they are host diagnostics rather
+  than product state: they are kept 14 days, pruned hourly, never synced,
+  exported, or replayed, and deleting the file loses nothing a person made. A
+  sample that cannot be written is dropped; recording never fails the host.
+  `POST /api/usage/host-health` reads a span as minutes, or as hours when the
+  minutes would exceed 2,016 points; an hour sums its minutes' counts and keeps
+  their worst memory, stall, and latency. It names nothing Project-scoped, so
+  any authenticated window may read it. The lifetime counters a diagnostics
+  export carries are unchanged.
 - **Support bundle.** The maintainer approved a diagnostics file the person
   saves and sends themselves (2026-10-31); Octant never sends it. Host ›
   Maintenance › Save diagnostics and `octant diagnostics export --out <folder
