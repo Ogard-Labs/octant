@@ -843,14 +843,32 @@ this is the same rule with a network in between.
 
 **Delivery on B.** Delivery follows the one-host rule on B. When the
 recipient's next Code turn assembles its context, B rechecks that the recipient
-is still active and tagged, that A is still in the roster, and that A's grant
-still carries Message, and refuses otherwise. A delivered message marks the
+is still active and tagged, that A is still in the roster, that A's grant
+still carries Message, and that A has not withdrawn the message (below), and
+refuses otherwise. A delivered message marks the
 recipient with `thread.external-content-ingested@1` under the source label
 `member-message` and joins the turn as one context block: a host sentence that
 names the sending member and the sender's remote reference, then the body
 inside the shared external-data frame. Nothing that arrives starts a turn on B,
 grants authority there, or answers an approval there. The agent on B replies
 by sending to the reference in that sentence.
+
+**The sender's end after B accepts.** The one-host rule rechecks the sender at
+delivery. Across members B cannot see the sender, so A tells it. When a
+sending thread stops being eligible (it is completed, archived, deleted, or
+purged, or a person turns its tag off), A sends B a signed member request
+(`POST /api/hub/peer/messages/withdraw`) naming every message from that thread
+that B accepted and has not yet delivered. B refuses each one at once, deletes
+its body, and sends the `refused` receipt back. A withdraw that cannot reach B
+is sent again with the same ids until B answers or the message's 24-hour
+deadline passes. A thread that only dropped to Plan withdraws nothing, because
+Plan stops a thread from sending, not from having sent. Rationale: if B asked A
+before every delivery, delivery would depend on A being online, and waiting for
+an unreachable member would no longer work. The cost is a window: while A
+cannot reach B, B may still deliver a message whose sender A already closed.
+That message is unchanged text the sender wrote while it was eligible, framed
+and tainting, so the window exposes nothing the person had not allowed when it
+was sent.
 
 **Receipts.** B sends `delivered`, `acknowledged`, `refused`, and `expired`
 back to A as signed member requests (`POST /api/hub/peer/messages/receipts`)
@@ -1660,7 +1678,7 @@ a numbered slice. Built, with these narrower readings:
 11. **Messaging between members.** The Reachable tag and its event, the
     Message peer-grant item (in the full-member grant, and a Message-only
     grant for the hub), remote references, `list` with a `member`, the
-    threads, messages, and receipts member routes, sending with retry and
+    threads, messages, receipts, and withdraw member routes, sending with retry and
     the 24-hour deadline, delivery on the receiver, and receipts back.
     Acceptance: an untagged thread is never listed and refuses a message in
     the same words as an unknown one; a sender thread without the tag cannot
@@ -1668,7 +1686,8 @@ a numbered slice. Built, with these narrower readings:
     `unauthorized`; a message sent while the receiver is down arrives once
     after it returns and expires after 24 hours; nothing that arrives starts a
     turn or reaches an approval on the receiver; untagging or revoking refuses
-    waiting messages; a Claude thread on one host and a Codex thread on another
+    waiting messages; closing or untagging the sender withdraws what B still
+    holds; a Claude thread on one host and a Codex thread on another
     exchange a message and a reply. Verification: server tests and a
     three-host loopback smoke with fake providers; a run between two real
     computers and real providers is a maintainer gate. **Linux container:
