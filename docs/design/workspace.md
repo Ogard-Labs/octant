@@ -1263,7 +1263,9 @@ in Chat, Work, and Code. A questionnaire belongs in its originating thread,
 with one compact card containing up to four questions. It creates no Canvas.
 Each question offers one choice or several choices, optional descriptions,
 and an optional written alternative. Recommendations are labelled and never
-preselected. A person can add a comment alongside their choices.
+preselected. A person can add a comment alongside their choices by default.
+A provider-native form can explicitly omit this field when its protocol cannot
+return a comment; the host refuses a supplied comment for that exact ask.
 
 Choosing an option only edits the draft. **Send answers** submits the complete
 set once; the host validates question and option identities, required answers,

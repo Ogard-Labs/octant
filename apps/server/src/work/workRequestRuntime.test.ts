@@ -98,6 +98,65 @@ describe("WorkRequestRuntime", () => {
     });
   });
 
+  it("sanitizes questionnaire text without changing selection identities or native callback values", async () => {
+    const recorded: WorkRequestRecordInput[] = [];
+    const runtime = new WorkRequestRuntime({
+      requests: {
+        record: (input: WorkRequestRecordInput) => {
+          recorded.push(input);
+          return { status: "ok", request: {} as never };
+        },
+      } as never,
+      uuid: () => "00000000-0000-4000-8000-000000000905",
+    });
+    const connection = {
+      subscribe: Effect.succeed(
+        Stream.fromIterable<ProviderRuntimeEvent>([
+          {
+            instanceId: providerInstanceId,
+            sessionId,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(projectId)),
+            occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+            kind: "user-input-request",
+            requestId: "native-form",
+            prompt: "Choose",
+            options: [],
+            questionnaire: {
+              allowComment: false,
+              questions: [
+                {
+                  id: "q0",
+                  prompt: "Open /private/secret?",
+                  selection: "multiple",
+                  options: [
+                    { id: "o0", label: "https://private.example" },
+                    { id: "o1", label: "PDF" },
+                  ],
+                },
+              ],
+            },
+          },
+        ]),
+      ),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      interrupt: () => Effect.void,
+    };
+    await Effect.runPromise(
+      runtime.subscribe({ connection, projectId, threadId, providerInstanceId, sessionId }),
+    );
+    expect(recorded).toHaveLength(1);
+    expect(JSON.stringify(recorded[0]?.detail)).not.toContain("/private");
+    expect(JSON.stringify(recorded[0]?.detail)).not.toContain("https:");
+    expect(recorded[0]?.detail).toMatchObject({
+      questionnaire: {
+        allowComment: false,
+        questions: [{ id: "q0", selection: "multiple", options: [{ id: "o0" }, { id: "o1" }] }],
+      },
+    });
+  });
+
   it("forwards answers through the subscribed provider connection", async () => {
     const answerApproval = vi.fn(() => Effect.void);
     const answerUserInput = vi.fn(() => Effect.void);
