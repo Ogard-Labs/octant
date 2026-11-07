@@ -175,6 +175,9 @@ export async function captureBrowserFeedbackPoint(
       crop.y + crop.height > viewport.pageY + viewport.clientHeight
     )
       throw new Error("Feedback crop is invalid.");
+    // Closed descendants can overflow an ordinary host's box. A native presence
+    // check therefore withholds the whole optional crop, not only the host bounds.
+    const opaqueShadow = !(await hasCompleteShadowCoverage(send));
     const decoded = decodeProductFeedbackElement({
       kind: "browser-element",
       ...element,
@@ -183,7 +186,20 @@ export async function captureBrowserFeedbackPoint(
     if (decoded.kind !== "browser-element" || decoded.context === undefined) {
       throw new Error("Feedback description is invalid.");
     }
-    const { kind: _kind, ...selected } = decoded;
+    const { kind: _kind, ...original } = decoded;
+    const selected =
+      opaqueShadow && !decoded.context.omissions.includes("crop-withheld-for-uninspected-region")
+        ? {
+            ...original,
+            context: {
+              ...decoded.context,
+              omissions: [
+                ...decoded.context.omissions,
+                "crop-withheld-for-uninspected-region" as const,
+              ],
+            },
+          }
+        : original;
     return {
       frame: { id: frame.id, loaderId: frame.loaderId, url: frame.url },
       hit: hit.backendNodeId,
@@ -194,7 +210,7 @@ export async function captureBrowserFeedbackPoint(
         pageY: viewport.pageY,
       },
       element: selected,
-      cropBlocked: description.cropBlocked,
+      cropBlocked: description.cropBlocked || opaqueShadow,
       cropBounds: { x: crop.x, y: crop.y, width: crop.width, height: crop.height },
       ...(typeof result.title === "string" ? { title: result.title.trim().slice(0, 1_024) } : {}),
     };
@@ -292,4 +308,35 @@ function abortable<T>(effect: Promise<T>, signal: AbortSignal): Promise<T> {
       },
     );
   });
+}
+
+/** Page JavaScript cannot distinguish a closed shadow host from a plain element. */
+async function hasCompleteShadowCoverage(
+  send: BrowserFeedbackCapturePort["send"],
+): Promise<boolean> {
+  const tree = record(
+    await send("DOM.getDocument", { depth: -1, pierce: true }).catch(() => undefined),
+  );
+  const root = record(tree?.root);
+  if (root === undefined) return false;
+  const pending: unknown[] = [root];
+  let count = 0;
+  while (pending.length > 0) {
+    const node = record(pending.pop());
+    if (node === undefined || ++count > 20_000) return false;
+    const shadows = node.shadowRoots;
+    if (shadows !== undefined) {
+      if (!Array.isArray(shadows)) return false;
+      for (const entry of shadows) {
+        const shadow = record(entry);
+        if (shadow?.shadowRootType !== "open") return false;
+        pending.push(shadow);
+      }
+    }
+    if (node.children !== undefined) {
+      if (!Array.isArray(node.children)) return false;
+      pending.push(...node.children);
+    }
+  }
+  return true;
 }

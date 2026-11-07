@@ -934,6 +934,8 @@ describe("bounded headless element feedback", () => {
               scale: 1,
             },
           };
+        case "DOM.getDocument":
+          return { root: { nodeName: "#document", children: [] } };
         case "DOM.getNodeForLocation":
           return { frameId: "top", backendNodeId: 42 };
         case "Page.createIsolatedWorld":

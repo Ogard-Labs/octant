@@ -1263,7 +1263,10 @@ thread and is framed as evidence, never instructions.
   sequence. It rechecks approved origin, frame/loader/node identity, viewport
   and credential protection across DOM and screenshot waits. It never enters
   a child frame to inspect an element. A crop overlapping editable content or
-  an uninspected iframe/embed region is withheld; safe bounded context and the
+  an uninspected iframe/embed region is withheld. Native protocol inspection
+  also detects closed shadow roots on ordinary elements. Their descendants can
+  overflow the host's bounds, so any closed root or incomplete native coverage
+  withholds the optional crop for that read; safe bounded context and the
   person's comment remain, with an explicit omission. Filtering DOM text does
   not imply that arbitrary screenshots have their form values redacted.
 - Preview memory is host-owned and temporary: eight per window/task, 32 across

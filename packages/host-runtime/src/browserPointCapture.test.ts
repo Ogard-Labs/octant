@@ -10,10 +10,25 @@ function fixture() {
   let node = 42;
   let frame = "top";
   let blocked = false;
+  let closedShadow = false;
   let screenshot: (() => Promise<unknown>) | undefined;
   const sensitive = vi.fn(async () => false);
   const send = vi.fn(
     async (method: string, _parameters?: Record<string, unknown>): Promise<unknown> => {
+      if (method === "DOM.getDocument")
+        return {
+          root: {
+            nodeName: "#document",
+            children: closedShadow
+              ? [
+                  {
+                    nodeName: "DIV",
+                    shadowRoots: [{ nodeName: "#document-fragment", shadowRootType: "closed" }],
+                  },
+                ]
+              : [],
+          },
+        };
       if (method === "Page.getFrameTree")
         return {
           frameTree: {
@@ -88,6 +103,9 @@ function fixture() {
     crossFrame: () => {
       frame = "unapproved-child";
     },
+    closeShadow: () => {
+      closedShadow = true;
+    },
     opaqueCrop: () => {
       blocked = true;
     },
@@ -117,6 +135,20 @@ describe("host point capture", () => {
       captureBeyondViewport: false,
       clip: { x: 136, y: 196, width: 112, height: 96, scale: 1 },
     });
+  });
+
+  it("withholds a crop when a native closed root on an ordinary element hides editable descendants", async () => {
+    const f = fixture();
+    f.closeShadow();
+    const result = await captureBrowserFeedbackPoint(
+      f.port,
+      { x: 0.3, y: 0.3 },
+      new AbortController().signal,
+    );
+    if (result.status !== "described") throw Error("Missing safe context");
+    expect(result.cropDataUrl).toBeUndefined();
+    expect(result.element.context?.omissions).toContain("crop-withheld-for-uninspected-region");
+    expect(f.send.mock.calls.some(([method]) => method === "Page.captureScreenshot")).toBe(false);
   });
 
   it("does not enter a child frame merely because CDP can hit its node", async () => {

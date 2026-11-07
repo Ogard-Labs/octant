@@ -3512,6 +3512,7 @@ async function selectedSurface(extraTab = false) {
           scale: 1,
         },
       };
+    if (method === "DOM.getDocument") return { root: { nodeName: "#document", children: [] } };
     if (method === "DOM.getNodeForLocation") return { frameId: "top", backendNodeId: 42 };
     if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
     if (method === "Runtime.evaluate")

@@ -41,6 +41,7 @@ const chrome = [
 ].find((candidate) => candidate !== undefined && existsSync(candidate));
 
 const pages: Record<string, string> = {
+  "/feedback-closed": `<!doctype html><title>Feedback closed root</title><div id="feedback-container" style="position:absolute;left:100px;top:100px;width:120px;height:50px"></div><script>document.getElementById('feedback-container').attachShadow({mode:'closed'}).innerHTML='<input type="text" value="fixture-private-token">';</script>`,
   "/feedback": `<!doctype html><title>Feedback page</title><main><button id="feedback-save" style="position:absolute;left:100px;top:100px;width:120px;height:50px;color:rgb(10,20,30);margin:8px">Save changes</button></main>`,
   "/feedback-frame": `<!doctype html><title>Opaque feedback region</title><div id="feedback-container" style="position:absolute;left:10px;top:10px;width:300px;height:150px;background:white">Panel<iframe title="Opaque child" src="{{other}}/controls" style="position:absolute;left:80px;top:40px;width:160px;height:80px"></iframe></div>`,
 
@@ -2305,7 +2306,7 @@ describe.skipIf(chrome === undefined)(
       });
     });
 
-    it.each(["/feedback", "/feedback-frame", "/login"])(
+    it.each(["/feedback", "/feedback-frame", "/feedback-closed", "/login"])(
       "captures bounded feedback context/crop against a real page: %s",
       async (path) => {
         const f = await surface(path);
@@ -2356,7 +2357,7 @@ describe.skipIf(chrome === undefined)(
           expect(result.element.context?.captureId).toMatch(/^[a-f0-9]{64}$/);
           expect(result.element.context?.viewport).toEqual(viewport);
           expect(result.element.context?.omissions).toContain("form-values-excluded");
-          if (path === "/feedback-frame") {
+          if (path === "/feedback-frame" || path === "/feedback-closed") {
             expect(result.element.selector).toBe("#feedback-container");
             expect(result.cropDataUrl).toBeUndefined();
             expect(result.element.context?.omissions).toContain(
