@@ -478,7 +478,13 @@ export function wireChat(deps: ChatDependencies) {
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
-      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) => {
+      resolveAppManagedTools: ({
+        windowId,
+        thread,
+        turnId,
+        threadMentionIds,
+        coordinationDepth,
+      }) => {
         const sideChat = sideChatSidecars.findBySidecarThread(thread.id) !== undefined;
         return combineAppManagedToolSets(
           taintAppManagedToolResults({
@@ -518,6 +524,7 @@ export function wireChat(deps: ChatDependencies) {
                       threadId: String(thread.id),
                       mode: "chat",
                       projectId: thread.projectId,
+                      turnId: turnId === undefined ? undefined : String(turnId),
                       suggestedBy: thread,
                       uuid: randomUUID,
                       clock: () => new Date().toISOString(),

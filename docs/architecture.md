@@ -7833,9 +7833,11 @@ turn and then the prompt), and in a Code thread in a Project a worktree or the
 current checkout. The host stamps the offering turn's own identity (`turnId`:
 a Chat turn, a Work turn, or a Code operation). The call only journals the
 offer (`thread-side-tasks`, at most five open per thread) and returns at once;
-it grants nothing, and the model is told not to wait for the answer.
-`/api/side-tasks/:threadId` lists offers and starts, continues, or dismisses
-one.
+it grants nothing, and the model is told not to wait for the answer or do the
+work itself. In a Code thread a `fork` offer always targets a worktree.
+`GET /api/side-tasks/:threadId` lists offers; `POST` to its `start`,
+`continue`, and `dismiss` actions answers one, each refused before anything
+is created or sent unless the window may act on the offering thread.
 
 The web renders each offer inline in the transcript, after the reply of the
 turn that made it (offers without a `turnId` sit after the last reply), as a
@@ -7855,12 +7857,21 @@ person's confirmation:
   (always its own worktree, carrying the checkout as that turn left it), and
   `fork-work-thread` through the offering Work turn. The person may switch
   the context on the card; a fork whose offering turn has not finished is
-  refused `turn-running`, and the card holds the fork choice until the reply
-  ends. The fork's own rules apply unchanged: its handoff, marks, and refusals.
+  refused `turn-running` before anything is created, by the rule the mode's
+  fork applies (a Chat branch waits for every reply in the thread, a Work fork
+  for every turn it carries, a Code fork for the named operation), and the
+  card holds the fork choice until the reply ends. An offer without a `turnId`
+  can only start fresh. The fork's own rules apply unchanged: its handoff,
+  marks, and refusals, and the prompt is sent only while the fork runs on the
+  model that made the offer.
 - **Do it here.** The prompt goes to the offering thread itself: as its next
   turn through the same ordinary turn command when the thread is idle, or into
   its message queue behind the running turn, with the queue's usual holds.
-  The offer journals `side-task-continued-here` with how it was delivered.
+  The queue answers where the thread stands for the window and holds its
+  ordering while an idle thread is sent the prompt; a thread whose last
+  message may not have gone out is sent nothing. The offer journals
+  `side-task-continued-here` with how it was delivered, and nothing when it
+  was not.
 - **Dismiss.** The offer closes and nothing is sent.
 
 These are the only places a prompt is sent for the person, and only on their
@@ -7869,16 +7880,18 @@ the prompt waits in its composer.
 
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming
-the source thread and a finished Work turn. The host checks, as for a Code
-fork, that the source is in the same Project, readable by the confirming
-window, and that the turn exists and has settled. The fork's first turn
-carries the source's conversation through that turn as a text handoff
-(`context-handoff-attached`, reason `fork`), built by the same selector and
-bounds as a provider switch's Work handoff and journaled before the prompt is
-sent; a handoff that cannot be built refuses the turn with its reason. A
-Work fork shares the Project root, so it inherits no session grant, running
-turn, or Done mark, and starts with the Project's ordinary posture. A thread
-forked from a marked source starts marked (label `work-fork`).
+the source thread and a finished Work turn, and copies the source's turns
+through that point as carried turns in one journal unit with its creation.
+The host checks, as for a Code fork, that the source's Project is readable by
+the confirming window and that every carried turn exists and has settled. The
+fork's first own turn on a provider that keeps its own session starts a new
+one with the carried conversation as a text handoff (the turn's `handoff`,
+reason `fork`), built by the same selector and bounds as a provider switch's
+Work handoff and journaled with the turn's acceptance, before the provider is
+sent anything; a handoff that cannot be built refuses the turn with its
+reason. A Work fork shares the Project root, so it inherits no session grant,
+running turn, or Done mark, and starts at Ask first. A thread forked from a
+marked source starts marked (label `work-fork`).
 
 ### Harness tool egress rules
 
