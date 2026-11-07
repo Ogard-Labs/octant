@@ -20,8 +20,11 @@ if ($octantAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octa
 if ($Mode -eq 'directory-acl') {
   $octantWorld = [Security.Principal.SecurityIdentifier]::new('S-1-1-0')
   $octantRule = [Security.AccessControl.FileSystemAccessRule]::new($octantWorld, [Security.AccessControl.FileSystemRights]::ReadAndExecute, [Security.AccessControl.AccessControlType]::Allow)
-  $octantAcl.AddAccessRule($octantRule)
-  Set-Acl -LiteralPath $octantRoot -AclObject $octantAcl
+  # Modify only this owned directory's DACL. Set-Acl can also persist audit
+  # information and incorrectly require a privilege this reader must not have.
+  $octantAccess = [Security.AccessControl.DirectorySecurity]::new($octantRoot, [Security.AccessControl.AccessControlSections]::Access)
+  $octantAccess.AddAccessRule($octantRule)
+  [IO.Directory]::SetAccessControl($octantRoot, $octantAccess)
   exit 0
 }
 # Only a child whose private native record matches its actual creation time
