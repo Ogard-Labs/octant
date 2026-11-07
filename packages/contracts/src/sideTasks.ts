@@ -55,6 +55,9 @@ export type SideTaskContext = typeof SideTaskContext.Type;
 export const SideTaskStatus = Schema.Literal("offered", "started", "continued-here", "dismissed");
 export type SideTaskStatus = typeof SideTaskStatus.Type;
 
+/** Unconfirmed is a durable dispatch claim, never permission to replay it. */
+export const SideTaskHereDelivery = Schema.Literal("sent", "queued", "unconfirmed");
+
 export const SideTaskOffer = Schema.Struct({
   id: SideTaskId,
   threadId: Schema.UUID,
@@ -87,8 +90,8 @@ export const SideTask = Schema.Struct({
   startedThreadId: Schema.optional(Schema.UUID),
   /** Whether a new thread was forked from this conversation; present once started. */
   startedWith: Schema.optional(SideTaskContext),
-  /** How "do it here" reached this thread; present once continued here. */
-  continuedDelivery: Schema.optional(Schema.Literal("sent", "queued")),
+  /** Confirmed delivery or a durable claim whose outcome is still unknown. */
+  continuedDelivery: Schema.optional(SideTaskHereDelivery),
   settledAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 export type SideTask = typeof SideTask.Type;
@@ -111,11 +114,18 @@ export type SideTaskStarted = typeof SideTaskStarted.Type;
 /** The person chose to have the offering thread do the work itself. */
 export const SideTaskContinuedHere = Schema.Struct({
   sideTaskId: SideTaskId,
-  /** Sent as the thread's next turn, or queued behind the turn that is running. */
-  delivery: Schema.Literal("sent", "queued"),
+  /** Claimed before dispatch, then confirmed as sent or queued when possible. */
+  delivery: SideTaskHereDelivery,
   continuedAt: UtcTimestamp,
 }).annotations(strict);
 export type SideTaskContinuedHere = typeof SideTaskContinuedHere.Type;
+
+/** A claimed continuation was explicitly refused before it dispatched anything. */
+export const SideTaskContinuationRefused = Schema.Struct({
+  sideTaskId: SideTaskId,
+  refusedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskContinuationRefused = typeof SideTaskContinuationRefused.Type;
 
 export const SideTaskDismissed = Schema.Struct({
   sideTaskId: SideTaskId,
@@ -166,7 +176,7 @@ export const SideTaskResult = Schema.Union(
     kind: Schema.Literal("side-task-continued-here"),
     sideTaskId: SideTaskId,
     threadId: Schema.UUID,
-    delivery: Schema.Literal("sent", "queued"),
+    delivery: SideTaskHereDelivery,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("side-task-dismissed"),
@@ -191,6 +201,7 @@ export const THREAD_SIDE_TASK_EVENT_NAMES = {
   started: "side-task-started@1",
   dismissed: "side-task-dismissed@1",
   continuedHere: "side-task-continued-here@1",
+  continuationRefused: "side-task-continuation-refused@1",
 } as const;
 
 export const decodeSideTaskId = Schema.decodeUnknownSync(SideTaskId);

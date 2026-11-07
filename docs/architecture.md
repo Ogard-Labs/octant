@@ -7869,9 +7869,17 @@ person's confirmation:
   its message queue behind the running turn, with the queue's usual holds.
   The queue answers where the thread stands for the window and holds its
   ordering while an idle thread is sent the prompt; a thread whose last
-  message may not have gone out is sent nothing. The offer journals
-  `side-task-continued-here` with how it was delivered, and nothing when it
-  was not.
+  message may not have gone out is sent nothing. Before dispatch the offer
+  journals `side-task-continued-here` with delivery `unconfirmed`, a claim
+  that prevents a second send or queue even after a restart. A confirmed
+  result refines that delivery to `sent` or `queued`. An explicit no-effect
+  refusal journals `side-task-continuation-refused` and reopens the offer.
+  An exception, uncertain send, or failed receipt write retains the claim:
+  the card says delivery is unconfirmed and asks the person to inspect the
+  thread and its queued messages before sending the prompt themselves.
+  It offers no retry and the host never replays that uncertain action. A lost
+  action response or unavailable post-action read holds the card's actions
+  until a fresh authoritative read confirms its state.
 - **Dismiss.** The offer closes and nothing is sent.
 
 These are the only places a prompt is sent for the person, and only on their

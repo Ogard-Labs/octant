@@ -253,7 +253,7 @@ export async function continueInThread(
       if (standing === "unavailable") return refused("This thread cannot take a message now.");
       return (await ports.sendTurn(input).catch(() => false))
         ? { kind: "sent" }
-        : refused("The prompt could not be sent to this thread.");
+        : { kind: "unconfirmed" };
     },
     "dispatch",
   );
