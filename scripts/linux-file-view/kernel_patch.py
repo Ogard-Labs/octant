@@ -26,6 +26,45 @@ def instrument(source: str, name: str, condition: str = "true") -> str:
     return source[:at] + f"\n\toctant_namespace_scope({condition});\n" + source[at:]
 
 
+
+def instrument_namespace_preparation(source: str) -> str:
+    # These preparation calls run after copied names and parent paths resolve,
+    # before the VFS takes parent inode locks. The final LSM hook only compares
+    # the actual operation with the per-task token; it performs no lookup/IPC.
+    preparations = {
+        "do_unlinkat": (
+            "retry_deleg:\n\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+            "retry_deleg:\n\terror = octant_namespace_prepare(OCTANT_MEDIATION_UNLINK, &path, &last, NULL, NULL, 0);\n"
+            "\tif (error) {\n\t\tmnt_drop_write(path.mnt);\n\t\tgoto exit2;\n\t}\n"
+            "\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+        ),
+        "do_rmdir": (
+            "\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+            "\terror = octant_namespace_prepare(OCTANT_MEDIATION_RMDIR, &path, &last, NULL, NULL, 0);\n"
+            "\tif (error) {\n\t\tmnt_drop_write(path.mnt);\n\t\tgoto exit2;\n\t}\n"
+            "\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+        ),
+        "do_renameat2": (
+            "retry_deleg:\n\ttrap = lock_rename(new_path.dentry, old_path.dentry);",
+            "retry_deleg:\n\terror = octant_namespace_prepare(OCTANT_MEDIATION_RENAME, &old_path, &old_last,\n"
+            "\t\t&new_path, &new_last, flags);\n\tif (error)\n\t\tgoto exit_lock_rename;\n"
+            "\ttrap = lock_rename(new_path.dentry, old_path.dentry);",
+        ),
+    }
+    for function, (anchor, replacement) in preparations.items():
+        declaration = re.search(rf"(?m)^int {function}\([^;{{]*?\)\s*\{{", source)
+        if declaration is None:
+            raise ValueError(f"Pinned preparation definition {function} differs")
+        # Next top-level closing brace is the end of this function, so an
+        # identical lock site in another syscall cannot receive this patch.
+        end = source.index("\n}", declaration.end())
+        body = source[declaration.end():end]
+        if body.count(anchor) != 1:
+            raise ValueError(f"Pinned pre-lock anchor for {function} differs")
+        source = source[:declaration.end()] + body.replace(anchor, replacement, 1) + source[end:]
+    return source
+
+
 def install_epochs(kernel: Path, native: Path) -> None:
     # Real unconfined writers use these same VFS entry points. These counters
     # describe in-flight mutations, not delayed filesystem-watch notifications.
@@ -50,8 +89,10 @@ def install_epochs(kernel: Path, native: Path) -> None:
             # The non-atomic negative-dentry path invokes i_op->create
             # directly; it does not pass through vfs_create.
             source = instrument(source, "lookup_open", "(op->open_flag & O_CREAT) != 0")
+            source = instrument_namespace_preparation(source)
         path.write_text(include_bridge(source))
     shutil.copyfile(native / "bridge.h", kernel / "include/linux/octant_mediation_bridge.h")
+    shutil.copyfile(native / "octant_mediation.h", kernel / "include/uapi/linux/octant_mediation.h")
     # The modern static-call allocation counts configured LSMs explicitly.
     # Register this original component in that count; selecting CONFIG_LSM
     # alone otherwise leaves only the capability slot and skips initialization.

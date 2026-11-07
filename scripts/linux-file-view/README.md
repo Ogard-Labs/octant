@@ -17,6 +17,20 @@ names and canonical paths retain their original bytes, including invalid Linux
 UTF-8 names; enumeration streams under finite metadata/depth/time budgets. Its
 epoch comparison is optimistic and never substitutes for the kernel admission.
 The reader still needs the owned broker/production launch integration below.
+Account exception forms are captured at enrollment; replacing an account path
+with a symlink never transfers that exception to another sign-in.
+
+The namespace candidate adds copied byte names, actual parent device/inode
+identities, operation and flags to ABI 2. Unlink, rmdir and rename prepare their
+bounded decision before parent inode locks. Their final LSM hook compares the
+actual operation with a per-task token and the current epoch without waiting or
+looking up paths under those locks. Same-policy threads have separate tokens;
+foreign mutations invalidate a proposal rather than freezing outside writers.
+The namespace guest cases use synthetic allow/deny decisions to check this
+transport and token boundary. They do not implement or prove the full policy:
+that broker must refuse only destructive companion/ancestor operations which
+would declassify still-existing protected content, preserving ordinary public
+keys and unrelated aliases.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
@@ -33,8 +47,12 @@ reports `production_coverage: 0`; the host never calls it. Namespace begin/end
 and final epoch comparison exist, but complete VFS mutation/pre-effect hooks,
 the effective structured-policy broker, all file/alias/process routes, the real
 production Bubblewrap launch and the complete native compatibility matrix are
-still required. The initial guest check covers actual read/alias/new-mapping
-admissions and fail-closed group loss only. Neither compilation nor a successful
+still required. The admission guest check covers fourteen actual read/alias/new-mapping,
+same-policy thread, write/truncate, async-fallback and group-loss cases. The
+additional namespace cases check copied identities/names, refused and allowed
+mutations, outside same-parent progress while a proposal waits, stale replies,
+and pending/new mutation refusal after broker loss. Their exact-head hosted
+result must be read separately; a newly added case is not an executed pass. Neither compilation nor a successful
 guest-core result enables a provider or closes the production acceptance gap.
 
 ## Modern stock pre-access check

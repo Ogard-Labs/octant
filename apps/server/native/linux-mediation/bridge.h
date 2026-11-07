@@ -3,16 +3,25 @@
 #define OCTANT_MEDIATION_BRIDGE_H
 
 #include <linux/types.h>
+#include <linux/octant_mediation.h>
+struct path;
+struct qstr;
 
 /* These hooks never wait, allocate, or call the userspace policy broker. */
 #ifdef CONFIG_SECURITY_OCTANT_MEDIATION
 void octant_namespace_begin(void);
 void octant_namespace_end(void);
 bool octant_mediation_restricted(void);
+int octant_namespace_prepare(u32 operation, const struct path *source,
+	const struct qstr *name, const struct path *destination,
+	const struct qstr *new_name, u32 flags);
 #else
 static inline void octant_namespace_begin(void) {}
 static inline void octant_namespace_end(void) {}
 static inline bool octant_mediation_restricted(void) { return false; }
+static inline int octant_namespace_prepare(u32 operation, const struct path *source,
+	const struct qstr *name, const struct path *destination,
+	const struct qstr *new_name, u32 flags) { return 0; }
 #endif
 
 static inline void octant_namespace_scope_end(bool *entered)

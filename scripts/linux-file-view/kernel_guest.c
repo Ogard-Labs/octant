@@ -177,6 +177,108 @@ static int measure(void)
   return passed && cleaned ? 0 : 8;
 }
 
+static bool named(const struct octant_mediation_name *name, const struct stat *parent, const char *leaf)
+{
+  return name->parent_inode == (unsigned long long)parent->st_ino &&
+    name->device_major == major(parent->st_dev) && name->device_minor == minor(parent->st_dev) &&
+    name->length == strlen(leaf) && !name->reserved && !memcmp(name->bytes, leaf, name->length);
+}
+
+/* Synthetic decisions below test the real pre-lock transport and final token,
+ * not the still-unintegrated structured-policy broker. */
+static int namespace_measure(void)
+{
+  const char *files[] = {"key", "key.pub", "folder.pub", "public.pub", "stale.pub", "live"};
+  if (mkdir("/tmp/ns", 0700) || mkdir("/tmp/ns/folder", 0700) ||
+      mkdir("/tmp/ns/unrelated", 0700) || mkdir("/tmp/ns/empty", 0700)) return 21;
+  for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+    char path[80]; snprintf(path, sizeof(path), "/tmp/ns/%s", files[i]);
+    int file = open(path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+    if (file < 0 || write(file, content, sizeof(content) - 1) != sizeof(content) - 1) return 22;
+    close(file);
+  }
+  if (link("/tmp/ns/public.pub", "/tmp/ns/alias.pub")) return 23;
+  struct stat parent;
+  if (stat("/tmp/ns", &parent)) return 24;
+  int broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+  int enrollment = broker < 0 ? -1 : ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
+  int results[2];
+  if (enrollment < 0 || pipe2(results, O_CLOEXEC)) return 25;
+  pid_t child = fork();
+  if (!child) {
+    close(broker); close(results[0]);
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(26);
+    close(enrollment);
+    for (unsigned i = 0; i < 9; i++) {
+      int result;
+      errno = 0;
+      switch (i) {
+      case 0: result = unlink("/tmp/ns/key.pub"); break;
+      case 1: result = rename("/tmp/ns/key.pub", "/tmp/ns/moved.pub"); break;
+      case 2: result = rename("/tmp/ns/folder", "/tmp/ns/moved-folder"); break;
+      case 3: result = unlink("/tmp/ns/alias.pub"); break;
+      case 4: result = rename("/tmp/ns/unrelated", "/tmp/ns/moved-unrelated"); break;
+      case 5: result = rmdir("/tmp/ns/empty"); break;
+      case 6: result = unlink("/tmp/ns/stale.pub"); break;
+      case 7: result = unlink("/tmp/ns/key.pub"); break;
+      default: result = rename("/tmp/ns/folder", "/tmp/ns/moved-folder"); break;
+      }
+      int passed = i >= 3 && i <= 5 ? result == 0 :
+        result == -1 && errno == (i == 6 ? EAGAIN : EACCES);
+      if (!transfer(results[1], &passed, sizeof(passed), true) || !passed) _exit(27);
+    }
+    _exit(0);
+  }
+  close(enrollment); close(results[1]);
+  if (child < 0) { close(results[0]); close(broker); return 28; }
+  const char *source[] = {"key.pub", "key.pub", "folder", "alias.pub", "unrelated", "empty", "stale.pub", "key.pub"};
+  const char *destination[] = {NULL, "moved.pub", "moved-folder", NULL, "moved-unrelated", NULL, NULL, NULL};
+  bool passed = true;
+  unsigned measured = 0;
+  for (unsigned i = 0; i < 9 && passed; i++) {
+    if (i < 8) {
+      struct octant_mediation_request request;
+      passed = transfer(broker, &request, sizeof(request), false) && !request.flags && !request.padding &&
+        named(&request.source, &parent, source[i]) && request.operation ==
+        (destination[i] ? OCTANT_MEDIATION_RENAME : i == 5 ? OCTANT_MEDIATION_RMDIR : OCTANT_MEDIATION_UNLINK);
+      if (passed && destination[i]) passed = named(&request.destination, &parent, destination[i]);
+      if (passed && i == 6) {
+        /* Same-parent external rename must finish while the broker waits:
+         * there is no parent inode lock held across this policy decision. */
+        passed = rename("/tmp/ns/live", "/tmp/ns/live-moved") == 0;
+      }
+      if (passed && i == 7) { close(broker); broker = -1; }
+      else if (passed) {
+        struct octant_mediation_answer answer = {.request_id = request.request_id,
+          .namespace_epoch = request.namespace_epoch, .allow = i >= 3 && i <= 6};
+        passed = write(broker, &answer, sizeof(answer)) == sizeof(answer);
+      }
+    }
+    int result = 0;
+    passed = passed && transfer(results[0], &result, sizeof(result), false) && result == 1;
+    printf("OCTANT_KERNEL_NAMESPACE_STEP %u passed=%u\n", i, passed);
+    measured++;
+  }
+  if (!passed) kill(child, SIGKILL);
+  int exit = 0; pid_t joined;
+  do { joined = waitpid(child, &exit, 0); } while (joined < 0 && errno == EINTR);
+  bool reaped = joined == child;
+  passed = passed && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
+  close(results[0]); if (broker >= 0) close(broker);
+  bool controls = access("/tmp/ns/key", F_OK) == 0 && access("/tmp/ns/key.pub", F_OK) == 0 &&
+    access("/tmp/ns/folder", F_OK) == 0 && access("/tmp/ns/public.pub", F_OK) == 0 &&
+    access("/tmp/ns/moved-unrelated", F_OK) == 0 && access("/tmp/ns/stale.pub", F_OK) == 0;
+  for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+    char path[80]; snprintf(path, sizeof(path), "/tmp/ns/%s", files[i]); unlink(path);
+  }
+  unlink("/tmp/ns/live-moved"); unlink("/tmp/ns/alias.pub");
+  rmdir("/tmp/ns/folder"); rmdir("/tmp/ns/unrelated"); rmdir("/tmp/ns/moved-unrelated"); rmdir("/tmp/ns/empty");
+  bool cleaned = rmdir("/tmp/ns") == 0;
+  printf("OCTANT_KERNEL_NAMESPACE {\"status\":\"%s\",\"measurements\":%u,\"productionReady\":false,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+    passed && controls && cleaned ? "measured-namespace-token" : "failed", measured, reaped ? "true" : "false", cleaned ? "true" : "false");
+  return passed && controls && cleaned ? 0 : 29;
+}
+
 int main(void)
 {
   mkdir("/dev", 0755); mkdir("/proc", 0755); mkdir("/tmp", 0700);
@@ -185,6 +287,7 @@ int main(void)
     puts("OCTANT_KERNEL_FAILURE guest mounts unavailable");
   } else {
     int result = measure();
+    if (!result) result = namespace_measure();
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

@@ -7,6 +7,8 @@
 #include <linux/anon_inodes.h>
 #include <linux/binfmts.h>
 #include <linux/cred.h>
+#include <linux/dcache.h>
+#include <linux/path.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/fs.h>
@@ -34,6 +36,7 @@ struct octant_pending {
 	bool delivered;
 	bool answered;
 	int decision;
+	u64 decision_epoch;
 	wait_queue_head_t changed;
 };
 
@@ -57,8 +60,19 @@ struct octant_cred {
 	struct octant_context *context;
 };
 
+/* Per-task rather than per-credential: same-policy threads may propose
+ * concurrent namespace operations without replacing each other's token. */
+struct octant_task {
+	struct octant_mediation_request approved;
+	u64 mutation_base;
+	u64 own_changes;
+	u32 mutation_depth;
+	bool has_approved;
+};
+
 static struct lsm_blob_sizes octant_blobs __ro_after_init = {
 	.lbs_cred = sizeof(struct octant_cred),
+	.lbs_task = sizeof(struct octant_task),
 };
 /* Private guest identity, not an assigned upstream LSM userspace ABI number. */
 static const struct lsm_id octant_lsm_id = {
@@ -82,10 +96,24 @@ bool octant_mediation_restricted(void)
 	return initialized && octant_cred(current_cred())->context;
 }
 
+static struct octant_task *octant_task(void)
+{
+	return current->security + octant_blobs.lbs_task;
+}
+
 void octant_namespace_begin(void)
 {
 	unsigned long flags;
+	struct octant_task *task = initialized ? octant_task() : NULL;
 	spin_lock_irqsave(&namespace_lock, flags);
+	if (task) {
+		if (!task->mutation_depth) {
+			task->mutation_base = namespace_epoch;
+			task->own_changes = 0;
+		}
+		task->mutation_depth++;
+		task->own_changes++;
+	}
 	if (namespace_epoch == U64_MAX || active_mutations == U32_MAX)
 		namespace_overflow = true;
 	else {
@@ -98,12 +126,23 @@ void octant_namespace_begin(void)
 void octant_namespace_end(void)
 {
 	unsigned long flags;
+	struct octant_task *task = initialized ? octant_task() : NULL;
 	spin_lock_irqsave(&namespace_lock, flags);
 	if (!active_mutations || namespace_epoch == U64_MAX)
 		namespace_overflow = true;
 	else {
 		active_mutations--;
 		namespace_epoch++;
+	}
+	if (task) {
+		if (!task->mutation_depth)
+			namespace_overflow = true;
+		else {
+			task->mutation_depth--;
+			task->own_changes++;
+			if (!task->mutation_depth)
+				task->has_approved = false;
+		}
 	}
 	spin_unlock_irqrestore(&namespace_lock, flags);
 }
@@ -140,7 +179,7 @@ static void free_cred(struct cred *cred)
 	put_context(octant_cred(cred)->context);
 }
 
-static int admit_inode(struct inode *inode, u32 operation)
+static int admit_request(struct octant_mediation_request *request)
 {
 	struct octant_context *context = octant_cred(current_cred())->context;
 	struct octant_pending *pending = NULL;
@@ -148,7 +187,7 @@ static int admit_inode(struct inode *inode, u32 operation)
 	long waited;
 	int result, i;
 	u64 epoch;
-	if (!context || !inode || !S_ISREG(inode->i_mode))
+	if (!context)
 		return 0;
 	spin_lock_irqsave(&namespace_lock, flags);
 	epoch = namespace_epoch;
@@ -170,14 +209,9 @@ static int admit_inode(struct inode *inode, u32 operation)
 		spin_unlock_irqrestore(&context->lock, flags);
 		return -EAGAIN;
 	}
-	pending->request = (struct octant_mediation_request) {
-		.request_id = ++context->next_id,
-		.namespace_epoch = epoch,
-		.inode = inode->i_ino,
-		.device_major = MAJOR(inode->i_sb->s_dev),
-		.device_minor = MINOR(inode->i_sb->s_dev),
-		.operation = operation,
-	};
+	pending->request = *request;
+	pending->request.request_id = ++context->next_id;
+	pending->request.namespace_epoch = epoch;
 	pending->occupied = true;
 	pending->delivered = false;
 	pending->answered = false;
@@ -189,9 +223,110 @@ static int admit_inode(struct inode *inode, u32 operation)
 		msecs_to_jiffies(OCTANT_MEDIATION_TIMEOUT_MS));
 	spin_lock_irqsave(&context->lock, flags);
 	result = waited <= 0 || context->dead ? -EACCES : pending->decision;
+	if (!result)
+		request->namespace_epoch = pending->decision_epoch;
 	pending->occupied = false;
 	spin_unlock_irqrestore(&context->lock, flags);
 	return result;
+}
+
+static int admit_inode(struct inode *inode, u32 operation)
+{
+	struct octant_mediation_request request = { .operation = operation };
+	if (!inode || !S_ISREG(inode->i_mode))
+		return 0;
+	request.inode = inode->i_ino;
+	request.device_major = MAJOR(inode->i_sb->s_dev);
+	request.device_minor = MINOR(inode->i_sb->s_dev);
+	return admit_request(&request);
+}
+
+static int copy_name(struct octant_mediation_name *output, struct inode *parent,
+		     const struct qstr *name)
+{
+	if (!parent || !name || !name->len || name->len > 255)
+		return -EACCES;
+	output->parent_inode = parent->i_ino;
+	output->device_major = MAJOR(parent->i_sb->s_dev);
+	output->device_minor = MINOR(parent->i_sb->s_dev);
+	output->length = name->len;
+	memcpy(output->bytes, name->name, name->len);
+	return 0;
+}
+
+int octant_namespace_prepare(u32 operation, const struct path *source,
+	const struct qstr *name, const struct path *destination,
+	const struct qstr *new_name, u32 flags)
+{
+	struct octant_mediation_request request = { .operation = operation, .flags = flags };
+	struct octant_task *task;
+	int result;
+	if (!octant_mediation_restricted())
+		return 0;
+	task = octant_task();
+	task->has_approved = false;
+	result = copy_name(&request.source, d_inode(source->dentry), name);
+	if (!result && destination)
+		result = copy_name(&request.destination, d_inode(destination->dentry), new_name);
+	if (!result)
+		result = admit_request(&request);
+	if (!result) {
+		task->approved = request;
+		task->has_approved = true;
+	}
+	return result;
+}
+
+/* Called with the VFS locks held: comparison only, never a broker wait or a
+ * pathname lookup. Every unsupported or unprepared path refuses. */
+static int check_namespace(u32 operation, struct inode *source, struct dentry *name,
+	struct inode *destination, struct dentry *new_name, u32 operation_flags)
+{
+	struct octant_mediation_request actual = { .operation = operation, .flags = operation_flags };
+	struct octant_task *task;
+	unsigned long flags;
+	bool valid;
+	int result;
+	if (!octant_mediation_restricted())
+		return 0;
+	task = octant_task();
+	result = copy_name(&actual.source, source, &name->d_name);
+	if (!result && destination)
+		result = copy_name(&actual.destination, destination, &new_name->d_name);
+	if (result)
+		return result;
+	spin_lock_irqsave(&namespace_lock, flags);
+	valid = task->has_approved && !namespace_overflow &&
+		!READ_ONCE(octant_cred(current_cred())->context->dead) &&
+		task->approved.operation == actual.operation &&
+		task->approved.flags == actual.flags &&
+		!memcmp(&task->approved.source, &actual.source, sizeof(actual.source)) &&
+		!memcmp(&task->approved.destination, &actual.destination, sizeof(actual.destination)) &&
+		active_mutations == task->mutation_depth &&
+		(task->mutation_depth ?
+		 task->approved.namespace_epoch == task->mutation_base &&
+		 namespace_epoch >= task->mutation_base &&
+		 namespace_epoch - task->mutation_base == task->own_changes :
+		 task->approved.namespace_epoch == namespace_epoch);
+	task->has_approved = false;
+	spin_unlock_irqrestore(&namespace_lock, flags);
+	return valid ? 0 : -EACCES;
+}
+
+static int check_unlink(struct inode *parent, struct dentry *name)
+{
+	return check_namespace(OCTANT_MEDIATION_UNLINK, parent, name, NULL, NULL, 0);
+}
+
+static int check_rmdir(struct inode *parent, struct dentry *name)
+{
+	return check_namespace(OCTANT_MEDIATION_RMDIR, parent, name, NULL, NULL, 0);
+}
+
+static int check_rename(struct inode *source, struct dentry *name,
+	struct inode *destination, struct dentry *new_name, unsigned int flags)
+{
+	return check_namespace(OCTANT_MEDIATION_RENAME, source, name, destination, new_name, flags);
 }
 
 static int admit_file(struct file *file, u32 operation)
@@ -334,6 +469,7 @@ static ssize_t answer_request(struct file *file, const char __user *bytes, size_
 		namespace_overflow || active_mutations || namespace_epoch != answer.namespace_epoch ?
 		-EAGAIN : 0;
 	spin_unlock(&namespace_lock);
+	pending->decision_epoch = answer.namespace_epoch;
 	pending->answered = true;
 	wake_up_interruptible(&pending->changed);
 	spin_unlock_irqrestore(&context->lock, flags);
@@ -495,6 +631,9 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(cred_transfer, transfer_cred),
 	LSM_HOOK_INIT(cred_free, free_cred),
 	LSM_HOOK_INIT(file_permission, octant_file_permission),
+	LSM_HOOK_INIT(inode_unlink, check_unlink),
+	LSM_HOOK_INIT(inode_rmdir, check_rmdir),
+	LSM_HOOK_INIT(inode_rename, check_rename),
 	LSM_HOOK_INIT(file_truncate, truncate_file),
 	LSM_HOOK_INIT(path_truncate, truncate_path),
 	LSM_HOOK_INIT(mmap_file, mmap_file),

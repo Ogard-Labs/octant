@@ -94,7 +94,8 @@ def main():
             timeout=50, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     print(log[-20000:])
-    if "OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log:
+    if ("OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log or
+            '"status":"measured-namespace-token"' not in log):
         raise SystemExit("The guest admission core did not pass; no production proof is inferred.")
 
 
