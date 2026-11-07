@@ -122,8 +122,12 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   }
 
   function pick(label: string) {
+    // A closed note is kept for when it reopens, but only text the person can
+    // see goes with their choice.
     void answer(
-      note.trim().length === 0 ? { kind: "choice", label } : { kind: "choice", label, note },
+      !noteOpen || note.trim().length === 0
+        ? { kind: "choice", label }
+        : { kind: "choice", label, note },
     );
   }
 
