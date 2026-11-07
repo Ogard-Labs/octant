@@ -933,6 +933,8 @@ export const ExtensionPackageState = Schema.Struct({
   slug: Schema.optional(ExtensionSlug),
   displayName: Schema.optional(boundedText(128)),
   stateVersion: AggregateVersion,
+  /** Admission revision; isolated invocation observations do not revoke their own approval. */
+  activationVersion: Schema.optional(AggregateVersion),
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
   source: ExtensionSource,
@@ -983,6 +985,8 @@ export const ExtensionEffectivePackageState = Schema.Struct({
   slug: Schema.optional(ExtensionSlug),
   displayName: Schema.optional(boundedText(128)),
   stateVersion: AggregateVersion,
+  /** Admission revision; isolated invocation observations do not revoke their own approval. */
+  activationVersion: Schema.optional(AggregateVersion),
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
   source: ExtensionSource,

@@ -9219,7 +9219,12 @@ verified. A shared protocol is not evidence of platform confinement.
 Destination descriptions may be synchronous or asynchronous, with a ten-second
 host deadline and an eight-second worker deadline. Inspection/module loading
 and description have no network access. A changed activation or package identity
-invalidates the pending card. The approval names the declared HTTPS destinations;
+invalidates the pending card. The host binds a journal-derived admission revision,
+not the general package state version or catalogue epoch: starting/stopping one
+isolated invocation must neither invalidate itself nor drain sibling invocations.
+Explicit disable/uninstall, integrity holds and uncertain startup cleanup keep
+their ordinary gates, and replay rebuilds the admission revision.
+The approval names the declared HTTPS destinations;
 only the approved export phase may request mediated HTTP operations, with no
 ambient cookies, credentials or authorization headers. The host enforces the
 exact origin, public IP addresses at connection time, bounded requests and

@@ -1,3 +1,8 @@
+import { PassThrough } from "node:stream";
+import { Schema } from "effect";
+import { ExtensionActivationScope } from "@octant/contracts/extensions";
+import { decodeCanvasExportRenderedOutput } from "@octant/contracts/canvas-export";
+import { canvasExportPluginTargets } from "../canvas/canvasExportPluginTargets";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,7 +33,11 @@ import {
   type ExtensionLifecycleFaultPoint,
   type ExtensionSupervisorPort,
 } from "./extensionLifecycleService";
-import type { ExtensionRuntimeEvidence } from "./extensionSupervisor";
+import {
+  ExtensionSupervisor,
+  type ExtensionRuntimeEvidence,
+  type ExtensionProcessExit,
+} from "./extensionSupervisor";
 import {
   ExtensionActivationService,
   LOCAL_EXTENSION_ACTIVATION_POLICY,
@@ -74,7 +83,7 @@ function inspection(
       path: "runtime/main.mjs",
       kind: "file",
       content: new TextEncoder().encode(body),
-      executable: true,
+      executable: component.kind !== "canvas-export-target",
     },
   ];
   const manifest = {
@@ -933,4 +942,154 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     });
     expect(context.makeService().snapshot()).toEqual(quarantined);
   });
+});
+
+it("describes through a supervised worker without its lifecycle evidence revoking export admission", async () => {
+  const context = await setup();
+  const service = context.makeService();
+  await service.install(
+    inspection("1.0.0", "export const canvasExport = {};", [], {
+      id: "server",
+      kind: "canvas-export-target",
+      displayName: "Review copy",
+      declaredCapabilities: [],
+      entryPoint: "runtime/main.mjs",
+      canvasExport: {
+        contribution: {
+          schemaVersion: 1,
+          kind: "canvas-export-contribution",
+          targetId: "review-copy",
+          label: "Review copy",
+          formats: ["markdown"],
+        },
+        allowedOrigins: [],
+      },
+    }),
+  );
+  appendLifecycle(context, { kind: "source-trust-changed", trusted: true });
+  appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+  appendLifecycle(context, {
+    kind: "component-desired-state-changed",
+    componentId: "server",
+    desired: true,
+  });
+  const resolver = new ExtensionActivationService({
+    catalogStatus: () => "available",
+    policy: {
+      resolve: () => ({
+        revision: 0,
+        projectRevision: 0,
+        threadRevision: 0,
+        hostAllowed: true,
+        modeAllowed: true,
+        projectAllowed: true,
+        threadAllowed: true,
+        policyAllowed: true,
+      }),
+    },
+  });
+  const snapshot = () =>
+    resolver.resolve(service.snapshot(), {
+      scope: Schema.decodeUnknownSync(ExtensionActivationScope)({
+        hostId: "local",
+        mode: "code",
+        projectId: null,
+        threadId: null,
+        providerFamily: "canvas-export",
+      }),
+    });
+  const supervisor = new ExtensionSupervisor({
+    clock: () => now,
+    authorizeLaunch: async () => true,
+    evidence: (event) => service.recordRuntimeEvidence(event),
+    process: {
+      receipts: async () => [],
+      start: async () => {
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        let exited: ((exit: ExtensionProcessExit) => void) | undefined;
+        const wait = new Promise<ExtensionProcessExit>((resolve) => {
+          exited = resolve;
+        });
+        stdin.on("data", () =>
+          stdout.write(
+            `${JSON.stringify({ kind: "description", destination: { account: "Review account" } })}\n`,
+          ),
+        );
+        return {
+          pid: 12345,
+          stdin,
+          stdout,
+          ready: Promise.resolve(),
+          wait,
+          stop: async () => {
+            stdin.destroy();
+            stdout.destroy();
+            exited?.({ code: 0, signal: null });
+          },
+          once: () => undefined,
+        };
+      },
+    },
+  });
+  const options = {
+    store: context.store,
+    supervisor,
+    runtime: { kind: "bun" as const, path: "/host/bun" },
+    workerEntryPoint: "/host/worker.mjs",
+    platform: "darwin" as const,
+  };
+  const before = service.snapshot().packages[0];
+  const target = canvasExportPluginTargets(options, snapshot)[0];
+  if (before === undefined || target === undefined)
+    throw new Error("Expected effective export target");
+  const output = decodeCanvasExportRenderedOutput({
+    schemaVersion: 1,
+    kind: "canvas-export-output",
+    format: "markdown",
+    title: "Review",
+    body: "hello",
+    metadata: {
+      canvasId: randomUUID(),
+      versionId: randomUUID(),
+      sequence: 1,
+      byteLength: 5,
+      contentDigest: `sha256:${"a".repeat(64)}`,
+    },
+  });
+  expect(await target.target.describeDestination?.(output)).toMatchObject({
+    account: "Review account",
+  });
+  const after = service.snapshot().packages[0];
+  expect(Number(after?.stateVersion)).toBeGreaterThan(Number(before.stateVersion));
+  expect(after?.activationVersion).toBe(before.activationVersion);
+  expect(after?.activation).toEqual(before.activation);
+  expect(canvasExportPluginTargets(options, snapshot)[0]?.identity).toBe(target.identity);
+  appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: false });
+  appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+  expect(canvasExportPluginTargets(options, snapshot)[0]?.identity).not.toBe(target.identity);
+  const projection = context.runtime.projections.get("extensions");
+  if (projection === undefined) throw new Error("Expected extension projection");
+  const persisted = service.snapshot();
+  rebuildProjection({
+    connection: context.connection,
+    journal: context.journal,
+    projection,
+    clock: () => now,
+  });
+  expect(service.snapshot()).toEqual(persisted);
+  await context
+    .makeService({
+      supervisor: {
+        ...NOOP_EXTENSION_SUPERVISOR,
+        receipts: async () => [{ extensionId, packageId, componentId: "server", state: "running" }],
+        drain: async () => ({ state: "waiting" }),
+      },
+    })
+    .reconcileStartup();
+  expect(service.snapshot().packages[0]?.activation.waiting).toBe(true);
+  expect(Number(service.snapshot().packages[0]?.activationVersion)).toBeGreaterThan(
+    Number(persisted.packages[0]?.activationVersion),
+  );
+  expect(canvasExportPluginTargets(options, snapshot)).toEqual([]);
 });

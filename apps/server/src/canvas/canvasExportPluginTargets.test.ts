@@ -35,7 +35,7 @@ const resolver = new ExtensionActivationService({
     }),
   },
 });
-function snapshot(changes: Partial<typeof activation> = {}) {
+function snapshot(changes: Partial<typeof activation> = {}, stateVersion = 1) {
   const facts = { ...activation, ...changes };
   return resolver.resolve(
     decodeExtensionSnapshot({
@@ -46,7 +46,8 @@ function snapshot(changes: Partial<typeof activation> = {}) {
         {
           extensionId: "33333333-3333-4333-8333-333333333333",
           packageId: "44444444-4444-4444-8444-444444444444",
-          stateVersion: 1,
+          stateVersion,
+          activationVersion: 1,
           version: "1.0.0",
           digest: `sha256:${"a".repeat(64)}`,
           source: { kind: "local-folder", sourceRef: "local-export" },
@@ -122,4 +123,20 @@ describe("effective plugin export offers", () => {
   ])("omits a target when its activation no longer admits it: %j", (changes) => {
     expect(canvasExportPluginTargets(options, () => snapshot(changes))).toHaveLength(0);
   });
+});
+
+it("keeps an export approval identity stable across runtime-only package revisions", () => {
+  const first = canvasExportPluginTargets(options, () => snapshot({}, 1))[0];
+  const running = canvasExportPluginTargets(options, () => snapshot({}, 3))[0];
+  expect(first).toBeDefined();
+  expect(running?.identity).toBe(first?.identity);
+});
+
+it("refuses an activation snapshot that has no stable authorization revision", () => {
+  const current = snapshot();
+  const packages = current.packages.map((pkg) => {
+    const { activationVersion: _version, ...withoutVersion } = pkg;
+    return withoutVersion;
+  });
+  expect(canvasExportPluginTargets(options, () => ({ ...current, packages }))).toEqual([]);
 });

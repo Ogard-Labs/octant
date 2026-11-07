@@ -12,7 +12,8 @@ function candidates(snapshot: ExtensionEffectiveSnapshot) {
       if (
         state.component.kind !== "canvas-export-target" ||
         declaration === undefined ||
-        state.effectiveState.kind !== "effective"
+        state.effectiveState.kind !== "effective" ||
+        pkg.activationVersion === undefined
       )
         return [];
       return [
@@ -31,7 +32,14 @@ function candidates(snapshot: ExtensionEffectiveSnapshot) {
             pkg.version,
             pkg.digest,
             state.component.id,
-            snapshot.catalogEpoch,
+            pkg.activationVersion,
+            snapshot.scope,
+            state.policy.revision,
+            state.policy.hostAllowed,
+            state.policy.modeAllowed,
+            state.policy.projectAllowed,
+            state.policy.threadAllowed,
+            state.policy.policyAllowed,
           ]),
           facts: {
             installed: state.activation.installed,
