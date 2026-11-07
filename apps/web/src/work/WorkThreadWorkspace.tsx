@@ -2531,7 +2531,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
                 {pendingBrowserApproval.upload === undefined &&
                 pendingBrowserApproval.download === undefined &&
-                pendingBrowserApproval.signIn === undefined ? (
+                pendingBrowserApproval.signIn === undefined &&
+                pendingBrowserApproval.script === undefined ? (
                   <OctantButton
                     disabled={browserApprovalBusy}
                     onClick={() => void decideBrowserApproval("approved", true)}

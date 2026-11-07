@@ -41,7 +41,9 @@ export function browserApprovalSummary(approval: {
   readonly upload?: BrowserUploadRequest | undefined;
   readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
+  readonly script?: { readonly source: string } | undefined;
 }): string {
+  if (approval.script !== undefined) return `Run this script once on ${approval.origin}?`;
   if (approval.signIn !== undefined) {
     return `The agent asks you to sign in on ${approval.origin}`;
   }
@@ -64,7 +66,11 @@ export function browserApprovalDetail(approval: {
   readonly upload?: BrowserUploadRequest | undefined;
   readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
+  readonly script?: { readonly source: string } | undefined;
 }): string {
+  if (approval.script !== undefined) {
+    return `Profile: ${approval.profile === undefined ? "Private" : BROWSER_PROFILE_LABELS[approval.profile.kind]}. This script can read and change the page using its signed-in account authority, even in Private. This permission covers this exact source once in this task and profile. Shell and file access stay unchanged.`;
+  }
   if (approval.download !== undefined) {
     return "The file comes from the page and is checked here first. This answer covers this file once";
   }

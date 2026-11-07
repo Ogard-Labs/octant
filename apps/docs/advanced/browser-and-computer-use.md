@@ -140,13 +140,18 @@ as above, and fixed readers keep password and one-time-code values protected.
 
 ### Synchronous page scripts
 
-For a local native Code page already at **Full access**, the agent can use
-`run-script` when the fixed actions cannot express the task. It supplies source
-and the revision from a fresh page read. Existing site/profile approval still
-applies; no additional script prompt appears. Work, headless, paired, routine,
-subagent, terminal and Plan callers are refused. Scripts below Full access are
-currently unavailable because Octant cannot establish whether a Private page
-is signed in. Private means temporary storage, not a signed-out account.
+For a local native Code page, the agent can use `run-script` when fixed
+actions cannot express the task. It supplies source and the revision from a
+fresh page read. Existing site/profile approvals still apply. At **Full access**,
+there is no additional script prompt. Below Full access, Octant asks you to
+review the exact source and HTTPS origin for one run in the task's selected
+profile. The permission grants that page's account authority, even in Private;
+it never becomes an “always allow” site grant or changes shell/file access.
+Changing the task, profile or page invalidates the pending answer.
+
+Below Full access, a credential field or incomplete frame/shadow inspection
+refuses execution. Work, headless, paired, routine, subagent, terminal and Plan
+callers remain refused. Private means temporary storage, not a signed-out account.
 
 A script has normal page DOM and account access. It can read values a form
 populated or reflected and install callbacks that survive the call. Those

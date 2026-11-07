@@ -51,6 +51,28 @@ describe("TerminalBrowserApprovalPrompt", () => {
     );
   });
 
+  it("shows the exact script and account authority with only a one-use answer", async () => {
+    const browser = client([{ ...approval(), script: { source: "document.title" } }]);
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={browser}
+        threadId={threadId}
+        threadTitle="Check the page"
+      />,
+    );
+    const card = await screen.findByRole("group", { name: "Browser script permission" });
+    expect(card).toHaveTextContent("document.title");
+    expect(card).toHaveTextContent("signed-in account authority");
+    expect(screen.queryByRole("button", { name: "Always allow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Run once" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: approval().approvalId,
+        decision: "approved",
+      }),
+    );
+  });
+
   it("names the thread and the site, and says the terminal asked rather than the thread's agent", async () => {
     const browser = client([approval()]);
     render(
