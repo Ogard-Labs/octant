@@ -1131,6 +1131,17 @@ export function wireWork(deps: WorkDependencies) {
     // A side task's prompt as a thread's next message, through the mode's
     // ordinary turn command on the confirming window: the first message of a
     // thread a start created, or the next turn of the thread that offered it.
+    // A Chat command is checked against the thread's journal head version.
+    // The projection row's own version lags it once a turn has run, so a
+    // "do it here" built from that row was refused as stale on a thread with
+    // a reply; the service's read stamps the head version, as the queue does.
+    const readChatThreadHead = (threadId: string) => {
+      try {
+        return chatService.read(decodeChatThreadId(threadId)).thread;
+      } catch {
+        return undefined;
+      }
+    };
     const sendSideTaskTurn = async ({
       windowId,
       mode,
@@ -1144,7 +1155,7 @@ export function wireWork(deps: WorkDependencies) {
     }): Promise<boolean> => {
       const window = decodeWindowId(windowId);
       if (mode === "chat") {
-        const thread = persistence.readChatThread(threadId as never);
+        const thread = readChatThreadHead(threadId);
         if (thread === undefined) return false;
         // A Chat send settles when the reply ends; the side task is started
         // the moment the message is in, so the new thread opens right away.
@@ -1323,7 +1334,7 @@ export function wireWork(deps: WorkDependencies) {
           decodeCodeThreadId(threadId),
         ),
       chat: {
-        readThread: (threadId: string) => persistence.readChatThread(decodeChatThreadId(threadId)),
+        readThread: readChatThreadHead,
         execute: (command: unknown, context: { readonly windowId: WindowId }) =>
           chatService.execute(command, context),
       },
