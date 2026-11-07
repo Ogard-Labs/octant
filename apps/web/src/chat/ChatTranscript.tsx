@@ -263,6 +263,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // behind it.
   const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.id))), [turns]);
+  const chatReplyInFlight = turns.some((turn) =>
+    turn.attempts.some(
+      (attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming",
+    ),
+  );
   const turnIndexById = useMemo(
     () => new Map(turns.map((turn, index) => [String(turn.id), index])),
     [turns],
@@ -630,11 +635,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             <SideTaskInline
               last={detached === undefined && String(turn.id) === String(turns.at(-1)?.id)}
               loadedTurnIds={loadedTurnIds}
-              running={
-                turn.attempts.at(-1)?.outcome === "queued" ||
-                turn.attempts.at(-1)?.outcome === "streaming" ||
-                turn.attempts.at(-1)?.outcome === "waiting"
-              }
+              // A Chat branch waits for every reply in flight in the thread, not
+              // only the offering turn's, so the card holds the fork choice too.
+              running={chatReplyInFlight || turn.attempts.at(-1)?.outcome === "waiting"}
               turnId={String(turn.id)}
             />
           </div>

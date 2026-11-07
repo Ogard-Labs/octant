@@ -2079,9 +2079,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       <SideTaskInline
                         last={message === lastReply}
                         loadedTurnIds={loadedOperationIds}
+                        // The host refuses a fork through an operation that is still
+                        // incomplete or waiting, whichever reply it is.
                         running={
-                          message === lastReply &&
-                          (message.status === undefined || message.status === "waiting")
+                          message.status === undefined ||
+                          message.status === "incomplete" ||
+                          message.status === "waiting"
                         }
                         turnId={String(message.operationId)}
                       />
