@@ -805,17 +805,3 @@ MFA/CAPTCHA and uncertain results remain yours to complete. The website can
 retain or reflect input, so check it before continuing. See
 [Secret stores](../guide/secret-stores.md#record-permission-for-a-browser-login-item)
 for custody, cancellation and exact SSO limits.
-
-## Leave a note on the running page
-
-In a Work or Code task's Browser, choose **Point at something** and select the
-part of the page you mean. Pointing selects evidence without clicking the page
-or sending a message. Review the static element preview, write your comment and
-choose **Leave the note**. You can edit, exclude or remove a pending note before
-your next message carries it to the task's agent.
-
-The preview contains bounded structure and style context, with a small image
-when it is safe to capture. Form values are excluded from the description.
-Images are withheld around protected fields or uninspected embedded content.
-A sign-in, script or owner-control hold can make capture unavailable. An expired
-preview keeps your comment so you can select the element again.
