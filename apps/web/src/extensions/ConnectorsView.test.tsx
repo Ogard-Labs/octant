@@ -189,6 +189,37 @@ describe("Connectors", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("flags a connected connector whose sign-in expired, with the host's reason", () => {
+    render(
+      <ConnectorsView
+        actions={null}
+        client={{
+          addUserMcpServer: vi.fn() as never,
+          mcpServerSignIn: vi.fn(async () => ({ kind: "signed-out" })) as never,
+        }}
+        connections={[
+          {
+            extensionId: EXTENSION,
+            packageId: "44000000-0000-4000-8000-000000000003",
+            componentId: "mcp-linear",
+            packageName: "connector-linear",
+            serverName: "Linear",
+            transport: "streamable-http",
+            state: "needs-sign-in",
+            reason: "The sign-in expired. Sign in again.",
+          } as never,
+        ]}
+        disabled={false}
+        localHost
+        onConnected={vi.fn()}
+        snapshot={snapshotWith([addedPackage("connector-linear")])}
+      />,
+    );
+    const popular = screen.getByRole("region", { name: "Popular" });
+    expect(within(popular).getByText("Needs sign-in")).toBeTruthy();
+    expect(within(popular).getByText("The sign-in expired. Sign in again.")).toBeTruthy();
+  });
+
   it("does not show a server the person named like a connector as Connected", () => {
     render(
       <ConnectorsView
