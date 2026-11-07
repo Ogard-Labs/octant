@@ -90,8 +90,8 @@ describe("resolveSidebarContributions", () => {
     ).toBe(false);
   });
 
-  it("treats an unlisted component as not effective", () => {
-    expect(resolveSidebarContributions("code", effectiveMap({})).size).toBe(0);
+  it("treats an unlisted component as not effective, keeping only host-owned destinations", () => {
+    expect([...resolveSidebarContributions("code", effectiveMap({}))]).toEqual(["pull-requests"]);
   });
 });
 
