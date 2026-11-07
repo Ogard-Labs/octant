@@ -1,0 +1,65 @@
+name: Docs
+
+# The guide at apps/docs is live at https://octant.dev/docs/. Every PR and
+# every merge-queue commit builds it and runs the link, anchor, sidebar, and
+# metadata gates, so a broken docs change fails before it can ship. The publish
+# step runs only on the merge queue AND only when a maintainer approves the
+# docs-deploy environment, which holds the host credentials.
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check the guide
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter @octant/docs check:links
+      - run: bun run --filter @octant/docs check:sidebar
+      - run: bun run --filter @octant/docs test
+      - run: bun run --filter @octant/docs typecheck
+      - run: bun run --filter @octant/docs build
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'merge_group'
+        with:
+          name: octant-docs
+          path: apps/docs/dist
+          retention-days: 7
+
+  publish:
+    name: Publish to octant.dev/docs
+    needs: build
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Maintainer gate: this environment holds the docs-host credentials and
+    # each run needs a maintainer's approval in GitHub.
+    environment: docs-deploy
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: octant-docs
+          path: dist
+      # Maintainer-owned publish command. Replace with the actual host upload
+      # (rsync/CLI/S3 sync) using this environment's secrets; the build artifact
+      # above is everything that ships.
+      - name: Publish dist/ to octant.dev/docs
+        run: |
+          echo "Publishing $(find dist -type f | wc -l) files to https://octant.dev/docs/"
+          echo "TODO(maintainer): wire the real publish command with the docs-deploy environment secrets."

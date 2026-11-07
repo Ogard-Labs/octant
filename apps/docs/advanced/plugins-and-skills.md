@@ -379,7 +379,7 @@ A server that runs the repository's own tools, such as a build or a package
 manager, declares `"launchClass": "repo-tooling"` and may add `shell` and
 `network` to its capabilities. It never starts until you allow it from the
 editor of a Code thread, for one checkout or for the whole Project (see
-[Language services](/advanced/language-services#servers-that-run-the-repositorys-tools)).
+[Language services](/advanced/language-services#servers-that-run-the-repository-s-tools)).
 
 **Review before installing** names the binary, its own SHA-256 digest (compare
 it with the one the server's author publishes), the languages it reads, and

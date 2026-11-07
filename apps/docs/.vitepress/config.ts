@@ -137,6 +137,12 @@ export default defineConfig({
     },
     search: { provider: "local" },
     outline: [2, 3],
+    editLink: {
+      pattern: "https://github.com/Ogard-Labs/octant/edit/main/apps/docs/:path",
+      text: "Edit this page on GitHub",
+    },
+    lastUpdated: { text: "Last updated" },
+    socialLinks: [{ icon: "github", link: "https://github.com/Ogard-Labs/octant" }],
     footer: {
       message: "Octant documentation · local-first by design",
     },
