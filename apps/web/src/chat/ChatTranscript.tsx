@@ -36,6 +36,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
+import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
@@ -261,6 +262,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // shows the conversation as it now stands and the turns it left out stay
   // behind it.
   const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
+  const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.id))), [turns]);
   const turnIndexById = useMemo(
     () => new Map(turns.map((turn, index) => [String(turn.id), index])),
     [turns],
@@ -625,6 +627,16 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 />
               ))}
             </TurnActionMenu>
+            <SideTaskInline
+              last={detached === undefined && String(turn.id) === String(turns.at(-1)?.id)}
+              loadedTurnIds={loadedTurnIds}
+              running={
+                turn.attempts.at(-1)?.outcome === "queued" ||
+                turn.attempts.at(-1)?.outcome === "streaming" ||
+                turn.attempts.at(-1)?.outcome === "waiting"
+              }
+              turnId={String(turn.id)}
+            />
           </div>
         );
       }}

@@ -116,6 +116,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -798,6 +799,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  const loadedOperationIds = new Set(
+    messages.flatMap((message) =>
+      message.role === "assistant" && message.operationId !== undefined
+        ? [String(message.operationId)]
+        : [],
+    ),
+  );
+  const lastReply = messages.findLast((message) => message.role === "assistant");
   // The host only binds a thread to its provider once a provider session
   // exists, and a completed reply is the renderer's proof of one. A thread
   // whose first turn failed before the provider started has nothing to carry
@@ -2066,6 +2075,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : null}
                       </TurnActionMenu>
                     </article>
+                    {message.role === "assistant" && message.operationId !== undefined ? (
+                      <SideTaskInline
+                        last={message === lastReply}
+                        loadedTurnIds={loadedOperationIds}
+                        running={
+                          message === lastReply &&
+                          (message.status === undefined || message.status === "waiting")
+                        }
+                        turnId={String(message.operationId)}
+                      />
+                    ) : null}
                   </div>
                 );
               }}
