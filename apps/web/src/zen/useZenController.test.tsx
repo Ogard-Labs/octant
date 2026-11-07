@@ -147,6 +147,69 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("useZenController with the Zen plugin off", () => {
+  it("cannot be entered and never reaches the host", async () => {
+    const client = createClient();
+    const { result } = renderHook(() =>
+      useZenController({ client, windowId, storage: window.sessionStorage, enabled: false }),
+    );
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.active).toBe(false);
+    expect(client.bootstrap).not.toHaveBeenCalled();
+    expect(client.command).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a Zen that was open before the plugin was switched off", async () => {
+    window.sessionStorage.setItem(`${ZEN_PRESENTATION_STORAGE_PREFIX}${windowId}`, "active");
+    const bootstrap = vi.fn(async () => ({
+      space: makeSpace({ active: true }),
+      focusZone: makeZone(makeSpace({ active: true })),
+      windowId,
+    }));
+    const client = createClient({ bootstrap });
+    const { result } = renderHook(() =>
+      useZenController({ client, windowId, storage: window.sessionStorage, enabled: false }),
+    );
+
+    await act(async () => undefined);
+
+    expect(result.current.active).toBe(false);
+    expect(bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("closes an open Zen when the plugin is switched off and keeps its data", async () => {
+    const client = createClient();
+    const { result, rerender } = renderHook(
+      ({ enabled }) =>
+        useZenController({ client, windowId, storage: window.sessionStorage, enabled }),
+      { initialProps: { enabled: true } },
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    expect(result.current.active).toBe(true);
+
+    rerender({ enabled: false });
+
+    await waitFor(() => expect(result.current.active).toBe(false));
+    expect(result.current.recoveryNeeded).toBe(false);
+    // Switching off closes the surface locally. The host refuses Zen routes
+    // while the plugin is off, so nothing is sent and nothing is removed.
+    const commandsBefore = vi.mocked(client.command).mock.calls.length;
+    await act(async () => undefined);
+    expect(vi.mocked(client.command).mock.calls.length).toBe(commandsBefore);
+    expect(window.sessionStorage.getItem(`${ZEN_PRESENTATION_STORAGE_PREFIX}${windowId}`)).toBe(
+      null,
+    );
+    expect(result.current.space).not.toBeNull();
+  });
+});
+
 describe("useZenController", () => {
   it("enters Zen by creating a space when bootstrap has none", async () => {
     const client = createClient();

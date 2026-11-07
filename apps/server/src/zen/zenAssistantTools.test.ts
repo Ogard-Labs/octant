@@ -158,6 +158,21 @@ async function boundAssistantFixture() {
 }
 
 describe("ZenAssistantTools", () => {
+  it("offers no tool while the Zen plugin is off, and the same tool once it is on again", () => {
+    const { service, zenLayout } = fixture(true);
+    let effective = false;
+    const tools = new ZenAssistantTools({
+      zenService: service as never,
+      zenLayout,
+      isEffective: () => effective,
+    });
+    expect(tools.forThread(windowId, thread)).toBeUndefined();
+    effective = true;
+    expect(tools.forThread(windowId, thread)?.definitions.map(({ name }) => name)).toEqual([
+      "octant_zen",
+    ]);
+  });
+
   it("offers one octant_zen tool, and only to the exact bound assistant thread", () => {
     const exact = fixture(true);
     const ordinary = fixture(false);

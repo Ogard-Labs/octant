@@ -132,8 +132,12 @@ are inert while Zen is active or no Code thread is in view.
 
 ## Zen focus workspace
 
-The Zen workspace is a pressure-focus surface for deep work. Keyboard
-behavior:
+The Zen workspace is a pressure-focus surface for deep work. Zen is a
+bundled plugin and is on by default. When the Zen plugin is off, **⌘/Ctrl+Shift+Z**
+does nothing, the profile menu and command palette no longer offer Zen, and an open
+Zen closes back to your workspace. Your Zen layouts, backgrounds, and spaces are
+kept and come back when you turn the plugin on again. App backgrounds are not part
+of the plugin and keep working. Keyboard behavior:
 
 - **⌘/Ctrl+Shift+Z** enters and exits Zen. The chord is remappable in
   Settings, and still exits when a pinned card or other Zen element has

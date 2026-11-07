@@ -24,6 +24,8 @@ export interface ZenBackgroundRouteDependencies {
   readonly zenService: ZenService;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  /** False when the bundled Zen plugin is switched off; the routes then refuse. */
+  readonly isEffective?: () => boolean;
   readonly liveAssets: () => ReadonlyMap<
     string,
     { readonly ownerWindowId: WindowId; readonly spaceId: ZenSpaceId }
@@ -37,6 +39,9 @@ export function createZenBackgroundRouteHandler(dependencies: ZenBackgroundRoute
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/zen/backgrounds")) return undefined;
     const origin = request.headers.get("origin");
+    if (dependencies.isEffective?.() === false) {
+      return failure("plugin-disabled", "The Zen plugin is turned off.", 403, origin);
+    }
     if (
       !isLoopbackHostname(url.hostname) ||
       (origin !== null && !isAllowedRendererOrigin(origin))

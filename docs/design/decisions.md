@@ -453,6 +453,7 @@ Zen's assistant arranges its window's Zen space through one family, `octant_zen`
 - Every change names the version it applies to; an out-of-date one changes nothing and the conflict carries the current version.
 - `create-widget` offers only the kinds it creates (Notes, Checklist, Timer); a recipe widget exists only after the person confirms a preview.
 - Labels journaled under the seven tools it replaced (`octant_zen_*`) still read.
+- The tool exists only while the bundled Zen plugin is on; switching the plugin off withholds it and refuses the Zen routes without deleting any Zen data.
 
 Status: Built. Since: —. Detail: [Architecture: Zen assistant tool](../architecture.md#zen-assistant-tool).
 

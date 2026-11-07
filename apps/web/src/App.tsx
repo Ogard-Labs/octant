@@ -907,7 +907,11 @@ function LaunchedShell(
   );
   const shellBackdropCoversSidebar =
     shellBackdrop !== undefined && resolvedAppBackground?.coversSidebar === true;
+  // The one Zen plugin switch. Every Zen entry point below reads `zen.enabled`
+  // (derived from this) rather than the map again.
+  const zenPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("zen") === true;
   const zen = useZenController({
+    enabled: zenPluginEffective,
     ...(props.zenClient === undefined ? {} : { client: props.zenClient }),
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
@@ -6925,10 +6929,14 @@ function LaunchedShell(
         }),
     onOpenReview: openReview,
     ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
-    onOpenZen: () => {
-      if (zen.active) zen.exitZen();
-      else void zen.enterZen();
-    },
+    ...(zen.enabled
+      ? {
+          onOpenZen: () => {
+            if (zen.active) zen.exitZen();
+            else void zen.enterZen();
+          },
+        }
+      : {}),
     threads: threadSearchThreads
       .filter((thread) => thread.lifecycle === "active")
       .map((thread) => ({
@@ -7113,6 +7121,7 @@ function LaunchedShell(
         sidebar={
           <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
             <SidebarContainer
+              zenEnabled={zen.enabled}
               windowHistory={windowHistory}
               actions={actions}
               {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
@@ -7674,15 +7683,19 @@ function LaunchedShell(
                       current === undefined ? undefined : { ...current, open: false },
                     )
                   }
-                  onOpenTerminal={(terminalId) => {
-                    void (async () => {
-                      if (!zen.active) await zen.enterZen();
-                      await zen.pinProjectTerminal({
-                        projectId: projectActionRun.target.projectId,
-                        terminalId,
-                      });
-                    })();
-                  }}
+                  {...(zen.enabled
+                    ? {
+                        onOpenTerminal: (terminalId: ReturnType<typeof decodeCodeTerminalId>) => {
+                          void (async () => {
+                            if (!zen.active) await zen.enterZen();
+                            await zen.pinProjectTerminal({
+                              projectId: projectActionRun.target.projectId,
+                              terminalId,
+                            });
+                          })();
+                        },
+                      }
+                    : {})}
                 />
               )}
 

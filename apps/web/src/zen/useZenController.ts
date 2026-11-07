@@ -41,6 +41,12 @@ export interface UseZenControllerOptions {
   readonly windowCapability?: string;
   readonly windowId?: WindowId;
   readonly storage?: ZenPresentationStorage;
+  /**
+   * False when the bundled Zen plugin is switched off. Zen then cannot be
+   * entered, reports itself inactive and never asks for recovery, and a Zen
+   * that was open closes. Layouts and backgrounds stay with the host.
+   */
+  readonly enabled?: boolean;
 }
 
 function defaultStorage(): ZenPresentationStorage | undefined {
@@ -93,6 +99,7 @@ export function useZenController(options: UseZenControllerOptions) {
   );
   const client = options.client ?? fallbackClient;
   const windowId = options.windowId;
+  const enabled = options.enabled ?? true;
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -401,6 +408,7 @@ export function useZenController(options: UseZenControllerOptions) {
   }, [client, markActive, windowId]);
 
   const enterZen = useCallback(async () => {
+    if (!enabled) return;
     const next = await loadOrCreateSpace();
     if (next === null || !mounted.current) return;
     if (next.active) {
@@ -409,7 +417,7 @@ export function useZenController(options: UseZenControllerOptions) {
     } else {
       await setPresentation({ active: true });
     }
-  }, [loadOrCreateSpace, markActive, setPresentation]);
+  }, [enabled, loadOrCreateSpace, markActive, setPresentation]);
 
   const exitZen = useCallback(() => {
     setMessage(undefined);
@@ -1499,7 +1507,16 @@ export function useZenController(options: UseZenControllerOptions) {
     [setBarCollapsedState, setPresentation],
   );
 
+  // Switching Zen off while it is open returns the window to its workspace.
+  // Local only: the host refuses every Zen route while the plugin is off, so
+  // the stored presentation is left as it is and is not restored on its own.
   useEffect(() => {
+    if (enabled || !active) return;
+    markActive(false);
+  }, [active, enabled, markActive]);
+
+  useEffect(() => {
+    if (!enabled) return;
     if (restoring.current) return;
     if (!readPresentationActive(storage, windowId)) return;
     if (client === undefined || windowId === undefined) return;
@@ -1533,11 +1550,12 @@ export function useZenController(options: UseZenControllerOptions) {
         if (mounted.current) restoring.current = false;
       }
     })();
-  }, [client, markActive, setBarCollapsedState, storage, windowId]);
+  }, [client, enabled, markActive, setBarCollapsedState, storage, windowId]);
 
   // One identity while nothing in it moved; see useRetainedRecord.
   return useRetainedRecord({
-    active,
+    enabled,
+    active: active && enabled,
     space,
     pinTerminal,
     pinProjectTerminal,
@@ -1554,7 +1572,7 @@ export function useZenController(options: UseZenControllerOptions) {
     barCollapsed,
     setBarCollapsed,
     setLayout,
-    recoveryNeeded,
+    recoveryNeeded: recoveryNeeded && enabled,
     message,
     enterZen,
     exitZen,

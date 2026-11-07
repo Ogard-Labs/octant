@@ -107,6 +107,7 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
   return (
     <ZenRoot
       active={zen.active}
+      enabled={zen.enabled}
       onCycleSpace={(step) => void zen.cycleSpace(step)}
       onExit={zen.exitZen}
       onToggle={() => {

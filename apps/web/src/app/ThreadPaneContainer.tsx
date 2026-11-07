@@ -555,8 +555,14 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 chatReadCursorStore={chatReadCursorStore}
                 {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
                 onChatTurnRevealed={spendRevealChatTurn}
-                onPinTerminal={(request) => void zen.pinTerminal(request)}
-                onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
+                {...(zen.enabled
+                  ? {
+                      onPinTerminal: (request: Parameters<typeof zen.pinTerminal>[0]) =>
+                        void zen.pinTerminal(request),
+                      onPinCanvasInFocusZone: (request: Parameters<typeof zen.pinCanvas>[0]) =>
+                        void zen.pinCanvas(request),
+                    }
+                  : {})}
                 onStartPlanTask={(request) => {
                   closeWorkspaceReaders();
                   setDraftError(undefined);
