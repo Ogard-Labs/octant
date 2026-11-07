@@ -323,7 +323,7 @@ async function hasCompleteShadowCoverage(
   let count = 0;
   while (pending.length > 0) {
     const node = record(pending.pop());
-    if (node === undefined || ++count > 20_000) return false;
+    if (node === undefined || typeof node.nodeName !== "string" || ++count > 20_000) return false;
     const shadows = node.shadowRoots;
     if (shadows !== undefined) {
       if (!Array.isArray(shadows)) return false;

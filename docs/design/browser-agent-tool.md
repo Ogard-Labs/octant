@@ -1264,7 +1264,10 @@ thread and is framed as evidence, never instructions.
   and credential protection across DOM and screenshot waits. It never enters
   a child frame to inspect an element. A crop overlapping editable content or
   an uninspected iframe/embed region is withheld. Native protocol inspection
-  also detects closed shadow roots on ordinary elements. Their descendants can
+  also detects closed shadow roots on ordinary elements. Open shadow roots are
+  walked independently of their host bounds, and overflowing contenteditable
+  text ranges are checked too; element/root/rectangle limits withhold the crop
+  when coverage is incomplete. Their descendants can
   overflow the host's bounds, so any closed root or incomplete native coverage
   withholds the optional crop for that read; safe bounded context and the
   person's comment remain, with an explicit omission. Filtering DOM text does

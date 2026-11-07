@@ -138,53 +138,68 @@ export function readBrowserFeedbackElement(argument: {
   const cropRight = cropLeft + cropBounds.width;
   const cropBottom = cropTop + cropBounds.height;
   let cropBlocked = element.closest(editable) !== null;
-  // A screenshot cannot be described as value-free merely because text was
-  // filtered. Withhold it when an editable control overlaps the padded crop.
-  const controls = document.querySelectorAll(`${editable}, iframe, frame, embed, object`);
-  let opaqueCrop = controls.length > 256;
-  if (controls.length > 256) cropBlocked = true;
-  for (let index = 0; index < Math.min(256, controls.length) && !cropBlocked; index += 1) {
-    const control = controls.item(index);
-    if (control === null) continue;
-    const box = control.getBoundingClientRect();
-    if (
-      box.width > 0 &&
-      box.height > 0 &&
-      box.right > cropLeft &&
-      box.left < cropRight &&
-      box.bottom > cropTop &&
-      box.top < cropBottom
-    ) {
-      cropBlocked = true;
-      opaqueCrop = /^(?:iframe|frame|embed|object)$/i.test(control.tagName);
-    }
-  }
-  const pageElements = document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT);
+  // A host's box does not contain absolutely positioned shadow descendants.
+  // Walk each open root and inspect the actual editable/opaque regions there.
+  const roots: Array<Document | ShadowRoot> = [document];
   let scanned = 0;
-  for (
-    let node = pageElements.nextNode();
-    node !== null && !cropBlocked;
-    node = pageElements.nextNode()
-  ) {
-    scanned += 1;
-    if (scanned > 2_048) {
-      cropBlocked = true;
-      opaqueCrop = true;
-      break;
-    }
-    if (!(node instanceof Element) || (node.shadowRoot === null && !node.tagName.includes("-")))
-      continue;
-    const box = node.getBoundingClientRect();
-    if (
-      box.width > 0 &&
-      box.height > 0 &&
-      box.right > cropLeft &&
-      box.left < cropRight &&
-      box.bottom > cropTop &&
-      box.top < cropBottom
-    ) {
-      cropBlocked = true;
-      opaqueCrop = true;
+  let controls = 0;
+  let inspectedRects = 0;
+  let opaqueCrop = false;
+  const overlaps = (box: DOMRectReadOnly) =>
+    box.width > 0 &&
+    box.height > 0 &&
+    box.right > cropLeft &&
+    box.left < cropRight &&
+    box.bottom > cropTop &&
+    box.top < cropBottom;
+  for (let index = 0; index < roots.length && !cropBlocked; index += 1) {
+    const root = roots[index];
+    if (root === undefined) break;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.nextNode(); node !== null && !cropBlocked; node = walker.nextNode()) {
+      if (++scanned > 2_048 || roots.length > 64) {
+        cropBlocked = true;
+        opaqueCrop = true;
+        break;
+      }
+      if (!(node instanceof Element)) continue;
+      if (node.shadowRoot !== null) roots.push(node.shadowRoot);
+      if (node.matches(`${editable}, iframe, frame, embed, object`)) {
+        if (++controls > 256) {
+          cropBlocked = true;
+          opaqueCrop = true;
+          break;
+        }
+        const boxes = [node.getBoundingClientRect()];
+        if (node.matches("[contenteditable]:not([contenteditable=false])")) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          if (typeof range.getClientRects !== "function") {
+            cropBlocked = true;
+            opaqueCrop = true;
+            break;
+          }
+          const contents = Array.from(range.getClientRects());
+          inspectedRects += contents.length;
+          if (inspectedRects > 2_048) {
+            cropBlocked = true;
+            opaqueCrop = true;
+            break;
+          }
+          boxes.push(...contents);
+        }
+        if (boxes.some(overlaps)) {
+          cropBlocked = true;
+          opaqueCrop = /^(?:iframe|frame|embed|object)$/i.test(node.tagName);
+        }
+      } else if (
+        node.shadowRoot === null &&
+        node.tagName.includes("-") &&
+        overlaps(node.getBoundingClientRect())
+      ) {
+        cropBlocked = true;
+        opaqueCrop = true;
+      }
     }
   }
   const name = element.getAttribute("aria-label")?.trim();

@@ -71,6 +71,40 @@ describe("the shared host element reader", () => {
     expect(readBrowserFeedbackElement(point)?.cropBlocked).toBe(true);
   });
 
+  it.each([new DOMRect(0, 0, 0, 0), new DOMRect(500, 120, 10, 10)])(
+    "withholds editable values overflowing an open shadow host outside the crop",
+    (hostBox) => {
+      select('<button id="save">Save</button><div id="host"></div>', "#save");
+      const host = document.getElementById("host");
+      if (host === null) throw Error("Missing host");
+      vi.spyOn(host, "getBoundingClientRect").mockReturnValue(hostBox);
+      const root = host.attachShadow({ mode: "open" });
+      root.innerHTML = '<input type="text" value="fixture-private-token">';
+      const input = root.querySelector("input");
+      if (input === null) throw Error("Missing shadow input");
+      vi.spyOn(input, "getBoundingClientRect").mockReturnValue(new DOMRect(180, 130, 40, 20));
+      const result = readBrowserFeedbackElement(point);
+      expect(result?.cropBlocked).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("fixture-private-token");
+    },
+  );
+
+  it("includes overflowing contenteditable text bounds in crop protection", () => {
+    select(
+      '<button id="save">Save</button><div contenteditable="true">fixture-private-text</div>',
+      "#save",
+    );
+    const editor = document.querySelector("[contenteditable]");
+    if (editor === null) throw Error("Missing editor");
+    vi.spyOn(editor, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 0, 0));
+    const range = document.createRange();
+    Object.defineProperty(range, "getClientRects", {
+      value: () => [new DOMRect(180, 130, 40, 20)],
+    });
+    vi.spyOn(document, "createRange").mockReturnValue(range);
+    expect(readBrowserFeedbackElement(point)?.cropBlocked).toBe(true);
+  });
+
   it("withholds a parent crop intersecting an opaque frame without inspecting that frame", () => {
     const selected = select(
       `<main id="container"><iframe src="https://other.example/"></iframe></main>`,
