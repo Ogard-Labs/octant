@@ -1031,8 +1031,14 @@ try {
           const answer = record(
             await present({ kind: "input", presentationId, input: value, frameSequence: sequence }),
           );
-          if (answer.status === "refused")
-            throw new Error(`Input refused: ${JSON.stringify(value)}`);
+          if (answer.status === "refused") {
+            const trace = stableA.events
+              .matching((event) => event.event.startsWith("presentation-"))
+              .slice(-50);
+            throw new Error(
+              `Input refused: ${JSON.stringify(value)} Trace: ${JSON.stringify(trace)}`,
+            );
+          }
         };
         const click = async (x: number, y: number) => {
           await input({ type: "mouseDown", x, y, button: "left", clickCount: 1 });

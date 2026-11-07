@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { app, session } from "electron";
 import { startCredentialBroker, type CredentialStore } from "@octant/host-runtime";
+import { BrowserPresentation } from "../apps/desktop/src/browserPresentation";
 import { createBrowserSurfaceHost } from "../apps/desktop/src/browserSurfaceHost";
 import { createBrowserProfileStore } from "../apps/desktop/src/browserProfileStore";
 import { startBrowserRuntimeBroker } from "../apps/desktop/src/browserRuntimeBroker";
@@ -54,6 +55,45 @@ function required(name: string): string {
 function emit(event: string, detail: Record<string, unknown> = {}): void {
   process.stdout.write(`HARNESS ${JSON.stringify({ event, ...detail })}\n`);
 }
+
+// Synthetic-only admission trace: records event kinds and coordinate epochs,
+// never page text, credentials or a person's input. A failed hosted smoke can
+// then distinguish a competing layout from a rejected native dispatch.
+const originalLayout = BrowserPresentation.prototype.layout;
+BrowserPresentation.prototype.layout = function (id, layout) {
+  const accepted = originalLayout.call(this, id, layout);
+  emit("presentation-layout", { id, ...layout, accepted });
+  return accepted;
+};
+const originalInput = BrowserPresentation.prototype.reserveInput;
+BrowserPresentation.prototype.reserveInput = function (id, input, frameSequence) {
+  const dispatch = originalInput.call(this, id, input, frameSequence);
+  emit("presentation-input", {
+    id,
+    type: input.type,
+    frameSequence,
+    phase: "admit",
+    accepted: dispatch !== undefined,
+  });
+  if (dispatch === undefined) return undefined;
+  return () => {
+    const accepted = dispatch();
+    emit("presentation-input", {
+      id,
+      type: input.type,
+      frameSequence,
+      phase: "dispatch",
+      accepted,
+    });
+    return accepted;
+  };
+};
+const originalClose = BrowserPresentation.prototype.close;
+BrowserPresentation.prototype.close = function () {
+  const accepted = originalClose.call(this);
+  emit("presentation-close", { accepted });
+  return accepted;
+};
 
 function memoryStore(): CredentialStore {
   const values = new Map<string, string>();

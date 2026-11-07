@@ -1,0 +1,30 @@
+name: Nightly select input diagnosis
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/nightly-client-diagnostic.yml
+      - scripts/nightly-client-harness-stable.ts
+      - scripts/smoke-nightly-client.ts
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-select-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Trace native Nightly select input
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: node node_modules/electron/install.js
+      - run: bun scripts/smoke-nightly-client.ts
