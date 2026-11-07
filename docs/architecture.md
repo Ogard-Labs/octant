@@ -10864,9 +10864,16 @@ access` agree); a thread's own change is journaled as
   option label exactly and a reason of at most 100 characters, else the review
   is `failed`. A reply steered by outside content is `withheld`; a Project
   whose provider policy refuses the account sends nothing and is
-  `not-allowed`. These outcomes are journaled as `decision-review.recorded@1`
-  on one host aggregate (latest record per key, records over 30 days old drop
-  on replay), so a restart neither shows nor pays again. An account that is
+  `not-allowed`. A decision in a thread marked Leave no trace, or in a Project
+  kept out of memory, is never sent: it is treated as if the setting were off,
+  nothing is journaled, and the card has no review. These outcomes are
+  journaled as `decision-review.recorded@1` on one host aggregate (latest
+  record per key, records over 30 days old drop on replay, and a record that
+  cannot be decoded is skipped so it never blocks startup). An outcome is final
+  for that decision and the chosen model, so a restart neither shows nor pays
+  again; a changed choice of model ignores the old record and asks again. A
+  failure to journal or to record usage after a paid call keeps the outcome in
+  memory for the host's lifetime rather than asking again. An account that is
   off, not ready, at its limit or removed, and a timed-out or unreached call,
   are not journaled: the card shows no review and the decision asks again on a
   later read after a five-minute cooldown, never on another account. Each call
@@ -14181,7 +14188,8 @@ ready or at a reported usage limit, the Judge sends that decision to the person
 (`model-account-unavailable`, journaled with the chosen account) and never
 allows it itself, and distilling returns the thread to the next pass without
 calling another account, and a second opinion is simply not shown and asks again
-later. A rule that decides without a model (a fast allow, a
+later. A decision in a Leave no trace thread or a Project kept out of memory is
+never sent for a second opinion. A rule that decides without a model (a fast allow, a
 hard line) is unaffected. Each call is journaled with its account: the Judge
 decision names its model, and the call's `shield-review`, `person-memory` or
 `decision-review` usage row names the provider account and model, so Usage shows which account

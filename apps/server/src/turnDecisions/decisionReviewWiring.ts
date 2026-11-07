@@ -21,18 +21,27 @@ import type { DecisionReviewDependencies } from "./decisionReviews";
  */
 export function createDecisionReviewModelPort(input: {
   readonly persistence: Pick<PersistenceService, "connection" | "journal" | "readProviderInstance">;
-  readonly store: Pick<PersonMemoryStore, "settings">;
+  readonly store: Pick<PersonMemoryStore, "settings" | "leavesNoTrace" | "projectExcluded">;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly accountUnavailable: (providerInstanceId: ProviderInstanceId) => string | undefined;
   readonly scratchRoot: string;
 }): Pick<
   DecisionReviewDependencies,
-  "chosenModel" | "accountUnavailable" | "providerIdentity" | "redact" | "complete" | "recordUsage"
+  | "chosenModel"
+  | "accountUnavailable"
+  | "keptOutOfMemory"
+  | "providerIdentity"
+  | "redact"
+  | "complete"
+  | "recordUsage"
 > {
   const { persistence } = input;
   return {
     chosenModel: () => input.store.settings().decisionReviewModel,
     accountUnavailable: input.accountUnavailable,
+    keptOutOfMemory: (decision) =>
+      input.store.leavesNoTrace({ mode: decision.mode, threadId: String(decision.threadId) }) ||
+      input.store.projectExcluded(String(decision.projectId)),
     providerIdentity: (id) => {
       const instance = persistence.readProviderInstance(id);
       return instance === undefined

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import {
   ActorId,
   AggregateId,
@@ -28,6 +28,7 @@ export const DECISION_REVIEW_EVENT = "decision-review.recorded@1";
 const aggregateType = "decision-review";
 const aggregateId = Schema.decodeUnknownSync(AggregateId)("00000000-0000-4000-8000-0000000000da");
 const decodeRecord = Schema.decodeUnknownSync(DecisionReviewRecorded);
+const readRecord = Schema.decodeUnknownOption(DecisionReviewRecorded);
 
 /** One request at a time and a short queue: a second opinion is a courtesy, never a backlog. */
 export const MAX_QUEUED_DECISION_REVIEWS = 16;
@@ -63,6 +64,11 @@ export interface DecisionReviewDependencies {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => boolean;
+  /**
+   * Whether the person keeps this decision's thread (Leave no trace) or
+   * Project out of memory. Such a decision is never sent for a second opinion.
+   */
+  readonly keptOutOfMemory: (decision: DecisionRequest) => boolean;
   readonly providerIdentity: (
     providerInstanceId: ProviderInstanceId,
   ) => { readonly displayName: string; readonly driverKind: string } | undefined;
@@ -90,7 +96,7 @@ export interface DecisionReviewDependencies {
  * The second opinion each open decision gets from the model the person chose.
  * It is advisory and never answers or changes a decision. Outcomes that say
  * something about the decision are journaled under its identity key, so a
- * restart does not pay again; an account that cannot be asked is not, and
+ * restart does not pay again, and a changed choice of model asks again; an account that cannot be asked is not, and
  * waits out a cooldown. A read of the list never waits on a review.
  */
 export class DecisionReviews {
@@ -113,7 +119,9 @@ export class DecisionReviews {
   reviewFor(key: string, decision: DecisionRequest): TurnDecisionReview | undefined {
     const chosen = this.#dependencies.chosenModel();
     if (chosen === undefined) return undefined;
-    const stored = this.#records.get(key);
+    // Marks can change, so nothing is stored for a decision they keep out.
+    if (this.#dependencies.keptOutOfMemory(decision)) return undefined;
+    const stored = this.#current(key, chosen);
     if (stored !== undefined) {
       const { outcome } = stored;
       if (outcome.kind !== "reviewed") return { status: outcome.kind };
@@ -131,7 +139,11 @@ export class DecisionReviews {
       };
     }
     if (this.#waiting.has(key)) return { status: "pending" };
-    if ((this.#cooldownUntil.get(key) ?? 0) > this.#now()) return undefined;
+    const cooldown = this.#cooldownUntil.get(key);
+    if (cooldown !== undefined) {
+      if (cooldown > this.#now()) return undefined;
+      this.#cooldownUntil.delete(key);
+    }
     if (this.#dependencies.accountUnavailable(chosen.providerInstanceId) !== undefined) {
       return undefined;
     }
@@ -148,6 +160,20 @@ export class DecisionReviews {
     while (this.#working !== undefined) await this.#working;
   }
 
+  /** The record that answers this decision for the chosen model: another model's, or an old one, does not. */
+  #current(key: string, chosen: DecisionReviewModel): DecisionReviewRecorded | undefined {
+    const stored = this.#records.get(key);
+    if (stored === undefined) return undefined;
+    if (Date.parse(stored.reviewedAt) < this.#now() - DECISION_REVIEW_RETENTION_MS) {
+      this.#records.delete(key);
+      return undefined;
+    }
+    return String(stored.providerInstanceId) === String(chosen.providerInstanceId) &&
+      String(stored.modelId) === String(chosen.modelId)
+      ? stored
+      : undefined;
+  }
+
   #now(): number {
     return (this.#dependencies.now ?? Date.now)();
   }
@@ -157,19 +183,27 @@ export class DecisionReviews {
     this.#working = (async () => {
       // Let the read that queued this finish first, so it never waits on a review.
       await Promise.resolve();
-      for (let next = this.#queue.shift(); next !== undefined; next = this.#queue.shift()) {
-        try {
-          await this.#review(next.key, next.decision);
-        } catch {
-          // A journal or model-port failure is retried after the cooldown.
-          this.#cooldownUntil.set(next.key, this.#now() + DECISION_REVIEW_COOLDOWN_MS);
-        } finally {
-          this.#waiting.delete(next.key);
+      try {
+        const now = this.#now();
+        for (const [key, until] of this.#cooldownUntil) {
+          if (until <= now) this.#cooldownUntil.delete(key);
         }
+        for (let next = this.#queue.shift(); next !== undefined; next = this.#queue.shift()) {
+          try {
+            await this.#review(next.key, next.decision);
+          } catch {
+            // A failure before the call finished is retried after the cooldown.
+            this.#cooldownUntil.set(next.key, this.#now() + DECISION_REVIEW_COOLDOWN_MS);
+          } finally {
+            this.#waiting.delete(next.key);
+          }
+        }
+      } finally {
+        // Cleared in the same turn the loop sees an empty queue, so a read that
+        // queues next starts a new drain instead of being stranded.
+        this.#working = undefined;
       }
-    })().finally(() => {
-      this.#working = undefined;
-    });
+    })();
   }
 
   async #review(key: string, decision: DecisionRequest): Promise<void> {
@@ -178,6 +212,7 @@ export class DecisionReviews {
     // A decision that closed while it waited its turn is not worth a request.
     const open = this.#dependencies.readOpen(decision);
     if (open === undefined) return;
+    if (this.#dependencies.keptOutOfMemory(decision)) return;
     if (this.#dependencies.accountUnavailable(chosen.providerInstanceId) !== undefined) {
       this.#cooldownUntil.set(key, this.#now() + DECISION_REVIEW_COOLDOWN_MS);
       return;
@@ -195,6 +230,8 @@ export class DecisionReviews {
     const answer = await this.#dependencies.complete({
       model: chosen,
       instructions: DECISION_REVIEW_INSTRUCTIONS,
+      // The redactor runs over the whole prompt, so a token-like option label can
+      // be rewritten and the review then fails safely as `failed`.
       prompt: this.#dependencies.redact(
         decisionReviewPrompt({
           decision: {
@@ -216,11 +253,16 @@ export class DecisionReviews {
       return;
     }
     // Both a read reply and a withheld one were paid for.
-    this.#dependencies.recordUsage({
-      threadId: String(decision.threadId),
-      model: chosen,
-      usage: answer.usage,
-    });
+    // A failure after the paid call must never lead to a second call.
+    try {
+      this.#dependencies.recordUsage({
+        threadId: String(decision.threadId),
+        model: chosen,
+        usage: answer.usage,
+      });
+    } catch {
+      // The spend row is lost; the outcome below is still kept.
+    }
     if (answer.status === "withheld") {
       this.#record(key, chosen, { kind: "withheld" });
       return;
@@ -246,30 +288,35 @@ export class DecisionReviews {
       reviewedAt: new Date(this.#now()).toISOString(),
       outcome,
     });
-    this.#dependencies.journal.append({
-      aggregate: { aggregateType, aggregateId },
-      expectedVersion: readAggregateVersion(
-        this.#dependencies.connection,
-        aggregateType,
-        String(aggregateId),
-      ),
-      events: [
-        {
-          eventId: Schema.decodeUnknownSync(EventId)(randomUUID()),
-          eventName: DECISION_REVIEW_EVENT,
-          eventVersion: 1,
-          hostId: LOCAL_HOST_ID,
-          correlationId: Schema.decodeUnknownSync(CorrelationId)(randomUUID()),
-          actor: {
-            kind: "system",
-            actorId: Schema.decodeUnknownSync(ActorId)(OCTANT_LOCAL_ACTOR_ID),
-          },
-          occurredAt: decodeUtcTimestamp(record.reviewedAt),
-          payload: record,
-        },
-      ],
-    });
+    // Kept in memory first: a journal failure after a paid call must not ask again.
     this.#records.set(key, record);
+    try {
+      this.#dependencies.journal.append({
+        aggregate: { aggregateType, aggregateId },
+        expectedVersion: readAggregateVersion(
+          this.#dependencies.connection,
+          aggregateType,
+          String(aggregateId),
+        ),
+        events: [
+          {
+            eventId: Schema.decodeUnknownSync(EventId)(randomUUID()),
+            eventName: DECISION_REVIEW_EVENT,
+            eventVersion: 1,
+            hostId: LOCAL_HOST_ID,
+            correlationId: Schema.decodeUnknownSync(CorrelationId)(randomUUID()),
+            actor: {
+              kind: "system",
+              actorId: Schema.decodeUnknownSync(ActorId)(OCTANT_LOCAL_ACTOR_ID),
+            },
+            occurredAt: decodeUtcTimestamp(record.reviewedAt),
+            payload: record,
+          },
+        ],
+      });
+    } catch {
+      // Not journaled: a restart may ask again, this host's lifetime does not.
+    }
   }
 
   /** The latest record per key, without anything older than the retention window. */
@@ -284,8 +331,11 @@ export class DecisionReviews {
         limit: 1000,
       });
       for (const event of page) {
-        const record = decodeRecord(event.payload);
         afterVersion = event.aggregateVersion;
+        // One unreadable record never blocks the host's startup.
+        const decoded = readRecord(event.payload);
+        if (Option.isNone(decoded)) continue;
+        const record = decoded.value;
         if (Date.parse(record.reviewedAt) < oldest) this.#records.delete(record.key);
         else this.#records.set(record.key, record);
       }

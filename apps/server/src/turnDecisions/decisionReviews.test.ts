@@ -8,6 +8,8 @@ import {
   decodeProviderModelId,
   type PendingRequest,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import { AggregateId } from "@octant/contracts";
 import { DecisionReviewRecorded } from "@octant/contracts/pending-requests";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -23,6 +25,7 @@ import {
   type DecisionReviewAnswer,
   type DecisionReviewDependencies,
 } from "./decisionReviews";
+import { createDecisionReviewModelPort } from "./decisionReviewWiring";
 
 const reviewer = {
   providerInstanceId: decodeProviderInstanceId("00000000-0000-4000-8000-0000000000b1"),
@@ -96,6 +99,7 @@ function reviews(
     chosenModel: () => reviewer,
     accountUnavailable: () => undefined,
     projectAllows: () => true,
+    keptOutOfMemory: () => false,
     providerIdentity: () => ({ displayName: "Reviewer account", driverKind: "codex" }),
     readOpen: () => ({ context: "The fix is in." }),
     redact: (text) => text,
@@ -281,5 +285,144 @@ describe("a second opinion on a decision", () => {
     const restarted = first.restart();
     expect(restarted.reviewFor(key(1), decision())).toEqual({ status: "pending" });
     await restarted.settled();
+  });
+
+  it("skips an unreadable journal record on replay and keeps the good one", async () => {
+    const first = reviews();
+    first.service.reviewFor(key(1), decision());
+    await first.service.settled();
+    // The registry would refuse such a payload, so hand replay the page an older build could have left.
+    const withUnreadable: DecisionReviewDependencies["journal"] = {
+      append: journal.append.bind(journal),
+      replayAggregate: (query) => {
+        const page = journal.replayAggregate(query);
+        const last = page.at(-1);
+        return last === undefined
+          ? page
+          : [
+              ...page,
+              {
+                ...last,
+                payload: { key: key(2), garbage: true },
+              },
+            ];
+      },
+    };
+    const restarted = new DecisionReviews({ ...first.dependencies, journal: withUnreadable });
+    expect(restarted.reviewFor(key(1), decision())).toMatchObject({ status: "reviewed" });
+    expect(first.complete).toHaveBeenCalledOnce();
+  });
+
+  it("never sends a decision whose thread is marked Leave no trace or whose Project is kept out of memory", () => {
+    const store = (untraced: boolean, excluded: boolean) => ({
+      settings: () => ({ decisionReviewModel: reviewer }) as never,
+      leavesNoTrace: () => untraced,
+      projectExcluded: () => excluded,
+    });
+    const keptOut = (untraced: boolean, excluded: boolean) =>
+      createDecisionReviewModelPort({
+        persistence: {} as never,
+        store: store(untraced, excluded),
+        resolveDriver: () => undefined,
+        accountUnavailable: () => undefined,
+        scratchRoot: folder,
+      }).keptOutOfMemory(decision());
+    expect(keptOut(true, false)).toBe(true);
+    expect(keptOut(false, true)).toBe(true);
+    expect(keptOut(false, false)).toBe(false);
+  });
+
+  it("does nothing and journals nothing for a decision kept out of memory", async () => {
+    const { service, complete } = reviews({ keptOutOfMemory: () => true });
+    expect(service.reviewFor(key(1), decision())).toBeUndefined();
+    await service.settled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(
+      journal.replayAggregate({
+        aggregateType: "decision-review",
+        aggregateId: Schema.decodeUnknownSync(AggregateId)("00000000-0000-4000-8000-0000000000da"),
+        afterVersion: 0,
+        limit: 10,
+      }),
+    ).toEqual([]);
+  });
+
+  it("drops a queued decision whose thread became Leave no trace before its turn", async () => {
+    let marked = false;
+    const { service, complete } = reviews({ keptOutOfMemory: () => marked });
+    expect(service.reviewFor(key(1), decision())).toEqual({ status: "pending" });
+    marked = true;
+    await service.settled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("asks again under a newly chosen model even after a final outcome from the old one", async () => {
+    let model = reviewer;
+    const { service, complete } = reviews({
+      chosenModel: () => model,
+      projectAllows: () => model !== reviewer,
+    });
+    service.reviewFor(key(1), decision());
+    await service.settled();
+    expect(service.reviewFor(key(1), decision())).toEqual({ status: "not-allowed" });
+    model = { ...reviewer, modelId: decodeProviderModelId("other-model") };
+    expect(service.reviewFor(key(1), decision())).toEqual({ status: "pending" });
+    await service.settled();
+    expect(complete).toHaveBeenCalledOnce();
+    expect(service.reviewFor(key(1), decision())).toMatchObject({
+      status: "reviewed",
+      modelId: "other-model",
+    });
+  });
+
+  it("starts a new drain for a read that lands as the previous one finishes", async () => {
+    const { service, complete } = reviews();
+    service.reviewFor(key(1), decision());
+    // Wait until the loop has emptied the queue but its promise has not yet been observed.
+    while (complete.mock.calls.length === 0) await Promise.resolve();
+    await Promise.resolve();
+    service.reviewFor(key(2), decision());
+    await service.settled();
+    expect(service.reviewFor(key(2), decision())).toMatchObject({ status: "reviewed" });
+  });
+
+  it("does not ask again in this host's lifetime when journaling a paid answer failed", async () => {
+    const failing = {
+      replayAggregate: journal.replayAggregate.bind(journal),
+      append: vi.fn(() => {
+        throw new Error("disk full");
+      }),
+    };
+    const { service, complete, advance } = reviews({ journal: failing });
+    service.reviewFor(key(1), decision());
+    await service.settled();
+    advance(DECISION_REVIEW_COOLDOWN_MS + 1000);
+    expect(service.reviewFor(key(1), decision())).toMatchObject({ status: "reviewed" });
+    await service.settled();
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("does not ask again when recording the usage of a paid answer failed", async () => {
+    const { service, complete, advance } = reviews({
+      recordUsage: () => {
+        throw new Error("ledger down");
+      },
+    });
+    service.reviewFor(key(1), decision());
+    await service.settled();
+    advance(DECISION_REVIEW_COOLDOWN_MS + 1000);
+    expect(service.reviewFor(key(1), decision())).toMatchObject({ status: "reviewed" });
+    await service.settled();
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("forgets an in-memory record older than thirty days when it is read", async () => {
+    const { service, advance, complete } = reviews();
+    service.reviewFor(key(1), decision());
+    await service.settled();
+    advance(31 * 24 * 60 * 60_000);
+    expect(service.reviewFor(key(1), decision())).toEqual({ status: "pending" });
+    await service.settled();
+    expect(complete).toHaveBeenCalledTimes(2);
   });
 });

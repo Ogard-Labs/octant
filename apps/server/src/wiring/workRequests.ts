@@ -68,6 +68,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     DecisionReviewDependencies,
     | "chosenModel"
     | "accountUnavailable"
+    | "keptOutOfMemory"
     | "providerIdentity"
     | "redact"
     | "complete"
