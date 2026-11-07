@@ -32,6 +32,8 @@ static int protected_path(const char *path) {
   const char *relative = path[0] == '/' ? path + 1 : path;
   const char *name = strrchr(relative, '/');
   name = name ? name + 1 : relative;
+  if (!strcmp(relative, ".provider") || !strcmp(relative, ".provider/accounts") ||
+      !strcmp(relative, ".provider/accounts/first")) return 0;
   if (!strncmp(relative, ".provider/", 10))
     return strncmp(relative, ".provider/accounts/first/", 25) != 0;
   if (strncmp(relative, ".ssh/", 5)) return 0;
