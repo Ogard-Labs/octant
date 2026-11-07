@@ -391,6 +391,36 @@ turned on a switch, and then only after they answer for that file.
   cannot redirect that creation or its cleanup to an outside folder. An
   unavailable destination refuses without a saved receipt. Only macOS and
   Linux have this save path; unsupported platforms refuse.
+- The save boundary accepts a trusted host-selected destination internally;
+  the ordinary `download-save` tool still passes only the workspace default.
+  The internal selection carries the current host-resolved approved Project
+  folder (main or extra), its canonical root, the exact reviewed bounded
+  relative directory (`.` for that root), and the reviewed directory's device
+  and inode. The directory must already exist. The host rechecks that this
+  folder identity still belongs to the Project; an unavailable selection never
+  falls back to the current checkout. Agent JSON cannot supply a root or these
+  callbacks. This port does not itself grant recurring transfer permission or
+  add a destination picker.
+- Root and destination proofs are read-only. The native writer checks the
+  root identity and its held destination's device/inode and physical canonical
+  position before exclusive relative creation. It uses native `realpath` so
+  Node's cached working-directory string cannot hide a rename. An ordinary
+  missing `downloads/` is made only inside that writer after admission; an
+  internal selected directory is never made implicitly.
+- The save checks cancellation and selection currentness after asynchronous
+  preparation. Once all held bytes and target proofs are available, a
+  synchronous host callback admits current source, authority and any quota
+  reservation immediately before writer dispatch. The ordinary service supplies
+  its current context/authority fence and combines context and caller
+  cancellation. Refusal before dispatch creates no file or directory. After
+  dispatch an unsuccessful writer may have written: this boundary never refunds
+  a reservation or dispatches a retry on an uncertain result.
+- Ordinary saved receipts and the existing journal remain workspace-relative.
+  A trusted selected save instead returns its opaque approved-folder id, a
+  path-free display label and an explicit `selected-root` path base: its path
+  is relative to that selected approved root, not to the thread's workspace.
+  A future selected-destination consumer must carry that receipt honestly;
+  it cannot write it as a legacy workspace-relative event.
 - Not covered: a person's own downloads in the Browser pane, and a download
   that starts after an action's settling has ended (it is cancelled).
 

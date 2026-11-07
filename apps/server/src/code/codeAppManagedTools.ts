@@ -540,6 +540,7 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
+      readonly signal?: AbortSignal;
       readonly ask: (
         facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
         origin: string,
@@ -1535,6 +1536,7 @@ async function browserToolOne(
       threadId,
       downloadId: input.downloadId,
       workspaceRoot: download.root,
+      ...(signal === undefined ? {} : { signal }),
       ask: (facts, pageOrigin) =>
         download.request(browserDownloadQuestion(pageOrigin, facts), signal),
     });

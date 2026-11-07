@@ -1479,6 +1479,18 @@ describe("Code app-managed tools", () => {
       );
     });
 
+    it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
+      const { tools, saveDownload, request } = downloadTools({});
+      const abort = new AbortController();
+      await tools.execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
+        signal: abort.signal,
+      });
+      expect(saveDownload).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
+      expect(request).toHaveBeenCalledWith(expect.any(String), abort.signal);
+    });
+
     it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
       const paired = downloadTools({ refusal: "download-needs-this-computer" });
       expect(await save(paired.tools)).toEqual({
