@@ -2,6 +2,7 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { MobileHostRegistryRead } from "../hosts/HostRegistry";
 import { MobileEntryGate } from "./MobileEntryGate";
 
 interface ElementProps {
@@ -33,6 +34,7 @@ let root: Root | undefined;
 afterEach(async () => {
   await act(async () => root?.unmount());
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 function Live(props: { readonly mounted: () => void }) {
@@ -110,6 +112,36 @@ describe("public offline entry", () => {
       throw new Error("Storage initialization unavailable");
     });
     expect(container.textContent).toContain("Explore offline demo");
+    expect(mounted).not.toHaveBeenCalled();
+  });
+  it("keeps a late host read from replacing the demo after startup times out", async () => {
+    vi.useFakeTimers();
+    let complete: ((value: MobileHostRegistryRead) => void) | undefined;
+    const read = new Promise<MobileHostRegistryRead>((resolve) => {
+      complete = resolve;
+    });
+    const { mounted, container } = await mount(() => read);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(container.textContent).toContain("Explore offline demo");
+    await click("mobile-entry-demo");
+    await act(async () =>
+      complete?.({
+        kind: "ok",
+        hosts: [
+          {
+            hostId: "saved",
+            origin: "https://example.invalid",
+            label: "Saved computer",
+            keyId: "key",
+            credentialGeneration: 1,
+            hostKeyFingerprint: "fingerprint",
+          },
+        ],
+      }),
+    );
+    expect(container.textContent).toContain("Offline sample");
     expect(mounted).not.toHaveBeenCalled();
   });
 });

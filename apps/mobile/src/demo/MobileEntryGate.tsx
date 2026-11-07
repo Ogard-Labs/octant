@@ -17,19 +17,25 @@ export function MobileEntryGate(props: {
   const [entry, setEntry] = useState<"checking" | "welcome" | "live" | "demo">("checking");
   useEffect(() => {
     let current = true;
+    let settled = false;
+    const finish = (next: "welcome" | "live") => {
+      if (!current || settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      setEntry(next);
+    };
+    // Secure-storage trouble must not block the public offline path. Once
+    // offered, a late catalogue read cannot replace the person's demo choice.
+    const deadline = setTimeout(() => finish("welcome"), 3000);
     void Promise.resolve()
       .then(props.readHosts ?? readHosts)
       .then(
-        (result) => {
-          if (current)
-            setEntry(result.kind === "ok" && result.hosts.length > 0 ? "live" : "welcome");
-        },
-        () => {
-          if (current) setEntry("welcome");
-        },
+        (result) => finish(result.kind === "ok" && result.hosts.length > 0 ? "live" : "welcome"),
+        () => finish("welcome"),
       );
     return () => {
       current = false;
+      clearTimeout(deadline);
     };
   }, [props.readHosts]);
   const styles = useMemo(
