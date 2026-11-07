@@ -113,7 +113,7 @@ export type BrowserProfileDecision =
  * Whether a caller may put a page in a profile.
  *
  * A stored profile holds sign-ins, so it opens only for the person at a local
- * window, only in a desktop Browser (a headless copy would hold different
+ * window or an explicitly delegated session, only in a desktop Browser (a headless copy would hold different
  * cookies from the native one), only for a Work or Code Project the thread
  * actually belongs to, and never for Chat, which has no Browser. Private is
  * always allowed here; it carries no sign-in.
@@ -121,6 +121,8 @@ export type BrowserProfileDecision =
 export function evaluateBrowserProfileUse(input: {
   readonly profile: BrowserProfile | undefined;
   readonly caller: BrowserProfileCaller;
+  /** Verified by the host for the exact caller/profile/sites; never a wire request field. */
+  readonly delegatedSession?: boolean;
   /** Whether the desktop app's own Browser can hold this page. */
   readonly nativeBrowserAvailable: boolean;
   readonly authority?: Pick<ToolActionAuthority, "mode" | "projectId">;
@@ -130,7 +132,10 @@ export function evaluateBrowserProfileUse(input: {
   if (input.caller === "remote-device") {
     return refused("profile-not-local", "Signed-in pages open only on this Mac.");
   }
-  if (input.caller === "unattended" || input.caller === "terminal-grant") {
+  if (
+    (input.caller === "unattended" || input.caller === "terminal-grant") &&
+    input.delegatedSession !== true
+  ) {
     return refused(
       "profile-needs-a-person",
       "A signed-in page needs a person at this Mac; this turn has none.",

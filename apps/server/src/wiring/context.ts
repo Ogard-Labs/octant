@@ -53,6 +53,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     BrowserWiring,
     | "browserCredentialUseService"
+    | "browserSessionGrants"
     | "browserAutomationService"
     | "browserExtensionService"
     | "browserFlowService"
@@ -75,6 +76,7 @@ export function wireContext(deps: ContextDependencies) {
     browserAuthority,
     browserAutomationService,
     browserCredentialUseService,
+    browserSessionGrants,
     browserCaptures,
     browserModelBindings,
     browserToolApprovalService,
@@ -588,6 +590,7 @@ export function wireContext(deps: ContextDependencies) {
         }),
     },
     credentialUse: browserCredentialUseService,
+    sessionGrants: browserSessionGrants,
     captures: browserCaptures,
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,

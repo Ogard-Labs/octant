@@ -674,6 +674,8 @@ export function startOctantServer(
     });
     const {
       browserCredentialUseService,
+      browserSessionGrants,
+      browserDelegatedChildren,
       browserAutomationService,
       browserExtensionService,
       browserFlowService,
@@ -688,6 +690,9 @@ export function startOctantServer(
       windowHoldsProject,
     } = yield* wireBrowser({
       browserAuthority,
+      providerRuntimeRegistry,
+      contributeChildTools,
+      agentRunInteractions,
       codeSessionAuthority,
       machineChangeFeed,
       onWindowRevoked,
@@ -1068,6 +1073,7 @@ export function startOctantServer(
     const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
       wireContext({
         browserCredentialUseService,
+        browserSessionGrants,
         agentMessageProjection,
         browserModelBindings,
         browserAuthority,
@@ -1938,6 +1944,8 @@ export function startOctantServer(
           }
           try {
             projectBrowserService?.close();
+            browserSessionGrants.close();
+            await browserDelegatedChildren.close();
             await browserAutomationService?.close();
           } catch (error) {
             shutdownFailure ??= error;

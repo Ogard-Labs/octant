@@ -136,6 +136,16 @@ export interface BrowserPageScriptInput {
 }
 
 export interface BrowserAutomationServiceOptions {
+  /** A delegated owner closes its own contexts without shutting down the shared engine. */
+  readonly sharedRuntime?: boolean;
+  /** Host-owned exact caller/profile/site permission, never supplied by an RPC command. */
+  readonly delegatedProfileIsCurrent?: (input: {
+    readonly windowId: WindowId;
+    readonly threadId: BrowserThreadId;
+    readonly authority: ToolActionAuthority;
+    readonly profile: StoredBrowserProfile;
+    readonly origins: ReadonlyArray<string>;
+  }) => boolean;
   /** Resolves current local-person thread posture; absent/unknown fails closed. */
   readonly pageScriptPolicy?: (
     windowId: WindowId,
@@ -353,6 +363,8 @@ const staleRefFailure: BrowserAutomationFailure = {
 };
 
 export class BrowserAutomationService {
+  readonly #sharedRuntime: boolean;
+  readonly #delegatedProfileIsCurrent: BrowserAutomationServiceOptions["delegatedProfileIsCurrent"];
   readonly #runtime: BrowserRuntimePort;
   readonly #pageScriptPolicy: BrowserAutomationServiceOptions["pageScriptPolicy"];
   readonly #authority: BrowserAuthorityResolver;
@@ -392,6 +404,8 @@ export class BrowserAutomationService {
   readonly #removePersonInputListener: (() => void) | undefined;
 
   constructor(options: BrowserAutomationServiceOptions) {
+    this.#sharedRuntime = options.sharedRuntime === true;
+    this.#delegatedProfileIsCurrent = options.delegatedProfileIsCurrent;
     this.#runtime = options.runtime;
     this.#pageScriptPolicy = options.pageScriptPolicy;
     this.#authority = options.authority;
@@ -554,6 +568,10 @@ export class BrowserAutomationService {
         }
         if (this.#expired(owned)) {
           await this.#expireContext(owned);
+          return;
+        }
+        if (!this.#authorityIsActive(owned)) {
+          this.#revokeAuthority(owned);
           return;
         }
         const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
@@ -2599,7 +2617,9 @@ export class BrowserAutomationService {
       owned.record = stoppedRecord(owned.record, this.#clock(), "shutdown", "stopped");
       owned.status = "interrupted";
     }
-    await this.#runtime.closeAll();
+    if (this.#sharedRuntime)
+      await Promise.all([...this.#contexts.keys()].map((contextId) => this.#safeClose(contextId)));
+    else await this.#runtime.closeAll();
   }
 
   #authorizeCreate(
@@ -2634,11 +2654,13 @@ export class BrowserAutomationService {
   /**
    * A stored profile holds sign-ins, so who may open a page in one is decided
    * here, on the server, before any runtime is asked: a paired device, a
-   * routine, a subagent, and a terminal grant are refused, and so is a thread
-   * that is not the profile's Project's.
+   * routine or terminal grant without delegated permission is refused, and so
+   * is a thread that is not the profile's Project's. The caller never becomes
+   * the person just because session use was explicitly delegated.
    */
   async #authorizeProfile(input: {
     readonly windowId: WindowId;
+    readonly threadId?: BrowserThreadId;
     readonly action: ToolActionRequest;
     readonly policy: BrowserContextPolicy;
     readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
@@ -2647,10 +2669,24 @@ export class BrowserAutomationService {
     const caller: BrowserProfileCaller = this.#isUnattendedScope(input.windowId)
       ? "unattended"
       : (input.profileCaller ?? "person");
+    const profile = storedBrowserProfile(input.policy.profile);
+    const nativeBrowserAvailable = (await this.#runtime.nativeAvailable?.()) === true;
+    const delegatedSession =
+      caller === "unattended" &&
+      profile !== undefined &&
+      input.threadId !== undefined &&
+      this.#delegatedProfileIsCurrent?.({
+        windowId: input.windowId,
+        threadId: input.threadId,
+        authority: input.action.authority,
+        profile,
+        origins: input.policy.allowedOrigins,
+      }) === true;
     const decision = evaluateBrowserProfileUse({
       profile: input.policy.profile,
       caller,
-      nativeBrowserAvailable: (await this.#runtime.nativeAvailable?.()) === true,
+      delegatedSession,
+      nativeBrowserAvailable,
       authority: input.action.authority,
     });
     if (decision.kind === "allowed" && input.policy.profile?.kind === "account") {
@@ -3169,6 +3205,19 @@ export class BrowserAutomationService {
   }
 
   #authorityIsActive(owned: OwnedContext): boolean {
+    const profile = storedBrowserProfile(owned.record.policy.profile);
+    if (
+      profile !== undefined &&
+      this.#isUnattendedScope(owned.windowId) &&
+      this.#delegatedProfileIsCurrent?.({
+        windowId: owned.windowId,
+        threadId: owned.threadId,
+        authority: owned.action.authority,
+        profile,
+        origins: owned.record.policy.allowedOrigins,
+      }) !== true
+    )
+      return false;
     if (
       !this.#authority.canAccessWindow(
         owned.windowId,

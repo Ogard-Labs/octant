@@ -126,6 +126,31 @@ describe("browser profile partitions", () => {
 });
 
 describe("evaluateBrowserProfileUse", () => {
+  it("admits a verified delegated session without borrowing person or cross-Project authority", () => {
+    const input = {
+      profile: project,
+      caller: "unattended" as const,
+      nativeBrowserAvailable: true,
+      authority: { mode: "work" as const, projectId },
+      delegatedSession: true,
+    };
+    expect(evaluateBrowserProfileUse(input)).toEqual({ kind: "allowed" });
+    expect(evaluateBrowserProfileUse({ ...input, delegatedSession: false })).toMatchObject({
+      reason: "profile-needs-a-person",
+    });
+    expect(evaluateBrowserProfileUse({ ...input, nativeBrowserAvailable: false })).toMatchObject({
+      reason: "profile-unavailable",
+    });
+    expect(
+      evaluateBrowserProfileUse({
+        ...input,
+        authority: { mode: "work", projectId: otherProjectId },
+      }),
+    ).toMatchObject({ reason: "profile-unavailable" });
+    expect(evaluateBrowserProfileUse({ ...input, caller: "remote-device" })).toMatchObject({
+      reason: "profile-not-local",
+    });
+  });
   const base = { nativeBrowserAvailable: true } as const;
   const codeAuthority = { mode: "code", projectId } as const;
 

@@ -60,6 +60,7 @@
     "./browser-download": "./src/browserDownload.ts",
     "./browser-flows": "./src/browserFlows.ts",
     "./browser-profiles": "./src/browserProfiles.ts",
+    "./browser-session-grants": "./src/browserSessionGrants.ts",
     "./browser-extensions": "./src/browserExtensions.ts",
     "./canvas": "./src/canvas.ts",
     "./canvas-actions": "./src/canvasActions.ts",

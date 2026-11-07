@@ -108,6 +108,8 @@ function harness(
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
+    readonly delegatedProfileIsCurrent?: () => boolean;
+    readonly sharedRuntime?: boolean;
     readonly describePoint?: BrowserRuntimePort["describePoint"];
   } = {},
 ) {
@@ -188,6 +190,10 @@ function harness(
       : { agentDownloadsEnabled: () => options.agentDownloadsEnabled === true }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
+    ...(options.delegatedProfileIsCurrent === undefined
+      ? {}
+      : { delegatedProfileIsCurrent: options.delegatedProfileIsCurrent }),
+    ...(options.sharedRuntime === true ? { sharedRuntime: true } : {}),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => new Date(now).toISOString(),
     now: () => now,
@@ -215,6 +221,38 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("opens an explicitly delegated signed-in context and withholds a revoked in-flight observation", async () => {
+    let current = true;
+    const f = harness({ unattended: true, delegatedProfileIsCurrent: () => current });
+    const opened = await f.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy: { ...policy, profile: { kind: "personal" } },
+    });
+    expect(opened.context?.state).toBe("active");
+    vi.mocked(f.runtime.act).mockImplementation(async () => {
+      current = false;
+      return { url: "https://example.com", extractedText: "must be withheld" };
+    });
+    const result = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+    });
+    expect(result.observation).toBeUndefined();
+    expect(result.failure?.category).toBe("unauthorized");
+    await f.service.close();
+  });
+
+  it("closes only its own contexts when a delegated service borrows the native runtime", async () => {
+    const f = harness({ sharedRuntime: true });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await f.service.close();
+    expect(f.runtime.closeAll).not.toHaveBeenCalled();
+    expect(f.runtime.closeContext).toHaveBeenCalledWith(contextOne);
+  });
   it.each([
     { mode: "work" as const, unattended: false, dedicated: false },
     { mode: "code" as const, unattended: true, dedicated: false },

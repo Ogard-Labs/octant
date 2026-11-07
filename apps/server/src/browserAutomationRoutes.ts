@@ -76,6 +76,11 @@ import {
 import type { BrowserCredentialUseService } from "./browser/browserCredentialUseService";
 import type { WindowId } from "@octant/contracts/shell";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
+import {
+  decodeBrowserSessionGrantsCommand,
+  decodeBrowserSessionGrantsResult,
+} from "@octant/contracts/browser-session-grants";
+import type { BrowserSessionGrants } from "./browser/browserSessionGrants";
 
 const PREFIX = "/api/browser/";
 const METHODS = "POST, OPTIONS";
@@ -83,6 +88,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly sessionGrants?: Pick<BrowserSessionGrants, "execute">;
   readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
   readonly service: Pick<
     BrowserAutomationService,
@@ -492,6 +498,32 @@ export function createBrowserAutomationRouteHandler(
                   reason: "not-found",
                   message: "That flow no longer exists.",
                 },
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/session-grants") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserSessionGrantsResult({
+              kind: "browser-session-refused",
+              reason: "not-local",
+              message: "Session permissions are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.sessionGrants === undefined)
+          return failure(
+            { category: "unavailable", message: "Browser session permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserSessionGrantsResult(
+            await dependencies.sessionGrants.execute(
+              windowId,
+              decodeBrowserSessionGrantsCommand(decoded.value),
+            ),
           ),
           origin,
         );

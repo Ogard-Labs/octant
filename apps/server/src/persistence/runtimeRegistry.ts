@@ -1,5 +1,12 @@
 import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import {
+  BROWSER_SESSION_EVENT_NAMES,
+  BrowserSessionGranted,
+  BrowserSessionRevoked,
+  BrowserSessionExpired,
+  BrowserSessionChanged,
+} from "@octant/contracts/browser-session-grants";
+import {
   CHILD_WORKTREE_SOURCE_UPDATED,
   ChildWorktreeSourceUpdated,
   CHILD_WORKTREE_SEED_UPDATED,
@@ -714,6 +721,10 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.refused, 1, BrowserDownloadRefused)
+    .register(BROWSER_SESSION_EVENT_NAMES.granted, 1, BrowserSessionGranted)
+    .register(BROWSER_SESSION_EVENT_NAMES.revoked, 1, BrowserSessionRevoked)
+    .register(BROWSER_SESSION_EVENT_NAMES.expired, 1, BrowserSessionExpired)
+    .register(BROWSER_SESSION_EVENT_NAMES.changed, 1, BrowserSessionChanged)
     .register(BROWSER_FLOW_EVENT_NAMES.saved, 1, BrowserFlowSaved)
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)

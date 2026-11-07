@@ -44,7 +44,12 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
-import { defaultShellSettings, enabledModes, isBrowserProfileSiteRemembered } from "@octant/domain";
+import {
+  browserProfileKey,
+  defaultShellSettings,
+  enabledModes,
+  isBrowserProfileSiteRemembered,
+} from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
 import type { ServerStart } from "./serverShape";
@@ -53,6 +58,16 @@ import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
+import type { HarnessStateWiring } from "./harnessState";
+import {
+  BrowserSessionGrants,
+  type CurrentBrowserSessionTarget,
+} from "../browser/browserSessionGrants";
+import { BrowserDelegatedChildren } from "../browser/browserDelegatedChildren";
+import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
+import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
+import { decodeAgentRunId, type AgentRun, type ToolActionAuthority } from "@octant/contracts";
+import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -63,14 +78,18 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "windowAuthorityStore"
     | "codeSessionAuthority"
   > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "contributeChildTools"> &
+  Pick<HarnessStateWiring, "agentRunInteractions"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "localPluginImportReceipts" | "providerDataDirectory"> &
-  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence">;
+  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence" | "providerRuntimeRegistry">;
 
 export function wireBrowser(deps: BrowserDependencies) {
   const {
     browserAuthority,
+    providerRuntimeRegistry,
+    contributeChildTools,
+    agentRunInteractions,
     browserCaptures,
     codeSessionAuthority,
     codeEvidence,
@@ -211,6 +230,134 @@ export function wireBrowser(deps: BrowserDependencies) {
             native: desktopBrowserRuntime,
             headless: headlessBrowserRuntime,
           }));
+    const childSessionTarget = (run: AgentRun): CurrentBrowserSessionTarget | undefined => {
+      if (
+        run.executionKind !== "octant-managed" ||
+        String(run.routingReceipt.executionResolution.hostId) !== String(LOCAL_HOST_ID) ||
+        !run.authority.tools ||
+        !run.authority.network ||
+        run.workspaceReceipt.kind === "chat-virtual" ||
+        !agentRunInteractions.canReviewSession(run)
+      )
+        return undefined;
+      if (run.workspaceReceipt.kind === "code-worktree" && !run.workspaceReceipt.verified)
+        return undefined;
+      const parent = decodeBrowserThreadId(String(run.parentThreadId));
+      const mode = run.workspaceReceipt.mode;
+      const parentAuthority = browserAuthority.resolve(parent, mode);
+      if (
+        parentAuthority === undefined ||
+        String(parentAuthority.projectId) !== String(run.workspaceReceipt.projectId)
+      )
+        return undefined;
+      const execution = effectiveAgentRunExecutionTarget(run.routingReceipt);
+      const observed = providerRuntimeRegistry.observedState(execution.providerInstanceId);
+      if (
+        observed?.capabilities.appManagedTools !== "supported" &&
+        observed?.verifiedToolModelIds?.some(
+          (modelId) => String(modelId) === String(execution.modelId),
+        ) !== true
+      )
+        return undefined;
+      const authority: ToolActionAuthority = {
+        hostId: parentAuthority.hostId,
+        mode,
+        projectId: run.workspaceReceipt.projectId,
+        providerInstanceId: execution.providerInstanceId,
+        extension: { kind: "core" },
+      };
+      return {
+        target: {
+          grantee: { kind: "child", runId: run.id },
+          label: run.task.slice(0, 256),
+          authority,
+          modelId: execution.modelId,
+        },
+        revision: JSON.stringify({
+          requestId: run.requestId,
+          generation: run.generation ?? 1,
+          workspace: run.workspaceReceipt,
+          authority: run.authority,
+          parent: parentAuthority,
+          digest: run.routingReceipt.effectiveAuthorityDigest,
+        }),
+      };
+    };
+    const currentSessionTarget = (
+      grantee: BrowserSessionGrantee,
+    ): CurrentBrowserSessionTarget | undefined => {
+      if (grantee.kind !== "child") return undefined;
+      const run = persistence.agentRunProjection.getById(grantee.runId);
+      return run === undefined ? undefined : childSessionTarget(run);
+    };
+    let delegatedChildren: BrowserDelegatedChildren | undefined;
+    const browserSessionGrants = new BrowserSessionGrants({
+      now: Date.now,
+      uuid: randomUUID,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      localWindows: () => windowAuthorityStore.listWindowIds(),
+      canReview: (windowId, target) => {
+        if (target.grantee.kind !== "child") return false;
+        const run = persistence.agentRunProjection.getById(target.grantee.runId);
+        return (
+          run !== undefined &&
+          browserAuthority.canAccessWindow(
+            windowId,
+            decodeBrowserThreadId(String(run.parentThreadId)),
+            target.authority.mode,
+          )
+        );
+      },
+      targets: () =>
+        persistence.agentRunProjection
+          .listCenterCandidates({ status: "all", mode: "all" })
+          .flatMap(({ run }) => {
+            const target = childSessionTarget(run);
+            return target === undefined ? [] : [target];
+          }),
+      current: currentSessionTarget,
+      profileLabel: async (profile) =>
+        (await browserRuntime.profiles?.list(false).catch(() => undefined))?.find(
+          (row) => browserProfileKey(row.profile) === browserProfileKey(profile),
+        )?.label,
+      record: browserSessionGrantJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: Date.now,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+      onRevoked: (grantId) => {
+        void delegatedChildren?.revoke(grantId);
+        machineChangeFeed.publish(["tool-approvals"]);
+      },
+    });
+    delegatedChildren = new BrowserDelegatedChildren({
+      runtime: browserRuntime,
+      grants: browserSessionGrants,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      uuid: randomUUID,
+      now: Date.now,
+    });
+    const browserDelegatedChildren = delegatedChildren;
+    contributeChildTools(({ run, authority }) => {
+      const target = childSessionTarget(run)?.target;
+      if (target === undefined || !authority.tools || !authority.network) return undefined;
+      return browserDelegatedChildren.tools({
+        target,
+        executionPolicy: authority.executionPolicy,
+        current: () =>
+          agentRunInteractions.isCurrent(run)
+            ? currentSessionTarget({ kind: "child", runId: decodeAgentRunId(String(run.id)) })
+                ?.target
+            : undefined,
+      });
+    });
+    onWindowRevoked((windowId) => {
+      browserSessionGrants.revokeWindow(windowId);
+      void browserDelegatedChildren.closeWindow(windowId);
+    });
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
     // A file an earlier run held for an agent has no page and no question left.
     yield* Effect.promise(() =>
@@ -395,6 +542,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       journal: persistence.journal,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       closePages: async (profile) => {
+        browserSessionGrants.invalidateProfile(profile);
         if (!browserCredentialUseService.invalidateProfile(profile))
           throw new Error("Profile login permission revocations could not be recorded.");
         await Promise.all([
@@ -501,6 +649,8 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     return {
       nativeBrowserPresentationRoutes,
+      browserSessionGrants,
+      browserDelegatedChildren,
       browserAutomationService,
       browserCredentialUseService,
       browserExtensionService,

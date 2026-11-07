@@ -18,6 +18,29 @@ const authority = {
 };
 
 describe("BrowserAutomationClient", () => {
+  it("sends local session-permission commands and rejects malformed permission scope", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ kind: "browser-session-grants", grants: [] }))
+      .mockResolvedValueOnce(
+        Response.json({ kind: "browser-session-grants", grants: [{ grantId: "invalid" }] }),
+      );
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    const manage = client.manageSessionGrants;
+    if (manage === undefined) throw Error("Missing session-permission route");
+    await expect(manage({ kind: "list" })).resolves.toEqual({
+      kind: "browser-session-grants",
+      grants: [],
+    });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:13773/api/browser/session-grants",
+    );
+    await expect(manage({ kind: "list" })).rejects.toMatchObject({ category: "protocol" });
+  });
   it("strictly decodes task-profile transaction results and preserves host refusals", async () => {
     const selection = { threadId, mode: "code", version: 2, profile: "personal" };
     const fetch = vi

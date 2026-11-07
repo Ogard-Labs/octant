@@ -11981,8 +11981,12 @@ access` agree); a thread's own change is journaled as
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  paired devices, routines, subagents, and terminal Browser grants are refused
-  on profile pages; a paired device sees only that a signed-in page exists. The
+  paired devices, routines and terminal Browser grants are refused on profile
+  pages. A managed child may use an existing sign-in only through an explicit
+  local-person host/run/model/authority/profile/HTTPS session permission,
+  revalidated before effects and observations; it owns its context and receives
+  no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
+  A paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one

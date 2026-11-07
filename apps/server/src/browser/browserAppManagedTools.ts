@@ -136,6 +136,11 @@ export interface BrowserAppManagedToolsOptions {
    * thread's Private pages only; a page in a signed-in profile needs a person.
    */
   readonly profileCaller?: "terminal-grant";
+  /** A host-resolved bounded permission for this exact unattended caller. */
+  readonly delegatedProfileIsCurrent?: (
+    profile: StoredBrowserProfile,
+    origins: ReadonlyArray<string>,
+  ) => boolean;
   /**
    * The Project's flows and the recorder of this host. Absent (a CLI in a
    * thread terminal), flow operations are unavailable and nothing is recorded.
@@ -222,10 +227,15 @@ export function createBrowserAppManagedTools(
       ) {
         return failure("browser-navigation-required");
       }
+      const expiredProfile = storedBrowserProfile(snapshot.context?.policy.profile);
       if (
-        storedBrowserProfile(snapshot.context?.policy.profile) !== undefined &&
+        expiredProfile !== undefined &&
         (options.profileCaller === "terminal-grant" ||
-          options.approvals?.isUnattendedScope?.(options.windowId) === true)
+          options.approvals?.isUnattendedScope?.(options.windowId) === true) &&
+        options.delegatedProfileIsCurrent?.(
+          expiredProfile,
+          snapshot.context?.policy.allowedOrigins ?? [],
+        ) !== true
       ) {
         return failure("profile-needs-a-person");
       }
@@ -282,7 +292,8 @@ export function createBrowserAppManagedTools(
     if (
       profile !== undefined &&
       (options.profileCaller === "terminal-grant" ||
-        options.approvals?.isUnattendedScope?.(options.windowId) === true)
+        options.approvals?.isUnattendedScope?.(options.windowId) === true) &&
+      options.delegatedProfileIsCurrent?.(profile, [origin]) !== true
     ) {
       return failure("profile-needs-a-person");
     }

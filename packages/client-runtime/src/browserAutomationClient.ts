@@ -1,4 +1,9 @@
 import {
+  BrowserSessionGrantsResult,
+  decodeBrowserSessionGrantsCommand,
+  type BrowserSessionGrantsCommand,
+} from "@octant/contracts/browser-session-grants";
+import {
   BrowserCredentialResult,
   decodeBrowserCredentialCommand,
   type BrowserCredentialCommand,
@@ -70,6 +75,10 @@ export interface BrowserAutomationClientOptions {
 }
 
 export interface BrowserAutomationClient {
+  manageSessionGrants?(
+    command: BrowserSessionGrantsCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserSessionGrantsResult.Type>;
   readTaskProfile?(
     input: BrowserTaskProfileReadCommand,
     signal?: AbortSignal,
@@ -313,6 +322,14 @@ export function createBrowserAutomationClient(
         "/api/browser/extensions",
         decodeBrowserExtensionsCommand(command),
         decodeHostAnswer(BrowserExtensionsResult),
+        signal,
+      ),
+    manageSessionGrants: (command, signal) =>
+      post(
+        options,
+        "/api/browser/session-grants",
+        decodeBrowserSessionGrantsCommand(command),
+        decodeHostAnswer(BrowserSessionGrantsResult),
         signal,
       ),
     manageProfiles: (command, signal) =>

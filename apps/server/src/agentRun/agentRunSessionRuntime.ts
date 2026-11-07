@@ -364,6 +364,8 @@ export interface AgentRunSessionRuntimeOptions {
    * The app-managed tools a managed child may offer its provider, composed
    * from the run's own clamped authority. Absent means the child gets none
    * and every tool request is declined.
+   * Preflight also calls the factory, so resource acquisition must be lazy.
+   * The actual session's set is closed on completion, failure or cancellation.
    */
   readonly appManagedTools?: (input: {
     readonly run: AgentRun;
@@ -922,11 +924,43 @@ export function createAgentRunSessionRuntime(
 
     const shutdown: SessionShutdown = { unconfirmed: undefined };
     let endedOutcome: AgentRunSessionOutcome | undefined;
+    let closingTools: Promise<string | undefined> | undefined;
+    const closeTools = (): Promise<string | undefined> => {
+      closingTools ??= (async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            Promise.resolve()
+              .then(() => appManagedTools?.close?.())
+              .then(
+                () => undefined,
+                () => "Child-owned tool cleanup failed.",
+              ),
+            new Promise<string>((resolve) => {
+              timer = setTimeout(
+                () => resolve("Child-owned tool cleanup did not finish within three seconds."),
+                3_000,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      })();
+      return closingTools;
+    };
     let markFinished: () => void = () => undefined;
     const finished = new Promise<void>((resolve) => {
       markFinished = resolve;
     });
-    const end = (outcome: AgentRunSessionOutcome): void => {
+    const end = async (outcome: AgentRunSessionOutcome): Promise<void> => {
+      const cleanupFailure = await closeTools();
+      if (cleanupFailure !== undefined)
+        outcome = {
+          kind: "interrupted",
+          reason: cleanupFailure,
+          ...(outcome.evidence === undefined ? {} : { evidence: outcome.evidence }),
+        };
       if (
         outcome.kind === "failed" &&
         record.pendingContinuation?.generation === (run.generation ?? 1) &&
@@ -954,6 +988,13 @@ export function createAgentRunSessionRuntime(
     const workingTimeLimitMs = options.workingTimeLimitMs?.() ?? timeoutMs;
     let workingTime: AgentRunWorkingTime | undefined;
     const controller = new AbortController();
+    controller.signal.addEventListener(
+      "abort",
+      () => {
+        void closeTools();
+      },
+      { once: true },
+    );
     const inputController = new AbortController();
     const live: LiveSession = {
       controller,
@@ -1142,7 +1183,7 @@ export function createAgentRunSessionRuntime(
         } catch {
           // Missing capture is explicit in results and never changes execution success.
         } finally {
-          end(outcome);
+          await end(outcome);
         }
       },
       (error: unknown) => end({ kind: "interrupted", reason: boundedReason(error) }),

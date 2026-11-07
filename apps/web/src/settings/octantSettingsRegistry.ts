@@ -1271,6 +1271,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
         },
         {
+          id: settingId("browser-session-permissions"),
+          label: "Browser session permissions",
+          scope: "host",
+          keywords:
+            "browser delegated child routine terminal session permission grant revoke expiry signed in account",
+        },
+        {
           id: settingId("browser-flows"),
           label: "Browser flows",
           scope: "host",
