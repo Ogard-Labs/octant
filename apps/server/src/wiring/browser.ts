@@ -55,7 +55,12 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
-import { defaultShellSettings, enabledModes, isBrowserProfileSiteRemembered } from "@octant/domain";
+import {
+  isToolAllowedByAllowlist,
+  defaultShellSettings,
+  enabledModes,
+  isBrowserProfileSiteRemembered,
+} from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
 import type { ServerStart } from "./serverShape";
@@ -283,6 +288,7 @@ export function wireBrowser(deps: BrowserDependencies) {
             ) === true),
         executionProfileCurrent:
           profile !== undefined &&
+          isToolAllowedByAllowlist(profile.toolConstraints, "octant_browser") &&
           profile.version === definition.executionProfile.profileVersion &&
           profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
       });
