@@ -1266,8 +1266,13 @@ function subjectKey(subject: ContextSubjectRef): string {
   return `${subject.aggregateType}\u0000${subject.aggregateId}`;
 }
 
-/** The stored summary's own bound; a longer answer is cut, never refused. */
-const MAX_HANDOVER_SUMMARY_CHARACTERS = 20_000;
+/**
+ * What a switch can carry in its three summary blocks of 4,000 characters,
+ * less their framing sentence, so the summary's end (usually where the work
+ * stands) is never the part a switch drops. A longer answer is cut, never
+ * refused.
+ */
+const MAX_HANDOVER_SUMMARY_CHARACTERS = 11_500;
 
 /**
  * The most of a conversation a handover summary reads, newest first. A

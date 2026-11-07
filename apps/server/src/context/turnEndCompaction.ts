@@ -1,5 +1,6 @@
 import type {
   ContextCompactionCause,
+  ContextCompactionId,
   ContextCompactionRecord,
   ContextSubjectRef,
   ProviderInstanceId,
@@ -33,6 +34,11 @@ export interface TurnEndRules {
 export interface TurnEndCompactionOptions {
   readonly compactions: Pick<SessionCompactionService, "start" | "windowFill">;
   readonly latestCompaction: (subject: ContextSubjectRef) => ContextCompactionRecord | undefined;
+  /** Whether the thread already has a compaction under this id. */
+  readonly compactionExists: (
+    subject: ContextSubjectRef,
+    compactionId: ContextCompactionId,
+  ) => boolean;
   /** Read on every turn's end, so a change in Settings applies to the next one. */
   readonly rules: () => TurnEndRules;
   /** The account windows the instance last reported; a stored reading, no request. */
@@ -50,8 +56,8 @@ export interface TurnEndCompactionOptions {
  * ready to move to another provider, or else when it leaves the context
  * window past its share, so the next turn starts from a summary rather than
  * from a window the runtime or the planner would otherwise trim or overrun.
- * The limit rule goes first: one compaction serves both, and only the limit
- * rule writes the summary a move needs.
+ * The limit rule goes first, once per limit period: one compaction serves
+ * both, and only the limit rule writes the summary a move needs.
  *
  * It asks through the same service a window's **Compact session** does, as
  * `host-policy`, so every refusal a requested compaction meets applies; a
@@ -129,7 +135,15 @@ export class TurnEndCompactions {
       now: (this.#options.clock ?? Date.now)(),
     });
     if (limit !== undefined) {
-      return { cause: limit.cause, key: `rule:limit-near:${limit.crossing}` };
+      const key = `rule:limit-near:${limit.crossing}`;
+      // A period already answered leaves the turn to the window-fill rule;
+      // otherwise a limit sitting past the share for hours would stand in
+      // for every later fill crossing in that period.
+      if (
+        !this.#options.compactionExists(input.subject, automaticCompactionId(input.subject, key, 1))
+      ) {
+        return { cause: limit.cause, key };
+      }
     }
     const previousAttempt = leftByLastRule(
       this.#options.latestCompaction(input.subject),

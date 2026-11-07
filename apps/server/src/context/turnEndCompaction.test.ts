@@ -26,6 +26,7 @@ function harness(input: {
   readonly fill: Fill;
   readonly rules?: Partial<TurnEndRules>;
   readonly windows?: ReadonlyArray<ProviderRateLimitWindow>;
+  readonly existing?: ReadonlyArray<string>;
   readonly latest?: ContextCompactionRecord;
   readonly refusals?: ReadonlyArray<"turn-running" | "spend-ceiling-reached">;
 }) {
@@ -55,6 +56,9 @@ function harness(input: {
       },
     },
     latestCompaction: () => input.latest,
+    compactionExists: (_subject, compactionId) =>
+      (input.existing ?? []).includes(String(compactionId)) ||
+      starts.some(([command]) => String(command.compactionId) === String(compactionId)),
     rules: () => rules,
     accountWindows: () => input.windows ?? [],
     clock: () => Date.parse("2026-11-07T10:00:00.000Z"),
@@ -231,17 +235,38 @@ describe("compacting a thread after its turn ends", () => {
       windows: [fiveHour],
     });
     compactions.turnEnded({ subject, turnKey: "turn-a", windowId });
+    drain();
     compactions.turnEnded({ subject, turnKey: "turn-b", windowId });
     drain();
-    expect(starts).toHaveLength(2);
+    // Both turns fall in one period, so only the first compacts for the limit.
+    expect(starts).toHaveLength(1);
     expect(starts[0]?.[3]).toEqual({
       kind: "limit-near",
       window: "five_hour",
       usedPercent: 91,
       thresholdPercent: 90,
     });
-    // Both turns fall in one period, so the second finds the first compaction.
-    expect(String(starts[1]?.[0].compactionId)).toBe(String(starts[0]?.[0].compactionId));
+  });
+
+  it("leaves a later turn in an answered limit period to the window-fill rule", () => {
+    const { compactions, starts, drain } = harness({
+      fill: { tokens: 95_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
+      rules: { limit: 90 },
+      windows: [
+        {
+          window: "five_hour",
+          status: "warning",
+          utilization: 0.92,
+          resetsAt: decodeUtcTimestamp("2026-11-07T13:00:00.000Z"),
+          observedAt: decodeUtcTimestamp("2026-11-07T10:00:00.000Z"),
+        },
+      ],
+    });
+    compactions.turnEnded({ subject, turnKey: "turn-a", windowId });
+    drain();
+    compactions.turnEnded({ subject, turnKey: "turn-b", windowId });
+    drain();
+    expect(starts.map(([, , , cause]) => cause?.kind)).toEqual(["limit-near", "window-fill"]);
   });
 
   it("lets the limit rule act for a turn that also crossed the window share", () => {

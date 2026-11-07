@@ -489,6 +489,8 @@ export function wireContext(deps: ContextDependencies) {
   const turnEndCompactions = new TurnEndCompactions({
     compactions: sessionCompaction,
     latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    compactionExists: (subject, compactionId) =>
+      contextHarness.compaction(subject, compactionId) !== undefined,
     rules: () => {
       const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
       return {

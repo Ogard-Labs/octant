@@ -347,6 +347,8 @@ spell waits for the thread's next turn.
   window-fill rule only when it does not act, since one compaction serves both
   and only the limit rule writes a handover. The account windows come from
   `ProviderUsageLimitsService.snapshot()`, a stored reading; no provider is asked.
+  Once the period's compaction exists, later turns in that period go to the
+  window-fill rule, so a limit that stays high never stands in for it.
   `windowFill` also returns the thread's provider instance.
 - **Handover** (`sessionCompaction.ts` `#writeHandover`): for a `limit-near`
   compaction of a runtime-kept Chat or Work thread, the host first asks the
@@ -361,7 +363,10 @@ spell waits for the thread's next turn.
   rule made it) and leads the handoff with it in up to three 4,000-character
   blocks after the framing block. Where that leaves no room, the oldest verbatim
   messages give way and count as earlier messages. The record says
-  `handoverSummary: true`.
+  `handoverSummary: true`. The summary is cut to 11,500 characters when written,
+  so a switch carries all of it. A later switch on (A to B to C) still leads with
+  A's summary until another compaction replaces it; the newest messages follow
+  it verbatim.
 - **Notice**: under the divider, "Codex is at 91% of its 5-hour limit. This
   thread is compacted and ready to move." with **Switch model**, which opens the
   composer's model picker through the composer scope.
@@ -420,6 +425,10 @@ cannot be read hands a switch the raw selection, as before.
 - FR-7 covers Chat and Work only (D-5).
 - Slice 1's `WindowFillCompactions` became `TurnEndCompactions`, since it now
   judges the limit rule too.
+- Review found that a limit period already answered still claimed every later
+  turn, so the window-fill rule never ran in that period; that "Switch model"
+  opened every picker under the workspace's shared scope; and that a 20,000
+  character summary lost its end in a switch. Each is fixed as Slice 3 says.
 
 ### Change log
 

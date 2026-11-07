@@ -135,13 +135,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const controlsDisabled = props.disabled === true || selectionPending;
   // A request from outside the picker (the limit notice under a compaction)
   // opens it; the count it mounted with is no request.
-  const { modelPickerNonce } = useComposerContextMeterScope();
+  // Only the active pane's thread composer answers: the scope spans the whole
+  // workspace, and every other picker under it is gated off.
+  const { modelPickerNonce, visible } = useComposerContextMeterScope();
   const seenModelPickerNonce = useRef(modelPickerNonce);
   useEffect(() => {
     if (modelPickerNonce === seenModelPickerNonce.current) return;
     seenModelPickerNonce.current = modelPickerNonce;
-    if (!controlsDisabled) setOpen(true);
-  }, [modelPickerNonce, controlsDisabled]);
+    if (visible && !controlsDisabled) setOpen(true);
+  }, [modelPickerNonce, visible, controlsDisabled]);
   const modelsElement = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [catalogFilter, setCatalogFilter] = useState<string | undefined>(undefined);

@@ -19,7 +19,10 @@ import {
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { decodeContextCompactionReceipt } from "@octant/contracts/context";
 import { CompactionDivider } from "../context/CompactionDivider";
-import { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
+import {
+  ComposerContextMeterGate,
+  ComposerContextMeterProvider,
+} from "../context/composerContextMeterScope";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
@@ -390,14 +393,26 @@ describe("ComposerModelPicker", () => {
       completedAt: "2026-11-07T10:00:00.000Z",
     });
     render(
-      <ComposerContextMeterProvider status="ready">
-        <CompactionDivider receipt={receipt} />
+      <ComposerContextMeterProvider
+        status="ready"
+        subjectKey="chat-thread:61000000-0000-4000-8000-000000000001"
+      >
         <ComposerModelPicker
+          ariaLabel="Overview model"
           groups={groups()}
           onSelect={vi.fn()}
           selectedModelId={modelOne}
           selectedProviderInstanceId={providerA}
         />
+        <ComposerContextMeterGate enabled>
+          <CompactionDivider receipt={receipt} />
+          <ComposerModelPicker
+            groups={groups()}
+            onSelect={vi.fn()}
+            selectedModelId={modelOne}
+            selectedProviderInstanceId={providerA}
+          />
+        </ComposerContextMeterGate>
       </ComposerContextMeterProvider>,
     );
 
@@ -413,7 +428,10 @@ describe("ComposerModelPicker", () => {
       screen.queryByRole("dialog", { name: "Choose provider and model" }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Switch model" }));
-    expect(await screen.findByRole("dialog", { name: "Choose provider and model" })).toBeVisible();
+    // Only the thread's own composer opens; a picker outside it stays shut.
+    expect(
+      await screen.findAllByRole("dialog", { name: "Choose provider and model" }),
+    ).toHaveLength(1);
   });
 
   it("opens a nested provider → model menu from the compact trigger", async () => {

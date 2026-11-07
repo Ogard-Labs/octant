@@ -114,7 +114,12 @@ export function CompactionDivider(props: { readonly receipt: ContextCompactionRe
       {divider}
       <div className="flex flex-wrap items-center justify-center gap-2 pb-3 text-center text-sm text-muted-foreground">
         <p>{notice}</p>
-        {scope.requestModelPicker === undefined ? null : (
+        {/* Offered only where it reaches this thread's own composer: the
+            active pane's, writing to the thread the receipt is for. */}
+        {scope.requestModelPicker === undefined ||
+        !scope.visible ||
+        scope.subjectKey !==
+          `${String(props.receipt.subject.aggregateType)}:${String(props.receipt.subject.aggregateId)}` ? null : (
           <OctantButton onClick={scope.requestModelPicker} size="sm" type="button">
             Switch model
           </OctantButton>

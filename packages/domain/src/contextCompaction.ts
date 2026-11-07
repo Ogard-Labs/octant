@@ -556,7 +556,8 @@ export function decideLimitCompaction(
     if (window.resetsAt === undefined || !(Date.parse(window.resetsAt) > now)) continue;
     const used =
       window.utilization !== undefined
-        ? Math.floor(window.utilization * 100)
+        ? // 0.58 × 100 is 57.999…; the nudge keeps a reported 58% at 58.
+          Math.floor(window.utilization * 100 + 1e-9)
         : window.status === "exhausted"
           ? 100
           : undefined;
