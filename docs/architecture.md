@@ -15327,7 +15327,9 @@ JSON payload is at most 16,383 UTF-8 bytes. Oversized frames are refused, never
 truncated.
 
 Nonblocking byte-pipe polling has a two-second connection/request deadline and
-retains no overlapped kernel I/O buffer after a call returns. The host strongly
+retains no overlapped kernel I/O buffer after a call returns. Only an explicitly
+busy connection that has dispatched no bytes may retry within that original
+deadline; a pending, refused or uncertain dispatched request is never replayed. The host strongly
 anchors its owner lease. Closing the endpoint, GC or environment/worker teardown
 cannot remove the native PID/birth record or release its retained directory and
 record guards while that process lives: the first-party module is pinned for

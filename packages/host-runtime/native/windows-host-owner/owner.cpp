@@ -445,9 +445,13 @@ napi_value begin_request(napi_env env, napi_callback_info info) {
   if (!root) return object(env, "refused");
   Record record;
   if (read_record(*root, record) != 1 || alive(record.identity) != 1) return object(env, "refused");
-  Handle pipe(CreateFileW(root->endpoint.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+  // Peer identity authenticates this connection; no caller impersonation
+  // authority is delegated to the server process.
+  Handle pipe(CreateFileW(root->endpoint.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+    SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr));
+  if (!pipe) return object(env, GetLastError() == ERROR_PIPE_BUSY ? "busy" : "refused");
   DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT; ULONG server = 0;
-  if (!pipe || !SetNamedPipeHandleState(pipe.value, &mode, nullptr, nullptr) ||
+  if (!SetNamedPipeHandleState(pipe.value, &mode, nullptr, nullptr) ||
       !GetNamedPipeServerProcessId(pipe.value, &server) || server != record.identity.pid || !same_user(server, *root) || alive(record.identity) != 1) return object(env, "refused");
   auto client = std::make_unique<Client>(); client->env = env; client->root = std::move(root); client->pipe = std::move(pipe);
   client->server = record.identity; client->outgoing.assign(frame.begin(), frame.end()); client->outgoing.push_back('\n'); client->started = GetTickCount64();

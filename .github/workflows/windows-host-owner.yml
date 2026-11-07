@@ -54,7 +54,12 @@ jobs:
           cmake --build "$env:RUNNER_TEMP/owner-build" --config Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Bundle the source adapter fixture
-        run: bun build scripts/windows-host-owner/smoke.ts --target=node --outfile "$env:RUNNER_TEMP/owner-smoke.mjs"
+        run: |
+          bun build scripts/windows-host-owner/smoke.ts --target=node --outfile "$env:RUNNER_TEMP/owner-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun build scripts/windows-host-owner/worker.ts --target=node --outfile "$env:RUNNER_TEMP/owner-worker.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item scripts/windows-host-owner/fixtures.ps1 "$env:RUNNER_TEMP/owner-fixtures.ps1"
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"

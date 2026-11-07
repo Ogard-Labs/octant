@@ -160,3 +160,76 @@ describe("native Windows owner admission", () => {
     }
   });
 });
+
+import { createHash } from "node:crypto";
+it("waits for a busy pipe before dispatch and never replays a refused dispatched request", async () => {
+  const fake = nativeFixture();
+  const nonce = Buffer.alloc(32, 7);
+  const previous = {
+    ...receipt,
+    endpoint,
+    pid: 5555,
+    processStart: "win32:0000000100000003",
+    nonceDigest: createHash("sha256").update(nonce.toString("base64url")).digest("hex"),
+  };
+  let attempts = 0;
+  let dispatchedRefused = false;
+  const native: WindowsHostOwnerNative = {
+    ...fake.native,
+    claim: () => ({
+      status: "existing",
+      pid: previous.pid,
+      processStart: previous.processStart,
+      secret: Buffer.from(nonce),
+      receipt: Buffer.from(JSON.stringify(previous)),
+    }),
+    beginRequest: () => {
+      attempts++;
+      return attempts <= 2 ? { status: "busy" } : { status: "pending", id: attempts };
+    },
+    pollRequest: () =>
+      dispatchedRefused
+        ? { status: "refused" }
+        : { status: "response", bytes: Buffer.from(JSON.stringify({ ok: true, owner: previous })) },
+  };
+  try {
+    const attached = await acquireWindowsHostRuntimeOwner({ ...ownerOptions, native });
+    expect(attached.kind).toBe("attached");
+    expect(attempts).toBe(3);
+    if (attached.kind !== "attached") throw new Error("Expected native attachment.");
+    dispatchedRefused = true;
+    await expect(
+      attached.request({ type: "diagnostics", principal: "local" }),
+    ).resolves.toBeUndefined();
+    expect(attempts).toBe(4);
+  } finally {
+    nonce.fill(0);
+    native.close();
+  }
+});
+
+it("does not close an existing owner when another acquisition is refused", async () => {
+  const fake = nativeFixture();
+  let preparations = 0;
+  const native: WindowsHostOwnerNative = {
+    ...fake.native,
+    prepare: () =>
+      ++preparations === 1
+        ? { status: "prepared", pid: 4242, processStart: "win32:0000000100000002", endpoint }
+        : { status: "refused" },
+  };
+  const first = await acquireWindowsHostRuntimeOwner({ ...ownerOptions, native });
+  if (first.kind !== "owner") throw new Error("Expected first owner.");
+  try {
+    await expect(
+      acquireWindowsHostRuntimeOwner({
+        ...ownerOptions,
+        scope: "44444444-4444-4444-8444-444444444444",
+        native,
+      }),
+    ).rejects.toMatchObject({ code: "owner-unhealthy" });
+    expect(native.close).not.toHaveBeenCalled();
+  } finally {
+    await first.release();
+  }
+});

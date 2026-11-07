@@ -1,7 +1,9 @@
+import { fileURLToPath } from "node:url";
 import { win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { rename, symlink } from "node:fs/promises";
+import { Worker } from "node:worker_threads";
 import { createInterface } from "node:readline";
 import {
   acquireWindowsHostRuntimeOwner,
@@ -30,6 +32,7 @@ const options = {
 const checks: string[] = [];
 const fixtures = new Set<string>();
 const children = new Set<ChildProcess>();
+const workers = new Set<Worker>();
 const lifetime = setTimeout(() => {
   for (const child of children) child.kill();
   process.exit(2);
@@ -76,6 +79,53 @@ async function boundedChild(scopeId: string): Promise<{ child: ChildProcess; roo
   fixtures.add(result);
   return { child, root: result };
 }
+async function alterOwnedFixture(
+  scopeId: string,
+  mode: "directory-acl" | "process-query",
+  target?: number,
+): Promise<void> {
+  const executable = win32.join(
+    process.env.SystemRoot ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  const args = [
+    "-NoProfile",
+    "-NonInteractive",
+    "-File",
+    fileURLToPath(new URL("./owner-fixtures.ps1", import.meta.url)),
+    "-Scope",
+    scopeId,
+    "-Mode",
+    mode,
+  ];
+  if (target !== undefined) args.push("-TargetProcessId", String(target));
+  const child = spawn(executable, args, {
+    env: { ...process.env },
+    stdio: ["ignore", "ignore", "inherit"],
+    windowsHide: true,
+  });
+  children.add(child);
+  const code = await new Promise<number | null>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("Owned ACL fixture timed out."));
+    }, 8000);
+    child.once("error", () => {
+      clearTimeout(timer);
+      reject(new Error("Owned ACL fixture did not start."));
+    });
+    child.once("close", (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+  children.delete(child);
+  if (code !== 0) throw new Error("Owned ACL fixture failed.");
+}
+
 async function join(child: ChildProcess): Promise<void> {
   if (child.exitCode === null && child.signalCode === null) {
     child.kill();
@@ -114,6 +164,15 @@ if (role === "child") {
       "native current process birth matches runtime",
     );
     fixtures.add(root + ".moved");
+    const otherScope = randomUUID();
+    console.log(JSON.stringify({ fixtureScope: otherScope }));
+    let acquisitionRefused = false;
+    try {
+      await acquireWindowsHostRuntimeOwner({ ...options, scope: otherScope });
+    } catch {
+      acquisitionRefused = true;
+    }
+    check(acquisitionRefused, "another refused acquisition does not own this process endpoint");
     let renameRefused = false;
     try {
       await rename(root, root + ".moved");
@@ -190,6 +249,75 @@ if (role === "child") {
     if (held.kind === "owner") await held.release();
     held = undefined;
 
+    const workerScope = randomUUID();
+    console.log(JSON.stringify({ fixtureScope: workerScope }));
+    const worker = new Worker(new URL("./owner-worker.mjs", import.meta.url), {
+      workerData: { bindingPath, scope: workerScope },
+    });
+    workers.add(worker);
+    const workerRoot = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Owned worker did not start.")), 8000);
+      worker.once("error", () => {
+        clearTimeout(timer);
+        reject(new Error("Owned worker failed."));
+      });
+      worker.once("message", (message: unknown) => {
+        clearTimeout(timer);
+        if (
+          !record(message) ||
+          message.ready !== true ||
+          typeof message.root !== "string" ||
+          message.productionWorkerRefused !== true
+        )
+          reject(new Error("Invalid worker readiness."));
+        else resolve(message.root);
+      });
+    });
+    fixtures.add(workerRoot);
+    await worker.terminate();
+    workers.delete(worker);
+    const afterWorker = native.prepare(workerScope);
+    check(
+      record(afterWorker) && afterWorker.status === "prepared",
+      "worker teardown closes its native environment owner",
+    );
+    const prior = native.claim(Buffer.from("{}"), Buffer.alloc(32, 1));
+    check(
+      record(prior) && prior.status === "existing" && prior.pid === process.pid,
+      "worker teardown preserves the live process writer tombstone",
+    );
+    if (record(prior) && prior.secret instanceof Uint8Array) prior.secret.fill(0);
+    native.close();
+
+    const unknownScope = randomUUID();
+    console.log(JSON.stringify({ fixtureScope: unknownScope }));
+    const unknownChild = await boundedChild(unknownScope);
+    if (unknownChild.child.pid === undefined) throw new Error("Owned process identity missing.");
+    await alterOwnedFixture(unknownScope, "process-query", unknownChild.child.pid);
+    const unknownFacts = native.prepare(unknownScope);
+    check(
+      record(unknownFacts) && unknownFacts.status === "prepared",
+      "prepares the owned unknown-writer fixture",
+    );
+    const unknown = native.claim(Buffer.from("{}"), Buffer.alloc(32, 1));
+    check(
+      record(unknown) && unknown.status === "unknown",
+      "OS-denied inspection never authorizes writer takeover",
+    );
+    native.close();
+    await join(unknownChild.child);
+
+    const unsafeScope = randomUUID();
+    console.log(JSON.stringify({ fixtureScope: unsafeScope }));
+    rootFor(unsafeScope);
+    await alterOwnedFixture(unsafeScope, "directory-acl");
+    const unsafe = native.prepare(unsafeScope);
+    check(
+      record(unsafe) && unsafe.status === "refused",
+      "refuses an owned scope whose DACL became readable by Everyone",
+    );
+    native.close();
+
     const aliasScope = randomUUID();
     console.log(JSON.stringify({ fixtureScope: aliasScope }));
     const aliasRoot = rootFor(aliasScope);
@@ -215,6 +343,13 @@ if (role === "child") {
   } finally {
     if (held?.kind === "owner") await held.release();
     native.close();
+    const workerCleanup = await Promise.allSettled(
+      [...workers].map((worker) => worker.terminate()),
+    );
+    check(
+      workerCleanup.every((result) => result.status === "fulfilled"),
+      "owned native workers joined",
+    );
     const settled = await Promise.allSettled([...children].map(join));
     check(
       settled.every((result) => result.status === "fulfilled"),
