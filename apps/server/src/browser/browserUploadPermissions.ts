@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
-import { extname, relative, resolve, sep } from "node:path";
+import { basename, extname, relative, resolve, sep } from "node:path";
 import { browserProfileKey } from "@octant/domain";
 import {
   decodeCodeRelativePath,
@@ -90,7 +90,7 @@ export class BrowserUploadPermissions {
           .targets()
           .filter((row) => this.#options.canReview(windowId, row.recipient.target))
           .slice(0, 256)
-          .map((row) => ({ target: row.recipient.target, folders: row.folders })),
+          .map((row) => ({ target: row.recipient.target, folders: uploadFolderChoices(row) })),
       };
     if (command.kind === "list")
       return {
@@ -115,7 +115,10 @@ export class BrowserUploadPermissions {
         return refused("limit", "Finish an existing upload review first.");
       const current = this.#options.current(command.routineId);
       const rootSource = current?.rootFor(command.folderId);
-      const folder = current?.folders.find((row) => String(row.id) === String(command.folderId));
+      const folder =
+        current === undefined
+          ? undefined
+          : uploadFolderChoices(current).find((row) => String(row.id) === String(command.folderId));
       if (
         current === undefined ||
         current.recipient.target.grantee.kind !== "routine" ||
@@ -462,4 +465,20 @@ export class BrowserUploadPermissions {
     timer.unref?.();
     this.#timers.set(row.permission.permissionId, timer);
   }
+}
+
+/** Existing folder-picker labels may be absolute when basenames collide. */
+function uploadFolderChoices(
+  current: BrowserUploadRecipient,
+): ReadonlyArray<ApprovedWorkingFolder> {
+  let extra = 0;
+  return current.folders.map((folder) => {
+    if (folder.kind === "main") return { ...folder, label: "Main folder" };
+    extra += 1;
+    const root = current.rootFor(folder.id);
+    return {
+      ...folder,
+      label: `Extra folder ${extra}: ${root === undefined ? "Unavailable" : basename(root).slice(0, 200) || "Root"}`,
+    };
+  });
 }

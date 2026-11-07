@@ -38,7 +38,7 @@ const target: BrowserSessionTarget = {
     extension: { kind: "core" },
   }),
 };
-async function fixture() {
+async function fixture(absoluteFolderLabels = false) {
   const directory = await mkdtemp(join(tmpdir(), "octant-upload-permission-"));
   const root = join(directory, "reports");
   await mkdir(root);
@@ -46,8 +46,18 @@ async function fixture() {
   let revision = "definition-one";
   const current = () => ({
     recipient: { target, revision },
-    folders: [folder],
-    rootFor: () => root,
+    folders: absoluteFolderLabels
+      ? [
+          { ...folder, label: root },
+          {
+            ...folder,
+            id: decodeProjectWorkingFolderId(`folder_${"b".repeat(64)}`),
+            label: join(directory, "other", "reports"),
+          },
+        ]
+      : [folder],
+    rootFor: (id: string) =>
+      String(id) === String(folder.id) ? root : join(directory, "other", "reports"),
   });
   const record = vi.fn();
   const service = new BrowserUploadPermissions({
@@ -367,6 +377,26 @@ it("forgets erased Project authority without recreating erased metadata", async 
     expect(policy.signal.aborted).toBe(true);
     expect(f.service.prepare(f.input)).toBeUndefined();
     expect(f.record.mock.calls).toHaveLength(before);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it("keeps duplicate folder roots out of reviewed, journaled and routine-visible manifest metadata", async () => {
+  const f = await fixture(true);
+  try {
+    const choices = await f.service.execute(windowId, { kind: "targets" });
+    expect(JSON.stringify(choices)).not.toContain(f.directory);
+    if (choices.kind !== "upload-permission-targets") throw Error("Expected choices");
+    const labels = choices.targets[0]?.folders.map((row) => row.label);
+    expect(labels).toHaveLength(2);
+    expect(new Set(labels).size).toBe(2);
+    expect(JSON.stringify(f.review.permission)).not.toContain(f.directory);
+    await f.grant();
+    expect(JSON.stringify(f.record.mock.calls)).not.toContain(f.directory);
+    expect(
+      JSON.stringify(f.service.choices(target, f.input.profile, f.input.origin)),
+    ).not.toContain(f.directory);
   } finally {
     await f.cleanup();
   }
