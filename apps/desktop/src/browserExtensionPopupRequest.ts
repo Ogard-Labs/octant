@@ -5,6 +5,7 @@
  */
 export interface ExtensionPopupRequest {
   readonly profile:
+    | { readonly kind: "account"; readonly profileId: string }
     | { readonly kind: "personal" }
     | { readonly kind: "project"; readonly projectId: string };
   readonly extensionId: string;
@@ -76,6 +77,13 @@ export function validateExtensionPopupRequest(value: unknown): ExtensionPopupReq
     PROJECT_ID.test(profile.projectId)
   ) {
     checked = { kind: "project", projectId: profile.projectId };
+  } else if (
+    profile.kind === "account" &&
+    Object.keys(profile).length === 2 &&
+    typeof profile.profileId === "string" &&
+    PROJECT_ID.test(profile.profileId)
+  ) {
+    checked = { kind: "account", profileId: profile.profileId };
   } else {
     throw invalid();
   }

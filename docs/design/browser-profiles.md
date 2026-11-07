@@ -19,13 +19,15 @@ site's cookies, and the `chrome.tabs` support for popups and the
 ## Profiles
 
 A profile is the store a page keeps cookies, local storage, IndexedDB, cache,
-and service workers in. There are three kinds:
+and service workers in. The initial three choices keep their behavior, with
+additional named account profiles on the same host:
 
-| Profile  | Lives                                 | Shared by                                  | Survives a restart |
-| -------- | ------------------------------------- | ------------------------------------------ | ------------------ |
-| Private  | In memory, one per browsing context   | That page and the tabs it opens            | No                 |
-| Project  | On disk, one per Work or Code Project | Every page of that Project, in any thread  | Yes                |
-| Personal | On disk, one per host                 | Every page that chooses it, in any Project | Yes                |
+| Profile       | Lives                                           | Shared by                                                        | Survives a restart |
+| ------------- | ----------------------------------------------- | ---------------------------------------------------------------- | ------------------ |
+| Private       | In memory, one per browsing context             | That page and the tabs it opens                                  | No                 |
+| Project       | On disk, one per Work or Code Project           | Every page of that Project, in any thread                        | Yes                |
+| Personal      | On disk, one per host                           | Every page that chooses it, in any Project                       | Yes                |
+| Named account | On disk, one per host-assigned account identity | Every page that explicitly chooses that account, across Projects | Yes                |
 
 - Private is the initial default. A person can choose a different default for
   their Project pages or explicitly for a Work or Code task, as described below.
@@ -38,7 +40,7 @@ and service workers in. There are three kinds:
   in place. The `existing-profile` profile mode in the Browser contract is
   retired: the schema no longer decodes it, so no caller can ask for it. The one
   way another browser's sign-ins reach Octant is the person's explicit
-  [cookie import](#cookie-import) into a Project or Personal profile. An
+  [cookie import](#cookie-import) into a stored profile. An
   extension from another browser reaches Octant only as a copy, through
   [Importing from another browser](#importing-from-another-browser).
 - Chat has no Browser, so it has no profile. A Chat Project has no Project
@@ -48,12 +50,41 @@ and service workers in. There are three kinds:
   Octant keeps credential references rather than a password vault. Fill and
   submit are separate approvals, and neither proves authentication.
 
+### Named account profiles
+
+A person at a local window creates an account profile in Settings → Data &
+privacy → Browser profiles and gives it a label (1–80 characters, at most 64
+per host). The native owner assigns an immutable opaque identity and a separate
+persistent partition; labels are display text, never filesystem paths or grants.
+The native registry lives beside the host's profile stores, outside the journal
+and artifact replica. Profile stores and this registry are not exported or synced.
+A host with no native owner or no registered identity refuses, rather than opening
+another store or falling back to Private.
+
+A person explicitly selects an account in the existing page or task profile
+control. It behaves like Personal for local-person eligibility and reuse across
+Projects, while its origin approvals, model binding, extensions, cookies and data
+remain separate from Personal and every other account. A name or selected profile
+never grants Project access, site access, credential use or delegated authority.
+The site prompt resolves the label from the native host and identifies the account;
+a missing registry entry cannot mint a profile or an approval. A newly created
+profile opens no page and changes no default. Fork/import rules for task defaults
+remain unchanged. The agent uses a named account only through an explicitly
+selected task default; its existing explicit Private/Project/Personal arguments
+retain their behavior.
+
+Sign out and Clear cookies retain the account's identity and label while removing
+the confirmed data scope. Existing cookie import and extension enablement are
+explicit local actions per account; no Personal grants or enabled extensions carry
+across. Multiple account creations serialize their atomic registry replacements.
+Missing or invalid native metadata refuses creation/use without removing stores.
+
 ### Choosing a profile
 
 - The profile is fixed per page. A new page uses its applicable default, initially
   Private. The person changes
   it from the profile control at the left of the Browser toolbar's address field
-  (Private, Project, Personal). Changing it opens the same address in the chosen
+  (Private, Project, Personal and the named accounts on this host). Changing it opens the same address in the chosen
   profile as a new browsing context; the old context closes, and nothing it held
   (cookies, approvals, an agent's binding) carries over. The host turns "Project"
   into the thread's or window's own Project, so a caller cannot name another
@@ -172,7 +203,7 @@ fill is implied. See [the credential boundary](../architecture.md#linked-secret-
 ## Cookie import
 
 A person can bring the sign-ins they already have in another browser on this Mac
-into one Project or Personal profile, so they do not sign in again.
+into one stored profile, so they do not sign in again.
 
 - **Only on the person's pick.** Settings › Data & storage › Browser profiles has
   "Import cookies…" on each stored profile. The dialog lists the browsers
@@ -242,7 +273,7 @@ into one Project or Personal profile, so they do not sign in again.
 
 ## The agent on a signed-in page
 
-A Project or Personal page is treated as signed in, whether or not it is. The
+A Project, Personal or named account page is treated as signed in, whether or not it is. The
 host cannot tell, and a page in a shared profile may hold a sign-in another
 thread made.
 
@@ -292,7 +323,7 @@ thread made.
 - **Captures.** A screenshot the agent or person keeps from a profile page is
   kept by the thread under the usual
   [Browser captures](browser-captures.md) rules, and its record names the
-  profile (Project or Personal). A capture of a Private page names none.
+  profile (Project, Personal or named account). A capture of a Private page names none.
 
 The agent's activity on a profile page is visible: while the agent drives one,
 the Browser toolbar's driver indicator ("Agent active · Personal") and the
