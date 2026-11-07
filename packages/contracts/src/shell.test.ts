@@ -102,6 +102,7 @@ const settings = {
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
+  persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
