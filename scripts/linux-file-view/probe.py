@@ -159,10 +159,12 @@ finally:
             except (OSError,ProcessLookupError):pass
     if mount and mount.exists():
         subprocess.run(['fusermount3','-uz',str(mount)],capture_output=True,timeout=3)
+    still_mounted = bool(mount and mount.exists() and subprocess.run(['mountpoint','-q',str(mount)],timeout=2).returncode==0)
+    remaining = [process.pid for process,_ in owned if process.poll() is None]
+    state.setdefault('cleanup',{}).update(processesExited=not remaining,remainingOwnedPids=remaining,mountRemoved=not still_mounted)
     if temporary and fixture_identity:
         now = os.lstat(temporary)
-        still_mounted = mount and subprocess.run(['mountpoint','-q',str(mount)],timeout=2).returncode==0
-        if (now.st_dev,now.st_ino)==(fixture_identity.st_dev,fixture_identity.st_ino) and not still_mounted:
+        if (now.st_dev,now.st_ino)==(fixture_identity.st_dev,fixture_identity.st_ino) and not still_mounted and not remaining:
             shutil.rmtree(temporary)
             state.setdefault('cleanup',{})['fixtureRemoved']=True
         else:
