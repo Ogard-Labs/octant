@@ -2718,17 +2718,30 @@ Unknown prices and missing quota measurements are unavailable, never zero.
 API estimates, provider-recorded costs, pricing revisions, and measured-record
 coverage remain distinguishable.
 
+Diagnostics is the third source in the same toggle group, offered when the host
+answers turn diagnostics. It reads how turns went across every provider and mode
+([architecture: reading how turns went](docs/architecture.md#context-and-usage-accounting))
+and has its own Range (24 hours to all recorded turns), Mode, Provider, and
+Trend-by controls. Its sections, in order: a Summary of tiles; Turns by day or
+hour as bars with failed and stopped turns as a hatched base segment, a legend,
+and a disclosed table; Benchmarks by model with p50 and p95 first-token, speed,
+and turn length; Failures by cause with the newest redacted message; Tools, most
+failures first; Retries, limits, and waits; Turns to investigate, whose Open
+button leaves Usage for that thread; and Likely prompt-cache misses, worded as a
+likelihood. A figure no turn measured reads Unavailable, never zero. The header
+copies the whole report as JSON for offline analysis and benchmarking.
+
 The following canonical map applies to the Usage flow and its Settings entry:
 
-| Capability      | Canonical owner                                   | Source of truth                                 | Allowed variants                                                                | Verification                                 |
-| --------------- | ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------- |
-| Table Selection | UsageWorkspace and ProviderUsageHistoryWorkspace  | Usage contracts and this document               | Read-only model/day/detail tables; no bulk selection                            | Usage component tests and narrow rendered QA |
-| Select/Listbox  | OctantSelectField and OctantToggleGroup           | Shared UI adapters                              | Select fields for filters; toggle groups for source, metric, and period         | Shared-control and Usage interaction tests   |
-| Date            | ProviderUsageHistoryWorkspace period controls     | LocalUsageHistoryRequest                        | Past 24h, 7, 30, and 90 days; explicit viewing timezone                         | Range and stale-response tests               |
-| Form            | UsageDashboard filters and shared field adapters  | UsageQueryFilter                                | App-owned validation; retained filter values                                    | UsageDashboard tests                         |
-| Scrollbar       | Usage workspace viewport and table scroll regions | usageWorkspace.css and providerUsageHistory.css | One page scroller; horizontal table overflow and disclosed chart-data scrolling | Narrow viewport and keyboard QA              |
-| Toast           | Inline usage status and error regions             | Query and provider-limit state                  | Retained stale readings and inline recovery; no critical toast-only feedback    | Failure, refresh, and client-switch tests    |
-| CRUD            | UsageDashboard in Settings                        | Usage client and retention/export contracts     | Main Usage is read-only; retention and export stay in Settings                  | Existing usage action tests                  |
+| Capability      | Canonical owner                                                             | Source of truth                                 | Allowed variants                                                                | Verification                                 |
+| --------------- | --------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------- |
+| Table Selection | UsageWorkspace, ProviderUsageHistoryWorkspace, and TurnDiagnosticsWorkspace | Usage contracts and this document               | Read-only model/day/detail tables; no bulk selection                            | Usage component tests and narrow rendered QA |
+| Select/Listbox  | OctantSelectField and OctantToggleGroup                                     | Shared UI adapters                              | Select fields for filters; toggle groups for source, metric, and period         | Shared-control and Usage interaction tests   |
+| Date            | ProviderUsageHistoryWorkspace period controls                               | LocalUsageHistoryRequest                        | Past 24h, 7, 30, and 90 days; explicit viewing timezone                         | Range and stale-response tests               |
+| Form            | UsageDashboard filters and shared field adapters                            | UsageQueryFilter                                | App-owned validation; retained filter values                                    | UsageDashboard tests                         |
+| Scrollbar       | Usage workspace viewport and table scroll regions                           | usageWorkspace.css and providerUsageHistory.css | One page scroller; horizontal table overflow and disclosed chart-data scrolling | Narrow viewport and keyboard QA              |
+| Toast           | Inline usage status and error regions                                       | Query and provider-limit state                  | Retained stale readings and inline recovery; no critical toast-only feedback    | Failure, refresh, and client-switch tests    |
+| CRUD            | UsageDashboard in Settings                                                  | Usage client and retention/export contracts     | Main Usage is read-only; retention and export stay in Settings                  | Existing usage action tests                  |
 
 ## Git history in Review
 

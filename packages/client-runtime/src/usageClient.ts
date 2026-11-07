@@ -8,7 +8,11 @@ import {
   type UsageResetRequest,
   type UsageRetentionRequest,
 } from "@octant/contracts/usage-rpc";
-import { decodeHostAnswer } from "@octant/contracts";
+import {
+  decodeHostAnswer,
+  TurnDiagnosticsReport,
+  type UsageDiagnosticsRequest,
+} from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface UsageClientOptions {
@@ -24,6 +28,8 @@ export interface UsageExportResult {
 
 export interface UsageClient {
   query(request: UsageQueryRequest): Promise<UsageQueryResponse>;
+  /** How the matching turns went: failures, tools, retries, cache misses, and speed. */
+  diagnostics(request: UsageDiagnosticsRequest): Promise<TurnDiagnosticsReport>;
   export(request: UsageExportRequest): Promise<UsageExportResult>;
   reset(request: UsageResetRequest): Promise<UsagePurgeResult>;
   retain(request: UsageRetentionRequest): Promise<UsagePurgeResult>;
@@ -92,6 +98,23 @@ export function createUsageClient(options: UsageClientOptions): UsageClient {
       const body = await readJsonBody(response);
       try {
         return decodeHostAnswer(UsageQueryResponse)(body);
+      } catch {
+        throw new UsageClientError("Usage service returned an invalid response.");
+      }
+    },
+    async diagnostics(request) {
+      const response = await postJson(
+        resolved,
+        "/api/usage/diagnostics",
+        request,
+        DEFAULT_TIMEOUT_MS,
+      );
+      if (!response.ok) {
+        throw new UsageClientError(`Usage diagnostics failed with status ${response.status}.`);
+      }
+      const body = await readJsonBody(response);
+      try {
+        return decodeHostAnswer(TurnDiagnosticsReport)(body);
       } catch {
         throw new UsageClientError("Usage service returned an invalid response.");
       }

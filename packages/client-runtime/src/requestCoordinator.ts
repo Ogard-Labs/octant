@@ -36,6 +36,7 @@ const COORDINATED_POST_READ_PATHS = new Set([
   "/api/code/terminals/inspect",
   "/api/context/inspect",
   "/api/usage/dashboard",
+  "/api/usage/diagnostics",
   "/api/usage/query",
   "/api/work/board",
 ]);
