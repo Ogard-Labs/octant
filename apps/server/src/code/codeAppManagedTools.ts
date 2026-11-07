@@ -56,7 +56,11 @@ import type {
   ToolApprovalId,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  MAX_CODE_OPERATION_SUMMARY_BYTES,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
@@ -1540,8 +1544,14 @@ async function browserToolOne(
       threadId,
       downloadId: input.downloadId,
       workspaceRoot: download.root,
-      ask: (facts, pageOrigin) =>
-        download.request(browserDownloadQuestion(pageOrigin, facts), signal),
+      ask: (facts, pageOrigin) => {
+        const question = browserDownloadQuestion(pageOrigin, facts);
+        // Code journals bounded approval summaries. Refuse before that layer
+        // could truncate the source chain and hide its final origin.
+        return Buffer.byteLength(question, "utf8") > MAX_CODE_OPERATION_SUMMARY_BYTES
+          ? Promise.resolve("cancelled" as const)
+          : download.request(question, signal);
+      },
     });
     return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
   }

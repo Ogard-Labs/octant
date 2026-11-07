@@ -2470,6 +2470,8 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 
 Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Page audits](browser-agent-tool.md#page-audits), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
 
+Download-source review preserves every attested origin. Code refuses a review that cannot fit its complete approval-summary byte limit; it never approves a truncated chain.
+
 ### Browser profiles and extensions
 
 Browser pages may keep sign-in in a Project or Personal profile. Private is the initial default, and extensions are enabled only per profile.

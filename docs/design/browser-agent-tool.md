@@ -341,7 +341,9 @@ turned on a switch, and then only after they answer for that file.
   Download source: https://example.com → https://files.example.com." It
   names the file, its size, its type, the requesting page and the attested
   source origins separately. Without a native receipt, it says "Download
-  source: unverified." A page address is never substituted as source proof. The answer covers that file
+  source: unverified." A page address is never substituted as source proof.
+  Code refuses a save whose complete review exceeds its approval-summary byte
+  limit; it never offers approval of a truncated source chain. The answer covers that file
   once and is never remembered, so the card has no "Always allow", and it is
   asked at every access level, Full access included. Work asks in the thread's
   Browser approval card ("Save once" or "Deny"); Code asks in the thread's tool
