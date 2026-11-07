@@ -124,6 +124,7 @@ describe("the connectors catalog", () => {
     for (const entry of entries) {
       expect(entry.id).toMatch(/^[a-z0-9][a-z0-9-]{0,63}$/);
       expect(new URL(entry.url).protocol).toBe("https:");
+      expect(new URL(entry.docs).protocol).toBe("https:");
       expect(entry.description.length).toBeLessThanOrEqual(120);
       if (entry.auth.kind === "key") {
         expect(new URL(entry.auth.keyPage).protocol).toBe("https:");
@@ -132,7 +133,7 @@ describe("the connectors catalog", () => {
     }
   });
 
-  it("searches by name or description and lists everything for an empty query", () => {
+  it("searches by name, description or keyword and lists everything for an empty query", () => {
     expect(searchConnectorCatalog("  ").length).toBe(connectorCatalog().length);
     expect(searchConnectorCatalog("postgres").map((entry) => entry.id)).toEqual([
       "supabase",
@@ -140,6 +141,11 @@ describe("the connectors catalog", () => {
       "prisma",
     ]);
     expect(searchConnectorCatalog("LINEAR").map((entry) => entry.id)).toEqual(["linear"]);
+    expect(searchConnectorCatalog("Jira").map((entry) => entry.id)).toEqual(["atlassian"]);
+    expect(searchConnectorCatalog("crm").map((entry) => entry.id)).toEqual([
+      "hubspot",
+      "pipedrive",
+    ]);
   });
 
   it("lists Doop as a sign-in connector at its own address", () => {

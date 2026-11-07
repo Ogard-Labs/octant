@@ -9412,9 +9412,12 @@ the person decided to.
 
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
-`@octant/domain`), each with a name, one line, a category, the vendor's own
-address and how it is reached: sign-in through the MCP authorization flow,
-a key the vendor issues sent in one header, or nothing. Nothing is fetched
+`@octant/domain`), each with a name, one line, a category, search keywords,
+the vendor's own address and setup page, and how it is reached: sign-in
+through the MCP authorization flow, a key the vendor issues sent in one
+header, or nothing. An entry whose address stops behaving as its auth says is fixed or
+removed; `bun run connectors:probe` checks every address and setup page
+and runs weekly in CI, never in the app. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. A remote browser's disabled

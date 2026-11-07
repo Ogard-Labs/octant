@@ -35,7 +35,11 @@ export interface ConnectorCatalogEntry {
   /** One line: what the agent can do with it. */
   readonly description: string;
   readonly category: ConnectorCategory;
+  /** Other words a person may search for: products it covers and the kind of tool it is. */
+  readonly keywords?: readonly string[];
   readonly url: string;
+  /** The vendor's own page on connecting to this server, shown beside the entry. */
+  readonly docs: string;
   readonly auth: ConnectorAuth;
 }
 
@@ -74,6 +78,7 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       description: service.description,
       category: "business",
       url: service.resource,
+      docs: "https://developers.google.com/workspace/guides/create-credentials#desktop-app",
       auth: {
         kind: "sign-in",
         clientSetup: "registered",
@@ -88,7 +93,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Slack",
     description: "Search public Slack content with an eligible app you register.",
     category: "business",
+    keywords: ["chat", "messages", "channels"],
     url: "https://mcp.slack.com/mcp",
+    docs: "https://docs.slack.dev/ai/slack-mcp-server/",
     auth: {
       kind: "sign-in",
       clientSetup: "registered",
@@ -101,7 +108,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Atlassian",
     description: "Work with permitted Jira, Confluence and other Atlassian Cloud content.",
     category: "business",
+    keywords: ["jira", "confluence", "issues", "wiki"],
     url: "https://mcp.atlassian.com/v2/mcp",
+    docs: "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/",
     auth: { kind: "sign-in" },
   },
   {
@@ -109,7 +118,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Airtable",
     description: "Read and update the bases you select during Airtable consent.",
     category: "business",
+    keywords: ["database", "spreadsheet", "bases"],
     url: "https://mcp.airtable.com/mcp",
+    docs: "https://support.airtable.com/docs/using-the-airtable-mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -117,7 +128,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Airtable personal token",
     description: "Use a personal token limited to selected bases and read or write permissions.",
     category: "business",
+    keywords: ["database", "spreadsheet", "bases"],
     url: "https://mcp.airtable.com/mcp",
+    docs: "https://support.airtable.com/docs/using-the-airtable-mcp-server",
     auth: {
       kind: "key",
       header: "Authorization",
@@ -130,7 +143,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "HubSpot",
     description: "Read and update CRM data with a connector you register in your HubSpot account.",
     category: "business",
+    keywords: ["crm", "sales", "marketing", "contacts"],
     url: "https://mcp.hubspot.com/",
+    docs: "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
     auth: {
       kind: "sign-in",
       clientSetup: "registered",
@@ -145,7 +160,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Linear",
     description: "Find, create, and update issues, projects, and comments.",
     category: "popular",
+    keywords: ["issues", "tickets", "project management"],
     url: "https://mcp.linear.app/mcp",
+    docs: "https://linear.app/docs/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -153,7 +170,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Notion",
     description: "Search, read, and edit pages and databases.",
     category: "popular",
+    keywords: ["wiki", "docs", "notes"],
     url: "https://mcp.notion.com/mcp",
+    docs: "https://developers.notion.com/docs/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -161,7 +180,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Stripe",
     description: "Work with customers, payments, and the Stripe docs.",
     category: "popular",
+    keywords: ["payments", "billing", "subscriptions"],
     url: "https://mcp.stripe.com",
+    docs: "https://docs.stripe.com/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -169,7 +190,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Sentry",
     description: "Investigate errors, issues, and releases.",
     category: "popular",
+    keywords: ["errors", "monitoring", "crashes"],
     url: "https://mcp.sentry.dev/mcp",
+    docs: "https://docs.sentry.io/product/sentry-mcp/",
     auth: { kind: "sign-in" },
   },
   {
@@ -177,7 +200,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Supabase",
     description: "Query Postgres, manage projects, and deploy edge functions.",
     category: "popular",
+    keywords: ["database", "auth", "storage"],
     url: "https://mcp.supabase.com/mcp",
+    docs: "https://supabase.com/docs/guides/getting-started/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -185,7 +210,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Vercel",
     description: "Manage projects and deployments, and read deployment logs.",
     category: "popular",
+    keywords: ["hosting", "deploy", "next.js"],
     url: "https://mcp.vercel.com",
+    docs: "https://vercel.com/docs/mcp/vercel-mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -193,7 +220,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "GitHub repositories",
     description: "Read and write public and private repositories with your registered OAuth App.",
     category: "developer-tools",
+    keywords: ["git", "code", "pull requests"],
     url: "https://api.githubcopilot.com/mcp/",
+    docs: "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/set-up-the-github-mcp-server",
     auth: {
       kind: "sign-in",
       clientSetup: "registered",
@@ -209,7 +238,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     description:
       "Connect your registered OAuth App with profile read access; tool availability varies.",
     category: "developer-tools",
+    keywords: ["git", "code"],
     url: "https://api.githubcopilot.com/mcp/",
+    docs: "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/set-up-the-github-mcp-server",
     auth: {
       kind: "sign-in",
       clientSetup: "registered",
@@ -223,7 +254,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "GitHub",
     description: "Read repositories, issues, and pull requests with a personal access token.",
     category: "popular",
+    keywords: ["git", "code", "issues"],
     url: "https://api.githubcopilot.com/mcp/",
+    docs: "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/set-up-the-github-mcp-server",
     auth: {
       kind: "key",
       header: "Authorization",
@@ -236,7 +269,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Figma",
     description: "Read files, frames, and design context.",
     category: "popular",
+    keywords: ["design", "ui", "prototypes"],
     url: "https://mcp.figma.com/mcp",
+    docs: "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/",
     auth: { kind: "sign-in" },
   },
   {
@@ -244,7 +279,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Doop",
     description: "Build and refine designs on a shared canvas, and open pull requests.",
     category: "popular",
+    keywords: ["design", "canvas", "prototypes"],
     url: "https://doop.design/mcp",
+    docs: "https://doop.design/docs/get-started",
     auth: { kind: "sign-in" },
   },
   {
@@ -252,7 +289,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Asana",
     description: "Find and update tasks and projects.",
     category: "popular",
+    keywords: ["tasks", "project management"],
     url: "https://mcp.asana.com/mcp",
+    docs: "https://developers.asana.com/docs/using-asanas-mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -260,7 +299,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Dropbox",
     description: "Search, read, and organize files and folders, and work with shared links.",
     category: "popular",
+    keywords: ["files", "storage", "cloud drive"],
     url: "https://mcp.dropbox.com/mcp",
+    docs: "https://help.dropbox.com/integrations/connect-dropbox-mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -268,7 +309,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "monday.com",
     description: "Read and update boards, items, and updates.",
     category: "popular",
+    keywords: ["monday", "boards", "project management", "work management"],
     url: "https://mcp.monday.com/mcp",
+    docs: "https://developer.monday.com/api-reference/docs/compatible-mcp-clients",
     auth: { kind: "sign-in" },
   },
   {
@@ -276,7 +319,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "ClickUp",
     description: "Find and update tasks, docs, comments, and time entries.",
     category: "popular",
+    keywords: ["tasks", "project management"],
     url: "https://mcp.clickup.com/mcp",
+    docs: "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -284,7 +329,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Miro",
     description: "Read boards and create diagrams and content on them.",
     category: "popular",
+    keywords: ["whiteboard", "diagrams", "boards"],
     url: "https://mcp.miro.com/",
+    docs: "https://developers.miro.com/docs/mcp-intro",
     auth: { kind: "sign-in" },
   },
   {
@@ -292,7 +339,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Todoist",
     description: "Find, add, and complete tasks and projects.",
     category: "popular",
+    keywords: ["tasks", "to-do", "reminders"],
     url: "https://ai.todoist.net/mcp",
+    docs: "https://github.com/Doist/todoist-ai/blob/main/docs/mcp-server.md",
     auth: { kind: "sign-in" },
   },
   {
@@ -300,7 +349,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Cloudflare",
     description: "Build with Workers, KV, R2, and D1 on your account.",
     category: "developer-tools",
+    keywords: ["workers", "kv", "r2", "d1", "serverless"],
     url: "https://bindings.mcp.cloudflare.com/mcp",
+    docs: "https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/",
     auth: { kind: "sign-in" },
   },
   {
@@ -308,7 +359,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "GitLab",
     description: "Work with GitLab.com projects, issues, merge requests, and pipelines.",
     category: "developer-tools",
+    keywords: ["git", "code", "ci", "merge requests"],
     url: "https://gitlab.com/api/v4/mcp",
+    docs: "https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/",
     auth: { kind: "sign-in" },
   },
   {
@@ -316,7 +369,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Buildkite",
     description: "Inspect pipelines, builds, jobs, and logs.",
     category: "developer-tools",
+    keywords: ["ci", "builds", "pipelines"],
     url: "https://mcp.buildkite.com/mcp",
+    docs: "https://buildkite.com/docs/apis/mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -324,7 +379,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Amplitude",
     description: "Query product analytics, charts, and experiment results.",
     category: "developer-tools",
+    keywords: ["analytics", "events", "experiments"],
     url: "https://mcp.amplitude.com/mcp",
+    docs: "https://amplitude.com/docs/amplitude-ai/amplitude-mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -332,7 +389,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Cloudflare docs",
     description: "Search the Cloudflare documentation.",
     category: "developer-tools",
+    keywords: ["documentation", "workers"],
     url: "https://docs.mcp.cloudflare.com/mcp",
+    docs: "https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/",
     auth: { kind: "none" },
   },
   {
@@ -340,7 +399,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Neon",
     description: "Manage serverless Postgres projects and branches.",
     category: "developer-tools",
+    keywords: ["database", "serverless"],
     url: "https://mcp.neon.tech/mcp",
+    docs: "https://neon.com/docs/ai/neon-mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -348,7 +409,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "PostHog",
     description: "Query product analytics, feature flags, and errors.",
     category: "developer-tools",
+    keywords: ["analytics", "feature flags", "session replay"],
     url: "https://mcp.posthog.com/mcp",
+    docs: "https://posthog.com/docs/model-context-protocol",
     auth: { kind: "sign-in" },
   },
   {
@@ -356,7 +419,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Netlify",
     description: "Create, deploy, and manage Netlify sites.",
     category: "developer-tools",
+    keywords: ["hosting", "deploy"],
     url: "https://netlify-mcp.netlify.app/mcp",
+    docs: "https://docs.netlify.com/build/build-with-ai/netlify-mcp-server/",
     auth: { kind: "sign-in" },
   },
   {
@@ -364,7 +429,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Prisma",
     description: "Manage Prisma Postgres databases and backups.",
     category: "developer-tools",
+    keywords: ["database", "orm"],
     url: "https://mcp.prisma.io/mcp",
+    docs: "https://www.prisma.io/docs/postgres/integrations/mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -372,7 +439,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Railway",
     description: "Deploy and manage Railway projects and services.",
     category: "developer-tools",
+    keywords: ["hosting", "deploy"],
     url: "https://mcp.railway.com/mcp",
+    docs: "https://docs.railway.com/ai/mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -380,7 +449,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Webflow",
     description: "Read and update sites, pages, and the CMS.",
     category: "developer-tools",
+    keywords: ["website", "cms"],
     url: "https://mcp.webflow.com/mcp",
+    docs: "https://developers.webflow.com/data/docs/ai-tools",
     auth: { kind: "sign-in" },
   },
   {
@@ -388,7 +459,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Cloudinary",
     description: "Find, upload, and transform media assets.",
     category: "developer-tools",
+    keywords: ["images", "video", "media"],
     url: "https://asset-management.mcp.cloudinary.com/mcp",
+    docs: "https://cloudinary.com/documentation/cloudinary_llm_mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -396,7 +469,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Convex",
     description: "Start Convex apps and get setup and scaling guidance.",
     category: "developer-tools",
+    keywords: ["database", "backend"],
     url: "https://mcp.convex.dev/mcp",
+    docs: "https://docs.convex.dev/ai/convex-mcp-server",
     auth: { kind: "none" },
   },
   {
@@ -404,7 +479,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Context7",
     description: "Look up current library documentation and code examples.",
     category: "developer-tools",
+    keywords: ["documentation", "libraries"],
     url: "https://mcp.context7.com/mcp",
+    docs: "https://github.com/upstash/context7",
     auth: { kind: "none" },
   },
   {
@@ -412,7 +489,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "DeepWiki",
     description: "Ask about public GitHub repositories.",
     category: "developer-tools",
+    keywords: ["documentation", "github", "repositories"],
     url: "https://mcp.deepwiki.com/mcp",
+    docs: "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
     auth: { kind: "none" },
   },
   {
@@ -420,7 +499,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Microsoft Learn",
     description: "Search Microsoft and Azure documentation.",
     category: "developer-tools",
+    keywords: ["azure", "microsoft docs", "documentation"],
     url: "https://learn.microsoft.com/api/mcp",
+    docs: "https://learn.microsoft.com/en-us/training/support/mcp",
     auth: { kind: "none" },
   },
   {
@@ -428,7 +509,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Hugging Face",
     description: "Search models, datasets, Spaces, and papers.",
     category: "developer-tools",
+    keywords: ["ai models", "datasets", "machine learning"],
     url: "https://huggingface.co/mcp",
+    docs: "https://huggingface.co/docs/hub/hf-mcp-server",
     auth: { kind: "none" },
   },
   {
@@ -436,7 +519,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "PayPal",
     description: "Work with invoices, orders, and subscriptions.",
     category: "business",
+    keywords: ["payments", "invoices"],
     url: "https://mcp.paypal.com/mcp",
+    docs: "https://developer.paypal.com/ai-tools/mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -444,7 +529,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Square",
     description: "Work with catalog, orders, payments, and customers.",
     category: "business",
+    keywords: ["payments", "point of sale"],
     url: "https://mcp.squareup.com/mcp",
+    docs: "https://developer.squareup.com/docs/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -452,7 +539,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Zapier",
     description: "Run actions across the apps connected to your Zapier account.",
     category: "business",
+    keywords: ["automation", "workflows", "integrations"],
     url: "https://mcp.zapier.com/api/mcp/mcp",
+    docs: "https://docs.zapier.com/mcp/home",
     auth: { kind: "sign-in" },
   },
   {
@@ -460,7 +549,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Intercom",
     description: "Search conversations, contacts, and articles.",
     category: "business",
+    keywords: ["support", "customer messaging", "help desk"],
     url: "https://mcp.intercom.com/mcp",
+    docs: "https://developers.intercom.com/docs/guides/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -468,7 +559,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Canva",
     description: "Find, create, and export designs.",
     category: "business",
+    keywords: ["design", "graphics", "presentations"],
     url: "https://mcp.canva.com/mcp",
+    docs: "https://www.canva.dev/docs/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -476,7 +569,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Box",
     description: "Search, read, and manage Box content with an integration your Box admin enables.",
     category: "business",
+    keywords: ["files", "storage", "cloud drive", "documents"],
     url: "https://mcp.box.com/",
+    docs: "https://developer.box.com/guides/box-mcp/remote/",
     auth: {
       kind: "sign-in",
       clientSetup: "registered",
@@ -490,7 +585,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Calendly",
     description: "See event types and bookings, and share scheduling links.",
     category: "business",
+    keywords: ["scheduling", "meetings", "calendar", "booking"],
     url: "https://mcp.calendly.com",
+    docs: "https://developer.calendly.com/calendly-mcp-server",
     auth: { kind: "sign-in" },
   },
   {
@@ -498,7 +595,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Pipedrive",
     description: "Read and update deals, contacts, leads, and activities.",
     category: "business",
+    keywords: ["crm", "sales", "deals"],
     url: "https://mcp.pipedrive.ai/mcp",
+    docs: "https://support.pipedrive.com/en/article/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -506,7 +605,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Klaviyo",
     description: "Work with profiles, lists, campaigns, and flows.",
     category: "business",
+    keywords: ["email marketing", "sms", "marketing"],
     url: "https://mcp.klaviyo.com/mcp",
+    docs: "https://developers.klaviyo.com/en/docs/connect_to_the_klaviyo_mcp_server",
     auth: { kind: "sign-in" },
   },
   {
@@ -514,7 +615,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     displayName: "Mercado Pago",
     description: "Work with payments and the Mercado Pago docs.",
     category: "business",
+    keywords: ["payments"],
     url: "https://mcp.mercadopago.com/mcp",
+    docs: "https://www.mercadopago.com/developers/en/docs/mcp-server/overview",
     auth: { kind: "sign-in" },
   },
 ];
@@ -560,13 +663,14 @@ export function featuredConnectors(): ReadonlyArray<ConnectorCatalogEntry> {
   });
 }
 
-/** Entries whose name or description contains the query, in catalog order; an empty query lists all. */
+/** Entries whose name, description or a keyword contains the query, in catalog order; an empty query lists all. */
 export function searchConnectorCatalog(query: string): ReadonlyArray<ConnectorCatalogEntry> {
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) return ENTRIES;
   return ENTRIES.filter(
     (entry) =>
       entry.displayName.toLowerCase().includes(needle) ||
-      entry.description.toLowerCase().includes(needle),
+      entry.description.toLowerCase().includes(needle) ||
+      (entry.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(needle)),
   );
 }
