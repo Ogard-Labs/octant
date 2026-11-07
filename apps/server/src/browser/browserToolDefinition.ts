@@ -56,11 +56,6 @@ export const BROWSER_TOOL_DEFINITION = {
           "^(private|project|personal|account:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
         description: "Navigate profile; grants no access.",
       },
-      uploadPermissionId: {
-        type: "string",
-        description:
-          "For an explicitly reviewed recurring upload: the exact host-issued manifest permission id. It grants no Browser profile authority.",
-      },
       ref: { type: "string", description: "Element ref from the latest snapshot." },
       include: {
         type: "array",

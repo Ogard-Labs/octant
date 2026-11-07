@@ -116,6 +116,15 @@ export class BrowserDelegatedChildren {
             ...BROWSER_TOOL_DEFINITION.inputSchema,
             properties: {
               ...BROWSER_TOOL_DEFINITION.inputSchema.properties,
+              ...(input.uploadPermissions === undefined
+                ? {}
+                : {
+                    uploadPermissionId: {
+                      type: "string",
+                      description:
+                        "The exact host-reviewed upload manifest id; grants no account access.",
+                    },
+                  }),
               profile: {
                 type: "string",
                 description:
