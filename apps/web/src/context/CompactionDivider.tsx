@@ -4,9 +4,10 @@ import {
   type ContextSubjectRef,
 } from "@octant/contracts/context";
 import { useEffect, useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { useComposerContextMeterScope } from "./composerContextMeterScope";
-import { compactionResultLine } from "./sessionCompactionPresentation";
+import { compactionResultLine, limitNearNotice } from "./sessionCompactionPresentation";
 
 /**
  * The compactions the host journaled for one thread, oldest first. Each pane
@@ -92,16 +93,33 @@ export function placeCompactions<T>(
   return { before, trailing };
 }
 
-/** A quiet rule that says the session was compacted here, and how. */
+/**
+ * A quiet rule that says the session was compacted here, and how. After the
+ * limit rule it also says the thread is ready to move, with a way to pick
+ * the next model, since that is why the rule ran.
+ */
 export function CompactionDivider(props: { readonly receipt: ContextCompactionReceipt }) {
-  const names = useComposerContextMeterScope().compaction?.names;
-  const line = compactionResultLine(
-    { status: "completed", receipt: props.receipt },
-    names ?? { provider: () => undefined, model: () => undefined },
-  );
-  return (
+  const scope = useComposerContextMeterScope();
+  const names = scope.compaction?.names ?? { provider: () => undefined, model: () => undefined };
+  const line = compactionResultLine({ status: "completed", receipt: props.receipt }, names);
+  const notice = limitNearNotice(props.receipt, names);
+  const divider = (
     <OctantSeparatorWithLabel aria-label={line} className="py-3" data-compaction-divider="">
       {line}
     </OctantSeparatorWithLabel>
+  );
+  if (notice === undefined) return divider;
+  return (
+    <>
+      {divider}
+      <div className="flex flex-wrap items-center justify-center gap-2 pb-3 text-center text-sm text-muted-foreground">
+        <p>{notice}</p>
+        {scope.requestModelPicker === undefined ? null : (
+          <OctantButton onClick={scope.requestModelPicker} size="sm" type="button">
+            Switch model
+          </OctantButton>
+        )}
+      </div>
+    </>
   );
 }

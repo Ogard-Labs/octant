@@ -885,6 +885,52 @@ describe("compacting a session a runtime keeps", () => {
     world.close();
   });
 
+  it("writes a handover summary with the thread's own provider before a limit rule compacts it", async () => {
+    const world = createRuntimeWorld({
+      answer: { kind: "compacted", tokensBefore: 900, tokensAfter: 300 },
+      usage: { inputTokens: 50, outputTokens: 20 },
+      handover: "Rotate the signing key before the release.",
+    });
+    planSession(world);
+    const cause = {
+      kind: "limit-near",
+      window: "five_hour",
+      usedPercent: 91,
+      thresholdPercent: 90,
+    } as const;
+    world.service.start(command(), "host-policy", windowId, cause);
+    await world.service.settled();
+
+    const record = world.harness.latestCompaction(subject);
+    if (record?.status !== "completed") throw new Error("The compaction completed");
+    expect(record.receipt.cause).toEqual(cause);
+    expect(record.receipt.handover).toBeDefined();
+    // The summary read the conversation the host holds, before the runtime compacted.
+    expect(world.runtime.handoverPrompts).toHaveLength(1);
+    expect(world.runtime.handoverPrompts[0]).toContain("User: ");
+    expect(world.runtime.compactions).toEqual([String(compactionId)]);
+    expect(world.harness.handoverSummary(subject)).toEqual({
+      content: "Rotate the signing key before the release.",
+      completedAt: String(record.receipt.completedAt),
+    });
+    // What the summary spent is part of what the compaction spent.
+    expect(record.receipt.usage).toMatchObject({ inputTokens: 80, outputTokens: 30 });
+    world.close();
+  });
+
+  it("writes no handover summary for a compaction another rule or the person started", async () => {
+    const world = createRuntimeWorld({
+      answer: { kind: "compacted", tokensBefore: 900, tokensAfter: 300 },
+      handover: "Unused.",
+    });
+    planSession(world);
+    world.service.start(command(), "local-window", windowId);
+    await world.service.settled();
+    expect(world.runtime.handoverPrompts).toHaveLength(0);
+    expect(world.harness.handoverSummary(subject)).toBeUndefined();
+    world.close();
+  });
+
   it("waits for the next usage report when the runtime reports no figures", async () => {
     const world = createRuntimeWorld({ answer: { kind: "compacted" } });
     planSession(world);
@@ -2082,6 +2128,9 @@ function createRuntimeWorld(
         settled: (threadId: string, compaction: unknown) => {
           announced.push({ threadId, compaction });
         },
+        ...(kind === "chat-thread"
+          ? { conversation: () => conversation, scratchRoot: async () => "/tmp/octant-scratch" }
+          : {}),
         runtimeSessions: {
           exists: () => state.hasSession,
           ...(kind === "code-thread" ? { occupancy: () => state.occupancy } : {}),
@@ -2136,6 +2185,8 @@ interface FakeRuntimeOptions {
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
   /** Runs when the runtime is asked, before it answers. */
   readonly onCompact?: () => void;
+  /** What the runtime answers when the host asks it for a handover summary. */
+  readonly handover?: string;
 }
 
 /** A runtime connection whose session compacts the way its options say. */
@@ -2149,10 +2200,14 @@ function fakeRuntime(options: FakeRuntimeOptions) {
     endings: [] as Array<"interrupt" | "stop">,
   };
   const queue = Effect.runSync(Queue.unbounded<never>());
+  const handoverPrompts: Array<string> = [];
   const connection = {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
-    start: () =>
-      Effect.fail({ category: "protocol", message: "A compaction never starts a session." }),
+    // Only a handover summary starts a session of its own.
+    start: (input: { readonly sessionId: string }) =>
+      options.handover === undefined
+        ? Effect.fail({ category: "protocol", message: "A compaction never starts a session." })
+        : Effect.succeed({ sessionId: input.sessionId }),
     resume: (input: ProviderSessionResume) =>
       Effect.suspend(() => {
         recorded.resumed.push(input);
@@ -2160,7 +2215,23 @@ function fakeRuntime(options: FakeRuntimeOptions) {
           ? Effect.fail({ category: "unavailable", message: "The session is gone." })
           : Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor });
       }),
-    send: () => Effect.void,
+    send: (input: { readonly sessionId: string; readonly prompt: string }) =>
+      Effect.gen(function* () {
+        if (options.handover === undefined) return;
+        handoverPrompts.push(input.prompt);
+        yield* Queue.offer(queue, {
+          kind: "text-delta",
+          sessionId: input.sessionId,
+          text: options.handover,
+        } as never);
+        yield* Queue.offer(queue, {
+          kind: "usage",
+          sessionId: input.sessionId,
+          inputTokens: 30,
+          outputTokens: 10,
+        } as never);
+        yield* Queue.offer(queue, { kind: "completed", sessionId: input.sessionId } as never);
+      }),
     compact: (input: { readonly sessionId: string; readonly compactionId: string }) =>
       Effect.suspend(() => {
         recorded.compactions.push(input.compactionId);
@@ -2208,6 +2279,7 @@ function fakeRuntime(options: FakeRuntimeOptions) {
   } as unknown as ProviderDriver;
   return {
     driver,
+    handoverPrompts,
     acquired: recorded.acquired,
     resumed: recorded.resumed,
     compactions: recorded.compactions,

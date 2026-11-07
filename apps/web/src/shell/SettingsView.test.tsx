@@ -248,6 +248,16 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactIdleMinutes: 30 });
   });
 
+  it("leaves the limit rule off by default and turns it on at the share the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const limit = screen.getByRole("combobox", { name: "Compact near a usage limit" });
+    expect(limit).toHaveTextContent("Never");
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "At 90% used" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactLimitPercent: 90 });
+  });
+
   it("presents one section at a time, defaulting to General", () => {
     renderSettings();
 

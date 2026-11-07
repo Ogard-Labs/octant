@@ -15,7 +15,7 @@ import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthorit
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { IdleCompactions } from "../context/idleCompaction";
-import { WindowFillCompactions } from "../context/windowFillCompaction";
+import { TurnEndCompactions } from "../context/turnEndCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
 import { createTaskAccessFacts } from "../context/taskAccessFacts";
 import { createTaskAccessSubjectReader } from "../context/taskAccessSubject";
@@ -52,7 +52,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
-  Pick<ProvidersWiring, "configuredDriverOptions"> &
+  Pick<ProvidersWiring, "configuredDriverOptions" | "providerUsageLimitsService"> &
   Pick<
     BrowserWiring,
     | "browserCredentialUseService"
@@ -98,6 +98,7 @@ export function wireContext(deps: ContextDependencies) {
     persistence,
     projectService,
     providerRuntimeRegistry,
+    providerUsageLimitsService,
     routeCodeService,
     serverProjectStore,
     spendCeilingService,
@@ -485,7 +486,7 @@ export function wireContext(deps: ContextDependencies) {
     idleMinutes: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).autoCompactIdleMinutes,
   });
-  const windowFillCompactions = new WindowFillCompactions({
+  const turnEndCompactions = new TurnEndCompactions({
     compactions: sessionCompaction,
     latestCompaction: (subject) => contextHarness.latestCompaction(subject),
     rules: () => {
@@ -493,7 +494,17 @@ export function wireContext(deps: ContextDependencies) {
       return {
         octant: settings.autoCompactOctantWindowPercent,
         runtime: settings.autoCompactRuntimeWindowPercent,
+        limit: settings.autoCompactLimitPercent,
       };
+    },
+    // The stored reading the usage page shows; reading it asks no provider.
+    accountWindows: (providerInstanceId) => {
+      const entry = providerUsageLimitsService
+        .snapshot()
+        .entries.find(
+          (candidate) => String(candidate.providerInstanceId) === String(providerInstanceId),
+        );
+      return entry?.status === "available" ? (entry.limits.rateLimitWindows ?? []) : [];
     },
   });
   observeTurnEnded((scope, turn) => {
@@ -502,7 +513,7 @@ export function wireContext(deps: ContextDependencies) {
       aggregateId: scope.threadId,
     });
     idleCompactions.turnEnded({ subject, endedAt: turn.endedAt, windowId: scope.windowId });
-    windowFillCompactions.turnEnded({ subject, turnKey: turn.endedAt, windowId: scope.windowId });
+    turnEndCompactions.turnEnded({ subject, turnKey: turn.endedAt, windowId: scope.windowId });
   });
   const taskAccessFacts = createTaskAccessFacts({
     subject: createTaskAccessSubjectReader({

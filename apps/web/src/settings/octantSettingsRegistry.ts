@@ -79,6 +79,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "compact compaction auto-compact automatic idle inactive inactivity quiet minutes hours summary",
         },
         {
+          id: settingId("auto-compact-limit"),
+          label: "Compact near a usage limit",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic usage limit rate limit quota 5-hour weekly handover hand over switch provider model summary",
+        },
+        {
           id: settingId("app-update-automatic-checks"),
           label: "Automatic update checks",
           scope: "app",

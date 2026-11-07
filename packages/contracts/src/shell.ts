@@ -12,7 +12,11 @@ import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { CanvasId } from "./canvas";
-import { AutoCompactIdleMinutes, AutoCompactWindowPercent } from "./context";
+import {
+  AutoCompactIdleMinutes,
+  AutoCompactLimitPercent,
+  AutoCompactWindowPercent,
+} from "./context";
 import {
   PreviewDisplayName,
   PreviewHostId,
@@ -700,6 +704,15 @@ export const ShellSettings = Schema.Struct({
    * compaction of a thread nobody returns to is pure cost.
    */
   autoCompactIdleMinutes: Schema.optionalWith(Schema.NullOr(AutoCompactIdleMinutes), {
+    default: () => null,
+  }),
+  /**
+   * Compact a thread, and write a summary another provider can carry, once a
+   * turn leaves its provider's account window (a 5-hour or weekly limit) at
+   * least this used. `null`, the default, means never: the summary spends a
+   * little of the limit that is running out.
+   */
+  autoCompactLimitPercent: Schema.optionalWith(Schema.NullOr(AutoCompactLimitPercent), {
     default: () => null,
   }),
   /**

@@ -5,6 +5,7 @@ import {
   decideContextLengthRecovery,
   decideSessionCompaction,
   decideIdleCompaction,
+  decideLimitCompaction,
   decideWindowFillCompaction,
   IDLE_COMPACTION_MIN_TOKENS,
   evaluateSemanticSummary,
@@ -636,6 +637,55 @@ describe("compacting a quiet thread", () => {
   it("never compacts while the person has the rule off", () => {
     expect(
       decideIdleCompaction({ ...facts, thresholdMinutes: null, now: endedAt + 600 * 60_000 }),
+    ).toBeUndefined();
+  });
+});
+
+describe("compacting when an account limit gets close", () => {
+  const now = Date.parse("2026-11-07T10:00:00.000Z");
+  const later = "2026-11-07T13:00:00.000Z";
+
+  it("compacts at the rule's share, naming the fullest window and its period", () => {
+    const decided = decideLimitCompaction({
+      thresholdPercent: 90,
+      now,
+      windows: [
+        { window: "seven_day", status: "allowed", utilization: 0.4, resetsAt: later },
+        { window: "five_hour", status: "warning", utilization: 0.913, resetsAt: later },
+      ],
+    });
+    expect(decided).toEqual({
+      cause: { kind: "limit-near", window: "five_hour", usedPercent: 91, thresholdPercent: 90 },
+      crossing: `five_hour:${later}`,
+    });
+  });
+
+  it("leaves a window below the share, one with no reset, and one already reset", () => {
+    expect(
+      decideLimitCompaction({
+        thresholdPercent: 90,
+        now,
+        windows: [
+          { window: "five_hour", status: "allowed", utilization: 0.89, resetsAt: later },
+          { window: "seven_day", status: "warning", utilization: 0.95 },
+          {
+            window: "one_day",
+            status: "warning",
+            utilization: 0.97,
+            resetsAt: "2026-11-07T09:00:00.000Z",
+          },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("counts an exhausted window with no share as full, and never acts with the rule off", () => {
+    const exhausted = [{ window: "five_hour", status: "exhausted" as const, resetsAt: later }];
+    expect(
+      decideLimitCompaction({ thresholdPercent: 95, now, windows: exhausted })?.cause,
+    ).toMatchObject({ usedPercent: 100 });
+    expect(
+      decideLimitCompaction({ thresholdPercent: null, now, windows: exhausted }),
     ).toBeUndefined();
   });
 });

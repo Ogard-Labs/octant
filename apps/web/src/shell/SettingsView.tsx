@@ -1987,6 +1987,34 @@ function AutoCompactIdleSelect(props: {
   );
 }
 
+const AUTO_COMPACT_LIMIT_CHOICES: ReadonlyArray<number> = [75, 80, 85, 90, 95];
+
+/** How used a provider's account limit may get before the limit rule acts, plus off. */
+function AutoCompactLimitSelect(props: {
+  readonly percent: number | null;
+  readonly onChange: (percent: number | null) => void;
+}) {
+  const choices =
+    props.percent === null || AUTO_COMPACT_LIMIT_CHOICES.includes(props.percent)
+      ? AUTO_COMPACT_LIMIT_CHOICES
+      : [...AUTO_COMPACT_LIMIT_CHOICES, props.percent].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Compact near a usage limit"
+      id="auto-compact-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        { id: "off", label: "Never" },
+        ...choices.map((percent) => ({
+          id: String(percent),
+          label: `At ${String(percent)}% used`,
+        })),
+      ]}
+      value={props.percent === null ? "off" : String(props.percent)}
+    />
+  );
+}
+
 function ProfileSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
@@ -2149,6 +2177,18 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             <AutoCompactIdleSelect
               minutes={props.settings.autoCompactIdleMinutes}
               onChange={(minutes) => props.onSettingsChange({ autoCompactIdleMinutes: minutes })}
+            />
+          </SettingRow>
+          <SettingRow
+            description="When a turn leaves a provider's 5-hour or weekly limit this used, Octant compacts the thread and writes a summary another provider can pick up, so you can switch before the limit stops you."
+            focused={focusedSetting === settingId("auto-compact-limit")}
+            label="Compact near a usage limit"
+            scope="host"
+            settingId="auto-compact-limit"
+          >
+            <AutoCompactLimitSelect
+              onChange={(percent) => props.onSettingsChange({ autoCompactLimitPercent: percent })}
+              percent={props.settings.autoCompactLimitPercent}
             />
           </SettingRow>
         </div>

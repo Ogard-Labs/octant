@@ -1096,6 +1096,7 @@ export function startOctantServer(
       persistence,
       projectService,
       providerRuntimeRegistry,
+      providerUsageLimitsService,
       browserToolApprovalService,
       routeCodeService,
       serverProjectStore,

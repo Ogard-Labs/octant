@@ -1,6 +1,6 @@
 # Automatic compaction
 
-Status: Building (slice 2 of 4)
+Status: Building (slice 3 of 4)
 Size: Full — crosses contracts, the context service, every runtime adapter,
 Settings and the provider-switch handoff.
 Owner: maintainers · Started: 2026-11-07 · Approved: 2026-11-07, maintainer (Q-1 and Q-2 answered)
@@ -226,6 +226,19 @@ Choice: (b). It adds no new authority path; the window that just ran a turn on
 the checkout is the one that compacts it. Consequences: the idle rule (slice 2)
 needs a window that can still open the thread, or it skips Code threads.
 
+### D-5: The handover summary covers Chat and Work; Code waits (Accepted, 2026-11-07)
+
+Context: the host holds the whole conversation of a Chat or Work thread
+(`sessionCompactionConversation`), so it can ask the thread's own provider for a
+summary of it before the runtime compacts. A Code thread's conversation lives in
+its runtime session and its operation journal; the host reads it only as the
+bounded selection a switch hands over. Options: (a) build a full Code
+conversation reader in this slice; (b) write the summary for Chat and Work, and
+let a Code thread's switch keep today's bounded selection. Choice: (b), so the
+limit rule, its notice and **Switch model** reach every mode now, and a Code
+reader is its own change. Consequences: FR-7 holds for Chat and Work only; a
+Code thread is still compacted and told it is ready to move.
+
 ## 6. Build plan
 
 | Slice | What it delivers                                                                                                                           | Requirement IDs                       | Status  |
@@ -272,7 +285,7 @@ needs a window that can still open the thread, or it skips Code threads.
   adds `contextWindow` to `latestWindowOccupancy`), else the plan's latest usage,
   else the plan's estimate, and never a report older than a later compaction; `keeper` is `octant` where the
   instance's driver keeps no conversation of its own.
-- **Rule** (`windowFillCompaction.ts`): hears every settled turn through
+- **Rule** (`windowFillCompaction.ts`, now `turnEndCompaction.ts`): hears every settled turn through
   `observeTurnEnded` in the harness wiring (Chat, Work and Code all end there),
   picks the share by keeper, and starts the compaction under an id derived from
   the thread and the turn's end, so the same end seen twice is one compaction.
@@ -316,6 +329,46 @@ for 5 more points after its last attempt; a restart closes a running rule compac
 Failure modes: a pass that throws is dropped and the timer goes on; a refused
 spell waits for the thread's next turn.
 
+### Slice 3: limit rule and handover summary
+
+- **Setting**: `autoCompactLimitPercent` (`AutoCompactLimitPercent | null`, 50 to
+  99, default `null`). Settings → General → Compaction → **Compact near a usage
+  limit** offers Never, then 75, 80, 85, 90 and 95% used.
+- **Cause**: `{ "kind": "limit-near", "window": "five_hour", "usedPercent": 91,
+"thresholdPercent": 90 }`. `window` is the provider's own name for the account
+  window, as `ProviderRateLimitWindow.window` carries it.
+- **Decision** (`decideLimitCompaction`): over the instance's stored account
+  windows, the fullest one at or past the rule, counting an exhausted window
+  with no share as 100%. Its crossing is the window plus `resetsAt`, so a thread
+  is compacted once per limit period. A window with no reset, or one already
+  reset, is passed over.
+- **Rule** (`turnEndCompaction.ts`, `TurnEndCompactions`, renamed from slice 1's
+  window-fill rule): after a turn, the limit rule is judged first and the
+  window-fill rule only when it does not act, since one compaction serves both
+  and only the limit rule writes a handover. The account windows come from
+  `ProviderUsageLimitsService.snapshot()`, a stored reading; no provider is asked.
+  `windowFill` also returns the thread's provider instance.
+- **Handover** (`sessionCompaction.ts` `#writeHandover`): for a `limit-near`
+  compaction of a runtime-kept Chat or Work thread, the host first asks the
+  thread's own provider, tool-free, for a summary of the conversation it holds
+  (newest first, at most 400,000 characters), then asks the runtime to compact.
+  The text is stored in the summary content store, committed with the receipt,
+  which names it as `handover.summaryId`. A host-summarized thread needs none:
+  its stored summary is the handover. A summary that fails lets the compaction
+  go on without one. Its spend is added to the compaction's.
+- **Switch** (`withHandoverSummary`): a Chat or Work provider switch reads
+  `ContextHarnessService.handoverSummary` (the latest compaction, if the limit
+  rule made it) and leads the handoff with it in up to three 4,000-character
+  blocks after the framing block. Where that leaves no room, the oldest verbatim
+  messages give way and count as earlier messages. The record says
+  `handoverSummary: true`.
+- **Notice**: under the divider, "Codex is at 91% of its 5-hour limit. This
+  thread is compacted and ready to move." with **Switch model**, which opens the
+  composer's model picker through the composer scope.
+
+Failure modes: a reading with no account windows never acts; a ledger that
+cannot be read hands a switch the raw selection, as before.
+
 ## 9. Verification
 
 | Acceptance criterion                                     | Test                                                                                                                                           | Result | Change      |
@@ -333,6 +386,13 @@ spell waits for the thread's next turn.
 | FR-5: Code only under an open window                     | `sessionCompaction.test.ts` "refuses a rule on a Code thread with no open window…"                                                             | Pass   | This change |
 | FR-9 (idle): timeline says how long it was quiet         | `CompactionDivider.test.tsx` "says how long the thread was quiet…"                                                                             | Pass   | This change |
 | NFR-2: a pass with nothing due reads nothing             | `idleCompaction.test.ts` "reads nothing and asks no provider…" (500 threads, under 50 ms, zero reads)                                          | Pass   | This change |
+| FR-1 (limit): Settings writes the share, off by default  | `SettingsView.test.tsx` "leaves the limit rule off by default…"                                                                                | Pass   | This change |
+| FR-6: once per limit period, ahead of window fill        | `turnEndCompaction.test.ts` limit tests; `contextCompaction.test.ts` "compacting when an account limit gets close"                             | Pass   | This change |
+| FR-7: handover written first, stored with the receipt    | `sessionCompaction.test.ts` "writes a handover summary with the thread's own provider…", "writes no handover summary…"                         | Pass   | This change |
+| FR-7: a switch leads with the handover                   | `conversationHandoff.test.ts` "handing a thread to another provider after the limit rule"                                                      | Pass   | This change |
+| FR-8: notice, and Switch model opens the picker          | `ComposerModelPicker.test.tsx` "opens from the limit notice under a compaction…"                                                               | Pass   | This change |
+| FR-7 for Code threads                                    | Not built (D-5)                                                                                                                                | Open   | —           |
+| FR-6 to FR-8 on a real runtime                           | Not run: needs a live provider near its account limit                                                                                          | Open   | —           |
 | FR-2 on a real runtime                                   | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                    | Open   | —           |
 
 ## 10. Codebase deltas and change log
@@ -353,6 +413,13 @@ spell waits for the thread's next turn.
   learns each Code turn's window (D-4), and it keeps a pass free of reads. A
   thread whose last turn ended before the host started is not compacted for
   being idle.
+- FR-7 said the raw selection after a handover covers only turns after it. The
+  switch keeps the newest verbatim messages instead, and drops only the oldest
+  when the summary needs room: the next model benefits from the exact last
+  words, and the overlap is bounded by the handoff's own block limit.
+- FR-7 covers Chat and Work only (D-5).
+- Slice 1's `WindowFillCompactions` became `TurnEndCompactions`, since it now
+  judges the limit rule too.
 
 ### Change log
 
@@ -360,3 +427,4 @@ spell waits for the thread's next turn.
 - 2026-11-07: Q-1 and Q-2 answered; D-1 to D-3 accepted, D-4 added; slice 1
   built with its detailed design and verification.
 - 2026-11-07: Slice 2 (idle rule) built.
+- 2026-11-07: Slice 3 (limit rule, handover summary, notice) built; D-5 added.

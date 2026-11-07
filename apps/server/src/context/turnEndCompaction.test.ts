@@ -6,31 +6,34 @@ import {
   decodeUtcTimestamp,
   decodeWindowId,
   type ContextCompactionRecord,
+  type ProviderRateLimitWindow,
 } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import type { SessionCompactionService } from "./sessionCompaction";
-import { WindowFillCompactions, type WindowFillRules } from "./windowFillCompaction";
+import { TurnEndCompactions, type TurnEndRules } from "./turnEndCompaction";
 
 const subject = decodeContextSubjectRef({
   aggregateType: "code-thread",
   aggregateId: "11111111-1111-4111-8111-111111111111",
 });
 const windowId = decodeWindowId("82000000-0000-4000-8000-000000000001");
+const providerInstanceId = decodeProviderInstanceId("81000000-0000-4000-8000-000000000001");
 
 type Start = Parameters<SessionCompactionService["start"]>;
 type Fill = ReturnType<SessionCompactionService["windowFill"]>;
 
 function harness(input: {
   readonly fill: Fill;
-  readonly rules?: WindowFillRules;
+  readonly rules?: Partial<TurnEndRules>;
+  readonly windows?: ReadonlyArray<ProviderRateLimitWindow>;
   readonly latest?: ContextCompactionRecord;
   readonly refusals?: ReadonlyArray<"turn-running" | "spend-ceiling-reached">;
 }) {
   const starts: Array<Start> = [];
   const refusals = [...(input.refusals ?? [])];
   const pending: Array<() => void> = [];
-  const rules = input.rules ?? { octant: 85, runtime: null };
-  const compactions = new WindowFillCompactions({
+  const rules = { octant: 85, runtime: null, limit: null, ...input.rules };
+  const compactions = new TurnEndCompactions({
     compactions: {
       windowFill: () => input.fill,
       start: (...args: Start) => {
@@ -53,6 +56,8 @@ function harness(input: {
     },
     latestCompaction: () => input.latest,
     rules: () => rules,
+    accountWindows: () => input.windows ?? [],
+    clock: () => Date.parse("2026-11-07T10:00:00.000Z"),
     schedule: (run) => {
       pending.push(run);
     },
@@ -63,10 +68,10 @@ function harness(input: {
   return { compactions, starts, drain };
 }
 
-describe("compacting a thread when its window fills", () => {
+describe("compacting a thread after its turn ends", () => {
   it("compacts an Octant Harness thread past the share the person set, under the turn's window", () => {
     const { compactions, starts, drain } = harness({
-      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant" },
+      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
     });
     compactions.turnEnded({ subject, turnKey: "2026-11-07T10:00:00.000Z", windowId });
     drain();
@@ -80,7 +85,7 @@ describe("compacting a thread when its window fills", () => {
 
   it("gives the same turn's end announced twice the same compaction id", () => {
     const { compactions, starts, drain } = harness({
-      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant" },
+      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
     });
     compactions.turnEnded({ subject, turnKey: "turn-a", windowId });
     compactions.turnEnded({ subject, turnKey: "turn-a", windowId });
@@ -93,7 +98,12 @@ describe("compacting a thread when its window fills", () => {
   });
 
   it("leaves a runtime's thread to the runtime unless the person set a share for runtimes", () => {
-    const fill = { tokens: 90_000, contextWindow: 100_000, keeper: "runtime" } as const;
+    const fill = {
+      tokens: 90_000,
+      contextWindow: 100_000,
+      keeper: "runtime",
+      providerInstanceId,
+    } as const;
     const left = harness({ fill });
     left.compactions.turnEnded({ subject, turnKey: "turn", windowId });
     left.drain();
@@ -110,7 +120,9 @@ describe("compacting a thread when its window fills", () => {
   });
 
   it("does nothing below the share, or for a thread that has reported nothing", () => {
-    const below = harness({ fill: { tokens: 50_000, contextWindow: 100_000, keeper: "octant" } });
+    const below = harness({
+      fill: { tokens: 50_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
+    });
     below.compactions.turnEnded({ subject, turnKey: "turn", windowId });
     below.drain();
     const silent = harness({ fill: undefined });
@@ -122,7 +134,7 @@ describe("compacting a thread when its window fills", () => {
 
   it("asks again while the turn that crossed the rule is still letting go of the thread", () => {
     const { compactions, starts, drain } = harness({
-      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant" },
+      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
       refusals: ["turn-running", "turn-running"],
     });
     compactions.turnEnded({ subject, turnKey: "turn", windowId });
@@ -132,7 +144,7 @@ describe("compacting a thread when its window fills", () => {
 
   it("stops after any other refusal, which leaves nothing behind", () => {
     const { compactions, starts, drain } = harness({
-      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant" },
+      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
       refusals: ["spend-ceiling-reached"],
     });
     compactions.turnEnded({ subject, turnKey: "turn", windowId });
@@ -155,7 +167,7 @@ describe("compacting a thread when its window fills", () => {
       failedAt: decodeUtcTimestamp("2026-11-07T10:00:00.000Z"),
     };
     const same = harness({
-      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant" },
+      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
       latest: failed,
     });
     same.compactions.turnEnded({ subject, turnKey: "turn", windowId });
@@ -184,7 +196,12 @@ describe("compacting a thread when its window fills", () => {
         completedAt: "2026-11-07T10:00:00.000Z",
       }),
     };
-    const fill = { tokens: 90_000, contextWindow: 100_000, keeper: "runtime" } as const;
+    const fill = {
+      tokens: 90_000,
+      contextWindow: 100_000,
+      keeper: "runtime",
+      providerInstanceId,
+    } as const;
     const held = harness({ fill, latest: completed, rules: { octant: null, runtime: 85 } });
     held.compactions.turnEnded({ subject, turnKey: "turn", windowId });
     held.drain();
@@ -198,5 +215,52 @@ describe("compacting a thread when its window fills", () => {
     grown.compactions.turnEnded({ subject, turnKey: "turn", windowId });
     grown.drain();
     expect(grown.starts).toHaveLength(1);
+  });
+
+  it("compacts once per limit period when the provider's account window nears its limit", () => {
+    const fiveHour: ProviderRateLimitWindow = {
+      window: "five_hour",
+      status: "warning",
+      utilization: 0.91,
+      resetsAt: decodeUtcTimestamp("2026-11-07T13:00:00.000Z"),
+      observedAt: decodeUtcTimestamp("2026-11-07T10:00:00.000Z"),
+    };
+    const { compactions, starts, drain } = harness({
+      fill: { tokens: 30_000, contextWindow: 200_000, keeper: "runtime", providerInstanceId },
+      rules: { limit: 90 },
+      windows: [fiveHour],
+    });
+    compactions.turnEnded({ subject, turnKey: "turn-a", windowId });
+    compactions.turnEnded({ subject, turnKey: "turn-b", windowId });
+    drain();
+    expect(starts).toHaveLength(2);
+    expect(starts[0]?.[3]).toEqual({
+      kind: "limit-near",
+      window: "five_hour",
+      usedPercent: 91,
+      thresholdPercent: 90,
+    });
+    // Both turns fall in one period, so the second finds the first compaction.
+    expect(String(starts[1]?.[0].compactionId)).toBe(String(starts[0]?.[0].compactionId));
+  });
+
+  it("lets the limit rule act for a turn that also crossed the window share", () => {
+    const { compactions, starts, drain } = harness({
+      fill: { tokens: 90_000, contextWindow: 100_000, keeper: "octant", providerInstanceId },
+      rules: { limit: 90 },
+      windows: [
+        {
+          window: "seven_day",
+          status: "warning",
+          utilization: 0.95,
+          resetsAt: decodeUtcTimestamp("2026-11-10T00:00:00.000Z"),
+          observedAt: decodeUtcTimestamp("2026-11-07T10:00:00.000Z"),
+        },
+      ],
+    });
+    compactions.turnEnded({ subject, turnKey: "turn", windowId });
+    drain();
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.[3]).toMatchObject({ kind: "limit-near", window: "seven_day" });
   });
 });
