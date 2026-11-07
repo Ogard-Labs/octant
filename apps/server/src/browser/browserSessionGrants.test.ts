@@ -111,6 +111,44 @@ describe("explicit Browser session permissions", () => {
       f.service.close();
     }
   });
+  it.each(["profile clear", "window revocation", "host close"] as const)(
+    "refuses a pending native grant after %s invalidates its review",
+    async (cause) => {
+      const f = fixture();
+      try {
+        const review = await f.service.execute(windowId, command);
+        if (review.kind !== "browser-session-review") throw Error("Missing review");
+        f.profileLabel.mockImplementationOnce(async () => {
+          if (cause === "profile clear") f.service.invalidateProfile(command.profile);
+          if (cause === "window revocation") f.service.revokeWindow(windowId);
+          if (cause === "host close") f.service.close();
+          return "Personal";
+        });
+        expect(
+          await f.service.execute(windowId, { kind: "grant", reviewId: review.reviewId }),
+        ).toMatchObject({ kind: "browser-session-refused", reason: "stale" });
+        expect(f.record).not.toHaveBeenCalled();
+        expect(f.service.find(command.grantee, command.profile, command.origins)).toBeUndefined();
+      } finally {
+        f.service.close();
+      }
+    },
+  );
+  it("consumes one review only once across simultaneous native profile checks", async () => {
+    const f = fixture();
+    try {
+      const review = await f.service.execute(windowId, command);
+      if (review.kind !== "browser-session-review") throw Error("Missing review");
+      const results = await Promise.all([
+        f.service.execute(windowId, { kind: "grant", reviewId: review.reviewId }),
+        f.service.execute(windowId, { kind: "grant", reviewId: review.reviewId }),
+      ]);
+      expect(results.filter((result) => result.kind === "browser-session-granted")).toHaveLength(1);
+      expect(f.record).toHaveBeenCalledOnce();
+    } finally {
+      f.service.close();
+    }
+  });
   it("expires and closes permission without waiting for another agent call", async () => {
     vi.useFakeTimers();
     const f = fixture();

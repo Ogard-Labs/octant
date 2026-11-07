@@ -195,14 +195,19 @@ export class BrowserSessionGrants {
     const review = this.#reviews.get(command.reviewId);
     if (review === undefined || String(review.windowId) !== String(windowId))
       return refused("stale", "This review belongs to its original window or has ended.");
-    this.#reviews.delete(command.reviewId);
-    if (!this.#current(review) || !this.#options.canReview(windowId, review.grant.target))
+    if (!this.#current(review) || !this.#options.canReview(windowId, review.grant.target)) {
+      this.#reviews.delete(command.reviewId);
       return refused(
         "stale",
         "This review expired or the caller changed. Review its permission again.",
       );
+    }
     const label = await this.#options.profileLabel(review.grant.profile);
+    // Keep the review cancellable across native reads, then consume it once.
+    const retained = this.#reviews.get(command.reviewId) === review;
+    if (retained) this.#reviews.delete(command.reviewId);
     if (
+      !retained ||
       review.expires <= this.#options.now() ||
       label !== review.grant.profileLabel ||
       !this.#current(review) ||
