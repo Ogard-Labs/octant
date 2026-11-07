@@ -3585,11 +3585,19 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   send journals `agent.message-sent@1` on the `agent-message` aggregate, one
   message per recipient, and keeps the body in the host's store under an
   opaque reference; bodies never enter the journal. The sender is told `sent`
-  and nothing more: sending starts no turn, grants no authority, and returns
-  no reply. Bounds are four recipients per send, a 64 KiB body, and eight
+  and nothing more: sending grants no authority and returns no reply, and it
+  starts a turn only as the bounded wake below. Bounds are four recipients per send, a 64 KiB body, and eight
   messages per sender that no turn has carried yet; a waiting message whose
   recipient closed or left the Project is refused at the sender's next send,
   so it stops holding a slot.
+- **Across a person's computers.** A tagged Code thread may also message a
+  tagged Code thread on another member of its hub, under that member's peer
+  grant. Each host applies the rules above to its own end, and the receiver
+  keeps the final say; the extra rules (the Reachable tag, the Message item,
+  remote references, waiting on the sender while the receiver is unreachable,
+  a bounded wake turn for an idle recipient, receipts back) are in
+  [Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members).
+  Designed, not built.
 - **Delivery.** Admission is not delivery. When the recipient's next Code turn
   assembles its context, the host rechecks that the sender is still active,
   that both threads still share a Project, and that the recipient is active,
@@ -3607,6 +3615,47 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   into the next turn too; a host stop never drops a message unread. The block
   reaches every Code provider the way a `#thread` mention does and is part of
   that turn only.
+- **Waking an idle recipient.** Every Code thread has a **Wake when a message
+  arrives** switch in its header menu and its row's context menu. It is off by
+  default, only a person sets it (a window on the host, or an owner device
+  after a fresh unlock; never an agent, a routine, or a peer), and each change
+  is journaled as `thread.message-wake-set@1` with its principal. When a
+  message is admitted for a thread with the switch on and the thread is idle,
+  the host starts one turn to carry it, so agents can coordinate without a
+  person starting each turn.
+  - **Idle** means the thread is active Code outside Plan, has no turn running
+    or queued, and is not waiting for a person (an approval, a question, or a
+    usage-limit pause). A thread that is not idle carries the message in its
+    next turn as before; a running turn is never interrupted.
+  - **The wake turn** is a host-run turn with the `agent` initiator, the way a
+    routine's Code turn starts, so every approval waits for a person. It runs
+    under the thread's own posture, provider profile, and model and takes the
+    ordinary turn admission: capacity gating, the Done lock, and usage limits
+    apply, and a turn refused there starts nothing and leaves the messages
+    waiting. Its prompt is a host sentence naming the sender thread that woke
+    it; the messages arrive as the ordinary delivery block after the ordinary
+    delivery checks, and when every waiting message is refused there, no turn
+    starts. It is journaled with the initiator kind `agent-message` and the
+    message ids, and the thread's row and transcript say which thread woke it.
+  - **Bounds.** One wake turn at a time per thread and at most six per thread
+    in any hour; a message past either bound waits for the next turn. Each
+    message carries a hop count: zero from a turn a person or a routine
+    started, and one more than the message that woke the sender's turn
+    otherwise. A message whose hop count is three or more is delivered but
+    wakes nothing, so two agents answering each other stop waking each other
+    after three rounds and continue only when a person runs a turn.
+  - Turning the switch off stops new wake turns; one already running finishes
+    like any turn, and cancelling it is the ordinary cancel.
+
+  Rationale: a wake turn starts nothing a person could not have started on
+  that thread, under the posture the person chose, with approvals still waiting
+  for a person, so a message can spend provider usage but cannot widen what the
+  recipient's agent may do. It is off by default on one host because a thread's
+  siblings were never asked whether they may start its turns; the hop count and
+  hourly bound keep two agents from turning one message into unbounded turns.
+  Waking across a person's computers adds the rules in
+  [Hub and spokes: waking an idle thread](design/hub-and-spokes.md#waking-an-idle-thread).
+
 - **Bodies.** A body lives only while its message waits: delivery and refusal
   delete it, purging either thread deletes it with the message, and at start
   the host keeps only the bodies of waiting messages. A message an earlier
@@ -13209,7 +13258,10 @@ access` agree); a thread's own change is journaled as
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another. An all-hosts list keeps every registered host;
+  into authority on another. An agent message to a thread on another hub
+  member is not offline work: it carries no authority and the receiver admits
+  it afresh, so it waits on the sender until that member answers
+  ([Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members)). An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and

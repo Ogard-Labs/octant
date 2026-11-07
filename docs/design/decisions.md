@@ -745,8 +745,10 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are operations of one tool, `octant_threads` (maintainer decision, 2026-11-05): Work and Code turns see the other open threads of their own Project, and only Code turns message them.
 
-- A refusal reveals nothing about whether another thread exists, and sending starts no turn, grants no authority and returns no reply.
+- A refusal reveals nothing about whether another thread exists, and sending grants no authority and returns no reply.
+- A message wakes an idle recipient only when a person turned on its Wake when a message arrives switch (off by default): one `agent`-initiated turn under the thread's own posture, one at a time, at most six an hour, and none past three rounds of agents answering each other (maintainer request, 2026-11-07). _Designed, not built._
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
+- A tagged Code thread may message a tagged Code thread on another hub member under that member's Message peer-grant item; each host keeps its own end's rules and the receiver keeps the final say (maintainer request, 2026-11-07). _Designed, not built._ Detail: [Hub and spokes: messaging between members](hub-and-spokes.md#messaging-between-members).
 - A source turn may make at most three `octant_ask_thread` calls, and a target turn started by that tool is never offered the tool. _Here only._
 - Every operation names a thread by one reference, `<thread id>@<project id>`; a reference whose Project is not the caller's refuses like an unknown one, `send` included. A `send` with more than four recipients, a malformed reference, or one of another Project is refused whole; it never reaches a subset.
 - `list`, `read` and `wait` change nothing outside the caller's record and are offered in Plan; a `list` or `read` marks the caller, and a turn may make 8 reads and 4 waits. In Work they see only Work threads, and in Code only Code threads.
@@ -1858,7 +1860,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Pairin
 
 Multi-host views merge read models client-side without transferring authority. Federation shares no credentials; the explicit [Shared sign-ins](hub-and-spokes.md#shared-sign-ins) API-key copy requires a fresh own-unlock on each host and a one-use receiving ticket. Subscription sign-ins refuse copying.
 
-- Conflicting facts stay under their owning host; create and mutation routing name one destination and refuse when that host is not routable, and nothing queues offline work.
+- Conflicting facts stay under their owning host; create and mutation routing name one destination and refuse when that host is not routable, and nothing queues offline work. An agent message to another hub member is not offline work: it waits on the sender until that member answers, and the receiver admits it afresh.
 - An all-hosts list keeps every registered host; an unreachable host's cached items stay listed as stale and read-only.
 - A host is shown as an environment under the person's name for it, and the host a window runs on is always "Local". _Here only._
 - A row names its environment only when it is not this one; filtering and ordering by environment are client view state, and "All environments" includes hosts that connect later. _Here only._
@@ -2827,6 +2829,7 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 - Subscription sign-ins held by a provider's own app are never copied; the hub can ask a spoke to sign in itself, and the person finishes it there.
 - An owner with a fresh unlock may copy an API key between hosts; both hosts journal the copy without the value.
 - Delegated work is clamped to the smaller of the peer grant and the receiving spoke's own Project authority, and journaled with the requesting peer.
+- Agent messages between members reach only Code threads a person tagged Reachable on both ends, under the receiver's Message item; they grant nothing there, and the only turn one can start is a bounded, `agent`-initiated wake turn on an idle recipient whose person left Wake when a message arrives on. _Designed, not built._
 - Hub provisioning offers are data that land as proposals; auto-apply is per kind and off by default, and a routine always asks.
 - The hub's wake service and push sender are each off until turned on; the hub forwards sealed notifications unchanged.
 

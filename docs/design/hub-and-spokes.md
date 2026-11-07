@@ -74,7 +74,9 @@ checks a mirrored feed against the shared release keys. Hub-started sign-in is
 built (the Sign-in grant item, a request the hub relays and a spoke's person
 accepts, and one outcome word back), read narrowly as the delivery plan's
 closing note records; it has run only between hosts on loopback with a fake
-view of the provider's own app, never against a real provider sign-in. After this slice every delivery-plan slice is built. What remains is
+view of the provider's own app, never against a real provider sign-in. After this slice every delivery-plan slice up to 10 is built. Slice 11,
+[messaging between members](#messaging-between-members), was added on
+2026-11-07 and is designed, not built. What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub, a real Claude or Codex sign-in on a
@@ -709,12 +711,14 @@ A peer grant names:
   Code approval-gated, or Plan read-only; Full access only when an owner chose
   it for that peer and Project with a fresh unlock, and only where B's own
   Project allows Full access);
-- which provider profiles on B that work may use; and
-- whether A may read B's status.
+- which provider profiles on B that work may use;
+- whether A may read B's status; and
+- whether A may list and message B's tagged threads (the Message item, see
+  [Messaging between members](#messaging-between-members)).
 
-The full-member grant lets A read B's status and delegate into every Project
-on B, at Work ask-first or Code approval-gated (never Full access), with B's
-default provider profile. For a guest it is the ordinary paired-device
+The full-member grant lets A read B's status, message B's tagged threads, and
+delegate into every Project on B, at Work ask-first or Code approval-gated
+(never Full access), with B's default provider profile. For a guest it is the ordinary paired-device
 authority in every Project on B, including answering B's approvals the way a
 paired phone does today. A browser guest reaches a spoke the way
 [decision H15](#decisions) settles.
@@ -763,6 +767,154 @@ Rationale: delegation as a remote child run reuses the existing subagent rule
 (equal or narrower, clamped server-side) and the existing paired-principal
 path, so B never needs a new authority model. The result coming back as data
 keeps a compromised spoke from steering another spoke's agent.
+
+### Messaging between members
+
+An agent's thread on one member can message a running thread on another
+member, so agents on the person's computers can coordinate, whichever provider
+each runs. It extends the one-host channel in
+[Architecture: agent-to-agent messaging](../architecture.md#modes-chat-work-and-code):
+everything that rule says holds on each host, and this section states only what
+changes when the two threads live on different members. Delegation hands work
+to another spoke; a message hands text to a thread that already runs there.
+
+**The tag.** A Code thread takes part only when a person turned on **Reachable
+from my other computers** for it, in the thread's header menu and its row's
+context menu, on the host that owns the thread (a window there, or an owner
+device after a fresh unlock). It is off for every thread by default; an agent,
+the hub, and a peer cannot turn it on; and turning it on or off is journaled on
+that host as `thread.member-reachable-set@1` with its principal. A thread that
+is completed, archived, deleted, or in Plan keeps its tag but takes part in
+nothing until it is active Code outside Plan again. Both ends need the tag: a
+thread may send to another member only while it is tagged itself, so the
+person opted in on both sides and the recipient can always answer. Turning the
+tag on also turns on the thread's **Wake when a message arrives** switch,
+which can then be turned off on its own (see
+[Waking an idle thread](#waking-an-idle-thread)).
+
+**Who.** Spokes, the hub's own threads (the hub is also its own spoke), and a
+standby's own threads may send and receive; a guest runs no agents and does
+neither. Only Code to Code, as on one host: Chat, Work, and child runs neither
+send nor receive across members, and a delegated thread on B takes part only if
+a person tags it.
+
+**The Message item.** A peer grant gains one item, **Message**: member A may
+list B's tagged threads and send them messages. It is in the full-member grant
+(decision H2), because the tag, off by default, is the consent that matters,
+and the item only says which members may use it. A spoke also holds a peer
+grant for its hub whose only item is Message, ticked at join and changeable
+there, so the hub's own threads can take part. Rationale: a compromised hub can
+already introduce a fake member that gets the full-member grant, so this adds
+no power a compromised hub lacked; a spoke that wants none unticks it.
+
+**Finding a thread.** `octant_threads list` takes an optional `member`, a roster
+member id. A's host then asks B with a signed member request
+(`POST /api/hub/peer/threads`), and B answers with its active tagged Code
+threads, at most 32, in the row shape of a local `list` (reference, title,
+state, when the state changed). A remote reference is
+`<thread id>@<project id>@<member id>`; the local form stays as it is. A `list`
+with no `member` stays local, and `read` and `wait` stay local only. B answers
+a member without the Message item, and one it does not hold, with an empty
+list, the same answer as a member with no tagged threads, so the answer
+reveals nothing.
+
+**Sending.** A's host admits the send under the local rules (Code, not Plan,
+the profile names `octant_threads.send`, at most four recipients, a 64 KiB
+body, eight messages waiting per sender), journals `agent.message-sent@1` with
+the remote recipient's reference, and keeps the body in its own store. It then
+sends B a signed member request (`POST /api/hub/peer/messages`) over B's
+pinned listener, signed with A's identity key the way delegation is. B checks
+that A is in the roster it holds, that A's peer grant carries Message, and that
+the recipient is an active tagged Code thread. If all hold, B journals
+`agent.message-received@1` on its own `agent-message` aggregate with principal
+`peer:A`, the sender's remote reference, and an opaque reference to the body in
+B's store, and answers `accepted`; A journals `agent.message-forwarded@1` and
+deletes its copy of the body. Any other answer is `unauthorized`, in the same
+words for every reason, and A journals `agent.message-refused@1`. B holds at
+most eight waiting messages per remote sender thread and 32 per member; past
+either, it refuses until a turn carries some.
+
+**A member that cannot be reached.** A message B has not answered stays
+waiting on A. A sends it again with backoff while the member is unreachable,
+until B answers or the 24-hour deadline passes, when A journals
+`agent.message-expired@1`. Every try carries the same message id, and B keeps
+one message per id, so a lost answer never doubles a message. Rationale:
+Architecture says nothing queues offline work for another host. A message is
+not work: it carries no authority, starts nothing, and B decides afresh when it
+arrives. Waiting on the sender is what the one-host channel already does, so
+this is the same rule with a network in between.
+
+**Delivery on B.** Delivery follows the one-host rule on B. When the
+recipient's next Code turn assembles its context, B rechecks that the recipient
+is still active and tagged, that A is still in the roster, that A's grant
+still carries Message, and that A has not withdrawn the message (below), and
+refuses otherwise. A delivered message marks the
+recipient with `thread.external-content-ingested@1` under the source label
+`member-message` and joins the turn as one context block: a host sentence that
+names the sending member and the sender's remote reference, then the body
+inside the shared external-data frame. A message grants no authority on B and
+never answers an approval there; the only turn it can start is the wake turn
+below. The agent on B replies by sending to the reference in that sentence.
+
+#### Waking an idle thread
+
+Waking follows the one-host rule in
+[Architecture: agent-to-agent messaging](../architecture.md#modes-chat-work-and-code):
+a message to an idle thread whose **Wake when a message arrives** switch is on
+starts one bounded, `agent`-initiated turn there. Across members, only these
+parts differ:
+
+- B starts the wake turn when it accepts the message, and the turn's host
+  sentence and the thread's row name the member that woke it. The turn is
+  journaled with the initiator kind `member-message`.
+- The hop count travels in A's signed request, set by A from its own record.
+  B cannot check it, so a member that sends a false count is still held by
+  B's one-at-a-time and hourly bounds, which B counts itself and which cover
+  local and member messages together.
+- Turning the tag off stops new wake turns from members, as turning off the
+  wake switch does.
+
+Rationale: a compromised member could otherwise turn one message into
+unbounded turns on B. B's own bounds cap what it can spend there without B
+having to trust anything A counts.
+
+**The sender's end after B accepts.** The one-host rule rechecks the sender at
+delivery. Across members B cannot see the sender, so A tells it. When a
+sending thread stops being eligible (it is completed, archived, deleted, or
+purged, or a person turns its tag off), A sends B a signed member request
+(`POST /api/hub/peer/messages/withdraw`) naming every message from that thread
+that B accepted and has not yet delivered. B refuses each one at once, deletes
+its body, and sends the `refused` receipt back. A withdraw that cannot reach B
+is sent again with the same ids until B answers or the message's 24-hour
+deadline passes. A thread that only dropped to Plan withdraws nothing, because
+Plan stops a thread from sending, not from having sent. Rationale: if B asked A
+before every delivery, delivery would depend on A being online, and waiting for
+an unreachable member would no longer work. The cost is a window: while A
+cannot reach B, B may still deliver a message whose sender A already closed.
+That message is unchanged text the sender wrote while it was eligible, framed
+and tainting, so the window exposes nothing the person had not allowed when it
+was sent.
+
+**Receipts.** B sends `delivered`, `acknowledged`, `refused`, and `expired`
+back to A as signed member requests (`POST /api/hub/peer/messages/receipts`)
+that name only the message id. A records them on its own message, so the
+sender's `receipts` reads the same states as on one host, plus `forwarded`. A
+receipt that cannot reach A is sent again with the same id until A answers or
+a day has passed; a receipt A cannot match to a message it sent is dropped.
+
+**Leaving and revoking.** When B's person unticks Message for A, removes A, or
+B sees A's removal in a newer roster, B refuses every waiting message from A at
+its next delivery check, and every new one. Turning off a thread's tag makes B
+refuse messages to it the same way. On A, messages waiting for a member that
+left the roster are refused at the sender's next send. The hub never carries a
+message: members reach each other directly, as for delegation, and the hub only
+introduces them.
+
+Rationale: tagging threads rather than whole Projects lets a person open one
+long-running coordinator on each computer without exposing every thread there.
+Reusing delegation's signed member request gives each message a sender
+identity checked against the roster and a receiver that keeps the final say,
+so no host trusts another more than the hub-and-spoke rules already allow.
 
 ### Connectivity
 
@@ -911,6 +1063,8 @@ notifications from all of them after joining once:
 | Roster, standby order, removal                    | The hub; a standby adds and removes while standing in      | Changed in standby order by a standby               |
 | Delegation request and result reference           | The delegating spoke (A)                                   | Treated as authority on B                           |
 | Delegated thread                                  | The receiving spoke (B), principal `peer:A`                | Approvable from A or the hub                        |
+| A message between members                         | The sender (A) until B accepts it, then B, `peer:A`        | Carried by the hub; a body in either journal        |
+| A thread's Reachable tag                          | The host that owns the thread, set by a person             | Set by an agent, the hub, or a peer                 |
 | Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports           | Holds the routine's prompt, Project, or profile     |
 | Push envelopes in transit                         | Not journaled on the hub; counts and failure category only | Readable by the hub                                 |
 | Credentials                                       | The broker of each host that holds them                    | Copied except by an owner's unlocked act; journaled |
@@ -928,15 +1082,15 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                      | Can                                                                                                                                                                                                                                          | Cannot, and why                                                                                                                                                                                                                         |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act |
-| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                          | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                              |
-| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; claim to be standing in as hub                                                                                                                        | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster                                                    |
-| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                                                                                                                                        | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                |
-| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                                                                                                                                             | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                           |
-| A spoke's agent            | Ask its own host to delegate within its thread's authority                                                                                                                                                                                   | Choose the peer grant, approve on the receiver, widen authority, carry a credential                                                                                                                                                     |
-| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                          | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                |
+| Party                      | Can                                                                                                                                                                                                                                                                                                                 | Cannot, and why                                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata                                                                        | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act |
+| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                 | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                              |
+| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster                                                    |
+| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                               | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                |
+| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                    | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                           |
+| A spoke's agent            | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                             | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                          |
+| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                 | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -978,7 +1132,15 @@ choice to the design, the design's recommendation was taken.
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                             |
 | H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens; Full access, merge, credential copy, and owner changes each need their own                                                                                                                                      |
 
-Earlier the same day the maintainer settled that a standby hub exists (was
+On 2026-11-07 the maintainer added messaging between members: an agent on one
+computer must be able to message a running thread on another when that thread
+is tagged, across providers, using this topology rather than a new host-to-host
+channel. The design took its own recommendation for the rest (a per-thread tag
+on both ends, the Message peer-grant item, a message waiting on the sender while
+the receiver is unreachable); see
+[Messaging between members](#messaging-between-members).
+
+Earlier on 2026-10-28 the maintainer settled that a standby hub exists (was
 H1), and that no member acts as a relay or introducer except the hub and a
 named standby (was H9).
 
@@ -1537,6 +1699,28 @@ a numbered slice. Built, with these narrower readings:
   and how it ended with the outcome word. Only the request id, the kind, and the
   words are written; the schema has no field for a token, a code, an address, or
   an account name.
+
+11. **Messaging between members.** The Reachable tag and its event, the
+    Message peer-grant item (in the full-member grant, and a Message-only
+    grant for the hub), remote references, `list` with a `member`, the
+    threads, messages, receipts, and withdraw member routes, sending with retry and
+    the 24-hour deadline, delivery on the receiver, waking an idle thread,
+    and receipts back.
+    Acceptance: an untagged thread is never listed and refuses a message in
+    the same words as an unknown one; a sender thread without the tag cannot
+    send to a member; a member without Message gets an empty list and
+    `unauthorized`; a message sent while the receiver is down arrives once
+    after it returns and expires after 24 hours; a message to an idle thread
+    with the wake switch on starts one `agent`-initiated turn, a busy or
+    waiting thread is not interrupted, and the hourly and hop bounds stop a
+    reply loop after three rounds; nothing that arrives reaches an approval on
+    the receiver; untagging or revoking refuses
+    waiting messages; closing or untagging the sender withdraws what B still
+    holds; a Claude thread on one host and a Codex thread on another
+    exchange a message and a reply. Verification: server tests and a
+    three-host loopback smoke with fake providers; a run between two real
+    computers and real providers is a maintainer gate. **Linux container:
+    yes, except that gate.**
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
