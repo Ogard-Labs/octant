@@ -160,13 +160,38 @@ content starts marked too, because a model that had read it wrote the prompt.
 
 While it works, a model may notice something that belongs in its own thread —
 a real bug, stale docs, missing tests — and offer it as a side task instead of
-widening the current change. The offer appears as a card over the composer
-with a title, one line on why, and the exact prompt behind a disclosure.
-**Start in new worktree** (Code) or **Start in new thread** creates the thread
-on the same model and sends the prompt, so the work begins right away; a Code
-side task still asks before it edits or runs anything unless you gave it Full
-access. × dismisses the offer. Side tasks need a provider that runs Octant's
-app-managed tools; the others can still suggest follow-ups.
+widening the current change. The offer appears as a card in the conversation,
+right after the reply that made it. It shows a title, one line on why, and the
+exact prompt behind **Prompt**, then asks: _Start this in a new thread, or do
+it here?_
+
+- **New thread** (**New chat** in Chat, **New worktree** in Code) creates the
+  thread on the same model and sends the prompt, so the work begins right
+  away. A Code side task still asks before it edits or runs anything unless you
+  gave it Full access.
+- **Do it here** sends the prompt as the next message in this thread. If a
+  reply is still running, it is queued and runs after that reply.
+- **×** dismisses the offer.
+
+Choose what a new thread starts with. **Fresh** starts it with only the
+prompt. **Include this conversation** also gives it this conversation up to the
+reply that made the offer, so it keeps the context. In Code, including the
+conversation always means a new worktree that starts from the files as that
+reply left them. The conversation can be included only once the reply has
+finished; until then the choice is dimmed and **Fresh** and **Do it here**
+still work.
+
+Once you answer, the card shrinks to one line in the same place: "Started in a
+new thread · Open" (or "Forked into a new thread"), "Doing it here", or
+"Dismissed". Side tasks need a provider that runs Octant's app-managed tools;
+the others can still suggest follow-ups.
+
+If **Do it here** cannot confirm delivery, its receipt says so and offers no
+retry, including after reopening the app. Check the thread and its queued
+messages before sending the prompt yourself. A clear refusal before anything
+was delivered keeps the offer available; an uncertain action is never replayed.
+If the connection loses the action's response or cannot read its status, the
+card waits for the host's recorded state before allowing another action.
 
 An approved later interaction model is recorded in the architecture decision
 records and is **not** what the app renders today for remaining dock

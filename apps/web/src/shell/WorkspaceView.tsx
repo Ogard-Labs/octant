@@ -24,6 +24,7 @@ import { decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
+  PaneSideTasks,
   type ComposerOffers,
 } from "../followUps/FollowUpSuggestionChips";
 import type {
@@ -847,41 +848,43 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
               renderSurface={(surface, paneId) => (
                 <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
-                  <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
-                    <ComposerNoticeProvider
-                      value={paneId === activePaneId && inlineNotice ? contextNotice : null}
-                    >
-                      <ComposerContextMeterGate
-                        enabled={
-                          paneId === props.workspace.activePaneIds[props.mode] &&
-                          offersThreadComposer(surface)
-                        }
+                  <PaneSideTasks>
+                    <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
+                      <ComposerNoticeProvider
+                        value={paneId === activePaneId && inlineNotice ? contextNotice : null}
                       >
-                        <SurfaceLinkActionsProvider
-                          {...(props.hostBridge === undefined
-                            ? {}
-                            : { hostBridge: props.hostBridge })}
-                          {...(props.onOpenLink === undefined
-                            ? {}
-                            : { onOpenLink: props.onOpenLink })}
-                          paneId={paneId}
-                          surface={surface}
+                        <ComposerContextMeterGate
+                          enabled={
+                            paneId === props.workspace.activePaneIds[props.mode] &&
+                            offersThreadComposer(surface)
+                          }
                         >
-                          <TaskAccessContext value={taskAccessFor(surface, props)}>
-                            <OutsideContentContext
-                              value={outsideContentFor(surface, props.contextClient)}
-                            >
-                              {onWelcomeGround(
-                                surface,
-                                props.welcomeBackdrop,
-                                renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                              )}
-                            </OutsideContentContext>
-                          </TaskAccessContext>
-                        </SurfaceLinkActionsProvider>
-                      </ComposerContextMeterGate>
-                    </ComposerNoticeProvider>
-                  </ComposerSubagentsContext>
+                          <SurfaceLinkActionsProvider
+                            {...(props.hostBridge === undefined
+                              ? {}
+                              : { hostBridge: props.hostBridge })}
+                            {...(props.onOpenLink === undefined
+                              ? {}
+                              : { onOpenLink: props.onOpenLink })}
+                            paneId={paneId}
+                            surface={surface}
+                          >
+                            <TaskAccessContext value={taskAccessFor(surface, props)}>
+                              <OutsideContentContext
+                                value={outsideContentFor(surface, props.contextClient)}
+                              >
+                                {onWelcomeGround(
+                                  surface,
+                                  props.welcomeBackdrop,
+                                  renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
+                                )}
+                              </OutsideContentContext>
+                            </TaskAccessContext>
+                          </SurfaceLinkActionsProvider>
+                        </ComposerContextMeterGate>
+                      </ComposerNoticeProvider>
+                    </ComposerSubagentsContext>
+                  </PaneSideTasks>
                 </FollowUpSuggestionContext>
               )}
               {...(props.liveThreadTitles === undefined

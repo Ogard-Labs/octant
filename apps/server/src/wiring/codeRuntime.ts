@@ -1256,12 +1256,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
           agentMessageService.confirmDelivered(messageIds),
-        sideTasks: ({ windowId, thread, planner }) =>
+        sideTasks: ({ windowId, thread, operationId, planner }) =>
           createSideTaskTools({
             store: sideTasks,
             threadId: String(thread.id),
             mode: "code",
             projectId: thread.projectId,
+            turnId: operationId,
             suggestedBy: thread,
             uuid: randomUUID,
             clock: () => new Date().toISOString(),

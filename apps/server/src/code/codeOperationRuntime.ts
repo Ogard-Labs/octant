@@ -552,6 +552,8 @@ export interface CodeOperationRuntimeOptions {
   readonly sideTasks?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    /** The operation the tools serve; an offer names it as its turn. */
+    readonly operationId: string;
     readonly planner?: CodePlannerToolPort;
   }) => AppManagedToolSet | undefined;
   /**
@@ -4770,6 +4772,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.sideTasks?.({
           windowId: active.windowId,
           thread: active.thread,
+          operationId: String(active.operationId),
           ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),

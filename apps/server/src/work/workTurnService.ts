@@ -376,6 +376,8 @@ export interface WorkTurnServiceDependencies {
     /** The Project's extra folders, which file tools treat as the root. */
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
+    /** The turn the tools serve. */
+    readonly turnId: StartWorkThreadTurnCommand["turnId"];
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
@@ -1068,6 +1070,7 @@ export class WorkTurnService {
               projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
               windowId: authenticatedWindowId,
+              turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
     const preparedTools =
