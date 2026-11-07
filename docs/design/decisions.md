@@ -173,6 +173,16 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
+### Optional first-task capability discovery
+
+Your first task includes an optional Explore capabilities card for Browser,
+Computer use, helper agents and person memory. Current host facts and existing
+Settings own their state; examples are static, dismissal changes no settings,
+and the card adds no onboarding step or permission grant. Paired clients acquire
+no local settings authority.
+
+Status: Built. Detail: [Start screen: Optional capability card](start-screen.md#optional-capability-card-in-your-first-task).
+
 ### First run asks which mode new threads start in
 
 The first run asks once which mode new threads start in, with Auto pre-selected and marked Recommended, and never pre-selects Full access.
@@ -576,7 +586,7 @@ Octant keeps a memory of the person beside Project memory: after a thread ends i
 - The block is placed after Octant's instructions, holds only entries older than the thread so its text is stable for prompt caching, is capped at 2,000 characters and is framed as data, not instructions.
 - `octant_past_threads` searches remembered digests and entries only and returns at most five excerpts with their source; it reads no transcript or file and grants no authority.
 - Settings › Memory: one switch for everything, one for searching past threads, Projects kept out (not learned from, not shown, no block or tool in them), threads that leave no trace (set from the thread menu), each entry editable and deletable with its sources, and Forget everything. Deleting erases the events from the journal; a thread purge removes what came only from it.
-- Only a turn a window on this host started gets the block or the tool: not a paired device, a routine or other host-started turn, or a subagent. Memory is never synced to a hub, spoke or peer host. First run says in one sentence that it is on and where to turn it off.
+- Only a turn a window on this host started gets the block or the tool: not a paired device, a routine or other host-started turn, or a subagent. Memory is never synced to a hub, spoke or peer host. First run explains memory and where to change it without assuming it is on; the optional Your first task card reports the current host setting.
 - Export my data carries person memory: a `person-memory` page with every entry and the threads it came from. Built.
 
 Status: Built. Since: 2026-11-01. Detail: [Architecture: Person memory](../architecture.md#person-memory).

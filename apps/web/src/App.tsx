@@ -7580,6 +7580,13 @@ function LaunchedShell(
             ? {}
             : { windowCapability: props.projectWindowCapability })}
           firstRun={{
+            capabilities: {
+              helpers: launchedClients.agentRunSettingsClient,
+              memory: launchedClients.personMemoryClient,
+              computerUse: controller.settings?.computerUse,
+              ...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge }),
+              onOpenSettings: (target) => void controller.openSettings(target),
+            },
             workModelGroups: workProviderGroups,
             codeModelGroups: codeProviderGroups,
             controller: firstRunController,
