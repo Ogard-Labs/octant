@@ -142,6 +142,21 @@ describe("durable ordinary thread queue", () => {
     recoveryIdentity: "lost-turn-1",
   };
 
+  it("tells a caller about to send that a thread taking no new message is unavailable, while a reader still sees it idle", async () => {
+    const p = port();
+    p.inspect.mockImplementation(async (input) =>
+      input.intent === "dispatch"
+        ? { status: "held", reason: "thread-unavailable" }
+        : { status: "ready", binding: "authorized-target" },
+    );
+    const { service } = fixture(p);
+
+    expect(await service.withTurnStanding(windowId, scope, (standing) => standing)).toBe("idle");
+    expect(
+      await service.withTurnStanding(windowId, scope, (standing) => standing, "dispatch"),
+    ).toBe("unavailable");
+  });
+
   it("keeps a restart continuation durable and deduplicates a lost response across queue reconstruction", async () => {
     const before = fixture();
     expect(await queueRestartContinuation(before.service, recovery)).toEqual({ kind: "queued" });
