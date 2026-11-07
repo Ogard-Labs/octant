@@ -124,18 +124,18 @@ describe("a decision card", () => {
     });
   });
 
-  it("closes the note on Escape and offers no note inside an embedding card", async () => {
+  it("closes the note on Escape, sends no hidden note, and offers no note inside an embedding card", async () => {
     const user = userEvent.setup();
+    const onAnswer = vi.fn(async () => ({ status: "answered" as const }));
+    const request = richDecision();
     const view = render(
-      <PendingRequestRow
-        now={NOW}
-        onAnswer={vi.fn()}
-        onOpenThread={vi.fn()}
-        request={richDecision()}
-      />,
+      <PendingRequestRow now={NOW} onAnswer={onAnswer} onOpenThread={vi.fn()} request={request} />,
     );
     await user.click(screen.getByRole("button", { name: "Add note" }));
+    await user.type(screen.getByRole("textbox", { name: "Note sent with your choice" }), "staging");
     await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /Open it/ }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith(request, { kind: "choice", label: "Open it" });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     view.rerender(
       <PendingRequestRow
