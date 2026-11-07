@@ -96,12 +96,17 @@ The deterministic JavaScript fixture exercises real asynchronous file reads,
 writes, fsync, held descriptors, hard-link inode identity, persistent rename,
 child creation and a native watch event from a child writer. It also checks
 Bun's file API and runs the native refusal check in a spawned descendant.
-Provider executables only print version/help in a Bubblewrap network namespace,
-with empty temporary account/configuration directories and no inherited
-credentials. No provider request is made. If the standard Bubblewrap capsule
-cannot start, provider checks remain blocked; deterministic Bun/Node results
-are separately labelled as outside the capsule. No AppArmor, sysctl, boot or
-other host security setting is changed by this job.
+Provider executables only print version/help in Bubblewrap, with empty temporary
+account/configuration directories and no inherited credentials. The launcher
+also refuses socket creation, connect and send operations with `EACCES` for
+these startup checks. A native child verifies those inherited refusals and that
+only nonsocket standard descriptors were inherited. Python closes other FDs
+before each launch. No provider request is made. If the standard network
+namespace cannot start, only provider startup may retry with `--share-net` and
+the process-owned socket refusals; that result does not establish production
+network confinement. Without either capsule, provider checks remain blocked.
+Deterministic Bun/Node file results outside the capsule are labelled separately.
+No AppArmor, sysctl, boot or other host security setting is changed by this job.
 
 Dispatch `experiment=async-compatibility` for this experiment only. The Python
 owner has a 90-second lifetime, each operation is bounded to ten seconds, the

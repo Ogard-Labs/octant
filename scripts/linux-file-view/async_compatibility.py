@@ -31,7 +31,7 @@ def run(arguments, environment, directory, timeout=10):
     global active
     active = subprocess.Popen(arguments, env=environment, cwd=directory,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, start_new_session=True)
+                              text=True, start_new_session=True, close_fds=True)
     try:
         output, errors = active.communicate(timeout=timeout)
         return {'exit': active.returncode, 'stdout': output[:4000], 'stderr': errors[:2000]}
@@ -65,8 +65,17 @@ try:
                 '--proc', '/proc', '--dev', '/dev', '--'] if bwrap else [])
     prerequisite = run(capsule+['/bin/true'], base_environment, temporary) if bwrap else {'exit': 127, 'stderr': 'Bubblewrap absent'}
     state['bubblewrap'] = prerequisite
+    state['networkNamespace'] = prerequisite['exit'] == 0
+    provider_capsule = capsule
     if prerequisite['exit'] != 0:
         capsule = []
+        provider_capsule = ([bwrap, '--unshare-all', '--share-net', '--die-with-parent', '--new-session',
+                             '--ro-bind', '/', '/', '--bind', str(temporary), str(temporary),
+                             '--proc', '/proc', '--dev', '/dev', '--'] if bwrap else [])
+        shared = run(provider_capsule+['/bin/true'], base_environment, temporary) if bwrap else prerequisite
+        state['bubblewrapSharedNetwork'] = shared
+        if shared['exit'] != 0:
+            provider_capsule = []
     for name, number in [('EPERM', errno.EPERM), ('ENOSYS', errno.ENOSYS)]:
         prefix = capsule+[str(checker), name]
         for runtime_name, runtime in [('bun-1.4.4', bun), ('node-runner', node)]:
@@ -76,15 +85,21 @@ try:
                          base_environment, temporary)
             state['measurements'].append({'name': runtime_name+' native file behavior '+name,
                                           'passed': result['exit'] == 0, 'capsule': bool(capsule), **result})
+        startup_prefix = provider_capsule+[str(checker), name, '--no-network']
+        if provider_capsule:
+            result = run(startup_prefix+[str(checker), 'check-network'], base_environment, temporary)
+            state['measurements'].append({'name': 'startup network and descendant FD refusal '+name,
+                                          'passed': result['exit'] == 0, **result})
         for label, executable in providers:
             for option in ['--version', '--help']:
-                if not capsule:
+                if not provider_capsule:
                     state['measurements'].append({'name': label+' '+option+' '+name,
-                                                  'passed': False, 'blocked': 'No network-isolated Bubblewrap capsule'})
+                                                  'passed': False, 'blocked': 'No Bubblewrap capsule; provider startup skipped'})
                     continue
-                result = run(prefix+[str(executable.resolve()), option], base_environment, temporary)
+                result = run(startup_prefix+[str(executable.resolve()), option], base_environment, temporary)
                 state['measurements'].append({'name': label+' '+option+' '+name,
-                                              'passed': result['exit'] == 0, 'capsule': True, **result})
+                                              'passed': result['exit'] == 0, 'capsule': True,
+                                              'startupSocketRefusal': True, **result})
     state['status'] = 'measured' if all(item['passed'] for item in state['measurements']) else 'blocked'
 except Exception as error:
     state['status'] = 'blocked'
