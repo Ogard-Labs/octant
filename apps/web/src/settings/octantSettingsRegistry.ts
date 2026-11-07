@@ -1278,6 +1278,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser upload manifest recurring routine approved folder exact files content count bytes quota revoke expiry",
         },
         {
+          id: settingId("browser-download-permissions"),
+          label: "Recurring Browser downloads",
+          scope: "host",
+          keywords:
+            "browser download manifest recurring routine approved folder directory source origins file types count bytes quota revoke expiry",
+        },
+        {
           id: settingId("browser-session-permissions"),
           label: "Browser session permissions",
           scope: "host",
