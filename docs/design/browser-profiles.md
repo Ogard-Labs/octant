@@ -361,8 +361,9 @@ children, Chat children, provider-native children and unavailable or unverified
 workspaces are not eligible. Terminal-session caller grants are not yet
 available; their existing refusal remains.
 For Code routines, the reviewed source checkout remains part of the definition
-identity. Each dispatched run executes in its own managed checkout. The host
-proves that checkout belongs to the exact run thread and repository, and checks
+identity. A new-thread run executes in its own managed checkout. A same-thread
+follow-up instead uses the reviewed origin thread and its exact bound checkout.
+The host proves that checkout belongs to the exact run thread and repository, and checks
 its current Project binding, provider and model before granting Browser access.
 Browser operations carry that execution checkout's authority; a missing,
 unavailable or unrelated checkout refuses rather than borrowing the reviewed

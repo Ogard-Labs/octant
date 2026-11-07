@@ -149,17 +149,21 @@ function codeExecutionMatches(
     String(thread.repositoryId) === String(binding.repositoryId) &&
     String(thread.providerInstanceId) === String(definition.executionProfile.providerInstanceId) &&
     String(thread.modelId) === String(definition.executionProfile.modelId) &&
-    checkout.kind === "managed-worktree" &&
+    (definition.targetPolicy === "same-thread"
+      ? String(definition.originThreadId) === String(thread.id) &&
+        String(checkout.id) === String(binding.checkoutId) &&
+        ["existing-worktree", "managed-worktree", "plain-folder"].includes(checkout.kind)
+      : checkout.kind === "managed-worktree" &&
+        String(checkout.id) ===
+          String(
+            deriveManagedWorktreeCheckoutId({
+              repositoryId: binding.repositoryId,
+              threadId: thread.id,
+            }),
+          )) &&
     checkout.availability === "available" &&
     String(checkout.repositoryId) === String(binding.repositoryId) &&
     String(checkout.id) === String(thread.checkoutId) &&
-    String(checkout.id) ===
-      String(
-        deriveManagedWorktreeCheckoutId({
-          repositoryId: binding.repositoryId,
-          threadId: thread.id,
-        }),
-      ) &&
     String(authority.worktreeId) === String(checkout.id) &&
     sameToolActionAuthority(
       decodeToolActionAuthority({ ...authority, worktreeId: binding.checkoutId }),
