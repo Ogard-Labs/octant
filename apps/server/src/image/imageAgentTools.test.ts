@@ -91,7 +91,7 @@ function tools(
       offer: Parameters<ImageAgentToolPort["ask"]>[0]["offer"],
     ) => ImageGenerationOfferOutcome;
     readonly remembered?: ImageGenerationChoice;
-    readonly refusal?: string;
+    readonly refusal?: () => string | undefined;
   } = {},
 ) {
   const enqueue = vi.fn(async () => job());
@@ -114,7 +114,7 @@ function tools(
       ask,
       remembered: () => remembered,
       forget,
-      ...(options.refusal === undefined ? {} : { refusal: () => options.refusal }),
+      ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
     },
   });
   return { ask, enqueue, forget, set };
@@ -230,11 +230,25 @@ describe("createImageAgentTools", () => {
 
   it("refuses in Plan mode before asking anyone", async () => {
     const { ask, enqueue, set } = tools([imageProfile()], [], [], {
-      refusal: "Plan mode cannot generate images.",
+      refusal: () => "Plan mode cannot generate images.",
     });
     const outcome = await call(set, { prompt: "a red cube" });
     expect(outcome.isError).toBe(true);
     expect(ask).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("spends nothing when the thread moved to Plan while the card was open", async () => {
+    let plan = false;
+    const { enqueue, set } = tools([imageProfile()], [], [], {
+      refusal: () => (plan ? "Plan mode cannot generate images." : undefined),
+      answer: (offer) => {
+        plan = true;
+        return { status: "generate", ...offer.suggested };
+      },
+    });
+    const outcome = await call(set, { prompt: "a red cube" });
+    expect(outcome.isError).toBe(true);
     expect(enqueue).not.toHaveBeenCalled();
   });
 

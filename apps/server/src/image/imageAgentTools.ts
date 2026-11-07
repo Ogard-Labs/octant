@@ -182,6 +182,10 @@ export function createImageAgentTools(options: {
             };
         }
       }
+      // The answer can arrive minutes later, so the turn's standing is read
+      // again: a thread moved to Plan while the card was open must not spend.
+      const refusalNow = options.port.refusal?.();
+      if (refusalNow !== undefined) return { result: { error: refusalNow }, isError: true };
       // The person's choice is checked again as it runs: a profile turned off
       // while the card was open must not run.
       if (!isEligibleChoice(eligibleProfiles(options.port), choice)) {

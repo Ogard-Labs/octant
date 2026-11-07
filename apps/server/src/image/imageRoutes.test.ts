@@ -345,6 +345,33 @@ describe("image routes", () => {
       await expect(outcome).resolves.toEqual({ status: "cancelled" });
     });
 
+    it("refuses an answer from a window that can no longer open the thread and keeps the offer waiting", async () => {
+      const { handler, offers } = setup({ authorized: false });
+      let settled = false;
+      void offers.offer({ windowId: windowId as never, offer }).then(() => {
+        settled = true;
+      });
+      const [waiting] = offers.list(windowId as never, scope);
+      const response = await handler(
+        request("/api/image/offers/decide", {
+          method: "POST",
+          body: {
+            offerId: waiting?.offerId,
+            decision: "generate",
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            rememberForThread: true,
+          },
+        }),
+      );
+      expect(response?.status).toBe(404);
+      expect(offers.list(windowId as never, scope)).toHaveLength(1);
+      expect(offers.remembered(scope)).toBeUndefined();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      offers.close();
+    });
+
     it("does not list offers for a thread the window cannot open", async () => {
       const { handler } = setup({ authorized: false });
       const response = await handler(

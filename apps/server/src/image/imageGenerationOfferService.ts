@@ -111,6 +111,14 @@ export class ImageGenerationOfferService {
       .map((pending) => pending.view);
   }
 
+  /** The waiting offer this window asked for, without taking it off the list. */
+  find(windowId: WindowId, offerId: ImageGenerationOfferId): ImageGenerationOffer | undefined {
+    const pending = this.#pending.get(String(offerId));
+    return pending === undefined || String(pending.windowId) !== String(windowId)
+      ? undefined
+      : pending.view;
+  }
+
   /**
    * Take one waiting offer off the list so exactly one answer acts on it; a
    * second claim, from a retry or another tab of the same window, finds

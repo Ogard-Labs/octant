@@ -35,7 +35,7 @@ const ARTIFACT_PATH =
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
   /** Agents' requests to generate, answered from the thread's card. */
-  readonly offers?: Pick<ImageGenerationOfferService, "list" | "claim" | "remember">;
+  readonly offers?: Pick<ImageGenerationOfferService, "list" | "find" | "claim" | "remember">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly authorizeScope: (
@@ -208,6 +208,14 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
               reason: "That image model is not available. Choose another one.",
             });
           }
+        }
+        // The window must still be able to open the thread that asked: one
+        // that moved to another Project answers nothing there, and the offer
+        // keeps waiting for its turn to end or expire.
+        const waiting = dependencies.offers?.find(windowId, decision.offerId);
+        if (waiting === undefined) return answer({ kind: "image-offer-gone" });
+        if (!(await dependencies.authorizeScope(windowId, waiting.threadKind, waiting.scopeId))) {
+          return failure("Image offers are unavailable.", 404, origin);
         }
         const claimed = dependencies.offers?.claim(windowId, decision.offerId);
         if (claimed === undefined) return answer({ kind: "image-offer-gone" });
