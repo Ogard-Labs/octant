@@ -1,3 +1,4 @@
+import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // A whole Octant host for the hub tests: its journal, its real remote gateway
 // behind a real TLS listener serving a certificate it made itself, and the hub
 // role and spoke link wired as the server wires them. The network seams are
@@ -225,6 +226,7 @@ export interface HubTestHost {
 }
 
 export async function startHubTestHost(input: {
+  readonly ownerApprovals?: OwnerApprovalHost;
   readonly ownerBrowser?: OwnerBrowserControlService;
   readonly name: string;
   readonly address: string;
@@ -682,6 +684,7 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
   });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
+    ...(input.ownerApprovals === undefined ? {} : { approvals: input.ownerApprovals }),
     ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
     spoke,

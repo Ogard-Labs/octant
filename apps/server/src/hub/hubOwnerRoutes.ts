@@ -1,3 +1,5 @@
+import { decodeOwnerApprovalAnswer } from "@octant/contracts/owner-approvals";
+import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // What an owner device asks of a host with a window's powers: the
 // administration the loopback channel gives a window (hub grant, leave, Confirm
 // new members, owner changes, and on the hub the hub role, join codes and
@@ -93,6 +95,8 @@ export const HUB_OWNER_ROUTES = {
   signInAccept: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/accept`,
   signInDecline: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/decline`,
   signInCheck: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/check`,
+  approvalRead: `${HUB_OWNER_ROUTE_PREFIX}/approvals/read`,
+  approvalAnswer: `${HUB_OWNER_ROUTE_PREFIX}/approvals/answer`,
   browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
   browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
   browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
@@ -127,6 +131,8 @@ const HUB_ONLY: ReadonlySet<string> = new Set([
 ]);
 const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.challenge,
+  HUB_OWNER_ROUTES.approvalRead,
+  HUB_OWNER_ROUTES.approvalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
@@ -150,6 +156,8 @@ const MERGE_ROUTES: ReadonlySet<string> = new Set(CODE_OWNER_UNLOCKED_MERGE_PATH
  * decided by the posture asked for; an owner join code by its body.
  */
 const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
+  HUB_OWNER_ROUTES.approvalRead,
+  HUB_OWNER_ROUTES.approvalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
@@ -190,6 +198,7 @@ const MAX_BODY_BYTES = 16 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 export interface HubOwnerRouteOptions {
+  readonly approvals?: OwnerApprovalHost;
   readonly browser?: OwnerBrowserControlService;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
@@ -383,6 +392,59 @@ export function createHubOwnerRouteHandler(
       memberId: senderMember.memberId,
     };
 
+    if (route === HUB_OWNER_ROUTES.approvalRead || route === HUB_OWNER_ROUTES.approvalAnswer) {
+      if (options.approvals === undefined || unlockResult?.status !== "fresh")
+        return refused(403, "unlock-required");
+      const stamp = ownerListStamp(scope);
+      const deadline = (options.now ?? Date.now)() + 60_000;
+      const current = () => {
+        const latest = scopeFor(route, body);
+        return (
+          !request.signal.aborted &&
+          (options.now ?? Date.now)() <= deadline &&
+          !("kind" in latest) &&
+          ownerListStamp(latest) === stamp &&
+          !latest.inactiveDeviceMemberIds.includes(senderId) &&
+          authorizeOwnerRequest({
+            host: latest.host,
+            grant: latest.grant,
+            owners: ownerEntries(latest.owners),
+            roster: latest.roster,
+            memberId: senderMember.memberId,
+            identityKeyFingerprint: publicKeyFingerprint(presentedKey),
+            unlock: "not-needed",
+            unlockClass: "own",
+          }).status === "allowed"
+        );
+      };
+      try {
+        if (!current()) return refused(403, "refused");
+        if (route === HUB_OWNER_ROUTES.approvalRead) {
+          const value: unknown = JSON.parse(body);
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            Array.isArray(value) ||
+            Object.keys(value).length !== 0
+          )
+            return refused(400, "invalid");
+          return Response.json(options.approvals.list(senderMember.memberId), {
+            headers: NO_STORE,
+          });
+        }
+        const result = await options.approvals.answer(decodeOwnerApprovalAnswer(JSON.parse(body)), {
+          principal,
+          current,
+        });
+        return Response.json(result, {
+          status: result.status === "refused" ? 409 : 200,
+          headers: NO_STORE,
+        });
+      } catch {
+        return refused(400, "invalid");
+      }
+    }
+
     if (
       route === HUB_OWNER_ROUTES.browserTargets ||
       route === HUB_OWNER_ROUTES.browserTakeOver ||
@@ -470,6 +532,8 @@ export function createHubOwnerRouteHandler(
       if (body.trim() !== "") throw new Error("invalid");
     };
     switch (route) {
+      case HUB_OWNER_ROUTES.approvalRead:
+      case HUB_OWNER_ROUTES.approvalAnswer:
       case HUB_OWNER_ROUTES.browserTargets:
       case HUB_OWNER_ROUTES.browserTakeOver:
       case HUB_OWNER_ROUTES.browserControl:

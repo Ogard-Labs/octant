@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { HubMemberId } from "@octant/contracts";
+import { WorkRequestRuntime } from "./workRequestRuntime";
+import { providerApprovalCall } from "../providers/providerApprovalCall";
+import { Effect } from "effect";
+import { type WorkRequest, decodeProviderRuntimeEvent } from "@octant/contracts";
+import { describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
   AggregateVersion,
@@ -1303,5 +1308,109 @@ describe("WorkRequestService hydration and listing", () => {
       }),
     ).toMatchObject({ status: "ok", request: { status: "resolved" } });
     expect(answers).toEqual(["file:///private/source"]);
+  });
+});
+
+describe("owner Work approval admission", () => {
+  it("keeps the exact live callback through the durable intent and delivers once without a remembered grant", async () => {
+    let runtime: WorkRequestRuntime | undefined;
+    const answerApproval = vi.fn(() => Effect.void);
+    const { service } = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          if (runtime === undefined) throw new Error("Runtime unavailable.");
+          await runtime.answerApproval({
+            ...input,
+            sessionId: decodeProviderSessionId(input.sessionId),
+          });
+        },
+      },
+    });
+    runtime = new WorkRequestRuntime({ requests: service, uuid: () => String(ids.request) });
+    const input = {
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      sessionId: ids.session,
+      projectRoot: "/work",
+      connection: {
+        answerApproval,
+        answerUserInput: () => Effect.void,
+        interrupt: () => Effect.void,
+        subscribe: Effect.die("No subscription needed for the deterministic fixture."),
+        approvalCall: () =>
+          providerApprovalCall({
+            tool: "Write",
+            arguments: { file_path: "/work/a.txt", content: "full file content" },
+          }),
+      },
+    };
+    const release = runtime.register(input);
+    try {
+      await Effect.runPromise(
+        runtime.observe(
+          input,
+          decodeProviderRuntimeEvent({
+            kind: "approval-request",
+            instanceId: ids.provider,
+            sessionId: ids.session,
+            sequence: 1,
+            correlationId: ids.request,
+            occurredAt: clockNow,
+            requestId: "exact-callback",
+            action: "Write",
+            description: "Write file",
+          }),
+        ),
+      );
+      const answer = async (request: WorkRequest, approved: boolean, current: () => boolean) =>
+        (
+          await service.resolve(
+            {
+              kind: "resolve-work-request",
+              requestId: request.requestId,
+              expectedVersion: request.version,
+              resolution: { kind: "approval", approved },
+            },
+            current,
+          )
+        ).status === "ok";
+      let pending = runtime.ownerApprovals(service.listPending(ids.project), answer)[0];
+      if (pending === undefined) throw new Error("Missing owner Work approval.");
+      expect(pending.action?.input).toContain("full file content");
+      expect(
+        await pending.answer(true, () => false, {
+          kind: "owner-unlock",
+          memberId: HubMemberId.make(String(ids.project)),
+        }),
+      ).toBe(false);
+      expect(answerApproval).not.toHaveBeenCalled();
+      let admissions = 0;
+      expect(
+        await pending.answer(true, () => ++admissions < 3, {
+          kind: "owner-unlock",
+          memberId: HubMemberId.make(String(ids.project)),
+        }),
+      ).toBe(false);
+      expect(answerApproval).not.toHaveBeenCalled();
+      pending = runtime.ownerApprovals(service.listPending(ids.project), answer)[0];
+      if (pending === undefined)
+        throw new Error("Missing live pending request after refused delivery.");
+      expect(
+        await pending.answer(true, pending.current, {
+          kind: "owner-unlock",
+          memberId: HubMemberId.make(String(ids.project)),
+        }),
+      ).toBe(true);
+      expect(answerApproval).toHaveBeenCalledExactlyOnceWith({
+        sessionId: ids.session,
+        requestId: "exact-callback",
+        approved: true,
+        scope: "once",
+      });
+      expect(runtime.ownerApprovals(service.listPending(ids.project), answer)).toHaveLength(0);
+    } finally {
+      release();
+    }
   });
 });

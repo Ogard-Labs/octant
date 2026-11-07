@@ -1,3 +1,4 @@
+import { OwnerApprovalSection } from "./OwnerApprovalSection";
 import {
   ownerActionNotice,
   readOwnerAlerts,
@@ -68,6 +69,7 @@ export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
   return (
     <>
       <OwnerPostureSection spokes={props.spokes} />
+      <OwnerApprovalSection spokes={props.spokes} />
       <SettingsSection title="Owner alerts">
         {notice === undefined ? null : (
           <SettingsState kind={notice.tone === "done" ? "success" : "error"}>

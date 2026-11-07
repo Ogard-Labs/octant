@@ -1,3 +1,5 @@
+import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import {
   decodeWorkRequestId,
   decodeWorkRequestRecordInput,
@@ -64,6 +66,10 @@ export class WorkRequestRuntime {
   readonly #uuid: () => string;
   readonly #shield: (() => ShieldReviewPort | undefined) | undefined;
   readonly #connections = new Map<string, RequestConnection>();
+  readonly #ownerRequests = new Map<
+    string,
+    { readonly input: WorkRequestRuntimeContext; readonly callback: string }
+  >();
 
   constructor(options: WorkRequestRuntimeOptions) {
     this.#requests = options.requests;
@@ -95,6 +101,7 @@ export class WorkRequestRuntime {
         try: () => {
           const results = this.#requests.interruptSession(input.sessionId);
           this.#connections.delete(String(input.sessionId));
+          this.#forgetOwnerRequests(input.sessionId);
           const failed = results.find((result) => result.status === "failure");
           if (failed?.status === "failure") throw new Error(failed.failure.message);
         },
@@ -202,13 +209,97 @@ export class WorkRequestRuntime {
     });
   }
 
+  ownerApprovals(
+    requests: ReadonlyArray<import("@octant/contracts").WorkRequest>,
+    answer: (
+      request: import("@octant/contracts").WorkRequest,
+      approved: boolean,
+      current: () => boolean,
+    ) => Promise<boolean>,
+  ): ReadonlyArray<RuntimeApprovalRecovery> {
+    const pending: RuntimeApprovalRecovery[] = [];
+    for (const request of requests) {
+      const recorded = this.#ownerRequests.get(String(request.requestId));
+      if (
+        request.status !== "pending" ||
+        request.delivery !== undefined ||
+        request.detail.kind !== "approval"
+      )
+        continue;
+      if (recorded === undefined || recorded.input.signal?.aborted) {
+        pending.push({
+          mode: "work",
+          threadId: request.threadId,
+          requestId: OwnerApprovalId.make(request.requestId),
+          identity: String(request.providerSessionId),
+          action: undefined,
+          current: () => false,
+          answer: async () => false,
+        });
+        continue;
+      }
+      const connection = this.#connections.get(String(request.providerSessionId));
+      if (
+        connection === undefined ||
+        String(recorded.input.threadId) !== String(request.threadId) ||
+        String(recorded.input.sessionId) !== String(request.providerSessionId)
+      )
+        continue;
+      pending.push({
+        mode: "work",
+        threadId: request.threadId,
+        requestId: OwnerApprovalId.make(request.requestId),
+        ...(recorded.input.projectRoot === undefined ? {} : { root: recorded.input.projectRoot }),
+        identity: JSON.stringify({
+          sessionId: request.providerSessionId,
+          providerInstanceId: request.providerInstanceId,
+          callback: recorded.callback,
+          version: request.version,
+        }),
+        get action() {
+          try {
+            return connection.approvalCall?.({
+              sessionId: request.providerSessionId,
+              requestId: recorded.callback,
+            })?.ownerAction;
+          } catch {
+            return undefined;
+          }
+        },
+        current: () =>
+          this.#connections.get(String(request.providerSessionId)) === connection &&
+          this.#ownerRequests.get(String(request.requestId)) === recorded &&
+          !recorded.input.signal?.aborted,
+        answer: (approved, current) =>
+          current() ? answer(request, approved, current) : Promise.resolve(false),
+      });
+    }
+    return pending;
+  }
+
   async answerApproval(input: {
     readonly sessionId: ProviderSessionId;
     readonly requestId: string;
     readonly approved: boolean;
+    readonly ownerCurrent?: () => boolean;
   }): Promise<void> {
     const connection = this.#connection(input.sessionId);
-    await this.#run(connection.answerApproval({ ...input }));
+    const answer = () =>
+      connection.answerApproval({
+        sessionId: input.sessionId,
+        requestId: input.requestId,
+        approved: input.approved,
+        ...(input.ownerCurrent === undefined ? {} : { scope: "once" as const }),
+      });
+    await this.#run(
+      input.ownerCurrent === undefined
+        ? answer()
+        : Effect.suspend(() => {
+            if (!input.ownerCurrent?.())
+              return Effect.die(new Error("Owner approval target changed before delivery."));
+            return answer();
+          }),
+    );
   }
 
   async answerUserInput(input: {
@@ -275,6 +366,12 @@ export class WorkRequestRuntime {
               },
       });
       const result: WorkRequestServiceResult = this.#requests.record(record);
+      if (result.status === "ok" && event.kind === "approval-request") {
+        this.#ownerRequests.set(String(result.request.requestId), {
+          input,
+          callback: providerCallbackId,
+        });
+      }
       return result.status === "ok"
         ? { status: "ok" }
         : { status: "failure", message: result.failure.message };
@@ -288,6 +385,7 @@ export class WorkRequestRuntime {
     return () => {
       if (this.#connections.get(String(input.sessionId)) === input.connection) {
         this.#connections.delete(String(input.sessionId));
+        this.#forgetOwnerRequests(input.sessionId);
         this.#requests.interruptSession(input.sessionId);
       }
     };
@@ -301,6 +399,11 @@ export class WorkRequestRuntime {
       return Effect.void;
     }
     return connection.interrupt(sessionId).pipe(Effect.catchAll(() => Effect.void));
+  }
+
+  #forgetOwnerRequests(sessionId: ProviderSessionId): void {
+    for (const [id, entry] of this.#ownerRequests)
+      if (String(entry.input.sessionId) === String(sessionId)) this.#ownerRequests.delete(id);
   }
 
   #connection(sessionId: ProviderSessionId): RequestConnection {

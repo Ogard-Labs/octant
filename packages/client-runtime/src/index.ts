@@ -117,3 +117,5 @@ export { createGitHistoryClient, type GitHistoryClient } from "./gitHistoryClien
 
 export * from "./ownerPosture";
 export { createBrowserPresentationClient } from "./browserPresentationClient";
+
+export * from "./ownerApprovals";

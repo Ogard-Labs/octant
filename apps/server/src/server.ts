@@ -1582,6 +1582,8 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      workRequestRuntime,
+      workRequestService,
       beginGoogleCliChange,
       workThreadService,
       onSecretStoreLinkChange: () => commands.linkChanged(),

@@ -1,7 +1,66 @@
 import {
+  decodeOwnerApprovalAction,
   MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH,
   type ProviderApprovalCall,
 } from "@octant/contracts";
+
+/** Only these complete native file shapes are recoverable; no inferred tool categories. */
+export function completeOwnerFileAction(input: {
+  readonly tool: string;
+  readonly arguments?: unknown;
+  readonly workingDirectory?: string | undefined;
+}) {
+  try {
+    const args = input.arguments;
+    if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+    const record = args as Readonly<Record<string, unknown>>;
+    const allowed =
+      input.tool === "Read"
+        ? ["file_path", "offset", "limit", "pages"]
+        : input.tool === "Write"
+          ? ["file_path", "content"]
+          : input.tool === "Edit"
+            ? ["file_path", "old_string", "new_string", "replace_all"]
+            : undefined;
+    if (allowed === undefined || Object.keys(record).some((key) => !allowed.includes(key)))
+      return undefined;
+    if (
+      typeof record.file_path !== "string" ||
+      record.file_path.length === 0 ||
+      record.file_path.includes("\0")
+    )
+      return undefined;
+    if (input.tool === "Write" && typeof record.content !== "string") return undefined;
+    if (
+      input.tool === "Edit" &&
+      (typeof record.old_string !== "string" ||
+        typeof record.new_string !== "string" ||
+        (record.replace_all !== undefined && typeof record.replace_all !== "boolean"))
+    )
+      return undefined;
+    if (
+      input.tool === "Read" &&
+      ((record.offset !== undefined &&
+        (!Number.isSafeInteger(record.offset) || Number(record.offset) < 0)) ||
+        (record.limit !== undefined &&
+          (!Number.isSafeInteger(record.limit) || Number(record.limit) < 0)) ||
+        (record.pages !== undefined && typeof record.pages !== "string"))
+    )
+      return undefined;
+    const action = {
+      kind:
+        input.tool === "Read" ? "file-read" : input.tool === "Write" ? "file-write" : "file-edit",
+      tool: input.tool,
+      input: JSON.stringify(args),
+      ...(input.workingDirectory === undefined ? {} : { workingDirectory: input.workingDirectory }),
+    };
+    const text = JSON.stringify(action);
+    if (redactSecretShaped(text) !== text) return undefined;
+    return decodeOwnerApprovalAction(action);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Text shaped like a credential: a bearer header, a key or token assignment,
@@ -92,8 +151,10 @@ export function providerApprovalCall(input: {
     text = undefined;
   }
   const workingDirectory = input.workingDirectory?.trim();
+  const ownerAction = completeOwnerFileAction(input);
   return {
     tool,
+    ...(ownerAction === undefined ? {} : { ownerAction }),
     ...(text === undefined || text === "{}"
       ? {}
       : { input: text.slice(0, MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH) }),

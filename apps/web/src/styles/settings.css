@@ -3789,3 +3789,10 @@ html[data-octant-increased-contrast="true"]
   padding-inline-start: var(--oct-space-4);
   list-style: decimal;
 }
+
+.owner-approval-action {
+  max-inline-size: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

@@ -1,3 +1,4 @@
+import type { OwnerApprovalAnswer } from "@octant/contracts/owner-approvals";
 // An owner device acting on a host. It reaches the host's private listener with
 // the same signed member request a guest uses, adds the identity key the host
 // recorded for it, and for every change asks the host for a challenge bound to
@@ -60,6 +61,8 @@ const OWNER_ROUTES = {
   credentialCopy: "/api/hub/owner/credentials/copy",
   provisionApply: "/api/hub/owner/provision/apply",
   provisionDismiss: "/api/hub/owner/provision/dismiss",
+  approvalRead: "/api/hub/owner/approvals/read",
+  approvalAnswer: "/api/hub/owner/approvals/answer",
   browserTargets: "/api/hub/owner/browser/targets",
   browserTakeOver: "/api/hub/owner/browser/take-over",
   browserControl: "/api/hub/owner/browser/control",
@@ -176,6 +179,10 @@ export interface OwnerClient {
  * handed these.
  */
 export interface OwnerAdministrationClient {
+  /** Fresh unlock for private complete file facts; never covered by an administration session. */
+  readonly readApprovals?: () => Promise<OwnerActionResult>;
+  /** A second fresh unlock, signed for this exact one-use answer. */
+  readonly answerApproval?: (request: OwnerApprovalAnswer) => Promise<OwnerActionResult>;
   /**
    * One unlock that covers five minutes of administration screens on this host
    * (decision H17). The session is kept in memory only; Full access, merge, a
@@ -541,6 +548,9 @@ export function createOwnerClient(
       session = undefined;
     },
     hasSession: sessionLive,
+    readApprovals: () => unlocked((signer) => act(OWNER_ROUTES.approvalRead, "{}", signer)),
+    answerApproval: (request) =>
+      unlocked((signer) => act(OWNER_ROUTES.approvalAnswer, JSON.stringify(request), signer)),
     listPostures: () => administration(OWNER_ROUTES.postureRead, "{}"),
     readPosture: (subject) => administration(OWNER_ROUTES.postureRead, JSON.stringify({ subject })),
     changePosture: (request) => {

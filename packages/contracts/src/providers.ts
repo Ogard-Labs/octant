@@ -1,3 +1,4 @@
+import { OwnerApprovalAction } from "./providerApprovalAction";
 import { Schema } from "effect";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import {
@@ -2661,10 +2662,13 @@ export const MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH = 8_192;
  * its tool, the argument fields a reviewer judges as bounded JSON with
  * credentials redacted, and where it runs. It never carries the call's output.
  * A driver hands it to the host through `ProviderConnection.approvalCall` for
- * an automatic reviewer only: it is never put on an event, journaled, or
- * shown.
+ * an automatic reviewer. Judged input is never put on an event or journaled.
+ * Optional ownerAction is a separate complete file-operation consent body,
+ * shown only through fresh owner authorization and never journaled.
  */
 export const ProviderApprovalCall = Schema.Struct({
+  /** Complete, unredacted file-operation consent facts, absent when unavailable. Never journal. */
+  ownerAction: Schema.optional(OwnerApprovalAction),
   tool: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   input: Schema.optional(
     Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH)),

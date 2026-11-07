@@ -1,3 +1,5 @@
+import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import type {
   ConversationInputReceipt,
@@ -761,6 +763,7 @@ export interface CodeOperationRuntimeOptions {
 }
 
 export interface CodeOperationRuntime {
+  readonly ownerApprovals?: () => ReadonlyArray<RuntimeApprovalRecovery>;
   execute(
     windowId: WindowId,
     command: unknown,
@@ -1335,6 +1338,7 @@ export function createCodeOperationRuntime(
   };
 
   return {
+    ownerApprovals: () => turns.ownerApprovals(),
     terminals: terminal,
     prepareApproval: async (windowId, rawRequest) => {
       if (approvalStore === undefined) return undefined;
@@ -4275,7 +4279,97 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
   }
 
-  async answerApproval(input: Parameters<CodeOperationTurnPort["answerApproval"]>[0]) {
+  ownerApprovals(): ReadonlyArray<RuntimeApprovalRecovery> {
+    const pending: RuntimeApprovalRecovery[] = [];
+    for (const active of this.#active.values()) {
+      if (active.abort.signal.aborted || (active.state !== "running" && active.state !== "waiting"))
+        continue;
+      for (const requestId of active.toolApprovals.keys()) {
+        pending.push({
+          mode: "code",
+          threadId: active.thread.id,
+          requestId: OwnerApprovalId.make(requestId),
+          identity: String(active.operationId),
+          action: undefined,
+          current: () => false,
+          answer: async () => false,
+        });
+      }
+      for (const [requestId, callback] of active.approvals) {
+        pending.push({
+          mode: "code",
+          threadId: active.thread.id,
+          requestId: OwnerApprovalId.make(requestId),
+          root: active.checkoutRoot,
+          identity: JSON.stringify({
+            operationId: active.operationId,
+            sessionId: active.sessionId,
+            callback,
+            windowId: active.windowId,
+            policy: active.thread.executionPolicy,
+            persistence: active.thread.permissionPersistence,
+          }),
+          get action() {
+            try {
+              return active.connection?.approvalCall?.({
+                sessionId: decodeProviderSessionId(active.sessionId),
+                requestId: callback,
+              })?.ownerAction;
+            } catch {
+              return undefined;
+            }
+          },
+          current: () =>
+            this.#active.get(active.thread.id) === active &&
+            active.approvals.get(requestId) === callback &&
+            !active.abort.signal.aborted &&
+            (active.state === "running" || active.state === "waiting"),
+          answer: async (approved, current, principal) => {
+            const thread = this.#options.persistence.readCodeThread(active.thread.id);
+            if (thread === undefined || !current() || active.abort.signal.aborted) return false;
+            let outcome: "approved" | "denied" | "uncertain" = "uncertain";
+            try {
+              const result = await this.answerApproval(
+                {
+                  thread,
+                  checkoutRoot: active.checkoutRoot,
+                  approvalId: requestId,
+                  decision: approved ? "approved" : "denied",
+                },
+                current,
+              );
+              if (result.state === "failed") return false;
+              outcome = approved ? "approved" : "denied";
+              return true;
+            } finally {
+              if (!active.approvals.has(requestId)) {
+                const frame = this.#events.append({
+                  threadId: active.thread.id,
+                  operationId: active.operationId,
+                  expectedCursor: active.cursor,
+                  event: {
+                    kind: "owner-approval-settled",
+                    approvalId: CodeApprovalId.make(requestId),
+                    outcome,
+                    actingPrincipal: principal,
+                  },
+                });
+                active.cursor = frame.cursor;
+                this.#options.onPendingRequestWithdrawn?.();
+              }
+            }
+          },
+        });
+      }
+    }
+    return pending;
+  }
+
+  async answerApproval(
+    input: Parameters<CodeOperationTurnPort["answerApproval"]>[0],
+    ownerCurrent?: () => boolean,
+  ) {
+    if (ownerCurrent !== undefined && !ownerCurrent()) return turnState("failed");
     const active = this.#owned(input.thread, input.checkoutRoot);
     const providerRequestId = active?.approvals.get(input.approvalId);
     const turnPosture =
@@ -4304,12 +4398,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.thread.permissionPersistence !== input.thread.permissionPersistence
     )
       return turnState("failed");
-    active.approvals.delete(input.approvalId);
+    const connection = active.connection;
+    if (ownerCurrent === undefined) active.approvals.delete(input.approvalId);
     await Effect.runPromise(
-      active.connection.answerApproval({
-        sessionId: active.sessionId as never,
-        requestId: providerRequestId,
-        approved: input.decision === "approved",
+      Effect.suspend(() => {
+        if (ownerCurrent !== undefined && !ownerCurrent())
+          return Effect.die(new Error("Owner approval target changed before delivery."));
+        if (ownerCurrent !== undefined) active.approvals.delete(input.approvalId);
+        return connection.answerApproval({
+          sessionId: active.sessionId as never,
+          requestId: providerRequestId,
+          approved: input.decision === "approved",
+          ...(ownerCurrent === undefined ? {} : { scope: "once" as const }),
+        });
       }),
     );
     if (input.decision === "approved") return answeredTurnState(active.state);

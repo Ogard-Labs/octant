@@ -57,6 +57,7 @@ export interface WorkRequestProviderSessionPort {
     readonly sessionId: ProviderSessionId;
     readonly requestId: string;
     readonly approved: boolean;
+    readonly ownerCurrent?: () => boolean;
   }): Promise<void>;
   answerUserInput(input: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -273,7 +274,10 @@ export class WorkRequestService {
   /** The user's resolution of a pending approval or user-input request. */
   async resolve(
     command: Extract<WorkRequestCommand, { kind: "resolve-work-request" }>,
+    ownerCurrent?: () => boolean,
   ): Promise<WorkRequestServiceResult> {
+    if (ownerCurrent !== undefined && !ownerCurrent())
+      return failure("stale", "Owner approval target changed.");
     if (this.#userActor.kind !== "local-user") {
       return failure(
         "unauthorized",
@@ -323,6 +327,7 @@ export class WorkRequestService {
             sessionId: prepared.request.providerSessionId,
             requestId: providerCallbackId(entry),
             approved: command.resolution.approved,
+            ...(ownerCurrent === undefined ? {} : { ownerCurrent }),
           });
         } else {
           await this.#providerSessions.answerUserInput({

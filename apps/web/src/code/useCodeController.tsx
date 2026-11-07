@@ -523,6 +523,15 @@ export function useCodeController(options: CodeControllerOptions) {
   }, [conversationStarted]);
 
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
+    if (event.kind === "owner-approval-settled") {
+      setProviderRequests((current) =>
+        current.filter(
+          (request) =>
+            request.kind !== "approval" || String(request.approvalId) !== String(event.approvalId),
+        ),
+      );
+      return;
+    }
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
   }, []);

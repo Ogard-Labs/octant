@@ -1,0 +1,47 @@
+import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { decodeOwnerApprovalAction } from "@octant/contracts/owner-approvals";
+import { ownerApprovalFileContext } from "./ownerApprovalFile";
+
+describe("owner file approval scope", () => {
+  it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
+    "keeps the live bound root identity and refuses outside, credential and Git paths including aliases",
+    () => {
+      const base = mkdtempSync(join(tmpdir(), "octant-owner-file-scope-"));
+      const root = join(base, "project");
+      mkdirSync(root);
+      const action = (path: string) =>
+        decodeOwnerApprovalAction({
+          kind: "file-write",
+          tool: "Write",
+          input: JSON.stringify({ file_path: path, content: "fixture" }),
+        });
+      try {
+        const original = ownerApprovalFileContext(action(join(root, "new.txt")), root);
+        expect(original?.physicalRoot).toBeDefined();
+        writeFileSync(join(base, "outside.txt"), "fixture");
+        symlinkSync(join(base, "outside.txt"), join(root, "alias.txt"));
+        mkdirSync(join(root, ".git"));
+        writeFileSync(join(root, ".git", "config"), "fixture");
+        symlinkSync(join(root, ".git", "config"), join(root, "git-alias"));
+        for (const path of [
+          join(base, "outside.txt"),
+          join(root, "alias.txt"),
+          join(root, ".env"),
+          join(root, ".git", "config"),
+          join(root, "git-alias"),
+        ])
+          expect(ownerApprovalFileContext(action(path), root)).toBeUndefined();
+        renameSync(root, join(base, "previous"));
+        mkdirSync(root);
+        expect(ownerApprovalFileContext(action(join(root, "new.txt")), root)?.inode).not.toBe(
+          original?.inode,
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
+});
