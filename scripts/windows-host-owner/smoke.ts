@@ -102,8 +102,13 @@ async function alterOwnedFixture(
     mode,
   ];
   if (target !== undefined) args.push("-TargetProcessId", String(target));
+  // The hosted runner uses PowerShell 7; Windows PowerShell must derive its
+  // own standard module paths rather than load incompatible inherited modules.
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"),
+  );
   const child = spawn(executable, args, {
-    env: { ...process.env },
+    env: environment,
     stdio: ["ignore", "ignore", "inherit"],
     windowsHide: true,
   });
