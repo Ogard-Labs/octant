@@ -1,3 +1,4 @@
+import { BrowserFlowRunDialog } from "./BrowserFlowRunDialog";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserFlowSummary } from "@octant/contracts/browser-flows";
 import { useCallback, useEffect, useState } from "react";
@@ -18,12 +19,13 @@ type Loaded =
 /**
  * Settings › Data & privacy › Browser flows: the checks an agent saved in a
  * Project, each with its step count and where it starts, and a way to delete
- * it. The agent runs a flow by name; deleting is the person's, from here.
+ * it. A person can review a run in an existing task or delete a saved flow.
  */
 export function BrowserFlowsSection(props: BrowserFlowsSectionProps) {
   const { client } = props;
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [confirming, setConfirming] = useState<BrowserFlowSummary>();
+  const [running, setRunning] = useState<BrowserFlowSummary>();
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState<string>();
   const manage = client.manageFlows;
@@ -102,6 +104,15 @@ export function BrowserFlowsSection(props: BrowserFlowsSectionProps) {
             >
               <div className="host-settings__controls">
                 <OctantButton
+                  aria-label={`Run flow ${flow.name}`}
+                  onClick={() => setRunning(flow)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Run…
+                </OctantButton>
+                <OctantButton
                   aria-label={`Delete flow ${flow.name}`}
                   onClick={() => setConfirming(flow)}
                   size="sm"
@@ -116,6 +127,14 @@ export function BrowserFlowsSection(props: BrowserFlowsSectionProps) {
         </div>
       ) : null}
       {notice === undefined ? null : <SettingsState kind="empty">{notice}</SettingsState>}
+      {running === undefined ? null : (
+        <BrowserFlowRunDialog
+          key={`${running.projectId}:${running.name}`}
+          client={client}
+          flow={running}
+          onClose={() => setRunning(undefined)}
+        />
+      )}
       {confirming === undefined ? null : (
         <OctantConfirmDialog
           confirmLabel="Delete"

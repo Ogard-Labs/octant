@@ -517,9 +517,20 @@ a private page but cannot save one, and a turn started from your phone can do
 neither.
 
 Settings › Data & storage › Browser flows lists the flows of every Project with
-their step count and starting address, and deletes one. A flow is stored on this
-Mac with the Project, goes when the Project is erased, and is not part of a
-thread export.
+their step count and starting address. Run asks you to choose an existing idle
+Work or Code task in that Project, then review its model, access, profile and
+fixed steps. You can edit the text of a type step and a recorded expected title for this run without
+changing the saved flow. If your new text changes the expected page title,
+review that title too; Octant does not guess substitutions or skip the check. Run fixed steps starts it; the ordinary site and profile
+approvals still apply. Plan and server Projects cannot use this local runner.
+
+The dialog shows progress. If the person holds the page before a step runs,
+hand it back and choose Resume. Changes to the flow, task authority, profile or
+site approval require a new review. Other failures stop without retrying an
+uncertain action. Closing the dialog stops an active run; an operation already
+sent to the page may have acted. Runs expire after 15 minutes. Delete still asks
+for confirmation. A saved flow stays on this Mac with its Project, goes when
+the Project is erased, and is not part of a thread export.
 
 ### When a Browser call does not go through
 
