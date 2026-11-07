@@ -3543,10 +3543,12 @@ describe("watching the thread's own pull request as an agent tool", () => {
           : { status: "declined", answer: "denied" };
       },
     );
-    const unwatch = vi.fn(async (): Promise<PullRequestWatchOutcome> => ({
-      status: "unwatched",
-      target,
-    }));
+    const unwatch = vi.fn(
+      async (): Promise<PullRequestWatchOutcome> => ({
+        status: "unwatched",
+        target,
+      }),
+    );
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
       windowId: scope,
