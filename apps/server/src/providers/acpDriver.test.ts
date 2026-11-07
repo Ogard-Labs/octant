@@ -192,7 +192,9 @@ function permissionRequest(id: string, toolCallId: string) {
 
 function fixture(
   profile: AcpProviderProfile,
-  overrides: Partial<Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory">> & {
+  overrides: Partial<
+    Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory" | "process">
+  > & {
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
     readonly runtimeVersion?: string;
@@ -305,6 +307,200 @@ async function collectTerminal(
     ).pipe(Effect.map((items) => Array.from(items) as ProviderRuntimeEvent[])),
   );
 }
+
+describe("supplementary file review capability", () => {
+  it("checks current host admission after a cold load before changing native settings", async () => {
+    const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    let current = true;
+    f.client.loadSession.mockImplementationOnce(async () => {
+      current = false;
+      return { sessionId: "native-saved", configOptions: f.client.configOptions };
+    });
+    const outcome = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "mistral-vibe",
+              value: "native-saved",
+              binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+            },
+            modelId,
+            executionPolicy: "plan",
+            tools: [],
+            current: () => current,
+          });
+        }),
+      ),
+    );
+    await expect(outcome).rejects.toThrow();
+    expect(f.client.setConfigOption).not.toHaveBeenCalled();
+    expect(f.active()).toBe(0);
+    expect(f.released()).toBe(1);
+  });
+
+  it("bounds the owned session-close handshake and joins process release", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+      f.client.closeSession.mockImplementationOnce(() => new Promise(() => {}));
+      const pending = Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.resume({
+              sessionId,
+              resumeCursor: {
+                driverKind: "mistral-vibe",
+                value: "native-saved",
+                binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+              },
+              modelId,
+              executionPolicy: "plan",
+              tools: [],
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      await vi.waitFor(() => expect(f.client.closeSession).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(501);
+      await pending;
+      expect(f.active()).toBe(0);
+      expect(f.released()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("aborts an owned partial initialization and releases its scope before returning", async () => {
+    let entered: (() => void) | undefined;
+    const initialized = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let released = 0;
+    const f = fixture(
+      { ...vibe, fileReviewVersions: ["3.0.3"] },
+      {
+        runtimeVersion: "3.0.3",
+        process: {
+          start: () =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  released += 1;
+                }),
+              );
+              entered?.();
+              return yield* Effect.never;
+            }),
+        },
+      },
+    );
+    const controller = new AbortController();
+    const pending = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "mistral-vibe",
+              value: "native-saved",
+              binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+            },
+            modelId,
+            executionPolicy: "plan",
+            tools: [],
+          });
+        }),
+      ),
+      { signal: controller.signal },
+    );
+    await initialized;
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(released).toBe(1);
+    expect(f.client.loadSession).not.toHaveBeenCalled();
+    expect(f.registry.activeSessionCount(instanceId)).toBe(0);
+  });
+  it("cancels a suspended cold load, closes its process and ignores a late native reply", async () => {
+    const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    let finish: (() => void) | undefined;
+    f.client.loadSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({ sessionId: "native-saved", configOptions: f.client.configOptions });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "mistral-vibe",
+              value: "native-saved",
+              binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+            },
+            modelId,
+            executionPolicy: "plan",
+            tools: [],
+          });
+        }),
+      ),
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(f.client.loadSession).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(f.active()).toBe(0);
+    expect(f.released()).toBe(1);
+    expect(f.registry.activeSessionCount(instanceId)).toBe(0);
+    finish?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.client.setConfigOption).not.toHaveBeenCalled();
+    expect(f.client.newSession).not.toHaveBeenCalled();
+    expect(f.client.prompt).not.toHaveBeenCalled();
+  });
+  it("leaves the production Vibe reader unadvertised before signed-in cold-resume evidence", async () => {
+    const f = fixture(vibe, { runtimeVersion: "3.0.3" });
+    expect(f.driver.fileReviewReads).toBeUndefined();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          expect(connection.readFileReview).toBeUndefined();
+        }),
+      ),
+    );
+  });
+
+  it("allows a source-injected verified profile to refuse an absent session without native calls", async () => {
+    const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    expect(f.driver.fileReviewReads).toBe(true);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const read = connection.readFileReview;
+          if (read === undefined) throw new Error("Expected the injected read port");
+          expect(yield* read({ sessionId, path: "sample.txt", current: () => true })).toEqual({
+            status: "refused",
+            reason: "no-session",
+          });
+          expect(f.client.call).not.toHaveBeenCalled();
+          expect(f.client.newSession).not.toHaveBeenCalled();
+        }),
+      ),
+    );
+  });
+});
 
 describe("verified ACP usage", () => {
   it.each([

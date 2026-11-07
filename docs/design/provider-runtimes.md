@@ -112,9 +112,47 @@ in-process host, so it loses no capability by comparison: the 3.0.3 source
 sends ACP usage updates with context size and cost, a `/compact` command,
 `review/*` extension methods, and questions as elicitation. Usage and context
 updates are consumed for the verified 3.0.3 release, as specified below.
-Compaction, review and elicitation remain unimplemented and need their own
-signed-in runtime evidence before any capability is declared. Revisit `vibe-app-server` when it negotiates a
+Compaction and elicitation remain unimplemented. Supplementary file-review
+reads have a candidate integration behind an empty verified-version allowlist:
+no production profile declares the read capability until signed-in 3.0.3
+read and genuine same-task cold-resume evidence pass. Revisit `vibe-app-server` when it negotiates a
 version or is documented.
+
+The provider SDK's optional file-review read port returns bounded checkpoint
+text, observed edit scopes, per-scope text comparisons and line anchors. It
+never approves or reverts edits and does not report approval-review verdicts.
+The host can offer this supplementary detail from current checkout Changes
+only; historical turn and run comparisons keep their retained Git evidence.
+Git owns baseline, changed-file counts and discard. An empty checkpoint is
+valid content, distinct from no saved session or a refused cold resume.
+
+Each explicit file read resolves window/Project/checkout authority and the
+thread's host-recorded cursor, provider, model and exact runtime root. It
+refuses a running turn or compaction and holds the session against another
+turn while acquiring, resuming, reading and closing its private connection.
+It never creates a new session, prompts a model or takes over a live turn.
+The read always resumes at Plan with no tools, extra folders, automatic
+approval or native setup: subagents, web tools, skills, MCP/connectors,
+hooks and Project code are explicitly off. It cannot inherit Full access
+from the task. The existing Plan launch confines checkout writes and child
+execution and retains guarded provider egress. Compatibility of this
+restricted cold resume is part of the outstanding native gate.
+Selected files pass the existing contained-path and protected-file checks;
+a narrower working-folder session never gains the wider checkout root.
+Authority and file identity are checked again before returning content.
+Host preparation has a 20-second deadline and the runtime operation has a
+12-second deadline. Cancellation interrupts owned process initialization and
+native load/configuration waits; connection finalization cancels pending
+starts before joining them. Stopping the session has a three-second wait;
+scope finalization still joins its owned process cleanup. The native close
+handshake gets at most 500 milliseconds, followed by transport closure and
+the existing process-group termination (two two-second phases, plus the
+25-millisecond transport-exit grace). Thus the read's configured operation
+and process-cleanup budget is about 16.6 seconds after host preparation,
+not a claim that the 12-second operation bound includes cleanup. A process
+that survives the kill deadline reports cleanup failure and keeps its
+registry ownership; it is never reported as a successful read. Unsupported versions,
+malformed/oversized data, cancellation and stale identity refuse the read.
 
 A read-only signed-in ACP probe on 2026-11-03 confirmed 3.0.3's
 `usage_update` with `used`, `size` and cumulative `promptTokens`,

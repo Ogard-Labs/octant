@@ -164,7 +164,9 @@
     "./command-credentials": "./src/commandCredentials.ts",
     "./browser-page-script": "./src/browserPageScript.ts",
     "./owner-browser": "./src/ownerBrowser.ts",
-    "./browser-presentation": "./src/browserPresentation.ts"
+    "./browser-presentation": "./src/browserPresentation.ts",
+    "./provider-file-review": "./src/providerFileReview.ts",
+    "./code-provider-file-review": "./src/codeProviderFileReview.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

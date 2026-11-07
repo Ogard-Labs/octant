@@ -34,6 +34,91 @@ async function chooseSideBySide() {
 }
 
 describe("CodeDiffPane", () => {
+  it("offers supplementary reads only for the current checkout and keeps its Git comparison", async () => {
+    const code = client();
+    const read = vi.fn<NonNullable<CodeClient["readProviderFileReview"]>>(async (input) =>
+      input.kind === "availability"
+        ? { status: "available" }
+        : {
+            status: "ready",
+            file: {
+              path: input.path,
+              checkpoint: "",
+              scopes: [{ id: "manual:0", label: "Manual edit 1", source: "manual-edit" }],
+              comparison: {
+                scopeId: "manual:0",
+                change: "modified",
+                before: "before",
+                after: "after",
+              },
+              anchors: [{ side: "after", line: 1 }],
+            },
+          },
+    );
+    code.readProviderFileReview = read;
+    const fixture = runtime();
+    render(<CodeDiffPane client={code} diff={available()} loadRuntime={fixture.loadRuntime} />);
+    const file = await screen.findByRole("region", { name: "src/index.ts" });
+    const open = await within(file).findByRole("button", { name: "Provider checkpoint" });
+    expect(read).toHaveBeenCalledTimes(1);
+    await userEvent.setup().click(open);
+    expect(
+      await screen.findByRole("region", { name: "Provider checkpoint for src/index.ts" }),
+    ).toBeVisible();
+    expect(await screen.findByRole("combobox", { name: "Provider edit scope" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Provider checkpoint · src/index.ts" }),
+    ).toHaveFocus();
+    expect(screen.getByRole("region", { name: "README.md" })).toBeVisible();
+    expect(code.executeOperation).not.toHaveBeenCalled();
+    expect(read).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ kind: "file", path: "src/index.ts" }),
+      expect.any(AbortSignal),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Close checkpoint" }));
+    expect(open).toHaveFocus();
+  });
+
+  it("cancels a supplementary read when its selected comparison changes and withholds the late answer", async () => {
+    const code = client();
+    let answer:
+      | ((value: Awaited<ReturnType<NonNullable<CodeClient["readProviderFileReview"]>>>) => void)
+      | undefined;
+    let signal: AbortSignal | undefined;
+    code.readProviderFileReview = vi.fn<NonNullable<CodeClient["readProviderFileReview"]>>(
+      async (input, readSignal) => {
+        if (input.kind === "availability") return { status: "available" };
+        signal = readSignal;
+        return new Promise((resolve) => {
+          answer = resolve;
+        });
+      },
+    );
+    const fixture = runtime();
+    const mounted = render(
+      <CodeDiffPane client={code} diff={available()} loadRuntime={fixture.loadRuntime} />,
+    );
+    const file = await screen.findByRole("region", { name: "src/index.ts" });
+    await userEvent
+      .setup()
+      .click(await within(file).findByRole("button", { name: "Provider checkpoint" }));
+    expect(await screen.findByText("Reading provider checkpoint")).toBeVisible();
+    mounted.rerender(
+      <CodeDiffPane
+        client={code}
+        diff={{ state: "loading", message: "Refresh" } as never}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    expect(signal?.aborted).toBe(true);
+    answer?.({
+      status: "ready",
+      file: { path: "src/index.ts", checkpoint: "late private content", scopes: [], anchors: [] },
+    });
+    expect(screen.queryByText("late private content")).not.toBeInTheDocument();
+  });
+
   it("restores the selected review file from the same captured diff without performing a Git effect", async () => {
     const namespace = `review-view-${crypto.randomUUID()}`;
     const store = createWorkspaceViewStore(namespace);
