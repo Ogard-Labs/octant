@@ -34,7 +34,7 @@ const target: BrowserSessionTarget = {
   }),
 };
 
-function fixture() {
+function fixture(clock?: () => number) {
   let now = Date.parse("2026-11-07T10:00:00Z");
   let current: CurrentBrowserSessionTarget | undefined = { target, revision: "child-workspace-1" };
   let local = true;
@@ -42,7 +42,7 @@ function fixture() {
   const profileLabel = vi.fn(async () => "Personal");
   const onRevoked = vi.fn();
   const service = new BrowserSessionGrants({
-    now: () => now,
+    now: () => clock?.() ?? now,
     uuid: () => crypto.randomUUID(),
     isLocalWindow: () => local,
     canReview: (window) => String(window) === String(windowId),
@@ -272,4 +272,67 @@ describe("explicit Browser session permissions", () => {
     ).toMatchObject({ reason: "record-failed" });
     expect(f.service.find(command.grantee, command.profile, command.origins)).toBeUndefined();
   });
+});
+
+function routineReview(durationMinutes?: number) {
+  const result = decodeBrowserSessionGrantsCommand({
+    kind: "review",
+    grantee: { kind: "routine", routineId: "60000000-0000-4000-8000-000000000001" },
+    profile: command.profile,
+    origins: command.origins,
+    ...(durationMinutes === undefined ? {} : { durationMinutes }),
+  });
+  if (result.kind !== "review") throw new Error("Expected routine review");
+  return result;
+}
+
+it("defaults a recurring permission to seven days without widening child duration", async () => {
+  const f = fixture();
+  const request = routineReview();
+  f.setCurrent({
+    target: { ...target, grantee: request.grantee },
+    revision: "routine-definition-1",
+  });
+  try {
+    const review = await f.service.execute(windowId, request);
+    if (review.kind !== "browser-session-review") throw new Error("Expected review");
+    expect(Date.parse(review.grant.expiresAt) - Date.parse(review.grant.grantedAt)).toBe(
+      7 * 24 * 60 * 60_000,
+    );
+    expect(review.grant).toHaveProperty("recipientRevisionDigest");
+    expect(() =>
+      decodeBrowserSessionGrantsCommand({ ...command, durationMinutes: 30 * 24 * 60 }),
+    ).toThrow();
+    expect(() => routineReview(30 * 24 * 60 + 1)).toThrow();
+  } finally {
+    f.service.close();
+  }
+});
+
+it("keeps a thirty-day permission alive beyond the native timer limit and expires it once", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-07T10:00:00Z"));
+  const f = fixture(Date.now);
+  const request = routineReview(30 * 24 * 60);
+  f.setCurrent({
+    target: { ...target, grantee: request.grantee },
+    revision: "routine-definition-1",
+  });
+  try {
+    const review = await f.service.execute(windowId, request);
+    if (review.kind !== "browser-session-review") throw new Error("Expected review");
+    const granted = await f.service.execute(windowId, { kind: "grant", reviewId: review.reviewId });
+    expect(granted.kind).toBe("browser-session-granted");
+    await vi.advanceTimersByTimeAsync(25 * 24 * 60 * 60_000);
+    expect(f.service.find(request.grantee, request.profile, request.origins)).toBe(
+      review.grant.grantId,
+    );
+    expect(f.onRevoked).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5 * 24 * 60 * 60_000);
+    expect(f.service.find(request.grantee, request.profile, request.origins)).toBeUndefined();
+    expect(f.onRevoked).toHaveBeenCalledTimes(1);
+  } finally {
+    f.service.close();
+    vi.useRealTimers();
+  }
 });

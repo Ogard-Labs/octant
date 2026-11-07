@@ -34,6 +34,7 @@ interface ChildBrowserEntry {
   readonly service: BrowserAutomationService;
   readonly tools: AppManagedToolSet;
   readonly grantId: string;
+  readonly callerIsCurrent: () => boolean;
   readonly windowId: WindowId;
 }
 
@@ -63,9 +64,16 @@ export class BrowserDelegatedChildren {
     readonly target: BrowserSessionTarget;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly current: () => BrowserSessionTarget | undefined;
+    /** A host-proven run/session identity, independent of the reusable recipient. */
+    readonly executionId?: string;
+    readonly contentThreadId?: BrowserThreadId;
   }): AppManagedToolSet {
-    if (input.target.grantee.kind !== "child") throw new Error("Expected a child Browser target.");
-    const id = String(input.target.grantee.runId);
+    const id =
+      input.target.grantee.kind === "child"
+        ? String(input.target.grantee.runId)
+        : input.executionId;
+    if (id === undefined)
+      throw new Error("A delegated Browser execution needs a host-owned identity.");
     const ownerKey = this.#options.uuid();
     const threadId = decodeBrowserThreadId(id);
     const close = async (): Promise<void> => {
@@ -81,7 +89,7 @@ export class BrowserDelegatedChildren {
           ? {}
           : {
               message:
-                "A local person reviews this child's Browser session permission in Settings > Data & storage. Then retry with the exact granted profile. Granting does not start or resume the child.",
+                "A local person reviews this caller's Browser session permission in Settings > Data & storage. Then retry with the exact granted profile. Granting does not start or resume the caller.",
               permissions:
                 input.current() === undefined
                   ? []
@@ -100,7 +108,7 @@ export class BrowserDelegatedChildren {
         {
           ...BROWSER_TOOL_DEFINITION,
           description:
-            "Use this managed child's own Browser context with an explicitly granted stored profile and HTTPS site. Permission never lends the parent's page or file-transfer authority.",
+            "Use this delegated caller's own Browser context with an explicitly granted stored profile and HTTPS site. Permission never lends the parent's page or file-transfer authority.",
           inputSchema: {
             ...BROWSER_TOOL_DEFINITION.inputSchema,
             properties: {
@@ -108,7 +116,7 @@ export class BrowserDelegatedChildren {
               profile: {
                 type: "string",
                 description:
-                  "The exact granted profile: project, personal, or account:<id>. A missing permission response lists only this child's granted profiles.",
+                  "The exact granted profile: project, personal, or account:<id>. A missing permission response lists only this caller's granted profiles.",
               },
             },
           },
@@ -191,7 +199,11 @@ export class BrowserDelegatedChildren {
             isUnattendedScope: () => true,
             delegatedProfileIsCurrent: ({ profile: candidate, origins: sites }) =>
               permitted(candidate, sites),
-            recordExternalContentIngestion: this.#options.recordExternalContentIngestion,
+            recordExternalContentIngestion: (mark) =>
+              this.#options.recordExternalContentIngestion({
+                ...mark,
+                ...(input.contentThreadId === undefined ? {} : { threadId: input.contentThreadId }),
+              }),
             uuid: this.#options.uuid,
             now: this.#options.now,
             clock: () => new Date(this.#options.now()).toISOString(),
@@ -221,7 +233,13 @@ export class BrowserDelegatedChildren {
             },
             uuid: this.#options.uuid,
           });
-          entry = { service, tools: managed, grantId, windowId };
+          entry = {
+            service,
+            tools: managed,
+            grantId,
+            windowId,
+            callerIsCurrent: () => input.current() !== undefined,
+          };
           this.#active.set(ownerKey, entry);
         }
         const answer = await entry.tools.execute(call);
@@ -245,6 +263,12 @@ export class BrowserDelegatedChildren {
       },
     };
     return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);
+  }
+
+  async settle(): Promise<void> {
+    const ended = [...this.#active.entries()].filter(([, row]) => !row.callerIsCurrent());
+    for (const [id] of ended) this.#active.delete(id);
+    await Promise.all(ended.map(([, row]) => row.service.close()));
   }
 
   async revoke(grantId: string): Promise<void> {
@@ -277,7 +301,7 @@ function originOf(value: string): ReadonlyArray<string> {
   }
 }
 
-/** A site-limited native Browser grant never changes the child's ambient network grant. */
+/** A site-limited native Browser grant never changes the caller's ambient network grant. */
 export function currentManagedChildBrowserTarget(
   run: AgentRun,
   input: {

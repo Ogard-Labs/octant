@@ -3666,3 +3666,53 @@ function uuidFactory() {
   let index = 1;
   return () => `c0000000-0000-4000-8000-${String(index++).padStart(12, "0")}`;
 }
+
+it("retains task staleness and Plan refusals when a routine has its own Browser tools", async () => {
+  let current: CodeThread | undefined = thread();
+  const execute = vi.fn(async () => ({ result: { status: "observed" } }));
+  const close = vi.fn(async () => {});
+  const tools = createCodeAppManagedTools({
+    windowId,
+    thread: thread(),
+    readThread: () => current,
+    uuid: uuidFactory(),
+    executeOperation: async () => {
+      throw Error("No terminal operation expected");
+    },
+    terminal: {
+      read: async () => {
+        throw Error("No terminal read expected");
+      },
+    },
+    delegatedBrowserTools: {
+      definitions: [
+        { name: CODE_BROWSER_TOOL_NAME, description: "Browser", inputSchema: { type: "object" } },
+      ],
+      execute,
+      close,
+    },
+  });
+  const navigate = {
+    name: CODE_BROWSER_TOOL_NAME,
+    inputJson: JSON.stringify({
+      operation: "navigate",
+      url: "https://example.com",
+      profile: "personal",
+    }),
+  };
+  current = undefined;
+  expect(await tools.execute(navigate)).toMatchObject({
+    isError: true,
+    result: { error: "tool-authority-stale" },
+  });
+  current = { ...thread(), executionPolicy: "plan" };
+  expect(await tools.execute(navigate)).toMatchObject({
+    isError: true,
+    result: { error: "plan-mode-read-only" },
+  });
+  expect(execute).not.toHaveBeenCalled();
+  current = thread();
+  expect(await tools.execute(navigate)).toEqual({ result: { status: "observed" } });
+  await tools.close?.();
+  expect(close).toHaveBeenCalledOnce();
+});

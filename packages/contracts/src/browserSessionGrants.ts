@@ -8,6 +8,10 @@ import { ToolActionAuthority } from "./toolActions";
 import { WindowId } from "./shell";
 import { ProviderModelId } from "./providers";
 
+export const BROWSER_ROUTINE_SESSION_DEFAULT_MINUTES = 7 * 24 * 60;
+export const BROWSER_ROUTINE_SESSION_MAX_MINUTES = 30 * 24 * 60;
+export const BROWSER_SESSION_PERMISSION_LIMIT = 256;
+
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const BrowserSessionGrantId = Schema.UUID.pipe(Schema.brand("BrowserSessionGrantId"));
 export const BrowserSessionReviewId = Schema.UUID.pipe(Schema.brand("BrowserSessionReviewId"));
@@ -40,6 +44,10 @@ export const BrowserSessionGrant = Schema.Struct({
   profile: StoredBrowserProfile,
   profileLabel: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   origins: Origins,
+  /** Host digest of the recipient definition/workspace revision; never raw paths. */
+  recipientRevisionDigest: Schema.optional(
+    Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/)),
+  ),
   grantedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
 }).annotations(strict);
@@ -77,8 +85,18 @@ export const BrowserSessionGrantsCommand = Schema.Union(
     grantee: BrowserSessionGrantee,
     profile: StoredBrowserProfile,
     origins: Origins,
-    durationMinutes: Schema.Literal(15, 60, 480),
-  }).annotations(strict),
+    durationMinutes: Schema.optional(
+      Schema.Int.pipe(Schema.between(1, BROWSER_ROUTINE_SESSION_MAX_MINUTES)),
+    ),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter(
+        (review) =>
+          review.grantee.kind === "routine" ||
+          (review.durationMinutes !== undefined && [15, 60, 480].includes(review.durationMinutes)),
+      ),
+    ),
   Schema.Struct({ kind: Schema.Literal("grant"), reviewId: BrowserSessionReviewId }).annotations(
     strict,
   ),
