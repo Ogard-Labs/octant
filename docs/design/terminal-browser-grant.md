@@ -10,7 +10,7 @@ and [Architecture: security and authority](../architecture.md#security-and-autho
 its refusals; the `octant mcp` command that a CLI is pointed at; the launcher the
 macOS app puts on a granted terminal's `PATH`; the switch in a local window, the
 approval card that names the terminal, and the user guide
-(`apps/docs/advanced/terminal-browser.md`). The Linux desktop package ships no
+(`octant-site/docs/advanced/terminal-browser.md`). The Linux desktop package ships no
 launcher, so there the command comes from a headless install.
 
 ## The problem

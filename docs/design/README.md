@@ -75,7 +75,10 @@ available behavior, while Linear tracks delivery progress.
    add an entry for a new decision, change the rule or requirements for a changed
    one, move its status when a slice lands, and remove an entry the change
    retires.
-5. Verify the changed behavior with focused tests, boundary checks, or rendered
+5. Update affected user-guide pages in a companion PR in
+   [octant-site](https://github.com/Ogard-Labs/octant-site/tree/main/docs). Link
+   both PRs in their descriptions, or explain why a guide update is unnecessary.
+6. Verify the changed behavior with focused tests, boundary checks, or rendered
    inspection as appropriate. Cite the evidence and any remaining gaps in the PR.
 
 Ask about a consequential ambiguity or an action outside the authorized scope.

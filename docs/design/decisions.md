@@ -305,9 +305,9 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
-### Documentation builds and maintainer-owned publication
+### External user guide and maintainer-owned publication
 
-The guide builds for `https://octant.sh/docs/`. Pull requests, merge-queue commits and main pushes run its docs gates and upload a static artifact named for the commit. The maintainer configures and releases that artifact on their VPS; no workflow deploys it or treats an artifact upload as a live publication. Missing pages use the supported VitePress layout slot, and links retain the `/docs/` base.
+The VitePress guide lives in `Ogard-Labs/octant-site/docs`, outside the application monorepo, and builds independently for `https://octant.sh/docs/`. Application changes update the guide through companion PRs linked in both descriptions. The site repository runs its docs gates and uploads a static artifact named for the commit. The application repository retains internal specifications and exports semantic theme defaults for the guide; it does not duplicate the guide source. The maintainer configures and releases that artifact on their VPS; no workflow deploys it or treats an artifact upload as a live publication. Missing pages use the supported VitePress layout slot, and links retain the `/docs/` base.
 
 Status: Built. Since: 2026-11-07. Detail: [Documentation build and VPS handoff](../docs-deployment.md).
 

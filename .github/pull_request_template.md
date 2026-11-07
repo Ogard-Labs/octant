@@ -2,6 +2,12 @@
 
 One or two sentences: what changes and why a user or contributor cares.
 
+## User guide
+
+Link the companion guide PR in [octant-site](https://github.com/Ogard-Labs/octant-site),
+or explain why this change needs no user-guide update. Link this PR back from
+the guide PR. The guide source lives in `octant-site/docs`, not this repository.
+
 ## How to verify
 
 Map changed acceptance criteria to evidence: check/scenario, commit or build,

@@ -1,46 +1,47 @@
-# Documentation build and VPS handoff
+# User guide ownership and VPS handoff
 
-The guide is built for `https://octant.sh/docs/`. The maintainer configures
-and publishes it on their VPS. The repository does not deploy it or hold
-VPS credentials, and a successful build is not evidence of a live release.
+The VitePress guide lives in [Ogard-Labs/octant-site/docs](https://github.com/Ogard-Labs/octant-site/tree/main/docs).
+Its source, dependencies, checks, theme projection and static build belong there;
+there is no guide workspace or deployment workflow in this monorepo. Internal
+architecture and design specifications remain here.
 
-## Build artifact
+## Keeping application changes and the guide together
 
-The Docs workflow checks pull requests, merge-queue commits, and pushes to
-`main`; it can also be run manually. It runs the link/anchor, sidebar,
-metadata, type and build checks with:
+For a change that affects setup, security or user-visible behavior, edit the
+owning internal specification here and update the relevant guide pages in a
+companion PR in `octant-site`. Link both PRs in their descriptions. The PR
+checklist requires that link or a reason the guide needs no update. Keep
+unmerged behavior paired with its product PR rather than claiming it shipped.
+Existing in-flight guide edits must be transferred to that repository before
+their product PR lands; do not recreate `apps/docs`.
+
+For semantic theme changes, generate the guide's checked-in data projection:
+
+```sh
+bun run docs:theme > /path/to/octant-site/docs/.vitepress/theme/theme-tokens.json
+```
+
+Use the executable directly (`bun scripts/export-docs-theme.ts`) if a runner
+adds output to stdout. The JSON records an immutable source revision. Commit
+it in the companion guide PR and run the site's theme tests and build. The
+guide consumes this data without a workspace dependency or network fetch.
+
+## Build and publication
+
+The site repository's Docs workflow checks pull requests, merge-queue commits,
+and main pushes, and can be run manually. It tests metadata, anchors, links,
+sidebar coverage and types, checks formatting, and builds with:
 
 - `OCTANT_DOCS_BASE=/docs/`
 - `OCTANT_DOCS_URL=https://octant.sh/docs/`
 
-Each successful run uploads `apps/docs/dist/` as the seven-day artifact
-`octant-docs-<commit SHA>`. Use a successful `main` run for publication;
-PR and merge-queue artifacts are review builds. The artifact is the static
-site, with assets, clean-URL pages, sitemap and custom `404.html`.
+Each successful run uploads `docs/dist/` as `octant-docs-<commit SHA>`, retained
+seven days. Use a successful site `main` build for publication; PR artifacts
+are review builds. The root marketing site remains independent of this build.
 
-A local equivalent is:
-
-```sh
-bun install --frozen-lockfile
-bun run --filter @octant/docs check:links
-bun run --filter @octant/docs check:sidebar
-bun run --filter @octant/docs test
-bun run --filter @octant/docs typecheck
-OCTANT_DOCS_BASE=/docs/ OCTANT_DOCS_URL=https://octant.sh/docs/ bun run --filter @octant/docs build
-```
-
-## Maintainer publication
-
-1. Download the artifact for the selected successful `main` commit.
-2. Publish its contents to the VPS directory served at `/docs/`. The VPS
-   configuration must support clean URLs (for example `/docs/guide/export`
-   serves `guide/export.html`) and directory indexes.
-3. Serve the supplied `404.html` with HTTP status 404 for missing docs URLs.
-   Keep its `/docs/` asset and navigation paths intact.
-4. Confirm the home page, a nested guide page, assets and one missing URL;
-   check that canonical links and `sitemap.xml` use `https://octant.sh/docs/`.
-5. Record the deployed commit and observed results. Any final publication
-   review applicable to the content remains a separate gate.
-
-The workflow never uploads to the VPS or claims that those checks passed.
-No deployment hostname, private key or server path is needed in this repo.
+Henrik configures and publishes the artifact on the VPS at
+`https://octant.sh/docs/`. Serve clean URLs and directory indexes, and the
+supplied `404.html` with HTTP status 404 for missing docs URLs. Verify the home
+page, a nested page, assets, canonical URLs and sitemap, then record the deployed
+site commit. A build is not live publication, and applicable content-review gates
+remain separate. Neither repository's guide workflow deploys or needs VPS keys.

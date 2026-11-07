@@ -67,7 +67,8 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run style:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build",
-    "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts"
+    "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts",
+    "docs:theme": "bun scripts/export-docs-theme.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",
