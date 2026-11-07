@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { inflateSync } from "node:zlib";
+import { decodeBrowserFlow } from "@octant/contracts";
 import type {
   BrowserAccessibilityAudit,
   BrowserContextId,
@@ -29,6 +30,7 @@ import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
  */
 
 const pages: Record<string, string> = {
+  "/flow-key": `<!doctype html><title>Key page</title><input aria-label="Message" autofocus><p id="count">Key presses: 0</p><script>let count=0;document.addEventListener('keydown',event=>{if(event.key==='Enter')document.getElementById('count').textContent='Key presses: '+(++count);});</script>`,
   "/login": `<!doctype html><title>Sign in</title>
     <h1>Sign in</h1>
     <form id="f">
@@ -1706,6 +1708,73 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
       );
       expect(flows.saved.get("Order check")?.steps[1]?.input.text).toBe("Ada");
       expect(flows.saved.get("Order check")?.steps[2]?.expect.title).toBe("Saved Ada");
+    } finally {
+      runs.close();
+      await fresh.stop();
+    }
+  });
+
+  it("sends an untargeted reviewed keypress after a person hands the page back", async () => {
+    const fresh = agentTool();
+    await fresh.call({ operation: "navigate", url: `${origin}/flow-key` });
+    const projectId = authority.projectId;
+    if (projectId === undefined) throw Error("Project fixture missing");
+    const task = {
+      threadId,
+      mode: "work" as const,
+      title: "Send key",
+      modelId: "model" as never,
+      accessLabel: "Ask first",
+      profileLabel: "Private",
+    };
+    const flow = decodeBrowserFlow({
+      name: "Send key",
+      savedAt: new Date().toISOString(),
+      steps: [
+        {
+          operation: "press",
+          input: { operation: "press", key: "Enter" },
+          expect: { path: "/flow-key", title: "Key page" },
+        },
+      ],
+    });
+    const runs = new BrowserFlowRuns({
+      readFlow: () => flow,
+      tasks: () => [task],
+      bindTask: () => ({
+        fingerprint: "current",
+        refs: () => fresh.service.snapshotRefs(windowId, threadId),
+        execute: async (step) => {
+          const answer = await fresh.call({ ...step });
+          return { result: answer.result, isError: answer.isError };
+        },
+        claim: fresh.claimFlow,
+      }),
+      uuid: randomUUID,
+      now: Date.now,
+    });
+    try {
+      const review = runs.review(windowId, projectId, flow.name, task);
+      if (review.kind !== "browser-flow-run") throw Error("Review refused");
+      fresh.service.takeOver(windowId, threadId);
+      await runs.start(windowId, review.run.id, []);
+      await vi.waitFor(() =>
+        expect(runs.inspect(windowId, review.run.id)).toMatchObject({
+          run: { state: "paused", completed: 0 },
+        }),
+      );
+      fresh.service.handBack(windowId, threadId);
+      await runs.resume(windowId, review.run.id);
+      await vi.waitFor(
+        () =>
+          expect(runs.inspect(windowId, review.run.id)).toMatchObject({
+            run: { state: "completed", completed: 1 },
+          }),
+        { timeout: 10_000 },
+      );
+      expect((await fresh.call({ operation: "read-page" })).result.page?.text).toContain(
+        "Key presses: 1",
+      );
     } finally {
       runs.close();
       await fresh.stop();

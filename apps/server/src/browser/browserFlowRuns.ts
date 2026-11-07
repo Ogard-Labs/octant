@@ -288,7 +288,8 @@ export class BrowserFlowRuns {
           run.view = {
             ...run.view,
             state: "paused",
-            message: "The person holds this page. Hand it back, then choose Resume.",
+            message:
+              "This step did not run while the person used the page. Hand it back if needed, then choose Resume.",
           };
           return;
         }
@@ -340,5 +341,9 @@ function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
 function heldBeforeEffect(value: unknown): boolean {
   const failure = record(record(value)?.failedStep);
   const error = record(failure?.answer)?.error;
-  return error === "browser-waiting-for-person" || error === "browser-person-took-over";
+  return (
+    failure?.reason === "person-handoff" ||
+    error === "browser-waiting-for-person" ||
+    error === "browser-person-took-over"
+  );
 }

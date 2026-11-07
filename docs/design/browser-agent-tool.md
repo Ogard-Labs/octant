@@ -448,7 +448,10 @@ runs, not when it was recorded.
   authority, model binding, origin approval, Plan mode, the stale check, and the
   credential check. A step that acted by ref first takes a snapshot of the fresh
   page and picks the one element with the recorded role and name; none, or more
-  than one, stops the replay. After each step the server compares the page's
+  than one, stops the replay. An untargeted keypress also takes a fresh snapshot
+  before dispatch, including after a person hands back the page. A hand-back
+  answer that substituted a snapshot is never counted as an executed step.
+  After each step the server compares the page's
   path and title with the recorded ones, and the first step whose outcome
   differs, or that fails or is refused, stops the replay. The answer names that
   step (its number, its operation, and the expected and found path and title, the
