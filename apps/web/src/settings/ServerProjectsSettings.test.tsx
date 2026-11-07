@@ -59,6 +59,26 @@ function setup(options: {
 }
 
 describe("ServerProjectsSettings", () => {
+  it("shows a binding refusal after the Project whose action editor was open is removed", async () => {
+    const { user } = setup({
+      answer: (command) =>
+        command.kind === "remove-server-project"
+          ? { kind: "server-projects-updated", view: { projects: [] } }
+          : {
+              kind: "server-projects-refused",
+              reason: "folder-not-found",
+              message: "That folder is missing on the server.",
+            },
+    });
+    await user.click(await screen.findByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Remove Website" }));
+    expect(await screen.findByText("No folders on a server are bound.")).toBeVisible();
+    const form = screen.getByRole("form", { name: "Bind a folder on a server" });
+    await user.type(within(form).getByLabelText("Project name"), "Replacement");
+    await user.type(within(form).getByLabelText("Folder on the server"), "/srv/missing");
+    await user.click(within(form).getByRole("button", { name: "Bind folder" }));
+    expect(await screen.findByText("That folder is missing on the server.")).toBeVisible();
+  });
   it("retains a refused action draft until the person reloads the current saved list", async () => {
     let current: ServerProjectsView = { projects: [SITE] };
     const { user } = setup({

@@ -49,6 +49,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [actionProblem, setActionProblem] = useState<string | undefined>(undefined);
   const [actionsChanged, setActionsChanged] = useState(false);
   const [name, setName] = useState("");
   const [serverId, setServerId] = useState("");
@@ -63,9 +64,13 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     try {
       const [projects, registry] = await Promise.all([client.read(), serversClient?.read()]);
       setView(projects);
+      setEditingActions((current) =>
+        projects.projects.some((project) => String(project.id) === current) ? current : undefined,
+      );
       setServers(registry?.servers ?? []);
       setLoadFailed(false);
       setProblem(undefined);
+      setActionProblem(undefined);
       setActionsChanged(false);
     } catch {
       setLoadFailed(true);
@@ -88,20 +93,27 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
 
   async function send(command: ServerProjectsCommand): Promise<boolean> {
     if (client === undefined) return false;
-    setProblem(undefined);
-    setActionsChanged(false);
+    const actionSave = command.kind === "set-server-project-actions";
+    const reportProblem = actionSave ? setActionProblem : setProblem;
+    reportProblem(undefined);
+    if (actionSave) setActionsChanged(false);
     setBusy(true);
     try {
       const result = await client.command(command);
       if (result.kind === "server-projects-updated") {
         setView(result.view);
+        setEditingActions((current) =>
+          result.view.projects.some((project) => String(project.id) === current)
+            ? current
+            : undefined,
+        );
         return true;
       }
-      setProblem(result.message);
-      setActionsChanged(result.reason === "actions-changed");
+      reportProblem(result.message);
+      if (actionSave) setActionsChanged(result.reason === "actions-changed");
       return false;
     } catch {
-      setProblem("The server Project could not be saved.");
+      reportProblem("The server Project could not be saved.");
       return false;
     } finally {
       setBusy(false);
@@ -219,8 +231,8 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                         })
                       }
                     />
-                    {problem === undefined ? null : (
-                      <OctantAlert tone="danger">{problem}</OctantAlert>
+                    {actionProblem === undefined ? null : (
+                      <OctantAlert tone="danger">{actionProblem}</OctantAlert>
                     )}
                     {actionsChanged ? (
                       <>
@@ -319,7 +331,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
               />
             </div>
             <div aria-live="polite">
-              {problem === undefined || editingActions !== undefined ? null : (
+              {problem === undefined ? null : (
                 <OctantAlert className="shield-servers__problem" tone="danger">
                   {problem}
                 </OctantAlert>
