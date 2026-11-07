@@ -13544,6 +13544,23 @@ cards; general Azure CLI credentials remain unavailable by design.
   proof remain required before any production integration. No live kernel,
   driver, boot configuration or installed host policy changes as part of this
   development path. Prior admitted operations and mappings need not be erased.
+  A mediated workload must not weaken that live policy by destructively moving
+  or removing a current companion or ancestor when doing so would declassify
+  still-existing protected content. The pre-effect admission binds the actual
+  operation, source, destination and current namespace epoch. This adds no
+  content denial for public keys: their reads/writes, new public-key creation,
+  unrelated aliases and legitimate permitted namespace operations remain
+  available. Host/unconfined changes and Full access retain their normal
+  behavior. There is no sticky per-launch protection floor and no freeze of
+  external writers while userspace inspects metadata. An own-account exception
+  retains its initially enrolled lexical/canonical forms; replacing that path
+  with a link never transfers the exception to a different sign-in.
+  _Rationale._ Otherwise deleting a readable `name.pub` marker could make its
+  still-existing custom-named private key readable. Retaining all former secret
+  inodes forever would instead reject legitimate host changes and require
+  additional inode-lifetime state. Operation-specific namespace admission keeps
+  the live policy without either shortcut. Complete implementation and native
+  proof of this boundary remain required above.
 - **Work goes through the channel instead of the file.** SSH through the
   agent socket in `SSH_AUTH_SOCK`, a password manager's SSH agent included;
   Git over HTTPS through the system credential helper, which reaches the

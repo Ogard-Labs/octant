@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   stat,
   symlink,
@@ -127,4 +128,20 @@ it("never treats a scan concurrent with an outside namespace mutation as a valid
     status: "unavailable",
     reason: "namespace-changing",
   });
+});
+
+it("does not transfer an enrolled account exception when its path is replaced by a link to another sign-in", async () => {
+  const f = await fixture();
+  const own = join(f.home, ".claude");
+  const foreign = join(f.home, ".codex");
+  await mkdir(own);
+  await mkdir(foreign);
+  const credentials = join(foreign, "auth.json");
+  await writeFile(credentials, "synthetic foreign sign-in");
+  const policy = f.policy([own]);
+  await rename(own, `${own}-previous`);
+  await symlink(foreign, own);
+  const snapshot = await readLinuxMediationPolicy(policy, f.readNamespace);
+  if (snapshot.status !== "ready") throw Error("Missing current policy snapshot");
+  expect(snapshot.protectedObjects.has(await f.key(credentials))).toBe(true);
 });

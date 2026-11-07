@@ -149,7 +149,9 @@ export function secretGuardMediationPolicy(input: {
       },
       state.choice,
     ),
-    ownAccountPaths: [...input.ownAccountPaths],
+    // An enrolled account's canonical forms are fixed for that launch. A later
+    // symlink replacement must not transfer its exception to another sign-in.
+    ownAccountPaths: uniqueForms(input.ownAccountPaths),
     sshCompanionDirectory: state.choice.removed.includes("ssh-private-keys")
       ? undefined
       : join(home, ".ssh"),

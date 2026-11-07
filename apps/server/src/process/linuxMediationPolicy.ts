@@ -72,11 +72,6 @@ export async function readLinuxMediationPolicy(
         return { status: "unavailable", reason: "metadata-unavailable" };
       own.push(path);
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
-      try {
-        own.push((await realpath(nativePath(path), { encoding: "buffer" })).toString("latin1"));
-      } catch (error) {
-        if (!missing(error)) throw error;
-      }
     }
     const inspect = async (path: string, forced = false) => {
       if (!checkBudget()) return undefined;
