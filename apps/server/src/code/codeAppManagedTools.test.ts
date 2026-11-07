@@ -1,3 +1,4 @@
+import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
@@ -638,7 +639,7 @@ describe("Code app-managed tools", () => {
   describe("task Browser profile defaults and fresh bindings", () => {
     function fixture(
       options: {
-        profile?: "private" | "project" | "personal";
+        profile?: BrowserProfileChoice;
         explicit?: "private" | "project" | "personal";
         active?: boolean;
         pending?: "same" | "model" | "authority";
@@ -745,6 +746,22 @@ describe("Code app-managed tools", () => {
         );
       },
     );
+    it("uses an explicitly selected account default while still asking for that account's site authority", async () => {
+      const profileId = "40000000-0000-4000-8000-000000000002";
+      const f = fixture({ profile: `account:${profileId}` });
+      expect((await f.run({ operation: "navigate", url: "https://example.com" })).isError).toBe(
+        false,
+      );
+      expect(f.request).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: { kind: "account", profileId } }),
+      );
+      expect(f.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          policy: expect.objectContaining({ profile: { kind: "account", profileId } }),
+        }),
+      );
+      expect(f.privateRequest).not.toHaveBeenCalled();
+    });
     it("accepts an explicit Private override without rewriting the task default", async () => {
       const f = fixture({ profile: "personal" });
       await f.run({ operation: "navigate", url: "https://example.com", profile: "private" });

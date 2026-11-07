@@ -2653,6 +2653,23 @@ export class BrowserAutomationService {
       nativeBrowserAvailable: (await this.#runtime.nativeAvailable?.()) === true,
       authority: input.action.authority,
     });
+    if (decision.kind === "allowed" && input.policy.profile?.kind === "account") {
+      const profileId = input.policy.profile.profileId;
+      const rows = await this.#runtime.profiles?.list(false).catch(() => undefined);
+      if (
+        !rows?.some(
+          (entry) =>
+            entry.profile.kind === "account" &&
+            String(entry.profile.profileId) === String(profileId),
+        )
+      )
+        return {
+          category: "unavailable",
+          reason: "profile-unavailable",
+          message:
+            "The named account profile is not available on this host. Choose a local profile explicitly.",
+        };
+    }
     if (decision.kind === "allowed") return undefined;
     return decision.reason === "profile-unavailable"
       ? { category: "unavailable", reason: decision.reason, message: decision.message }

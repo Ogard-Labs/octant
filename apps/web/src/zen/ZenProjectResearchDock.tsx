@@ -1,3 +1,5 @@
+import { useBrowserAccountProfiles } from "../browser/useBrowserAccountProfiles";
+import { browserProfileFromChoice, storedBrowserProfile } from "@octant/domain";
 import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
 import type {
   BrowserProfileChoice,
@@ -63,6 +65,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
   const [message, setMessage] = useState<string>();
   const [opening, setOpening] = useState(false);
   const [nativeSupported, setNativeSupported] = useState<boolean>();
+  const accounts = useBrowserAccountProfiles(client, nativeSupported === true);
   // Where the next page keeps its site data; remembered per Project in this
   // renderer, and applied only to pages the person opens.
   const [profileChoice, setProfileChoice] = useState<BrowserProfileChoice>(() =>
@@ -272,6 +275,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
         </>
       ) : null}
       <BrowserProfileControl
+        accounts={accounts}
         disabled={opening}
         onChange={(choice) => void chooseProfile(choice)}
         profile={active ? (context?.profile ?? "private") : profileChoice}
@@ -284,9 +288,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
           agentDriving={false}
           client={client}
           hostBridge={props.hostBridge}
-          profile={
-            context.profile === "personal" ? { kind: "personal" } : { kind: "project", projectId }
-          }
+          profile={storedBrowserProfile(browserProfileFromChoice(context.profile, projectId))}
           refreshKey={String(context.contextId)}
         />
       ) : null}

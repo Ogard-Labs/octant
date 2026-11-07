@@ -1,3 +1,5 @@
+import { browserProfileChoiceOf } from "@octant/domain";
+import { browserProfileLabel } from "./browserProfileCopy";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserCapture, BrowserStep, BrowserThreadId } from "@octant/contracts";
 import { browserProofTimeline, browserStepLine, type BrowserProofEntry } from "@octant/domain";
@@ -149,7 +151,7 @@ function ProofList(props: {
             {item.step.profile === undefined ? null : (
               <span className="oct-meta">
                 {" "}
-                · {item.step.profile.kind === "personal" ? "Personal" : "Project"} profile
+                · {browserProfileLabel(browserProfileChoiceOf(item.step.profile))} profile
               </span>
             )}
             {item.captures.map((capture) => (

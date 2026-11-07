@@ -1,3 +1,4 @@
+import { browserProfileFromChoice } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
 import {
@@ -26,7 +27,6 @@ import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
   type BrowserThreadId,
-  type BrowserProfile,
 } from "@octant/contracts/browser-automation";
 import {
   decodeBrowserCaptureImage,
@@ -284,12 +284,7 @@ export function createBrowserAutomationRouteHandler(
             409,
             origin,
           );
-        const profile: BrowserProfile | undefined =
-          selection.profile === "project"
-            ? authority.projectId === undefined
-              ? undefined
-              : { kind: "project", projectId: authority.projectId }
-            : { kind: selection.profile };
+        const profile = browserProfileFromChoice(selection.profile, authority.projectId);
         if (profile === undefined)
           return failure(
             { category: "unavailable", message: "This task has no Project Browser profile." },

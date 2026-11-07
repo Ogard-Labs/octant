@@ -1,3 +1,4 @@
+import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -940,7 +941,7 @@ describe("octant_browser profile argument", () => {
 
   function fixture(
     options: {
-      readonly defaultProfile?: "private" | "project" | "personal";
+      readonly defaultProfile?: BrowserProfileChoice;
       readonly paired?: boolean;
       readonly remembered?: (origin: string, profile: unknown) => boolean;
       readonly unattended?: boolean;
@@ -994,6 +995,18 @@ describe("octant_browser profile argument", () => {
 
     expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
     expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
+  });
+
+  it("keeps a selected named account separate from the ordinary Personal profile", async () => {
+    const profileId = "40000000-0000-4000-8000-000000000002";
+    const f = fixture({ defaultProfile: `account:${profileId}` });
+    expect((await f.run({ operation: "navigate", url: "https://example.com" })).isError).toBe(
+      false,
+    );
+    expect(f.request).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: { kind: "account", profileId } }),
+    );
+    expect(f.create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "account", profileId });
   });
 
   it("uses the task default without granting it, and lets an explicit Private override it", async () => {

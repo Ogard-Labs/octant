@@ -1,3 +1,4 @@
+import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
 import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
@@ -1750,6 +1751,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
       clipboard: { writeText: (text) => clipboard.writeText(text) },
       createView: (options) => {
+        const stored = storedBrowserProfileOfPartitionFolder(
+          options.partition.replace(/^persist:/, ""),
+        );
+        if (stored?.kind === "account" && !profileStore.hasAccountProfile(stored.profileId))
+          throw new Error("The named account profile is not registered on this host.");
         if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
           return createOffscreenBrowserSurface(options);
         return new WebContentsView({
