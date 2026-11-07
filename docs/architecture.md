@@ -10955,8 +10955,11 @@ trust, replacement, changed authority or turn teardown invalidates pending use;
 a saved-command review retains that host fence before execution. An effect
 already started cannot be undone, and a changed caller receives no stale result.
 Credential-operation registration and its trusted response predicates remain in
-the host. The unified core credential composition remains host-owned until its
-separate migration through this port; its existing behavior is unchanged here.
+the host. The unified core `octant_credential` uses the same public capability
+port and family composer as installed declarations. Its existing name, help,
+schema, offered-side rules and task-owned command presentation are unchanged.
+The core's additional command presentation stays in a private server adapter;
+it is not added to the installed-plugin port's fixed metadata types.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated
