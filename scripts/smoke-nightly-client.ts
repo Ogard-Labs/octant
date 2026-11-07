@@ -1072,8 +1072,11 @@ try {
         );
         const menuMark = nightly.events.mark();
         await nextFrame();
-        await click(120, 120);
+        // Hold the physical release until AppKit's menu has actually opened:
+        // this is the schedule that intermittently failed the ordinary click.
+        await input({ type: "mouseDown", x: 120, y: 120, button: "left", clickCount: 1 });
         const menu = await nightly.events.next((event) => event.event === "menu", menuMark, 15_000);
+        await input({ type: "mouseUp", x: 120, y: 120, button: "left", clickCount: 1 });
         if (!JSON.stringify(menu.labels).includes("Third"))
           throw new Error(`The select menu offered ${JSON.stringify(menu.labels)}.`);
         await waitFor("The chosen option in the page", 15_000, () =>
