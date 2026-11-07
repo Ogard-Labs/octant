@@ -226,6 +226,15 @@ describe("BrowserWorkspace", () => {
   it("starts a repeated Browser tab fresh and reports the context it creates", async () => {
     const browser = client();
     const onContextCreated = vi.fn();
+    vi.mocked(browser.inspectThread).mockResolvedValue(
+      decodeBrowserAutomationSnapshot({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        agentAvailability: { status: "omitted", reason: "no-tool-transport" },
+      }),
+    );
     render(
       <BrowserWorkspace
         client={browser}
@@ -242,7 +251,13 @@ describe("BrowserWorkspace", () => {
     );
 
     await act(async () => undefined);
-    expect(browser.inspectThread).not.toHaveBeenCalled();
+    expect(await screen.findByText(/provider has no supported tool transport/)).toBeVisible();
+    expect(browser.inspectThread).toHaveBeenCalledWith(
+      { threadId, freshPicture: false },
+      expect.any(AbortSignal),
+    );
+    expect(screen.getByRole("button", { name: "Start browser" })).toBeDisabled();
+    expect(onContextCreated).not.toHaveBeenCalled();
     enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
