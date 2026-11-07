@@ -106,7 +106,12 @@ namespace cannot start, only provider startup may retry with `--share-net` and
 the process-owned socket refusals; that result does not establish production
 network confinement. Without either capsule, provider checks remain blocked.
 Deterministic Bun/Node file results outside the capsule are labelled separately.
-No AppArmor, sysctl, boot or other host security setting is changed by this job.
+The owned ephemeral Ubuntu job uses the existing desktop Linux CI setup:
+`kernel.apparmor_restrict_unprivileged_userns=0` permits Bubblewrap's user
+namespace in that disposable runner. It changes no persistent host, boot setting
+or kernel component. Earlier attempts without this setup remain blocked
+evidence, not production failures or passes. The original `--unshare-all`
+capsule is tried first; only it establishes a network namespace measurement.
 
 Dispatch `experiment=async-compatibility` for this experiment only. The Python
 owner has a 90-second lifetime, each operation is bounded to ten seconds, the
