@@ -137,7 +137,7 @@ export function BrowserSessionGrantsSection(props: {
           props.profiles.length === 0
             ? "No Browser profiles are available on this host. Check Browser profiles above, then reopen this page to reload them."
             : loaded && targets.length === 0
-              ? "No eligible managed child in this Project. A local Work or Code child needs tool and network authority and a supported provider. Queued and waiting children can be reviewed without starting them."
+              ? "No eligible managed child in this Project. A local Work or Code child needs tool authority and a supported provider. Queued and waiting children can be reviewed without starting them."
               : "Choose the caller and profile explicitly, then review sites and expiry."
         }
       >

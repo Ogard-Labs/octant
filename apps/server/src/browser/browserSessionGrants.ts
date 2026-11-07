@@ -203,12 +203,16 @@ export class BrowserSessionGrants {
       );
     const label = await this.#options.profileLabel(review.grant.profile);
     if (
+      review.expires <= this.#options.now() ||
       label !== review.grant.profileLabel ||
       !this.#current(review) ||
       !this.#options.isLocalWindow(windowId) ||
       !this.#options.canReview(windowId, review.grant.target)
     )
-      return refused("stale", "The profile, caller or window changed. Review it again.");
+      return refused(
+        "stale",
+        "The review expired or its profile, caller or window changed. Review it again.",
+      );
     if (this.#grants.size >= MAX_PERMISSIONS)
       return refused("limit", "Revoke an existing session permission first.");
     try {

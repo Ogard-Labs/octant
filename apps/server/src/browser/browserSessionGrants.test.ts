@@ -92,6 +92,25 @@ describe("explicit Browser session permissions", () => {
     expect(f.record).not.toHaveBeenCalled();
     f.service.close();
   });
+  it("refuses a review that expires while the native profile is being checked", async () => {
+    const f = fixture();
+    try {
+      const review = await f.service.execute(windowId, command);
+      if (review.kind !== "browser-session-review") throw Error("Missing review");
+      f.advance(2 * 60_000 - 1);
+      f.profileLabel.mockImplementationOnce(async () => {
+        f.advance(1);
+        return "Personal";
+      });
+      expect(
+        await f.service.execute(windowId, { kind: "grant", reviewId: review.reviewId }),
+      ).toMatchObject({ kind: "browser-session-refused", reason: "stale" });
+      expect(f.record).not.toHaveBeenCalled();
+      expect(f.service.find(command.grantee, command.profile, command.origins)).toBeUndefined();
+    } finally {
+      f.service.close();
+    }
+  });
   it("expires and closes permission without waiting for another agent call", async () => {
     vi.useFakeTimers();
     const f = fixture();
