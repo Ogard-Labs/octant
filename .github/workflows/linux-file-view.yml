@@ -137,15 +137,25 @@ jobs:
         run: |
           gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/async_refusal.c \
             -o "$RUNNER_TEMP/octant-async-refusal"
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/syscall_admission.c \
+            -o "$RUNNER_TEMP/octant-owned-inode-admission"
       - name: Measure only deterministic files and no-auth startup
         run: |
           timeout --kill-after=3s 100s python3 scripts/linux-file-view/async_compatibility.py \
             "$RUNNER_TEMP/octant-async-refusal" "$(command -v bun)" \
             "$RUNNER_TEMP/octant-provider-startup" "$RUNNER_TEMP/async-compatibility.json"
+      - name: Measure one owned stopped client's inode admission
+        run: |
+          timeout --kill-after=3s 20s "$RUNNER_TEMP/octant-async-refusal" ENOSYS \
+            "$RUNNER_TEMP/octant-owned-inode-admission" --native-admission \
+            > "$RUNNER_TEMP/owned-inode-admission.json"
+          cat "$RUNNER_TEMP/owned-inode-admission.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: linux-async-refusal-compatibility
-          path: ${{ runner.temp }}/async-compatibility.json
+          path: |
+            ${{ runner.temp }}/async-compatibility.json
+            ${{ runner.temp }}/owned-inode-admission.json
           if-no-files-found: error
           retention-days: 7

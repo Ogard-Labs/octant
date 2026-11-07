@@ -120,3 +120,21 @@ process leaders are joined; timeout cleanup kills only the owned process group.
 The private fixture is identity-checked before removal. Passing startup and
 selected file checks does not prove authenticated provider behavior, a complete
 syscall mediator or production readiness.
+
+The compatibility job then runs `syscall_admission.c --native-admission`
+under inherited `ENOSYS` refusal. One retained, stopped native client reads an
+ordinary inode before a synchronous synthetic companion transition. The tracer
+compares each new read/pread/mmap descriptor's device and inode through that
+retained client's `/proc` entry, refuses the protected inode through held and
+hardlink descriptors, refuses an unknown descriptor, and admits another inode's
+read and mapping. This is a positive, single-client descriptor-admission
+experiment outside Bubblewrap, with the same 15/20-second ownership bounds.
+The original negative SQPOLL experiment remains separate.
+
+The positive fixture has no untrusted pathname policy, shared FD table or peer
+that can close/reuse its descriptors. A different tracer event stops this
+fixture; it never detaches and allows an unknown lifecycle to continue. It
+does not implement whole-thread/descendant supervision, descriptor transfer,
+FD reuse, cross-process memory access, general path/inode policy, concurrent
+outside mutations or a production mediator. Those obligations remain open;
+this controlled fixture must not be wired into production.

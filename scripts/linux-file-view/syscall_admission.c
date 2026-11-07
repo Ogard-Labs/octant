@@ -31,6 +31,14 @@ struct result {
   int completion;
   bool submitted;
   bool matched;
+  int alias_read_error;
+  int alias_map_error;
+  int unknown_error;
+  int async_error;
+  bool before_matched;
+  bool alias_identity;
+  bool permitted_read;
+  bool permitted_map;
 };
 
 static void stop(int number) { interrupted = number; }
@@ -44,6 +52,52 @@ static int64_t milliseconds(void) {
   struct timespec value;
   if (clock_gettime(CLOCK_MONOTONIC, &value)) return -1;
   return (int64_t)value.tv_sec * 1000 + value.tv_nsec / 1000000;
+}
+
+static void native_client(const char *path, const char *alias, const char *permitted,
+    struct result *answer) {
+  alarm(10);
+  if (ptrace(PTRACE_TRACEME, 0, NULL, NULL)) _exit(2);
+  raise(SIGSTOP);
+  int held = open(path, O_RDONLY | O_CLOEXEC);
+  int linked = open(alias, O_RDONLY | O_CLOEXEC);
+  int allowed = open(permitted, O_RDONLY | O_CLOEXEC);
+  if (held < 0 || linked < 0 || allowed < 0) _exit(3);
+  struct stat original, other;
+  answer->alias_identity = fstat(held, &original) == 0 && fstat(linked, &other) == 0 &&
+    original.st_dev == other.st_dev && original.st_ino == other.st_ino && original.st_nlink == 2;
+  char bytes[64] = {0};
+  answer->before_matched = pread(held, bytes, sizeof(bytes), 0) == (ssize_t)sizeof(sentinel) - 1 &&
+    memcmp(bytes, sentinel, sizeof(sentinel) - 1) == 0;
+  struct io_uring_params parameters = {0};
+  if (syscall(SYS_io_uring_setup, 8, &parameters) < 0) answer->async_error = errno;
+  syscall(SYS_getppid);
+  if (pread(held, bytes, sizeof(bytes), 0) < 0) answer->pread_error = errno;
+  if (read(linked, bytes, sizeof(bytes)) < 0) answer->alias_read_error = errno;
+  if (pread(999, bytes, sizeof(bytes), 0) < 0) answer->unknown_error = errno;
+  void *mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, held, 0);
+  if (mapped == MAP_FAILED) answer->mmap_error = errno;
+  else munmap(mapped, 4096);
+  mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, linked, 0);
+  if (mapped == MAP_FAILED) answer->alias_map_error = errno;
+  else munmap(mapped, 4096);
+  answer->permitted_read = pread(allowed, bytes, sizeof(bytes), 0) == (ssize_t)sizeof(sentinel) - 1 &&
+    memcmp(bytes, sentinel, sizeof(sentinel) - 1) == 0;
+  mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, allowed, 0);
+  if (mapped != MAP_FAILED) {
+    answer->permitted_map = memcmp(mapped, sentinel, sizeof(sentinel) - 1) == 0;
+    munmap(mapped, 4096);
+  }
+  _exit(0);
+}
+
+/* One stopped client owns its FDs: no peer can close/reuse this table here. */
+static bool protected_descriptor(pid_t child, unsigned long descriptor, const struct stat *identity) {
+  char path[96];
+  snprintf(path, sizeof(path), "/proc/%ld/fd/%lu", (long)child, descriptor);
+  struct stat target;
+  return stat(path, &target) != 0 ||
+    (target.st_dev == identity->st_dev && target.st_ino == identity->st_ino);
 }
 
 static void client(const char *path, struct result *answer) {
@@ -124,11 +178,13 @@ static void client(const char *path, struct result *answer) {
   _exit(0);
 }
 
-int main(void) {
+int main(int count, char **arguments) {
 #if !defined(__x86_64__)
   puts("{\"status\":\"blocked\",\"reason\":\"x86_64 fixture required\",\"productionReady\":false}");
   return 1;
 #else
+  bool native = count == 2 && strcmp(arguments[1], "--native-admission") == 0;
+  if (count > 1 && !native) return 2;
   struct sigaction action = {0};
   action.sa_handler = stop;
   sigemptyset(&action.sa_mask);
@@ -143,14 +199,27 @@ int main(void) {
   if (!mkdtemp(directory)) return 1;
   struct stat owner;
   bool have_identity = lstat(directory, &owner) == 0;
-  char path[256], companion[260];
+  char path[256], companion[260], alias[256], permitted[256];
   snprintf(path, sizeof(path), "%s/custom", directory);
   snprintf(companion, sizeof(companion), "%s.pub", path);
+  snprintf(alias, sizeof(alias), "%s/hardlink", directory);
+  snprintf(permitted, sizeof(permitted), "%s/permitted", directory);
   int fixture = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
   bool ready = fixture >= 0 && write(fixture, sentinel, sizeof(sentinel) - 1) == (ssize_t)sizeof(sentinel) - 1;
   if (fixture >= 0) close(fixture);
+  struct stat protected_identity;
+  ready = ready && lstat(path, &protected_identity) == 0;
+  if (native) {
+    ready = ready && link(path, alias) == 0;
+    int allowed = open(permitted, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    ready = ready && allowed >= 0 && write(allowed, sentinel, sizeof(sentinel) - 1) == (ssize_t)sizeof(sentinel) - 1;
+    if (allowed >= 0) close(allowed);
+  }
   pid_t child = ready ? fork() : -1;
-  if (child == 0) client(path, answer);
+  if (child == 0) {
+    if (native) native_client(path, alias, permitted, answer);
+    else client(path, answer);
+  }
   bool reaped = child < 0, protected = false, entering = true, skipped = false;
   bool trace_ready = false;
   int status = 0, denied_reads = 0, denied_maps = 0, enters_after_transition = 0;
@@ -179,8 +248,10 @@ int main(void) {
         if (!protected) break;
       }
       if (protected && registers.orig_rax == SYS_io_uring_enter) enters_after_transition++;
-      bool read = protected && registers.orig_rax == SYS_pread64 && registers.rdi == HELD_FD;
-      bool map = protected && registers.orig_rax == SYS_mmap && registers.r8 == HELD_FD;
+      bool read = protected && (registers.orig_rax == SYS_pread64 || (native && registers.orig_rax == SYS_read)) &&
+        (native ? protected_descriptor(child, registers.rdi, &protected_identity) : registers.rdi == HELD_FD);
+      bool map = protected && registers.orig_rax == SYS_mmap && !(registers.r10 & MAP_ANONYMOUS) &&
+        (native ? protected_descriptor(child, registers.r8, &protected_identity) : registers.r8 == HELD_FD);
       skipped = read || map;
       if (skipped) {
         if (read) denied_reads++;
@@ -209,23 +280,36 @@ int main(void) {
   if (same_directory && reaped) {
     unlink(companion);
     unlink(path);
+    if (native) { unlink(alias); unlink(permitted); }
     removed = rmdir(directory) == 0;
   }
-  bool controls = protected && denied_reads == 1 && denied_maps == 1 &&
+  bool controls = protected && denied_reads == (native ? 3 : 1) && denied_maps == (native ? 2 : 1) &&
     answer->pread_error == EACCES && answer->mmap_error == EACCES;
-  bool measured = controls && answer->submitted && answer->matched &&
+  bool native_controls = answer->before_matched && answer->alias_identity &&
+    answer->alias_read_error == EACCES && answer->alias_map_error == EACCES &&
+    answer->unknown_error == EACCES && answer->async_error == ENOSYS &&
+    answer->permitted_read && answer->permitted_map;
+  bool measured = controls && (native ? native_controls : answer->submitted && answer->matched) &&
     enters_after_transition == 0 && reaped && removed && !interrupted;
   struct utsname system = {0};
   uname(&system);
-  printf("{\"kind\":\"syscall-entry-counterexample\",\"kernel\":\"%s\","
+  printf("{\"kind\":\"%s\",\"kernel\":\"%s\","
     "\"status\":\"%s\",\"productionReady\":false,\"setupError\":%d,"
     "\"directReadDenied\":%s,\"newMappingDenied\":%s,\"ringSubmitted\":%s,"
     "\"ringCompletion\":%d,\"ringReadMatched\":%s,\"ringEnterCallsAfterTransition\":%d,"
+    "\"nativeAdmissionControls\":%s,\"beforeReadMatched\":%s,\"hardlinkIdentity\":%s,"
+    "\"hardlinkReadDenied\":%s,\"hardlinkMappingDenied\":%s,\"unknownFdDenied\":%s,"
+    "\"asyncRefusalErrno\":%d,\"permittedRead\":%s,\"permittedMapping\":%s,"
     "\"ownedChildReaped\":%s,\"fixtureRemoved\":%s}\n",
-    system.release, measured ? "measured-counterexample" : "blocked", answer->setup_error,
+    native ? "owned-inode-admission" : "syscall-entry-counterexample", system.release,
+    measured ? (native ? "measured-admission" : "measured-counterexample") : "blocked", answer->setup_error,
     answer->pread_error == EACCES ? "true" : "false",
     answer->mmap_error == EACCES ? "true" : "false", answer->submitted ? "true" : "false",
     answer->completion, answer->matched ? "true" : "false", enters_after_transition,
+    native_controls ? "true" : "false", answer->before_matched ? "true" : "false",
+    answer->alias_identity ? "true" : "false", answer->alias_read_error == EACCES ? "true" : "false",
+    answer->alias_map_error == EACCES ? "true" : "false", answer->unknown_error == EACCES ? "true" : "false",
+    answer->async_error, answer->permitted_read ? "true" : "false", answer->permitted_map ? "true" : "false",
     reaped ? "true" : "false", removed ? "true" : "false");
   munmap(answer, sizeof(*answer));
   return measured ? 0 : 1;
