@@ -1024,7 +1024,7 @@ export function useZenController(options: UseZenControllerOptions) {
       readonly width?: number;
       readonly collapsed?: boolean;
     }) => {
-      if (client === undefined || space === null) return;
+      if (!enabled || client === undefined || space === null) return;
       setPanelBusy(true);
       try {
         const result = await client.dockResearch({
@@ -1049,7 +1049,7 @@ export function useZenController(options: UseZenControllerOptions) {
         if (mounted.current) setPanelBusy(false);
       }
     },
-    [client, space],
+    [client, enabled, space],
   );
 
   /**

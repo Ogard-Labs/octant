@@ -210,6 +210,28 @@ describe("useZenController with the Zen plugin off", () => {
   });
 });
 
+describe("useZenController dockResearch with the Zen plugin off", () => {
+  it("sends nothing to the host once the plugin is switched off", async () => {
+    const client = createClient();
+    const { result, rerender } = renderHook(
+      ({ enabled }) =>
+        useZenController({ client, windowId, storage: window.sessionStorage, enabled }),
+      { initialProps: { enabled: true } },
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    rerender({ enabled: false });
+    await waitFor(() => expect(result.current.active).toBe(false));
+
+    await act(async () => {
+      await result.current.dockResearch({ thread: null });
+    });
+
+    expect(client.dockResearch).not.toHaveBeenCalled();
+  });
+});
+
 describe("useZenController", () => {
   it("enters Zen by creating a space when bootstrap has none", async () => {
     const client = createClient();

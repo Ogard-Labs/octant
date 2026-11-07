@@ -561,6 +561,19 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                         void zen.pinTerminal(request),
                       onPinCanvasInFocusZone: (request: Parameters<typeof zen.pinCanvas>[0]) =>
                         void zen.pinCanvas(request),
+                      onDockResearch: (request: {
+                        readonly threadId: string;
+                        readonly mode: "work" | "code";
+                      }) =>
+                        void zen.dockResearch({
+                          thread: {
+                            threadId:
+                              request.mode === "code"
+                                ? decodeCodeThreadId(request.threadId)
+                                : decodeWorkThreadId(request.threadId),
+                            mode: request.mode,
+                          },
+                        }),
                     }
                   : {})}
                 onStartPlanTask={(request) => {
@@ -575,17 +588,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   ? {}
                   : { draftPendingPrompt: pendingDraftPrompt })}
                 onDraftPendingPromptConsumed={() => setPendingDraftPrompt(undefined)}
-                onDockResearch={(request) =>
-                  void zen.dockResearch({
-                    thread: {
-                      threadId:
-                        request.mode === "code"
-                          ? decodeCodeThreadId(request.threadId)
-                          : decodeWorkThreadId(request.threadId),
-                      mode: request.mode,
-                    },
-                  })
-                }
                 codeController={codeController}
                 codeControllers={codeThreadControllers}
                 extensionClient={extensionClient}
