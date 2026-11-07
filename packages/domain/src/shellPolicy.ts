@@ -193,6 +193,7 @@ export function defaultShellSettings(): ShellSettings {
     rememberedBrowserOrigins: [],
     rememberedBrowserProfileSites: [],
     agentBrowserDownloads: false,
+    persistentBrowserOwner: false,
   };
 }
 

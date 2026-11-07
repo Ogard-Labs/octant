@@ -1484,6 +1484,28 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           )}
+          <SettingsSection
+            title="Background Browser ownership"
+            description="Keep this host's native Browser available for newly reviewed task permissions when its windows close."
+          >
+            <div className="setgroup">
+              <SettingRow
+                label="Keep Browser available without windows"
+                scope="host"
+                settingId="persistent-browser-owner"
+                focused={focusedSetting === settingId("persistent-browser-owner")}
+                description="Off by default; enabling starts no task, copies no sign-ins and upgrades no existing permission, while turning it off or quitting Octant ends background leases."
+              >
+                <OctantSwitch
+                  checked={props.settings.persistentBrowserOwner}
+                  label="Keep Browser available without windows"
+                  onCheckedChange={(checked) =>
+                    props.onSettingsChange({ persistentBrowserOwner: checked })
+                  }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
           {props.browserAutomationClient === undefined ? null : (
             <BrowserFlowsSection
               client={props.browserAutomationClient}

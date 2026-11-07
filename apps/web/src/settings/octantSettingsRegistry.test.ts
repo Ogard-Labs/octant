@@ -142,6 +142,7 @@ describe("octantSettingsRegistry", () => {
       "browser-accounts",
       "browser-profiles",
       "browser-session-permissions",
+      "persistent-browser-owner",
       "browser-flows",
       "browser-extensions",
       "thread-retention",

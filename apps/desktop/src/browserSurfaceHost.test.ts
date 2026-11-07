@@ -3226,6 +3226,33 @@ describe("the native execution owner boundary", () => {
         "https://example.com",
       ),
     ).toMatchObject({ status: "refused" });
+    expect(
+      await host.humanPresentation(
+        decodeHumanBrowserRequest({ kind: "attach", contextId: executionId, threadId }),
+        contextId,
+      ),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await host.runPageScript(
+        decodeBrowserPageScriptNativeCommand({
+          operation: "prepare",
+          contextId: executionId,
+          owner: { windowId: contextId, threadId },
+          source: "42",
+          expectedUrl: "https://example.com/",
+        }),
+        new AbortController().signal,
+      ),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await host.ownerControl(
+        decodeOwnerBrowserNativeCommand({
+          operation: "inspect",
+          contextId: executionId,
+          owner: { windowId: contextId, threadId },
+        }),
+      ),
+    ).toMatchObject({ status: "refused" });
     await host.persistentOwner.configure(false);
     expect(() => host.state(executionId)).toThrow();
     expect(views[1]?.webContents.close).toHaveBeenCalled();

@@ -194,7 +194,7 @@ export function BrowserSessionGrantsSection(props: {
           settingId="browser-session-permissions"
           key={grant.grantId}
           label={`${grant.target.label} · ${grant.profileLabel}`}
-          description={`${grant.origins.join(", ")} · Expires ${new Date(grant.expiresAt).toLocaleString()} · ${grant.target.modelId}`}
+          description={`${grant.origins.join(", ")} · Expires ${new Date(grant.expiresAt).toLocaleString()} · ${grant.target.modelId}${grant.continuesWithoutWindow === true ? " · Continues when windows close" : " · Requires an open local window"}`}
           scope="host"
         >
           <OctantButton
@@ -249,6 +249,13 @@ export function BrowserSessionGrantsSection(props: {
                 Permissions end at the displayed expiry, on revocation or when this host restarts.
                 Granting starts no task or routine.
               </p>
+              {review === undefined ? null : (
+                <p>
+                  {review.grant.continuesWithoutWindow === true
+                    ? "This permission can keep using the native Browser when all windows close. Turning off background Browser ownership or quitting Octant ends its execution lease; a new owner requires another review."
+                    : "This permission requires an open local window. Turning on background Browser ownership later does not extend it."}
+                </p>
+              )}
               {review === undefined ? (
                 <div className="flex flex-col gap-3">
                   <label className="field">

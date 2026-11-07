@@ -1278,6 +1278,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser delegated child routine terminal session permission grant revoke expiry signed in account",
         },
         {
+          id: settingId("persistent-browser-owner"),
+          label: "Keep Browser available without windows",
+          scope: "host",
+          keywords:
+            "background persistent native browser owner close windows routine session permission",
+        },
+        {
           id: settingId("browser-flows"),
           label: "Browser flows",
           scope: "host",

@@ -198,7 +198,6 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
             backend === runtime && (contextIds === undefined || contextIds.includes(contextId)),
         )
         .map(([contextId]) => contextId);
-      for (const contextId of owned) this.#forget(contextId);
       if (owned.length > 0) listener(owned);
     };
     const removeNative = this.#native.onProcessExit?.((contextIds) =>
