@@ -383,6 +383,29 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
       },
     );
 
+    it("refuses changed held bytes before final admission even when size and inode stay the same", async () => {
+      const fixture = await selectedFixture();
+      const admission = vi.fn(() => "approved" as const);
+      const outcome = await saveBrowserDownload({
+        workspaceRoot: fixture.workspace,
+        destination: fixture.destination,
+        name: "report.txt",
+        claim: async () => fixture.held,
+        isHeldPath: async () => true,
+        ask: async () => {
+          const bytes = await readFile(fixture.held);
+          bytes.set([0x7f, 0x45, 0x4c, 0x46]);
+          await writeFile(fixture.held, bytes);
+          return "approved";
+        },
+        finalAdmission: admission,
+      });
+      expect(outcome).toMatchObject({ status: "refused", reason: "changed" });
+      expect(admission).not.toHaveBeenCalled();
+      expect(await readdir(fixture.folder)).toEqual([]);
+      expect(await readdir(fixture.workspace)).toEqual([]);
+    });
+
     it("preserves only fixed Node-mode authority when the host runs in the packaged worker runtime", async () => {
       const root = await realpath(await mkdtemp(join(tmpdir(), "octant-download-worker-")));
       roots.push(root);

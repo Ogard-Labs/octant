@@ -178,7 +178,12 @@ export async function saveBrowserDownload(input: SaveInput): Promise<BrowserDown
     if (!current(input)) return decisionRefusal("cancelled", facts);
     const after = await handle.stat();
     if (!current(input)) return decisionRefusal("cancelled", facts);
-    if (read.bytesRead !== stats.size || after.size !== stats.size || after.ino !== stats.ino) {
+    if (
+      read.bytesRead !== stats.size ||
+      after.size !== stats.size ||
+      after.ino !== stats.ino ||
+      head.some((byte, index) => bytes[index] !== byte)
+    ) {
       return refused("download-changed", "changed", facts);
     }
     const sha256 = createHash("sha256").update(bytes).digest("hex");

@@ -408,7 +408,9 @@ turned on a switch, and then only after they answer for that file.
   missing `downloads/` is made only inside that writer after admission; an
   internal selected directory is never made implicitly.
 - The save checks cancellation and selection currentness after asynchronous
-  preparation. Once all held bytes and target proofs are available, a
+  preparation. The final bytes must retain the sniffed prefix, so a held-file
+  rewrite cannot carry stale type facts into admission. Once all held bytes
+  and target proofs are available, a
   synchronous host callback admits current source, authority and any quota
   reservation immediately before writer dispatch. The ordinary service supplies
   its current context/authority fence and combines context and caller
