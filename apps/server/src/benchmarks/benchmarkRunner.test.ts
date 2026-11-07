@@ -8,6 +8,7 @@ import type {
   BenchmarkTurnStart,
 } from "./benchmarkChatPort";
 import { BENCHMARKS_PROJECT_ID } from "./benchmarkChatPort";
+import { createWorkerPatternMatcher } from "./benchmarkPatternMatcher";
 import { BenchmarkRunner, benchmarkCellIdentity } from "./benchmarkRunner";
 import {
   BENCHMARK_TEST_NOW,
@@ -76,6 +77,8 @@ class FakeChat implements BenchmarkChatPort {
   }
 }
 
+const matcher = createWorkerPatternMatcher(300);
+
 function setup(options: { readonly timeoutMs?: number } = {}) {
   const clock = { now: BENCHMARK_TEST_NOW };
   const opened = openBenchmarkTestStore(() => clock.now);
@@ -87,6 +90,7 @@ function setup(options: { readonly timeoutMs?: number } = {}) {
     store: opened.store,
     turnMetrics: { forThread: (threadId) => metrics.get(threadId) ?? [] },
     projectId: BENCHMARKS_PROJECT_ID,
+    matchPattern: matcher,
     clock: () => clock.now,
     ...(options.timeoutMs === undefined ? {} : { turnTimeoutMs: options.timeoutMs }),
   });
@@ -230,6 +234,7 @@ describe("benchmark runner", () => {
       store,
       turnMetrics: { forThread: () => [] },
       projectId: BENCHMARKS_PROJECT_ID,
+      matchPattern: matcher,
       clock: () => clock.now,
     });
     await first.tick();
@@ -242,6 +247,7 @@ describe("benchmark runner", () => {
       store,
       turnMetrics: { forThread: (id) => metrics.get(id) ?? [] },
       projectId: BENCHMARKS_PROJECT_ID,
+      matchPattern: matcher,
       clock: () => clock.now,
     });
     await restarted.tick();
@@ -305,5 +311,64 @@ describe("benchmark runner", () => {
     expect(cancelled?.cells.every((cell) => cell.state === "cancelled")).toBe(true);
     expect(chat.interrupted).toHaveLength(2);
     expect(projection.runningRuns()).toEqual([]);
+  });
+
+  it("fails a check whose pattern never returns within the deadline and still scores the other cells", async () => {
+    const { store, chat, runner, projection } = setup();
+    const suite = sampleSuite({
+      cases: [
+        {
+          caseId: benchmarkIds.caseA,
+          kind: "prompt",
+          title: "Greeting",
+          prompt: "Say hello.",
+          checks: [{ kind: "matches", pattern: "(a+)+$", flags: "" }],
+        },
+        {
+          caseId: benchmarkIds.caseB,
+          kind: "prompt",
+          title: "Number",
+          prompt: "Say 42.",
+          checks: [{ kind: "contains", text: "42", caseSensitive: true }],
+        },
+      ],
+    });
+    const run = sampleRun({ suite });
+    store.runStarted({ run });
+    await runner.tick();
+    chat.finish(threadOf(String(run.cells[0]!.cellId)), `${"a".repeat(40)}!`);
+    chat.finish(threadOf(String(run.cells[1]!.cellId)), "42");
+    const began = Date.now();
+
+    await runner.tick();
+
+    expect(Date.now() - began).toBeLessThan(2_000);
+    const cells = projection.run(benchmarkIds.run)!.cells;
+    expect(cells[0]).toMatchObject({
+      state: "answered",
+      checks: [{ index: 0, passed: false, detail: "pattern took too long" }],
+    });
+    expect(cells[1]).toMatchObject({ state: "answered", checks: [{ index: 0, passed: true }] });
+  });
+
+  it("archives the threads of settled cells again when the host starts, including a cell that never recorded its thread", async () => {
+    const { store, chat, runner } = setup();
+    const run = sampleRun();
+    store.runStarted({ run });
+    store.cellSettled({
+      runId: run.runId,
+      cellId: run.cells[0]!.cellId,
+      state: "failed",
+      failureReason: "refused",
+      checks: [],
+      settledAt: BENCHMARK_TEST_NOW as never,
+    });
+
+    const stop = runner.start();
+    await runner.tick();
+    stop();
+
+    expect(chat.archived).toContain(threadOf(String(run.cells[0]!.cellId)));
+    expect(chat.archived).not.toContain(threadOf(String(run.cells[1]!.cellId)));
   });
 });

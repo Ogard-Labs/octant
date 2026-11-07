@@ -6037,9 +6037,14 @@ erase threads, so a principal other than a local window is refused with 403
 before the body is read. Start refuses a missing suite (404), a contender that
 is not an enabled provider model on this host, and a run over 2,000 cells (422),
 and answers a retried run id with the run it already made. Purging a run
-purges each cell thread through the ordinary thread purge path and keeps the run
-if any purge fails. None of these paths is on the remote forward list yet, so a
-paired device does not reach them until that admission is added.
+purges each cell's thread, by the fixed identity its cell derives, through the
+ordinary thread purge path and keeps the run if any purge fails. Like usage
+reads, the three read paths are on the remote forward list, classified as
+non-secret reads; no write path is forwarded. A `matches` check runs its pattern
+in a worker thread under a two-second deadline against at most 50,000 characters
+of the answer, so a pattern that never returns fails the check instead of
+stalling the host. Each start of the host archives again the threads of settled
+cells that are still active.
 
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,

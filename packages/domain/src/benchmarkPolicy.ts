@@ -19,7 +19,19 @@ import { percentile } from "./turnDiagnosticsReport";
 export const BENCHMARK_CONCURRENCY_LIMITS = { perProvider: 2, perHost: 4 } as const;
 
 /** An answer longer than this is cut before any check reads it. */
-export const BENCHMARK_ANSWER_CHECK_CHARS = 200_000;
+export const BENCHMARK_ANSWER_CHECK_CHARS = 50_000;
+
+/**
+ * Tests a pattern the person wrote against an answer. Matching a hand-written
+ * regular expression can run without end, so the domain never does it: the host
+ * supplies a matcher that bounds the time and refuses with a reason when it is
+ * exceeded.
+ */
+export type BenchmarkPatternMatcher = (
+  pattern: string,
+  flags: string,
+  text: string,
+) => Promise<{ readonly matched: boolean } | { readonly refused: string }>;
 
 export function benchmarkCellCount(
   caseCount: number,
@@ -67,23 +79,29 @@ export function isBenchmarkCodeOnlyCheck(check: BenchmarkCheck): boolean {
  * here and scored by the runner; the result keeps the check's own position, so
  * the two sets of results interleave back into the case's order.
  */
-export function scoreBenchmarkChecks(
+export async function scoreBenchmarkChecks(
   checks: ReadonlyArray<BenchmarkCheck>,
   answer: string,
-): ReadonlyArray<BenchmarkCheckResult> {
+  matchPattern: BenchmarkPatternMatcher,
+): Promise<ReadonlyArray<BenchmarkCheckResult>> {
   const text =
     answer.length > BENCHMARK_ANSWER_CHECK_CHARS
       ? answer.slice(0, BENCHMARK_ANSWER_CHECK_CHARS)
       : answer;
   const results: BenchmarkCheckResult[] = [];
-  checks.forEach((check, index) => {
-    if (isBenchmarkCodeOnlyCheck(check)) return;
-    results.push(scoreOne(check, text, index));
-  });
+  for (const [index, check] of checks.entries()) {
+    if (isBenchmarkCodeOnlyCheck(check)) continue;
+    results.push(await scoreOne(check, text, index, matchPattern));
+  }
   return results;
 }
 
-function scoreOne(check: BenchmarkCheck, answer: string, index: number): BenchmarkCheckResult {
+async function scoreOne(
+  check: BenchmarkCheck,
+  answer: string,
+  index: number,
+  matchPattern: BenchmarkPatternMatcher,
+): Promise<BenchmarkCheckResult> {
   switch (check.kind) {
     case "contains": {
       const found = check.caseSensitive
@@ -98,13 +116,15 @@ function scoreOne(check: BenchmarkCheck, answer: string, index: number): Benchma
       return found ? { index, passed: false, detail: "text found" } : { index, passed: true };
     }
     case "matches": {
-      let pattern: RegExp;
       try {
-        pattern = new RegExp(check.pattern, check.flags);
+        // Compiling is bounded; only matching is not.
+        new RegExp(check.pattern, check.flags);
       } catch {
         return { index, passed: false, detail: "invalid pattern" };
       }
-      return pattern.test(answer)
+      const outcome = await matchPattern(check.pattern, check.flags, answer);
+      if ("refused" in outcome) return { index, passed: false, detail: outcome.refused };
+      return outcome.matched
         ? { index, passed: true }
         : { index, passed: false, detail: "no match" };
     }

@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  type BenchmarkPatternMatcher,
   benchmarkBudgetDecision,
   benchmarkCellMetrics,
   benchmarkLeaderboard,
@@ -39,65 +40,90 @@ describe("planning benchmark cells", () => {
   });
 });
 
-describe("scoring benchmark checks", () => {
-  const score = (check: BenchmarkCheck, answer: string) => scoreBenchmarkChecks([check], answer)[0];
+const directMatcher: BenchmarkPatternMatcher = async (pattern, flags, text) => ({
+  matched: new RegExp(pattern, flags).test(text),
+});
 
-  it("honours case sensitivity for contains and not-contains", () => {
-    expect(score({ kind: "contains", text: "Hello", caseSensitive: true }, "hello")?.passed).toBe(
-      false,
-    );
-    expect(score({ kind: "contains", text: "Hello", caseSensitive: false }, "hello")?.passed).toBe(
-      true,
-    );
+describe("scoring benchmark checks", () => {
+  const score = async (check: BenchmarkCheck, answer: string) =>
+    (await scoreBenchmarkChecks([check], answer, directMatcher))[0];
+
+  it("honours case sensitivity for contains and not-contains", async () => {
     expect(
-      score({ kind: "not-contains", text: "secret", caseSensitive: false }, "A SECRET")?.passed,
+      (await score({ kind: "contains", text: "Hello", caseSensitive: true }, "hello"))?.passed,
     ).toBe(false);
     expect(
-      score({ kind: "not-contains", text: "secret", caseSensitive: true }, "A SECRET")?.passed,
+      (await score({ kind: "contains", text: "Hello", caseSensitive: false }, "hello"))?.passed,
+    ).toBe(true);
+    expect(
+      (await score({ kind: "not-contains", text: "secret", caseSensitive: false }, "A SECRET"))
+        ?.passed,
+    ).toBe(false);
+    expect(
+      (await score({ kind: "not-contains", text: "secret", caseSensitive: true }, "A SECRET"))
+        ?.passed,
     ).toBe(true);
   });
 
-  it("matches a regular expression with its flags", () => {
-    expect(score({ kind: "matches", pattern: "^ab+c$", flags: "" }, "abbc")?.passed).toBe(true);
-    expect(score({ kind: "matches", pattern: "^abc$", flags: "" }, "ABC")?.passed).toBe(false);
-    expect(score({ kind: "matches", pattern: "^abc$", flags: "i" }, "ABC")?.passed).toBe(true);
+  it("matches a regular expression with its flags", async () => {
+    expect((await score({ kind: "matches", pattern: "^ab+c$", flags: "" }, "abbc"))?.passed).toBe(
+      true,
+    );
+    expect((await score({ kind: "matches", pattern: "^abc$", flags: "" }, "ABC"))?.passed).toBe(
+      false,
+    );
+    expect((await score({ kind: "matches", pattern: "^abc$", flags: "i" }, "ABC"))?.passed).toBe(
+      true,
+    );
   });
 
-  it("fails a pattern that does not compile, with a reason, instead of throwing", () => {
-    expect(score({ kind: "matches", pattern: "(unclosed", flags: "" }, "x")).toEqual({
+  it("refuses a pattern the matcher gives up on, with its reason, and never throws", async () => {
+    const giveUp: BenchmarkPatternMatcher = async () => ({ refused: "pattern took too long" });
+    expect(
+      await scoreBenchmarkChecks(
+        [{ kind: "matches", pattern: "(a+)+$", flags: "" }],
+        "aaaa",
+        giveUp,
+      ),
+    ).toEqual([{ index: 0, passed: false, detail: "pattern took too long" }]);
+  });
+
+  it("fails a pattern that does not compile, with a reason, instead of throwing", async () => {
+    expect(await score({ kind: "matches", pattern: "(unclosed", flags: "" }, "x")).toEqual({
       index: 0,
       passed: false,
       detail: "invalid pattern",
     });
   });
 
-  it("compares equals exactly unless it is told to trim", () => {
-    expect(score({ kind: "equals", text: "42", trim: false }, " 42\n")?.passed).toBe(false);
-    expect(score({ kind: "equals", text: "42", trim: true }, " 42\n")?.passed).toBe(true);
+  it("compares equals exactly unless it is told to trim", async () => {
+    expect((await score({ kind: "equals", text: "42", trim: false }, " 42\n"))?.passed).toBe(false);
+    expect((await score({ kind: "equals", text: "42", trim: true }, " 42\n"))?.passed).toBe(true);
   });
 
-  it("accepts valid JSON and refuses prose", () => {
-    expect(score({ kind: "valid-json" }, ' {"a": [1, 2]} ')?.passed).toBe(true);
-    expect(score({ kind: "valid-json" }, "here is json: {}")?.passed).toBe(false);
+  it("accepts valid JSON and refuses prose", async () => {
+    expect((await score({ kind: "valid-json" }, ' {"a": [1, 2]} '))?.passed).toBe(true);
+    expect((await score({ kind: "valid-json" }, "here is json: {}"))?.passed).toBe(false);
   });
 
-  it("leaves worktree checks to the runner and keeps each result at its check's position", () => {
-    const results = scoreBenchmarkChecks(
+  it("leaves worktree checks to the runner and keeps each result at its check's position", async () => {
+    const results = await scoreBenchmarkChecks(
       [
         { kind: "command-exits-zero", command: "bun test", timeoutSeconds: 60 },
         { kind: "contains", text: "ok", caseSensitive: false },
         { kind: "max-files-changed", count: 2 },
       ],
       "ok",
+      directMatcher,
     );
     expect(results).toEqual([{ index: 1, passed: true }]);
   });
 
-  it("reads only the first 200,000 characters of an answer", () => {
-    const answer = `${"a".repeat(200_000)}tail`;
-    expect(score({ kind: "contains", text: "tail", caseSensitive: true }, answer)?.passed).toBe(
-      false,
-    );
+  it("reads only the first 50,000 characters of an answer", async () => {
+    const answer = `${"a".repeat(50_000)}tail`;
+    expect(
+      (await score({ kind: "contains", text: "tail", caseSensitive: true }, answer))?.passed,
+    ).toBe(false);
   });
 });
 

@@ -15,6 +15,7 @@ import {
   boundedBenchmarkReason,
   nextBenchmarkCells,
   scoreBenchmarkChecks,
+  type BenchmarkPatternMatcher,
 } from "@octant/domain";
 import { deterministicUuid } from "../deterministicUuid";
 import type { BenchmarkChatPort } from "./benchmarkChatPort";
@@ -29,12 +30,14 @@ const CODE_CASES_LATER = "Code cases arrive in a later version";
 
 export interface BenchmarkRunnerOptions {
   readonly chat: BenchmarkChatPort;
-  readonly projection: Pick<BenchmarkProjection, "run" | "runningRuns">;
+  readonly projection: Pick<BenchmarkProjection, "run" | "runs" | "runningRuns">;
   readonly store: Pick<BenchmarkEventStore, "cellStarted" | "cellSettled" | "runEnded">;
   readonly turnMetrics: {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
   };
   readonly projectId: ProjectId;
+  /** Tests a hand-written pattern under a deadline; the runner never matches one itself. */
+  readonly matchPattern: BenchmarkPatternMatcher;
   readonly clock: () => string;
   readonly tickMs?: number;
   readonly turnTimeoutMs?: number;
@@ -80,6 +83,7 @@ export class BenchmarkRunner {
     this.#stopped = false;
     const timer = setInterval(() => void this.tick(), this.#options.tickMs ?? BENCHMARK_TICK_MS);
     timer.unref();
+    void this.#exclusive(() => this.#archiveSettled()).catch(() => undefined);
     void this.tick();
     return () => {
       this.#stopped = true;
@@ -108,6 +112,22 @@ export class BenchmarkRunner {
   /** Stops a run: running turns are interrupted, queued cells are cancelled, and the run ends. */
   cancel(runId: string): Promise<BenchmarkRun | undefined> {
     return this.#exclusive(() => this.#cancel(runId));
+  }
+
+  /**
+   * A settled cell's thread is archived best effort, so a failed archive leaves
+   * it active. Each start tries again for every settled cell, by the cell's
+   * fixed thread identity, so a cell refused after its thread was made is
+   * covered too. Archiving a thread that is gone or already archived does nothing.
+   */
+  async #archiveSettled(): Promise<void> {
+    for (const run of this.#options.projection.runs()) {
+      for (const cell of run.cells) {
+        if (this.#stopped) return;
+        if (cell.state === "queued" || cell.state === "running") continue;
+        await this.#options.chat.archiveThread(benchmarkCellIdentity(String(cell.cellId)).threadId);
+      }
+    }
   }
 
   #exclusive<T>(work: () => Promise<T>): Promise<T> {
@@ -199,7 +219,7 @@ export class BenchmarkRunner {
           cell,
           "answered",
           undefined,
-          scoreBenchmarkChecks(benchmarkCase.checks, answer),
+          await scoreBenchmarkChecks(benchmarkCase.checks, answer, this.#options.matchPattern),
         );
       }
       await chat.archiveThread(cell.threadId);

@@ -16,6 +16,8 @@ import {
   type BenchmarkSuite,
   type BenchmarkSuiteDeleteRequest,
   type BenchmarkSuiteSaveRequest,
+  type ProviderInstanceId,
+  type ProviderModelId,
   type TurnMetricsRecord,
   type WindowId,
 } from "@octant/contracts";
@@ -27,6 +29,7 @@ import {
   summarizeBenchmarkRun,
 } from "@octant/domain";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
+import { benchmarkCellIdentity } from "./benchmarkRunner";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 
 /** A refusal is a value the route answers with its own status. */
@@ -51,7 +54,10 @@ export interface BenchmarkServiceOptions {
     readonly kick: () => void;
   };
   /** Whether the provider instance exists, is enabled, and offers the model. */
-  readonly contenderAvailable: (providerInstanceId: string, modelId: string) => boolean;
+  readonly contenderAvailable: (
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ) => boolean;
   /** Creates the Benchmarks Chat Project once; refuses when it cannot be used. */
   readonly ensureProject: (
     windowId: WindowId,
@@ -71,6 +77,7 @@ export interface BenchmarkServiceOptions {
  */
 export class BenchmarkService {
   readonly #options: BenchmarkServiceOptions;
+  #starts: Promise<unknown> = Promise.resolve();
 
   constructor(options: BenchmarkServiceOptions) {
     this.#options = options;
@@ -145,7 +152,27 @@ export class BenchmarkService {
     return ok({ run, leaderboard: benchmarkLeaderboard(run, metricsByThread), cellMetrics });
   }
 
-  async startRun(
+  /**
+   * Starts are one at a time. The check for a run that already exists, the
+   * wait for the Project, and the journaling must not interleave, or two
+   * identical starts would each journal a run.
+   */
+  startRun(
+    windowId: WindowId,
+    request: BenchmarkRunStartRequest,
+  ): Promise<BenchmarkOutcome<BenchmarkRun>> {
+    const result = this.#starts.then(
+      () => this.#startRun(windowId, request),
+      () => this.#startRun(windowId, request),
+    );
+    this.#starts = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  async #startRun(
     windowId: WindowId,
     request: BenchmarkRunStartRequest,
   ): Promise<BenchmarkOutcome<BenchmarkRun>> {
@@ -171,10 +198,7 @@ export class BenchmarkService {
     }
     const unavailable = request.contenders.findIndex(
       (contender) =>
-        !this.#options.contenderAvailable(
-          String(contender.providerInstanceId),
-          String(contender.modelId),
-        ),
+        !this.#options.contenderAvailable(contender.providerInstanceId, contender.modelId),
     );
     if (unavailable >= 0) {
       return refused(
@@ -219,10 +243,16 @@ export class BenchmarkService {
     if (run.status === "running") {
       return refused("conflict", "Cancel the run before purging it.");
     }
+    // A cell refused after its thread was made never recorded the thread, so
+    // every cell's fixed thread identity is purged. A thread that was never made
+    // is "absent", which counts as done.
     for (const cell of run.cells) {
-      if (cell.threadId === undefined) continue;
-      if ((await this.#options.purgeThread(cell.threadId)) === "failed") {
-        return refused("unavailable", "A cell thread could not be purged, so the run was kept.");
+      const threadIds = new Set([benchmarkCellIdentity(String(cell.cellId)).threadId]);
+      if (cell.threadId !== undefined) threadIds.add(cell.threadId);
+      for (const threadId of threadIds) {
+        if ((await this.#options.purgeThread(threadId)) === "failed") {
+          return refused("unavailable", "A cell thread could not be purged, so the run was kept.");
+        }
       }
     }
     this.#options.store.runPurged({ runId: run.runId });

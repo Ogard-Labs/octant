@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { benchmarkCellIdentity } from "./benchmarkRunner";
 import { createBenchmarkRouteHandler } from "./benchmarkRoutes";
 import { BenchmarkService } from "./benchmarkService";
 import {
@@ -36,7 +37,10 @@ function setup(
       kick: () => void kicks.push(1),
     },
     contenderAvailable: () => options.available ?? true,
-    ensureProject: async () => ({ status: "ready" }),
+    ensureProject: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { status: "ready" };
+    },
     purgeThread: async (threadId) => {
       purged.push(threadId);
       return options.purge ?? "purged";
@@ -204,6 +208,41 @@ describe("benchmark routes", () => {
     expect(projection.runs()).toHaveLength(1);
   });
 
+  it("purges the fixed thread of a cell that never recorded one, and counts an absent thread as done", async () => {
+    const { handler, store, projection, purged } = setup({ purge: "absent" });
+    const run = sampleRun();
+    store.runStarted({ run });
+    store.cellSettled({
+      runId: run.runId,
+      cellId: run.cells[0]!.cellId,
+      state: "failed",
+      failureReason: "refused after the thread was made",
+      checks: [],
+      settledAt: BENCHMARK_TEST_NOW as never,
+    });
+    store.runEnded({ runId: run.runId, status: "cancelled", endedAt: BENCHMARK_TEST_NOW as never });
+
+    const response = await handler(
+      post(BENCHMARK_ROUTE_PATHS.runsPurge, { runId: benchmarkIds.run }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(purged).toContain(benchmarkCellIdentity(String(run.cells[0]!.cellId)).threadId);
+    expect(projection.run(benchmarkIds.run)).toBeUndefined();
+  });
+
+  it("answers two identical concurrent starts with one run", async () => {
+    const { handler, store, projection, kicks } = setup();
+    store.suiteSaved({ suite: sampleSuite() });
+    const [first, second] = await Promise.all([
+      handler(post(BENCHMARK_ROUTE_PATHS.runsStart, startBody)),
+      handler(post(BENCHMARK_ROUTE_PATHS.runsStart, startBody)),
+    ]);
+    expect([first?.status, second?.status]).toEqual([200, 200]);
+    expect(projection.runs()).toHaveLength(1);
+    expect(kicks).toHaveLength(1);
+  });
+
   it("purges every cell thread of a finished run before it forgets the run, and keeps a running one", async () => {
     const { handler, store, projection, purged } = setup();
     const run = sampleRun();
@@ -224,7 +263,9 @@ describe("benchmark routes", () => {
       post(BENCHMARK_ROUTE_PATHS.runsPurge, { runId: benchmarkIds.run }),
     );
     expect(response?.status).toBe(200);
-    expect(purged).toEqual(["66700000-0000-4000-8000-000000000001"]);
+    expect(purged).toContain("66700000-0000-4000-8000-000000000001");
+    for (const cell of run.cells)
+      expect(purged).toContain(benchmarkCellIdentity(String(cell.cellId)).threadId);
     expect(projection.run(benchmarkIds.run)).toBeUndefined();
   });
 

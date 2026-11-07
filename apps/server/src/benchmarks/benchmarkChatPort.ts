@@ -1,9 +1,12 @@
 import {
+  decodeChatAttemptId,
   decodeChatSubmissionId,
+  decodeChatTurnId,
   decodeChatThreadId,
   decodeProjectId,
   type AggregateVersion,
   type ChatAttemptOutcome,
+  type ChatCommand,
   type ProjectId,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -83,7 +86,7 @@ export interface BenchmarkChatService {
       }>;
     }>;
   };
-  readonly execute: (command: unknown) => Promise<{ readonly kind: string }>;
+  readonly execute: (command: ChatCommand) => Promise<{ readonly kind: string }>;
 }
 
 export interface CreateBenchmarkChatPortOptions {
@@ -201,8 +204,8 @@ export function createBenchmarkChatPort(
           kind: "interrupt-chat-turn",
           threadId: decodeChatThreadId(threadId),
           expectedVersion: current.thread.version,
-          turnId,
-          attemptId: attempt.id,
+          turnId: decodeChatTurnId(turnId),
+          attemptId: decodeChatAttemptId(attempt.id),
         });
       } catch {
         // A turn that already ended has nothing to interrupt.

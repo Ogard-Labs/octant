@@ -806,6 +806,11 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["text/plain"] as const,
     maxBodyBytes: 64 * 1_024,
   },
+  // Benchmark reads only. Saving or deleting a suite and starting, cancelling, or
+  // purging a run are never forwarded; the route also refuses them for a remote principal.
+  ...["/api/benchmarks/suites/list", "/api/benchmarks/runs/list", "/api/benchmarks/runs/read"].map(
+    (path) => ({ kind: "exact" as const, path, methods: ["POST"] as const }),
+  ),
   {
     kind: "exact" as const,
     path: "/api/usage/dashboard",

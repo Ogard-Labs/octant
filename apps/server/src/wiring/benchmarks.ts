@@ -12,6 +12,7 @@ import {
   BENCHMARKS_PROJECT_NAME,
   createBenchmarkChatPort,
 } from "../benchmarks/benchmarkChatPort";
+import { createWorkerPatternMatcher } from "../benchmarks/benchmarkPatternMatcher";
 import { createBenchmarkRouteHandler } from "../benchmarks/benchmarkRoutes";
 import { BenchmarkRunner } from "../benchmarks/benchmarkRunner";
 import { BenchmarkService } from "../benchmarks/benchmarkService";
@@ -74,6 +75,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     store,
     turnMetrics,
     projectId: BENCHMARKS_PROJECT_ID,
+    matchPattern: createWorkerPatternMatcher(),
     clock,
   });
   const service = new BenchmarkService({
@@ -82,13 +84,11 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     turnMetrics,
     runner: benchmarkRunner,
     contenderAvailable: (providerInstanceId, modelId) => {
-      const instance = persistence.readProviderInstance(providerInstanceId as never);
+      const instance = persistence.readProviderInstance(providerInstanceId);
       if (instance === undefined || !instance.enabled) return false;
-      const catalog = persistence.readProviderCatalog?.(providerInstanceId as never);
+      const catalog = persistence.readProviderCatalog?.(providerInstanceId);
       if (catalog === undefined) return true;
-      const models = (catalog as { readonly models?: ReadonlyArray<{ readonly id: string }> })
-        .models;
-      return models?.some((model) => model.id === modelId) ?? true;
+      return catalog.models.some((model) => String(model.id) === String(modelId));
     },
     ensureProject: async (windowId: WindowId) => {
       const existing = persistence.readProject(BENCHMARKS_PROJECT_ID);
