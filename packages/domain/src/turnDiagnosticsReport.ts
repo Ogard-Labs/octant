@@ -3,6 +3,8 @@ import {
   MAX_DIAGNOSTICS_FAILURE_GROUPS,
   MAX_DIAGNOSTICS_MODELS,
   MAX_DIAGNOSTICS_RECENT_FAILURES,
+  MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS,
+  MAX_DIAGNOSTICS_SAME_PROMPTS,
   MAX_DIAGNOSTICS_TOOLS,
   MAX_DIAGNOSTICS_TREND_BUCKETS,
   type DiagnosticsPercentiles,
@@ -12,6 +14,8 @@ import {
   type TurnDiagnosticsFailureGroup,
   type TurnDiagnosticsModelRow,
   type TurnDiagnosticsReport,
+  type TurnDiagnosticsSamePrompt,
+  type TurnDiagnosticsSamePromptPair,
   type TurnDiagnosticsToolRow,
   type TurnDiagnosticsTroubledTurn,
   type TurnMetricsRecord,
@@ -339,8 +343,105 @@ export function buildTurnDiagnosticsReport(
     failureGroups,
     troubledTurns: troubled.reverse().slice(0, MAX_DIAGNOSTICS_RECENT_FAILURES),
     cacheMisses: [...misses].reverse().slice(0, MAX_DIAGNOSTICS_CACHE_MISSES),
+    samePrompt: samePromptList(sorted),
     trend,
   };
+}
+
+/**
+ * Prompts that two or more provider and model pairs were sent, newest first.
+ * Turns recorded without a digest never group. A pair is a provider instance
+ * and model, as a model row keys them, so the same model on two accounts counts
+ * as two. `sorted` runs oldest first; the newest turn of a prompt names its
+ * thread and time.
+ */
+function samePromptList(
+  sorted: ReadonlyArray<TurnMetricsRecord>,
+): ReadonlyArray<TurnDiagnosticsSamePrompt> {
+  interface PairAccumulator {
+    readonly providerInstanceId: TurnMetricsRecord["providerInstanceId"];
+    readonly modelId: TurnMetricsRecord["modelId"];
+    turns: number;
+    failedTurns: number;
+    ttft: number[];
+    decodeRates: number[];
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number | undefined;
+  }
+  const prompts = new Map<
+    string,
+    { newest: TurnMetricsRecord; pairs: Map<string, PairAccumulator> }
+  >();
+  for (const record of sorted) {
+    if (record.promptDigest === undefined) continue;
+    const prompt = prompts.get(record.promptDigest) ?? { newest: record, pairs: new Map() };
+    prompts.set(record.promptDigest, prompt);
+    if (record.startedAt >= prompt.newest.startedAt) prompt.newest = record;
+    const pairKey = `${String(record.providerInstanceId)}\u0000${String(record.modelId)}`;
+    const pair = prompt.pairs.get(pairKey) ?? {
+      providerInstanceId: record.providerInstanceId,
+      modelId: record.modelId,
+      turns: 0,
+      failedTurns: 0,
+      ttft: [],
+      decodeRates: [],
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: undefined,
+    };
+    prompt.pairs.set(pairKey, pair);
+    pair.turns += 1;
+    if (record.stopReason === "failed") pair.failedTurns += 1;
+    const { timeToFirstTokenMs, decodeOutputTokens, decodeMs } = record.metrics;
+    if (timeToFirstTokenMs !== undefined) pair.ttft.push(timeToFirstTokenMs);
+    if (decodeOutputTokens !== undefined && decodeMs !== undefined) {
+      pair.decodeRates.push(decodeOutputTokens / (decodeMs / 1_000));
+    }
+    if (record.usage !== undefined) {
+      pair.inputTokens += record.usage.inputTokens;
+      pair.outputTokens += record.usage.outputTokens;
+      if (record.usage.costUsd !== undefined) {
+        pair.costUsd = (pair.costUsd ?? 0) + record.usage.costUsd;
+      }
+    }
+  }
+  const entries: TurnDiagnosticsSamePrompt[] = [];
+  for (const [promptDigest, prompt] of prompts) {
+    if (prompt.pairs.size < 2) continue;
+    const pairs: TurnDiagnosticsSamePromptPair[] = [...prompt.pairs.values()]
+      .sort((left, right) => right.turns - left.turns || compareModel(left, right))
+      .slice(0, MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS)
+      .map((pair) => {
+        const ttftP50 = percentile(pair.ttft, 0.5);
+        const rateP50 = percentile(pair.decodeRates, 0.5);
+        return {
+          providerInstanceId: pair.providerInstanceId,
+          modelId: pair.modelId,
+          turns: pair.turns,
+          failedTurns: pair.failedTurns,
+          ...(ttftP50 === undefined ? {} : { timeToFirstTokenP50Ms: ttftP50 }),
+          ...(rateP50 === undefined ? {} : { decodeTokensPerSecondP50: roundRate(rateP50) }),
+          inputTokens: pair.inputTokens,
+          outputTokens: pair.outputTokens,
+          ...(pair.costUsd === undefined ? {} : { costUsd: pair.costUsd }),
+        };
+      });
+    entries.push({
+      promptDigest: promptDigest as TurnDiagnosticsSamePrompt["promptDigest"],
+      threadId: prompt.newest.threadId,
+      mode: prompt.newest.mode,
+      lastSentAt: prompt.newest.startedAt,
+      pairs,
+    });
+  }
+  return entries
+    .sort(
+      (left, right) =>
+        right.lastSentAt.localeCompare(left.lastSentAt) ||
+        left.promptDigest.localeCompare(right.promptDigest),
+    )
+    .slice(0, MAX_DIAGNOSTICS_SAME_PROMPTS);
 }
 
 /**
@@ -457,7 +558,10 @@ function toModelRow(model: ModelAccumulator): TurnDiagnosticsModelRow {
   };
 }
 
-function compareModel(left: ModelAccumulator, right: ModelAccumulator): number {
+function compareModel(
+  left: Pick<ModelAccumulator, "providerInstanceId" | "modelId">,
+  right: Pick<ModelAccumulator, "providerInstanceId" | "modelId">,
+): number {
   return (
     String(left.providerInstanceId).localeCompare(String(right.providerInstanceId)) ||
     String(left.modelId).localeCompare(String(right.modelId))

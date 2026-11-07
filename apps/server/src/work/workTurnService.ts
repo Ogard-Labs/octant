@@ -94,7 +94,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
-import type { TurnEndSummary } from "../metrics/turnEnd";
+import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   accumulateTurnUsage,
@@ -422,6 +422,8 @@ export interface WorkTurnServiceDependencies {
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
+    /** The host's keyed prompt digest; absent when the host has no key. */
+    readonly promptDigest?: (text: string) => string;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -2203,7 +2205,11 @@ export class WorkTurnService {
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
         onTurnEnded: (ended) => {
-          endedTurn = ended;
+          endedTurn = withPromptDigest(
+            ended,
+            this.#nativeHarness?.promptDigest,
+            input.command.prompt,
+          );
         },
         ...(this.#liveTurns === undefined
           ? {}

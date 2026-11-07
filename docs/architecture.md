@@ -5974,6 +5974,14 @@ unknown time zone is refused. The report holds:
   read none. It is a likelihood, not a provider fact; a changed system prompt
   or tool list also breaks a cache.
 - A trend by UTC hour or by calendar day in the reader's time zone.
+- A **Same prompt** list: prompts sent to two or more provider and model pairs.
+  Each turn frame may carry a `promptDigest`, a keyed HMAC-SHA-256 of the prompt
+  with its whitespace normalized, made by the host from the prompt text the
+  turn's service already holds and keyed with a random host-local key kept in a
+  private file under the data folder. The prompt text and the key are never
+  journaled or reported, and a purge of the thread takes the digest with its
+  frame. Detail, and the benchmark suites built on it, are in
+  [Model benchmarks](design/model-benchmarks.md).
 
 Percentiles count only turns that measured the figure, so a provider that
 reports no timing has no speed rather than zero. A turn recorded before

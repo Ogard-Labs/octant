@@ -65,6 +65,14 @@ describe("turn metrics", () => {
     ).toThrow();
   });
 
+  it("decodes a turn with or without a prompt digest and refuses a malformed one", () => {
+    const promptDigest = "ab".repeat(32);
+    expect(decodeTurnMetricsRecord(record).promptDigest).toBeUndefined();
+    expect(decodeTurnMetricsRecord({ ...record, promptDigest }).promptDigest).toBe(promptDigest);
+    expect(() => decodeTurnMetricsRecord({ ...record, promptDigest: "AB".repeat(32) })).toThrow();
+    expect(() => decodeTurnMetricsRecord({ ...record, promptDigest: "ab".repeat(31) })).toThrow();
+  });
+
   it("keeps usage absent on a turn whose provider reported none", () => {
     expect(decodeTurnMetricsRecord(record).usage).toBeUndefined();
     expect(

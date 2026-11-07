@@ -187,6 +187,57 @@ describe("the Diagnostics page", () => {
   });
 });
 
+describe("the Same prompt section", () => {
+  const promptDigest = "ab".repeat(32);
+  const sharedPrompt = report([
+    turn({ promptDigest }),
+    turn({
+      promptDigest,
+      modelId: "model-slow",
+      threadId: chatThread,
+      mode: "chat",
+      usage: { inputTokens: 900, outputTokens: 300, costUsd: 0.0123 },
+      metrics: {
+        precision: "exact",
+        wallMs: 20_000,
+        timeToFirstTokenMs: 2_400,
+        decodeOutputTokens: 300,
+        decodeMs: 10_000,
+        toolMs: 0,
+        modelCalls: 1,
+      },
+      startedAt: "2026-11-07T11:00:00.000Z",
+      endedAt: "2026-11-07T11:00:20.000Z",
+    }),
+  ]);
+
+  it("compares each model that was sent the same prompt and opens the newest thread", async () => {
+    const { onOpenSubject } = mount(async () => sharedPrompt);
+
+    const section = await screen.findByRole("region", { name: "Same prompt" });
+    const table = within(section).getByRole("table");
+    const slow = within(table).getByRole("row", { name: /model-slow/ });
+    expect(within(slow).getByText("2.4 s")).toBeInTheDocument();
+    expect(within(slow).getByText("30 tok/s")).toBeInTheDocument();
+    expect(within(slow).getByText("900 / 300")).toBeInTheDocument();
+    expect(within(slow).getByText("$0.0123")).toBeInTheDocument();
+    expect(within(table).getByRole("row", { name: /model-fast/ })).toBeInTheDocument();
+
+    await userEvent.click(within(section).getByRole("button", { name: /last sent the prompt/ }));
+    expect(onOpenSubject).toHaveBeenCalledWith("chat-thread", chatThread);
+  });
+
+  it("says so when no prompt was sent to more than one model", async () => {
+    mount(async () => troubledReport);
+
+    const section = await screen.findByRole("region", { name: "Same prompt" });
+    expect(
+      within(section).getByText(/No prompt in this range was sent to more than one model/),
+    ).toBeInTheDocument();
+    expect(within(section).queryByRole("table")).toBeNull();
+  });
+});
+
 describe("the Diagnostics report copy", () => {
   it("copies the whole report as JSON, and a newer reading replaces the note", async () => {
     const copyText = vi.fn(async (_text: string) => undefined);
