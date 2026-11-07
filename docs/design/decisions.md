@@ -771,6 +771,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 Threads form one real hierarchy, and Work and Code have server-derived boards; Chat has none. An agent can never mark any thread Done.
 
+- The boards are the bundled Board plugin. Switching it off hides the Work and Code board views and every way to open them in the renderer; the host-owned status policy and the server board projections and routes stay, because thread rows, the dock overview, the planner board read, sibling-thread tools and side tasks read them. Nothing is deleted. Owner: [Workspace](workspace.md#boards-and-integrations).
 - A Code thread is Done only when its user-confirmed delivery target is objectively satisfied, and no person's mark overrides ambiguous state.
 - A Work thread is Done when a person marks it; the mark is final and needs no evidence text.
 - The Work mark locks the thread on the host until it is archived and reactivated: queued messages hold, child results wait, and a due resume ends as invalidated.

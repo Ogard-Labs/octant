@@ -176,6 +176,19 @@ export function resolveBoardViewContributions(
   );
 }
 
+/**
+ * Whether the thread board (the Work and Code board views and every way to
+ * open them) is on for a mode. The board plugin's `thread-status` view is the
+ * one source: a switched-off plugin contributes no view, so each opener and
+ * the board layer read this instead of keeping a second flag.
+ */
+export function isThreadBoardAvailable(
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): boolean {
+  return resolveBoardViewContributions(mode, effective).has("thread-status");
+}
+
 export function resolveAppearancePresetContributions(
   effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
 ): ReadonlySet<string> {

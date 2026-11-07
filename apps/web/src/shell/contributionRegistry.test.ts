@@ -5,6 +5,7 @@ import {
   isPreviewViewerAvailable,
   isSettingsSectionAvailable,
   resolveAppearancePresetContributions,
+  isThreadBoardAvailable,
   resolveBoardViewContributions,
   resolvePreviewViewerContributions,
   resolveSettingsSectionContributions,
@@ -147,6 +148,21 @@ describe("resolveBoardViewContributions", () => {
 
   it("omits the thread-status view when the board plugin is not effective", () => {
     expect(resolveBoardViewContributions("code", effectiveMap({ board: false })).size).toBe(0);
+  });
+});
+
+describe("isThreadBoardAvailable", () => {
+  it("is on for work and code while the board plugin is effective, and never for chat", () => {
+    const effective = effectiveMap({ board: true });
+    expect(isThreadBoardAvailable("work", effective)).toBe(true);
+    expect(isThreadBoardAvailable("code", effective)).toBe(true);
+    expect(isThreadBoardAvailable("chat", effective)).toBe(false);
+  });
+
+  it("is off in every mode when the board plugin is not effective", () => {
+    const effective = effectiveMap({ board: false });
+    expect(isThreadBoardAvailable("work", effective)).toBe(false);
+    expect(isThreadBoardAvailable("code", effective)).toBe(false);
   });
 });
 
