@@ -375,6 +375,14 @@ synchronous server-spawn failures remain sanitized; readiness failures keep
 their classification for restart policy. An independently managed host is
 never added to this inventory or stopped with it.
 
+The Browser runtime broker owns its acquired surface subscriptions and loopback
+listener even when listening fails. Failed startup and ordinary close share one
+idempotent completion. Cleanup attempts both subscription removals, surface
+shutdown, and HTTP shutdown in that order even if an earlier stage throws;
+held HTTP connections are closed and listener completion is awaited. Failures
+remain explicit, including startup and cleanup errors together. This reuses the
+desktop's existing quit deadline rather than adding a separate watchdog.
+
 Accepted quit is terminal for host start and restart admission, including
 queued work. A start already in progress must close a late desktop-owned
 result; a late borrowed attachment is left alone. Confirmation remains
