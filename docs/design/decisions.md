@@ -65,7 +65,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 6       | 2            | 0                   |
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
-| [Disposable desktops](#disposable-desktops)                                           | 4         | 2       | 2            | 0                   |
+| [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | **All areas**                                                                         | **226**   | **192** | **31**       | **3**               |
 
 ## Principles and hard lines
@@ -2905,7 +2905,7 @@ Status: Built. Since: 2026-10-26. Detail: [Disposable desktops: model](disposabl
 
 ### Desktop isolation and transfer
 
-A desktop holds no host credential and no checkout. Only an explicit, journaled transfer of one checkout-relative file moves bytes in.
+A desktop holds no host credential and no checkout. Host files enter only through an explicit, journaled transfer of one checkout-relative file; the separately approved preview carries only the named application’s HTTP/WebSocket traffic.
 
 - A host-local desktop runs in a dedicated Linux sandbox with its own network namespace and no host loopback, and never has network: a recipe that asks for it is refused. Only a cloud recipe without a placement may allow network.
 - A cloud desktop's key stays in the host credential store and never enters the desktop.
@@ -2913,7 +2913,7 @@ A desktop holds no host credential and no checkout. Only an explicit, journaled 
 - Transfers to a cloud desktop always ask, in every posture, and Plan refuses transfers.
 - A local person may review and grant one healthy Octant-owned dev-server port from the Code task's own worktree to its ready host-local Linux lease. The portable provider seam exposes only bounded HTTP/WebSocket operations; an authenticated exact-socket IPC exception preserves the guest's separate network namespace and denies other host ports. Permissions expire with the original lease, invalidate with authority/binding/window/provider loss, never restore after restart and block replacement grants while cleanup is unconfirmed. E2B and Cua report this capability unavailable. The actual production-launch namespace proof is mandatory before enabling the new path.
 
-Status: Partly built. Since: 2026-10-26; lease-bound preview accepted 2026-11-07. Detail: [Disposable desktops: isolation](disposable-desktops.md#isolation), [artifact transfer](disposable-desktops.md#artifact-transfer), and [lease-bound dev-server preview](disposable-desktops.md#lease-bound-dev-server-preview). The local adapter and grant path are implemented; the required native namespace proof remains a separate gate.
+Status: Built. Since: 2026-10-26; host-local lease-bound preview 2026-11-07. Detail: [Disposable desktops: isolation](disposable-desktops.md#isolation), [artifact transfer](disposable-desktops.md#artifact-transfer), and [lease-bound dev-server preview](disposable-desktops.md#lease-bound-dev-server-preview). The local adapter and grant path are covered by the required hosted production-launch namespace proof; packaged desktop GUI acceptance remains separate.
 
 ### Desktop lifecycle and teardown
 
