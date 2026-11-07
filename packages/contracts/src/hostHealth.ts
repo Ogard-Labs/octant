@@ -50,7 +50,11 @@ export type HostHealthResolution = typeof HostHealthResolution.Type;
 export const HostHealthHistoryRequest = Schema.Struct({
   from: Schema.optional(UtcTimestamp),
   to: Schema.optional(UtcTimestamp),
-  /** Absent picks minutes when they fit in `MAX_HOST_HEALTH_POINTS`, else hours. */
+  /**
+   * Absent picks minutes when they fit in `MAX_HOST_HEALTH_POINTS`, else hours.
+   * Minutes asked for over a longer span return the newest
+   * `MAX_HOST_HEALTH_POINTS` of them.
+   */
   resolution: Schema.optional(HostHealthResolution),
 })
   .annotations(strict)
@@ -71,6 +75,12 @@ export const HostHealthHistory = Schema.Struct({
   generatedAt: UtcTimestamp,
   resolution: HostHealthResolution,
   retentionDays: PositiveInt,
+  /**
+   * Every distinct host process start seen in the span's minute samples,
+   * oldest first, read before any roll-up so restarts inside one hour are all
+   * counted. The first may predate the span.
+   */
+  processStarts: Schema.Array(UtcTimestamp).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
   samples: Schema.Array(HostHealthSample).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
 }).annotations(strict);
 export type HostHealthHistory = typeof HostHealthHistory.Type;

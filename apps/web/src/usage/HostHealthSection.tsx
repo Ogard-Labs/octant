@@ -102,7 +102,9 @@ export function HostHealthSection(props: {
   }
   const { history } = state;
   const samples = history.samples;
-  const restarts = restartTimes(samples);
+  // Each process start after the earliest is a restart; the host counts them
+  // from minutes, so restarts inside one hour are all here.
+  const restarts = history.processStarts.slice(1);
   return (
     <SurfaceSection label="Host health">
       {samples.length === 0 ? (
@@ -202,12 +204,6 @@ function MetricStrip(props: {
       <p className="usage-workspace__note">{props.metric.note}</p>
     </figure>
   );
-}
-
-/** Each process start after the first one in the range is a restart. */
-function restartTimes(samples: ReadonlyArray<HostHealthSample>): string[] {
-  const starts = [...new Set(samples.map((sample) => sample.processStartedAt))].sort();
-  return starts.slice(1);
 }
 
 function megabytes(bytes: number): string {

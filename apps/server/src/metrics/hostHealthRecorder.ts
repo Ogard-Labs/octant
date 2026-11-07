@@ -48,7 +48,10 @@ export class HostHealthRecorder {
   readonly #processStartedAt: string;
   #connection: SqliteConnection | undefined;
   #lastSampleMs: number;
-  #samplesSincePrune = 0;
+  // Starts due, so a host that never runs an hour still prunes on its first sample.
+  #samplesSincePrune = PRUNE_EVERY_SAMPLES;
+  // Set by stop; a sample or read after it neither writes nor reopens the file.
+  #closed = false;
 
   constructor(options: HostHealthRecorderOptions) {
     this.#options = options;
@@ -65,6 +68,7 @@ export class HostHealthRecorder {
     timer.unref();
     return () => {
       clearInterval(timer as ReturnType<typeof setInterval>);
+      this.#closed = true;
       this.#connection?.close();
       this.#connection = undefined;
     };
@@ -72,6 +76,7 @@ export class HostHealthRecorder {
 
   /** Takes and stores one sample of the window since the previous one. */
   sample(): HostHealthSample | undefined {
+    if (this.#closed) return undefined;
     try {
       const sampledAt = this.#clock();
       const sampledMs = Date.parse(sampledAt);
@@ -125,6 +130,7 @@ export class HostHealthRecorder {
     const to = request.to ?? generatedAt;
     let rows: ReadonlyArray<unknown> = [];
     try {
+      if (this.#closed) throw new Error("Host health recording has stopped.");
       rows = this.#open()
         .prepare(
           "SELECT sample FROM host_health_samples WHERE sampled_at >= ? AND sampled_at <= ? ORDER BY sampled_at",
@@ -149,6 +155,7 @@ export class HostHealthRecorder {
       resolution: points.resolution,
       retentionDays: HOST_HEALTH_RETENTION_DAYS,
       samples: points.samples,
+      processStarts: points.processStarts,
     };
   }
 

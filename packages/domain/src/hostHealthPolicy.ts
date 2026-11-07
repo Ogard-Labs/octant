@@ -19,11 +19,19 @@ import {
 export function hostHealthPoints(
   samples: ReadonlyArray<HostHealthSample>,
   requested: HostHealthResolution | undefined,
-): { readonly resolution: HostHealthResolution; readonly samples: HostHealthSample[] } {
+): {
+  readonly resolution: HostHealthResolution;
+  readonly samples: HostHealthSample[];
+  readonly processStarts: UtcTimestamp[];
+} {
   const sorted = [...samples].sort((left, right) => left.sampledAt.localeCompare(right.sampledAt));
   const resolution = requested ?? (sorted.length > MAX_HOST_HEALTH_POINTS ? "hour" : "minute");
   const points = resolution === "minute" ? sorted : rollUpToHours(sorted);
-  return { resolution, samples: points.slice(-MAX_HOST_HEALTH_POINTS) };
+  // Read from the minutes, before an hour keeps only its newest start.
+  const processStarts = [...new Set(sorted.map((sample) => sample.processStartedAt))]
+    .sort()
+    .slice(-MAX_HOST_HEALTH_POINTS);
+  return { resolution, samples: points.slice(-MAX_HOST_HEALTH_POINTS), processStarts };
 }
 
 function rollUpToHours(sorted: ReadonlyArray<HostHealthSample>): HostHealthSample[] {

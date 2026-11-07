@@ -90,6 +90,30 @@ describe("the host health recorder", () => {
     expect(all.samples.every((sample) => sample.sampledAt >= "2026-11-01")).toBe(true);
   });
 
+  it("prunes on its first sample, so a host that restarts often still forgets old samples", () => {
+    const path = scratch();
+    let now = Date.parse("2026-10-01T10:00:00.000Z");
+    const clock = () => new Date(now).toISOString();
+    recorder(path, clock).sample();
+    now = Date.parse("2026-11-07T10:00:00.000Z");
+    recorder(path, clock).sample();
+
+    const all = recorder(path, clock).read({ from: "2026-01-01T00:00:00.000Z" as never });
+
+    expect(all.samples.map((sample) => sample.sampledAt)).toEqual(["2026-11-07T10:00:00.000Z"]);
+  });
+
+  it("neither writes nor reopens its file once stopped", () => {
+    const path = scratch();
+    const health = new HostHealthRecorder({ path, latencyWindow: () => [] });
+    const stop = health.start();
+    expect(health.sample()).toBeDefined();
+    stop();
+
+    expect(health.sample()).toBeUndefined();
+    expect(health.read({}).samples).toEqual([]);
+  });
+
   it("never throws into the host when its file cannot be written", () => {
     const health = new HostHealthRecorder({
       path: "/nonexistent-octant-dir/host-health.sqlite3",

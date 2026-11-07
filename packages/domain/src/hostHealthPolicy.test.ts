@@ -55,6 +55,24 @@ describe("host health points", () => {
     });
   });
 
+  it("counts every restart, even two inside one rolled-up hour", () => {
+    const points = hostHealthPoints(
+      [
+        sample(1),
+        sample(10, { processStartedAt: "2026-11-07T10:09:00.000Z" }),
+        sample(20, { processStartedAt: "2026-11-07T10:19:00.000Z" }),
+      ],
+      "hour",
+    );
+
+    expect(points.samples).toHaveLength(1);
+    expect(points.processStarts).toEqual([
+      "2026-11-07T09:00:00.000Z",
+      "2026-11-07T10:09:00.000Z",
+      "2026-11-07T10:19:00.000Z",
+    ]);
+  });
+
   it("switches to hours on its own when the minutes would not fit in one read", () => {
     const minutes = Array.from({ length: MAX_HOST_HEALTH_POINTS + 1 }, (_unused, index) =>
       sample(index),

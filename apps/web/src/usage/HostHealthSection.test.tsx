@@ -27,6 +27,7 @@ function history(samples: ReadonlyArray<HostHealthSample>): HostHealthHistory {
     resolution: "minute",
     retentionDays: 14,
     samples,
+    processStarts: [...new Set(samples.map((entry) => entry.processStartedAt))].sort() as never,
   };
 }
 
@@ -43,7 +44,7 @@ describe("host health on the Diagnostics page", () => {
             eventLoopLagCount: 3,
             eventLoopLagWorstMs: 1_250,
           }),
-          sample(3, { processStartedAt: "2026-11-07T10:02:30.000Z" }),
+          sample(3, { processStartedAt: "2026-11-07T10:02:30.000Z" as never }),
         ]),
       ),
     };

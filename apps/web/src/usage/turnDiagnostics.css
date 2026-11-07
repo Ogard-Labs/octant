@@ -107,6 +107,9 @@
 
 .host-health__grid {
   display: grid;
+  /* A grid item sizes to its content by default; this one must shrink to the
+     section so its columns are counted from the screen width. */
+  min-width: 0;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: var(--oct-space-3);
 }
@@ -155,4 +158,9 @@
   flex: 1 1 0;
   background: var(--oct-accent);
   border-radius: 2px 2px 0 0;
+}
+
+/* Sections size to the page column, never to their widest content. */
+.turn-diagnostics .surface-section {
+  min-width: 0;
 }
