@@ -6933,7 +6933,12 @@ function LaunchedShell(
   const serverActionsProject =
     activeMode === "code"
       ? serverCodeProjectFor(serverCodeProjects.projects, activeProjectId)
-      : undefined;
+      : activeMode === "work"
+        ? serverCodeProjects.workProjects.find(
+            (project) =>
+              project.projectId === activeProjectId && project.developerToolsEnabled === true,
+          )
+        : undefined;
   const activeProjectActions =
     actionsProject?.type === "code" || actionsProject?.type === "work"
       ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
@@ -7753,7 +7758,10 @@ function LaunchedShell(
                         current === undefined ? undefined : { ...current, open: false },
                       )
                     }
-                    {...(zen.enabled
+                    {...(zen.enabled &&
+                    !serverCodeProjects.workProjects.some(
+                      (project) => project.projectId === projectActionRun.target.projectId,
+                    )
                       ? {
                           onOpenTerminal: (terminalId: ReturnType<typeof decodeCodeTerminalId>) => {
                             void (async () => {
@@ -7825,7 +7833,9 @@ function LaunchedShell(
                     {...(serverActionsProject.folder === undefined
                       ? {}
                       : { mainFolder: serverActionsProject.folder })}
-                    defaultFolderLabel="Active server checkout"
+                    defaultFolderLabel={
+                      activeMode === "work" ? "Task folder" : "Active server checkout"
+                    }
                     onRun={(action, folder) =>
                       void runProjectAction(serverActionsProject.projectId, action, folder)
                     }

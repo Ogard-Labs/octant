@@ -149,6 +149,8 @@ export interface ProjectTerminalServiceOptions {
 
 /** Where a server Project's terminal logs in. Canonical: docs/design/server-projects.md § Threads. */
 export interface ServerProjectTerminalTarget {
+  /** Work server Projects expose saved actions, not a general interactive shell. */
+  readonly actionsOnly?: true;
   /** Derived from the Project, server, and folder, so a rebound Project ends its shells. */
   readonly bindingRevisionId: BindingRevisionId;
   /** The login now, or undefined once its server left the registry. */
@@ -279,6 +281,11 @@ export class ProjectTerminalService {
         case "read-output":
           return this.#view(command.terminalId, owner, command.afterCharacters);
         case "write":
+          if (authority.kind === "allowed-on-server" && authority.server.actionsOnly === true)
+            return refused(
+              "unavailable",
+              "Work server actions do not accept interactive terminal input.",
+            );
           this.#options.terminals.write(String(command.terminalId), command.data);
           return this.#view(command.terminalId, owner);
         case "resize":
@@ -763,6 +770,11 @@ export class ProjectTerminalService {
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
     authority: Extract<Authority, { readonly kind: "allowed-on-server" }>,
   ): Promise<ProjectTerminalResult> {
+    if (authority.server.actionsOnly === true)
+      return refused(
+        "unavailable",
+        "This Work server Project offers saved actions, not a general Project terminal.",
+      );
     if (command.folder !== undefined) {
       return refused("unavailable", "That folder is not one of this Project's folders.");
     }

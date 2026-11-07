@@ -2,11 +2,33 @@ import { expect, it } from "vitest";
 import {
   decodeServerProjectsCommand,
   decodeServerProjectActionsReplacedPayload,
+  decodeServerWorkDeveloperToolsChangedPayload,
 } from "./serverProjects";
 import { decodeProjectTerminalCommand, decodeProjectTerminalResult } from "./projectTerminals";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const actionId = "22222222-2222-4222-8222-222222222222";
+it("records a local Work presentation choice with who and when but no command or credential authority", () => {
+  const command = { kind: "set-server-work-developer-tools", projectId, enabled: true };
+  expect(decodeServerProjectsCommand(command)).toEqual(command);
+  expect(() => decodeServerProjectsCommand({ ...command, credential: "not-allowed" })).toThrow();
+  const payload = {
+    projectId,
+    developerTools: {
+      enabled: true,
+      changedBy: { kind: "local-user", actorId: projectId },
+      changedAt: "2026-11-07T10:00:00.000Z",
+    },
+    principal: { kind: "local-window" },
+  };
+  expect(decodeServerWorkDeveloperToolsChangedPayload(payload)).toEqual(payload);
+  expect(() =>
+    decodeServerWorkDeveloperToolsChangedPayload({
+      ...payload,
+      principal: { kind: "remote-device" },
+    }),
+  ).toThrow();
+});
 it("accepts a versioned server action save and refuses executable or remote-principal additions", () => {
   const command = {
     kind: "set-server-project-actions",

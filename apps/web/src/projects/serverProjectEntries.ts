@@ -25,6 +25,7 @@ export interface ServerCodeProject {
 /** A Work Project on a server, with the binding its Work threads are created against. */
 export interface ServerWorkProject extends ServerCodeProject {
   readonly bindingRevisionId: BindingRevisionId;
+  readonly developerToolsEnabled?: boolean;
 }
 
 export interface ServerCodeProjects {
@@ -97,7 +98,15 @@ export function useServerCodeProjectsSource(
         const nextWork = view.projects.flatMap(
           (project): ReadonlyArray<ServerWorkProject> =>
             project.mode === "work" && project.workBindingRevisionId !== undefined
-              ? [{ ...entryOf(project), bindingRevisionId: project.workBindingRevisionId }]
+              ? [
+                  {
+                    ...entryOf(project),
+                    bindingRevisionId: project.workBindingRevisionId,
+                    ...(project.developerTools === undefined
+                      ? {}
+                      : { developerToolsEnabled: project.developerTools.enabled }),
+                  },
+                ]
               : [],
         );
         // An unchanged answer keeps its identity, so a poll that found nothing

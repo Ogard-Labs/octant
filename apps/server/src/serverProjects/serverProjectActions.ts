@@ -8,6 +8,7 @@ import {
   type ProjectId,
   type ProviderExecutionPolicy,
   type WindowId,
+  type WorkThreadId,
 } from "@octant/contracts";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
@@ -23,6 +24,7 @@ import {
 import { ServerFileSystem, RESOLVE_INSIDE, withProtectedPaths } from "./serverFiles";
 import { serverRemoteCommand, type ServerConnection } from "./serverConnection";
 import { serverCodeCheckout } from "./serverProjectThreads";
+import { serverWorkBindingRevisionId } from "./serverWorkThreads";
 import type { ServerProjectStore } from "./serverProjectStore";
 
 const DIRECTORY_ID = `stat -Lc '%d:%i' . 2>/dev/null || stat -f '%d:%i' . 2>/dev/null`;
@@ -45,7 +47,7 @@ ${GIT_READ}
 head=$(git rev-parse --verify HEAD 2>/dev/null) || head=
 branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || branch=
 [ "$head" = "$3" ] && [ "$branch" = "$4" ] || refuse
-sh -c "$5"
+if [ "$6" = closed ]; then sh -c "$5" </dev/null; else sh -c "$5"; fi
 status=$?; [ "$status" -eq 255 ] && status=254
 exit "$status"`;
 
@@ -57,15 +59,27 @@ export interface ServerActionTask {
   readonly authorityRevision: string;
   readonly current: () => boolean;
 }
+export interface ServerWorkActionTask {
+  readonly workThreadId: WorkThreadId;
+  readonly root: string;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly authorityRevision: string;
+  readonly current: () => boolean;
+}
 
 export function createServerProjectActions(options: {
-  readonly store: Pick<ServerProjectStore, "codeProject" | "serverOf">;
+  readonly store: Pick<ServerProjectStore, "project" | "serverOf">;
   readonly connection: Pick<ServerConnection, "run" | "loginCommand">;
   readonly task: (
     windowId: WindowId,
     projectId: ProjectId,
     thread: NonNullable<ProjectActionPlacementRequest["thread"]>,
   ) => Promise<ServerActionTask | undefined>;
+  readonly workTask?: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    threadId: WorkThreadId,
+  ) => Promise<ServerWorkActionTask | undefined>;
 }): Pick<ProjectTerminalServiceOptions, "placeServerAction" | "suggestServerActions"> {
   const serverRevision = (project: ServerProject, server: ShieldServer) =>
     JSON.stringify({
@@ -78,7 +92,7 @@ export function createServerProjectActions(options: {
       server,
     });
   const current = (project: ServerProject, server: ShieldServer) => {
-    const fresh = options.store.codeProject(String(project.id));
+    const fresh = options.store.project(String(project.id));
     const registered = options.store.serverOf(String(project.id));
     return (
       fresh !== undefined &&
@@ -88,7 +102,7 @@ export function createServerProjectActions(options: {
   };
   return {
     suggestServerActions: async (projectId) => {
-      const project = options.store.codeProject(String(projectId));
+      const project = options.store.project(String(projectId));
       const server = options.store.serverOf(String(projectId));
       if (project === undefined || server === undefined) return undefined;
       const files = new ServerFileSystem({
@@ -124,20 +138,29 @@ export function createServerProjectActions(options: {
       });
     },
     placeServerAction: async (windowId, command) => {
-      const project = options.store.codeProject(String(command.projectId));
+      const project = options.store.project(String(command.projectId));
       const server = options.store.serverOf(String(command.projectId));
       if (project === undefined || server === undefined)
         return refused("This server Project is unavailable.");
       const action = project.actions?.find((row) => row.id === command.actionId);
       if (action === undefined || action.preparesWorktrees === true)
         return refused("This server Project has no such runnable saved action.");
-      if (command.workThreadId !== undefined)
-        return refused("This Code server action cannot use a Work task.");
+      if (command.thread !== undefined && command.workThreadId !== undefined)
+        return refused("Choose one task for this action.");
+      if (
+        project.mode === "work" ? command.thread !== undefined : command.workThreadId !== undefined
+      )
+        return refused("This server action cannot use a task from another mode.");
       const task =
-        command.thread === undefined
-          ? undefined
-          : await options.task(windowId, project.id, command.thread);
-      if (command.thread !== undefined && (task === undefined || !task.current()))
+        command.workThreadId !== undefined
+          ? await options.workTask?.(windowId, project.id, command.workThreadId)
+          : command.thread === undefined
+            ? undefined
+            : await options.task(windowId, project.id, command.thread);
+      if (
+        (command.thread !== undefined || command.workThreadId !== undefined) &&
+        (task === undefined || !task.current())
+      )
         return refused("This server checkout or task authority changed.");
       if (command.kind === "start-action" && task?.executionPolicy === "plan")
         return refused("Plan cannot launch a server action.");
@@ -191,8 +214,9 @@ export function createServerProjectActions(options: {
               task === undefined
                 ? undefined
                 : {
-                    threadId: task.threadId,
-                    checkoutId: task.checkoutId,
+                    ...("workThreadId" in task
+                      ? { workThreadId: task.workThreadId }
+                      : { threadId: task.threadId, checkoutId: task.checkoutId }),
                     authority: task.authorityRevision,
                   },
           }),
@@ -205,13 +229,15 @@ export function createServerProjectActions(options: {
         ...(branch === "" ? {} : { branch }),
         ...(task === undefined
           ? {}
-          : {
-              thread: {
-                threadId: task.threadId,
-                checkoutId: task.checkoutId,
-                ...(head === "" ? {} : { head }),
-              },
-            }),
+          : "workThreadId" in task
+            ? { workThreadId: task.workThreadId }
+            : {
+                thread: {
+                  threadId: task.threadId,
+                  checkoutId: task.checkoutId,
+                  ...(head === "" ? {} : { head }),
+                },
+              }),
         server: {
           serverId: server.serverId,
           alias: server.alias,
@@ -227,11 +253,21 @@ export function createServerProjectActions(options: {
         action,
         projectVersion,
         receipt,
-        bindingRevisionId: serverCodeCheckout(project).bindingRevisionId,
+        bindingRevisionId:
+          project.mode === "work"
+            ? serverWorkBindingRevisionId(project)
+            : serverCodeCheckout(project).bindingRevisionId,
         current: () => current(project, server) && task?.current() !== false,
         login: options.connection.loginCommand(
           server,
-          serverRemoteCommand(RUN_SCRIPT, [folder, identity, head, branch, action.command]),
+          serverRemoteCommand(RUN_SCRIPT, [
+            folder,
+            identity,
+            head,
+            branch,
+            action.command,
+            project.mode === "work" ? "closed" : "terminal",
+          ]),
         ),
       };
     },

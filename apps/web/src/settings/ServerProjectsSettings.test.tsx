@@ -12,6 +12,8 @@ import {
   decodeProjectTerminalResult,
   type ProjectId,
 } from "@octant/contracts";
+import { ServerProject as ServerProjectSchema } from "@octant/contracts/server-projects";
+import { Schema } from "effect";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -153,6 +155,38 @@ describe("ServerProjectsSettings", () => {
     await user.type(within(form).getByLabelText("Folder on the server"), "/srv/missing");
     await user.click(within(form).getByRole("button", { name: "Bind folder" }));
     expect(await screen.findByText("That folder is missing on the server.")).toBeVisible();
+  });
+  it("reveals a server Work Project's saved actions only after its presentation switch is chosen", async () => {
+    const project = { ...SITE, mode: "work" as const };
+    const { user, command } = setup({
+      initial: { projects: [project] },
+      answer: (sent) => ({
+        kind: "server-projects-updated",
+        view: {
+          projects: [
+            Schema.decodeUnknownSync(ServerProjectSchema)({
+              ...project,
+              developerTools: {
+                enabled: sent.kind === "set-server-work-developer-tools" && sent.enabled,
+                changedBy: { kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" },
+                changedAt: "2026-11-07T10:00:00.000Z",
+              },
+            }),
+          ],
+        },
+      }),
+    });
+    const toggle = await screen.findByRole("switch", { name: "Show developer tools for Website" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
+    await user.click(toggle);
+    expect(command).toHaveBeenCalledExactlyOnceWith({
+      kind: "set-server-work-developer-tools",
+      projectId: SITE.id,
+      enabled: true,
+    });
+    expect(await screen.findByRole("button", { name: "Actions" })).toBeVisible();
+    expect(screen.getByText(/does not enable a general Project terminal/)).toBeVisible();
   });
   it("retains a refused action draft until the person reloads the current saved list", async () => {
     let current: ServerProjectsView = { projects: [SITE] };

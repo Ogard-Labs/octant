@@ -24,6 +24,11 @@ import { ServerProjectStore } from "./serverProjectStore";
 import { createServerProjectActions } from "./serverProjectActions";
 import { serverCodeCheckout } from "./serverProjectThreads";
 import { serverTerminalLogin } from "./serverTerminal";
+import { createServerWorkActionTask } from "./serverWorkProjectActions";
+import { serverWorkBindingRevisionId } from "./serverWorkThreads";
+import { decodeWorkThread } from "@octant/contracts/work-threads";
+import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
   canRunThrowawaySshd,
   startThrowawaySshd,
@@ -55,7 +60,11 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
     process.removeListener("SIGINT", stop);
   });
 
-  async function fixture(command = "printf '%s\\n' remote-action > result.txt", plan = false) {
+  async function fixture(
+    command = "printf '%s\\n' remote-action > result.txt",
+    plan = false,
+    work = false,
+  ) {
     const scratch = mkdtempSync(join(tmpdir(), "octant-server-action-"));
     const localRoot = join(scratch, "local");
     const remoteRoot = join(sshd.root, randomUUID());
@@ -105,6 +114,7 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       serverId: String(server.serverId),
       folder: remoteRoot,
       principal: "local-window",
+      ...(work ? { mode: "work" as const } : {}),
     });
     if (bound.kind !== "changed" || bound.project === undefined)
       throw Error("Expected server fixture binding");
@@ -121,6 +131,29 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
     const action = actions[0];
     if (action === undefined) throw Error("Expected fixture action");
     const windowId = decodeWindowId(randomUUID());
+    const emptyWorkspace = defaultWindowWorkspace(windowId);
+    let workspace = {
+      ...emptyWorkspace,
+      contextByMode: {
+        ...emptyWorkspace.contextByMode,
+        work: contextKeyForProject("work", LOCAL_HOST_ID, project.id, remoteRoot),
+      },
+    };
+    let windowLive = true;
+    let workThread = decodeWorkThread({
+      id: randomUUID(),
+      projectId: project.id,
+      title: "Synthetic Work task",
+      lifecycle: "active",
+      bindingRevisionId: serverWorkBindingRevisionId(project),
+      workingDirectory: "checkout",
+      access: "ask-first",
+      providerInstanceId: randomUUID(),
+      modelId: "synthetic-model",
+      version: 1,
+      createdAt: "2026-11-07T10:00:00.000Z",
+      updatedAt: "2026-11-07T10:00:00.000Z",
+    });
     let taskCurrent = true;
     const thread = {
       threadId: decodeCodeThreadId(randomUUID()),
@@ -129,6 +162,13 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
     const remoteActions = createServerProjectActions({
       store,
       connection,
+      workTask: createServerWorkActionTask({
+        store,
+        readThread: (id) => (id === workThread.id ? workThread : undefined),
+        workspace: () => workspace,
+        isWindowLive: () => windowLive,
+        workEnabled: () => true,
+      }),
       task: async () => ({
         ...thread,
         root: taskRoot,
@@ -164,16 +204,27 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       serverProject: (id) => {
-        const current = store.codeProject(String(id));
+        const current = store.project(String(id));
         return current === undefined
           ? undefined
           : {
-              bindingRevisionId: serverCodeCheckout(current).bindingRevisionId,
-              login: () => serverTerminalLogin(connection, server, remoteRoot),
+              ...(current.mode === "work" ? { actionsOnly: true as const } : {}),
+              bindingRevisionId:
+                current.mode === "work"
+                  ? serverWorkBindingRevisionId(current)
+                  : serverCodeCheckout(current).bindingRevisionId,
+              login: () =>
+                current.mode === "work"
+                  ? undefined
+                  : serverTerminalLogin(connection, server, remoteRoot),
             };
       },
     });
-    const target = { projectId: project.id, actionId: action.id, thread };
+    const target = {
+      projectId: project.id,
+      actionId: action.id,
+      ...(work ? { workThreadId: workThread.id } : { thread }),
+    };
     const preview = () =>
       service.execute(windowId, "local-window", { kind: "preview-action", ...target });
     const start = async () => {
@@ -207,6 +258,18 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       localStart,
       localResolve,
       localSuggestions,
+      changeWorkAccess: () => {
+        workThread = { ...workThread, access: "full-access" };
+      },
+      changeWorkModel: () => {
+        workThread = decodeWorkThread({ ...workThread, modelId: "changed-model" });
+      },
+      loseWorkProject: () => {
+        workspace = emptyWorkspace;
+      },
+      closeWindow: () => {
+        windowLive = false;
+      },
       preview,
       start,
       changeProfile: () => {
@@ -382,6 +445,96 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       expect(f.localStart).not.toHaveBeenCalled();
       f.store.remove({ projectId: String(f.project.id), principal: "local-window" });
       expect((await f.preview()).kind).toBe("project-terminal-refused");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("runs a reviewed Work task on its server and retires it when task authority changes without enabling a general terminal", async () => {
+    const f = await fixture("pwd; printf ready; exec sleep 30", false, true);
+    try {
+      expect(f.store.project(String(f.project.id))?.developerTools).toBeUndefined();
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "start",
+          projectId: f.project.id,
+          terminalId: decodeCodeTerminalId(randomUUID()),
+          columns: 80,
+          rows: 24,
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused" });
+      const run = await f.start();
+      expect(run.checked.action).toMatchObject({
+        workThreadId: "workThreadId" in f.target ? f.target.workThreadId : undefined,
+        folder: f.taskRoot,
+        server: { taskExecutionPolicy: "approval-gated", confinement: "none" },
+      });
+      expect(run.checked.action.thread).toBeUndefined();
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "write",
+          projectId: f.project.id,
+          terminalId: run.terminalId,
+          data: "echo never\n",
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused", reason: "unavailable" });
+      await vi.waitFor(
+        () =>
+          expect(f.terminals.attach(String(run.terminalId)).transcript.chunks.join("")).toContain(
+            `${f.taskRoot}\r\nready`,
+          ),
+        { timeout: 15000 },
+      );
+      f.changeWorkAccess();
+      await f.service.settleActionAuthorities();
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "read-output",
+          projectId: f.project.id,
+          terminalId: run.terminalId,
+          afterCharacters: 0,
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused", reason: "authority-revoked" });
+      expect(f.terminals.attach(String(run.terminalId)).status).not.toBe("running");
+      const reviewed = await f.preview();
+      if (reviewed.kind !== "project-action-preview") throw Error("Expected current Work review");
+      f.changeWorkModel();
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "start-action",
+          ...f.target,
+          terminalId: decodeCodeTerminalId(randomUUID()),
+          columns: 80,
+          rows: 24,
+          projectVersion: reviewed.projectVersion,
+          placementRevision: reviewed.action.server?.placementRevision,
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused" });
+      f.loseWorkProject();
+      expect((await f.preview()).kind).toBe("project-terminal-refused");
+      expect(f.localStart).not.toHaveBeenCalled();
+      expect(f.localResolve).not.toHaveBeenCalled();
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("gives a saved Work server command end-of-input rather than an interactive shell", async () => {
+    const f = await fixture(
+      "if IFS= read -r line; then printf unexpected-input; else printf stdin-closed; fi",
+      false,
+      true,
+    );
+    try {
+      const run = await f.start();
+      expect(run.result.kind).toBe("project-terminal");
+      await vi.waitFor(
+        () => expect(f.terminals.attach(String(run.terminalId)).status).toBe("exited"),
+        { timeout: 15000 },
+      );
+      expect(f.terminals.attach(String(run.terminalId)).transcript.chunks.join("")).toContain(
+        "stdin-closed",
+      );
     } finally {
       await f.close();
     }

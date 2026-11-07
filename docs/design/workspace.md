@@ -160,7 +160,11 @@ Project terminal), off by default, set only by a person. Its row says it
 changes what the Project shows, not what its threads may do: a Work thread
 has the same shell, Git, and tools as a Code thread at the same level either
 way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
-shows the Project terminal and Project actions. Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
+shows the Project terminal and Project actions. On a server Work Project its
+existing Settings → Access → Servers row instead offers the same default-off
+presentation choice for saved actions only; no general server Work terminal or
+tools pane is enabled ([Server Projects](server-projects.md#threads)).
+Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).

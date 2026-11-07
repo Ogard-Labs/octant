@@ -14,6 +14,7 @@ import {
   decodeServerProjectRemovedPayload,
   decodeServerProjectRenamedPayload,
   decodeServerProjectActionsReplacedPayload,
+  decodeServerWorkDeveloperToolsChangedPayload,
   MAX_SERVER_PROJECTS,
   SERVER_PROJECTS_AGGREGATE,
   SERVER_PROJECTS_AGGREGATE_ID,
@@ -268,11 +269,6 @@ export class ServerProjectStore {
     if (input.principal !== "local-window") return refused("needs-local-window");
     const project = this.#projects.get(input.projectId);
     if (project === undefined) return refused("project-not-found");
-    if (project.mode === "work")
-      return refused(
-        "unavailable",
-        "Saved actions for Work server Projects are not available yet.",
-      );
     if (input.expectedVersion !== (project.actionsVersion ?? 0)) return refused("actions-changed");
     if (input.actions.some((action) => action.preparesWorktrees === true))
       return refused(
@@ -302,7 +298,42 @@ export class ServerProjectStore {
     return this.#append("server-projects.preview-outcome@1", payload);
   }
 
+  setDeveloperTools(input: {
+    readonly projectId: string;
+    readonly enabled: boolean;
+    readonly principal: ServerProjectPrincipal;
+  }): ServerProjectsChange {
+    if (input.principal !== "local-window") return refused("needs-local-window");
+    const project = this.#projects.get(input.projectId);
+    if (project?.mode !== "work") return refused("project-not-found");
+    if ((project.developerTools?.enabled ?? false) === input.enabled)
+      return { kind: "changed", project };
+    const payload = {
+      projectId: project.id,
+      developerTools: {
+        enabled: input.enabled,
+        changedBy: this.#personActor,
+        changedAt: decodeTimestamp(this.#options.clock()),
+      },
+      principal: { kind: "local-window" as const },
+    };
+    if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged, payload))
+      return refused("unavailable");
+    this.#apply(SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged, payload);
+    return { kind: "changed", project: { ...project, developerTools: payload.developerTools } };
+  }
+
   #apply(eventName: string, payload: unknown): void {
+    if (eventName === SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged) {
+      const change = decodeServerWorkDeveloperToolsChangedPayload(payload);
+      const project = this.#projects.get(String(change.projectId));
+      if (project?.mode === "work")
+        this.#projects.set(String(project.id), {
+          ...project,
+          developerTools: change.developerTools,
+        });
+      return;
+    }
     if (eventName === SERVER_PROJECTS_EVENT_NAMES.actionsReplaced) {
       const replacement = decodeServerProjectActionsReplacedPayload(payload);
       const project = this.#projects.get(String(replacement.projectId));

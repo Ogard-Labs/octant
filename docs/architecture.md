@@ -1315,7 +1315,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   `project.work-developer-tools-changed@1` with who and when on the Project)
   is set only from a window on this host; a paired device is refused. It
   shows the Project terminal and Project actions, the developer surfaces Work
-  has today; no thread's authority reads it.
+  has today; no thread's authority reads it. A server Work Project's separately
+  journaled choice exposes saved actions only in Settings and the active
+  header/palette, without enabling a general terminal; [Server Projects](design/server-projects.md#threads)
+  owns that narrower surface.
 
 An ACP agent whose shell runs in-process with no protocol request reports
 `unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
@@ -12580,8 +12583,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   stops when its task, checkout or execution authority is revoked.
 
   `start-action` launches a fresh command process under the existing terminal
-  confinement and sanitized environment, not input into a running shell. Code
-  server Projects instead resolve actions and checkout identity on their server
+  confinement and sanitized environment, not input into a running shell.
+  Server Projects instead resolve actions and task identity on their server
   and use dedicated, explicitly reviewed SSH runs with no OS confinement;
   see [Server Projects](design/server-projects.md#threads). Their remote completion
   remains uncertain after connection loss or Stop. The

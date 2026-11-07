@@ -24,7 +24,7 @@ export interface ServerProjectRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly store: Pick<
     ServerProjectStore,
-    "projects" | "bind" | "rename" | "remove" | "setActions"
+    "projects" | "bind" | "rename" | "remove" | "setActions" | "setDeveloperTools"
   >;
   readonly now?: () => number;
 }
@@ -104,28 +104,34 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
       return failure("Server Project command is invalid.", 400, origin);
     }
     const change: ServerProjectsChange =
-      command.kind === "set-server-project-actions"
-        ? dependencies.store.setActions({
+      command.kind === "set-server-work-developer-tools"
+        ? dependencies.store.setDeveloperTools({
             projectId: String(command.projectId),
-            actions: command.actions,
-            expectedVersion: command.expectedVersion,
+            enabled: command.enabled,
             principal,
           })
-        : command.kind === "bind-server-project"
-          ? await dependencies.store.bind({
-              name: command.name,
-              serverId: String(command.serverId),
-              folder: command.folder,
-              mode: command.mode,
+        : command.kind === "set-server-project-actions"
+          ? dependencies.store.setActions({
+              projectId: String(command.projectId),
+              actions: command.actions,
+              expectedVersion: command.expectedVersion,
               principal,
             })
-          : command.kind === "rename-server-project"
-            ? dependencies.store.rename({
-                projectId: String(command.projectId),
+          : command.kind === "bind-server-project"
+            ? await dependencies.store.bind({
                 name: command.name,
+                serverId: String(command.serverId),
+                folder: command.folder,
+                mode: command.mode,
                 principal,
               })
-            : dependencies.store.remove({ projectId: String(command.projectId), principal });
+            : command.kind === "rename-server-project"
+              ? dependencies.store.rename({
+                  projectId: String(command.projectId),
+                  name: command.name,
+                  principal,
+                })
+              : dependencies.store.remove({ projectId: String(command.projectId), principal });
     const result: ServerProjectsCommandResult =
       change.kind === "changed"
         ? { kind: "server-projects-updated", view: catalogView(dependencies.store.projects()) }
