@@ -141,6 +141,46 @@ describe("turn diagnostics", () => {
     expect(message.startsWith("Process exited")).toBe(true);
   });
 
+  it("counts tools and calls named like built-in object members", () => {
+    const diagnostics = diagnose([
+      start(1, "constructor", "constructor"),
+      success(2, "constructor"),
+      start(3, "__proto__", "toString"),
+    ]);
+
+    expect(diagnostics.toolCalls).toBe(2);
+    expect(diagnostics.tools?.map((tally) => [tally.toolName, tally.calls])).toEqual([
+      ["constructor", 1],
+      ["toString", 1],
+    ]);
+    expect(() => decodeTurnDiagnostics(diagnostics)).not.toThrow();
+  });
+
+  it("leaves out a failure message that still reads like a secret after redaction", () => {
+    const diagnostics = diagnose([
+      event("failed", 1, {
+        failure: { category: "unauthenticated", message: "Auth failed: password is hunter2" },
+      }),
+    ]);
+
+    expect(diagnostics.failure).toEqual({ category: "unauthenticated" });
+  });
+
+  it("removes absolute paths outside home folders from a failure message, but keeps addresses", () => {
+    const diagnostics = diagnose([
+      event("failed", 1, {
+        failure: {
+          category: "unavailable",
+          message: "Cannot open /var/folders/x/y.txt via https://api.example.com/v1/chat",
+        },
+      }),
+    ]);
+
+    expect(diagnostics.failure?.message).toBe(
+      "Cannot open [redacted-path] via https://api.example.com/v1/chat",
+    );
+  });
+
   it("cuts a long failure message to the stored bound", () => {
     const diagnostics = diagnose([
       event("failed", 1, { failure: { category: "protocol", message: "x".repeat(2_000) } }),

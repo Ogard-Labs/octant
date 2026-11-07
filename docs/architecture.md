@@ -5915,7 +5915,10 @@ anything itself. The turn's `turn-metrics-recorded` frame carries the result as
 - When the provider failed the turn, its structured failure: category,
   refusal reason, process stage, kind, exit code and signal, usage-limit kind,
   and retry-after. Its message is the one piece of text kept: redacted by the
-  diagnostics rules, folded onto one line, and cut to 512 characters.
+  diagnostics rules, with absolute paths outside home folders removed too,
+  folded onto one line, and cut to 512 characters. A message that states a
+  secret in words ("the password is …") or still looks like one after
+  redaction is not kept at all.
 
 Tool input, tool output, and tool failure text are never in the frame; the
 transcript already holds them for the person who opens the turn. A turn that

@@ -9,7 +9,7 @@ import {
   type TurnRetryTally,
   type TurnToolTally,
 } from "@octant/contracts";
-import { redactDiagnosticText } from "./diagnosticsPolicy";
+import { redactDiagnosticText, stillContainsSecret } from "./diagnosticsPolicy";
 
 /**
  * What went wrong inside a turn, counted from the normalized runtime events
@@ -39,8 +39,10 @@ interface OpenToolCall {
 type RetryReason = TurnRetryTally["reason"];
 
 export interface TurnDiagnosticsState {
-  readonly tools: Readonly<Record<string, ToolCounts>>;
-  readonly openCalls: Readonly<Record<string, OpenToolCall>>;
+  // Keyed by provider-chosen names and ids, so a Map: a tool called
+  // `constructor` or `__proto__` must not read an inherited member.
+  readonly tools: ReadonlyMap<string, ToolCounts>;
+  readonly openCalls: ReadonlyMap<string, OpenToolCall>;
   /** Results for calls whose start the provider never streamed. */
   readonly unattributedCalls: number;
   readonly unattributedFailures: number;
@@ -59,8 +61,8 @@ const MAX_TOOL_NAME_LENGTH = 128;
 
 export function startTurnDiagnostics(): TurnDiagnosticsState {
   return {
-    tools: {},
-    openCalls: {},
+    tools: new Map(),
+    openCalls: new Map(),
     unattributedCalls: 0,
     unattributedFailures: 0,
     retries: {},
@@ -92,13 +94,16 @@ export function observeTurnDiagnostics(
   switch (event.kind) {
     case "tool-start": {
       // A provider that restates a start for a call already open is not a second call.
-      if (state.openCalls[event.toolCallId] !== undefined) return state;
+      if (state.openCalls.has(event.toolCallId)) return state;
       const toolName = boundedToolName(event.toolName);
-      const counts = state.tools[toolName] ?? EMPTY_COUNTS;
+      const counts = state.tools.get(toolName) ?? EMPTY_COUNTS;
       return {
         ...state,
-        tools: { ...state.tools, [toolName]: { ...counts, calls: counts.calls + 1 } },
-        openCalls: { ...state.openCalls, [event.toolCallId]: { toolName, startedAtMs: at } },
+        tools: new Map(state.tools).set(toolName, { ...counts, calls: counts.calls + 1 }),
+        openCalls: new Map(state.openCalls).set(event.toolCallId, {
+          toolName,
+          startedAtMs: at,
+        }),
       };
     }
     case "tool-success":
@@ -154,7 +159,7 @@ function observeToolResult(
   at: number | undefined,
 ): TurnDiagnosticsState {
   const failed = event.kind === "tool-failure" ? 1 : 0;
-  const open = state.openCalls[event.toolCallId];
+  const open = state.openCalls.get(event.toolCallId);
   if (open === undefined) {
     return {
       ...state,
@@ -162,8 +167,9 @@ function observeToolResult(
       unattributedFailures: state.unattributedFailures + failed,
     };
   }
-  const { [event.toolCallId]: _closed, ...stillOpen } = state.openCalls;
-  const counts = state.tools[open.toolName] ?? EMPTY_COUNTS;
+  const stillOpen = new Map(state.openCalls);
+  stillOpen.delete(event.toolCallId);
+  const counts = state.tools.get(open.toolName) ?? EMPTY_COUNTS;
   const durationMs =
     at !== undefined && open.startedAtMs !== undefined
       ? Math.max(0, Math.round(at - open.startedAtMs))
@@ -172,17 +178,14 @@ function observeToolResult(
   return {
     ...state,
     openCalls: stillOpen,
-    tools: {
-      ...state.tools,
-      [open.toolName]: {
-        calls: counts.calls,
-        failed: counts.failed + failed,
-        finished: counts.finished + 1,
-        nonZeroExits: counts.nonZeroExits + nonZeroExit,
-        totalMs: counts.totalMs + durationMs,
-        maxMs: Math.max(counts.maxMs, durationMs),
-      },
-    },
+    tools: new Map(state.tools).set(open.toolName, {
+      calls: counts.calls,
+      failed: counts.failed + failed,
+      finished: counts.finished + 1,
+      nonZeroExits: counts.nonZeroExits + nonZeroExit,
+      totalMs: counts.totalMs + durationMs,
+      maxMs: Math.max(counts.maxMs, durationMs),
+    }),
   };
 }
 
@@ -195,8 +198,10 @@ function boundedToolName(name: string): string {
 
 /**
  * The structured part of a provider failure, kept whole, and its message
- * redacted, folded onto one line, and cut. A message that redacts to nothing
- * is left out rather than kept empty.
+ * redacted, folded onto one line, and cut. A message that redacts to nothing,
+ * or that still looks like it holds a secret after redaction, is left out
+ * rather than kept: the diagnostics rules fail closed, and the redaction only
+ * removes the keyword of a phrase like "password is hunter2".
  */
 export function failureFacts(failure: ProviderFailure): TurnFailureFacts {
   const message = boundedFailureMessage(failure.message);
@@ -220,9 +225,26 @@ export function failureFacts(failure: ProviderFailure): TurnFailureFacts {
   };
 }
 
+/**
+ * Absolute paths outside a home folder (temporary folders, volumes, project
+ * checkouts under `/opt`) still name a person's files; the shared rules cover
+ * home folders only.
+ */
+const ABSOLUTE_PATH = /(^|[\s"'(=:])\/(?:[^\s/"')]+\/)+[^\s"')]*/g;
+
+/**
+ * A secret stated in words ("the password is hunter2"). The shared rules
+ * remove the keyword and the word after it, which leaves the value behind, so
+ * a message phrased this way is not kept at all.
+ */
+const SECRET_IN_WORDS =
+  /\b(?:password|passphrase|secret|token|api[-_ ]?key|access[-_ ]?token)\s+(?:is|was|for|=)\s/i;
+
 function boundedFailureMessage(raw: string | undefined): string | undefined {
-  if (typeof raw !== "string") return undefined;
-  const oneLine = redactDiagnosticText(raw).text.replace(/\s+/g, " ").trim();
+  if (typeof raw !== "string" || SECRET_IN_WORDS.test(raw)) return undefined;
+  const redacted = redactDiagnosticText(raw).text.replace(ABSOLUTE_PATH, "$1[redacted-path]");
+  if (stillContainsSecret(redacted)) return undefined;
+  const oneLine = redacted.replace(/\s+/g, " ").trim();
   if (oneLine.length === 0) return undefined;
   return oneLine.length > MAX_TURN_FAILURE_MESSAGE_LENGTH
     ? `${oneLine.slice(0, MAX_TURN_FAILURE_MESSAGE_LENGTH - 1).trimEnd()}…`
@@ -231,10 +253,10 @@ function boundedFailureMessage(raw: string | undefined): string | undefined {
 
 export function finishTurnDiagnostics(state: TurnDiagnosticsState): TurnDiagnostics {
   const unfinishedByTool = new Map<string, number>();
-  for (const open of Object.values(state.openCalls)) {
+  for (const open of state.openCalls.values()) {
     unfinishedByTool.set(open.toolName, (unfinishedByTool.get(open.toolName) ?? 0) + 1);
   }
-  const tallies: TurnToolTally[] = Object.entries(state.tools).map(([toolName, counts]) => ({
+  const tallies: TurnToolTally[] = [...state.tools].map(([toolName, counts]) => ({
     toolName,
     calls: counts.calls,
     failed: counts.failed,
