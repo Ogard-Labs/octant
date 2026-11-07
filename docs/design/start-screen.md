@@ -49,7 +49,11 @@ decision's options as full-width buttons with the recommended one first, a
 trailing "Recommended" in meta text rather than a hue, and the option's detail
 as a second meta line; a decision also shows its why as a meta paragraph under
 the ask, an "Urgent" tag in the warning role beside the wait when the agent
-marked it urgent, and an **Add note** control). Rows
+marked it urgent, and an **Add note** control; when a second opinion exists, a meta line under the recommended
+option naming the asking model and, under the option the reviewer backs, a line naming the
+reviewer's model and its one-sentence reason, each led by a 12px provider mark, and a
+"Second opinion differs" tag in the warning role beside Urgent when the two options differ).
+Rows
 are told apart by a hairline, never a tinted fill, and the waiting state is a
 glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
@@ -158,7 +162,18 @@ recommended option first (first number, first in focus order) and marked
 it is the agent's claim and changes no order. **Add note** (outside an embedding
 card) reveals a short text field: picking an option while it has text sends the
 option's words and the note, and Escape closes it; number keys type into the
-field rather than pick. **Reply…** opens the thread. A decision can also be
+field rather than pick. **Reply…** opens the thread. When the person has chosen a second-opinion
+model (Settings › Providers & Models › Automatic model calls, off by default), a decision also
+shows who asked and who reviewed: under the recommended option a small muted line with the asking
+thread's provider mark and model and "· asking thread", and under the option the reviewer backs a
+line with the reviewer's mark and model and "· Second opinion: " and its reason (both under one
+option when they agree). A "Second opinion differs" tag sits beside Urgent when the reviewer backs
+another option. While the review is queued one muted line under the options says "Getting a second
+opinion…"; when none will come (the reviewer's answer could not be read, it read outside content,
+or the Project does not allow the chosen provider) it says "No second opinion" with the reason as
+its tooltip; with no model chosen, or while the chosen account cannot be asked, nothing shows.
+Inside an embedding card these lines stay to one line each. The opinion is advice: it never picks
+an option or changes the order. A decision can also be
 deferred with the same controls as a question, so it drops below the active
 requests until the chosen time or **Bring back now**. A subagent waiting on an approval or question is a row too, headed "Research
 subagent needs your approval" or "Review subagent asked a question" (the

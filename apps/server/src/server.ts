@@ -517,6 +517,7 @@ export function startOctantServer(
       credentialCommandProcess,
       prepareCredentialCommand,
       personMemorySweep,
+      decisionReviewModelPort,
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
@@ -1182,6 +1183,8 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      decisionReviewModelPort,
+      isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
       workRequestService,
       agentRunPersistence,

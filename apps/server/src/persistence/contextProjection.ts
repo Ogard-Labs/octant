@@ -1,5 +1,6 @@
 import {
   AGENT_RUN_USAGE_AGGREGATE_TYPE,
+  DECISION_REVIEW_USAGE_AGGREGATE_TYPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
@@ -90,7 +91,8 @@ export class ContextProjection implements Projection {
         event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE ||
-        event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE)
+        event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
+        event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE)
     ) {
       return;
     }

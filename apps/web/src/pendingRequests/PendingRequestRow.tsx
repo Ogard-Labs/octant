@@ -54,6 +54,13 @@ export interface PendingRequestRowProps {
   readonly onOpenThread: (request: PendingRequest) => void;
 }
 
+/** Why no second opinion came, in words a tooltip can carry. */
+const NO_REVIEW_REASON = {
+  failed: "The reviewer's answer could not be read",
+  withheld: "The reviewer read outside content, so its answer was not used",
+  "not-allowed": "This Project doesn't allow the chosen provider",
+} as const;
+
 /**
  * One approval, question, or decision waiting on the person: who is waiting
  * and for how long, what it asked, and the answers that fit, in the order the
@@ -147,6 +154,10 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const decision = request.kind === "decision" ? request : undefined;
   const noun = decision === undefined ? "question" : "decision";
   const ModeIcon = modeIcons[request.mode];
+  const review = decision?.review;
+  const reviewed = review?.status === "reviewed" ? review : undefined;
+  const recommendedLabel = decision?.options.find((option) => option.recommended)?.label;
+  const differs = reviewed !== undefined && reviewed.backs !== recommendedLabel;
   const child = isChildPendingRequest(request) ? request : undefined;
   const lead = isLeadApprovalPendingRequest(request) ? request : undefined;
   return (
@@ -194,6 +205,9 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
         )}
         {decision?.urgent === true ? (
           <span className="oct-meta pending-request__urgent">Urgent</span>
+        ) : null}
+        {differs ? (
+          <span className="oct-meta pending-request__differs">Second opinion differs</span>
         ) : null}
         <span className="oct-meta pending-request__wait">
           <CirclePause aria-hidden="true" size={12} strokeWidth={1.8} />
@@ -303,35 +317,74 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             </>
           ) : (
             <>
-              {choices.map((choice, index) => (
-                <OctantButton
-                  className="pending-request__choice"
-                  disabled={busy}
-                  key={choice.label}
-                  onClick={() => pick(choice.label)}
-                  size="sm"
-                  title={choice.description ?? choice.label}
-                  type="button"
-                  variant="outline"
-                >
-                  <span aria-hidden="true" className="pending-request__number">
-                    {String(index + 1)}
-                  </span>
-                  <span className="pending-request__choice-body">
-                    <span className="pending-request__choice-line">
-                      <span className="pending-request__choice-label">{choice.label}</span>
-                      {choice.recommended === true ? (
-                        <span className="oct-meta pending-request__recommended">Recommended</span>
-                      ) : null}
+              {choices.map((choice, index) => {
+                const button = (
+                  <OctantButton
+                    className="pending-request__choice"
+                    disabled={busy}
+                    key={choice.label}
+                    onClick={() => pick(choice.label)}
+                    size="sm"
+                    title={choice.description ?? choice.label}
+                    type="button"
+                    variant="outline"
+                  >
+                    <span aria-hidden="true" className="pending-request__number">
+                      {String(index + 1)}
                     </span>
-                    {choice.detail === undefined ? null : (
-                      <span className="oct-meta pending-request__choice-detail">
-                        {choice.detail}
+                    <span className="pending-request__choice-body">
+                      <span className="pending-request__choice-line">
+                        <span className="pending-request__choice-label">{choice.label}</span>
+                        {choice.recommended === true ? (
+                          <span className="oct-meta pending-request__recommended">Recommended</span>
+                        ) : null}
                       </span>
-                    )}
-                  </span>
-                </OctantButton>
-              ))}
+                      {choice.detail === undefined ? null : (
+                        <span className="oct-meta pending-request__choice-detail">
+                          {choice.detail}
+                        </span>
+                      )}
+                    </span>
+                  </OctantButton>
+                );
+                if (decision === undefined) return button;
+                const askedLine = choice.recommended === true && decision.askedBy !== undefined;
+                const reviewLine = reviewed !== undefined && reviewed.backs === choice.label;
+                if (!askedLine && !reviewLine) return button;
+                return (
+                  <div className="pending-request__option" key={choice.label}>
+                    {button}
+                    {askedLine && decision.askedBy !== undefined ? (
+                      <p className="oct-meta pending-request__model-line">
+                        <ProviderGlyph
+                          className="pending-request__model-mark"
+                          displayName={
+                            props.provider?.displayName ?? String(decision.askedBy.modelId)
+                          }
+                          driverKind={props.provider?.driverKind ?? ""}
+                          size={12}
+                        />
+                        <span className="pending-request__model-text">
+                          {`${String(decision.askedBy.modelId)} · asking thread`}
+                        </span>
+                      </p>
+                    ) : null}
+                    {reviewLine && reviewed !== undefined ? (
+                      <p className="oct-meta pending-request__model-line" title={reviewed.reason}>
+                        <ProviderGlyph
+                          className="pending-request__model-mark"
+                          displayName={reviewed.providerName ?? String(reviewed.modelId)}
+                          driverKind={reviewed.driverKind ?? ""}
+                          size={12}
+                        />
+                        <span className="pending-request__model-text">
+                          {`${String(reviewed.modelId)} · Second opinion: ${reviewed.reason}`}
+                        </span>
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
               {decision === undefined || embedded ? null : (
                 <OctantButton
                   aria-expanded={noteOpen}
@@ -357,6 +410,14 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             </>
           )}
         </div>
+      ) : null}
+      {open && !deferred && review !== undefined && review.status !== "reviewed" ? (
+        <p
+          className="oct-meta pending-request__review-note"
+          title={review.status === "pending" ? undefined : NO_REVIEW_REASON[review.status]}
+        >
+          {review.status === "pending" ? "Getting a second opinion…" : "No second opinion"}
+        </p>
       ) : null}
       {open && !deferred && !embedded && decision !== undefined && noteOpen ? (
         <OctantTextarea

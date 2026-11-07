@@ -164,3 +164,48 @@
 .pending-request[data-embedded="true"] {
   padding: 0;
 }
+
+/* A model's name under the option it stands behind: the mark, the model, and one
+   short line. It sits below its option's button, level with the button's label. */
+.pending-request__option {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 2px;
+}
+
+.pending-request__model-line,
+.pending-request__review-note {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding-inline-start: var(--oct-space-2);
+  overflow-wrap: anywhere;
+}
+
+.pending-request__model-mark {
+  flex: 0 0 auto;
+}
+
+.pending-request__review-note {
+  padding-top: var(--oct-space-1);
+}
+
+/* Inside a card that names the thread, a model line stays to one line. */
+.pending-request__model-text {
+  min-width: 0;
+}
+
+.pending-request[data-embedded="true"] .pending-request__model-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The two models disagree: the words, in the warning role the Urgent tag uses. */
+.pending-request__differs {
+  flex: 0 0 auto;
+  color: var(--oct-warn-fg);
+}

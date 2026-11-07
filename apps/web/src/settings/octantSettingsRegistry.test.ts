@@ -219,6 +219,7 @@ describe("octantSettingsRegistry", () => {
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-judge",
       "automatic-model-memory",
+      "automatic-model-decision-review",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",

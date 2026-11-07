@@ -37,6 +37,7 @@ describe("Code turn decisions", () => {
           { label: "Merge it", recommended: true },
           { label: "Hold", recommended: false },
         ],
+        askedBy: { providerInstanceId: "00000000-0000-4000-8000-000000000a07", modelId: "model-a" },
         answer: { threadId, checkoutId, operationId: asking },
       },
     ]);

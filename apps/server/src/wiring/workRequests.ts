@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   decodeAgentRunParentThreadId,
   decodeCodeThreadId,
+  decodeProjectId,
   decodeWindowId,
   decodeWorkThreadId,
   type WindowId,
@@ -41,6 +42,8 @@ import {
 import { listWorkFolderTopLevel } from "../work/workProjectStatusReader";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { listWorkTurnDecisions, workTurnDecision } from "../turnDecisions/workTurnDecisions";
+import { DecisionReviews, type DecisionReviewDependencies } from "../turnDecisions/decisionReviews";
+import { replyBeforeTurnDecision } from "@octant/domain/turn-decision-policy";
 import { defaultShellSettings, workProjectKeepsStatusFile } from "@octant/domain";
 import { resolveAgentRunParentThreadTitle, resolveHarnessThreadFacts } from "./agentRuns";
 import {
@@ -59,7 +62,18 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { WorkFilesWiring } from "./workFiles";
 
-export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> &
+export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
+  /** The model side of a decision's second opinion, built where the configured drivers are. */
+  readonly decisionReviewModelPort: Pick<
+    DecisionReviewDependencies,
+    | "chosenModel"
+    | "accountUnavailable"
+    | "providerIdentity"
+    | "redact"
+    | "complete"
+    | "recordUsage"
+  >;
+} & Pick<FoundationsWiring, "isProjectPolicyTargetAllowed"> &
   Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
   Pick<WorkRequestStateWiring, "workRequestService"> &
   Pick<
@@ -89,6 +103,8 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> &
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
     agentRunPersistence,
+    decisionReviewModelPort,
+    isProjectPolicyTargetAllowed,
     baseRouteCodeService,
     chatService,
     codeOperationRuntime,
@@ -253,7 +269,44 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       String(windowId),
     )),
   ];
+  const decisionReviews = new DecisionReviews({
+    ...decisionReviewModelPort,
+    journal: persistence.journal,
+    connection: persistence.connection,
+    // A Project that limits providers decides whether its decision may go to
+    // the reviewer's account, as it does for a child run's target.
+    projectAllows: ({ projectId, providerInstanceId, modelId }) => {
+      const project = persistence.readProject(decodeProjectId(projectId));
+      return (
+        project !== undefined &&
+        project.type !== "chat" &&
+        isProjectPolicyTargetAllowed(project, providerInstanceId, modelId)
+      );
+    },
+    readOpen: (decision) => {
+      if (decision.mode === "work") {
+        const thread = workThreadProjection
+          .list()
+          .find((candidate) => String(candidate.id) === String(decision.threadId));
+        if (thread === undefined) return undefined;
+        const turns = workTurnProjection.listForThread(thread.id);
+        const open = workTurnDecision(thread, turns);
+        if (String(open?.answer.turnId) !== String(decision.answer.turnId)) return undefined;
+        return { context: replyBeforeTurnDecision(turns.at(-1)?.response ?? "") };
+      }
+      const thread = persistence.readCodeThread(decision.answer.threadId);
+      const open = thread === undefined ? undefined : codeTurnDecisions.forThread(thread);
+      if (thread === undefined || String(open?.operationId) !== String(decision.answer.operationId))
+        return undefined;
+      return {
+        context: replyBeforeTurnDecision(
+          codeTurnDecisions.replyOf(thread.id, decision.answer.operationId) ?? "",
+        ),
+      };
+    },
+  });
   const pendingRequestService = new PendingRequestService({
+    reviews: decisionReviews,
     deferrals: pendingQuestionDeferrals(persistence.journal, persistence.connection),
     readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
     work: async (windowId) => [

@@ -75,6 +75,7 @@ export class CodeTurnDecisions {
         ...(open.decision.why === undefined ? {} : { why: open.decision.why }),
         ...(open.decision.urgent === true ? { urgent: true } : {}),
         options: open.decision.options,
+        askedBy: { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
         answer: {
           threadId: thread.id,
           checkoutId: thread.checkoutId,
@@ -115,6 +116,11 @@ export class CodeTurnDecisions {
     return decision === undefined
       ? undefined
       : { decision, operationId, endedAt: latest.work.updatedAt };
+  }
+
+  /** The turn's reply as its transcript shows it, or undefined when it cannot be replayed whole. */
+  replyOf(threadId: CodeThreadId, operationId: CodeOperationId): string | undefined {
+    return this.#reply(threadId, operationId);
   }
 
   #decisionOf(threadId: CodeThreadId, operationId: CodeOperationId): TurnDecision | undefined {

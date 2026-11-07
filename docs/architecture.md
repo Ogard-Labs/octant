@@ -10846,7 +10846,32 @@ access` agree); a thread's own change is journaled as
   A decision can be deferred like a pending question, through the same
   `POST /api/pending-requests/defer` and the same journaled attention
   preference; its key is a hash of the mode, thread, and asking turn, so it
-  is stable across reads and a later turn's decision is not deferred. On the board an open decision files the thread under Waiting
+  is stable across reads and a later turn's decision is not deferred.
+  A decision may carry a **second opinion**, advisory only: when the person has
+  chosen a model under Automatic model calls, the host asks it once per
+  decision (by that same key) which option it backs, and the item gains an
+  optional `review` (`pending`, `reviewed` with the model, option and one-line
+  reason, `withheld`, `failed`, `not-allowed`) and `askedBy` (the asking
+  thread's provider account and model) so the card can show both models; the
+  review never answers a decision or changes its options. It is off until a
+  model is chosen. A list read never waits on it: reviews are queued in the
+  background, one at a time, at most 16 queued, 60 seconds each, and a
+  decision that closed before its turn is skipped. The reviewer is a
+  tool-less one-shot in a scratch folder and reads only the ask, why, options
+  with their details and the recommended one, and the last 3,000 characters of
+  the reply before the block, secrets removed; its fixed instructions carry
+  nothing about the thread, and it must answer one JSON object naming one
+  option label exactly and a reason of at most 100 characters, else the review
+  is `failed`. A reply steered by outside content is `withheld`; a Project
+  whose provider policy refuses the account sends nothing and is
+  `not-allowed`. These outcomes are journaled as `decision-review.recorded@1`
+  on one host aggregate (latest record per key, records over 30 days old drop
+  on replay), so a restart neither shows nor pays again. An account that is
+  off, not ready, at its limit or removed, and a timed-out or unreached call,
+  are not journaled: the card shows no review and the decision asks again on a
+  later read after a five-minute cooldown, never on another account. Each call
+  is a `decision-review` usage row under the asking thread (a withheld reply's
+  usage included). On the board an open decision files the thread under Waiting
   with `decision-pending` (after recovering and a live request's
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor
@@ -14128,27 +14153,38 @@ included. Shield
 sends no telemetry, and its calls count against the existing spend ceilings.
 
 **Automatic model calls.** The jobs Octant runs on a model without the
-person typing, today the Judge and person memory's distilling, share one
+person typing, today the Judge, person memory's distilling and the second
+opinion on decisions, share one
 Settings surface: Settings › Providers & Models › Automatic model calls. For
 each job the person keeps the default (the provider of the thread the work is
 about, with that provider's smallest model, unchanged) or picks one configured
-account and one of its models, an API-key account included. The Judge's choice
-is stored as `CodeSettings.shieldModel` and memory's as
-`PersonMemorySettings.distillModel`; the surface is the one place either is
-chosen, and both are changed only from a window on this host (a paired device
+account and one of its models, an API-key account included. The second opinion has no default and is **off** until the person picks an
+account and model. The Judge's choice
+is stored as `CodeSettings.shieldModel`, memory's as
+`PersonMemorySettings.distillModel` and the second opinion's as
+`PersonMemorySettings.decisionReviewModel` (the one host-wide record only a
+local window reads or changes); the surface is the one place any is
+chosen, and all are changed only from a window on this host (a paired device
 cannot). The surface says in plain words that what the job reads goes to the
 chosen provider: the Judge's input (the person's recent messages, the pending
 call and the Project's root, never tool results or outside content) and
 memory's (a thread's title and the person's own messages, secrets redacted as
-today). Rationale: account selection is fully manual by decision, so there is
+today) and the second opinion's (the decision's ask, why and options and at
+most 3,000 characters of the reply before it, secrets removed; never files,
+tool output or web pages; one request per decision). Rationale for "off until
+chosen": a second opinion from the thread's own model would only agree with
+itself, and sending a decision's text to a provider the person did not pick is
+not a default to make for them, so unlike the other two jobs it starts at
+none. Rationale: account selection is fully manual by decision, so there is
 no rotation and no failover; if the chosen account is removed, turned off, not
 ready or at a reported usage limit, the Judge sends that decision to the person
 (`model-account-unavailable`, journaled with the chosen account) and never
 allows it itself, and distilling returns the thread to the next pass without
-calling another account. A rule that decides without a model (a fast allow, a
+calling another account, and a second opinion is simply not shown and asks again
+later. A rule that decides without a model (a fast allow, a
 hard line) is unaffected. Each call is journaled with its account: the Judge
-decision names its model, and the call's `shield-review` or `person-memory`
-usage row names the provider account and model, so Usage shows which account
+decision names its model, and the call's `shield-review`, `person-memory` or
+`decision-review` usage row names the provider account and model, so Usage shows which account
 spent it. The surface keeps the two existing stored fields rather than adding a third
 setting, so no migration is needed and the default is exactly the old behavior;
 "at its limit" means only a limit the provider has reported. The harness's advisor review is a separate, slot-routed job and is
