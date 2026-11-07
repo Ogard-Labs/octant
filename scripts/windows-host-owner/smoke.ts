@@ -1,3 +1,4 @@
+import { win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { rename, symlink } from "node:fs/promises";
@@ -8,7 +9,7 @@ import {
   type WindowsHostOwnerNative,
 } from "../../packages/host-runtime/src/windowsHostOwner";
 
-const bindingPath = process.argv[2] ?? "";
+const bindingPath = win32.resolve(process.argv[2] ?? "");
 const selected = loadWindowsHostOwnerNative(bindingPath);
 if (process.platform !== "win32" || selected === undefined)
   throw new Error("Native Windows binding did not load.");
