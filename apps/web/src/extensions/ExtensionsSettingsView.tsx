@@ -1171,116 +1171,140 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </p>
               ) : (
                 <ul className="extensions-settings__cards">
-                  {installedPackages.map((pkg) => (
-                    <InstalledPackageCard
-                      key={`${pkg.extensionId}:${pkg.packageId}`}
-                      packageState={pkg}
-                      busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
-                      {...(props.client.toolGrantsAvailable ? { signIn: props.client } : {})}
-                      {...(projectPins === undefined
-                        ? {}
-                        : {
-                            projectPins,
-                            onPin: async (projectId: string, pinned: boolean) => {
-                              try {
-                                setProjectPins(
-                                  await props.client.projectPins({
-                                    kind: "set",
-                                    projectId: projectId as never,
-                                    extensionId: pkg.extensionId,
-                                    pinned,
-                                  }),
+                  {installedPackages.map((pkg) =>
+                    pkg.source.kind === "bundled" ? (
+                      <BundledPluginCard
+                        key={`${pkg.extensionId}:${pkg.packageId}`}
+                        packageState={pkg}
+                        busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
+                        onPluginDesired={(desired) =>
+                          runLifecycle(
+                            {
+                              kind: "set-plugin-desired",
+                              commandVersion: COMMAND_VERSION,
+                              extensionId: pkg.extensionId,
+                              expectedStateVersion: pkg.stateVersion,
+                              desired,
+                            },
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                      />
+                    ) : (
+                      <InstalledPackageCard
+                        key={`${pkg.extensionId}:${pkg.packageId}`}
+                        packageState={pkg}
+                        busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
+                        {...(props.client.toolGrantsAvailable ? { signIn: props.client } : {})}
+                        {...(projectPins === undefined
+                          ? {}
+                          : {
+                              projectPins,
+                              onPin: async (projectId: string, pinned: boolean) => {
+                                try {
+                                  setProjectPins(
+                                    await props.client.projectPins({
+                                      kind: "set",
+                                      projectId: projectId as never,
+                                      extensionId: pkg.extensionId,
+                                      pinned,
+                                    }),
+                                  );
+                                } catch {
+                                  setFailure({
+                                    category: "unavailable",
+                                    message: "The pin could not be changed.",
+                                  });
+                                }
+                              },
+                            })}
+                        {...(pkg.npm === undefined
+                          ? {}
+                          : {
+                              onCheckNpmUpdate: () => checkNpmUpdate(pkg.extensionId),
+                              onReviewNpmUpdate: (version: string) => {
+                                setView("marketplace");
+                                void lookUpNpm(
+                                  pkg.npm?.packageName ?? "",
+                                  version,
+                                  pkg.extensionId,
                                 );
-                              } catch {
-                                setFailure({
-                                  category: "unavailable",
-                                  message: "The pin could not be changed.",
-                                });
-                              }
+                              },
+                            })}
+                        onTrust={(trusted) =>
+                          runLifecycle(
+                            {
+                              kind: "set-source-trust",
+                              commandVersion: COMMAND_VERSION,
+                              extensionId: pkg.extensionId,
+                              expectedStateVersion: pkg.stateVersion,
+                              trusted,
                             },
-                          })}
-                      {...(pkg.npm === undefined
-                        ? {}
-                        : {
-                            onCheckNpmUpdate: () => checkNpmUpdate(pkg.extensionId),
-                            onReviewNpmUpdate: (version: string) => {
-                              setView("marketplace");
-                              void lookUpNpm(pkg.npm?.packageName ?? "", version, pkg.extensionId);
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                        onPluginDesired={(desired) =>
+                          runLifecycle(
+                            {
+                              kind: "set-plugin-desired",
+                              commandVersion: COMMAND_VERSION,
+                              extensionId: pkg.extensionId,
+                              expectedStateVersion: pkg.stateVersion,
+                              desired,
                             },
-                          })}
-                      onTrust={(trusted) =>
-                        runLifecycle(
-                          {
-                            kind: "set-source-trust",
-                            commandVersion: COMMAND_VERSION,
-                            extensionId: pkg.extensionId,
-                            expectedStateVersion: pkg.stateVersion,
-                            trusted,
-                          },
-                          `${pkg.extensionId}:${pkg.packageId}`,
-                        )
-                      }
-                      onPluginDesired={(desired) =>
-                        runLifecycle(
-                          {
-                            kind: "set-plugin-desired",
-                            commandVersion: COMMAND_VERSION,
-                            extensionId: pkg.extensionId,
-                            expectedStateVersion: pkg.stateVersion,
-                            desired,
-                          },
-                          `${pkg.extensionId}:${pkg.packageId}`,
-                        )
-                      }
-                      onComponentDesired={(componentId, desired) =>
-                        runLifecycle(
-                          {
-                            kind: "set-component-desired",
-                            commandVersion: COMMAND_VERSION,
-                            extensionId: pkg.extensionId,
-                            expectedStateVersion: pkg.stateVersion,
-                            componentId,
-                            desired,
-                          },
-                          `${pkg.extensionId}:${pkg.packageId}`,
-                        )
-                      }
-                      onTrustNewPublisher={(publisherKey) =>
-                        runLifecycle(
-                          {
-                            kind: "trust-new-publisher",
-                            commandVersion: COMMAND_VERSION,
-                            extensionId: pkg.extensionId,
-                            expectedStateVersion: pkg.stateVersion,
-                            publisherKey,
-                          },
-                          `${pkg.extensionId}:${pkg.packageId}`,
-                        )
-                      }
-                      onForgetPublisher={(publisherKey) =>
-                        runLifecycle(
-                          {
-                            kind: "forget-publisher",
-                            commandVersion: COMMAND_VERSION,
-                            extensionId: pkg.extensionId,
-                            expectedStateVersion: pkg.stateVersion,
-                            publisherKey,
-                          },
-                          `${pkg.extensionId}:${pkg.packageId}`,
-                        )
-                      }
-                      onUninstall={() =>
-                        runLifecycle(
-                          {
-                            kind: "uninstall-package",
-                            extensionId: pkg.extensionId,
-                            packageId: pkg.packageId,
-                          },
-                          `${pkg.extensionId}:${pkg.packageId}`,
-                        )
-                      }
-                    />
-                  ))}
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                        onComponentDesired={(componentId, desired) =>
+                          runLifecycle(
+                            {
+                              kind: "set-component-desired",
+                              commandVersion: COMMAND_VERSION,
+                              extensionId: pkg.extensionId,
+                              expectedStateVersion: pkg.stateVersion,
+                              componentId,
+                              desired,
+                            },
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                        onTrustNewPublisher={(publisherKey) =>
+                          runLifecycle(
+                            {
+                              kind: "trust-new-publisher",
+                              commandVersion: COMMAND_VERSION,
+                              extensionId: pkg.extensionId,
+                              expectedStateVersion: pkg.stateVersion,
+                              publisherKey,
+                            },
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                        onForgetPublisher={(publisherKey) =>
+                          runLifecycle(
+                            {
+                              kind: "forget-publisher",
+                              commandVersion: COMMAND_VERSION,
+                              extensionId: pkg.extensionId,
+                              expectedStateVersion: pkg.stateVersion,
+                              publisherKey,
+                            },
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                        onUninstall={() =>
+                          runLifecycle(
+                            {
+                              kind: "uninstall-package",
+                              extensionId: pkg.extensionId,
+                              packageId: pkg.packageId,
+                            },
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                      />
+                    ),
+                  )}
                 </ul>
               )}
               <div className="extensions-settings__local-import">
@@ -2437,6 +2461,37 @@ function ProviderFitLine(props: { readonly packageState: ExtensionSnapshot["pack
         </span>
       ))}
     </p>
+  );
+}
+
+/**
+ * A plugin built into Octant. Its code ships with the app and its source is
+ * reviewed, so it has one control, its switch: no trust, update, pin, or
+ * uninstall. Turning it off hides what it adds and keeps its data.
+ */
+function BundledPluginCard(props: {
+  readonly packageState: ExtensionSnapshot["packages"][number];
+  readonly busy: boolean;
+  readonly onPluginDesired: (desired: boolean) => Promise<boolean>;
+}) {
+  const pkg = props.packageState;
+  const name = installedPackageName(pkg);
+  return (
+    <li className="extcard">
+      <span aria-hidden="true" className="icon-mark">
+        <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+      </span>
+      <span className="extcard-name">{name}</span>
+      <span className="extcard-right">
+        <OctantSwitch
+          checked={pkg.activation.pluginDesired}
+          disabled={props.busy}
+          label={`Enable ${name}`}
+          onCheckedChange={(checked) => void props.onPluginDesired(checked)}
+        />
+      </span>
+      <span className="extcard-src">Built into Octant</span>
+    </li>
   );
 }
 

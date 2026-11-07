@@ -165,6 +165,26 @@ describe("the library model", () => {
     expect(on).toMatchObject({ state: "on", steps: { enable: "done" } });
   });
 
+  it("leaves plugins built into Octant out, since their only control is the switch under Installed", () => {
+    const items = buildLibrary({
+      snapshot: snapshot(
+        pkg(
+          "github",
+          { trusted: true, pluginDesired: true },
+          {
+            source: { kind: "bundled", sourceRef: "app:github" },
+          },
+        ),
+        pkg("a", {}),
+      ),
+      connectors: [],
+    });
+    const packages = items.flatMap((item) =>
+      item.packageRef === undefined ? [] : [item.packageRef.extensionId],
+    );
+    expect(packages).toEqual(["a"]);
+  });
+
   it("says a desired, trusted package that the host blocks is blocked, with the reason", () => {
     const [item] = buildLibrary({
       snapshot: snapshot(pkg("a", { trusted: true, pluginDesired: true })),
@@ -231,6 +251,13 @@ describe("the library model", () => {
     });
     expect(postgres.length).toBeGreaterThan(0);
     expect(postgres.every((item) => item.kind === "connector")).toBe(true);
+    const jira = filterLibrary(items, {
+      query: "jira",
+      kind: "all",
+      state: "all",
+      provider: ALL_PROVIDERS,
+    });
+    expect(jira.map((item) => item.connectorId)).toEqual(["atlassian"]);
   });
 
   it("offers what was found in Claude Code and Codex as not yet installed here", () => {

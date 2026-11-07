@@ -35,7 +35,7 @@ import type { useMachineChangeFeed } from "../polling/useMachineChangeFeed";
 import type { useProjectController } from "../projects/useProjectController";
 import type { useDiscoveryController } from "../providers/useDiscoveryController";
 import type { ProviderController } from "../providers/useProviderController";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "../shell/contributionRegistry";
+import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
 import {
   SelectionThreadStarterContext,
@@ -248,6 +248,7 @@ export interface ThreadPaneContainerProps {
 export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   props: ThreadPaneContainerProps,
 ) {
+  const firstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const {
     actions,
     activeCodeThreadUsageFallback,
@@ -833,9 +834,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 }}
                 onDraftPermissionModeChange={setDraftPermissionMode}
                 onDraftCreateThread={handleDraftCreateThread}
-                githubPluginEnabled={
-                  FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
-                }
+                githubPluginEnabled={firstPartyPluginsEffective.get("github-integration") === true}
                 linearClient={linearClient}
                 {...(homeStart === undefined ? {} : { homeStart })}
                 codeHome={{
@@ -867,9 +866,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   onOpenInbox: openInbox,
                   onOpenIssues: () => setGithubIssuesOpen(true),
                 }}
-                linearPluginEnabled={
-                  FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
-                }
+                linearPluginEnabled={firstPartyPluginsEffective.get("linear-integration") === true}
                 onDraftCreateCodeThread={handleDraftCreateCodeThread}
                 onChangeCodeNewThreadWorkspace={setCodeNewThreadWorkspace}
                 draftCodeExecute={codeController.execute}

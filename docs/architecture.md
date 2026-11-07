@@ -8611,7 +8611,11 @@ subset a plugin author needs as a narrower, named surface. Unknown
 contribution points are rejected. The renderer contribution registry resolves
 `sidebar.destination`, `settings.section`, `workspace.tab`, `thread.pane`,
 `preview.viewer`, `appearance.preset`, and `board.view` from the effective
-first-party catalog; it never decides availability. `apps/server/src/extensions`
+first-party catalog; it never decides availability. Which first-party plugins
+are on comes from the host's extension snapshot, where each switchable bundled
+plugin has a host-written row
+([Plugin boundaries](#plugin-boundaries-and-remaining-extraction)).
+`apps/server/src/extensions`
 owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
 curated catalog, npm Agent Plugins), Agent Plugins ingestion, supervisor, MCP
 session manager, and skill discovery.
@@ -9462,9 +9466,12 @@ the person decided to.
 
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
-`@octant/domain`), each with a name, one line, a category, the vendor's own
-address and how it is reached: sign-in through the MCP authorization flow,
-a key the vendor issues sent in one header, or nothing. Nothing is fetched
+`@octant/domain`), each with a name, one line, a category, search keywords,
+the vendor's own address and setup page, and how it is reached: sign-in
+through the MCP authorization flow, a key the vendor issues sent in one
+header, or nothing. An entry whose address stops behaving as its auth says is fixed or
+removed; `bun run connectors:probe` checks every address and setup page
+and runs weekly in CI, never in the app. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. A remote browser's disabled
@@ -10091,20 +10098,67 @@ filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
 Plugin projections are namespaced by package id and remain rebuildable.
 
-These are the current extraction boundaries; eligibility is not a claim that the
-feature is already an independently packaged plugin:
+**Switchable bundled plugins (maintainer decision, 2026-11-07).** GitHub,
+thread boards, and Zen are first-party plugins built into Octant that a person
+can switch off and on again. Every other surface below stays an integrated core
+feature: usage, diagnostics, Navigator, the automations UI, browser and
+computer use, agent hierarchy, remote and mobile access, the Apple workbench,
+and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                               | Boundary to preserve                                                                                                           |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Thread boards                                                         | Separable projection and UI; Work/Code status policy stays host-owned and Chat has no board                                    |
-| GitHub and Linear                                                     | Integration ports and contributed views; no direct host-service wiring                                                         |
-| Canvas and preview viewers                                            | Scoped artifact contracts, renderer modules, and registered viewers                                                            |
-| Zen, backgrounds, theme presets                                       | Appearance contributions and their scoped state                                                                                |
-| Usage, diagnostics, Navigator, automations UI                         | Scoped reads/actions and independent presentation; underlying authority stays in the host                                      |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
-| Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
-| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
+| Surface                                                               | Status and boundary to preserve                                                                                         |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                       |
+| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board |
+| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                              |
+| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                     |
+| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
+| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
+| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
+| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                   |
+
+The first-party manifests have one definition,
+`@octant/plugin-host/first-party-plugins`, which the server and the renderer
+both read; it also marks which of them are switchable. A switchable plugin's
+switch is its own journaled state, apart from the installed-package lifecycle,
+whose startup verification, quarantine, uninstall, rollback, and drain all
+assume package files on disk:
+
+- **Journaled, default on.** Each switch is an
+  `extension.bundled-plugin-switched@1` event on its own
+  `extension-bundled-plugin-switch` aggregate, keyed by the plugin's extension
+  id, with a rebuildable projection. A plugin nobody switched is on at state
+  version 0.
+- **One row per plugin in the extension snapshot.** The host adds an installed,
+  trusted row with its reviewed bundled source (`app:<slug>`) ahead of the
+  installed packages, and drops any installed package that claims the same
+  extension id, so the host's predicate for a first-party component reads the
+  person's switch. The renderer derives which first-party plugins are on from
+  the same snapshot, re-read on each extension change, and treats every plugin
+  as on until that snapshot has loaded.
+- **Only the switch.** `set-plugin-desired` on a bundled plugin follows the
+  same `expectedStateVersion` rule as an installed package and is refused as
+  stale otherwise. Every other package command that names one (install,
+  update, rollback, uninstall, trust, a component switch, an npm check) is
+  refused with a typed result, and only a local window may send it, as for
+  any lifecycle command.
+- **Not a scope's plugin.** A scope's effective state leaves bundled plugins
+  out, so they are never addressed with `@`, selected or pinned for a turn, or
+  given tools, and a switch does not move the catalog epoch. The Library does
+  not list them; Settings › Skills & Extensions › Installed shows each with
+  only its switch.
+- **Off keeps data.** Switching a plugin off changes what it contributes and
+  deletes nothing; its credentials, projections, and settings stay for when it
+  is switched on again.
+- **Each feature obeys its switch.** On the host, GitHub's routes, issue
+  context, read tools, and Gist export destination, and Zen's routes and tool,
+  read the switch on every request. In the renderer, the switch hides the
+  GitHub Issues destination, Settings section, start-screen cards, and Create
+  Project tab; the Work and Code boards and every way to open them; and Zen's
+  window and openers. Pull requests stay a host-owned destination, and the
+  board's data and the tools that read it stay available, as the owning
+  sections describe.
 
 A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback,
@@ -10133,14 +10187,11 @@ The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
 curated re-export of contracts, preserving the contracts package's dependency
 direction. Some Settings rows remain host-compiled. Linear uses the Integration
-port as a bundled plugin; extracting the remaining GitHub and board packages
-and packaging remaining appearance/viewer assets is unfinished work, tracked in
-Linear.
+port as a bundled plugin.
 
-Preserve the extraction sequence: establish a provider-neutral port and renderer
-seam before moving a feature behind them; keep extraction separate from unrelated
-fixes; move remaining GitHub/board packages before the remaining appearance/viewer
-packaging. Changing host mode policy is a separate explicit design change, not a
+Preserve the sequence: establish a provider-neutral port and renderer seam
+before moving a feature behind them, and keep that work separate from unrelated
+fixes. Changing host mode policy is a separate explicit design change, not a
 permission supplied by an integration plugin. The Integration kind stays Code-mode
 safe until that policy changes. Plugin disable preserves data and selections,
 drains running executables, and removes effective contributions; deleting

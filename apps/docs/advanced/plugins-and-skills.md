@@ -61,10 +61,19 @@ connector without a licensed logo shows a two-letter tile.
 ### Installed
 
 The **Installed** tab lists **Extension packages** and **Standalone skills**.
-Package cards offer **Trust source** / **Revoke trust**, an **Enable plugin**
-master switch, per-component **Enable component** switches, and **Uninstall**.
-Each component shows an effective state of **Effective** or **Blocked —**
-with a specific reason such as Host prohibited, Mode prohibited, Project
+
+**GitHub**, **Board** and **Zen** come first, marked **Built into Octant**. They
+ship with the app, so each has only an on/off switch: there is nothing to trust,
+update, or uninstall, and they do not appear in the Library. All three start on.
+Switching one off hides its sidebar rows (**Pull requests** and **Issues** for
+GitHub, **Board** for the board) and keeps its data, so switching it back on
+picks up where you left off. Only the Octant window on the computer that runs
+Octant can change these switches, not a paired phone or browser.
+
+Package cards for everything you installed offer **Trust source** / **Revoke
+trust**, an **Enable plugin** master switch, per-component **Enable component**
+switches, and **Uninstall**. Each component shows an effective state of
+**Effective** or **Blocked —** with a specific reason such as Host prohibited, Mode prohibited, Project
 prohibited, Thread prohibited, Not installed, Untrusted, Plugin disabled,
 Component disabled, Incompatible, Quarantined, Draining, Broken,
 Unavailable, Interrupted, or Waiting.
@@ -444,6 +453,9 @@ start another task or claim to refresh that provider's tools.
 **Settings → Skills & Extensions → Connectors** lists hosted services an
 agent can use once you connect them: issue trackers, docs, databases,
 deployment platforms, payments, design canvases such as Doop, and more, by category, with a search box.
+Search also matches what a service covers, so **Jira** finds Atlassian and
+**crm** finds HubSpot and Pipedrive. Each entry links to the vendor's own
+setup guide.
 The list ships with the app; nothing is fetched to show it. **Connect** adds
 the service's server to this host the way Add MCP server does, then opens
 its sign-in page, or asks for a key the service issues (kept in this

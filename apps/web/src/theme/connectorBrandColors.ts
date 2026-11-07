@@ -33,6 +33,13 @@ export const CONNECTOR_BRAND_COLORS: Readonly<Record<string, string>> = {
   intercom: "#6afdef",
   "mercado-pago": "#00b1ea",
   "hugging-face": "#ffd21e",
+  dropbox: "#0061ff",
+  box: "#0061d5",
+  gitlab: "#fc6d26",
+  clickup: "#7b68ee",
+  miro: "#050038",
+  calendly: "#006bff",
+  buildkite: "#14cc80",
 };
 
 const MINIMUM_MARK_CONTRAST = 3;

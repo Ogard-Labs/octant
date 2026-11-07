@@ -13,10 +13,10 @@ import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
-  FIRST_PARTY_PLUGINS_EFFECTIVE,
   resolveSidebarContributions,
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
+import { useFirstPartyPluginsEffective } from "./firstPartyPluginsEffective";
 import { IconButton } from "./IconButton";
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import type { OctantHostBridge } from "./hostBridge";
@@ -157,6 +157,7 @@ export interface ShellSidebarProps {
 const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-work-thread"]);
 
 export function ShellSidebar(props: ShellSidebarProps) {
+  const hostFirstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const modes = enabledModes(props.settings);
   const searchAlwaysShown = props.settings.sidebarSearchPresentation === "field";
   const [searchOpen, setSearchOpen] = useState(false);
@@ -182,7 +183,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
   const workActions = workReady ? props.workNavigation.actions : {};
   const sidebarContributions = resolveSidebarContributions(
     activeMode,
-    props.firstPartyPluginsEffective ?? FIRST_PARTY_PLUGINS_EFFECTIVE,
+    props.firstPartyPluginsEffective ?? hostFirstPartyPluginsEffective,
   );
   const chatStatusMessage =
     activeMode !== "chat"
