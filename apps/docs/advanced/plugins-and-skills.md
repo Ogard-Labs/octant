@@ -433,6 +433,27 @@ secrets.
 
 ### Recover a server connection
 
+**Settings → Skills & Extensions → Installed** starts with **Server
+connections**, a list of every MCP server and connector you installed. Each
+row shows whether it is hosted or runs on this computer, its state, and when
+Octant last saw it connect or fail:
+
+- **Connected**: a task has it open now. **Ready**: nothing is wrong; the next
+  task that uses it connects.
+- **Needs sign-in**: you are signed out, or the sign-in expired or was revoked.
+  Use the row's sign-in button.
+- **Not connecting**: the last connection failed; the row says why. Press
+  **Reconnect**, then run your task again. Reconnect drops the broken
+  connection so the next task connects fresh. It does not repeat the failed
+  action.
+- **Off** or **Blocked**: the package or server is switched off, or Octant
+  will not run it, for the reason shown.
+
+Connectors and the Library flag a connected server that needs attention, and
+the Library detail links to Server connections. Opening the list never
+contacts a server. A paired device sees the states but cannot sign in or
+reconnect.
+
 If an HTTP MCP server forgets its session or the connection/response is lost,
 Octant removes the stale tools. The failed action is not repeated automatically:
 it may already have changed something even though its answer did not arrive.

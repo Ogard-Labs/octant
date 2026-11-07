@@ -9736,6 +9736,31 @@ adopted as current authenticated content. Unrelated components stay usable.
 Only later authoritative task reconciliation initializes and lists again with
 the current broker grant; Settings does not probe tools.
 
+Settings › Skills & Extensions › Installed opens with **Server connections**:
+every installed MCP server and connector with its package, transport, state,
+last error sentence and when the host last saw it connect or fail. The
+listing (`/api/extensions/connections`, `list`) is composed on the host from
+retained facts only: the lifecycle snapshot's switches and blocks, the stored
+sign-in record's status, the session manager's memory of open sessions,
+in-flight connects, failures and the last successful connect (kept after an
+idle close), and the installed `mcp.json` read from disk for the transport.
+Reading it never connects, signs in, discovers endpoints or lists tools, so a
+server no task has used yet reads Ready rather than Connected. States, most
+decisive first: Off (package or server switched off), Needs sign-in (signed
+out, sign-in-again, or consent pending), Connected, Connecting, Not connecting
+(the last attempt failed or the transport closed, with its reason), Blocked (a
+lifecycle block such as quarantine), Ready. The Connectors row and the Library
+card and detail flag a connected server that needs attention with the same
+state and reason. A row that needs sign-in offers the existing sign-in
+control; a failed row offers **Reconnect** (`reconnect`), which retires that
+component's authentication generation, sessions, desired state and failure
+through the same path a sign-in change uses, so the next authoritative task
+reconciliation connects fresh. Reconnect connects nothing itself and never
+replays a failed call; it is a local-window act, and the route refuses it to a
+paired device, which may read the listing only. Rationale: connecting from
+Settings would discover tools outside a task's authority, so the person's
+action only clears what blocks the next authorized connect.
+
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access
 and refresh each have a ten-second stage bound. A known expired token or a

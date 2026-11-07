@@ -1,5 +1,9 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import type { ExtensionCommandFailure, ExtensionSnapshot } from "@octant/contracts/extension-rpc";
+import type {
+  ExtensionCommandFailure,
+  ExtensionSnapshot,
+  McpServerConnection,
+} from "@octant/contracts/extension-rpc";
 import {
   CONNECTOR_CATEGORY_LABEL,
   connectorPackageName,
@@ -16,6 +20,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { connectConnector } from "./connectConnector";
 import { McpServerSignInControl } from "./McpServerSignInControl";
+import { ConnectionStatus, connectionNeedsAttention } from "./ServerConnections";
 
 const HIDDEN_KEY = "octant.connectors.hidden";
 const CATEGORIES: ReadonlyArray<ConnectorCategory> = ["popular", "developer-tools", "business"];
@@ -30,6 +35,8 @@ export interface ConnectorsViewProps {
   readonly actions: ReactNode;
   /** Told after a connector's package was added, so the installed set is read again. */
   readonly onConnected: () => void;
+  /** The host's connection listing, already read, so a connected row can say it stopped working. */
+  readonly connections?: ReadonlyArray<McpServerConnection>;
 }
 
 interface Connected {
@@ -167,6 +174,15 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                 {entries.map((entry) => {
                   const installed = installedFor(entry);
                   const isHidden = hidden.has(entry.id);
+                  const connection =
+                    installed === undefined
+                      ? undefined
+                      : props.connections?.find(
+                          (server) =>
+                            String(server.extensionId) === installed.extensionId &&
+                            (installed.componentId === undefined ||
+                              String(server.componentId) === installed.componentId),
+                        );
                   return (
                     <li
                       className="connectors__row"
@@ -176,6 +192,9 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                       <span className="connectors__text">
                         <span className="connectors__name">{entry.displayName}</span>
                         <span className="connectors__detail">{entry.description}</span>
+                        {connection !== undefined && connectionNeedsAttention(connection.state) ? (
+                          <ConnectionStatus connection={connection} />
+                        ) : null}
                         {!props.localHost && installed === undefined ? (
                           <span
                             className="connectors__detail"

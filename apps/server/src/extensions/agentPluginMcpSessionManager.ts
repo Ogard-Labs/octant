@@ -83,6 +83,21 @@ export interface ExtensionToolCall {
   readonly signal?: AbortSignal;
 }
 
+/** What the manager last saw of one server, for the Settings connection listing. */
+export interface McpConnectionObservation {
+  readonly extensionId: string;
+  readonly componentId: string;
+  readonly state: "connected" | "connecting" | "failed" | "idle";
+  readonly reason?: string;
+  readonly at?: string;
+}
+
+function pick(
+  target: Pick<AgentPluginMcpSessionKey, "extensionId" | "componentId">,
+): Pick<McpConnectionObservation, "extensionId" | "componentId"> {
+  return { extensionId: String(target.extensionId), componentId: String(target.componentId) };
+}
+
 /** A component the manager should keep connected, with the server name its mcp.json uses. */
 type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
   readonly serverNameHint: string;
@@ -112,6 +127,8 @@ export interface AgentPluginMcpSessionManagerOptions {
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
   readonly uuid?: () => string;
+  /** The clock for when a connection opened or failed, as Settings shows it. */
+  readonly now?: () => Date;
   /**
    * Fills in the secret references in a launch for a package the host wrote
    * for a server the person added by hand. Only a package the host's own
@@ -167,7 +184,17 @@ export class AgentPluginMcpSessionManager {
     {
       readonly target: AgentPluginMcpSessionKey;
       readonly reason: string;
+      readonly at: string;
     }
+  >();
+  readonly #now: () => Date;
+  /**
+   * When each server last opened a session. Kept after an idle close so
+   * Settings can say when it last worked; dropped with the component.
+   */
+  readonly #lastConnected = new Map<
+    string,
+    { readonly target: AgentPluginMcpSessionKey; readonly at: string }
   >();
 
   constructor(options: AgentPluginMcpSessionManagerOptions) {
@@ -182,6 +209,7 @@ export class AgentPluginMcpSessionManager {
     this.#authorizeToolCall = options.authorizeToolCall;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid ?? randomUUID;
+    this.#now = options.now ?? (() => new Date());
     this.#isUserAddedSource = options.isUserAddedSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
     this.#bindUserAddedAuthentication = options.bindUserAddedAuthentication;
@@ -201,6 +229,47 @@ export class AgentPluginMcpSessionManager {
       componentId: target.componentId,
       reason,
     }));
+  }
+
+  /**
+   * What the manager last saw of each server, across every authority scope:
+   * an open session, a connect in flight, a failure, or when it last
+   * connected. A read of memory only; it never connects or lists tools.
+   */
+  connectionObservations(): ReadonlyArray<McpConnectionObservation> {
+    const observations = new Map<string, McpConnectionObservation>();
+    // Later facts replace earlier ones: last connected < failed < connecting < connected.
+    for (const { target, at } of this.#lastConnected.values())
+      observations.set(authenticationKey(target), { ...pick(target), state: "idle", at });
+    for (const { target, reason, at } of this.#failures.values())
+      observations.set(authenticationKey(target), { ...pick(target), state: "failed", reason, at });
+    for (const { target } of this.#connections.values()) {
+      const previous = observations.get(authenticationKey(target));
+      observations.set(authenticationKey(target), {
+        ...pick(target),
+        state: "connecting",
+        ...(previous?.at === undefined ? {} : { at: previous.at }),
+      });
+    }
+    for (const [key, record] of this.#sessions) {
+      const at = this.#lastConnected.get(key)?.at;
+      observations.set(authenticationKey(record), {
+        ...pick(record),
+        state: "connected",
+        ...(at === undefined ? {} : { at }),
+      });
+    }
+    return [...observations.values()];
+  }
+
+  /**
+   * A person's Reconnect: drop the server's sessions and its failure so the
+   * next task's authority reconciliation connects fresh. Nothing connects
+   * from here and no failed call is replayed; connecting stays with the task
+   * that has authority to use the server.
+   */
+  async reconnect(extensionId: string, componentId: string): Promise<void> {
+    await this.invalidateAuthentication(extensionId, componentId);
   }
 
   projectEffectiveState(effective: ExtensionEffectiveSnapshot): ExtensionEffectiveSnapshot {
@@ -385,6 +454,7 @@ export class AgentPluginMcpSessionManager {
               this.#failures.set(indexed.sessionKey, {
                 target: desired,
                 reason: "MCP tool transport closed; authority reconciliation is required.",
+                at: this.#now().toISOString(),
               });
             }
           }
@@ -536,6 +606,7 @@ export class AgentPluginMcpSessionManager {
         this.#failures.set(key, {
           target,
           reason: error instanceof Error ? error.message : "MCP connection failed.",
+          at: this.#now().toISOString(),
         });
       }
     }
@@ -620,6 +691,19 @@ export class AgentPluginMcpSessionManager {
     }
     for (const key of this.#failures.keys()) {
       if (!retained.has(key)) this.#failures.delete(key);
+    }
+    const installed = new Set(
+      snapshot.packages.flatMap((packageState) =>
+        packageState.components.map((componentState) =>
+          authenticationKey({
+            extensionId: packageState.extensionId,
+            componentId: componentState.component.id,
+          }),
+        ),
+      ),
+    );
+    for (const [key, { target }] of this.#lastConnected) {
+      if (!installed.has(authenticationKey(target))) this.#lastConnected.delete(key);
     }
   }
 
@@ -759,6 +843,7 @@ export class AgentPluginMcpSessionManager {
       return;
     }
     this.#sessions.set(key, record);
+    this.#lastConnected.set(key, { target, at: this.#now().toISOString() });
     this.#touchIdle(key);
     this.#reindex();
   }
@@ -801,6 +886,7 @@ export class AgentPluginMcpSessionManager {
     this.#failures.set(key, {
       target,
       reason: "MCP transport closed; authority reconciliation is required.",
+      at: this.#now().toISOString(),
     });
   }
 

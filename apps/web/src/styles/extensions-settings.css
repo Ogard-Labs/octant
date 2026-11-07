@@ -678,6 +678,22 @@
   overflow-wrap: anywhere;
 }
 
+/* A server's connection word, and for one that is not working, why. The
+   reason wraps under the word at phone width rather than widening the row. */
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  min-width: 0;
+}
+
+.connection-status__reason {
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
 .connectors__actions {
   display: inline-flex;
   align-items: center;

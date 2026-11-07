@@ -2,6 +2,7 @@ import type {
   DiscoveredAgentToolingListing,
   ExtensionCatalogEntry,
   ExtensionSnapshot,
+  McpServerConnection,
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionCapability } from "@octant/contracts/extensions";
 import {
@@ -81,6 +82,11 @@ export interface LibraryItem {
   readonly connectorAuth?: ConnectorAuth;
   /** The connector server's component, once connected, for its sign-in control. */
   readonly mcpComponentId?: string;
+  /**
+   * How the package's MCP server is connecting, as the host last saw it; the
+   * server most in need of attention when the package has several.
+   */
+  readonly connection?: Pick<McpServerConnection, "state" | "reason">;
   /** The Marketplace entry this item is, so it can be reviewed and installed here. */
   readonly marketplaceExtensionId?: string;
   readonly address?: string;
@@ -93,6 +99,32 @@ export interface LibrarySources {
   readonly marketplace?: ReadonlyArray<ExtensionCatalogEntry>;
   readonly discovered?: DiscoveredAgentToolingListing | undefined;
   readonly connectors?: ReadonlyArray<ConnectorCatalogEntry>;
+  /** The host's connection listing, already read; never fetched here. */
+  readonly connections?: ReadonlyArray<McpServerConnection>;
+}
+
+const ATTENTION: ReadonlyArray<McpServerConnection["state"]> = [
+  "needs-sign-in",
+  "failed",
+  "blocked",
+];
+
+function connectionFor(
+  item: LibraryItem,
+  connections: ReadonlyArray<McpServerConnection>,
+): LibraryItem {
+  const extensionId = item.packageRef?.extensionId;
+  if (extensionId === undefined) return item;
+  const servers = connections.filter((server) => String(server.extensionId) === extensionId);
+  const shown = servers.find((server) => ATTENTION.includes(server.state)) ?? servers[0];
+  if (shown === undefined) return item;
+  return {
+    ...item,
+    connection: {
+      state: shown.state,
+      ...(shown.reason === undefined ? {} : { reason: shown.reason }),
+    },
+  };
 }
 
 type Capability = ExtensionCapability;
@@ -510,7 +542,9 @@ export function buildLibrary(sources: LibrarySources): ReadonlyArray<LibraryItem
   const packages = (sources.snapshot?.packages ?? []).filter(
     (pkg) => pkg.activation.installed && pkg.source.kind !== "bundled",
   );
-  const installed = packages.map((pkg) => packageItem(pkg, connectors));
+  const installed = packages.map((pkg) =>
+    connectionFor(packageItem(pkg, connectors), sources.connections ?? []),
+  );
   const connected = new Set(
     installed.flatMap((item) => (item.connectorId ? [item.connectorId] : [])),
   );
