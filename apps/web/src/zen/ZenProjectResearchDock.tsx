@@ -185,10 +185,12 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
     const shown = context?.profile;
     const manage = client.manageProfiles;
     if (manage === undefined || shown === undefined || shown === "private") return;
+    const profile = storedBrowserProfile(browserProfileFromChoice(shown, projectId));
+    if (profile === undefined) return;
     try {
       const result = await manage.call(client, {
         kind: "clear",
-        profile: shown === "personal" ? { kind: "personal" } : { kind: "project", projectId },
+        profile,
         scope: "all",
       });
       setMessage(
