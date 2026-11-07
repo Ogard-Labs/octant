@@ -280,7 +280,8 @@ export type ChangeWorkThreadDocumentDeliveryCommand =
  * Moves a Work thread to another guardrail level from its composer, as a Code
  * thread switches mode. The next turn runs at the new level; a running turn
  * keeps the one it started with. Raising a thread to Full access is chosen at
- * a window on this host; a paired device may lower one.
+ * a window on this host; a paired device may lower one. A separately verified
+ * owner-device unlock can change the level through the owner posture route.
  */
 export const ChangeWorkThreadAccessCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-access"),

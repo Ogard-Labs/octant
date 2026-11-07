@@ -42,6 +42,7 @@ import {
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
   type WindowId,
+  type EventActor,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
@@ -160,10 +161,7 @@ export interface WorkThreadServiceDependencies {
           readonly eventName: string;
           readonly eventVersion: 1;
           readonly correlationId: string;
-          readonly actor: {
-            readonly kind: "local-user" | "system";
-            readonly actorId: string;
-          };
+          readonly actor: EventActor;
           readonly occurredAt: string;
           readonly payload: unknown;
         }>;
@@ -319,6 +317,70 @@ export class WorkThreadService {
     if (dependencies.linearIssueContext !== undefined) {
       this.#linearIssueContext = dependencies.linearIssueContext;
     }
+  }
+
+  /** Called only after the owner route verifies its host/target-bound unlock. */
+  changeOwnerAccess(input: {
+    readonly threadId: WorkThreadId;
+    readonly expectedVersion: number;
+    readonly access: WorkAccess;
+    readonly ownerMemberId: string;
+    readonly freshFull: boolean;
+  }): WorkThread {
+    this.#assertReady();
+    const current = this.#projection.read(input.threadId);
+    if (current === undefined) throw this.#failure("invalid", "Work thread was not found.");
+    if (current.version !== input.expectedVersion)
+      throw this.#failure("stale", "Work state changed; reload and unlock again.");
+    if (input.access === "full-access" && !input.freshFull)
+      throw this.#failure(
+        "unauthorized",
+        "Full access needs a fresh owner unlock for this change.",
+      );
+    const project = this.#persistence.readProject(current.projectId);
+    if (
+      project?.type !== "work" ||
+      project.lifecycle !== "active" ||
+      current.lifecycle !== "active"
+    )
+      throw this.#failure("unauthorized", "The Work thread or Project is unavailable.");
+    if (
+      current.bindingRevisionId !== undefined &&
+      String(current.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
+    )
+      throw this.#failure("stale", "Work Project binding changed; reload and unlock again.");
+    const updated = decodeWorkThread({
+      ...current,
+      access: input.access,
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#inUnit(() => {
+      this.#append(
+        current.id,
+        current.version,
+        "work.thread-updated@1",
+        { kind: "thread-updated", thread: updated },
+        actor,
+      );
+      this.#journalLowering(
+        {
+          scope: "thread",
+          from: workModeOfAccess(current.access),
+          to: workModeOfAccess(updated.access),
+          projectId: current.projectId,
+          threadId: String(current.id),
+        },
+        actor,
+      );
+    });
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+    return updated;
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<WorkThreadBootstrap> {
@@ -1753,13 +1815,16 @@ export class WorkThreadService {
    * thread or settings version waits on it. A change that does not lower the
    * guardrail records nothing.
    */
-  #journalLowering(change: {
-    readonly scope: "global" | "project" | "thread";
-    readonly from: PermissionMode;
-    readonly to: PermissionMode;
-    readonly projectId?: ProjectId;
-    readonly threadId?: string;
-  }): void {
+  #journalLowering(
+    change: {
+      readonly scope: "global" | "project" | "thread";
+      readonly from: PermissionMode;
+      readonly to: PermissionMode;
+      readonly projectId?: ProjectId;
+      readonly threadId?: string;
+    },
+    actor: EventActor = { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+  ): void {
     if (!guardrailLowered(change.from, change.to)) return;
     this.#persistence.journal.append({
       aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
@@ -1770,7 +1835,7 @@ export class WorkThreadService {
           eventName: GUARDRAIL_LEVEL_LOWERED,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor,
           occurredAt: decodeTimestamp(this.#clock()),
           payload: decodeGuardrailLevelLowered({ surface: "work", ...change }),
         },
@@ -1788,7 +1853,7 @@ export class WorkThreadService {
     payload: unknown,
     // Everything a person asks for is theirs; only the host's own timer
     // writes as the system, so a journal reader can tell the two apart.
-    actorKind: "local-user" | "system" = "local-user",
+    actorKind: "local-user" | "system" | EventActor = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: {
@@ -1803,9 +1868,11 @@ export class WorkThreadService {
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
           actor:
-            actorKind === "system"
-              ? { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
-              : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+            typeof actorKind === "object"
+              ? actorKind
+              : actorKind === "system"
+                ? { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
+                : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },
