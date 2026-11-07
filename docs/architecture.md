@@ -10148,13 +10148,14 @@ assume package files on disk:
 - **Off keeps data.** Switching a plugin off changes what it contributes and
   deletes nothing; its credentials, projections, and settings stay for when it
   is switched on again.
-- **Each feature obeys its switch (partly built).** The seams that already read
-  a first-party plugin's effective state follow the switch: on the host,
-  GitHub's routes, issue context, and read tools; in the renderer, the
-  contributed sidebar destinations (Pull requests, Issues, the board), the
-  GitHub Settings section, the start screen's pull-request and CI cards, and
-  the Create Project GitHub tab. Gating every remaining GitHub, board, and Zen
-  surface on its switch is not built yet.
+- **Each feature obeys its switch.** On the host, GitHub's routes, issue
+  context, read tools, and Gist export destination, and Zen's routes and tool,
+  read the switch on every request. In the renderer, the switch hides the
+  GitHub Issues destination, Settings section, start-screen cards, and Create
+  Project tab; the Work and Code boards and every way to open them; and Zen's
+  window and openers. Pull requests stay a host-owned destination, and the
+  board's data and the tools that read it stay available, as the owning
+  sections describe.
 
 A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback,

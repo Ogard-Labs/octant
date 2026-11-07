@@ -46,7 +46,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 8         | 7       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
-| [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
+| [Extensions](#extensions)                                                             | 8         | 8       | 0            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
@@ -1423,10 +1423,9 @@ New providers and tools reach the system through the published SDK, API and host
 - The extension snapshot carries one host-written row per switchable bundled plugin. Only its switch may change it, under the same expected-version rule and local-window authority as an installed package; every other package command on it is refused.
 - Bundled plugins are left out of a scope's effective state, so they are never addressed, selected, pinned or given tools, and the Library does not list them.
 - Disabling a plugin preserves its data and selections and drains running executables. Deleting credentials needs its own explicit confirmation.
-- The surfaces that already read a first-party plugin's effective state follow the switch: GitHub's routes, issue context and read tools, and the renderer's contributed sidebar destinations, GitHub Settings section, start-screen pull-request cards and Create Project GitHub tab.
-- Every remaining GitHub, thread board and Zen surface obeys its switch (not built yet).
+- Each feature follows its switch on the host and in the renderer: GitHub's account, repository, clone, issue, read-tool and Gist surfaces; the Work and Code boards and every way to open them; and Zen's routes, tool and window. Git and pull requests stay core, and the board's data and the tools that read it stay available.
 
-Status: Partly built. Since: —. Detail: [Architecture: Plugin boundaries and remaining extraction](../architecture.md#plugin-boundaries-and-remaining-extraction).
+Status: Built. Since: 2026-11-07. Detail: [Architecture: Plugin boundaries and remaining extraction](../architecture.md#plugin-boundaries-and-remaining-extraction).
 
 ## Authority and approvals
 
