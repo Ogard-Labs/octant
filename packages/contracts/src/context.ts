@@ -752,16 +752,31 @@ export const AutoCompactWindowPercent = Schema.Int.pipe(
 );
 export type AutoCompactWindowPercent = typeof AutoCompactWindowPercent.Type;
 
+export const MIN_AUTO_COMPACT_IDLE_MINUTES = 5;
+export const MAX_AUTO_COMPACT_IDLE_MINUTES = 1_440;
+export const AutoCompactIdleMinutes = Schema.Int.pipe(
+  Schema.between(MIN_AUTO_COMPACT_IDLE_MINUTES, MAX_AUTO_COMPACT_IDLE_MINUTES),
+);
+export type AutoCompactIdleMinutes = typeof AutoCompactIdleMinutes.Type;
+
 /**
  * Why Octant compacted a thread on its own, by a rule the person set. Absent
  * on a compaction the person asked for and on one a runtime made by itself.
  */
-export const ContextCompactionCause = Schema.Struct({
-  kind: Schema.Literal("window-fill"),
-  /** How full the window was at the report that crossed the rule, 0 to 100. */
-  filledPercent: Schema.Int.pipe(Schema.between(0, 100)),
-  thresholdPercent: AutoCompactWindowPercent,
-}).annotations(strict);
+export const ContextCompactionCause = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("window-fill"),
+    /** How full the window was at the report that crossed the rule, 0 to 100. */
+    filledPercent: Schema.Int.pipe(Schema.between(0, 100)),
+    thresholdPercent: AutoCompactWindowPercent,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("idle"),
+    /** Whole minutes since the thread's last turn ended, when the rule acted. */
+    idleMinutes: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
+    thresholdMinutes: AutoCompactIdleMinutes,
+  }).annotations(strict),
+);
 export type ContextCompactionCause = typeof ContextCompactionCause.Type;
 
 export const ContextCompactionReceipt = Schema.Struct({

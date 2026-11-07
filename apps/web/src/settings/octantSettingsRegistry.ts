@@ -72,6 +72,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "compact compaction auto-compact automatic context window full summary runtime claude code codex opencode pi",
         },
         {
+          id: settingId("auto-compact-idle"),
+          label: "Compact quiet threads",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic idle inactive inactivity quiet minutes hours summary",
+        },
+        {
           id: settingId("app-update-automatic-checks"),
           label: "Automatic update checks",
           scope: "app",

@@ -14,6 +14,7 @@ import {
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
+import { IdleCompactions } from "../context/idleCompaction";
 import { WindowFillCompactions } from "../context/windowFillCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
 import { createTaskAccessFacts } from "../context/taskAccessFacts";
@@ -432,6 +433,8 @@ export function wireContext(deps: ContextDependencies) {
       }).kind === "paused"
         ? "paused"
         : "admitted",
+    windowOpen: (windowId) =>
+      windowAuthorityStore.listWindowIds().some((open) => String(open) === String(windowId)),
     conversationOwner: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
       if (instance === undefined) return undefined;
@@ -476,6 +479,12 @@ export function wireContext(deps: ContextDependencies) {
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
   });
+  const idleCompactions = new IdleCompactions({
+    compactions: sessionCompaction,
+    latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    idleMinutes: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).autoCompactIdleMinutes,
+  });
   const windowFillCompactions = new WindowFillCompactions({
     compactions: sessionCompaction,
     latestCompaction: (subject) => contextHarness.latestCompaction(subject),
@@ -488,14 +497,12 @@ export function wireContext(deps: ContextDependencies) {
     },
   });
   observeTurnEnded((scope, turn) => {
-    windowFillCompactions.turnEnded({
-      subject: decodeContextSubjectRef({
-        aggregateType: `${scope.mode}-thread`,
-        aggregateId: scope.threadId,
-      }),
-      turnKey: turn.endedAt,
-      windowId: scope.windowId,
+    const subject = decodeContextSubjectRef({
+      aggregateType: `${scope.mode}-thread`,
+      aggregateId: scope.threadId,
     });
+    idleCompactions.turnEnded({ subject, endedAt: turn.endedAt, windowId: scope.windowId });
+    windowFillCompactions.turnEnded({ subject, turnKey: turn.endedAt, windowId: scope.windowId });
   });
   const taskAccessFacts = createTaskAccessFacts({
     subject: createTaskAccessSubjectReader({
@@ -644,6 +651,7 @@ export function wireContext(deps: ContextDependencies) {
     agentMessageRoutes,
     browserAutomationRoutes,
     contextRoutes,
+    idleCompactions,
     windowCanOpenThread,
   };
 }

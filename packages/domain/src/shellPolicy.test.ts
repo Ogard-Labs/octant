@@ -211,6 +211,7 @@ describe("shell settings policy", () => {
       completedThreadArchiveAfterDays: 7,
       autoCompactOctantWindowPercent: 85,
       autoCompactRuntimeWindowPercent: null,
+      autoCompactIdleMinutes: null,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.

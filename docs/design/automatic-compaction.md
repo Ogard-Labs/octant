@@ -1,6 +1,6 @@
 # Automatic compaction
 
-Status: Building (slice 1 of 4)
+Status: Building (slice 2 of 4)
 Size: Full — crosses contracts, the context service, every runtime adapter,
 Settings and the provider-switch handoff.
 Owner: maintainers · Started: 2026-11-07 · Approved: 2026-11-07, maintainer (Q-1 and Q-2 answered)
@@ -231,7 +231,7 @@ needs a window that can still open the thread, or it skips Code threads.
 | Slice | What it delivers                                                                                                                           | Requirement IDs                       | Status  |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ------- |
 | 1     | Rules in settings + pure decision; `host-policy` caller; window-fill trigger between turns on every runtime; reason on receipt and divider | FR-1 (fill), FR-2, FR-9, FR-10, NFR-1 | Built   |
-| 2     | Idle sweep                                                                                                                                 | FR-1 (idle), FR-5, NFR-2              | Planned |
+| 2     | Idle sweep                                                                                                                                 | FR-1 (idle), FR-5, NFR-2              | Built   |
 | 3     | Limit trigger, notice, handover summary read by switch and fork                                                                            | FR-1 (limit), FR-6, FR-7, FR-8        | Planned |
 | 4     | Runtime compaction point (Claude Code, Codex) and in-turn harness compaction                                                               | FR-3, FR-4                            | Planned |
 
@@ -286,19 +286,52 @@ Failure modes: a rule that cannot read the thread leaves it alone; a rule waits
 for 5 more points after its last attempt; a restart closes a running rule compaction as
 `interrupted`, exactly as a requested one.
 
+### Slice 2: idle sweep
+
+- **Setting** (`shell.ts`): `autoCompactIdleMinutes` (`AutoCompactIdleMinutes | null`,
+  5 to 1440, default `null`). Settings → General → Compaction → **Compact quiet
+  threads** offers Never, then 15, 30, 60, 120 and 240 minutes.
+- **Cause**: `ContextCompactionCause` becomes a union; the idle member is, for
+  example, `{ "kind": "idle", "idleMinutes": 31, "thresholdMinutes": 30 }`.
+- **Decision** (`decideIdleCompaction`): compacts when whole minutes since the
+  last turn's end reach the rule and the window holds at least
+  `IDLE_COMPACTION_MIN_TOKENS` (20,000). Below that the compaction's own read of
+  the window costs more than the next turn saves.
+- **Rule** (`idleCompaction.ts`, `IdleCompactions`): the same turn-end observer
+  records each thread's last end and its window in memory. A pass every minute
+  checks the time first, so a thread not yet due costs no read; a due thread is
+  skipped if any compaction ran or started since its last turn. One attempt per
+  quiet spell, under an id derived from the turn that began it; only
+  `turn-running` keeps the spell for the next pass. The timer starts once the
+  host serves and stops at shutdown, like the completed-thread sweep.
+- **Service**: option `windowOpen`, read from the window authority store. A rule
+  on a Code thread whose window has closed is refused `no-session` before
+  anything is journaled, since `open` could not resume its session and would
+  leave a failed compaction. Slice 1's rule gets the same check.
+- **Text**: "Compacted automatically · idle 31 min · …"; from two hours,
+  "idle 2 h".
+
+Failure modes: a pass that throws is dropped and the timer goes on; a refused
+spell waits for the thread's next turn.
+
 ## 9. Verification
 
-| Acceptance criterion                                  | Test                                                                                                                                           | Result | Change      |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
-| FR-1 (fill): Settings writes both shares              | `SettingsView.test.tsx` "compacts Octant threads at 85% by default and leaves runtimes…"                                                       | Pass   | This change |
-| FR-1 (fill): rendered on an isolated host             | Playwright on a scratch host: defaults shown, 70% survives a reload, no clipping at 1280 and 390 wide, no console errors                       | Pass   | This change |
-| FR-2: compacts past the share, under the turn         | `windowFillCompaction.test.ts` (7 tests); `contextCompaction.test.ts` window-fill tests                                                        | Pass   | This change |
-| FR-2: host compaction records cause and requester     | `sessionCompaction.test.ts` "records a compaction a rule the person set started…"                                                              | Pass   | This change |
-| FR-9: timeline names the rule and the fill            | `CompactionDivider.test.tsx` "says which rule compacted the thread…"                                                                           | Pass   | This change |
-| FR-10: refused rule leaves nothing behind             | `windowFillCompaction.test.ts` "stops after any other refusal…"; `sessionCompaction.test.ts` "refuses a rule on a Code thread with no window…" | Pass   | This change |
-| NFR-1: no repeat after a compaction that freed little | `windowFillCompaction.test.ts` "does not compact again after a rule's compaction that freed too little"                                        | Pass   | This change |
-| NFR-1: one compaction per turn end                    | `windowFillCompaction.test.ts` "gives the same turn's end announced twice the same compaction id"                                              | Pass   | This change |
-| FR-2 on a real runtime                                | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                    | Open   | —           |
+| Acceptance criterion                                     | Test                                                                                                                                           | Result | Change      |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
+| FR-1 (fill): Settings writes both shares                 | `SettingsView.test.tsx` "compacts Octant threads at 85% by default and leaves runtimes…"                                                       | Pass   | This change |
+| FR-1 (fill): rendered on an isolated host                | Playwright on a scratch host: defaults shown, 70% survives a reload, no clipping at 1280 and 390 wide, no console errors                       | Pass   | This change |
+| FR-2: compacts past the share, under the turn            | `windowFillCompaction.test.ts` (7 tests); `contextCompaction.test.ts` window-fill tests                                                        | Pass   | This change |
+| FR-2: host compaction records cause and requester        | `sessionCompaction.test.ts` "records a compaction a rule the person set started…"                                                              | Pass   | This change |
+| FR-9: timeline names the rule and the fill               | `CompactionDivider.test.tsx` "says which rule compacted the thread…"                                                                           | Pass   | This change |
+| FR-10: refused rule leaves nothing behind                | `windowFillCompaction.test.ts` "stops after any other refusal…"; `sessionCompaction.test.ts` "refuses a rule on a Code thread with no window…" | Pass   | This change |
+| NFR-1: no repeat after a compaction that freed little    | `windowFillCompaction.test.ts` "does not compact again after a rule's compaction that freed too little"                                        | Pass   | This change |
+| NFR-1: one compaction per turn end                       | `windowFillCompaction.test.ts` "gives the same turn's end announced twice the same compaction id"                                              | Pass   | This change |
+| FR-1 (idle): Settings writes the minutes, off by default | `SettingsView.test.tsx` "leaves quiet threads alone by default…"                                                                               | Pass   | This change |
+| FR-5: one compaction per quiet spell, above the minimum  | `idleCompaction.test.ts` (8 tests); `contextCompaction.test.ts` "compacting a quiet thread"                                                    | Pass   | This change |
+| FR-5: Code only under an open window                     | `sessionCompaction.test.ts` "refuses a rule on a Code thread with no open window…"                                                             | Pass   | This change |
+| FR-9 (idle): timeline says how long it was quiet         | `CompactionDivider.test.tsx` "says how long the thread was quiet…"                                                                             | Pass   | This change |
+| NFR-2: a pass with nothing due reads nothing             | `idleCompaction.test.ts` "reads nothing and asks no provider…" (500 threads, under 50 ms, zero reads)                                          | Pass   | This change |
+| FR-2 on a real runtime                                   | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                    | Open   | —           |
 
 ## 10. Codebase deltas and change log
 
@@ -313,9 +346,15 @@ for 5 more points after its last attempt; a restart closes a running rule compac
   completed compaction that left the window above the share was repeated after
   every turn, and that host threads read a usage report older than the latest
   compaction. Both are fixed as described in Slice 1.
+- The design had the idle sweep read last-turn times from projections. It
+  reads the turns that ended while the host ran instead: that is also where it
+  learns each Code turn's window (D-4), and it keeps a pass free of reads. A
+  thread whose last turn ended before the host started is not compacted for
+  being idle.
 
 ### Change log
 
 - 2026-11-07: First draft from the maintainer request and the current code.
 - 2026-11-07: Q-1 and Q-2 answered; D-1 to D-3 accepted, D-4 added; slice 1
   built with its detailed design and verification.
+- 2026-11-07: Slice 2 (idle rule) built.

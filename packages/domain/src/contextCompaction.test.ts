@@ -4,7 +4,9 @@ import {
   ContextCompactionRejected,
   decideContextLengthRecovery,
   decideSessionCompaction,
+  decideIdleCompaction,
   decideWindowFillCompaction,
+  IDLE_COMPACTION_MIN_TOKENS,
   evaluateSemanticSummary,
   orderContextMaintenance,
   reconcileContextVariance,
@@ -605,5 +607,35 @@ describe("compacting when the window fills", () => {
         previousAttempt: { leftPercent: 20 },
       }),
     ).toEqual({ kind: "window-fill", filledPercent: 72, thresholdPercent: 70 });
+  });
+});
+
+describe("compacting a quiet thread", () => {
+  const endedAt = Date.parse("2026-11-07T10:00:00.000Z");
+  const facts = { thresholdMinutes: 30, lastTurnEndedAt: endedAt, tokens: 60_000 };
+
+  it("compacts a thread quiet past the rule's minutes and says how long it was quiet", () => {
+    expect(decideIdleCompaction({ ...facts, now: endedAt + 31 * 60_000 })).toEqual({
+      kind: "idle",
+      idleMinutes: 31,
+      thresholdMinutes: 30,
+    });
+    expect(decideIdleCompaction({ ...facts, now: endedAt + 29 * 60_000 + 59_999 })).toBeUndefined();
+  });
+
+  it("leaves a quiet thread that holds too little to be worth a compaction", () => {
+    expect(
+      decideIdleCompaction({
+        ...facts,
+        tokens: IDLE_COMPACTION_MIN_TOKENS - 1,
+        now: endedAt + 60 * 60_000,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("never compacts while the person has the rule off", () => {
+    expect(
+      decideIdleCompaction({ ...facts, thresholdMinutes: null, now: endedAt + 600 * 60_000 }),
+    ).toBeUndefined();
   });
 });

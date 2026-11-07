@@ -1066,41 +1066,46 @@ export function startOctantServer(
         workTurnService,
         zenEventStore,
       });
-    const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
-      wireContext({
-        browserCredentialUseService,
-        agentMessageProjection,
-        browserModelBindings,
-        browserAuthority,
-        browserAutomationService,
-        browserCaptures,
-        browserExtensionService,
-        browserFlowService,
-        browserProfileService,
-        canAccessCodeProject,
-        capacityScheduler,
-        chatService,
-        codeOperationRuntime,
-        codeSessionAuthority,
-        configuredDriverOptions,
-        contextHarness,
-        hostShield,
-        liveProjectBrowsers,
-        nativeHarnessHooks,
-        observeTurnEnded,
-        persistence,
-        projectService,
-        providerRuntimeRegistry,
-        browserToolApprovalService,
-        routeCodeService,
-        serverProjectStore,
-        spendCeilingService,
-        windowAuthorityStore,
-        workThreadProjection,
-        workThreadService,
-        workTurnProjection,
-        workTurnService,
-      });
+    const {
+      agentMessageRoutes,
+      browserAutomationRoutes,
+      contextRoutes,
+      idleCompactions,
+      windowCanOpenThread,
+    } = wireContext({
+      browserCredentialUseService,
+      agentMessageProjection,
+      browserModelBindings,
+      browserAuthority,
+      browserAutomationService,
+      browserCaptures,
+      browserExtensionService,
+      browserFlowService,
+      browserProfileService,
+      canAccessCodeProject,
+      capacityScheduler,
+      chatService,
+      codeOperationRuntime,
+      codeSessionAuthority,
+      configuredDriverOptions,
+      contextHarness,
+      hostShield,
+      liveProjectBrowsers,
+      nativeHarnessHooks,
+      observeTurnEnded,
+      persistence,
+      projectService,
+      providerRuntimeRegistry,
+      browserToolApprovalService,
+      routeCodeService,
+      serverProjectStore,
+      spendCeilingService,
+      windowAuthorityStore,
+      workThreadProjection,
+      workThreadService,
+      workTurnProjection,
+      workTurnService,
+    });
     const {
       imageRoutes,
       previewHandoffBridgeRoutes,
@@ -1756,6 +1761,7 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          idleCompactions.start();
           personMemorySweep.start();
           // The memory guard reads the last run's state before it overwrites
           // it, so the next-start notice survives a crash.
@@ -1853,6 +1859,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();
           try {
