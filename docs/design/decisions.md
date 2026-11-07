@@ -1407,6 +1407,8 @@ A Canvas export reaches a destination only after the person approves a card show
 - The rendered document passes a secret-and-path filter, and one that fails is refused rather than published.
 - Saving or copying the HTML file is not a destination: it needs no approval and journals nothing, and the file loads nothing.
 
+- Local destination packages declare one module and exact HTTPS origins. A supervised worker runs the portable protocol; only an approved export gets bounded mediated network requests. Description is offline and bounded; changed activation or package identity invalidates approval. Linux and Windows execution stays unavailable pending verified native confinement.
+
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
 ### Composer window capture

@@ -75,6 +75,16 @@ it("accepts an export destination only as an executable package component with a
     displayName: "Page export",
     declaredCapabilities: ["network"],
     entryPoint: "export.mjs",
+    canvasExport: {
+      contribution: {
+        schemaVersion: 1,
+        kind: "canvas-export-contribution",
+        targetId: "page-export",
+        label: "Page export",
+        formats: ["markdown"],
+      },
+      allowedOrigins: ["https://example.test"],
+    },
   };
   const exporting = { ...packageManifest, primaryComponentId: target.id, components: [target] };
   expect(decodeExtensionPackageManifest(exporting).components[0]?.kind).toBe(

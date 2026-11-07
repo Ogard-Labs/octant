@@ -17,7 +17,9 @@
     "./language-server-package": "./src/languageServerPackage.ts",
     "./debug-adapter-package": "./src/debugAdapterPackage.ts",
     "./outside-provider-driver": "./src/outsideProviderDriver.ts",
-    "./credential-request": "./src/credentialRequest.ts"
+    "./credential-request": "./src/credentialRequest.ts",
+    "./canvas-export-package": "./src/canvasExportPackage.ts",
+    "./canvas-export-worker": "./src/canvasExportWorker.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

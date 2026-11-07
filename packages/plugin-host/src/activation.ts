@@ -18,6 +18,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "mcp-tool",
     "mcp-prompt",
     "mcp-resource",
+    "canvas-export-target",
     ...rendererKinds,
     ...providerDriverKind,
   ]),
@@ -28,6 +29,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "mcp-prompt",
     "mcp-resource",
     "app",
+    "canvas-export-target",
     ...rendererKinds,
     ...providerDriverKind,
     ...desktopProviderKind,
@@ -47,6 +49,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     // Code only: Work has no developer environment and Chat has no folder.
     "language-server",
     "debug-adapter",
+    "canvas-export-target",
     ...rendererKinds,
     ...providerDriverKind,
     ...desktopProviderKind,
@@ -93,7 +96,10 @@ export function isExtensionComponentHostConfined(
   platform: string,
   component: ExtensionComponent,
 ): boolean {
-  return component.kind !== "provider-driver" || isOutsideDriverHostConfined(platform);
+  return (
+    (component.kind !== "provider-driver" && component.kind !== "canvas-export-target") ||
+    isOutsideDriverHostConfined(platform)
+  );
 }
 
 /** Whether this platform confines an outside provider driver's process. */

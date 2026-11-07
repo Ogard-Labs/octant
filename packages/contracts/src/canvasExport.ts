@@ -1,7 +1,28 @@
+import {
+  CanvasExportSchemaVersion,
+  CANVAS_EXPORT_LABEL_MAX_CHARS,
+  CANVAS_EXPORT_MESSAGE_MAX_CHARS,
+  CanvasExportFormat,
+  CanvasExportTargetId,
+  CanvasExportContribution,
+  canvasExportSafeBounded,
+  canvasExportUniqueFormats,
+} from "./canvasExportContribution";
+export {
+  CANVAS_EXPORT_SCHEMA_VERSION,
+  CanvasExportSchemaVersion,
+  CANVAS_EXPORT_LABEL_MAX_CHARS,
+  CANVAS_EXPORT_MESSAGE_MAX_CHARS,
+  CanvasExportFormat,
+  CanvasExportTargetId,
+  CanvasExportContribution,
+  canvasExportSafeBounded,
+  canvasExportUniqueFormats,
+} from "./canvasExportContribution";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { CanvasId, CanvasVersionId } from "./canvas";
-import { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasShare";
+import { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasExportText";
 import { UtcTimestamp } from "./events";
 
 // A destination plugin receives a rendered Canvas and returns a receipt or a
@@ -13,21 +34,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 const boundedText = (maximum: number) =>
   Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(96),
-    Schema.pattern(/^[a-z][a-z0-9-]*$/),
-    Schema.brand(brand),
-  );
-
-export const CANVAS_EXPORT_SCHEMA_VERSION = 1 as const;
-export const CanvasExportSchemaVersion = Schema.Literal(CANVAS_EXPORT_SCHEMA_VERSION);
-export type CanvasExportSchemaVersion = typeof CanvasExportSchemaVersion.Type;
 
 export const CANVAS_EXPORT_BODY_MAX_BYTES = 262_144;
-export const CANVAS_EXPORT_LABEL_MAX_CHARS = 128;
-export const CANVAS_EXPORT_MESSAGE_MAX_CHARS = 1_024;
-
 /** A held approval is answered or forgotten. This is how long it waits. */
 export const CANVAS_EXPORT_APPROVAL_TTL_MS = 10 * 60_000;
 
@@ -56,15 +64,6 @@ const exportBody = Schema.String.pipe(
  * `share-document` is the Canvas's shared blocks as JSON, for a destination
  * that draws them itself (a public link).
  */
-export const CanvasExportFormat = Schema.Literal(
-  "markdown",
-  "html",
-  "share-document",
-  "pdf",
-  "png",
-);
-export type CanvasExportFormat = typeof CanvasExportFormat.Type;
-
 /** The forms rendered as one text body. */
 export const CanvasExportTextFormat = Schema.Literal("markdown", "html", "share-document");
 export type CanvasExportTextFormat = typeof CanvasExportTextFormat.Type;
@@ -126,9 +125,6 @@ export const CanvasExportFileName = Schema.NonEmptyTrimmedString.pipe(
 );
 export type CanvasExportFileName = typeof CanvasExportFileName.Type;
 
-export const CanvasExportTargetId = boundedToken("CanvasExportTargetId");
-export type CanvasExportTargetId = typeof CanvasExportTargetId.Type;
-
 export const CanvasExportRecordId = brandedUuid("CanvasExportRecordId");
 export type CanvasExportRecordId = typeof CanvasExportRecordId.Type;
 
@@ -141,35 +137,11 @@ export const CanvasExportPayloadDigest = Schema.String.pipe(
 );
 export type CanvasExportPayloadDigest = typeof CanvasExportPayloadDigest.Type;
 
-const safeBounded = (maximum: number) =>
-  boundedText(maximum).pipe(
-    Schema.filter((value) => isCanvasShareSafeText(value), {
-      message: () => "Canvas export text must not contain a secret or a file path.",
-    }),
-  );
-
 /** Text a destination or the host shows the person about one export. */
-const CanvasExportMessage = safeBounded(CANVAS_EXPORT_MESSAGE_MAX_CHARS);
+const CanvasExportMessage = canvasExportSafeBounded(CANVAS_EXPORT_MESSAGE_MAX_CHARS);
 
 /** Whether `value` would decode as an export message: bounded and free of paths and secrets. */
 export const isCanvasExportMessage = Schema.is(CanvasExportMessage);
-
-const uniqueFormats = <T extends string>(formats: ReadonlyArray<T>): boolean =>
-  new Set(formats).size === formats.length;
-
-export const CanvasExportContribution = Schema.Struct({
-  schemaVersion: CanvasExportSchemaVersion,
-  kind: Schema.Literal("canvas-export-contribution"),
-  targetId: CanvasExportTargetId,
-  label: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
-  formats: Schema.NonEmptyArray(CanvasExportFormat).pipe(
-    Schema.maxItems(5),
-    Schema.filter(uniqueFormats, {
-      message: () => "Canvas export formats must be unique.",
-    }),
-  ),
-}).annotations(strict);
-export type CanvasExportContribution = typeof CanvasExportContribution.Type;
 
 /** Honest status of a destination that passed activation. Disabled and uninstalled targets are omitted, not listed. */
 export const CanvasExportTargetStatus = Schema.Literal("not-connected", "ready", "refused");
@@ -188,10 +160,10 @@ export type CanvasExportVisibility = typeof CanvasExportVisibility.Type;
 
 export const CanvasExportTargetOffer = Schema.Struct({
   targetId: CanvasExportTargetId,
-  label: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
+  label: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   formats: Schema.Array(CanvasExportImplementedFormat).pipe(
     Schema.maxItems(5),
-    Schema.filter(uniqueFormats, {
+    Schema.filter(canvasExportUniqueFormats, {
       message: () => "Canvas export formats must be unique.",
     }),
   ),
@@ -232,7 +204,7 @@ export const CanvasExportRenderedText = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-output"),
   format: CanvasExportTextFormat,
-  title: safeBounded(256),
+  title: canvasExportSafeBounded(256),
   body: exportBody,
   metadata: CanvasExportMetadata,
 }).annotations(strict);
@@ -270,7 +242,7 @@ export const CanvasExportRenderedPictures = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-output"),
   format: CanvasExportPictureFormat,
-  title: safeBounded(256),
+  title: canvasExportSafeBounded(256),
   files: Schema.NonEmptyArray(CanvasExportRenderedFile).pipe(
     Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX),
     Schema.filter((files) => new Set(files.map((file) => file.name)).size === files.length, {
@@ -461,9 +433,9 @@ export const CanvasExportApprovalCard = Schema.Struct({
   versionId: CanvasVersionId,
   sequence: Schema.Int.pipe(Schema.positive()),
   targetId: CanvasExportTargetId,
-  destinationLabel: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
+  destinationLabel: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   format: CanvasExportImplementedFormat,
-  title: safeBounded(256),
+  title: canvasExportSafeBounded(256),
   /**
    * The exact file this export will write, when the destination can name one.
    *
@@ -486,7 +458,7 @@ export const CanvasExportApprovalCard = Schema.Struct({
    * The account this export will act as, when the destination acts as one.
    * Shown verbatim so the person knows whose name it goes out under.
    */
-  destinationAccount: Schema.optional(safeBounded(128)),
+  destinationAccount: Schema.optional(canvasExportSafeBounded(128)),
   /**
    * The audience the destination offered for this export. `secret` is visible
    * only to the account; `public` is visible to anyone, which
@@ -725,7 +697,7 @@ export const CanvasExportRecorded = Schema.Struct({
   versionId: CanvasVersionId,
   sequence: Schema.Int.pipe(Schema.positive()),
   targetId: CanvasExportTargetId,
-  destinationLabel: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
+  destinationLabel: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   format: CanvasExportImplementedFormat,
   payloadDigest: CanvasExportPayloadDigest,
   approvalId: CanvasExportApprovalId,

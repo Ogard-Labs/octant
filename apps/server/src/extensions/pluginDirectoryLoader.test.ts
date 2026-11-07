@@ -165,3 +165,13 @@ describe("loading a plugin folder in another tool's layout", () => {
     }
   });
 });
+
+it("reads one Canvas export document and refuses mixing executable package layouts", async () => {
+  const root = await folder({ "octant-canvas-export.json": "{}", "plugin.json": "{}" });
+  expect((await loadPluginDirectory(root)).format).toBe("canvas-export-package");
+  const mixed = await folder({
+    "octant-canvas-export.json": "{}",
+    "octant-provider-driver.json": "{}",
+  });
+  await expect(loadPluginDirectory(mixed)).rejects.toThrow(/not both/);
+});

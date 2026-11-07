@@ -1,3 +1,4 @@
+import { readCanvasExportPackage, type CanvasExportPackageInput } from "./canvasExportPackage";
 import type { ExtensionCatalogEntry, ExtensionCommand } from "@octant/contracts/extension-rpc";
 import type { ExtensionCatalogId, ExtensionSource } from "@octant/contracts/extensions";
 import { isAgentPluginsManifest } from "@octant/plugin-host/agent-plugins";
@@ -46,7 +47,8 @@ export type PluginPackageInput =
   | AgentPluginPackageInput
   | LanguageServerPackageInput
   | OutsideProviderDriverPackageInput
-  | DebugAdapterPackageInput;
+  | DebugAdapterPackageInput
+  | CanvasExportPackageInput;
 
 /**
  * A live Agent Plugins catalog source (today npm) that the resolver can search
@@ -259,6 +261,12 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
 
 function normalizePluginPackage(input: PluginPackageInput): ResolvedExtensionPackage {
   if ("layout" in input) {
+    if (input.layout === "canvas-export-package") {
+      const reading = readCanvasExportPackage(input);
+      if (reading.status === "refused")
+        throw new Error(`Canvas export package refused: ${reading.reason}.`);
+      return reading.resolved;
+    }
     if (input.layout === "debug-adapter-package") {
       const reading = readDebugAdapterPackage(input);
       if (reading.status === "refused") throw new DebugAdapterPackageRefusedError(reading.reason);

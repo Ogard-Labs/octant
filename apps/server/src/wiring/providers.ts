@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
 import { WorktreePreparationService } from "../code/worktreePreparationService";
@@ -650,7 +651,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       execPath: process.execPath,
       type: "type" in process && typeof process.type === "string" ? process.type : undefined,
     });
+    const canvasExportWorkerEntryPoint = fileURLToPath(
+      new URL(
+        import.meta.url.endsWith(".ts")
+          ? "../canvas/canvasExportWorker.mjs"
+          : "./canvasExportWorker.mjs",
+        import.meta.url,
+      ),
+    );
     const extensionPackageStore = new ExtensionPackageStore({
+      canvasExportWorkerEntryPoint,
       dataDirectory: providerDataDirectory,
       uuid: randomUUID,
       ...(outsideDriverRuntime === undefined ? {} : { outsideDriverRuntime }),
@@ -2103,6 +2113,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionApiService,
       extensionLifecycleService,
       extensionPackageStore,
+      canvasExportWorkerOptions: {
+        store: extensionPackageStore,
+        supervisor:
+          extensionSupervisor instanceof ExtensionSupervisor ? extensionSupervisor : undefined,
+        runtime: outsideDriverRuntime,
+        workerEntryPoint: canvasExportWorkerEntryPoint,
+        platform: process.platform,
+      },
       extensionRoutes,
       providerToolingRoutes,
       generatedImageStore,

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { CanvasExportContribution } from "./canvasExportContribution";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
@@ -495,6 +496,30 @@ export const ExtensionDebugAdapterDeclaration = Schema.Struct({
   );
 export type ExtensionDebugAdapterDeclaration = typeof ExtensionDebugAdapterDeclaration.Type;
 
+/** Explicit egress scope shown with an export approval; no ambient network is granted. */
+export const ExtensionCanvasExportDeclaration = Schema.Struct({
+  contribution: CanvasExportContribution,
+  allowedOrigins: Schema.Array(
+    Schema.String.pipe(
+      Schema.maxLength(256),
+      Schema.filter((value) => {
+        try {
+          const url = new URL(value);
+          return (
+            url.protocol === "https:" && url.origin === value && !url.username && !url.password
+          );
+        } catch {
+          return false;
+        }
+      }),
+    ),
+  ).pipe(
+    Schema.maxItems(8),
+    Schema.filter((values) => new Set(values).size === values.length),
+  ),
+}).annotations(strict);
+export type ExtensionCanvasExportDeclaration = typeof ExtensionCanvasExportDeclaration.Type;
+
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -510,6 +535,8 @@ export const ExtensionComponent = Schema.Struct({
   languageServer: Schema.optional(ExtensionLanguageServerDeclaration),
   /** Present exactly when `kind` is `debug-adapter`. */
   debugAdapter: Schema.optional(ExtensionDebugAdapterDeclaration),
+  /** Present exactly for a Canvas export target. */
+  canvasExport: Schema.optional(ExtensionCanvasExportDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -709,6 +736,8 @@ export const ExtensionPackageManifest = Schema.Struct({
         if ((component.kind === "debug-adapter") !== (component.debugAdapter !== undefined)) {
           return false;
         }
+        if ((component.kind === "canvas-export-target") !== (component.canvasExport !== undefined))
+          return false;
         if (mcpChild !== (component.parentComponentId !== undefined)) return false;
         if (!mcpChild) return true;
         return components.get(component.parentComponentId!)?.kind === "mcp-server";

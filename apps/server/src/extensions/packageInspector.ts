@@ -213,7 +213,8 @@ export function inspectExtensionPackage(
       const entry = filesByPath.get(entryPoint);
       // A provider driver's entry is a module the host loads on its own
       // runtime, never a program of the package's own, so it must not be one.
-      const runsAsModule = component.kind === "provider-driver";
+      const runsAsModule =
+        component.kind === "provider-driver" || component.kind === "canvas-export-target";
       if (entry === undefined || (entry.executable === true) === runsAsModule) {
         fail("entry-point-missing", "Declared package entry point is unavailable.");
       }

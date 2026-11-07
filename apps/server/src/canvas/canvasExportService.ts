@@ -63,11 +63,13 @@ import type {
  *
  * A destination plugin is reached only through the published export port, and
  * only after the person approves the rendered payload and that destination.
- * Preparing an approval does not call the plugin and does not journal an
- * export. Denying one does neither. The journal records the completed export
+ * Preparing an approval may describe the destination offline, but never
+ * invokes exportDocument or journals an export. Denying one does neither. The journal records the completed export
  * so a restart can replay it.
  */
 export interface CanvasExportTargetBinding {
+  /** Host-owned package/component/version identity, retained by an approval. */
+  readonly identity?: string;
   readonly facts: CanvasExportActivationFacts;
   readonly target: CanvasExportTarget;
 }
@@ -124,6 +126,7 @@ type PendingExport =
       readonly confirmedDestination?: CanvasExportDestination;
       /** Instant past which answering this approval is an `expired` refusal. */
       readonly expiresAtMs: number;
+      readonly targetIdentity?: string;
     }
   | {
       readonly released: true;
@@ -175,7 +178,7 @@ export class CanvasExportService {
 
   /**
    * Render the document and hold an approval card. The destination is not
-   * called. A text form renders at once; a picture form is drawn in the host's
+   * invoked to export. A text form renders at once; a picture form is drawn in the host's
    * browser first, so the card names exactly the files it holds and a host
    * with no browser refuses here, before anything is held.
    */
@@ -224,6 +227,7 @@ export class CanvasExportService {
       );
     }
 
+    const binding = this.#soleTargetBinding(offer.targetId, document.canvasId);
     const rendered = isCanvasExportPictureFormat(request.format)
       ? await this.#renderPictures(document, request.format, request.frameTheme)
       : renderText(document, request.format, request.frameTheme, this.#clock());
@@ -250,13 +254,53 @@ export class CanvasExportService {
         refused("malformed", "The rendered document cannot be exported."),
       );
     }
-    const binding = this.#soleTargetBinding(offer.targetId, document.canvasId);
     // A destination that can describe itself does so here, so the person
     // approves a place and its terms rather than a destination's promise.
     // Naming a file is also what makes the approval a confirmation to replace
     // an existing one; naming an account and an audience is what lets the
     // person see whose name it goes out under and who can see it.
-    const destination = withoutChoice(binding?.target.describeDestination?.(output));
+    if (
+      binding === undefined ||
+      this.#soleTargetBinding(offer.targetId, document.canvasId)?.identity !== binding.identity ||
+      this.#offerFor(offer.targetId, document.canvasId)?.status !== "ready"
+    ) {
+      return decodeCanvasExportPrepareResult(
+        refused("not-offered", "That destination is not offered."),
+      );
+    }
+    let destination: CanvasExportDestination | undefined;
+    let descriptionDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      destination = withoutChoice(
+        await Promise.race([
+          Promise.resolve().then(() => binding.target.describeDestination?.(output)),
+          new Promise<never>((_, reject) => {
+            descriptionDeadline = setTimeout(
+              () => reject(new Error("Destination description timed out.")),
+              10_000,
+            );
+          }),
+        ]),
+      );
+    } catch {
+      return decodeCanvasExportPrepareResult(
+        refused("unavailable", "The destination could not describe this export."),
+      );
+    } finally {
+      if (descriptionDeadline !== undefined) clearTimeout(descriptionDeadline);
+    }
+    const currentBinding = this.#soleTargetBinding(offer.targetId, document.canvasId);
+    const currentOffer = this.#offerFor(offer.targetId, document.canvasId);
+    if (
+      currentBinding === undefined ||
+      currentBinding.identity !== binding.identity ||
+      currentOffer?.status !== "ready" ||
+      !currentOffer.formats.includes(request.format)
+    ) {
+      return decodeCanvasExportPrepareResult(
+        refused("not-offered", "That destination is not offered."),
+      );
+    }
     // A link opens for anyone who holds it, so only the person at a local
     // window may publish one; a paired device can read links, not mint them.
     if (destination?.linkTerms !== undefined && requester !== "local-window") {
@@ -269,45 +313,53 @@ export class CanvasExportService {
     }
     const nowMs = Date.parse(this.#clock());
     const expiresAtMs = nowMs + CANVAS_EXPORT_APPROVAL_TTL_MS;
-    const card = decodeCanvasExportApprovalCard({
-      schemaVersion: 1,
-      kind: "canvas-export-approval",
-      approvalId,
-      canvasId: document.canvasId,
-      versionId: document.versionId,
-      sequence: document.sequence,
-      targetId: offer.targetId,
-      destinationLabel: offer.label,
-      format: rendered.format,
-      title: document.title,
-      ...(destination?.path === undefined
-        ? {}
-        : {
-            destinationPath: destination.path,
-            replacesExisting: destination.replacesExisting ?? false,
-            ...(destination.alsoReplaces === undefined || destination.alsoReplaces.length === 0
-              ? {}
-              : { alsoReplaces: destination.alsoReplaces }),
-          }),
-      ...(destination?.account === undefined ? {} : { destinationAccount: destination.account }),
-      ...(destination?.visibility === undefined
-        ? {}
-        : { destinationVisibility: destination.visibility }),
-      ...(destination?.note === undefined ? {} : { destinationNote: destination.note }),
-      ...rendered.card,
-      ...(destination?.linkTerms === undefined
-        ? {}
-        : { destinationLinkTerms: destination.linkTerms }),
-      payloadDigest: rendered.payloadDigest,
-      byteLength: rendered.byteLength,
-      expiresAt: new Date(expiresAtMs).toISOString(),
-    });
+    let card: CanvasExportApprovalCard;
+    try {
+      card = decodeCanvasExportApprovalCard({
+        schemaVersion: 1,
+        kind: "canvas-export-approval",
+        approvalId,
+        canvasId: document.canvasId,
+        versionId: document.versionId,
+        sequence: document.sequence,
+        targetId: offer.targetId,
+        destinationLabel: offer.label,
+        format: rendered.format,
+        title: document.title,
+        ...(destination?.path === undefined
+          ? {}
+          : {
+              destinationPath: destination.path,
+              replacesExisting: destination.replacesExisting ?? false,
+              ...(destination.alsoReplaces === undefined || destination.alsoReplaces.length === 0
+                ? {}
+                : { alsoReplaces: destination.alsoReplaces }),
+            }),
+        ...(destination?.account === undefined ? {} : { destinationAccount: destination.account }),
+        ...(destination?.visibility === undefined
+          ? {}
+          : { destinationVisibility: destination.visibility }),
+        ...(destination?.note === undefined ? {} : { destinationNote: destination.note }),
+        ...rendered.card,
+        ...(destination?.linkTerms === undefined
+          ? {}
+          : { destinationLinkTerms: destination.linkTerms }),
+        payloadDigest: rendered.payloadDigest,
+        byteLength: rendered.byteLength,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+      });
+    } catch {
+      return decodeCanvasExportPrepareResult(
+        refused("unavailable", "The destination description cannot be shown safely."),
+      );
+    }
     const result = decodeCanvasExportPrepareResult({ kind: "approval", card });
     if (result.kind === "approval") {
       this.#holdPending(document.canvasId, {
         card: result,
         output,
         expiresAtMs,
+        ...(binding.identity === undefined ? {} : { targetIdentity: binding.identity }),
         ...(destination === undefined ? {} : { confirmedDestination: destination }),
       });
     }
@@ -397,7 +449,7 @@ export class CanvasExportService {
     // sharing one id is ambiguous: the offer omits it, and a stale approval
     // for it is refused rather than resolved by binding order.
     const binding = this.#soleTargetBinding(pending.card.card.targetId, pending.card.card.canvasId);
-    if (binding === undefined) {
+    if (binding === undefined || binding.identity !== pending.targetIdentity) {
       this.#pending.delete(key);
       return decodeCanvasExportDecideResult(
         refused("not-offered", "That destination is not offered."),

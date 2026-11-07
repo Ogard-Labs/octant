@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -901,4 +901,53 @@ describe("node extension process port", () => {
       await child.stop().catch(() => undefined);
     }
   });
+});
+
+it("keeps a Canvas export worker offline and permits only its host-owned entry file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "octant-export-profile-"));
+  receiptDirectories.push(root);
+  const packageRoot = join(root, "package");
+  const temporaryDirectory = join(root, "worker-tmp");
+  const home = join(root, "home");
+  await Promise.all([packageRoot, home].map((path) => mkdir(path)));
+  await mkdir(temporaryDirectory, { mode: 0o700 });
+  let observed: ReadonlyArray<string> = [];
+  const spawn: typeof nodeSpawn = (
+    _command: string,
+    args?: ReadonlyArray<string> | SpawnOptions,
+  ) => {
+    if (Array.isArray(args)) observed = args;
+    throw new Error("Profile inspection only.");
+  };
+  const worker = join(root, "host-worker.mjs");
+  const port = createNodeExtensionProcessPort({
+    platform: "darwin",
+    sandboxPath: process.execPath,
+    homeDirectory: home,
+    spawn,
+  });
+  await expect(
+    port.start({
+      ...startInput,
+      args: [worker, join(packageRoot, "export.mjs")],
+      cwd: packageRoot,
+      readiness: "spawn",
+      env: { SECRET_TEST_VALUE: "host-only" },
+      sandbox: {
+        kind: "canvas-export",
+        runtime: "bun",
+        instanceId: "review",
+        packageRoot,
+        temporaryDirectory,
+        workerEntryPoint: worker,
+      },
+    }),
+  ).rejects.toThrow();
+  const profile = observed[1] ?? "";
+  expect(profile).toContain("(deny default)");
+  expect(profile).toContain(`(allow file-read* (literal "${worker}"))`);
+  expect(profile).not.toContain(`(allow file-read* (subpath "${root}"))`);
+  expect(profile).not.toContain("(allow network");
+  expect(profile).not.toContain("(allow process-fork)");
+  expect(profile).not.toContain("(allow process-exec)");
 });

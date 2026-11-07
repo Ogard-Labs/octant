@@ -34,6 +34,7 @@ import type {
   ExtensionProcessReceipt,
   ExtensionProcessStartInput,
   OutsideDriverProcessSandbox,
+  CanvasExportProcessSandbox,
 } from "./extensionSupervisor";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -118,7 +119,7 @@ async function startProcess(
       cwd: input.cwd,
       detached: process.platform !== "win32",
       env:
-        input.sandbox?.kind === "outside-driver"
+        input.sandbox?.kind === "outside-driver" || input.sandbox?.kind === "canvas-export"
           ? outsideDriverEnvironment(input.sandbox)
           : { PATH: SAFE_PATH, ...input.env },
       shell: false,
@@ -299,7 +300,7 @@ async function prepareProcessLaunch(
   if (input.sandbox === undefined) {
     return { command: input.command, args: [...input.args] };
   }
-  if (input.sandbox.kind === "outside-driver") {
+  if (input.sandbox.kind === "outside-driver" || input.sandbox.kind === "canvas-export") {
     return await prepareOutsideDriverLaunch(
       input,
       input.sandbox,
@@ -432,7 +433,7 @@ const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/etc", "/private/etc/localtime"];
  * fuses, and no flag, since the entry is the command line's one argument.
  */
 function outsideDriverEnvironment(
-  sandbox: OutsideDriverProcessSandbox,
+  sandbox: OutsideDriverProcessSandbox | CanvasExportProcessSandbox,
 ): Readonly<Record<string, string>> {
   return {
     PATH: SAFE_PATH,
@@ -485,7 +486,7 @@ function outsideDriverRuntimeReadRoots(
  * driver process owner makes exactly such a folder for every start.
  */
 async function assertOwnTemporaryFolder(
-  sandbox: OutsideDriverProcessSandbox,
+  sandbox: OutsideDriverProcessSandbox | CanvasExportProcessSandbox,
   homeDirectory: string | undefined,
 ): Promise<void> {
   const folder = sandbox.temporaryDirectory;
@@ -521,7 +522,7 @@ function isInsideOrEqual(path: string, root: string): boolean {
  */
 async function prepareOutsideDriverLaunch(
   input: ExtensionProcessStartInput,
-  sandbox: OutsideDriverProcessSandbox,
+  sandbox: OutsideDriverProcessSandbox | CanvasExportProcessSandbox,
   platform: NodeJS.Platform,
   sandboxPath: string,
   homeDirectory: string | undefined,
@@ -546,6 +547,7 @@ async function prepareOutsideDriverLaunch(
     "/",
     ...OUTSIDE_DRIVER_DEVICE_READS,
     ...OUTSIDE_DRIVER_SYSTEM_FILE_READS,
+    ...(sandbox.kind === "canvas-export" ? [sandbox.workerEntryPoint] : []),
     ...(runtime === input.command ? [] : [input.command]),
   ]);
   const metadataLiterals = uniqueAbsolutePaths(
