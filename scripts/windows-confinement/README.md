@@ -37,6 +37,23 @@ access-denied network policy. An inherited directory grant is expected to
 expose a later protected filename: that failed contract measurement identifies
 the missing access-time filename policy, rather than silently accepting it.
 
+The network measurement retains the no-capability LPAC baseline and compares it
+with an ordinary AppContainer with no capabilities and an LPAC with only the
+`registryRead` capability. The actual child token is checked for that exact
+capability list before resume. No case receives a network capability. The JSON
+records the failing Winsock stage, its result code, container kind and capability
+name. Only an explicit `WSAEACCES` after successful `WSAStartup` counts as a
+network-denial pass; a successful connection, initialization failure or timeout
+does not. The extra capability must also preserve the ungranted sibling denial.
+
+This tests an initialization hypothesis, not a fix for the filesystem gap:
+Microsoft documents that LPAC needs `registryRead` to open registry keys, and
+Winsock's generic error 10107 can include protocol-catalog registry failures.
+The experiment changes no system ACL or firewall setting and reads no registry
+data into its evidence. Every connection targets the fixture's owned loopback
+listener. Neither an improved socket result nor the registry capability can
+protect a late secret inside an inherited directory grant.
+
 Exit zero means the measurements ran and owned cleanup succeeded. Individual
 failed contract measurements remain visible in the JSON and job summary. A
 setup, compilation, execution, or cleanup failure exits nonzero. The result
@@ -47,4 +64,8 @@ No host implementation imports or packages this executable.
 
 The primitives follow Microsoft's [AppContainer launch API](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)
 and [Job object limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information).
+The capability comes from the SDK's
+[DeriveCapabilitySidsFromName](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-derivecapabilitysidsfromname)
+API, linked through the standard OneCoreUAP import library. The recorded codes
+follow Microsoft's [Winsock error contract](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2).
 The source is original fixture code, not an imported sandbox implementation.

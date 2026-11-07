@@ -112,12 +112,38 @@ static void private_directory(const fs::path& path) {
   if (!created) throw Failure{error};
 }
 
-static bool appcontainer_token(HANDLE process, bool expected_lpac) {
+static std::vector<BYTE> registry_read_capability() {
+  struct DerivedSids {
+    PSID* groups = nullptr;
+    DWORD group_count = 0;
+    PSID* capabilities = nullptr;
+    DWORD capability_count = 0;
+    ~DerivedSids() {
+      for (DWORD i = 0; i < group_count; ++i) LocalFree(groups[i]);
+      for (DWORD i = 0; i < capability_count; ++i) LocalFree(capabilities[i]);
+      LocalFree(groups); LocalFree(capabilities);
+    }
+  } derived;
+  require(DeriveCapabilitySidsFromName(L"registryRead", &derived.groups, &derived.group_count,
+    &derived.capabilities, &derived.capability_count), "derive registryRead capability");
+  if (derived.capability_count != 1) throw Failure{ERROR_INVALID_SID};
+  std::vector<BYTE> sid(GetLengthSid(derived.capabilities[0]));
+  require(CopySid(static_cast<DWORD>(sid.size()), sid.data(), derived.capabilities[0]));
+  return sid;
+}
+
+static bool appcontainer_token(HANDLE process, bool expected_lpac, PSID capability) {
   HANDLE raw = nullptr;
   require(OpenProcessToken(process, TOKEN_QUERY, &raw));
   Handle token(raw);
   DWORD app = 0, lpac = 0, length = 0;
   require(GetTokenInformation(token.get(), TokenIsAppContainer, &app, sizeof(app), &length), "query AppContainer token");
+  GetTokenInformation(token.get(), TokenCapabilities, nullptr, 0, &length);
+  std::vector<BYTE> capability_info(length);
+  require(GetTokenInformation(token.get(), TokenCapabilities, capability_info.data(), length, &length), "query child capability identities");
+  const auto* actual = reinterpret_cast<const TOKEN_GROUPS*>(capability_info.data());
+  if (actual->GroupCount != (capability ? 1u : 0u) ||
+      (capability && !EqualSid(actual->Groups[0].Sid, capability))) return false;
   if (!GetTokenInformation(token.get(), TokenIsLessPrivilegedAppContainer, &lpac, sizeof(lpac), &length)) {
     // Some native SDK/OS pairs expose this enum but reject the Win32 query.
     // Record that limit; the independent ACL control measures opt-out behavior.
@@ -134,7 +160,7 @@ class Child {
   Handle gate_;
   Handle process_;
 public:
-  Child(const fs::path& binary, PSID sid, const std::wstring& arguments, bool lpac = true)
+  Child(const fs::path& binary, PSID sid, const std::wstring& arguments, bool lpac = true, PSID capability = nullptr)
     : job_(CreateJobObjectW(nullptr, nullptr)), ready_(event()), gate_(event()) {
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -147,6 +173,9 @@ public:
     struct Attributes { LPPROC_THREAD_ATTRIBUTE_LIST value; ~Attributes() { DeleteProcThreadAttributeList(value); } } cleanup{list};
     SECURITY_CAPABILITIES capabilities{};
     capabilities.AppContainerSid = sid;
+    SID_AND_ATTRIBUTES granted{capability, SE_GROUP_ENABLED};
+    capabilities.CapabilityCount = capability ? 1u : 0u;
+    capabilities.Capabilities = capability ? &granted : nullptr;
     DWORD policy = PROCESS_CREATION_ALL_APPLICATION_PACKAGES_OPT_OUT;
     HANDLE inherited[] = {ready_.get(), gate_.get()};
     require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
@@ -170,7 +199,7 @@ public:
     try {
       // Verify the actual token and assign the Job before the first instruction.
       require(AssignProcessToJobObject(job_.get(), process_.get()), "assign suspended child to Job");
-      if (!appcontainer_token(process_.get(), lpac)) throw Failure{ERROR_BAD_TOKEN_TYPE};
+      if (!appcontainer_token(process_.get(), lpac, capability)) throw Failure{ERROR_BAD_TOKEN_TYPE};
       if (ResumeThread(thread.get()) == static_cast<DWORD>(-1)) throw Failure{GetLastError()};
       if (WaitForSingleObject(ready_.get(), 5000) != WAIT_OBJECT_0) throw Failure{WAIT_TIMEOUT};
     } catch (...) {
@@ -215,17 +244,39 @@ public:
   }
 };
 
+enum class NetworkStage : DWORD { startup = 1, socket = 2, nonblocking = 3, connect = 4, wait = 5, status = 6 };
+
+static DWORD network_result(NetworkStage stage, DWORD error) {
+  if (error > 0xffff) throw Failure{ERROR_INVALID_DATA};
+  return (static_cast<DWORD>(stage) << 16) | error;
+}
+
+static const char* network_stage(DWORD stage) {
+  switch (static_cast<NetworkStage>(stage)) {
+    case NetworkStage::startup: return "WSAStartup";
+    case NetworkStage::socket: return "socket";
+    case NetworkStage::nonblocking: return "ioctlsocket";
+    case NetworkStage::connect: return "connect";
+    case NetworkStage::wait: return "select";
+    case NetworkStage::status: return "getsockopt";
+  }
+  return "unknown";
+}
+
 static DWORD network_probe(unsigned short port) {
   WSADATA data{};
   int started = WSAStartup(MAKEWORD(2, 2), &data);
-  if (started) return static_cast<DWORD>(started);
+  if (started) return network_result(NetworkStage::startup, static_cast<DWORD>(started));
   SOCKET socket_value = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   DWORD result = 0;
+  NetworkStage stage = NetworkStage::socket;
   if (socket_value == INVALID_SOCKET) result = static_cast<DWORD>(WSAGetLastError());
   else {
+    stage = NetworkStage::nonblocking;
     u_long nonblocking = 1;
     if (ioctlsocket(socket_value, FIONBIO, &nonblocking)) result = static_cast<DWORD>(WSAGetLastError());
     else {
+      stage = NetworkStage::connect;
       sockaddr_in target{}; target.sin_family = AF_INET; target.sin_addr.s_addr = htonl(INADDR_LOOPBACK); target.sin_port = htons(port);
       if (connect(socket_value, reinterpret_cast<sockaddr*>(&target), sizeof(target))) {
         result = static_cast<DWORD>(WSAGetLastError());
@@ -233,15 +284,22 @@ static DWORD network_probe(unsigned short port) {
           fd_set write_set, errors; FD_ZERO(&write_set); FD_ZERO(&errors); FD_SET(socket_value, &write_set); FD_SET(socket_value, &errors);
           timeval timeout{2, 0};
           int selected = select(0, nullptr, &write_set, &errors, &timeout);
-          int error = 0, length = sizeof(error);
-          result = selected > 0 && !getsockopt(socket_value, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length)
-            ? static_cast<DWORD>(error) : WAIT_TIMEOUT;
+          if (selected <= 0) {
+            stage = NetworkStage::wait;
+            result = selected ? static_cast<DWORD>(WSAGetLastError()) : WSAETIMEDOUT;
+          } else {
+            int error = 0, length = sizeof(error);
+            if (getsockopt(socket_value, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length)) {
+              stage = NetworkStage::status;
+              result = static_cast<DWORD>(WSAGetLastError());
+            } else result = static_cast<DWORD>(error);
+          }
         }
       }
     }
     closesocket(socket_value);
   }
-  WSACleanup(); return result;
+  WSACleanup(); return network_result(stage, result);
 }
 
 static int child(int argc, wchar_t** argv) {
@@ -270,7 +328,15 @@ static int child(int argc, wchar_t** argv) {
   return ERROR_INVALID_PARAMETER;
 }
 
-struct Measurement { const char* name; DWORD observed; DWORD expected; };
+struct Measurement {
+  const char* name;
+  DWORD observed;
+  DWORD expected;
+  const char* network_stage = nullptr;
+  const char* container = nullptr;
+  const char* capability = nullptr;
+  bool setup_completed = true;
+};
 
 int wmain(int argc, wchar_t** argv) {
   try {
@@ -336,8 +402,21 @@ int wmain(int argc, wchar_t** argv) {
         int length = sizeof(address);
         if (getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length))
           throw Failure{static_cast<DWORD>(WSAGetLastError())};
-        Child process(binary, sid, L"network " + std::to_wstring(ntohs(address.sin_port)));
-        measurements.push_back({"no-capability child refuses owned loopback connection", process.run(), WSAEACCES});
+        const std::wstring action = L"network " + std::to_wstring(ntohs(address.sin_port));
+        auto measure_network = [&](const char* label, bool lpac, PSID capability) {
+          Child process(binary, sid, action, lpac, capability);
+          const DWORD encoded = process.run();
+          const DWORD stage = encoded >> 16;
+          measurements.push_back({label, encoded & 0xffff, WSAEACCES, network_stage(stage),
+            lpac ? "lpac" : "appcontainer", capability ? "registryRead" : nullptr,
+            stage >= static_cast<DWORD>(NetworkStage::socket) && stage <= static_cast<DWORD>(NetworkStage::status)});
+        };
+        measure_network("no-capability child refuses owned loopback connection", true, nullptr);
+        measure_network("ordinary no-capability AppContainer refuses owned loopback connection", false, nullptr);
+        auto registry = registry_read_capability();
+        measure_network("registryRead-only LPAC refuses owned loopback connection", true, registry.data());
+        Child restricted(binary, sid, L"read " + quote((root / L"outside-secret").wstring()), true, registry.data());
+        measurements.push_back({"registryRead-only LPAC still denies ungranted sibling", restricted.run(), ERROR_ACCESS_DENIED});
       }
       {
         Child process(binary, sid, L"subtree ignored");
@@ -361,7 +440,10 @@ int wmain(int argc, wchar_t** argv) {
       const auto& value = measurements[index];
       if (index) output << ',';
       output << "{\"name\":\"" << value.name << "\",\"observed\":" << value.observed << ",\"expected\":"
-        << value.expected << ",\"passed\":" << (value.observed == value.expected ? "true" : "false") << '}';
+        << value.expected << ",\"passed\":" << (value.observed == value.expected && value.setup_completed ? "true" : "false");
+      if (value.network_stage) output << ",\"networkStage\":\"" << value.network_stage << "\",\"setupCompleted\":" << (value.setup_completed ? "true" : "false")
+        << ",\"container\":\"" << value.container << "\",\"capabilities\":[" << (value.capability ? "\"registryRead\"" : "") << ']';
+      output << '}';
     }
     output << "]}\n"; output.close();
     return failure || !cleanup || !output ? 1 : 0;
