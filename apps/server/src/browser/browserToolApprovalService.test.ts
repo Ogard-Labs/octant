@@ -215,12 +215,28 @@ describe("BrowserToolApprovalService", () => {
       threadId: "50000000-0000-4000-8000-000000000002",
       authority,
       origin: "https://example.com",
-      download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+      download: {
+        name: "report.pdf",
+        sizeBytes: 1_258_291,
+        mediaType: "application/pdf",
+        source: {
+          kind: "https-origin-chain",
+          origins: ["https://example.com", "https://files.example.com"],
+        },
+      },
     });
     expect(service.list(windowId)).toEqual([
       expect.objectContaining({
         origin: "https://example.com",
-        download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+        download: {
+          name: "report.pdf",
+          sizeBytes: 1_258_291,
+          mediaType: "application/pdf",
+          source: {
+            kind: "https-origin-chain",
+            origins: ["https://example.com", "https://files.example.com"],
+          },
+        },
       }),
     ]);
     expect(

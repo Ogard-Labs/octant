@@ -21,6 +21,7 @@ import {
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
+  BrowserDownloadSource,
   BrowserActionRequest,
   BrowserAutomationSnapshot,
   BrowserContextPolicy,
@@ -101,7 +102,12 @@ export interface BrowserAppManagedToolsOptions {
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
       readonly ask: (
-        facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+        facts: {
+          readonly name: string;
+          readonly sizeBytes: number;
+          readonly mediaType: string;
+          readonly source?: BrowserDownloadSource;
+        },
         origin: string,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<

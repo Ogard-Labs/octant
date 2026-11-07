@@ -1,3 +1,4 @@
+import type { BrowserDownloadSource } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath, rm } from "node:fs/promises";
@@ -22,6 +23,7 @@ export interface BrowserDownloadFacts {
   readonly name: string;
   readonly sizeBytes: number;
   readonly mediaType: string;
+  readonly source?: BrowserDownloadSource;
 }
 
 export type BrowserDownloadSaveOutcome =

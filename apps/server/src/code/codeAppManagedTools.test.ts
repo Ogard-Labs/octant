@@ -1474,7 +1474,7 @@ describe("Code app-managed tools", () => {
         expect.objectContaining({ workspaceRoot: "/checkout", downloadId: "d1" }),
       );
       expect(request).toHaveBeenCalledWith(
-        "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
+        "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
         undefined,
       );
     });

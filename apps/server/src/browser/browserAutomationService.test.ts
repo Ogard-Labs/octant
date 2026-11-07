@@ -1,3 +1,7 @@
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { browserDownloadHoldRoot } from "@octant/host-runtime";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
 import { HubMemberId, UtcTimestamp } from "@octant/contracts";
@@ -3371,4 +3375,57 @@ describe("BrowserAutomationService", () => {
     expect(snapshot.contexts?.length).toBe(MAX_BROWSER_THREAD_CONTEXTS);
     release();
   });
+});
+
+it("carries the held download's source receipt to its per-file review without substituting the page", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "octant-download-source-"));
+  const holdRoot = browserDownloadHoldRoot("headless");
+  await mkdir(holdRoot, { recursive: true, mode: 0o700 });
+  const heldFolder = await mkdtemp(join(holdRoot, "source-test-"));
+  const path = join(heldFolder, "file");
+  await writeFile(path, "report");
+  const source = {
+    kind: "https-origin-chain" as const,
+    origins: ["https://start.example", "https://files.example"],
+  };
+  const f = harness({
+    agentDownloadsEnabled: true,
+    observed: {
+      downloads: [
+        {
+          state: "held",
+          downloadId: "d1",
+          name: "report.txt",
+          sizeBytes: 6,
+          mediaType: "text/plain",
+          source,
+        },
+      ],
+    },
+  });
+  Object.assign(f.runtime, { claimDownload: async () => path, discardDownload: async () => {} });
+  try {
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await f.service.act({
+      windowId,
+      request: request({ kind: "click", target: "#get" }),
+      capturedBy: "agent",
+      holdDownloads: true,
+    });
+    const ask = vi.fn(async () => "denied" as const);
+    expect(
+      await f.service.saveDownload({
+        windowId,
+        threadId: threadOne,
+        downloadId: "d1",
+        workspaceRoot: workspace,
+        ask,
+      }),
+    ).toMatchObject({ status: "refused", error: "browser-download-denied" });
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ source }), "https://example.com");
+  } finally {
+    await f.service.close();
+    await rm(heldFolder, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
 });

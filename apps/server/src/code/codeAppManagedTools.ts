@@ -1,5 +1,5 @@
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
-import type { StoredBrowserProfile } from "@octant/contracts";
+import type { StoredBrowserProfile, BrowserDownloadSource } from "@octant/contracts";
 import type {
   BrowserAppManagedToolsOptions,
   BrowserModelBinding,
@@ -541,7 +541,12 @@ export interface CodeAppManagedToolsOptions {
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
       readonly ask: (
-        facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+        facts: {
+          readonly name: string;
+          readonly sizeBytes: number;
+          readonly mediaType: string;
+          readonly source?: BrowserDownloadSource;
+        },
         origin: string,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
