@@ -69,8 +69,7 @@ interface ModelAccumulator {
   wall: number[];
   inputTokens: number;
   outputTokens: number;
-  cacheReadInputTokens: number;
-  cacheWriteInputTokens: number;
+  cache: { inputTokens: number; readTokens: number; writeTokens: number } | undefined;
   likelyCacheMisses: number;
   costUsd: number | undefined;
 }
@@ -161,8 +160,14 @@ export function buildTurnDiagnosticsReport(
     if (record.usage !== undefined) {
       model.inputTokens += record.usage.inputTokens;
       model.outputTokens += record.usage.outputTokens;
-      model.cacheReadInputTokens += record.usage.cacheReadInputTokens ?? 0;
-      model.cacheWriteInputTokens += record.usage.cacheWriteInputTokens ?? 0;
+      const { cacheReadInputTokens, cacheWriteInputTokens } = record.usage;
+      if (cacheReadInputTokens !== undefined || cacheWriteInputTokens !== undefined) {
+        const cache = model.cache ?? { inputTokens: 0, readTokens: 0, writeTokens: 0 };
+        cache.inputTokens += record.usage.inputTokens;
+        cache.readTokens += cacheReadInputTokens ?? 0;
+        cache.writeTokens += cacheWriteInputTokens ?? 0;
+        model.cache = cache;
+      }
       if (record.usage.costUsd !== undefined) {
         model.costUsd = (model.costUsd ?? 0) + record.usage.costUsd;
       }
@@ -397,7 +402,10 @@ export function likelyCacheMisses(
 
 /** Nearest-rank percentile; undefined over no values. */
 export function percentile(values: ReadonlyArray<number>, fraction: number): number | undefined {
-  return rank([...values].sort((left, right) => left - right), fraction);
+  return rank(
+    [...values].sort((left, right) => left - right),
+    fraction,
+  );
 }
 
 function rank(sorted: ReadonlyArray<number>, fraction: number): number | undefined {
@@ -443,8 +451,7 @@ function toModelRow(model: ModelAccumulator): TurnDiagnosticsModelRow {
     ...(wall === undefined ? {} : { wallMs: wall }),
     inputTokens: model.inputTokens,
     outputTokens: model.outputTokens,
-    cacheReadInputTokens: model.cacheReadInputTokens,
-    cacheWriteInputTokens: model.cacheWriteInputTokens,
+    ...(model.cache === undefined ? {} : { cache: { ...model.cache } }),
     likelyCacheMisses: model.likelyCacheMisses,
     ...(model.costUsd === undefined ? {} : { costUsd: model.costUsd }),
   };
@@ -474,8 +481,7 @@ function newModel(record: TurnMetricsRecord): ModelAccumulator {
     wall: [],
     inputTokens: 0,
     outputTokens: 0,
-    cacheReadInputTokens: 0,
-    cacheWriteInputTokens: 0,
+    cache: undefined,
     likelyCacheMisses: 0,
     costUsd: undefined,
   };

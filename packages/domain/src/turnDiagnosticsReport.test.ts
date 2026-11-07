@@ -214,6 +214,25 @@ describe("the turn diagnostics report", () => {
     expect(row?.wallMs?.count).toBe(4);
   });
 
+  it("weighs the cache hit rate over turns that reported cache figures, and states none when no turn did", () => {
+    const report = buildTurnDiagnosticsReport(
+      [
+        turn(0, { usage: { inputTokens: 10_000, outputTokens: 10, cacheReadInputTokens: 9_000 } }),
+        turn(10, { usage: { inputTokens: 5_000, outputTokens: 10 } }),
+        turn(20, {
+          modelId: "model-quiet",
+          usage: { inputTokens: 5_000, outputTokens: 10 },
+        }),
+      ],
+      options,
+    );
+
+    const cached = report.models.find((row) => row.modelId === "model-a");
+    expect(cached?.inputTokens).toBe(15_000);
+    expect(cached?.cache).toEqual({ inputTokens: 10_000, readTokens: 9_000, writeTokens: 0 });
+    expect(report.models.find((row) => row.modelId === "model-quiet")?.cache).toBeUndefined();
+  });
+
   it("places day buckets in the reader's time zone", () => {
     // 23:06 UTC on 7 November is already 8 November in Oslo (UTC+1).
     const report = buildTurnDiagnosticsReport([turn(0), turn(65)], {

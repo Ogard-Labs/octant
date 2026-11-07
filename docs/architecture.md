@@ -5940,8 +5940,10 @@ unknown time zone is refused. The report holds:
   likely cache misses, and nearest-rank p50, p95 and maximum for
   time-to-first-token, decode speed, and wall time.
 - One benchmark row per provider instance and model with the same counts and
-  percentiles, and input, output, and cache-read and cache-write tokens summed
-  so a hit rate is weighted by input.
+  percentiles, input and output tokens, and the prompt-cache read and write
+  tokens over only the turns that reported a cache figure, so a hit rate is
+  weighted by input and a provider that never reports its cache has no rate
+  rather than 0%.
 - Tools ranked by failures, failures grouped by category and process kind with
   the newest redacted message, and the newest 50 troubled turns (failed,
   cancelled, cut at the output limit, or with a tool failure or retry) for

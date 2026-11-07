@@ -81,11 +81,22 @@ export const TurnDiagnosticsModelRow = Schema.Struct({
   /** Per-turn output tokens over decode time. */
   decodeTokensPerSecond: Schema.optional(DiagnosticsPercentiles),
   wallMs: Schema.optional(DiagnosticsPercentiles),
-  /** Sums over turns that reported usage, so a hit rate is weighted by input. */
+  /** Sums over turns that reported usage. */
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
-  cacheReadInputTokens: NonNegativeInt,
-  cacheWriteInputTokens: NonNegativeInt,
+  /**
+   * Prompt-cache figures over only the turns that reported them, so a hit rate
+   * is `readTokens` over `inputTokens` here and weighted by input. Absent when
+   * no turn reported a cache figure: a provider that never says is not a 0%
+   * hit rate.
+   */
+  cache: Schema.optional(
+    Schema.Struct({
+      inputTokens: NonNegativeInt,
+      readTokens: NonNegativeInt,
+      writeTokens: NonNegativeInt,
+    }).annotations(strict),
+  ),
   likelyCacheMisses: NonNegativeInt,
   costUsd: Schema.optional(NonNegativeNumber),
 }).annotations(strict);
