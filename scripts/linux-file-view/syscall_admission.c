@@ -75,6 +75,19 @@ static void client(const char *path, struct result *answer) {
     PROT_READ | PROT_WRITE, MAP_SHARED, ring, IORING_OFF_SQES);
   if (sq == MAP_FAILED || cq == MAP_FAILED || entries == MAP_FAILED) _exit(5);
 
+  /* A newly created idle poller may already sleep; wake it before transition. */
+  entries[0].opcode = IORING_OP_NOP;
+  ((unsigned *)(sq + parameters.sq_off.array))[0] = 0;
+  publish((unsigned *)(sq + parameters.sq_off.tail), 1);
+  if (syscall(SYS_io_uring_enter, ring, 0, 1,
+      IORING_ENTER_SQ_WAKEUP | IORING_ENTER_GETEVENTS, NULL, 0) < 0) {
+    answer->setup_error = errno;
+    _exit(5);
+  }
+  unsigned *warm_head = (unsigned *)(cq + parameters.cq_off.head);
+  if (load(warm_head) == load((unsigned *)(cq + parameters.cq_off.tail))) _exit(5);
+  publish(warm_head, load(warm_head) + 1);
+
   /* The parent creates the companion at this entry stop, before either access. */
   syscall(SYS_getppid);
   char bytes[64] = {0};

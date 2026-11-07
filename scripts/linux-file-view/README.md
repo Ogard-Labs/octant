@@ -51,7 +51,8 @@ still needs the dynamic companion/account and alias semantics proven natively.
 
 `syscall_admission.c` is a separate original x86-64/Linux experiment, not a
 mediator. A parent traces its one owned child with exit-on-tracer-death enabled.
-The child holds an ordinary permitted inode and prepares an SQPOLL ring. At an
+The child holds an ordinary permitted inode and prepares an SQPOLL ring, waking
+its initially idle poller with a completed NOP before the transition. At an
 observed syscall stop the parent creates the synthetic `.pub` companion. It
 then refuses new direct `pread` and `mmap` requests on the held descriptor and
 measures whether publishing an SQE reads that inode without another read or
