@@ -135,7 +135,7 @@ if (count of windows of candidate) is 0 then error "Packaged window is not ready
 try
 set value of attribute "AXEnhancedUserInterface" of candidate to true
 end try
-set lines to {}
+set snapshotRows to {}
 repeat with uiElement in (entire contents of first window of candidate)
 try
 set rowRole to role of uiElement as text
@@ -153,11 +153,11 @@ try
 set rowValue to value of uiElement as text
 end try
 end if
-set end of lines to (rowRole & " | " & rowName & " | " & rowDescription & " | " & rowValue)
+set end of snapshotRows to (rowRole & " | " & rowName & " | " & rowDescription & " | " & rowValue)
 end try
 end repeat
 set AppleScript's text item delimiters to linefeed
-return lines as text
+return snapshotRows as text
 end tell
 end run`;
     let snapshot = "";
@@ -191,6 +191,77 @@ end run`;
     );
     if (!snapshot.includes("AXButton") || !snapshot.includes("Welcome to Octant"))
       throw Error("The real packaged primary window exposed no first-run native controls.");
+    await runBoundedCommand(
+      "/usr/bin/osascript",
+      [
+        "-e",
+        String.raw`on run argv
+tell application "System Events"
+set candidate to first application process whose unix id is (item 1 of argv as integer)
+repeat with uiElement in (entire contents of first window of candidate)
+try
+if (role of uiElement as text) is "AXButton" and (name of uiElement as text) is "Skip setup" then
+perform action "AXPress" of uiElement
+return "pressed"
+end if
+end try
+end repeat
+error "The packaged setup skip control is unavailable."
+end tell
+end run`,
+        String(ownPid),
+      ],
+      process.env,
+      6000,
+    );
+    const skipDeadline = Date.now() + 10_000;
+    while (!controller.signal.aborted && Date.now() < skipDeadline) {
+      snapshot = await runBoundedCommand(
+        "/usr/bin/osascript",
+        ["-e", snapshotScript, String(ownPid)],
+        process.env,
+        6000,
+      );
+      if (!snapshot.includes("Welcome to Octant")) break;
+      await pause(100);
+    }
+    if (snapshot.includes("Welcome to Octant")) throw Error("Native setup skip did not settle.");
+    await writeFile(join(artifacts, "after-skip-ax.txt"), snapshot);
+    await runBoundedCommand(
+      "/usr/bin/osascript",
+      [
+        "-e",
+        String.raw`on run argv
+tell application "System Events"
+set candidate to first application process whose unix id is (item 1 of argv as integer)
+set frontmost of candidate to true
+keystroke "," using command down
+end tell
+end run`,
+        String(ownPid),
+      ],
+      process.env,
+      6000,
+    );
+    const settingsDeadline = Date.now() + 10_000;
+    while (!controller.signal.aborted && Date.now() < settingsDeadline) {
+      snapshot = await runBoundedCommand(
+        "/usr/bin/osascript",
+        ["-e", snapshotScript, String(ownPid)],
+        process.env,
+        6000,
+      );
+      if (snapshot.includes("Permissions")) break;
+      await pause(100);
+    }
+    await writeFile(join(artifacts, "settings-ax.txt"), snapshot);
+    await runBoundedCommand(
+      "/usr/sbin/screencapture",
+      ["-x", join(artifacts, "settings.png")],
+      process.env,
+      5000,
+    );
+    if (!snapshot.includes("Permissions")) throw Error("The real packaged Settings did not open.");
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -266,6 +337,8 @@ end run`;
         watchdogProcessId: watchdog?.pid,
         port,
         nativeAccessibility: true,
+        nativeSetupSkip: true,
+        nativeSettings: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
         publishAcceptance: "not-run",
