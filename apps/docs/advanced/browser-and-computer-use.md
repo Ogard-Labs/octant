@@ -339,7 +339,12 @@ second `report.pdf` becomes `report (2).pdf`). Octant stops files over 25 MB,
 keeps at most five held at a time, and refuses programs and installers (such as
 `.exe`, `.dmg`, `.pkg`, `.sh`) even if they are renamed. Held files are deleted
 when you answer, when the page closes, and when Octant starts. Downloads you
-start yourself in the Browser pane stay blocked.
+start yourself in the Browser pane stay blocked. If simultaneous headless downloads cannot
+be matched to their temporary files and one exceeds the size cap, Octant
+cancels the ambiguous downloads rather than letting them finish unchecked.
+Downloads already matched to their own files are unaffected. Saving refuses a changed or
+unavailable destination, and does not follow a destination-folder link swap
+outside the workspace.
 
 A snapshot is a short outline of the page: its headings, text, and controls,
 each control with a reference such as `e4` the agent passes back to click or
