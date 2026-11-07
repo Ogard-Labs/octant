@@ -195,6 +195,12 @@ if (role === "child") {
     if (record(bun) && typeof bun.gc === "function") bun.gc(true);
     else if (typeof globalThis.gc === "function") globalThis.gc();
     else throw new Error("A real GC operation is required for this fixture.");
+    // No timer/server poll can run between these synchronous native calls.
+    const abandoned = native.beginRequest(scope, Buffer.from("{}"));
+    if (!record(abandoned) || abandoned.status !== "pending" || typeof abandoned.id !== "number")
+      throw new Error("Owned abandoned client did not connect.");
+    native.closeRequest(abandoned.id);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
     const pending = native.beginRequest(
       scope,
       Buffer.from(
@@ -203,7 +209,7 @@ if (role === "child") {
     );
     check(
       record(pending) && pending.status === "pending" && typeof pending.id === "number",
-      "private same-user client connects",
+      "a client closing before the first server poll does not wedge the private endpoint",
     );
     if (!record(pending) || typeof pending.id !== "number") throw new Error("Client not created.");
     let response: unknown;
