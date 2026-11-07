@@ -46,7 +46,9 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
 };
 
 /**
- * Entries were probed on 2026-10-20 (Doop on 2026-11-01): each sign-in server answered a bare
+ * Entries were probed on 2026-10-20 (Doop on 2026-11-01; Dropbox, monday.com,
+ * ClickUp, Miro, GitLab, Buildkite, Amplitude, Calendly, Pipedrive, Klaviyo and
+ * Box on 2026-11-07): each sign-in server answered a bare
  * request with 401 and resource metadata, its authorization server published
  * metadata with PKCE S256 and dynamic client registration; each key server
  * answered 401 without registration; each open server answered without a
@@ -56,7 +58,10 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
  * public-search scope; no live registration/consent/tool acceptance is claimed.
  * Google entries are Developer Preview: the 2026-11-03 documentation establishes
  * agentic Desktop public clients and per-service read scopes, not live acceptance
- * or permission for public distribution.
+ * or permission for public distribution. Box's resource metadata names an
+ * authorization server with PKCE S256 and client-secret token authentication
+ * but no dynamic registration, so it needs the admin-enabled integration's own
+ * client; no live consent or tool acceptance is claimed.
  */
 export const GITHUB_REPOSITORY_PERMISSION_NOTICE =
   "Allows read and write access to public and private repositories and related organization resources available to your account. This OAuth App permission does not select individual repositories. Reusing the same app can change permissions returned to other connections; their original access policy is retained.";
@@ -251,6 +256,38 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     auth: { kind: "sign-in" },
   },
   {
+    id: "dropbox",
+    displayName: "Dropbox",
+    description: "Search, read, and organize files and folders, and work with shared links.",
+    category: "popular",
+    url: "https://mcp.dropbox.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "monday",
+    displayName: "monday.com",
+    description: "Read and update boards, items, and updates.",
+    category: "popular",
+    url: "https://mcp.monday.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "clickup",
+    displayName: "ClickUp",
+    description: "Find and update tasks, docs, comments, and time entries.",
+    category: "popular",
+    url: "https://mcp.clickup.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "miro",
+    displayName: "Miro",
+    description: "Read boards and create diagrams and content on them.",
+    category: "popular",
+    url: "https://mcp.miro.com/",
+    auth: { kind: "sign-in" },
+  },
+  {
     id: "todoist",
     displayName: "Todoist",
     description: "Find, add, and complete tasks and projects.",
@@ -264,6 +301,30 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     description: "Build with Workers, KV, R2, and D1 on your account.",
     category: "developer-tools",
     url: "https://bindings.mcp.cloudflare.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "gitlab",
+    displayName: "GitLab",
+    description: "Work with GitLab.com projects, issues, merge requests, and pipelines.",
+    category: "developer-tools",
+    url: "https://gitlab.com/api/v4/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "buildkite",
+    displayName: "Buildkite",
+    description: "Inspect pipelines, builds, jobs, and logs.",
+    category: "developer-tools",
+    url: "https://mcp.buildkite.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "amplitude",
+    displayName: "Amplitude",
+    description: "Query product analytics, charts, and experiment results.",
+    category: "developer-tools",
+    url: "https://mcp.amplitude.com/mcp",
     auth: { kind: "sign-in" },
   },
   {
@@ -408,6 +469,44 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     description: "Find, create, and export designs.",
     category: "business",
     url: "https://mcp.canva.com/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "box",
+    displayName: "Box",
+    description: "Search, read, and manage Box content with an integration your Box admin enables.",
+    category: "business",
+    url: "https://mcp.box.com/",
+    auth: {
+      kind: "sign-in",
+      clientSetup: "registered",
+      setupGuide: "https://developer.box.com/guides/box-mcp/remote/",
+      permissionNotice:
+        "Can read and change files and folders your Box account can reach, within the scopes set on the integration. A Box admin enables the Box MCP Server integration; copy its client ID and link its client secret before signing in.",
+    },
+  },
+  {
+    id: "calendly",
+    displayName: "Calendly",
+    description: "See event types and bookings, and share scheduling links.",
+    category: "business",
+    url: "https://mcp.calendly.com",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "pipedrive",
+    displayName: "Pipedrive",
+    description: "Read and update deals, contacts, leads, and activities.",
+    category: "business",
+    url: "https://mcp.pipedrive.ai/mcp",
+    auth: { kind: "sign-in" },
+  },
+  {
+    id: "klaviyo",
+    displayName: "Klaviyo",
+    description: "Work with profiles, lists, campaigns, and flows.",
+    category: "business",
+    url: "https://mcp.klaviyo.com/mcp",
     auth: { kind: "sign-in" },
   },
   {
