@@ -71,6 +71,24 @@
   overflow-wrap: anywhere;
 }
 
+.pending-request__why {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending-request[data-embedded="true"] .pending-request__why {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* The agent's own claim that waiting costs more soon: the word, in the warning role. */
+.pending-request__urgent {
+  flex: 0 0 auto;
+  color: var(--oct-warn-fg);
+}
+
 .pending-request__actions {
   display: flex;
   min-width: 0;
@@ -82,6 +100,41 @@
 .pending-request__choice.pending-request__choice {
   max-width: 100%;
   min-width: 0;
+}
+
+/* A decision's options are cards in a column, each with its consequence below.
+   OctantButton fixes a one-line height, so the height is released here. */
+.pending-request[data-kind="decision"] .pending-request__choice.pending-request__choice {
+  width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding-block: var(--oct-space-1);
+  text-align: start;
+  white-space: normal;
+}
+
+.pending-request__choice-body {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.pending-request__choice-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+}
+
+.pending-request__choice-detail {
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.pending-request__note {
+  width: 100%;
+  margin-top: var(--oct-space-1);
 }
 
 .pending-request__number {

@@ -44,6 +44,8 @@ export function workTurnDecision(
     threadTitle: thread.title,
     requestedAt: latest.updatedAt,
     text: decision.ask,
+    ...(decision.why === undefined ? {} : { why: decision.why }),
+    ...(decision.urgent === true ? { urgent: true } : {}),
     options: decision.options,
     answer: {
       threadId: thread.id,

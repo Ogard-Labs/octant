@@ -27,6 +27,55 @@ describe("parseTurnDecision", () => {
     });
   });
 
+  it("reads why, urgency and option details, and trims them", () => {
+    expect(
+      parseTurnDecision(
+        reply(
+          JSON.stringify({
+            ask,
+            why: "  Tests are green.  ",
+            urgent: true,
+            options: [
+              { label: "Open it", recommended: true, detail: " Rollback is ready " },
+              { label: "Wait" },
+            ],
+          }),
+        ),
+      ),
+    ).toEqual({
+      ask,
+      why: "Tests are green.",
+      urgent: true,
+      options: [
+        { label: "Open it", recommended: true, detail: "Rollback is ready" },
+        { label: "Wait", recommended: false },
+      ],
+    });
+  });
+
+  it("refuses the whole block when why, urgent or a detail is present but unusable", () => {
+    const options = [{ label: "Open it", recommended: true }];
+    const refused = (extra: object, detail?: unknown) =>
+      parseTurnDecision(
+        reply(
+          JSON.stringify({
+            ask,
+            ...extra,
+            options: detail === undefined ? options : [{ ...options[0], detail }],
+          }),
+        ),
+      );
+    expect(refused({ why: 3 })).toBeUndefined();
+    expect(refused({ why: "   " })).toBeUndefined();
+    expect(refused({ why: "w".repeat(241) })).toBeUndefined();
+    expect(refused({ why: "one\ntwo" })).toBeUndefined();
+    expect(refused({ urgent: "yes" })).toBeUndefined();
+    expect(refused({}, 3)).toBeUndefined();
+    expect(refused({}, "d".repeat(81))).toBeUndefined();
+    expect(refused({}, "one\ntwo")).toBeUndefined();
+    expect(refused({ urgent: false })?.ask).toBe(ask);
+  });
+
   it("raises nothing for a reply without a marker", () => {
     expect(parseTurnDecision("Done. Nothing here needs you.")).toBeUndefined();
   });

@@ -1,8 +1,10 @@
 import {
   FOLLOW_UP_BLOCK_LANGUAGE,
   MAX_TURN_DECISION_ASK_LENGTH,
+  MAX_TURN_DECISION_OPTION_DETAIL_LENGTH,
   MAX_TURN_DECISION_OPTION_LENGTH,
   MAX_TURN_DECISION_OPTIONS,
+  MAX_TURN_DECISION_WHY_LENGTH,
   TURN_DECISION_BLOCK_LANGUAGE,
 } from "@octant/contracts";
 
@@ -13,7 +15,28 @@ import {
  */
 export interface TurnDecision {
   readonly ask: string;
-  readonly options: ReadonlyArray<{ readonly label: string; readonly recommended: boolean }>;
+  /** The context the person needs to choose, one line. */
+  readonly why?: string;
+  /** The agent's own claim that waiting has a cost that grows soon. */
+  readonly urgent?: boolean;
+  readonly options: ReadonlyArray<{
+    readonly label: string;
+    readonly recommended: boolean;
+    /** The consequence or tradeoff of this option, one line. */
+    readonly detail?: string;
+  }>;
+}
+
+/**
+ * An optional one-line text field: absent is fine, but a field that is present
+ * and unusable (not a string, empty, too long, or more than one line) makes
+ * the whole block unreadable rather than a decision with the field dropped.
+ */
+function readOptionalLine(value: unknown, maxLength: number): string | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") return null;
+  const line = value.trim();
+  return line.length === 0 || line.length > maxLength || /[\r\n]/.test(line) ? null : line;
 }
 
 /**
@@ -63,7 +86,12 @@ export function readTurnDecisionBlock(body: string): TurnDecision | undefined {
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) return undefined;
-  const record = parsed as { readonly ask?: unknown; readonly options?: unknown };
+  const record = parsed as {
+    readonly ask?: unknown;
+    readonly why?: unknown;
+    readonly urgent?: unknown;
+    readonly options?: unknown;
+  };
   const ask = typeof record.ask === "string" ? record.ask.trim() : "";
   if (ask.length === 0 || ask.length > MAX_TURN_DECISION_ASK_LENGTH || /[\r\n]/.test(ask)) {
     return undefined;
@@ -75,10 +103,17 @@ export function readTurnDecisionBlock(body: string): TurnDecision | undefined {
   ) {
     return undefined;
   }
-  const options: Array<{ readonly label: string; readonly recommended: boolean }> = [];
+  const why = readOptionalLine(record.why, MAX_TURN_DECISION_WHY_LENGTH);
+  if (why === null) return undefined;
+  if (record.urgent !== undefined && typeof record.urgent !== "boolean") return undefined;
+  const options: Array<TurnDecision["options"][number]> = [];
   for (const entry of record.options as ReadonlyArray<unknown>) {
     if (typeof entry !== "object" || entry === null) return undefined;
-    const option = entry as { readonly label?: unknown; readonly recommended?: unknown };
+    const option = entry as {
+      readonly label?: unknown;
+      readonly recommended?: unknown;
+      readonly detail?: unknown;
+    };
     const label = typeof option.label === "string" ? option.label.trim() : "";
     if (
       label.length === 0 ||
@@ -90,11 +125,22 @@ export function readTurnDecisionBlock(body: string): TurnDecision | undefined {
     if (option.recommended !== undefined && typeof option.recommended !== "boolean") {
       return undefined;
     }
-    options.push({ label, recommended: option.recommended === true });
+    const detail = readOptionalLine(option.detail, MAX_TURN_DECISION_OPTION_DETAIL_LENGTH);
+    if (detail === null) return undefined;
+    options.push({
+      label,
+      recommended: option.recommended === true,
+      ...(detail === undefined ? {} : { detail }),
+    });
   }
   if (options.filter((option) => option.recommended).length !== 1) return undefined;
   if (new Set(options.map((option) => option.label)).size !== options.length) return undefined;
-  return { ask, options };
+  return {
+    ask,
+    ...(why === undefined ? {} : { why }),
+    ...(record.urgent === true ? { urgent: true } : {}),
+    options,
+  };
 }
 
 /**

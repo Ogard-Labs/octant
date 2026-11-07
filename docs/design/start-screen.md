@@ -45,8 +45,11 @@ mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
 at the 12px step, the Project as meta text, and the request text clamped to two
 lines, with small buttons below (Approve filled, Deny ghost; a question's
 choices as outline buttons with a leading number, then a ghost Reply…; a
-decision's options the same way, the recommended one first with a trailing
-"Recommended" in meta text rather than a hue). Rows
+decision's options as full-width buttons with the recommended one first, a
+trailing "Recommended" in meta text rather than a hue, and the option's detail
+as a second meta line; a decision also shows its why as a meta paragraph under
+the ask, an "Urgent" tag in the warning role beside the wait when the agent
+marked it urgent, and an **Add note** control). Rows
 are told apart by a hairline, never a tinted fill, and the waiting state is a
 glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
@@ -146,9 +149,18 @@ once-a-minute clock), and the text clamped to two lines. An approval offers
 matching number key picks it while the row has focus) and **Reply…**, which
 opens the thread so the answer is typed in its composer; a question without
 choices offers Reply… alone. A decision is the ask a finished turn closed with:
-its row shows the ask clamped to two lines, one numbered button per option with
-the recommended option first (first number, first in focus order) and marked
-"Recommended" in words, and **Reply…**. A subagent waiting on an approval or question is a row too, headed "Research
+its row shows the ask clamped to two lines and, when the agent gave one, the
+why beneath it (clamped to three lines inside a card that already names the
+thread, whole elsewhere). Each option is one full-width numbered button with the
+recommended option first (first number, first in focus order) and marked
+"Recommended" in words, and with its detail, when given, as a second line. An
+"Urgent" tag beside the wait appears when the agent marked the decision urgent;
+it is the agent's claim and changes no order. **Add note** (outside an embedding
+card) reveals a short text field: picking an option while it has text sends the
+option's words and the note, and Escape closes it; number keys type into the
+field rather than pick. **Reply…** opens the thread. A decision can also be
+deferred with the same controls as a question, so it drops below the active
+requests until the chosen time or **Bring back now**. A subagent waiting on an approval or question is a row too, headed "Research
 subagent needs your approval" or "Review subagent asked a question" (the
 child's role), under the parent thread's title, with the child's task and the
 request text. It has one action, **Review request**, which opens the parent
@@ -165,8 +177,9 @@ this window has no reader (a remote window).
 The card holds no authority. An answer goes through the mode's own command with
 the handle the host listed, the same calls the open thread makes; a provider
 input response is kept as evidence first. A decision's option is the thread's
-ordinary next turn: its words go through the mode's own send command, kept as
-prompt evidence, with the authority the composer has in this window. An option
+ordinary next turn: its words, followed by the note when the person added one, go through the
+mode's own send command, kept as prompt evidence, with the authority the
+composer has in this window. An option
 is words, never an action: "merge it" is sent to the agent and merges nothing.
 The commands each mode uses are listed in
 [Host reads and commands](host-reads-and-commands.md#answering-a-waiting-request).
@@ -389,7 +402,8 @@ without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row
 opens the thread. A decision has one row (Enter opens the thread) and one
 command per option, titled with the option's words and the thread, so typing an
-option finds it; running one sends those words as the thread's next turn, the
+option finds it (its detail is part of the command's detail text, and there is
+no note here); running one sends those words as the thread's next turn, the
 same send the card makes. The palette reads the list each time it opens and never on a
 timer. With nothing waiting, or at a remote window, the group is absent, and the
 composer `/` list never carries it.

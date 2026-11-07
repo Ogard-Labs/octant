@@ -63,7 +63,7 @@ export class PendingRequestService {
       !current() ||
       !list.requests.some(
         (request) =>
-          request.kind === "question" &&
+          (request.kind === "question" || request.kind === "decision") &&
           request.deferralKey === change.key &&
           enabledModes(this.#sources.readSettings()).includes(request.mode),
       )
@@ -93,8 +93,12 @@ export class PendingRequestService {
     );
     return decodePendingRequestList({
       requests: oldestFirst.slice(0, MAX_PENDING_REQUESTS).map((request) => {
-        if (request.kind !== "question" || this.#sources.deferrals === undefined) return request;
-        const deferralKey = questionKey(request);
+        if (
+          (request.kind !== "question" && request.kind !== "decision") ||
+          this.#sources.deferrals === undefined
+        )
+          return request;
+        const deferralKey = deferralKeyOf(request);
         const until = this.#sources.deferrals.read(deferralKey);
         return {
           ...request,
@@ -120,7 +124,17 @@ function requestKey(request: PendingRequest): string {
   return `${request.mode}:${String(request.threadId)}:${handle}`;
 }
 
-function questionKey(request: PendingRequest): string {
+function deferralKeyOf(request: PendingRequest): string {
+  // A decision is the ask of one finished turn and never changes, while its
+  // answer authority follows the thread's current model. So its identity is
+  // the turn that asked, and a later turn's decision starts undeferred.
+  if (request.kind === "decision") {
+    const turn =
+      request.mode === "code" ? String(request.answer.operationId) : String(request.answer.turnId);
+    return createHash("sha256")
+      .update(`decision:${request.mode}:${String(request.threadId)}:${turn}`)
+      .digest("hex");
+  }
   // Identity, choices, version and authority context participate. A changed
   // request cannot inherit a former question's attention preference.
   return createHash("sha256").update(JSON.stringify(request)).digest("hex");
