@@ -225,7 +225,10 @@ import {
   StartQuickToolsPlacementProvider,
   type StartQuickToolsServices,
 } from "./shell/StartQuickTools";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./shell/contributionRegistry";
+import {
+  FirstPartyPluginsEffectiveContext,
+  useHostFirstPartyPluginsEffective,
+} from "./shell/firstPartyPluginsEffective";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
@@ -1576,6 +1579,12 @@ function LaunchedShell(
     workTurnClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
+  // Which bundled plugins (GitHub, the board) the person has switched on,
+  // re-read when the host reports an extension change.
+  const firstPartyPluginsEffective = useHostFirstPartyPluginsEffective(
+    extensionClient,
+    machineChanges.extensions,
+  );
   // Code Projects on the person's servers live in their own catalog, not the
   // Project catalog the sidebar and the composer otherwise read.
   const serverCodeProjects = useServerCodeProjectsSource(
@@ -1833,7 +1842,7 @@ function LaunchedShell(
       cancelled = true;
     };
   }, [githubTransport]);
-  const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
+  const linearPluginEffective = firstPartyPluginsEffective.get("linear-integration") === true;
   const probeLinearAuthentication = shouldProbeLinearAuthentication(
     linearPluginEffective,
     activeMode,
@@ -1938,12 +1947,12 @@ function LaunchedShell(
   // clients the composer's "New Project from GitHub repository" uses. Disabled
   // GitHub contributes no tab, exactly as it contributes no composer row.
   const projectCreateGithub = useMemo(() => {
-    if (FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") !== true) return undefined;
+    if (firstPartyPluginsEffective.get("github-integration") !== true) return undefined;
     const hostName =
       hosts.find((host) => String(host.hostId) === String(createHostId))?.displayName ??
       localHostDisplayName();
     return { client: githubClient, cloneClient: githubCloneClient, hostName };
-  }, [createHostId, githubCloneClient, githubClient, hosts]);
+  }, [createHostId, firstPartyPluginsEffective, githubCloneClient, githubClient, hosts]);
   // Drop removed hosts from the environments filter before create preselect runs,
   // otherwise a lone removed remote leaves createHostId pointing at nothing.
   useEffect(() => {
@@ -4975,6 +4984,7 @@ function LaunchedShell(
     feedRevision: pendingRequestFeedRevision,
     computerSnapshots,
     githubPullRequestCapability,
+    githubPluginEffective: firstPartyPluginsEffective.get("github-integration") === true,
     hostFederationTransports,
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
@@ -7654,160 +7664,162 @@ function LaunchedShell(
 
   return (
     <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
-      <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-        <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
-          <SpeechCapabilityProvider
-            client={speechClient}
-            instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-            settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-          >
-            <OctantCommandProvider commands={octantCommands}>
-              {projectActionRun === undefined ? null : (
-                <ProjectActionRunDialog
-                  key={JSON.stringify(projectActionRun.target)}
-                  client={projectTerminalClient}
-                  target={projectActionRun.target}
-                  storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                  open={projectActionRun.open}
-                  onClose={() =>
-                    setProjectActionRun((current) =>
-                      current === undefined ? undefined : { ...current, open: false },
-                    )
-                  }
-                  onOpenTerminal={(terminalId) => {
-                    void (async () => {
-                      if (!zen.active) await zen.enterZen();
-                      await zen.pinProjectTerminal({
-                        projectId: projectActionRun.target.projectId,
-                        terminalId,
-                      });
-                    })();
-                  }}
-                />
-              )}
+      <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
+        <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
+          <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+            <SpeechCapabilityProvider
+              client={speechClient}
+              instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+              settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+            >
+              <OctantCommandProvider commands={octantCommands}>
+                {projectActionRun === undefined ? null : (
+                  <ProjectActionRunDialog
+                    key={JSON.stringify(projectActionRun.target)}
+                    client={projectTerminalClient}
+                    target={projectActionRun.target}
+                    storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                    open={projectActionRun.open}
+                    onClose={() =>
+                      setProjectActionRun((current) =>
+                        current === undefined ? undefined : { ...current, open: false },
+                      )
+                    }
+                    onOpenTerminal={(terminalId) => {
+                      void (async () => {
+                        if (!zen.active) await zen.enterZen();
+                        await zen.pinProjectTerminal({
+                          projectId: projectActionRun.target.projectId,
+                          terminalId,
+                        });
+                      })();
+                    }}
+                  />
+                )}
 
-              {preparationTarget === undefined ? null : (
-                <WorktreePreparationDialog
-                  key={JSON.stringify(preparationTarget)}
-                  client={projectTerminalClient}
-                  runs={agentRunClient}
-                  target={preparationTarget}
-                  onClose={() => setPreparationTarget(undefined)}
-                />
-              )}
-              {actionsProject === undefined ? null : (
-                <ProjectActionButtons
-                  actions={activeProjectActions}
-                  {...(activeMode === "code" &&
-                  activeCodeThreadView !== undefined &&
-                  activeCodeThreadView.checkout.kind !== "remote-root" &&
-                  String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
-                    ? {
-                        onSetup: () => {
-                          const view = activeCodeThreadView;
-                          setPreparationTarget({
-                            projectId: actionsProject.id,
-                            thread: {
-                              threadId: view.thread.id,
-                              checkoutId: view.checkout.id,
-                              ...(view.checkout.head.kind === "none"
-                                ? {}
-                                : { head: view.checkout.head.oid }),
-                            },
-                          });
-                        },
-                      }
-                    : {})}
-                  {...(activeMode === "code" &&
-                  activeCodeThreadView !== undefined &&
-                  String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
-                    ? { defaultFolderLabel: "Active checkout" }
-                    : {})}
-                  {...(actionsProject.type === "code"
-                    ? {
-                        mainFolder: actionsProject.binding.canonicalRoot,
-                        extraFolders: (actionsProject.extraFolders ?? []).map(
-                          (folder) => folder.canonicalRoot,
-                        ),
-                      }
-                    : {})}
-                  onRun={(action, folder) =>
-                    void runProjectAction(actionsProject.id, action, folder)
-                  }
-                />
-              )}
-              <NeedsYouProvider source={needsYouSource}>
-                {/* Held here rather than with any Code pane: a thread's controller has to
+                {preparationTarget === undefined ? null : (
+                  <WorktreePreparationDialog
+                    key={JSON.stringify(preparationTarget)}
+                    client={projectTerminalClient}
+                    runs={agentRunClient}
+                    target={preparationTarget}
+                    onClose={() => setPreparationTarget(undefined)}
+                  />
+                )}
+                {actionsProject === undefined ? null : (
+                  <ProjectActionButtons
+                    actions={activeProjectActions}
+                    {...(activeMode === "code" &&
+                    activeCodeThreadView !== undefined &&
+                    activeCodeThreadView.checkout.kind !== "remote-root" &&
+                    String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                      ? {
+                          onSetup: () => {
+                            const view = activeCodeThreadView;
+                            setPreparationTarget({
+                              projectId: actionsProject.id,
+                              thread: {
+                                threadId: view.thread.id,
+                                checkoutId: view.checkout.id,
+                                ...(view.checkout.head.kind === "none"
+                                  ? {}
+                                  : { head: view.checkout.head.oid }),
+                              },
+                            });
+                          },
+                        }
+                      : {})}
+                    {...(activeMode === "code" &&
+                    activeCodeThreadView !== undefined &&
+                    String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                      ? { defaultFolderLabel: "Active checkout" }
+                      : {})}
+                    {...(actionsProject.type === "code"
+                      ? {
+                          mainFolder: actionsProject.binding.canonicalRoot,
+                          extraFolders: (actionsProject.extraFolders ?? []).map(
+                            (folder) => folder.canonicalRoot,
+                          ),
+                        }
+                      : {})}
+                    onRun={(action, folder) =>
+                      void runProjectAction(actionsProject.id, action, folder)
+                    }
+                  />
+                )}
+                <NeedsYouProvider source={needsYouSource}>
+                  {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-                <CodeThreadControllerSlots
-                  client={codeClient}
-                  navigationBootstrap={codeController.bootstrap}
-                  readCursorStore={codeReadCursorStore}
-                  registry={codeThreadControllers}
-                  threadIds={openCodeThreadIds}
-                />
-                <TrackerReferenceProvider ports={trackerReferencePorts}>
-                  <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                    <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                      <ProjectThreadsProvider value={projectThreadsAccess}>
-                        <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                          <StreamRepliesContext.Provider
-                            value={controller.settings?.streamReplies !== false}
-                          >
-                            <ReplyDetailSourceContext.Provider value={replyDetailSource}>
-                              <ReplyDetailContext.Provider
-                                value={replyDetailSource.reading.defaultLevel}
-                              >
-                                {/* The floor for every rendered link: panes that can host a
+                  <CodeThreadControllerSlots
+                    client={codeClient}
+                    navigationBootstrap={codeController.bootstrap}
+                    readCursorStore={codeReadCursorStore}
+                    registry={codeThreadControllers}
+                    threadIds={openCodeThreadIds}
+                  />
+                  <TrackerReferenceProvider ports={trackerReferencePorts}>
+                    <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                      <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                        <ProjectThreadsProvider value={projectThreadsAccess}>
+                          <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                            <StreamRepliesContext.Provider
+                              value={controller.settings?.streamReplies !== false}
+                            >
+                              <ReplyDetailSourceContext.Provider value={replyDetailSource}>
+                                <ReplyDetailContext.Provider
+                                  value={replyDetailSource.reading.defaultLevel}
+                                >
+                                  {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                                  <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                    <ModelToolVerificationContext.Provider
-                                      value={providerController.verifyModelTools}
-                                    >
-                                      <HostFederationStackContext.Provider value={federation}>
-                                        <PlanUsageProvider
-                                          barStyle={controller.settings?.usageBars ?? "smooth"}
-                                          client={launchedClients.providerUsageLimitsClient}
-                                        >
-                                          <HostPlatformContext.Provider value={hostPlatform}>
-                                            <ServerCodeProjectsContext.Provider
-                                              value={serverCodeProjects}
-                                            >
-                                              <CodeDebugWindowProvider
-                                                origin={new URL(props.launch.serverUrl).origin}
-                                                windowId={String(props.launch.windowId)}
+                                  <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                                    <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                      <ModelToolVerificationContext.Provider
+                                        value={providerController.verifyModelTools}
+                                      >
+                                        <HostFederationStackContext.Provider value={federation}>
+                                          <PlanUsageProvider
+                                            barStyle={controller.settings?.usageBars ?? "smooth"}
+                                            client={launchedClients.providerUsageLimitsClient}
+                                          >
+                                            <HostPlatformContext.Provider value={hostPlatform}>
+                                              <ServerCodeProjectsContext.Provider
+                                                value={serverCodeProjects}
                                               >
-                                                <QuestionnaireDraftsProvider
-                                                  serverUrl={props.launch.serverUrl}
-                                                  windowId={props.launch.windowId}
+                                                <CodeDebugWindowProvider
+                                                  origin={new URL(props.launch.serverUrl).origin}
+                                                  windowId={String(props.launch.windowId)}
                                                 >
-                                                  {shell}
-                                                </QuestionnaireDraftsProvider>
-                                              </CodeDebugWindowProvider>
-                                            </ServerCodeProjectsContext.Provider>
-                                          </HostPlatformContext.Provider>
-                                        </PlanUsageProvider>
-                                      </HostFederationStackContext.Provider>
-                                    </ModelToolVerificationContext.Provider>
-                                  </WorkKindChoiceContext.Provider>
-                                </MarkdownLinkActionsContext.Provider>
-                              </ReplyDetailContext.Provider>
-                            </ReplyDetailSourceContext.Provider>
-                          </StreamRepliesContext.Provider>
-                        </NewTaskDraftsContext.Provider>
-                      </ProjectThreadsProvider>
-                    </SidebarThreadTabsContext.Provider>
-                  </SidebarThreadDragContext.Provider>
-                </TrackerReferenceProvider>
-              </NeedsYouProvider>
-            </OctantCommandProvider>
-          </SpeechCapabilityProvider>
-        </ThreadActivityRevisionsContext.Provider>
-      </ImageJobChangeRevisionContext.Provider>
+                                                  <QuestionnaireDraftsProvider
+                                                    serverUrl={props.launch.serverUrl}
+                                                    windowId={props.launch.windowId}
+                                                  >
+                                                    {shell}
+                                                  </QuestionnaireDraftsProvider>
+                                                </CodeDebugWindowProvider>
+                                              </ServerCodeProjectsContext.Provider>
+                                            </HostPlatformContext.Provider>
+                                          </PlanUsageProvider>
+                                        </HostFederationStackContext.Provider>
+                                      </ModelToolVerificationContext.Provider>
+                                    </WorkKindChoiceContext.Provider>
+                                  </MarkdownLinkActionsContext.Provider>
+                                </ReplyDetailContext.Provider>
+                              </ReplyDetailSourceContext.Provider>
+                            </StreamRepliesContext.Provider>
+                          </NewTaskDraftsContext.Provider>
+                        </ProjectThreadsProvider>
+                      </SidebarThreadTabsContext.Provider>
+                    </SidebarThreadDragContext.Provider>
+                  </TrackerReferenceProvider>
+                </NeedsYouProvider>
+              </OctantCommandProvider>
+            </SpeechCapabilityProvider>
+          </ThreadActivityRevisionsContext.Provider>
+        </ImageJobChangeRevisionContext.Provider>
+      </FirstPartyPluginsEffectiveContext.Provider>
     </GuardrailDefaultsContext.Provider>
   );
 }

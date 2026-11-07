@@ -29,6 +29,7 @@ describe("first-party plugin catalog", () => {
       "azure-arm",
       "appearance",
       "preview-viewers",
+      "zen",
     ]);
     expect(FIRST_PARTY_PLUGIN_CATALOG.every((plugin) => plugin.manifestVersion === 1)).toBe(true);
   });

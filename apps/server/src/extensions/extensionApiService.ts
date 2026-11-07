@@ -46,6 +46,7 @@ import {
   type NpmPackageSourcePort,
 } from "./npmPackageSource";
 import { compareNpmVersions } from "./npmVersionRange";
+import type { BundledPluginSwitchStore } from "./bundledPluginSwitchStore";
 
 export interface ExtensionPackageResolverPort {
   resolve(
@@ -79,6 +80,9 @@ export class ExtensionApiService {
   readonly #skills: StandaloneSkillService | undefined;
   readonly #activation: ExtensionActivationServicePort | undefined;
   readonly #npm: NpmPackageSourcePort | undefined;
+  readonly #bundledPlugins:
+    | Pick<BundledPluginSwitchStore, "holds" | "packageStates" | "setDesired">
+    | undefined;
   readonly #onStateChanged:
     | ((snapshot: ExtensionSnapshot, command: ExtensionCommand) => void | Promise<void>)
     | undefined;
@@ -99,6 +103,15 @@ export class ExtensionApiService {
     readonly activation?: ExtensionActivationServicePort;
     /** Looks packages up on an npm registry; without it the npm commands are unavailable. */
     readonly npmSource?: NpmPackageSourcePort;
+    /**
+     * The switches of the plugins built into Octant. Each appears in the
+     * snapshot as an installed, trusted package whose only command is
+     * `set-plugin-desired`.
+     */
+    readonly bundledPlugins?: Pick<
+      BundledPluginSwitchStore,
+      "holds" | "packageStates" | "setDesired"
+    >;
     /** Told which command changed the state, so its consequences can follow it. */
     readonly onStateChanged?: (
       snapshot: ExtensionSnapshot,
@@ -117,13 +130,64 @@ export class ExtensionApiService {
     this.#skills = options.skills;
     this.#activation = options.activation;
     this.#npm = options.npmSource;
+    this.#bundledPlugins = options.bundledPlugins;
     this.#onStateChanged = options.onStateChanged;
     this.#userAddedMcpServers = options.userAddedMcpServers;
   }
 
   snapshot(): ExtensionSnapshot {
     const snapshot = this.#lifecycle.snapshot();
-    return this.#markAddedInSettings(this.#skills?.snapshot(snapshot) ?? snapshot);
+    return this.#markAddedInSettings(
+      this.#withBundledPlugins(this.#skills?.snapshot(snapshot) ?? snapshot),
+    );
+  }
+
+  /**
+   * Puts the bundled plugins' rows first, ahead of installed packages, and
+   * drops any installed row that claims a bundled plugin's id, so a reader
+   * that looks a first-party component up by id finds the host's own row.
+   */
+  #withBundledPlugins(snapshot: ExtensionSnapshot): ExtensionSnapshot {
+    const bundled = this.#bundledPlugins;
+    if (bundled === undefined) return snapshot;
+    return {
+      ...snapshot,
+      packages: [
+        ...bundled.packageStates(),
+        ...snapshot.packages.filter(
+          (packageState) => !bundled.holds(String(packageState.extensionId)),
+        ),
+      ],
+    };
+  }
+
+  /**
+   * A plugin built into Octant has one command: its switch. Everything else
+   * that names one (install, update, rollback, uninstall, trust, a component
+   * switch, an npm check) is refused before it reaches the installed-package
+   * lifecycle, which assumes package files on disk.
+   */
+  #bundledPluginCommand(command: ExtensionCommand): ExtensionCommandResult | undefined {
+    const bundled = this.#bundledPlugins;
+    if (bundled === undefined) return undefined;
+    const target =
+      "extensionId" in command
+        ? String(command.extensionId)
+        : command.kind === "resolve-npm-package" && command.updateOf !== undefined
+          ? String(command.updateOf)
+          : undefined;
+    if (target === undefined || !bundled.holds(target)) return undefined;
+    if (command.kind !== "set-plugin-desired") {
+      return failure("invalid", "A plugin built into Octant can only be switched on or off.");
+    }
+    const result = bundled.setDesired({
+      extensionId: target,
+      expectedStateVersion: command.expectedStateVersion,
+      desired: command.desired,
+    });
+    if (result.status === "stale") return failure("stale", lifecycleMessage("conflict"));
+    if (result.status === "refused") return failure("invalid", lifecycleMessage("invalid"));
+    return { kind: "extension-state-updated", snapshot: this.snapshot() };
   }
 
   /**
@@ -157,6 +221,8 @@ export class ExtensionApiService {
 
   async execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult> {
     try {
+      const bundled = this.#bundledPluginCommand(command);
+      if (bundled !== undefined) return bundled;
       switch (command.kind) {
         case "search-catalog": {
           if (this.#resolver.searchCatalog === undefined) return unsupportedCommand();
@@ -416,7 +482,10 @@ export class ExtensionApiService {
     if (this.#onStateChanged !== undefined) {
       await this.#onStateChanged(snapshot, command);
     }
-    return { kind: "extension-state-updated", snapshot: this.#markAddedInSettings(snapshot) };
+    return {
+      kind: "extension-state-updated",
+      snapshot: this.#markAddedInSettings(this.#withBundledPlugins(snapshot)),
+    };
   }
 }
 

@@ -1414,9 +1414,14 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 New providers and tools reach the system through the published SDK, API and host seams. They take no shortcut a third-party plugin could not take.
 
 - Plugin ports carry no raw filesystem, shell or credential handles, and plugin state holds only opaque references.
-- The marketplace and plugin registry stay in the host. Browser and computer use, agent hierarchy and remote clients keep core capability app-managed, and only presentation or adapters may be extracted.
+- Maintainers decided on 2026-11-07 that GitHub, thread boards and Zen are bundled first-party plugins a person can switch off and on, each on by default. Usage, diagnostics, Navigator, the automations UI, browser and computer use, agent hierarchy, remote and mobile access, the Apple workbench, and the marketplace and plugin registry stay integrated core features and are no longer extraction candidates.
+- The first-party manifests have one definition that the server and the renderer share.
+- A bundled plugin's switch is journaled on its own aggregate, apart from the installed-package lifecycle, with a rebuildable projection; a plugin nobody switched is on.
+- The extension snapshot carries one host-written row per switchable bundled plugin. Only its switch may change it, under the same expected-version rule and local-window authority as an installed package; every other package command on it is refused.
+- Bundled plugins are left out of a scope's effective state, so they are never addressed, selected, pinned or given tools, and the Library does not list them.
 - Disabling a plugin preserves its data and selections and drains running executables. Deleting credentials needs its own explicit confirmation.
-- Extraction of the remaining board, integration and appearance packages is unfinished work (not built yet).
+- The surfaces that already read a first-party plugin's effective state follow the switch: GitHub's routes, issue context and read tools, and the renderer's contributed sidebar destinations, GitHub Settings section, start-screen pull-request cards and Create Project GitHub tab.
+- Every remaining GitHub, thread board and Zen surface obeys its switch (not built yet).
 
 Status: Partly built. Since: —. Detail: [Architecture: Plugin boundaries and remaining extraction](../architecture.md#plugin-boundaries-and-remaining-extraction).
 

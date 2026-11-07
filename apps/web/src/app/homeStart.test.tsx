@@ -30,6 +30,7 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     computerSnapshots,
     feedRevision: 0,
     githubPullRequestCapability: noPullRequests,
+    githubPluginEffective: true,
     hostFederationTransports: undefined,
     hostResourceClient,
     isDesktop: false,

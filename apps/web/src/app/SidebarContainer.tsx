@@ -25,10 +25,8 @@ import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { ServerProjectsSidebarGroup } from "../projects/ServerProjectsSidebarGroup";
 import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { useProjectController } from "../projects/useProjectController";
-import {
-  FIRST_PARTY_PLUGINS_EFFECTIVE,
-  resolveSidebarDestinationContributions,
-} from "../shell/contributionRegistry";
+import { resolveSidebarDestinationContributions } from "../shell/contributionRegistry";
+import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { SidebarNavigationDescriptorId } from "../shell/navigationModel";
 import { openExternalUrl } from "../shell/openExternalUrl";
@@ -193,6 +191,7 @@ export interface SidebarContainerProps {
  * actions, which keep their identity across renders.
  */
 export const SidebarContainer = memo(function SidebarContainer(props: SidebarContainerProps) {
+  const firstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const {
     actions,
     activeChatThreadId,
@@ -310,7 +309,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     const resolved: Record<string, () => void> = {};
     for (const contribution of resolveSidebarDestinationContributions(
       activeMode,
-      FIRST_PARTY_PLUGINS_EFFECTIVE,
+      firstPartyPluginsEffective,
     )) {
       if (contribution.entryPoint === undefined) continue;
       if (contribution.destinationId === "linear-issues" && !linearIssuesRead) continue;
@@ -319,7 +318,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       resolved[contribution.destinationId] = () => result.action(context);
     }
     return resolved;
-  }, [actions, activeMode, linearIssuesRead]);
+  }, [actions, activeMode, firstPartyPluginsEffective, linearIssuesRead]);
 
   // What a thread row offers on right-click, per mode. Export and Hand off
   // appear only where this window resolved a client for them, the same test
