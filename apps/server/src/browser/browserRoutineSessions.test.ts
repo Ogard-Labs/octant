@@ -167,6 +167,50 @@ it("uses the dispatched Code thread's own managed checkout without broadening re
     authority: decodeToolActionAuthority({ ...target.target.authority, worktreeId: checkoutId }),
     codeExecution: { thread, checkout },
   };
+  const followUp = decodeAutomationDefinition({
+    ...definition,
+    targetPolicy: "same-thread",
+    originThreadId: threadId,
+    missedRunPolicy: "run-once",
+  });
+  const sameThread = {
+    ...input,
+    definition: followUp,
+    run: {
+      ...automationRunForDefinition(followUp),
+      lifecycle: "running" as const,
+      threadId: decodeAutomationThreadId(String(threadId)),
+    },
+    authority: target.target.authority,
+    codeExecution: {
+      thread: { ...thread, checkoutId: binding.checkoutId },
+      checkout: {
+        id: binding.checkoutId,
+        repositoryId: binding.repositoryId,
+        kind: "existing-worktree" as const,
+        availability: "available" as const,
+        head: { kind: "none" as const },
+        observedAt: work.createdAt,
+      },
+    },
+  };
+  expect(routineBrowserExecutionIsCurrent(sameThread)).toBe(true);
+  expect(
+    routineBrowserExecutionIsCurrent({
+      ...sameThread,
+      definition: {
+        ...followUp,
+        originThreadId: decodeAutomationThreadId("90000000-0000-4000-8000-000000000099"),
+      },
+    }),
+  ).toBe(false);
+  expect(
+    routineBrowserExecutionIsCurrent({
+      ...sameThread,
+      codeExecution: input.codeExecution,
+      authority: input.authority,
+    }),
+  ).toBe(false);
   expect(String(checkoutId)).not.toBe(String(binding.checkoutId));
   expect(routineBrowserExecutionIsCurrent(input)).toBe(true);
   expect(routineBrowserExecutionIsCurrent({ ...input, codeExecution: undefined })).toBe(false);
