@@ -250,6 +250,7 @@ it("keeps file authority separate from account access and revokes the routine's 
     current: () => target,
     uploadPermissions: f.service,
   });
+  expect(JSON.stringify(tools.definitions)).toContain("uploadPermissionId");
   const call = (input: object) =>
     tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
   const navigate = {

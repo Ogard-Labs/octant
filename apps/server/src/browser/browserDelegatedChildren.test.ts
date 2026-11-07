@@ -161,6 +161,7 @@ it.each(["child", "routine"] as const)(
       executionPolicy: "approval-gated",
       current: () => target,
     });
+    expect(JSON.stringify(tools.definitions)).not.toContain("uploadPermissionId");
     const call = {
       name: "octant_browser",
       inputJson: JSON.stringify({
