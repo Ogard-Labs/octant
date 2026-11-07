@@ -749,9 +749,11 @@ export class AgentPluginMcpSessionManager {
       baseEnv: this.#baseEnv,
       supportedTransports: new Set(["stdio", "streamable-http"]),
     });
-    const selectedLaunch =
-      plan.launches.find((candidate) => candidate.name === target.serverNameHint) ??
-      plan.launches.find((candidate) => `mcp-${tokenize(candidate.name)}` === target.componentId);
+    const selectedLaunch = selectMcpServer(
+      plan.launches,
+      target.serverNameHint,
+      target.componentId,
+    );
     if (selectedLaunch === undefined) {
       throw new Error(`MCP server for ${target.componentId} is unavailable.`);
     }
@@ -1227,6 +1229,21 @@ function isContainedPath(root: string, candidate: string): boolean {
   if (!isAbsolute(root) || !isAbsolute(candidate)) return false;
   const child = relative(root, candidate);
   return child === "" || (!isAbsolute(child) && !child.split(/[\\/]/).includes(".."));
+}
+
+/**
+ * The entry of a shared mcp.json a component runs: the one its display name
+ * names, else the one whose name the component id was derived from.
+ */
+export function selectMcpServer<T extends { readonly name: string }>(
+  servers: ReadonlyArray<T>,
+  displayName: string,
+  componentId: string,
+): T | undefined {
+  return (
+    servers.find((candidate) => candidate.name === displayName) ??
+    servers.find((candidate) => `mcp-${tokenize(candidate.name)}` === componentId)
+  );
 }
 
 function tokenize(name: string): string {

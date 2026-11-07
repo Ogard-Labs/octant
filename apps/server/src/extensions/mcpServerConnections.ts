@@ -10,7 +10,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { CONNECTOR_PACKAGE_PREFIX, connectorById } from "@octant/domain";
-import type { McpConnectionObservation } from "./agentPluginMcpSessionManager";
+import { selectMcpServer, type McpConnectionObservation } from "./agentPluginMcpSessionManager";
 
 /**
  * Where the Settings connection listing reads from. Every source is a
@@ -95,6 +95,10 @@ export function describeMcpServerConnection(input: {
   // connector that needs one cannot work here whatever else is true.
   if (signIn.kind === "refused" && input.signInRequired && observation?.state !== "connected")
     return { state: "blocked", reason: signIn.message, ...at };
+  // A registered-client connector cannot sign in until its app is set up;
+  // the row's sign-in control carries that setup.
+  if (signIn.kind === "client-setup-required" && observation?.state !== "connected")
+    return { state: "needs-sign-in", reason: signIn.message, ...at };
   if (signIn.kind === "awaiting-consent")
     return { state: "needs-sign-in", reason: "Finish signing in in the browser.", ...at };
   if (observation?.state === "connected") return { state: "connected", ...at };
@@ -117,8 +121,16 @@ function failureSentence(reason: string | undefined): string {
   return sentence.length > 512 ? `${sentence.slice(0, 509)}...` : sentence;
 }
 
-/** The transport the installed mcp.json names for this server, read from disk. */
-export function transportOf(configuration: string): McpServerConnection["transport"] {
+/**
+ * The transport the installed mcp.json names for this server, read from
+ * disk. A shared file holds several servers, so the entry is chosen the way
+ * the runtime chooses the one it connects to.
+ */
+export function transportOf(
+  configuration: string,
+  displayName: string,
+  componentId: string,
+): McpServerConnection["transport"] {
   try {
     const parsed: unknown = JSON.parse(configuration);
     const servers =
@@ -126,10 +138,14 @@ export function transportOf(configuration: string): McpServerConnection["transpo
         ? parsed.mcpServers
         : undefined;
     if (typeof servers !== "object" || servers === null) return "unknown";
-    const first: unknown = Object.values(servers)[0];
-    if (typeof first !== "object" || first === null) return "unknown";
-    if ("url" in first) return "streamable-http";
-    if ("command" in first) return "stdio";
+    const entry = selectMcpServer(
+      Object.entries(servers).map(([name, value]: [string, unknown]) => ({ name, value })),
+      displayName,
+      componentId,
+    )?.value;
+    if (typeof entry !== "object" || entry === null) return "unknown";
+    if ("url" in entry) return "streamable-http";
+    if ("command" in entry) return "stdio";
     return "unknown";
   } catch {
     return "unknown";
@@ -175,7 +191,7 @@ export async function listMcpServerConnections(
         packageName:
           packageState.displayName ?? packageState.slug ?? String(packageState.packageId),
         serverName: component.component.displayName,
-        transport: transportOf(configuration),
+        transport: transportOf(configuration, component.component.displayName, componentId),
         ...describeMcpServerConnection({
           component,
           signIn,

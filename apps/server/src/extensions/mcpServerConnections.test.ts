@@ -4,7 +4,7 @@ import type {
   ExtensionSnapshot,
   McpServerSignInView,
 } from "@octant/contracts";
-import { listMcpServerConnections } from "./mcpServerConnections";
+import { listMcpServerConnections, transportOf } from "./mcpServerConnections";
 import type { McpConnectionObservation } from "./agentPluginMcpSessionManager";
 
 const extensionId = "44000000-0000-4000-8000-000000000002";
@@ -205,6 +205,34 @@ describe("the server connection listing", () => {
       observations: [{ extensionId, componentId: "remote", state: "connected" }],
     });
     expect(connected.listing.servers[0]?.state).toBe("connected");
+  });
+
+  it("reads the transport of the entry this component runs from a shared mcp.json", () => {
+    const shared = JSON.stringify({
+      mcpServers: {
+        docs: { url: "https://mcp.example.com/mcp" },
+        "Local Tools": { command: "node", args: ["server.js"] },
+      },
+    });
+    expect(transportOf(shared, "Local Tools", "mcp-local-tools")).toBe("stdio");
+    expect(transportOf(shared, "Docs", "mcp-docs")).toBe("streamable-http");
+    expect(transportOf(shared, "Other", "mcp-other")).toBe("unknown");
+  });
+
+  it("asks for client setup on a connector whose sign-in app is not registered yet", async () => {
+    const { listing } = await list({
+      components: [server("remote")],
+      signIn: {
+        remote: {
+          kind: "client-setup-required",
+          message: "Set up your registered app before signing in.",
+        },
+      },
+    });
+    expect(listing.servers[0]).toMatchObject({
+      state: "needs-sign-in",
+      reason: "Set up your registered app before signing in.",
+    });
   });
 
   it("blocks a sign-in connector on a host that cannot sign in, naming why", async () => {

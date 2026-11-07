@@ -68,7 +68,7 @@ export interface ServerConnectionsProps {
   /** Whether this is the Octant window on the host: only it may sign in or reconnect. */
   readonly localHost: boolean;
   readonly disabled: boolean;
-  /** Told after a Reconnect, so the listing is read again. */
+  /** Told after a Reconnect or a sign-in change, so the listing is read again. */
   readonly onChanged: () => void;
   /** The view switch, kept in the first section's actions like the other views. */
   readonly actions?: ReactNode;
@@ -145,6 +145,7 @@ export function ServerConnections(props: ServerConnectionsProps) {
                           componentId={String(server.componentId)}
                           disabled={props.disabled}
                           extensionId={String(server.extensionId)}
+                          onChanged={props.onChanged}
                         />
                       ) : null}
                       {server.state === "failed" ? (

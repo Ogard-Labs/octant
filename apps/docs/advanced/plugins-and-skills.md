@@ -440,8 +440,9 @@ Octant last saw it connect or fail:
 
 - **Connected**: a task has it open now. **Ready**: nothing is wrong; the next
   task that uses it connects.
-- **Needs sign-in**: you are signed out, or the sign-in expired or was revoked.
-  Use the row's sign-in button.
+- **Needs sign-in**: you are signed out, the sign-in expired or was revoked,
+  or the service's sign-in app still needs setting up. Use the row's sign-in
+  or setup button; the list updates once you finish.
 - **Not connecting**: the last connection failed; the row says why. Press
   **Reconnect**, then run your task again. Reconnect drops the broken
   connection, in every task using that server, so the next task connects

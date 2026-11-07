@@ -9751,7 +9751,8 @@ successful connect (kept after an idle close), and the installed `mcp.json`
 read from disk for the transport. Reading it never connects, signs in,
 discovers endpoints or lists tools, so a server no task has used yet reads
 Ready rather than Connected. States, most decisive first: Off (package or
-server switched off), Needs sign-in (sign-in-again, consent pending, or a
+server switched off), Needs sign-in (sign-in-again, consent pending, client
+setup required for a registered-client connector, or a
 catalog connector that signs in and has no sign-in while not connected;
 signed out alone is only an offer, since a hosted server that takes a key or
 nothing reports it too), Connecting, Not connecting (the newest fact is a

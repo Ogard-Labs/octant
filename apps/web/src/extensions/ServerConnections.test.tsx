@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { McpServerConnection } from "@octant/contracts/extension-rpc";
 import { describe, expect, it, vi } from "vitest";
@@ -98,6 +98,31 @@ describe("Server connections in Settings", () => {
     await user.click(screen.getByRole("button", { name: "Reconnect Search" }));
     expect(extensions.reconnectMcpServer).toHaveBeenCalledWith({ extensionId, componentId: "b" });
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the listing again once a row's sign-in finishes", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn();
+    const extensions = {
+      mcpServerSignIn: vi.fn(async (request: { readonly kind: string }) =>
+        request.kind === "status"
+          ? ({ kind: "sign-in-again", reason: "expired" } as const)
+          : ({ kind: "signed-in", issuer: "auth.example" } as const),
+      ),
+      reconnectMcpServer: vi.fn(),
+    };
+    render(
+      <ServerConnections
+        client={extensions as never}
+        disabled={false}
+        localHost
+        onChanged={onChanged}
+        servers={[servers[2] as McpServerConnection]}
+      />,
+    );
+    expect(onChanged).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "Sign in again" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
   });
 
   it("shows a paired device the states without Reconnect or sign-in", () => {
