@@ -151,9 +151,13 @@ it.each(["child", "routine"] as const)(
       uuid: () => crypto.randomUUID(),
       recordExternalContentIngestion: record,
     });
+    let executionAvailable = kind !== "routine";
     const tools = children.tools({
       target,
       executionId,
+      ...(kind === "routine"
+        ? { executionAuthority: () => (executionAvailable ? target.authority : undefined) }
+        : {}),
       executionPolicy: "approval-gated",
       current: () => target,
     });
@@ -175,6 +179,11 @@ it.each(["child", "routine"] as const)(
       if (review.kind !== "browser-session-review") throw Error(JSON.stringify(review));
       const allowed = await grants.execute(windowId, { kind: "grant", reviewId: review.reviewId });
       if (allowed.kind !== "browser-session-granted") throw Error(JSON.stringify(allowed));
+      if (kind === "routine") {
+        expect((await tools.execute(call)).isError).toBe(true);
+        expect(runtime.createContext).not.toHaveBeenCalled();
+        executionAvailable = true;
+      }
       expect(await tools.execute(call)).toMatchObject({ isError: false });
       expect(runtime.createContext).toHaveBeenCalledOnce();
       expect(workRun.authority).toEqual(authority);

@@ -2,6 +2,8 @@ import {
   decodeToolActionAuthority,
   LOCAL_HOST_ID,
   sameToolActionAuthority,
+  type CodeThread,
+  type CodeCheckoutIdentity,
   type AutomationDefinition,
   type AutomationRun,
   type BrowserThreadId,
@@ -9,6 +11,7 @@ import {
   type ToolActionAuthority,
   type ToolHostId,
 } from "@octant/contracts";
+import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type { CurrentBrowserSessionTarget } from "./browserSessionGrants";
 
 /** The reviewed recipient is a definition, never whichever thread last ran it. */
@@ -78,6 +81,23 @@ export function routineBrowserExecutionIsCurrent(input: {
   readonly threadId: BrowserThreadId;
   readonly authority: ToolActionAuthority | undefined;
   readonly target: CurrentBrowserSessionTarget | undefined;
+  readonly codeExecution?:
+    | {
+        readonly thread:
+          | Pick<
+              CodeThread,
+              | "id"
+              | "projectId"
+              | "bindingRevisionId"
+              | "repositoryId"
+              | "checkoutId"
+              | "providerInstanceId"
+              | "modelId"
+            >
+          | undefined;
+        readonly checkout: CodeCheckoutIdentity | undefined;
+      }
+    | undefined;
 }): boolean {
   const { run, definition, target, authority } = input;
   return (
@@ -100,6 +120,50 @@ export function routineBrowserExecutionIsCurrent(input: {
       JSON.stringify(definition.authorityProfile.requested) &&
     JSON.stringify(run.authoritySnapshot.effective) ===
       JSON.stringify(definition.authorityProfile.effective) &&
-    sameToolActionAuthority(authority, target.target.authority)
+    (definition.mode === "code"
+      ? codeExecutionMatches(input, authority, definition, target)
+      : sameToolActionAuthority(authority, target.target.authority))
+  );
+}
+
+function codeExecutionMatches(
+  input: Parameters<typeof routineBrowserExecutionIsCurrent>[0],
+  authority: ToolActionAuthority,
+  definition: AutomationDefinition,
+  target: CurrentBrowserSessionTarget,
+): boolean {
+  const binding = definition.binding;
+  const thread = input.codeExecution?.thread;
+  const checkout = input.codeExecution?.checkout;
+  if (
+    binding.kind !== "code" ||
+    authority.mode !== "code" ||
+    thread === undefined ||
+    checkout === undefined
+  )
+    return false;
+  return (
+    String(thread.id) === String(input.threadId) &&
+    String(thread.projectId) === String(definition.projectId) &&
+    String(thread.bindingRevisionId) === String(binding.bindingRevisionId) &&
+    String(thread.repositoryId) === String(binding.repositoryId) &&
+    String(thread.providerInstanceId) === String(definition.executionProfile.providerInstanceId) &&
+    String(thread.modelId) === String(definition.executionProfile.modelId) &&
+    checkout.kind === "managed-worktree" &&
+    checkout.availability === "available" &&
+    String(checkout.repositoryId) === String(binding.repositoryId) &&
+    String(checkout.id) === String(thread.checkoutId) &&
+    String(checkout.id) ===
+      String(
+        deriveManagedWorktreeCheckoutId({
+          repositoryId: binding.repositoryId,
+          threadId: thread.id,
+        }),
+      ) &&
+    String(authority.worktreeId) === String(checkout.id) &&
+    sameToolActionAuthority(
+      decodeToolActionAuthority({ ...authority, worktreeId: binding.checkoutId }),
+      target.target.authority,
+    )
   );
 }
