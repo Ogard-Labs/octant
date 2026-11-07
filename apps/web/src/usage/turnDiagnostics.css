@@ -95,3 +95,12 @@
   min-width: 0;
   overflow-x: auto;
 }
+
+/*
+ * One shrinkable column. Without it the page's single grid track grows to the
+ * widest table's content, and embedded in Settings at phone width the whole
+ * view spilled past the screen instead of the tables scrolling inside.
+ */
+.turn-diagnostics {
+  grid-template-columns: minmax(0, 1fr);
+}
