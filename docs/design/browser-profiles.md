@@ -69,7 +69,9 @@ never grants Project access, site access, credential use or delegated authority.
 The site prompt resolves the label from the native host and identifies the account;
 a missing registry entry cannot mint a profile or an approval. A newly created
 profile opens no page and changes no default. Fork/import rules for task defaults
-remain unchanged. The agent uses a named account only through an explicitly
+remain unchanged. The shared Browser tool schema advertises `account:<id>`
+alongside Private, Project and Personal, including on terminal MCP endpoints;
+the selector itself grants no profile or site authority. The agent uses a named account only through an explicitly
 selected task default; its existing explicit Private/Project/Personal arguments
 retain their behavior.
 

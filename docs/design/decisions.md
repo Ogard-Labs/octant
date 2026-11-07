@@ -2535,6 +2535,11 @@ Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snaps
 
 ### Browser profiles and extensions
 
+The shared Browser tool contract advertises bounded named-account selectors
+(`account:<id>`) alongside the existing profile choices. This includes terminal
+MCP discovery; execution still requires the caller's separate current profile
+and site permission.
+
 Browser pages may keep sign-in in a Project or Personal profile. Private is the initial default, and extensions are enabled only per profile.
 
 - Private is the initial default. A local person may journal a Work or Code task’s default Browser profile; it is a default, not a pin or an approval grant. Explicit agent profile requests still follow existing policy, and excluded callers never silently substitute Private.

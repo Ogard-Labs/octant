@@ -52,9 +52,9 @@ export const BROWSER_TOOL_DEFINITION = {
       url: { type: "string", maxLength: 4096, description: "HTTP(S) URL for navigate." },
       profile: {
         type: "string",
-        enum: ["private", "project", "personal"],
-        description:
-          "For a new navigate: override the task default (otherwise Private). Project and Personal need site approval; this never changes the task default.",
+        pattern:
+          "^(private|project|personal|account:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+        description: "New navigate profile; stored profiles need a separate site grant.",
       },
       ref: { type: "string", description: "Element ref from the latest snapshot." },
       include: {
