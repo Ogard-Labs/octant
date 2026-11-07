@@ -434,9 +434,17 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
-  const { setInboxHostFilter, hosts, hostsLoaded, hostsError, transportForHost, transports } =
-    useMobileSession();
+  const {
+    environment,
+    setInboxHostFilter,
+    hosts,
+    hostsLoaded,
+    hostsError,
+    transportForHost,
+    transports,
+  } = useMobileSession();
   usePhoneNotificationRotation({
+    enabled: environment.kind === "live",
     book: mobilePushRegistrationBook(),
     permission: mobileNotificationPort,
     transportForHost,
