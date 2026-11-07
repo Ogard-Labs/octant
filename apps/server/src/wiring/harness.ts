@@ -64,6 +64,7 @@ import {
 } from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
+import { openPromptDigester } from "../metrics/promptDigest";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
 import { octantOrientation } from "../orientation/octantOrientation";
@@ -592,7 +593,13 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // Every provider's turn passes through these hooks; a harness turn also
   // reaches the observer and the lead fallback.
+  // Keyed with a host-local key kept in the provider data folder; a host that
+  // cannot keep the key records turns without digests.
+  const promptDigest = openPromptDigester(
+    join(providerDataDirectory, "metrics", "prompt-digest.key"),
+  );
   const nativeHarnessHooks = {
+    ...(promptDigest === undefined ? {} : { promptDigest }),
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       return nativeHarnessQuestions.answer(threadId, questionId, answer);
     },

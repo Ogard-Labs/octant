@@ -171,6 +171,7 @@ describe("UsageClient.diagnostics", () => {
     failureGroups: [],
     troubledTurns: [],
     cacheMisses: [],
+    samePrompt: [],
     trend: [
       {
         key: "2026-11-07",

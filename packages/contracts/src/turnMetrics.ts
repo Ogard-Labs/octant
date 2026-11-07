@@ -233,6 +233,15 @@ export const TurnDiagnostics = Schema.Struct({
 export type TurnDiagnostics = typeof TurnDiagnostics.Type;
 
 /**
+ * A keyed digest of the prompt a turn sent: a lowercase hex HMAC-SHA-256 of the
+ * prompt with its whitespace normalized, keyed with a secret that never leaves
+ * the host. Two turns that sent the same prompt on this host share a digest;
+ * the prompt text cannot be read back from it or matched on another machine.
+ */
+export const PromptDigest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+export type PromptDigest = typeof PromptDigest.Type;
+
+/**
  * One turn of any thread on any provider, recorded when it ends however it
  * ends. Failed and cancelled turns are recorded too: what they cost and how
  * long they ran still happened.
@@ -249,6 +258,8 @@ export const TurnMetricsRecord = Schema.Struct({
   metrics: TurnMetrics,
   /** Absent on turns recorded before diagnostics were counted. */
   diagnostics: Schema.optional(TurnDiagnostics),
+  /** Absent on turns recorded before prompts were digested. */
+  promptDigest: Schema.optional(PromptDigest),
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
 })
