@@ -7,7 +7,7 @@ describe("remote setup", () => {
   it("distinguishes controlling a host, server commands and server folders before opening setup", async () => {
     const open = vi.fn();
     const user = userEvent.setup();
-    render(<RemoteSetupGuide onContinue={open} />);
+    render(<RemoteSetupGuide canConfigureHost={true} onContinue={open} />);
     const guide = screen.getByRole("region", { name: "What do you want to do remotely?" });
     expect(within(guide).queryByRole("button", { name: /Continue/ })).toBeNull();
 
@@ -31,5 +31,18 @@ describe("remote setup", () => {
     await user.click(within(guide).getByRole("button", { name: "Continue to server Projects" }));
     expect(open).toHaveBeenLastCalledWith("server-folder");
     expect(open).toHaveBeenCalledTimes(3);
+  });
+
+  it("directs a client without host controls to the host instead of offering an inert continuation", async () => {
+    const open = vi.fn();
+    const user = userEvent.setup();
+    render(<RemoteSetupGuide canConfigureHost={false} onContinue={open} />);
+    await user.click(screen.getByRole("button", { name: "Control my Octant host" }));
+
+    expect(
+      screen.getByText(/Open Settings › Remote access in the Octant desktop app on the host/),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Continue to pairing" })).toBeNull();
+    expect(open).not.toHaveBeenCalled();
   });
 });

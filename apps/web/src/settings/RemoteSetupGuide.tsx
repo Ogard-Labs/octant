@@ -24,6 +24,7 @@ const CHOICES: ReadonlyArray<{
 
 /** Choosing a journey grants no access and starts no connection or command. */
 export function RemoteSetupGuide(props: {
+  readonly canConfigureHost: boolean;
   readonly onContinue: (intent: RemoteSetupIntent) => void;
 }) {
   const [intent, setIntent] = useState<RemoteSetupIntent>();
@@ -116,9 +117,16 @@ export function RemoteSetupGuide(props: {
               </p>
             </>
           )}
-          <OctantButton onClick={() => props.onContinue(chosen.intent)} size="sm" type="button">
-            {chosen.next}
-          </OctantButton>
+          {intent === "control-host" && !props.canConfigureHost ? (
+            <p>
+              Open Settings › Remote access in the Octant desktop app on the host. Listener and
+              pairing controls are unavailable in this client.
+            </p>
+          ) : (
+            <OctantButton onClick={() => props.onContinue(chosen.intent)} size="sm" type="button">
+              {chosen.next}
+            </OctantButton>
+          )}
         </div>
       )}
     </SettingsPanel>

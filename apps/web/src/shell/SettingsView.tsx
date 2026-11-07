@@ -1277,8 +1277,10 @@ function ActiveSectionContent({
             </p>
           </section>
         );
+      const administration = remoteAccessAdministrationOf(props.hostBridge);
       const setupGuide = (
         <RemoteSetupGuide
+          canConfigureHost={administration !== undefined}
           onContinue={(intent) =>
             onApplyDeepLink(
               intent === "control-host"
@@ -1293,12 +1295,12 @@ function ActiveSectionContent({
           }
         />
       );
-      const administration = remoteAccessAdministrationOf(props.hostBridge);
       return administration !== undefined ? (
         <div className="settings-section-stack">
           {setupGuide}
           <RemoteAccessSettingsSection
             bridge={administration}
+            focusedSetting={focusedSetting}
             hub={hubAdministrationOf(props.hostBridge)}
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}

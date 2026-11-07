@@ -36,7 +36,10 @@ Settings › Remote access begins with three explicit journeys: control an Octan
 host, run a command on a registered server, or work in a server folder. Selecting
 one shows execution/data locations, prerequisites and a read-only first task;
 Continue opens the existing pairing, server registry or server-Project binding
-controls. Selection starts no connection, command, key creation or listener.
+controls. Continuing to local listener setup focuses its real form. A client
+without local administration instead directs the person to Settings on the
+Octant host; it offers no inert pairing continuation. Selection starts no
+connection, command, key creation or listener.
 Registration alone proves no connectivity. The folder journey uses the existing
 SSH folder check and focuses its binding form; missing folders, SSH keys and
 unverified host identities require correction through their existing owners.
