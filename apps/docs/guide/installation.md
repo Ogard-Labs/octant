@@ -85,24 +85,6 @@ If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1
 
 AppRun preserves Chromium's sandbox and lets Chromium refuse when it cannot establish one. It never adds `--no-sandbox`. A separate `unshare` command is not a reliable prerequisite probe because it has a different AppArmor identity. See [Desktop sandbox prerequisites](./linux-host#desktop-sandbox-prerequisites) for a tested isolated installation and the boundary for administrator-reviewed host profiles.
 
-## Windows QA package
-
-Windows packaging is an engineering validation path, not a usable Windows
-release. On a native Windows x64 build machine, PowerShell can run:
-
-```powershell
-$env:OCTANT_PACKAGE_TARGET = "win32-x64"
-bun run package:desktop
-bun scripts/smoke-windows-package.ts
-```
-
-The output is `out/Octant-<version>-win32-x64.zip`. It contains the existing
-renderer/server/desktop payload and rebuilt Windows native dependencies.
-The smoke loads SQLite and the PTY module inside packaged Electron; it does
-not prove a working Windows UI, host admission, credentials, or confinement.
-There is no installer or Windows signed-update channel yet. Work and Code
-remain unavailable pending the approved confinement design and native proof.
-
 ## Nightly development foundation
 
 On macOS, both packaged desktop apps use a sealed bundled entry and refuse arbitrary
