@@ -1,8 +1,10 @@
+import { browserAgentAvailability, browserToolTransport } from "@octant/domain";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   DEFAULT_WORK_ACCESS,
+  decodeBrowserThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
@@ -473,7 +475,36 @@ export function wireContext(deps: ContextDependencies) {
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
   });
+  const readBrowserAvailability = (windowId: WindowId, threadId: string) => {
+    const code = persistence.readCodeThread(decodeCodeThreadId(threadId));
+    const work = workThreadProjection.read(decodeWorkThreadId(threadId));
+    const chat = persistence.readChatThread(decodeChatThreadId(threadId));
+    const thread = code ?? work ?? chat;
+    const mode = code !== undefined ? "code" : work !== undefined ? "work" : "chat";
+    if (
+      thread === undefined ||
+      !browserAuthority.canAccessWindow(windowId, decodeBrowserThreadId(String(thread.id)), mode)
+    )
+      return { status: "unknown" as const };
+    const effective =
+      code === undefined
+        ? undefined
+        : (codeOperationRuntime?.threadWithActiveTurnPosture?.(
+            codeSessionAuthority.effectiveThread(windowId, code),
+          ) ?? codeSessionAuthority.effectiveThread(windowId, code));
+    const observed = providerRuntimeRegistry.observedState(
+      effective?.providerInstanceId ?? thread.providerInstanceId,
+    );
+    return browserAgentAvailability({
+      toolTransport: browserToolTransport(observed, String(effective?.modelId ?? thread.modelId)),
+      hostLendsBrowser:
+        (code !== undefined && codeOperationRuntime !== undefined) || work !== undefined,
+      toolConstraints: effective?.toolConstraints ?? code?.toolConstraints ?? [],
+      readOnly: effective?.executionPolicy === "plan",
+    });
+  };
   const taskAccessFacts = createTaskAccessFacts({
+    browser: (subject, windowId) => readBrowserAvailability(windowId, String(subject.aggregateId)),
     subject: createTaskAccessSubjectReader({
       code: (id) => persistence.readCodeThread(id),
       work: (id) => workThreadProjection.read(id),
@@ -520,6 +551,7 @@ export function wireContext(deps: ContextDependencies) {
     return thread?.lifecycle === "active" ? thread : undefined;
   };
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
+    agentAvailability: (windowId, threadId) => readBrowserAvailability(windowId, String(threadId)),
     service: browserAutomationService,
     taskProfiles: {
       read: (threadId, mode) => {

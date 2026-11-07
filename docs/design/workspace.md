@@ -767,7 +767,23 @@ chrome. It holds a skeleton at the page's aspect ratio until the
 first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
-its separate card. **Browser start.** A Browser with no page opens on an empty
+its separate card.
+
+**Browser availability.** While no agent drives the page, the thread's pane and
+Project dock show a server-reported availability fact: available (read-only in
+Plan), omitted with its specific tool-transport, task-constraint or host-capability
+reason and an existing recovery action, or Unknown when disconnected/unreported.
+The same policy composes the Browser tool; the renderer never infers permission.
+At 720px and below the status keeps its accessible name and recovery action as
+an icon. Site approvals, Take over, Hand back and the active-agent indicator
+retain their existing behavior. This fact is a reading, never a grant. The provider remedy opens the owning
+thread's existing provider/model picker. A constraints remedy opens that task's
+access report; saved profile constraints cannot be removed by raising its access
+level, so the report directs the person to start a task with a permitting profile.
+A host-capability omission names the missing host capability and links to the
+existing host Settings. Neither recovery grants access by navigation.
+
+**Browser start.** A Browser with no page opens on an empty
 address bar, never a placeholder site. In a Code thread it lists the servers the
 host reports as openable for the thread's Project, this checkout's first and
 then leftovers from elsewhere, leaving out any the host could not reach, the

@@ -1,3 +1,4 @@
+import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
@@ -435,10 +436,7 @@ export function wireWork(deps: WorkDependencies) {
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
         const browserSupported =
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate) => String(candidate) === String(input.thread.modelId),
-          ) === true;
+          browserToolTransport(observed, String(input.thread.modelId)) === true;
         const native = nativeHarnessComposition?.forWork(input);
         const browser = !browserSupported
           ? undefined

@@ -1,3 +1,5 @@
+import { decodeCodeThreadId } from "@octant/contracts/code";
+import { requestThreadControl } from "../composer/threadControlNavigation";
 import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
 import { workspaceContentStorageKey } from "./workspaceContentPersistence";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
@@ -2064,6 +2066,33 @@ function renderNonCodeTab(
       <BrowserWorkspace
         key={tab.id}
         client={props.browserAutomationClient}
+        onAgentBrowserRecovery={(reason) => {
+          if (tab.threadId === undefined) return;
+          if (reason === "host-lends-no-browser") {
+            props.onOpenSettings?.();
+            return;
+          }
+          requestThreadControl(
+            String(tab.threadId),
+            reason === "no-tool-transport" ? "provider" : "access",
+          );
+          if (tab.mode === "code") {
+            const thread = props.codeController.bootstrap?.threads.find(
+              (candidate) => String(candidate.id) === String(tab.threadId),
+            );
+            props.onOpenCodeThread(
+              decodeCodeThreadId(String(tab.threadId)),
+              thread?.title ?? "Code task",
+              thread?.projectId,
+            );
+          } else if (tab.mode === "work") {
+            const thread = props.workThreads?.find(
+              (candidate) => String(candidate.id) === String(tab.threadId),
+            );
+            if (thread !== undefined)
+              props.onOpenWorkThread?.(thread.id, thread.projectId, thread.title);
+          }
+        }}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
