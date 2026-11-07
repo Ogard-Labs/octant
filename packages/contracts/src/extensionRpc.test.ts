@@ -7,7 +7,48 @@ import {
   decodeExtensionSnapshot,
   decodeMcpServerSignInView,
   decodeMcpReportedAccount,
+  decodeMcpServerConnectionListing,
+  decodeMcpServerConnectionRequest,
 } from "./extensionRpc";
+
+describe("the server connection contract", () => {
+  const extensionId = "44000000-0000-4000-8000-000000000002";
+
+  it("accepts a reconnect naming one server and refuses one carrying anything else", () => {
+    expect(
+      decodeMcpServerConnectionRequest({ kind: "reconnect", extensionId, componentId: "mcp" }),
+    ).toEqual({ kind: "reconnect", extensionId, componentId: "mcp" });
+    expect(() =>
+      decodeMcpServerConnectionRequest({
+        kind: "reconnect",
+        extensionId,
+        componentId: "mcp",
+        replay: true,
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a listing row with an unknown state or a timestamp that is not UTC", () => {
+    const row = {
+      extensionId,
+      packageId: "44000000-0000-4000-8000-000000000003",
+      componentId: "mcp",
+      packageName: "Linear",
+      serverName: "Linear",
+      transport: "streamable-http",
+      state: "failed",
+      reason: "Could not connect: fetch failed",
+      checkedAt: "2026-11-07T11:45:00.000Z",
+    };
+    expect(decodeMcpServerConnectionListing({ servers: [row] }).servers).toHaveLength(1);
+    expect(() =>
+      decodeMcpServerConnectionListing({ servers: [{ ...row, state: "probing" }] }),
+    ).toThrow();
+    expect(() =>
+      decodeMcpServerConnectionListing({ servers: [{ ...row, checkedAt: "yesterday" }] }),
+    ).toThrow();
+  });
+});
 import { ExtensionProvenance } from "./extensions";
 import { Schema } from "effect";
 

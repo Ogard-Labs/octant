@@ -30,6 +30,7 @@ import { connectConnector, connectPaperLocalServer } from "./connectConnector";
 import { connectorLogoInks } from "../theme/connectorBrandColors";
 import { CONNECTOR_LOGOS } from "./connectorLogos";
 import { McpServerSignInControl } from "./McpServerSignInControl";
+import { ConnectionStatus, connectionNeedsAttention } from "./ServerConnections";
 import {
   ALL_PROVIDERS,
   LIBRARY_KIND_LABEL,
@@ -487,6 +488,12 @@ function LibraryCard(props: LibraryCardProps) {
           >
             {action}
           </OctantButton>
+        ) : item.state === "on" &&
+          item.connection !== undefined &&
+          connectionNeedsAttention(item.connection.state) ? (
+          // A switched-on server that is not working says so on its card;
+          // the detail carries the reason.
+          <ConnectionStatus connection={{ state: item.connection.state }} />
         ) : item.state === "on" ? (
           <span className="library__card-on">
             <Check aria-hidden="true" size={12} strokeWidth={2} />
@@ -716,6 +723,14 @@ function LibraryDetail(props: LibraryDetailProps) {
           {item.stateNote}
         </p>
       )}
+      {item.connection !== undefined && connectionNeedsAttention(item.connection.state) ? (
+        <p className="library__note" role="status">
+          <ConnectionStatus connection={item.connection} />{" "}
+          <OctantButton onClick={() => props.onOpen("installed")} size="sm" variant="link">
+            Server connections
+          </OctantButton>
+        </p>
+      ) : null}
       <div className="library-detail__cols">
         <section aria-label="What it can do">
           <h4 className="library-detail__label">What it can do</h4>
