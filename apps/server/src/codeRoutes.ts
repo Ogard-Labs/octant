@@ -186,7 +186,7 @@ import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
 import { resolveLocalWindowPrincipal, WINDOW_CAPABILITY_HEADER } from "./clientPrincipal";
-import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -621,6 +621,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
+    let admissionCurrent: () => boolean;
     try {
       if (url.searchParams.has("windowId")) {
         throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
@@ -650,6 +651,12 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           return false;
         }
       };
+      admissionCurrent = retainRouteAdmissionCurrent({
+        request,
+        context: principalContext,
+        store: dependencies.windowAuthorityStore,
+        now,
+      });
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse(
@@ -804,14 +811,15 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
-              ...(requiresLiveCodeReviewAuthority(operation) ||
+              ...(operation.kind === "start-provider-turn" ||
+              requiresLiveCodeReviewAuthority(operation) ||
               [
                 "prepare-git-hunks",
                 "stage-git-hunks",
                 "unstage-git-hunks",
                 "reverse-git-hunks",
               ].includes(operation.kind)
-                ? { admissionCurrent: liveAdmissionCurrent }
+                ? { admissionCurrent: () => liveAdmissionCurrent() && admissionCurrent() }
                 : {}),
             }),
           );

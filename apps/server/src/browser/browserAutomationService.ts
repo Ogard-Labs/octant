@@ -2209,68 +2209,77 @@ export class BrowserAutomationService {
     readonly threadId: BrowserThreadId;
     readonly contextId: BrowserContextId;
     readonly point: { readonly x: number; readonly y: number };
-  }): Promise<BrowserPointObservation | { readonly status: "unavailable" }> {
+    readonly selectionId?: string;
+    readonly expectedObservationRevision?: number;
+    /** Original host principal/request identity, never provider-supplied. */
+    readonly current?: () => boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<BrowserPointObservation> {
     const owned = this.#contexts.get(input.contextId);
     if (
       owned === undefined ||
       owned.windowId !== input.windowId ||
-      String(owned.threadId) !== String(input.threadId) ||
-      owned.abort.signal.aborted ||
-      owned.record.state !== "active"
-    ) {
+      String(owned.threadId) !== String(input.threadId)
+    )
       return { status: "unavailable" };
-    }
-    const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
-    if (
-      !this.#authority.canAccessWindow(
-        owned.windowId,
-        owned.threadId,
-        modeOf(owned.action.authority),
-      ) ||
-      granted === undefined ||
-      authorizeToolAction(owned.action, granted).kind !== "allowed"
-    ) {
+    if (input.selectionId !== undefined && owned.record.presentation !== "native-live")
       return { status: "unavailable" };
-    }
     if (owned.credentialFill !== undefined) return { status: "unavailable" };
     const credentialEpoch = owned.credentialEpoch;
     const describe = this.#runtime.describePoint;
-    if (describe === undefined) return { status: "unavailable" };
-    return this.#queueAction(owned, async () => {
-      if (
-        owned.record.state !== "active" ||
-        owned.abort.signal.aborted ||
-        !this.#authorityIsActive(owned)
-      )
-        return { status: "unavailable" as const };
+    if (describe === undefined) return { status: "unavailable", reason: "capture-unavailable" };
+    const deadline = this.#now() + 10_000;
+    const readAbort = new AbortController();
+    const signal = AbortSignal.any([
+      owned.abort.signal,
+      readAbort.signal,
+      ...(input.signal === undefined ? [] : [input.signal]),
+    ]);
+    const timer = setTimeout(() => readAbort.abort(), 10_000);
+    timer.unref?.();
+    const personInputs = owned.personInputs;
+    const current = () => {
       if (this.#expired(owned)) {
         void this.#expireContext(owned);
-        return { status: "unavailable" as const };
+        return false;
       }
-      try {
-        if (owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch)
-          return { status: "unavailable" as const };
+      return (
+        this.#contexts.get(input.contextId) === owned &&
+        !signal.aborted &&
+        owned.record.state === "active" &&
+        this.#authorityIsActive(owned) &&
+        owned.credentialFill === undefined &&
+        credentialEpoch === owned.credentialEpoch &&
+        input.current?.() !== false &&
+        owned.waitingForPerson !== "sign-in" &&
+        (input.expectedObservationRevision === undefined ||
+          owned.observation?.revision === input.expectedObservationRevision) &&
+        ((owned.record.presentation === "native-live" && input.selectionId !== undefined) ||
+          owned.personInputs === personInputs) &&
+        this.#now() < deadline
+      );
+    };
+    try {
+      if (owned.waitingForPerson === "sign-in")
+        return { status: "unavailable", reason: "observation-paused" };
+      if (!current()) return { status: "unavailable" };
+      const queued = this.#queueAction(owned, async (): Promise<BrowserPointObservation> => {
+        if (!current()) return { status: "unavailable" };
         const observed = await waitForBrowserRuntime(
-          describe(input.contextId, input.point, owned.abort.signal),
-          owned.abort.signal,
+          describe.call(this.#runtime, input.contextId, input.point, signal, input.selectionId),
+          signal,
         );
-        if (
-          observed.kind === "interrupted" ||
-          owned.record.state !== "active" ||
-          !this.#authorityIsActive(owned)
-        )
-          return { status: "unavailable" as const };
-        if (this.#expired(owned)) {
-          void this.#expireContext(owned);
-          return { status: "unavailable" as const };
-        }
-        return owned.credentialFill !== undefined || credentialEpoch !== owned.credentialEpoch
-          ? { status: "unavailable" as const }
-          : observed.value;
-      } catch {
-        return { status: "unavailable" as const };
-      }
-    });
+        if (observed.kind === "interrupted" || !current()) return { status: "unavailable" };
+        return observed.value;
+      });
+      const result = await waitForBrowserRuntime(queued, signal);
+      if (result.kind === "interrupted" || !current()) return { status: "unavailable" };
+      return result.value;
+    } catch {
+      return { status: "unavailable" };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

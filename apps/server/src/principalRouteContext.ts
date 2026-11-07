@@ -2,6 +2,7 @@ import { decodeWindowId, type WindowId } from "@octant/contracts";
 import {
   assertNoPrincipalIdentityInPayload,
   ClientPrincipalError,
+  WINDOW_CAPABILITY_HEADER,
   resolveAuthenticatedPrincipal,
   type ClientPrincipal,
 } from "./clientPrincipal";
@@ -39,6 +40,54 @@ export function bindPrincipalRouteContext(request: Request, context: PrincipalRo
 /** Read a context previously bound by the server-owned dispatch boundary. */
 export function readPrincipalRouteContext(request: Request): PrincipalRouteContext | undefined {
   return boundContexts.get(request);
+}
+
+/**
+ * Retain one original request's identity through asynchronous admission work.
+ * Paired authentication supplies the original combined disconnect/registry
+ * signal. It is an in-flight request proof, not a persistent paired-turn lease:
+ * response completion releases registry tracking under the existing policy.
+ */
+export function retainRouteAdmissionCurrent(input: {
+  readonly request: Request;
+  readonly context: PrincipalRouteContext;
+  readonly store: WindowAuthorityStore;
+  readonly now: () => number;
+}): () => boolean {
+  const { request, context, store, now } = input;
+  const bound = readPrincipalRouteContext(request);
+  const capability = request.headers.get(WINDOW_CAPABILITY_HEADER);
+  const requestSignal = request.signal;
+  const principal = context.principal;
+  const scopeId = context.scopeId;
+  const lifetime = context.abortSignal;
+  return () => {
+    if (
+      request.signal !== requestSignal ||
+      requestSignal.aborted ||
+      lifetime?.aborted === true ||
+      request.headers.get(WINDOW_CAPABILITY_HEADER) !== capability ||
+      readPrincipalRouteContext(request) !== bound ||
+      context.principal !== principal ||
+      context.scopeId !== scopeId ||
+      context.abortSignal !== lifetime
+    )
+      return false;
+    if (principal.kind === "remote-device")
+      return (
+        bound === context &&
+        lifetime !== undefined &&
+        String(principal.deviceId) === String(scopeId)
+      );
+    try {
+      return (
+        String(store.authenticate(capability ?? "", now())) === String(scopeId) &&
+        String(principal.windowId) === String(scopeId)
+      );
+    } catch {
+      return false;
+    }
+  };
 }
 
 /**

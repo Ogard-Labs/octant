@@ -21,6 +21,7 @@ export const DESKTOP_IPC_CHANNELS = {
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
   browserSurfaceCommand: "octant:browser-surface:command",
+  browserSurfacePoint: "octant:browser-surface:point",
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",

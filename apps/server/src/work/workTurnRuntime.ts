@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -96,6 +97,11 @@ export interface WorkTurnRuntimePort {
     readonly admissionCurrent?: () => boolean;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    /** Claims only the exact prepared notes after the final admission check. */
+    readonly takeProductFeedback?: (maxAttachments?: number) => {
+      readonly context?: string;
+      readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+    };
     readonly modelOptionValues?: ProviderModelOptionValues;
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
@@ -616,36 +622,52 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             ),
           ),
         send: Effect.suspend(() => {
-          if (input.admissionCurrent?.() === false)
+          if (input.signal.aborted || input.admissionCurrent?.() === false)
             return Effect.fail({
               category: "unauthorized" as const,
-              message: "Work turn admission is no longer current. No prompt was sent.",
+              message: "Work turn admission is no longer current.",
             });
-          return Effect.sync(() => {
-            meter.sent();
-            input.onPromptSent?.();
-          }).pipe(
-            Effect.zipRight(
-              connection.send({
-                sessionId: input.providerSessionId,
-                prompt: input.command.prompt,
-                // A runtime that keeps its own conversation already holds the
-                // standing context an earlier completed turn of this session
-                // carried.
-                context: [
-                  ...(input.driver.conversationOwnership === "provider"
-                    ? heldTurnContext.forTurn({
-                        sessionId: input.providerSessionId,
-                        resumed: input.resumeCursor !== undefined,
-                        context: input.context,
-                      }).context
-                    : (input.context ?? [])),
-                ],
-                attachments: [...(input.attachments ?? [])],
-                tools: [...(input.appManagedTools?.definitions ?? [])],
-              }),
-            ),
-          );
+          let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
+          try {
+            feedback = input.takeProductFeedback?.(
+              MAX_PROVIDER_ATTACHMENTS - (input.attachments?.length ?? 0),
+            );
+          } catch {
+            return Effect.fail({
+              category: "provider-failed" as const,
+              message:
+                "Selected product notes or the attachment budget changed. Refresh notes or remove attachments before sending again.",
+            });
+          }
+          if (input.signal.aborted || input.admissionCurrent?.() === false)
+            return Effect.fail({
+              category: "unauthorized" as const,
+              message: "Work turn admission is no longer current.",
+            });
+          const context: ReadonlyArray<ProviderContextBlock> = [
+            ...(input.context ?? []),
+            ...(feedback?.context === undefined
+              ? []
+              : [{ kind: "user-message" as const, text: feedback.context }]),
+          ];
+          meter.sent();
+          input.onPromptSent?.();
+          return connection.send({
+            sessionId: input.providerSessionId,
+            prompt: input.command.prompt,
+            // Keep the existing standing-context hold. New note context remains
+            // a user-message block and is carried only by this admitted turn.
+            context:
+              input.driver.conversationOwnership === "provider"
+                ? heldTurnContext.forTurn({
+                    sessionId: input.providerSessionId,
+                    resumed: input.resumeCursor !== undefined,
+                    context,
+                  }).context
+                : context,
+            attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
+            tools: [...(input.appManagedTools?.definitions ?? [])],
+          });
         }),
       });
       yield* Fiber.join(events);

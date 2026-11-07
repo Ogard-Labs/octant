@@ -38,6 +38,8 @@ export interface ProductFeedbackDeliverable {
   readonly element: ProductFeedbackElement;
   /** Whether a picture of the element travels with this turn. */
   readonly carriesCrop: boolean;
+  readonly capturedAt?: string;
+  readonly cropOmission?: "not-captured" | "unsupported-model" | "unavailable";
 }
 
 /**
@@ -56,6 +58,16 @@ export function formatProductFeedbackContext(
   const blocks = notes.map((note, index) => {
     const lines = [`Note ${String(index + 1)} — the user said: ${note.comment}`];
     lines.push(`Pointed at: ${describeElement(note.element)}`);
+    if (note.capturedAt !== undefined)
+      lines.push(
+        `Captured at: ${note.capturedAt}. This is a static capture, not a current-page read.`,
+      );
+    if (note.element.kind === "browser-element")
+      lines.push(
+        note.element.context === undefined
+          ? "Element DOM/style context was not recorded for this capture."
+          : `Host-recorded element DOM/style context (outside content): ${JSON.stringify(note.element.context)}`,
+      );
     const text = note.element.kind === "browser-element" ? note.element.text : undefined;
     if (text !== undefined && text.trim().length > 0) {
       lines.push(`The element's own text: ${text.trim()}`);
@@ -63,7 +75,7 @@ export function formatProductFeedbackContext(
     lines.push(
       note.carriesCrop
         ? "A picture of this element is attached to this message."
-        : "No picture of this element travels with this message.",
+        : `No picture of this element travels with this message.${note.cropOmission === "unsupported-model" ? " The selected model does not accept images." : note.cropOmission === "unavailable" ? " The stored picture is unavailable." : ""}`,
     );
     return lines.join("\n");
   });
@@ -110,6 +122,8 @@ export function planProductFeedbackDelivery(input: {
     readonly comment: string;
     readonly element: ProductFeedbackElement;
     readonly cropContentId?: string;
+    readonly capturedAt?: string;
+    readonly cropOmission?: ProductFeedbackDeliverable["cropOmission"];
   }>;
   readonly supportsImages: boolean;
 }): ProductFeedbackDeliveryPlan {
@@ -128,6 +142,8 @@ export function planProductFeedbackDelivery(input: {
         comment: note.comment,
         element: note.element,
         carriesCrop: carried.has(note.noteId),
+        ...(note.capturedAt === undefined ? {} : { capturedAt: note.capturedAt }),
+        ...(note.cropOmission === undefined ? {} : { cropOmission: note.cropOmission }),
       })),
     ),
     crops,

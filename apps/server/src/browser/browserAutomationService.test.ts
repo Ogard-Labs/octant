@@ -1,3 +1,4 @@
+import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
 import { HubMemberId, UtcTimestamp } from "@octant/contracts";
@@ -109,6 +110,7 @@ function harness(
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
     readonly describePoint?: BrowserRuntimePort["describePoint"];
+    readonly wrapRuntime?: (runtime: BrowserRuntimePort) => BrowserRuntimePort;
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
@@ -118,7 +120,7 @@ function harness(
   let expire: (() => void) | undefined;
   const timers: Array<{ delay: number; run: () => void }> = [];
   let now = Date.parse("2026-07-27T20:00:00.000Z");
-  const runtime: BrowserRuntimePort = {
+  const baseRuntime: BrowserRuntimePort = {
     ...(options.ownerControl === undefined ? {} : { ownerControl: options.ownerControl }),
     available: vi.fn(async () => true),
     nativeAvailable: vi.fn(async () => true),
@@ -162,6 +164,7 @@ function harness(
       };
     },
   };
+  const runtime = options.wrapRuntime?.(baseRuntime) ?? baseRuntime;
   const ids = [contextOne, "30000000-0000-4000-8000-000000000002"];
   const service = new BrowserAutomationService({
     runtime,
@@ -3371,4 +3374,103 @@ describe("BrowserAutomationService", () => {
     expect(snapshot.contexts?.length).toBe(MAX_BROWSER_THREAD_CONTEXTS);
     release();
   });
+
+  it("reaches the actual routed page when a person describes a selected point", async () => {
+    const describePoint = vi.fn(async () => ({ status: "no-element" as const }));
+    const f = harness({
+      describePoint,
+      wrapRuntime: (native) => new RoutingBrowserRuntime({ native, headless: native }),
+    });
+    try {
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      expect(
+        await f.service.describePoint({
+          windowId,
+          threadId: threadOne,
+          contextId: contextOne,
+          point: { x: 0.25, y: 0.25 },
+        }),
+      ).toEqual({ status: "no-element" });
+      expect(describePoint).toHaveBeenCalledOnce();
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("settles a hung point read at its finite deadline and releases the queue without reopening", async () => {
+    vi.useFakeTimers();
+    let release: (() => void) | undefined;
+    const f = harness({
+      describePoint: async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { status: "no-element" };
+      },
+    });
+    try {
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const capture = f.service.describePoint({
+        windowId,
+        threadId: threadOne,
+        contextId: contextOne,
+        point: { x: 0.25, y: 0.25 },
+      });
+      await vi.waitFor(() => expect(release).toBeDefined());
+      const next = f.service.act({ windowId, capturedBy: "agent", request: request() });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(capture).resolves.toEqual({ status: "unavailable" });
+      await next;
+      expect(f.runtime.createContext).toHaveBeenCalledOnce();
+      expect(f.runtime.act).toHaveBeenCalledOnce();
+      release?.();
+      await Promise.resolve();
+    } finally {
+      release?.();
+      await f.service.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["principal", "authority", "person-input"] as const)(
+    "does not return a late point capture after its original %s changes",
+    async (changed) => {
+      let release: (() => void) | undefined;
+      let principalCurrent = true;
+      const f = harness({
+        describePoint: async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return {
+            status: "described",
+            element: {
+              selector: "#private-new-content",
+              bounds: { x: 0, y: 0, width: 0.1, height: 0.1 },
+            },
+            cropDataUrl: "data:image/jpeg;base64,/9j/AA==",
+          };
+        },
+      });
+      try {
+        await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        const capture = f.service.describePoint({
+          windowId,
+          threadId: threadOne,
+          contextId: contextOne,
+          point: { x: 0.25, y: 0.25 },
+          current: () => principalCurrent,
+        });
+        await vi.waitFor(() => expect(release).toBeDefined());
+        if (changed === "principal") principalCurrent = false;
+        if (changed === "authority") f.revoke(threadOne);
+        if (changed === "person-input") f.personTyped();
+        release?.();
+        await expect(capture).resolves.toEqual({ status: "unavailable" });
+      } finally {
+        release?.();
+        await f.service.close();
+      }
+    },
+  );
 });

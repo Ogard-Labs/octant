@@ -3,6 +3,7 @@ import {
   ProductFeedbackCommandResult,
   type ProductFeedbackNote,
   ProductFeedbackList,
+  ProductFeedbackCropAnswer,
   decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -11,10 +12,12 @@ export interface ProductFeedbackClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
+  readonly requestTimeoutMs?: number;
 }
 
 export interface ProductFeedbackClient {
   list(threadId: string, signal?: AbortSignal): Promise<ReadonlyArray<ProductFeedbackNote>>;
+  readCrop(noteId: string, signal?: AbortSignal): Promise<string | undefined>;
   execute(
     command: ProductFeedbackCommand,
     signal?: AbortSignal,
@@ -44,13 +47,14 @@ export function createProductFeedbackClient(
 ): ProductFeedbackClient {
   validateLoopbackBaseUrl(options.baseUrl);
   const fetch = bindFetchPort(options.fetch);
+  const request = (url: string, init: RequestInit, message: string) =>
+    send(fetch, url, init, message, options.requestTimeoutMs ?? 15_000);
 
   return {
     async list(threadId, signal) {
       const url = new URL("/api/feedback/notes", options.baseUrl);
       url.searchParams.set("threadId", threadId);
-      const body = await send(
-        fetch,
+      const body = await request(
         url.toString(),
         {
           method: "GET",
@@ -64,8 +68,7 @@ export function createProductFeedbackClient(
 
     async execute(command, signal) {
       const url = new URL("/api/feedback/commands", options.baseUrl);
-      const body = await send(
-        fetch,
+      const body = await request(
         url.toString(),
         {
           method: "POST",
@@ -80,6 +83,21 @@ export function createProductFeedbackClient(
       );
       return decodeHostAnswer(ProductFeedbackCommandResult)(body);
     },
+    async readCrop(noteId, signal) {
+      const body = await request(
+        new URL(
+          `/api/feedback/notes/${encodeURIComponent(noteId)}/crop`,
+          options.baseUrl,
+        ).toString(),
+        {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+          ...(signal === undefined ? {} : { signal }),
+        },
+        "The captured element image is unavailable.",
+      );
+      return decodeHostAnswer(ProductFeedbackCropAnswer)(body).dataUrl;
+    },
   };
 }
 
@@ -88,21 +106,60 @@ async function send(
   url: string,
   init: RequestInit,
   unavailableMessage: string,
+  timeoutMs: number,
 ): Promise<unknown> {
-  let response: Response;
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  const signal = AbortSignal.any([deadline.signal, ...(init.signal == null ? [] : [init.signal])]);
   try {
-    response = await fetch(url, init);
-  } catch {
-    throw new ProductFeedbackClientFailure(unavailableMessage, 0);
+    let response: Response;
+    try {
+      response = await untilAborted(fetch(url, { ...init, signal }), signal);
+    } catch {
+      throw new ProductFeedbackClientFailure(
+        unavailableMessage + " Refresh notes before retrying.",
+        0,
+      );
+    }
+    const body: unknown = await untilAborted(response.json(), signal).catch(() => {
+      if (signal.aborted)
+        throw new ProductFeedbackClientFailure(
+          "The host did not finish responding. Refresh notes before retrying.",
+          0,
+        );
+      return {};
+    });
+    if (!response.ok) {
+      throw new ProductFeedbackClientFailure(
+        readString(body, "error") ?? unavailableMessage,
+        response.status,
+      );
+    }
+    return body;
+  } finally {
+    clearTimeout(timer);
   }
-  const body: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new ProductFeedbackClientFailure(
-      readString(body, "error") ?? unavailableMessage,
-      response.status,
+}
+
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const refuse = () => reject(new DOMException("Feedback request was aborted.", "AbortError"));
+    if (signal.aborted) {
+      refuse();
+      return;
+    }
+    signal.addEventListener("abort", refuse, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", refuse);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", refuse);
+        reject(error);
+      },
     );
-  }
-  return body;
+  });
 }
 
 function readString(body: unknown, key: string): string | undefined {

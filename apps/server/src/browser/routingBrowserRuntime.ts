@@ -127,6 +127,16 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     return this.#owned(args[0]).act(...args);
   }
 
+  async describePoint(...args: Parameters<NonNullable<BrowserRuntimePort["describePoint"]>>) {
+    const backend = this.#owned(args[0]);
+    return (
+      backend.describePoint?.(...args) ?? {
+        status: "unavailable" as const,
+        reason: "capture-unavailable" as const,
+      }
+    );
+  }
+
   /** A peek goes to whichever backend holds the page; one without a peek offers none. */
   async peek(...args: Parameters<NonNullable<BrowserRuntimePort["peek"]>>) {
     const backend = this.#owned(args[0]);

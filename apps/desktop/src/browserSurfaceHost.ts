@@ -1,3 +1,7 @@
+import {
+  captureBrowserFeedbackPoint,
+  type BrowserFeedbackPointObservation,
+} from "@octant/host-runtime";
 import { BrowserPageScript, type PageScriptTarget } from "./browserPageScript";
 import { BrowserOwnerControl } from "./browserOwnerControl";
 import {
@@ -45,6 +49,7 @@ import {
 } from "@octant/contracts/browser-presentation";
 import { createHash, randomUUID } from "node:crypto";
 import { BrowserCredentialFill } from "./browserCredentialFill";
+import type { BrowserSurfacePointSelection } from "@octant/contracts/desktop-bridge";
 import {
   browserProfileKey,
   browserProfilePartition,
@@ -128,6 +133,7 @@ export interface BrowserSurfaceTabState {
 }
 
 export interface BrowserSurfaceState {
+  readonly pointSelection?: BrowserSurfacePointSelection;
   readonly contextId: string;
   readonly url: string;
   readonly title: string;
@@ -332,6 +338,7 @@ export interface BrowserSurfaceHostOptions {
 interface OwnedTab {
   readonly tabId: string;
   readonly view: BrowserSurfaceViewPort;
+  documentRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
   readonly contents: BrowserSurfaceViewPort["webContents"];
   readonly contentsId: number | undefined;
@@ -350,6 +357,26 @@ interface KeyboardEditingMenu {
   phase: "pressed" | "released" | "activating" | "opened";
 }
 interface OwnedSurface {
+  readonly lifetime: AbortController;
+  pointSelection:
+    | {
+        state: BrowserSurfacePointSelection;
+        readonly tabId: string;
+        readonly documentRevision: number;
+        readonly expiresAt: number;
+        readonly shellWindow: BrowserSurfaceShellWindowPort;
+        readonly viewportBounds: { readonly width: number; readonly height: number };
+        personInputs: number | undefined;
+      }
+    | undefined;
+  pointSelectionTimer: ReturnType<typeof setTimeout> | undefined;
+  selectionRelease:
+    | {
+        readonly tabId: string;
+        readonly documentRevision: number;
+        readonly shellWindow: BrowserSurfaceShellWindowPort;
+      }
+    | undefined;
   keyboardMenu: KeyboardEditingMenu | undefined;
   readonly pageEditMenu: BrowserPageEditMenu;
   readonly presentation: BrowserPresentation;
@@ -1023,6 +1050,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     });
   };
 
+  const clearPointSelection = (owned: OwnedSurface): void => {
+    if (owned.pointSelectionTimer !== undefined) clearTimeout(owned.pointSelectionTimer);
+    owned.pointSelectionTimer = undefined;
+    owned.pointSelection = undefined;
+  };
+
   const surface = (contextId: string): OwnedSurface => {
     const owned = surfaces.get(contextId);
     if (owned === undefined) throw new Error("Octant Browser context is unknown.");
@@ -1041,6 +1074,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
 
   const markGone = (contextId: string, owned: OwnedSurface): void => {
     if (surfaces.get(contextId) !== owned) return;
+    clearPointSelection(owned);
+    owned.lifetime.abort();
     credentialFill.forget(owned);
     surfaces.delete(contextId);
     void owned.textComposition.close();
@@ -1080,6 +1115,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
    * held, because a view that has only ever been created has none.
    */
   const showTab = (owned: OwnedSurface, incoming: OwnedTab): void => {
+    clearPointSelection(owned);
     leaveRecordedTab(owned, incoming);
     for (const tab of owned.tabs) {
       if (tab === incoming) continue;
@@ -1149,8 +1185,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         webSecurity: true,
       },
     });
+
     view.setVisible(false);
     const popups = new BrowserPagePopups();
+    const tab: OwnedTab = {
+      documentRevision: 0,
+      tabId,
+      view,
+      contents: view.webContents,
+      contentsId: view.webContents.id,
+      popups,
+      releasePopups: () => popups.close(),
+    };
+
     view.webContents.session.setPermissionCheckHandler(() => false);
     view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
@@ -1188,6 +1235,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       "page-title-updated",
     ]) {
       view.webContents.on(event, () => {
+        if (
+          event === "did-start-loading" ||
+          event === "did-navigate" ||
+          event === "did-navigate-in-page"
+        ) {
+          tab.documentRevision += 1;
+          if (owned.pointSelection?.tabId === tabId) clearPointSelection(owned);
+        }
         // A displayed frame belongs to this document, not its navigation successor.
         if (event === "did-start-loading") {
           void owned.textComposition.close();
@@ -1295,11 +1350,96 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     // the page through the debugger, which does not pass through them. The
     // person's input is delivered, never dropped, while the agent works; the
     // server learns of it so the agent's snapshot is not trusted afterwards.
-    const gateUserInput = (_event: unknown, input?: unknown) => {
+    const gateUserInput = (event: unknown, input?: unknown) => {
+      const priorSelection = owned.pointSelection;
+      const prevent = () => {
+        if (
+          typeof event === "object" &&
+          event !== null &&
+          "preventDefault" in event &&
+          typeof event.preventDefault === "function"
+        )
+          event.preventDefault();
+      };
+      if (typeof input === "object" && input !== null && "type" in input) {
+        // A missed up outside this view cannot own the next physical gesture.
+        if (input.type === "mouseDown") owned.selectionRelease = undefined;
+        if (input.type === "mouseUp") {
+          const release = owned.selectionRelease;
+          owned.selectionRelease = undefined;
+          if (
+            release !== undefined &&
+            "button" in input &&
+            input.button === "left" &&
+            release.tabId === tabId &&
+            owned.activeTabId === tabId &&
+            release.documentRevision === tab.documentRevision &&
+            owned.shellWindow === release.shellWindow &&
+            !release.shellWindow.isDestroyed()
+          ) {
+            prevent();
+            return;
+          }
+        }
+        const selection = owned.pointSelection;
+        if (selection !== undefined && selection.expiresAt <= Date.now())
+          clearPointSelection(owned);
+        if (selection?.state.status === "armed" && owned.pointSelection === selection) {
+          if (input.type === "keyDown" && "key" in input && input.key === "Escape") {
+            clearPointSelection(owned);
+            prevent();
+            publish(contextId, owned);
+            return;
+          }
+          if (
+            input.type === "mouseDown" &&
+            "button" in input &&
+            input.button === "left" &&
+            "x" in input &&
+            "y" in input &&
+            typeof input.x === "number" &&
+            typeof input.y === "number" &&
+            Number.isFinite(input.x) &&
+            Number.isFinite(input.y)
+          ) {
+            const bounds = owned.lastBounds;
+            if (
+              bounds !== undefined &&
+              selection.tabId === owned.activeTabId &&
+              selection.tabId === tabId &&
+              selection.documentRevision === tab.documentRevision &&
+              originAllowed(view.webContents.getURL(), owned.policy.allowedOrigins) &&
+              input.x >= 0 &&
+              input.y >= 0 &&
+              input.x <= bounds.width &&
+              input.y <= bounds.height
+            ) {
+              selection.state = {
+                status: "selected",
+                selectionId: selection.state.selectionId,
+                requestId: selection.state.requestId,
+                point: { x: input.x / bounds.width, y: input.y / bounds.height },
+              };
+              selection.personInputs = owned.personInputs + 1;
+              owned.selectionRelease = {
+                tabId,
+                documentRevision: tab.documentRevision,
+                shellWindow: selection.shellWindow,
+              };
+              prevent();
+            } else clearPointSelection(owned);
+          }
+        }
+      }
       if (isPersonInput(input)) {
         ownerControls.reclaim(owned);
         owned.ownerNavigationRestricted = false;
         owned.personInputs += 1;
+        if (
+          owned.pointSelection?.state.status === "selected" &&
+          owned.pointSelection.personInputs !== owned.personInputs
+        )
+          clearPointSelection(owned);
         for (const listener of personInputListeners) {
           try {
             listener(contextId);
@@ -1309,20 +1449,20 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         }
       }
       // An action in flight keeps the surface until it ends; its end hands it back.
-      if (owned.control === "agent") return;
+      if (owned.control === "agent") {
+        if (
+          priorSelection !== owned.pointSelection ||
+          owned.pointSelection?.state.status === "selected"
+        ) {
+          publish(contextId, owned);
+        }
+        return;
+      }
       owned.control = "user";
       publish(contextId, owned);
     };
     view.webContents.on("before-input-event", gateUserInput);
     view.webContents.on("before-mouse-event", gateUserInput);
-    const tab: OwnedTab = {
-      tabId,
-      view,
-      contents: view.webContents,
-      contentsId: view.webContents.id,
-      popups,
-      releasePopups: () => popups.close(),
-    };
     // Only Stable's hidden window for a native client presents through
     // human frames; its page popups have no visible window of their own.
     if (view.human !== undefined)
@@ -1901,6 +2041,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         tabs: [],
         activeTabId: firstTabId,
         nextTabOrdinal: 2,
+        pointSelection: undefined,
+        lifetime: new AbortController(),
+        pointSelectionTimer: undefined,
+        selectionRelease: undefined,
         lastBounds: undefined,
         userGrantedOrigins: [],
         credentialSubmitOrigins: undefined,
@@ -1924,6 +2068,55 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
+    },
+    setPointSelection: (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+      enabled: boolean,
+      requestId: string,
+    ): BrowserSurfaceState => {
+      const owned = surface(contextId);
+      if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
+        throw new Error("Octant Browser selection does not own this context.");
+      }
+      if (
+        typeof requestId !== "string" ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId)
+      )
+        throw new Error("Octant Browser selection request identity is invalid.");
+      if (!enabled && owned.pointSelection?.state.requestId !== requestId)
+        return readState(String(contextId), owned);
+      if (enabled && owned.pointSelection?.state.requestId === requestId)
+        return readState(String(contextId), owned);
+      clearPointSelection(owned);
+      if (enabled) {
+        const tab = owned.tabs.find((candidate) => candidate.tabId === owned.activeTabId);
+        if (
+          tab === undefined ||
+          owned.shellWindow === undefined ||
+          owned.shellWindow.isDestroyed() ||
+          owned.lastBounds === undefined ||
+          !originAllowed(tab.view.webContents.getURL(), owned.policy.allowedOrigins)
+        ) {
+          throw new Error("Octant Browser selection is unavailable on this page.");
+        }
+        owned.pointSelection = {
+          state: { status: "armed", requestId, selectionId: randomUUID() },
+          tabId: tab.tabId,
+          documentRevision: tab.documentRevision,
+          expiresAt: Date.now() + 60_000,
+          personInputs: undefined,
+          shellWindow: owned.shellWindow,
+          viewportBounds: { width: owned.lastBounds.width, height: owned.lastBounds.height },
+        };
+        owned.pointSelectionTimer = setTimeout(() => {
+          clearPointSelection(owned);
+          if (surfaces.get(String(contextId)) === owned) publish(String(contextId), owned);
+        }, 60_000);
+        owned.pointSelectionTimer.unref?.();
+      }
+      publish(String(contextId), owned);
+      return readState(String(contextId), owned);
     },
     humanPresentation: async (
       request: HumanBrowserRequest,
@@ -2337,6 +2530,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         throw new Error("Octant Browser can attach only to its owning Project window.");
       }
       if (owned.shellWindow !== undefined && owned.shellWindow !== shellWindow) {
+        clearPointSelection(owned);
         for (const tab of owned.tabs) owned.shellWindow.contentView.removeChildView(tab.view);
       }
       owned.shellWindow = shellWindow;
@@ -2357,19 +2551,98 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
         throw new Error("Octant Browser can resize only inside its owning Project window.");
       }
-      owned.lastBounds = normalizeBounds(bounds);
-      contentsView(owned).setBounds(owned.lastBounds);
+      const next = normalizeBounds(bounds);
+      if (owned.lastBounds?.width !== next.width || owned.lastBounds.height !== next.height) {
+        clearPointSelection(owned);
+        publish(String(contextId), owned);
+      }
+      owned.lastBounds = next;
+      contentsView(owned).setBounds(next);
     },
     detach: (contextId: BrowserContextId | string, owner: BrowserSurfaceOwner): void => {
       const owned = surface(contextId);
       if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
         throw new Error("Octant Browser can detach only from its owning Project window.");
       }
+      clearPointSelection(owned);
       for (const tab of owned.tabs) {
         tab.view.setVisible(false);
         owned.shellWindow?.contentView.removeChildView(tab.view);
       }
       owned.shellWindow = undefined;
+    },
+    describePoint: async (
+      contextId: BrowserContextId | string,
+      point: { readonly x: number; readonly y: number },
+      signal: AbortSignal,
+      selectionId: string,
+    ): Promise<BrowserFeedbackPointObservation> => {
+      const owned = surface(contextId);
+      let checkObservation: () => void;
+      try {
+        checkObservation = observation(owned);
+      } catch {
+        return { status: "unavailable", reason: "observation-paused" };
+      }
+      const selection = owned.pointSelection;
+      const tab = owned.tabs.find((candidate) => candidate.tabId === owned.activeTabId);
+      const current = () => {
+        try {
+          checkObservation();
+        } catch {
+          return false;
+        }
+        return (
+          surfaces.get(String(contextId)) === owned &&
+          !signal.aborted &&
+          !owned.lifetime.signal.aborted &&
+          selection !== undefined &&
+          owned.pointSelection === selection &&
+          selection.expiresAt > Date.now() &&
+          selection.state.status === "selected" &&
+          selection.state.selectionId === selectionId &&
+          selection.state.point.x === point.x &&
+          selection.state.point.y === point.y &&
+          owned.personInputs === selection.personInputs &&
+          tab !== undefined &&
+          owned.activeTabId === tab.tabId &&
+          selection.tabId === tab.tabId &&
+          selection.documentRevision === tab.documentRevision &&
+          !tab.view.webContents.isDestroyed() &&
+          !tab.view.webContents.isLoading() &&
+          owned.shellWindow === selection.shellWindow &&
+          owned.lastBounds?.width === selection.viewportBounds.width &&
+          owned.lastBounds.height === selection.viewportBounds.height &&
+          owned.shellWindow !== undefined &&
+          !owned.shellWindow.isDestroyed() &&
+          originAllowed(tab.view.webContents.getURL(), owned.policy.allowedOrigins)
+        );
+      };
+      if (tab === undefined || !current()) return { status: "unavailable", reason: "page-changed" };
+      const captureSignal = AbortSignal.any([signal, owned.lifetime.signal]);
+      return queueSurfaceAction<BrowserFeedbackPointObservation>(owned, async () => {
+        try {
+          if (!current()) return { status: "unavailable", reason: "page-changed" };
+          return await withDebugger(tab.view, (send) =>
+            captureBrowserFeedbackPoint(
+              {
+                send,
+                current,
+                admits: (url) => originAllowed(url, owned.policy.allowedOrigins),
+                sensitive: () => hasSensitiveDocument(tab.view, true),
+                digest: (value) => createHash("sha256").update(value).digest("hex"),
+              },
+              point,
+              captureSignal,
+            ),
+          );
+        } finally {
+          if (owned.pointSelection === selection) {
+            clearPointSelection(owned);
+            if (surfaces.get(String(contextId)) === owned) publish(String(contextId), owned);
+          }
+        }
+      });
     },
     runPageScript,
     ownerControl: async (
@@ -3051,6 +3324,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   async function closeContext(contextId: BrowserContextId | string): Promise<void> {
     const owned = surfaces.get(contextId);
     if (owned === undefined) return;
+    clearPointSelection(owned);
+    owned.lifetime.abort();
     ownerControls.reclaim(owned);
     credentialFill.forget(owned);
     surfaces.delete(contextId);
@@ -3215,6 +3490,7 @@ function originOf(target: string): string | undefined {
 function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState {
   const contents = contentsView(owned).webContents;
   return {
+    ...(owned.pointSelection === undefined ? {} : { pointSelection: owned.pointSelection.state }),
     contextId,
     url: contents.getURL().slice(0, 4_096),
     title: contents.getTitle().slice(0, 1_024),

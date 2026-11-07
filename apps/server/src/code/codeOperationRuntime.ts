@@ -3275,7 +3275,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     try {
       feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
     } catch {
-      // A feedback read failure must not prevent the person's message from running.
+      await serverTools?.close?.().catch(() => undefined);
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return {
+        ...failStart(
+          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+        ),
+        admission: "refused" as const,
+      };
     }
     const context = [
       ...(switchHandoff?.blocks ?? []),

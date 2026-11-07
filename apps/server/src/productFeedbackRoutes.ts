@@ -2,8 +2,9 @@ import type { WindowId } from "@octant/contracts/shell";
 import {
   ProductFeedbackError,
   type ProductFeedbackService,
+  type ProductFeedbackExecutionContext,
 } from "./browser/productFeedbackService";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -12,7 +13,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const MAX_THREAD_ID_LENGTH = 128;
 
 export interface ProductFeedbackRouteDependencies {
-  readonly feedback: Pick<ProductFeedbackService, "list" | "execute">;
+  readonly feedback: Pick<ProductFeedbackService, "list" | "execute" | "readCropForNote">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
@@ -45,6 +46,9 @@ export function createProductFeedbackRouteHandler(deps: ProductFeedbackRouteDepe
     if (url.pathname === "/api/feedback/notes" && request.method === "GET") {
       return listNotes(request, url, origin, deps, now);
     }
+    if (/^\/api\/feedback\/notes\/[^/]+\/crop$/.test(url.pathname) && request.method === "GET") {
+      return readCrop(request, url, origin, deps, now);
+    }
     if (url.pathname === "/api/feedback/commands" && request.method === "POST") {
       return executeCommand(request, url, origin, deps, now);
     }
@@ -59,23 +63,28 @@ async function listNotes(
   deps: ProductFeedbackRouteDependencies,
   now: () => number,
 ): Promise<Response> {
-  let windowId: WindowId;
+  let admission: ReturnType<typeof authenticateFeedback>;
   try {
     if (url.searchParams.size !== 1 || !url.searchParams.has("threadId")) {
       return failure("Feedback list request is invalid.", 400, origin);
     }
-    windowId = authenticateRouteWindowId({ request, store: deps.windowAuthorityStore, now: now() });
+    admission = authenticateFeedback(request, deps.windowAuthorityStore, now);
   } catch (error) {
     return authenticationFailure(error, "Feedback list", origin);
   }
-  const threadId = url.searchParams.get("threadId") ?? "";
-  if (threadId.length === 0 || threadId.length > MAX_THREAD_ID_LENGTH) {
-    return failure("Feedback list request is invalid.", 400, origin);
-  }
   try {
-    return json({ notes: await deps.feedback.list(windowId, threadId) }, origin);
+    const threadId = url.searchParams.get("threadId") ?? "";
+    if (threadId.length === 0 || threadId.length > MAX_THREAD_ID_LENGTH) {
+      return failure("Feedback list request is invalid.", 400, origin);
+    }
+    const notes = await deps.feedback.list(admission.windowId, threadId, admission.execution);
+    if (!admission.responseCurrent())
+      return failure("Feedback authority changed. Reconnect and refresh notes.", 401, origin);
+    return json({ notes }, origin);
   } catch (error) {
     return serviceFailure(error, "Feedback list failed.", origin);
+  } finally {
+    admission.finish();
   }
 }
 
@@ -86,23 +95,121 @@ async function executeCommand(
   deps: ProductFeedbackRouteDependencies,
   now: () => number,
 ): Promise<Response> {
-  let windowId: WindowId;
+  let admission: ReturnType<typeof authenticateFeedback>;
   try {
     if (url.search !== "") return failure("Feedback command is invalid.", 400, origin);
-    windowId = authenticateRouteWindowId({ request, store: deps.windowAuthorityStore, now: now() });
+    admission = authenticateFeedback(request, deps.windowAuthorityStore, now);
   } catch (error) {
     return authenticationFailure(error, "Feedback command", origin);
   }
-  let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return failure("Feedback command body is invalid.", 400, origin);
-  }
-  try {
-    return json(await deps.feedback.execute(windowId, body), origin);
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return failure("Feedback command body is invalid.", 400, origin);
+    }
+    if (!admission.responseCurrent())
+      return failure("Feedback authority changed. Reconnect and refresh notes.", 401, origin);
+    const result = await deps.feedback.execute(admission.windowId, body, admission.execution);
+    if (!admission.responseCurrent())
+      return failure(
+        "Feedback authority changed. Reconnect and refresh notes before retrying.",
+        401,
+        origin,
+      );
+    return json(result, origin);
   } catch (error) {
     return serviceFailure(error, "Feedback command failed.", origin);
+  } finally {
+    admission.finish();
+  }
+}
+
+function authenticateFeedback(
+  request: Request,
+  store: WindowAuthorityStore,
+  now: () => number,
+): {
+  readonly windowId: WindowId;
+  readonly execution: ProductFeedbackExecutionContext;
+  readonly responseCurrent: () => boolean;
+  readonly finish: () => void;
+} {
+  const context = authenticateRoutePrincipal({ request, store, now: now() });
+  if (context.principal.kind !== "local-window")
+    throw new WindowAuthorityError(
+      "unauthorized",
+      "Pointed-at feedback requires a local person window.",
+    );
+  const windowId = context.scopeId;
+  const capability = request.headers.get("x-octant-window-capability") ?? "";
+  let inFlight: (() => boolean) | undefined = retainRouteAdmissionCurrent({
+    request,
+    context,
+    store,
+    now,
+  });
+  let retired = false;
+  // Check the original request while it is in flight. A completed preview
+  // retains only the capability and sticky retirement state after finish().
+  const admissionCurrent = () => {
+    if (retired) return false;
+    try {
+      if (store.authenticate(capability, now()) !== windowId || inFlight?.() === false)
+        retired = true;
+    } catch {
+      retired = true;
+    }
+    return !retired;
+  };
+  if (!admissionCurrent())
+    throw new WindowAuthorityError("unauthorized", "Feedback authority is unavailable.");
+  return {
+    windowId,
+    execution: {
+      admissionCurrent,
+      signal:
+        context.abortSignal === undefined
+          ? request.signal
+          : AbortSignal.any([request.signal, context.abortSignal]),
+    },
+    responseCurrent: admissionCurrent,
+    finish: () => {
+      admissionCurrent();
+      // Completed previews retain only the original capability and sticky result,
+      // never the HTTP request, its body or its transport lifetime.
+      inFlight = undefined;
+    },
+  };
+}
+
+async function readCrop(
+  request: Request,
+  url: URL,
+  origin: string | null,
+  deps: ProductFeedbackRouteDependencies,
+  now: () => number,
+): Promise<Response> {
+  let admission: ReturnType<typeof authenticateFeedback> | undefined;
+  try {
+    if (url.search !== "") return failure("Feedback crop request is invalid.", 400, origin);
+    admission = authenticateFeedback(request, deps.windowAuthorityStore, now);
+    const noteId = url.pathname.split("/")[4] ?? "";
+    const dataUrl = await deps.feedback.readCropForNote(
+      admission.windowId,
+      noteId,
+      admission.execution,
+    );
+    if (!admission.responseCurrent())
+      return failure("Feedback authority changed. Reconnect and refresh notes.", 401, origin);
+    return json(dataUrl === undefined ? {} : { dataUrl }, origin);
+  } catch (error) {
+    if (error instanceof WindowAuthorityError)
+      return authenticationFailure(error, "Feedback crop", origin);
+    return serviceFailure(error, "Feedback crop is unavailable.", origin);
+  } finally {
+    admission?.finish();
   }
 }
 

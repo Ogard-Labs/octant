@@ -812,6 +812,7 @@ describe("desktop preload bridge", () => {
       "rotateRemoteHostIdentity",
       "saveBrowserProofScreenshots",
       "saveSupportBundle",
+      "selectBrowserSurfacePoint",
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "selectRuntimeBinary",
@@ -1730,6 +1731,43 @@ describe("desktop preload bridge", () => {
       [IPC_CHANNELS.remoteHostIdentityRecover],
     ]);
     expect(JSON.stringify(bridge)).not.toMatch(/PRIVATE KEY|privateKey|session secret/i);
+  });
+
+  it("carries only typed native point selection state over the owned surface bridge", async () => {
+    const contextId = "60000000-0000-4000-8000-000000000001";
+    const selectionId = "60000000-0000-4000-8000-000000000002";
+    const state = {
+      contextId,
+      url: "https://example.com",
+      title: "Example",
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      control: "user",
+      tabs: [],
+      activeTabId: "tab-1",
+      pointSelection: {
+        status: "selected",
+        requestId: selectionId,
+        selectionId,
+        point: { x: 0.25, y: 0.5 },
+      },
+    };
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async () => state),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const bridge = createHostBridge(ipc, projectWindowCapability);
+    const request = { contextId, threadId: projectId, enabled: true, requestId: selectionId };
+    expect((await bridge.selectBrowserSurfacePoint(request)).pointSelection).toEqual(
+      state.pointSelection,
+    );
+    expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith(IPC_CHANNELS.browserSurfacePoint, request);
+    state.pointSelection.point.x = Number.NaN;
+    await expect(bridge.selectBrowserSurfacePoint(request)).rejects.toThrow(
+      "Invalid Browser selection state",
+    );
   });
 });
 

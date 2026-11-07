@@ -1,3 +1,4 @@
+import { decodeProviderSessionId } from "@octant/contracts";
 import {
   decodeWorkTurnAuthority,
   decodeWorkTurnId,
@@ -1866,4 +1867,127 @@ describe("WorkTurnRuntime", () => {
       ]);
     });
   });
+
+  it.each([true, false])(
+    "claims feedback only at the live final Work send after held acquire: %s",
+    async (stillCurrent) => {
+      let release: (() => void) | undefined;
+      let acquired = false;
+      let current = true;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const order: string[] = [];
+      const sessionId = decodeProviderSessionId(ids.session);
+      const feedback = vi.fn(() => {
+        order.push("feedback");
+        return {
+          context: "Person comment; quoted outside-content element evidence.",
+          attachments: [
+            {
+              attachmentId: "feedback",
+              displayName: "Pointed-at element",
+              mediaType: "image/jpeg",
+              bytes: new Uint8Array([3]),
+            },
+          ],
+        };
+      });
+      const send = vi.fn((_input: Parameters<ProviderConnection["send"]>[0]) => {
+        order.push("send");
+        return Effect.void;
+      });
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(
+          Stream.make(
+            decodeProviderRuntimeEvent({
+              kind: "completed",
+              instanceId: ids.provider,
+              sequence: 1,
+              correlationId: ids.project,
+              occurredAt: "2026-08-11T12:00:00.000Z",
+              sessionId,
+            }),
+          ),
+        ),
+        start: () => Effect.succeed({ sessionId }),
+        resume: () => Effect.die("unused"),
+        send,
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const outcome = new WorkTurnRuntime({ timeoutMs: 2_000 }).run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Use my selected notes",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: sessionId,
+        projectRoot: "/tmp/work-project",
+        driver: {
+          kind: "openai-compatible",
+          probe: () => Effect.die("unused"),
+          acquire: () =>
+            Effect.promise(async () => {
+              acquired = true;
+              await gate;
+              return connection;
+            }),
+        },
+        signal: new AbortController().signal,
+        admissionCurrent: () => current,
+        takeProductFeedback: feedback,
+        context: [{ kind: "user-message", text: "Existing context" }],
+        attachments: [
+          {
+            attachmentId: "upload",
+            displayName: "Original upload",
+            mediaType: "image/png",
+            bytes: new Uint8Array([1, 2]),
+          },
+        ],
+      });
+      await vi.waitFor(() => expect(acquired).toBe(true));
+      expect(feedback).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      current = stillCurrent;
+      release?.();
+      const result = await outcome;
+      expect(feedback).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
+      expect(send).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
+      if (stillCurrent) {
+        expect(feedback).toHaveBeenCalledWith(15);
+        expect(order).toEqual(["feedback", "send"]);
+        expect(send.mock.calls[0]?.[0]).toMatchObject({
+          prompt: "Use my selected notes",
+          context: [
+            { kind: "user-message", text: "Existing context" },
+            {
+              kind: "user-message",
+              text: "Person comment; quoted outside-content element evidence.",
+            },
+          ],
+          attachments: [
+            expect.objectContaining({ attachmentId: "upload" }),
+            expect.objectContaining({ attachmentId: "feedback" }),
+          ],
+        });
+        expect(result.kind).toBe("completed");
+      } else expect(result.kind).toBe("failed");
+    },
+  );
 });

@@ -254,6 +254,12 @@ export interface OctantHostBridge {
       readonly command: BrowserSurfaceTabCommand;
     },
   ) => Promise<BrowserSurfaceState>;
+  readonly selectBrowserSurfacePoint: (
+    request: Omit<BrowserSurfaceRequest, "bounds"> & {
+      readonly enabled: boolean;
+      readonly requestId: string;
+    },
+  ) => Promise<BrowserSurfaceState>;
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup: (
     request: ExtensionPopupRequest,
@@ -629,6 +635,21 @@ export function createHostBridge(
         return Promise.reject(new TypeError("Invalid Browser surface command."));
       }
       return invoke(IPC_CHANNELS.browserSurfaceCommand, request);
+    },
+    selectBrowserSurfacePoint: async (
+      request: Omit<BrowserSurfaceRequest, "bounds"> & {
+        readonly enabled: boolean;
+        readonly requestId: string;
+      },
+    ) => {
+      validateBrowserSurfaceIdentity(request);
+      if (
+        typeof request.enabled !== "boolean" ||
+        typeof request.requestId !== "string" ||
+        !PROVIDER_INSTANCE_ID_PATTERN.test(request.requestId)
+      )
+        throw new TypeError("Invalid Browser selection request.");
+      return decodeBrowserSurfaceState(await ipc.invoke(IPC_CHANNELS.browserSurfacePoint, request));
     },
     tabBrowserSurface: async (
       request: Omit<BrowserSurfaceRequest, "bounds"> & {
@@ -2270,6 +2291,11 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
     throw new TypeError("Invalid Browser surface state.");
   }
   return Object.freeze({
+    ...(value.pointSelection === undefined
+      ? {}
+      : {
+          pointSelection: decodeBrowserPointSelection(value.pointSelection),
+        }),
     contextId: value.contextId,
     url: value.url,
     title: value.title,
@@ -2280,6 +2306,45 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
     tabs: Object.freeze(value.tabs.map(decodeBrowserSurfaceTabState)),
     activeTabId: value.activeTabId,
   });
+}
+
+function decodeBrowserPointSelection(
+  value: unknown,
+): NonNullable<BrowserSurfaceState["pointSelection"]> {
+  if (
+    !isRecord(value) ||
+    typeof value.requestId !== "string" ||
+    !PROVIDER_INSTANCE_ID_PATTERN.test(value.requestId) ||
+    typeof value.selectionId !== "string" ||
+    !PROVIDER_INSTANCE_ID_PATTERN.test(value.selectionId)
+  ) {
+    throw new TypeError("Invalid Browser selection state.");
+  }
+  if (value.status === "armed" && Object.keys(value).length === 3) {
+    return { status: "armed", requestId: value.requestId, selectionId: value.selectionId };
+  }
+  if (
+    value.status === "selected" &&
+    Object.keys(value).length === 4 &&
+    isRecord(value.point) &&
+    Object.keys(value.point).length === 2 &&
+    typeof value.point.x === "number" &&
+    typeof value.point.y === "number" &&
+    Number.isFinite(value.point.x) &&
+    Number.isFinite(value.point.y) &&
+    value.point.x >= 0 &&
+    value.point.x <= 1 &&
+    value.point.y >= 0 &&
+    value.point.y <= 1
+  ) {
+    return {
+      status: "selected",
+      requestId: value.requestId,
+      selectionId: value.selectionId,
+      point: { x: value.point.x, y: value.point.y },
+    };
+  }
+  throw new TypeError("Invalid Browser selection state.");
 }
 
 /**

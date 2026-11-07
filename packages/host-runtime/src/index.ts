@@ -283,3 +283,5 @@ export {
   type GithubActionsRepository,
   type GithubActionsCompletedRun,
 } from "./githubActionsSource";
+
+export * from "./browserPointCapture";

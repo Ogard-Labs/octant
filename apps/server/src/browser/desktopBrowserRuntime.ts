@@ -23,6 +23,7 @@ import type {
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
 import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
+import { decodeProductFeedbackPointObservation } from "@octant/contracts/product-feedback";
 import {
   BrowserNavigationBlockedError,
   BrowserRecordingUnavailableError,
@@ -260,6 +261,19 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     signal: AbortSignal,
   ): Promise<BrowserTargetInspection> {
     return this.#request("/v1/contexts/inspect-target", { contextId, selector }, signal);
+  }
+
+  async describePoint(
+    contextId: BrowserContextId,
+    point: { readonly x: number; readonly y: number },
+    signal: AbortSignal,
+    selectionId?: string,
+  ) {
+    if (selectionId === undefined)
+      return { status: "unavailable" as const, reason: "page-changed" as const };
+    return decodeProductFeedbackPointObservation(
+      await this.#request("/v1/contexts/describe-point", { contextId, point, selectionId }, signal),
+    );
   }
 
   peek(contextId: BrowserContextId, signal: AbortSignal): Promise<BrowserRuntimeObservation> {

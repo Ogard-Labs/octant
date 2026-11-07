@@ -46,6 +46,7 @@ const ROUTES = new Set([
   "/v1/available",
   "/v1/contexts/create",
   "/v1/contexts/inspect-target",
+  "/v1/contexts/describe-point",
   "/v1/contexts/gone",
   "/v1/contexts/person-input",
   "/v1/contexts/act",
@@ -105,31 +106,64 @@ export async function startBrowserRuntimeBroker(
       },
     );
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
+  // Every acquired subscription and HTTP listener has the same owner even
+  // when startup or one part of shutdown fails. Preserve all cleanup errors.
+  const cleanup = async (): Promise<ReadonlyArray<unknown>> => {
+    const errors: unknown[] = [];
+    for (const release of [removeGoneListener, removePersonInputListener]) {
+      try {
+        release();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    try {
+      await host.closeAll();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (server.listening) {
+      const closed = new Promise<void>((resolve, reject) => {
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+      });
+      try {
+        server.closeAllConnections();
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await closed;
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
+  };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
     });
-  });
-  const address = server.address() as AddressInfo | null;
-  if (address === null) throw new Error("Octant Browser runtime broker is unavailable.");
-  brokerUrl = `http://127.0.0.1:${address.port}/`;
+    const address = server.address() as AddressInfo | null;
+    if (address === null) throw new Error("Octant Browser runtime broker is unavailable.");
+    brokerUrl = `http://127.0.0.1:${address.port}/`;
+  } catch (error) {
+    const failures = await cleanup();
+    if (failures.length > 0)
+      throw new AggregateError([error, ...failures], "Browser broker startup and cleanup failed.");
+    throw error;
+  }
   let closing: Promise<void> | undefined;
   return Object.freeze({
     url: brokerUrl,
     token,
     close: () => {
-      closing ??= (async () => {
-        removeGoneListener();
-        removePersonInputListener();
-        await host.closeAll();
-        await new Promise<void>((resolve, reject) => {
-          if (!server.listening) return resolve();
-          server.close((error) => (error === undefined ? resolve() : reject(error)));
-          server.closeAllConnections();
-        });
-      })();
+      closing ??= cleanup().then((errors) => {
+        if (errors.length > 0) throw new AggregateError(errors, "Browser broker cleanup failed.");
+      });
       return closing;
     },
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
@@ -358,6 +392,25 @@ async function handleBrokerRequest(
         return failure("invalid-request", 400);
       }
       return Response.json(await host.inspectTarget(body.contextId, body.selector));
+    }
+    if (url.pathname === "/v1/contexts/describe-point") {
+      if (
+        Object.keys(body).length !== 3 ||
+        !isUuid(body.contextId) ||
+        !isUuid(body.selectionId) ||
+        !isViewportPoint(body.point) ||
+        Object.keys(body.point).length !== 2
+      ) {
+        return failure("invalid-request", 400);
+      }
+      return Response.json(
+        await host.describePoint(
+          body.contextId,
+          body.point,
+          signal ?? request.signal,
+          body.selectionId,
+        ),
+      );
     }
     if (url.pathname === "/v1/contexts/peek") {
       if (!isUuid(body.contextId)) return failure("invalid-request", 400);

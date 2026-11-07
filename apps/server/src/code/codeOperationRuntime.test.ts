@@ -1,3 +1,6 @@
+import { createProductFeedbackThreadScope } from "../browser/productFeedbackThreadScope";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { ProductFeedbackUpdated, decodeProject } from "@octant/contracts";
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
 import { withCodeOperationRuntime } from "../wiring/codeRuntime";
@@ -1198,6 +1201,7 @@ describe("CodeOperationRuntime", () => {
         prompt: fixture.prompt,
       } as const;
       const pending = fixture.runtime.execute(windowId, command, {
+        initiator: "user",
         admissionCurrent: () => current,
       });
       await entered.promise;
@@ -1212,7 +1216,10 @@ describe("CodeOperationRuntime", () => {
       current = true;
       const retry = { ...command, operationId: operationId(14), sessionId: operationId(14) };
       await expect(
-        fixture.runtime.execute(windowId, retry, { admissionCurrent: () => current }),
+        fixture.runtime.execute(windowId, retry, {
+          initiator: "user",
+          admissionCurrent: () => current,
+        }),
       ).resolves.toMatchObject({ state: "running" });
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
       expect(connection.send).toHaveBeenCalledWith(
@@ -1268,14 +1275,18 @@ describe("CodeOperationRuntime", () => {
         comment: "Align this button.",
       });
       await expect(
-        fixture.runtime.execute(windowId, {
-          kind: "start-provider-turn",
-          operationId: operationId(13),
-          threadId,
-          checkoutId,
-          sessionId,
-          prompt: fixture.prompt,
-        }),
+        fixture.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(13),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          },
+          { initiator: "user" },
+        ),
       ).resolves.toMatchObject({ state: "running" });
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
       expect(fixture.feedback.deliver({ threadId, operationId: operationId(14) })).toEqual([]);
@@ -6170,6 +6181,400 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.runtimeWorks()).toEqual([]);
     fixture.close();
   });
+
+  it("does not silently claim a product note edited during Code credential preparation", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>(),
+      credential = Promise.withResolvers<string>();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          entered.resolve();
+          return credential.promise;
+        },
+      },
+    });
+    try {
+      const captured = await fixture.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Original choice",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+      const pending = fixture.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(13),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        },
+        { initiator: "user" },
+      );
+      await entered.promise;
+      expect(
+        await fixture.feedback.execute(
+          windowId,
+          {
+            kind: "update-product-feedback",
+            noteId: captured.note.id,
+            expectedVersion: captured.note.version,
+            comment: "New choice after send",
+          },
+          { admissionCurrent: () => true },
+        ),
+      ).toMatchObject({ kind: "feedback-updated" });
+      credential.resolve("credential-value");
+      await expect(pending).resolves.toMatchObject({ admission: "refused" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(fixture.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "New choice after send", version: 2 },
+      ]);
+    } finally {
+      credential.resolve("credential-value");
+      fixture.close();
+    }
+  });
+
+  it.each(["credentials", "claim"] as const)(
+    "retains the actual host feedback Project binding through Code %s",
+    async (phase) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()),
+        connection = providerConnection(queue);
+      const entered = Promise.withResolvers<void>(),
+        credential = Promise.withResolvers<string>();
+      let project = decodeProject({
+        id: thread().projectId,
+        type: "code",
+        name: "Project",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        binding: { canonicalRoot: "/repo" },
+        codeAccessPersistence: "current-session",
+        bindingHistory: [
+          {
+            revisionId: thread().bindingRevisionId,
+            revision: 1,
+            currentBinding: { canonicalRoot: "/repo" },
+            actor: { kind: "local-user", actorId: windowId },
+            changedAt: now,
+          },
+        ],
+      });
+      const resolveScope = createProductFeedbackThreadScope({
+        readCodeThread: (id) => (id === threadId ? thread() : undefined),
+        readWorkThread: () => undefined,
+        readProject: () => project,
+        canUseWindow: (id) => id === windowId,
+        windowHoldsProject: (owner, id, mode) =>
+          owner === windowId && id === thread().projectId && mode === "code",
+      });
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        feedbackScope: resolveScope,
+        onFeedbackDelivered: () => {
+          if (phase === "claim")
+            project = decodeProject({ ...project, binding: { canonicalRoot: "/replacement" } });
+        },
+        credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+        credentialResolver: {
+          resolve: () => {
+            entered.resolve();
+            return credential.promise;
+          },
+        },
+      });
+      try {
+        await fixture.feedback.execute(windowId, {
+          kind: "capture-product-feedback",
+          threadId,
+          mode: "code",
+          contextId: operationId(40),
+          point: { x: 0.3, y: 0.5 },
+          comment: "Keep the original capture pending",
+        });
+        const pending = fixture.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(13),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          },
+          { initiator: "user" },
+        );
+        await entered.promise;
+        if (phase === "credentials")
+          project = decodeProject({ ...project, binding: { canonicalRoot: "/replacement" } });
+        credential.resolve("credential-value");
+        await expect(pending).resolves.toMatchObject({ admission: "refused" });
+        expect(connection.send).not.toHaveBeenCalled();
+        expect(fixture.feedback.pendingForTurn(threadId)).toHaveLength(phase === "claim" ? 0 : 1);
+        if (phase === "claim") {
+          expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+            { lifecycle: "delivered" },
+          ]);
+          await fixture.runtime.execute(
+            windowId,
+            {
+              kind: "start-provider-turn",
+              operationId: operationId(13),
+              threadId,
+              checkoutId,
+              sessionId,
+              prompt: fixture.prompt,
+            },
+            { initiator: "user" },
+          );
+          expect(connection.send).not.toHaveBeenCalled();
+          expect(fixture.feedback.pendingForTurn(threadId)).toEqual([]);
+        }
+      } finally {
+        credential.resolve("credential-value");
+        fixture.close();
+      }
+    },
+  );
+
+  it.each([
+    "body",
+    "provider",
+    "header",
+    "context",
+    "paired-missing",
+    "paired-live",
+    "paired-abort",
+  ] as const)(
+    "retains original Code route admission through held %s before feedback delivery",
+    async (phase) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const entered = Promise.withResolvers<void>(),
+        credential = Promise.withResolvers<string>();
+      const windows = new WindowAuthorityStore(),
+        capability = "A".repeat(43);
+      windows.register({ windowId, capability, now: Date.parse(now) });
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+        credentialResolver: {
+          resolve: () => {
+            entered.resolve();
+            return credential.promise;
+          },
+        },
+      });
+      const unused = (): never => {
+        throw Error("Unrelated route invoked");
+      };
+      const route = createCodeRouteHandler({
+        windowAuthorityStore: windows,
+        now: () => Date.parse(now),
+        service: {
+          bootstrap: unused,
+          navigation: unused,
+          read: unused,
+          execute: unused,
+          subscribe: unused,
+          readContent: unused,
+          saveFile: unused,
+          openFile: unused,
+          executeOperation: (owner, command, options) =>
+            fixture.runtime.execute(owner, command, options),
+        },
+      });
+      try {
+        await fixture.feedback.execute(windowId, {
+          kind: "capture-product-feedback",
+          threadId,
+          mode: "code",
+          contextId: operationId(40),
+          point: { x: 0.3, y: 0.5 },
+          comment: "Keep this choice pending",
+        });
+        const command = {
+          kind: "start-provider-turn",
+          operationId: operationId(13),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        };
+        let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+        const stream = new ReadableStream<Uint8Array>({
+          start: (controller) => {
+            body = controller;
+          },
+        });
+        const init: RequestInit & { duplex: "half" } = {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: phase === "body" ? stream : JSON.stringify(command),
+          duplex: "half",
+        };
+        const request = new Request("http://127.0.0.1/api/code/commands", init);
+        const paired = phase.startsWith("paired-");
+        if (!paired)
+          bindPrincipalRouteContext(request, {
+            scopeId: windowId,
+            principal: { kind: "local-window", windowId, capabilityGeneration: 0 },
+          });
+        const lifetime = new AbortController();
+        const dispatch = createAuthenticatedProductDispatch({
+          dispatch: (forwarded) => route(forwarded),
+        });
+        const pending = paired
+          ? dispatch({
+              request,
+              principal: createRemoteDevicePrincipal({
+                hostId: Schema.decodeUnknownSync(StableHostId)(operationId(80)),
+                deviceId: Schema.decodeUnknownSync(DeviceId)(operationId(81)),
+                sessionId: Schema.decodeUnknownSync(RemoteSessionId)(operationId(82)),
+                credentialGeneration: 1,
+                origin: "https://octant.invalid",
+                protocolVersion: 1,
+                capabilityDigest: "b".repeat(64),
+              }),
+              ...(phase === "paired-missing" ? {} : { abortSignal: lifetime.signal }),
+            })
+          : route(request);
+        if (phase !== "body" && phase !== "paired-missing") await entered.promise;
+        expect(connection.send).not.toHaveBeenCalled();
+        // Host-side retained-request lifetime probes, not a claim that a client
+        // can rewrite headers or server bindings after sending its request.
+        if (phase === "header") request.headers.set("x-octant-window-capability", "B".repeat(43));
+        else if (phase === "context")
+          bindPrincipalRouteContext(request, {
+            scopeId: windowId,
+            principal: { kind: "local-window", windowId, capabilityGeneration: 1 },
+          });
+        else if (phase === "paired-abort") lifetime.abort();
+        else if (!paired) windows.revoke(windowId);
+        if (phase === "body") {
+          body?.enqueue(new TextEncoder().encode(JSON.stringify(command)));
+          body?.close();
+        } else {
+          await stream.cancel();
+        }
+        credential.resolve("credential-value");
+        const response = await pending;
+        expect(response?.status).toBe(200);
+        if (phase === "paired-live") {
+          expect(await response?.json()).toMatchObject({ state: "running" });
+          await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+          expect(vi.mocked(connection.send).mock.calls[0]?.[0].attachments ?? []).toEqual([]);
+        } else {
+          expect(await response?.json()).toMatchObject({ admission: "refused" });
+          expect(connection.send).not.toHaveBeenCalled();
+        }
+        expect(fixture.feedback.pendingForTurn(threadId)).toHaveLength(1);
+      } finally {
+        credential.resolve("credential-value");
+        fixture.close();
+      }
+    },
+  );
+
+  it.each(["agent", "recovery"] as const)(
+    "keeps chosen feedback pending through an automatic Code continuation: %s",
+    async (origin) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const entered = Promise.withResolvers<void>();
+      const credential = Promise.withResolvers<string>();
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+        credentialResolver: {
+          resolve: () => {
+            entered.resolve();
+            return credential.promise;
+          },
+        },
+      });
+      try {
+        await fixture.feedback.execute(windowId, {
+          kind: "capture-product-feedback",
+          threadId,
+          mode: "code",
+          contextId: operationId(40),
+          point: { x: 0.3, y: 0.5 },
+          comment: "Person chose this note.",
+        });
+        const command = {
+          kind: "start-provider-turn",
+          operationId: operationId(13),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        } as const;
+        const pending = fixture.runtime.execute(
+          windowId,
+          command,
+          origin === "recovery" ? { initiator: "user", limitRecovery: true } : {},
+        );
+        await entered.promise;
+        expect(connection.send).not.toHaveBeenCalled();
+        expect(fixture.feedback.pendingForTurn(threadId)).toHaveLength(1);
+        credential.resolve("credential-value");
+        await expect(pending).resolves.toMatchObject({ state: "running" });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+        const automatic = vi.mocked(connection.send).mock.calls[0]?.[0];
+        expect(automatic?.attachments ?? []).toEqual([]);
+        expect(
+          automatic?.context?.some((block) => block.text.includes("Person chose this note.")) ??
+            false,
+        ).toBe(false);
+        expect(fixture.feedback.pendingForTurn(threadId)).toHaveLength(1);
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(14),
+          threadId,
+          checkoutId,
+        });
+        await expect(
+          fixture.runtime.execute(
+            windowId,
+            {
+              ...command,
+              operationId: operationId(15),
+              sessionId: operationId(15),
+            },
+            { initiator: "user" },
+          ),
+        ).resolves.toMatchObject({ state: "running" });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+        const person = vi.mocked(connection.send).mock.calls[1]?.[0];
+        expect(person?.attachments).toHaveLength(1);
+        expect(
+          person?.context?.some((block) => block.text.includes("Person chose this note.")),
+        ).toBe(true);
+        expect(fixture.feedback.pendingForTurn(threadId)).toEqual([]);
+      } finally {
+        credential.resolve("credential-value");
+        fixture.close();
+      }
+    },
+  );
 });
 
 describe("managed Code creation approval", () => {
@@ -8120,6 +8525,8 @@ function selectThreadConversation(
 }
 
 function runtimeFixture(options: {
+  feedbackScope?: Parameters<typeof createProductFeedbackTurnPort>[0]["resolveScope"];
+  onFeedbackDelivered?: () => void;
   inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
@@ -8277,12 +8684,17 @@ function runtimeFixture(options: {
   applyMigrations(connection, MIGRATIONS, () => now);
   const journal = new Journal({
     connection,
+    onCommitted: (append) => {
+      if (append.events.some((event) => event.eventName === "feedback.note-delivered@1"))
+        options.onFeedbackDelivered?.();
+    },
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
       .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated)
       .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
-      .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered),
+      .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered)
+      .register("feedback.note-updated@1", 1, ProductFeedbackUpdated),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(new CodeProjection())
@@ -8365,6 +8777,8 @@ function runtimeFixture(options: {
       }),
     },
     crops: { put: (content) => storedEvidence(45, content), read: () => feedbackCrop },
+    transaction: (body) => journal.transaction(body),
+    resolveThread: async () => ({ mode: "code", current: () => true }),
     readNote: (id) => readProductFeedbackNote(connection, id),
     readNotes: (id) => readProductFeedbackNotes(connection, id),
     canAccessThread: access,
@@ -8576,7 +8990,10 @@ function runtimeFixture(options: {
       : { forkProviderSession: options.forkProviderSession }),
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },
     supportsAttachments: () => true,
-    takeProductFeedbackForTurn: createProductFeedbackTurnPort({ service: feedback }),
+    takeProductFeedbackForTurn: createProductFeedbackTurnPort({
+      service: feedback,
+      ...(options.feedbackScope === undefined ? {} : { resolveScope: options.feedbackScope }),
+    }),
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: () => options.standingMergeAllowance ?? [] }),
