@@ -5,7 +5,9 @@ import type {
   ServerProjectsView,
 } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
-import { render, screen, within } from "@testing-library/react";
+import { decodeAggregateVersion } from "@octant/contracts";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ServerAccessSettings, ServerProjectsSettings } from "./ServerProjectsSettings";
@@ -28,11 +30,13 @@ const SITE: ServerProject = {
 
 function setup(options: {
   readonly initial?: ServerProjectsView;
+  readonly read?: () => ServerProjectsView;
   readonly servers?: ReadonlyArray<ShieldServer>;
   readonly answer?: (command: ServerProjectsCommand) => ServerProjectsCommandResult;
+  readonly terminalClient?: ProjectTerminalClient;
 }) {
   const initial = options.initial ?? { projects: [SITE] };
-  const read = vi.fn(async () => initial);
+  const read = vi.fn(async () => options.read?.() ?? initial);
   const command = vi.fn(
     async (sent: ServerProjectsCommand): Promise<ServerProjectsCommandResult> =>
       options.answer?.(sent) ?? { kind: "server-projects-updated", view: initial },
@@ -44,11 +48,71 @@ function setup(options: {
     })),
   };
   const user = userEvent.setup();
-  render(<ServerProjectsSettings client={{ read, command }} servers={servers} />);
+  render(
+    <ServerProjectsSettings
+      client={{ read, command }}
+      servers={servers}
+      {...(options.terminalClient === undefined ? {} : { terminalClient: options.terminalClient })}
+    />,
+  );
   return { command, user };
 }
 
 describe("ServerProjectsSettings", () => {
+  it("retains a refused action draft until the person reloads the current saved list", async () => {
+    let current: ServerProjectsView = { projects: [SITE] };
+    const { user } = setup({
+      read: () => current,
+      answer: () => {
+        current = {
+          projects: [{ ...SITE, actionsVersion: decodeAggregateVersion(1), actions: [] }],
+        };
+        return {
+          kind: "server-projects-refused",
+          reason: "actions-changed",
+          message: "Review the current actions.",
+        };
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+    await user.type(screen.getByRole("textbox", { name: "Action name" }), "Test");
+    await user.type(screen.getByRole("textbox", { name: "Action command" }), "npm test");
+    await user.click(screen.getByRole("button", { name: "Save actions" }));
+    expect(await screen.findByText("Review the current actions.")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Action command" })).toHaveValue("npm test");
+    await user.click(screen.getByRole("button", { name: "Reload current actions" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Action command" })).toBeNull(),
+    );
+  });
+  it("saves only explicitly accepted remote suggestions at the reviewed action version", async () => {
+    const execute = vi.fn(async () => ({
+      kind: "project-action-suggestions" as const,
+      projectId: SITE.id,
+      suggestions: [
+        { name: "Test", command: "bun run test", directory: ".", source: "package.json" as const },
+      ],
+    }));
+    const { user, command } = setup({ terminalClient: { execute } });
+    await user.click(await screen.findByRole("button", { name: "Actions" }));
+    const suggestion = await screen.findByRole("button", { name: /bun run test/ });
+    expect(command).not.toHaveBeenCalled();
+    await user.click(suggestion);
+    expect(command).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save actions" }));
+    expect(command).toHaveBeenCalledWith({
+      kind: "set-server-project-actions",
+      projectId: SITE.id,
+      expectedVersion: 0,
+      actions: [{ id: expect.any(String), name: "Test", command: "bun run test", directory: "." }],
+    });
+    expect(execute).toHaveBeenCalledWith(
+      { kind: "suggest-actions", projectId: SITE.id },
+      expect.any(AbortSignal),
+    );
+  });
   it("lists each server Project with the server and folder it is on", async () => {
     setup({});
 

@@ -1,6 +1,41 @@
 import { expect, it, vi } from "vitest";
 import { createServerProjectsClient } from "./serverProjectsClient";
+import { decodeServerProjectsCommand } from "@octant/contracts/server-projects";
 const projectId = "11111111-1111-4111-8111-111111111111";
+it("sends a versioned server action save once and preserves a stale-list refusal", async () => {
+  const fetch = vi.fn(async () =>
+    Response.json(
+      {
+        kind: "server-projects-refused",
+        reason: "actions-changed",
+        message: "Review the current actions.",
+      },
+      { status: 409 },
+    ),
+  );
+  const client = createServerProjectsClient({
+    baseUrl: "http://127.0.0.1:1234",
+    windowCapability: "private-window-token",
+    fetch,
+  });
+  const command = decodeServerProjectsCommand({
+    kind: "set-server-project-actions",
+    projectId,
+    expectedVersion: 3,
+    actions: [],
+  });
+  expect(await client.command(command)).toMatchObject({
+    kind: "server-projects-refused",
+    reason: "actions-changed",
+  });
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
+    "http://127.0.0.1:1234/api/server-projects",
+    expect.objectContaining({
+      body: JSON.stringify(command),
+      headers: expect.objectContaining({ "x-octant-window-capability": "private-window-token" }),
+    }),
+  );
+});
 it("authenticates preview requests and returns a refused start without retrying", async () => {
   const fetch = vi.fn(async () =>
     Response.json({ kind: "refused", reason: "already-owned" }, { status: 409 }),

@@ -270,6 +270,7 @@ import {
   ServerProjectBoundPayload,
   ServerProjectRemovedPayload,
   ServerProjectRenamedPayload,
+  ServerProjectActionsReplacedPayload,
 } from "@octant/contracts/server-projects";
 import {
   RUNTIME_NETWORK_EVENT_NAMES,
@@ -606,6 +607,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.renamed, 1, ServerProjectRenamedPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.removed, 1, ServerProjectRemovedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES.actionsReplaced, 1, ServerProjectActionsReplacedPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)

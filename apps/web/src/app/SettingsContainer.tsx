@@ -1,6 +1,7 @@
 import type { ThemeTypography } from "@octant/contracts/theme";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { memo, Suspense, useMemo } from "react";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -26,6 +27,8 @@ type HostFederationLifecycle = NonNullable<
 >["lifecycle"];
 
 export interface SettingsContainerProps {
+  readonly projectTerminalClient?: ProjectTerminalClient;
+  readonly projectActionStoragePrefix?: string;
   readonly actions: Pick<
     ShellActions,
     "openChatThread" | "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
@@ -283,6 +286,12 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(shieldServersClient === undefined ? {} : { shieldServersClient })}
       {...(providerToolingClient === undefined ? {} : { providerToolingClient })}
       {...(serverProjectsClient === undefined ? {} : { serverProjectsClient })}
+      {...(props.projectTerminalClient === undefined
+        ? {}
+        : { projectTerminalClient: props.projectTerminalClient })}
+      {...(props.projectActionStoragePrefix === undefined
+        ? {}
+        : { projectActionStoragePrefix: props.projectActionStoragePrefix })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}
       folderBrowseClient={folderBrowseClient}

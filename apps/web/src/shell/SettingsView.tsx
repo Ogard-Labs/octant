@@ -16,6 +16,7 @@ import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import {
   type HostPlatform,
   type ProviderInstanceId,
@@ -272,6 +273,8 @@ export interface SettingsViewProps {
   readonly providerToolingClient?: ProviderToolingClient;
   /** Code Projects on a registered server; absent off this computer. */
   readonly serverProjectsClient?: ServerProjectsClient;
+  readonly projectTerminalClient?: ProjectTerminalClient;
+  readonly projectActionStoragePrefix?: string;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -1393,6 +1396,12 @@ function ActiveSectionContent({
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
           />
           <ServerAccessSettings
+            {...(props.projectTerminalClient === undefined
+              ? {}
+              : { terminalClient: props.projectTerminalClient })}
+            {...(props.projectActionStoragePrefix === undefined
+              ? {}
+              : { actionStoragePrefix: props.projectActionStoragePrefix })}
             focusedSetting={focusedSetting}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
