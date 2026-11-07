@@ -15,16 +15,12 @@ Most network traffic is yours to configure: provider API requests for Chat,
 Work, and Code, a Canvas export to a GitHub Gist that you approve, and remote
 access when you enable pairing. Public links are off until you turn them on:
 a Canvas published to one goes to the public Canvas share service, which can
-read it ([details](/advanced/privacy-notice#destinations-you-choose)). Two HTTPS calls
+read it ([details](/advanced/privacy-notice#connections-you-choose)). Two HTTPS calls
 Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two
-calls. Drafts of the [privacy notice](/advanced/privacy-notice),
-[sub-processor position](/advanced/sub-processors),
-[data residency](/advanced/data-residency),
-drafts in `docs/legal/` (DPA template, SCC position, EULA placeholders)
-describe the broader boundary for legal review; they are not published
-notices or contracts.
+calls. [Privacy](/advanced/privacy-notice) summarises the data boundary and
+[Licence and contact](/advanced/terms) identifies the distributor and licence.
 
 ## Local storage
 
@@ -96,6 +92,12 @@ later host export carries no content trace of it. Its id remains only in
 the purge tombstone, by design. Its usage rows stay for accounting but are
 de-linked, so they carry token counts and no thread id, and Project memory
 is kept.
+
+Retention defaults to forever. Setting a retention window does not delete
+anything; purge requires an explicit confirmation. SQLite free pages may
+retain deleted bytes until a vacuum or store rebuild; the purge result
+reports this residual scope. Purging this host does not erase copies you
+published, exported, or backed up elsewhere.
 
 ## Credentials
 
@@ -567,9 +569,6 @@ federation and hosted relay models are not built.
 ## Next steps
 
 - [Privacy notice](/advanced/privacy-notice) for what exists, what leaves, and export or purge
-- Shared-host controller footing (repository draft at
-  `docs/legal/shared-host-controller.md`) for when several principals share
-  one host journal
 - [Installation](/guide/installation#updates) for what an update check sends
 - [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses)
   for what a catalog fetch discloses

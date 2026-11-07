@@ -4614,14 +4614,16 @@ or .zip>` write the same files, built by one host command
   at once; each page is walked before it is written. The cut names what it
   leaves out — credentials, filesystem paths, attachment bytes, raw
   provider payloads, unsent drafts, paired-device keys, and window
-  capabilities — and why. User-facing
-  drafts of the privacy notice, sub-processor position, data-residency
-  statement, DPA template, SCC position, and EULA governing-law placeholders
-  live in `apps/docs/advanced/` and are marked pending legal review; they
-  describe this behavior rather than changing it. The draft shared-host
-  controller footing for small teams lives in
-  `docs/legal/shared-host-controller.md` and covers sharing a host the people
-  control, without shipping the shared team host.
+  capabilities — and why. User-facing terms and privacy documentation are
+  limited to the MIT licence, distributor/contact information, the self-hosted
+  data boundary, and external connections. Ogard Labs does not receive or
+  process workspace data and operates no content service or telemetry
+  collection. The pages are `apps/docs/advanced/terms.md` and
+  `apps/docs/advanced/privacy-notice.md`; operational export/purge limits stay
+  in `apps/docs/advanced/privacy-and-security.md`. There is no separate EULA,
+  DPA/SCC template, or automatic assignment of a GDPR role to a host owner or
+  provider. Preserve mandatory rights and assess any changed processing model
+  on its facts; [documentation scope](legal/README.md) records the basis.
 - **Artifact mirror.** After each committed artifact version the host
   rewrites that artifact's mirrored files in place (removing old names on
   rename) and journals every outcome as a receipt, including skipped and
@@ -14219,8 +14221,8 @@ proper preview release (maintainer decision, 2026-11-06, which replaces the
 redacted push, capture and voice, public store distribution), a full LSP /
 extension host / debugger companion, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, third-party
-provider-driver plugins, and the EU/GDPR compliance package (legal review is
-still required before it ships). There is no separate post-preview track.
+provider-driver plugins, and the terms and privacy documentation for MIT self-hosted distribution
+(final legal publication review remains required). There is no separate post-preview track.
 Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
 maintainers schedule, not safety rules; none of them protects an invariant by
