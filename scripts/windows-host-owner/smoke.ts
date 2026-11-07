@@ -83,6 +83,7 @@ async function alterOwnedFixture(
   scopeId: string,
   mode: "directory-acl" | "process-query",
   target?: number,
+  readerBirth?: string,
 ): Promise<void> {
   const executable = win32.join(
     process.env.SystemRoot ?? "C:\\Windows",
@@ -102,6 +103,10 @@ async function alterOwnedFixture(
     mode,
   ];
   if (target !== undefined) args.push("-TargetProcessId", String(target));
+  if (mode === "process-query") {
+    if (readerBirth === undefined) throw new Error("Owned reader birth missing.");
+    args.push("-ReaderProcessId", String(process.pid), "-ReaderBirth", readerBirth);
+  }
   // The hosted runner uses PowerShell 7; Windows PowerShell must derive its
   // own standard module paths rather than load incompatible inherited modules.
   const environment = Object.fromEntries(
@@ -109,7 +114,7 @@ async function alterOwnedFixture(
   );
   const child = spawn(executable, args, {
     env: environment,
-    stdio: ["ignore", "ignore", "inherit"],
+    stdio: ["ignore", "inherit", "inherit"],
     windowsHide: true,
   });
   children.add(child);
@@ -164,6 +169,7 @@ if (role === "child") {
     held = await acquireWindowsHostRuntimeOwner(options);
     check(held.kind === "owner", "owns one fixed private scope");
     if (held.kind !== "owner") throw new Error("Unexpected attachment.");
+    const processBirth = held.receipt.processStart;
     check(
       held.receipt.pid === process.pid && held.receipt.processStart.startsWith("win32:"),
       "native current process birth matches runtime",
@@ -298,13 +304,16 @@ if (role === "child") {
     console.log(JSON.stringify({ fixtureScope: unknownScope }));
     const unknownChild = await boundedChild(unknownScope);
     if (unknownChild.child.pid === undefined) throw new Error("Owned process identity missing.");
-    await alterOwnedFixture(unknownScope, "process-query", unknownChild.child.pid);
+    await alterOwnedFixture(unknownScope, "process-query", unknownChild.child.pid, processBirth);
     const unknownFacts = native.prepare(unknownScope);
     check(
       record(unknownFacts) && unknownFacts.status === "prepared",
       "prepares the owned unknown-writer fixture",
     );
     const unknown = native.claim(Buffer.from("{}"), Buffer.alloc(32, 1));
+    console.log(
+      JSON.stringify({ ownedReaderClaimStatus: record(unknown) ? unknown.status : "invalid" }),
+    );
     check(
       record(unknown) && unknown.status === "unknown",
       "OS-denied inspection never authorizes writer takeover",
