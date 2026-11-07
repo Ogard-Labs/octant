@@ -51,8 +51,9 @@ static void workload(int enrollment, int commands, int results)
     } else {
       char bytes[64];
       ssize_t count = pread(command == 'l' ? alias : held, bytes, sizeof(bytes), 0);
-      passed = denied ? count == -1 && errno == EACCES :
-        count == (ssize_t)sizeof(content) - 1 && !memcmp(bytes, content, sizeof(content) - 1);
+      passed = command == 'S' ? count == -1 && errno == EAGAIN :
+        denied ? count == -1 && errno == EACCES :
+          count == (ssize_t)sizeof(content) - 1 && !memcmp(bytes, content, sizeof(content) - 1);
     }
     if (!transfer(results, &passed, sizeof(passed), true)) _exit(4);
   }
@@ -82,14 +83,14 @@ static int measure(void)
   }
   close(enrollment); close(commands[0]); close(answers[1]);
   if (child < 0) { close(broker); close(commands[1]); close(answers[0]); return 7; }
-  const char operations[] = {'r', 'l', 'm', 'D', 'M', 'X', 'X'};
+  const char operations[] = {'r', 'l', 'm', 'S', 'D', 'M', 'X', 'X'};
   bool passed = true;
   unsigned measured = 0;
   unsigned long long previous = 0;
   for (unsigned i = 0; i < sizeof(operations) && passed; i++) {
     char command = operations[i];
     passed = transfer(commands[1], &command, 1, true);
-    if (passed && i < 6) {
+    if (passed && i < 7) {
       struct octant_mediation_request request;
       passed = transfer(broker, &request, sizeof(request), false) &&
         request.request_id > previous && request.reserved == 0 &&
@@ -98,12 +99,21 @@ static int measure(void)
         request.operation == (command == 'm' || command == 'M' ? OCTANT_MEDIATION_MAP : OCTANT_MEDIATION_READ);
       if (!passed) break;
       previous = request.request_id;
-      if (i == 5) { close(broker); broker = -1; }
+      if (i == 6) { close(broker); broker = -1; }
       else {
+        if (command == 'S') {
+          int marker = open("/tmp/ordinary.pub", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+          if (marker < 0) { passed = false; break; }
+          close(marker);
+          struct octant_mediation_status changed;
+          passed = !ioctl(broker, OCTANT_MEDIATION_STATUS, &changed) &&
+            changed.namespace_epoch > request.namespace_epoch && changed.active_mutations == 0;
+          if (!passed) break;
+        }
         struct octant_mediation_answer answer = {
           .request_id = request.request_id,
           .namespace_epoch = request.namespace_epoch,
-          .allow = i < 3,
+          .allow = i < 4,
         };
         passed = write(broker, &answer, sizeof(answer)) == sizeof(answer);
       }
@@ -120,7 +130,7 @@ static int measure(void)
   bool reaped = joined == child;
   passed = passed && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
   close(commands[1]); close(answers[0]); if (broker >= 0) close(broker);
-  bool cleaned = !unlink("/tmp/alias") && !unlink("/tmp/ordinary");
+  bool cleaned = !unlink("/tmp/ordinary.pub") && !unlink("/tmp/alias") && !unlink("/tmp/ordinary");
   printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":false,\"measurements\":%u,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && cleaned ? "measured-admission-core" : "failed", measured,
     passed ? "true" : "false", reaped ? "true" : "false", cleaned ? "true" : "false");

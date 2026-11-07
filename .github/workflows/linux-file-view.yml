@@ -45,6 +45,7 @@ jobs:
         if: always()
         with:
           name: linux-kernel-admission-core
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/octant-kernel-guest/guest.log
             ${{ runner.temp }}/octant-kernel-guest/linux-6.18/.config

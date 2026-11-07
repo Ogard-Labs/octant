@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+from kernel_patch import install_epochs
 
 KERNEL = "6.18"
 DIGEST = "9106a4605da9e31ff17659d958782b815f9591ab308d03b0ee21aad6c7dced4b"
@@ -60,6 +61,7 @@ def main():
     destination.mkdir()
     for name in ("mediation.c", "octant_mediation.h", "bridge.h"):
         shutil.copyfile(native / name, destination / name)
+    install_epochs(kernel, native)
     (destination / "Makefile").write_text("obj-y += mediation.o\n")
     with (kernel / "security/Makefile").open("a") as output:
         output.write("\nobj-$(CONFIG_SECURITY_OCTANT_MEDIATION) += octant_mediation/\n")

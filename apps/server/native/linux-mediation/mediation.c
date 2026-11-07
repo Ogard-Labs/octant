@@ -191,7 +191,7 @@ static int admit_file(struct file *file, u32 operation)
 	return result;
 }
 
-static int file_permission(struct file *file, int mask)
+static int octant_file_permission(struct file *file, int mask)
 {
 	return admit_file(file, mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
 }
@@ -393,7 +393,7 @@ static const struct file_operations enrollment_operations = {
 	.unlocked_ioctl = enroll,
 	.compat_ioctl = enroll,
 	.release = close_enrollment,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static long broker_ioctl(struct file *file, unsigned int command, unsigned long argument)
@@ -462,7 +462,7 @@ static const struct file_operations broker_operations = {
 	.unlocked_ioctl = broker_ioctl,
 	.compat_ioctl = broker_ioctl,
 	.release = close_broker,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static struct miscdevice broker_device = {
@@ -476,7 +476,7 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(cred_prepare, copy_cred),
 	LSM_HOOK_INIT(cred_transfer, transfer_cred),
 	LSM_HOOK_INIT(cred_free, free_cred),
-	LSM_HOOK_INIT(file_permission, file_permission),
+	LSM_HOOK_INIT(file_permission, octant_file_permission),
 	LSM_HOOK_INIT(mmap_file, mmap_file),
 	LSM_HOOK_INIT(file_mprotect, protect_mapping),
 	LSM_HOOK_INIT(bprm_check_security, check_exec),

@@ -2,6 +2,8 @@
 #ifndef OCTANT_MEDIATION_BRIDGE_H
 #define OCTANT_MEDIATION_BRIDGE_H
 
+#include <linux/types.h>
+
 /* These hooks never wait, allocate, or call the userspace policy broker. */
 #ifdef CONFIG_SECURITY_OCTANT_MEDIATION
 void octant_namespace_begin(void);
@@ -10,5 +12,17 @@ void octant_namespace_end(void);
 static inline void octant_namespace_begin(void) {}
 static inline void octant_namespace_end(void) {}
 #endif
+
+static inline void octant_namespace_scope_end(bool *entered)
+{
+	if (*entered)
+		octant_namespace_end();
+}
+
+/* Cleanup pairs every early return with end; the guarded VFS operation never
+ * waits for the broker and does not hold a lock across userspace inspection. */
+#define octant_namespace_scope(condition) \
+	bool octant_namespace_entered __attribute__((cleanup(octant_namespace_scope_end))) = \
+		(condition) ? (octant_namespace_begin(), true) : false
 
 #endif
