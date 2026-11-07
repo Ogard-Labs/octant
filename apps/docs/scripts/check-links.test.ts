@@ -109,4 +109,14 @@ describe("check-links anchors", () => {
     const same = [markdown("guide/topics.md", "# Topics\n\n[down](#topics)\n")];
     expect(checkAnchors(same)).toEqual([]);
   });
+
+  it("reports a missing same-page heading", () => {
+    expect(checkAnchors([markdown("guide/topics.md", "# Topics\n\n[down](#missing)\n")])).toEqual([
+      { file: "guide/topics.md", target: "#missing", anchor: "missing" },
+    ]);
+  });
+
+  it("keeps a linked heading's visible text in its anchor", () => {
+    expect(headingSlugs("## [A link](https://example.com)\n")).toEqual(["a-link"]);
+  });
 });

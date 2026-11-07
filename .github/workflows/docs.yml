@@ -3,12 +3,18 @@ name: Docs
 # The guide at apps/docs is live at https://octant.dev/docs/. Every PR and
 # every merge-queue commit builds it and runs the link, anchor, sidebar, and
 # metadata gates, so a broken docs change fails before it can ship. The publish
-# step runs only on the merge queue AND only when a maintainer approves the
-# docs-deploy environment, which holds the host credentials.
+# deployment is a separate manual action on main using the docs-deploy environment.
 on:
   pull_request:
   merge_group:
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the built guide to the configured docs host
+        type: boolean
+        default: false
 
 concurrency:
   group: docs-${{ github.event.pull_request.number || github.ref }}
@@ -22,6 +28,9 @@ jobs:
     name: Build and check the guide
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      OCTANT_DOCS_BASE: /docs/
+      OCTANT_DOCS_URL: https://octant.dev/docs/
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -34,7 +43,6 @@ jobs:
       - run: bun run --filter @octant/docs typecheck
       - run: bun run --filter @octant/docs build
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'merge_group'
         with:
           name: octant-docs
           path: apps/docs/dist
@@ -43,7 +51,7 @@ jobs:
   publish:
     name: Publish to octant.dev/docs
     needs: build
-    if: github.event_name == 'merge_group'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Maintainer gate: this environment holds the docs-host credentials and

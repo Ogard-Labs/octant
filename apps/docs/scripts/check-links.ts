@@ -29,7 +29,7 @@ function fragmentOf(target: string): string {
 /** VitePress heading slugs: lowercase, punctuation/symbol runs collapse to one hyphen. */
 export function slugifyHeading(text: string): string {
   return text
-    .replace(/\[[^\]]*\]\([^)]*\)/g, (_m, label: string) => label)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, (_m, label: string) => label)
     .replace(/[`*_[\]]/g, "")
     .toLowerCase()
     .trim()
@@ -64,12 +64,12 @@ function extractLinks(file: SourceFile): string[] {
   if (file.path.endsWith(".md")) {
     for (const match of file.content.matchAll(MARKDOWN_LINK)) {
       const target = match[1]?.trim() ?? "";
-      if (target && !target.startsWith("#") && !EXTERNAL.test(target)) links.push(target);
+      if (target && !EXTERNAL.test(target)) links.push(target);
     }
   } else {
     for (const match of file.content.matchAll(CONFIG_LINK)) {
       const target = match[1]?.trim() ?? "";
-      if (target && !target.startsWith("#") && !EXTERNAL.test(target)) links.push(target);
+      if (target && !EXTERNAL.test(target)) links.push(target);
     }
   }
   return links;
@@ -88,6 +88,7 @@ export function checkLinks(sources: ReadonlyArray<SourceFile>): LinkIssue[] {
   for (const file of sources) {
     const relativeBase = baseDirFor(normalize(file.path));
     for (const rawTarget of extractLinks(file)) {
+      if (rawTarget.startsWith("#")) continue;
       const target = stripFragment(rawTarget);
       const rel = target.startsWith("/") ? target.slice(1) : normalize(join(relativeBase, target));
       const resolves = candidatesFor(rel).some((candidate) => existing.has(candidate));
