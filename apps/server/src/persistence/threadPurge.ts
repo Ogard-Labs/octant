@@ -222,7 +222,13 @@ const CANVAS_LINK_PATHS = [
   "$.record.document.canvasId",
   "$.event.canvasId",
 ] as const;
-const RUN_LINK_PATHS = ["$.parentRunId", "$.run.parentRunId"] as const;
+const RUN_LINK_PATHS = [
+  "$.parentRunId",
+  "$.run.parentRunId",
+  // Child Browser permissions keep their private task label under the grant;
+  // erasing the parent thread must take the permission's complete history too.
+  "$.grant.target.grantee.runId",
+] as const;
 
 /** Aggregates a purge must not take, even when a payload names the thread. */
 // A Project's egress rules name the thread they were granted from, but they
