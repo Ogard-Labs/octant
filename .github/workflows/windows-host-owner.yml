@@ -1,0 +1,78 @@
+name: Native Windows host ownership
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-host-owner.yml
+      - packages/host-runtime/native/windows-host-owner/**
+      - packages/host-runtime/src/windowsHostOwner*
+      - packages/host-runtime/src/ownerControlProtocol.ts
+      - packages/host-runtime/src/owner.ts
+      - packages/host-runtime/src/ownerReceipt.ts
+      - scripts/windows-host-owner/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-host-owner-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Own Windows control endpoints in Bun, Node and Electron
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Prepare the public Node-API SDK
+        run: |
+          $octantNodeVersion = (node -p process.version).Trim()
+          if ($octantNodeVersion -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Invalid SDK version' }
+          $octantArchive = "node-$octantNodeVersion-headers.tar.gz"
+          $octantBase = "https://nodejs.org/download/release/$octantNodeVersion"
+          Invoke-WebRequest "$octantBase/$octantArchive" -OutFile "$env:RUNNER_TEMP/$octantArchive"
+          Invoke-WebRequest "$octantBase/win-x64/node.lib" -OutFile "$env:RUNNER_TEMP/node.lib"
+          $octantSums = (Invoke-WebRequest "$octantBase/SHASUMS256.txt").Content -split "`n"
+          foreach ($octantEntry in @(@($octantArchive, $octantArchive), @('node.lib', 'win-x64/node.lib'))) {
+            $octantExpected = ($octantSums | Where-Object { $_.Trim().EndsWith("  $($octantEntry[1])") }).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)[0]
+            $octantActual = (Get-FileHash "$env:RUNNER_TEMP/$($octantEntry[0])" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($octantActual -ne $octantExpected) { throw 'Public SDK checksum mismatch' }
+          }
+          tar -xf "$env:RUNNER_TEMP/$octantArchive" -C "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake -S packages/host-runtime/native/windows-host-owner -B "$env:RUNNER_TEMP/owner-build" -A x64 "-DOCTANT_NODE_HEADERS=$env:RUNNER_TEMP/node-$octantNodeVersion/include/node" "-DOCTANT_NODE_IMPORT_LIB=$env:RUNNER_TEMP/node.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/owner-build" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the source adapter fixture
+        run: bun build scripts/windows-host-owner/smoke.ts --target=node --outfile "$env:RUNNER_TEMP/owner-smoke.mjs"
+      - name: Prove the native Bun owner and client
+        run: |
+          bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove the native Node owner and client
+        run: |
+          bun scripts/windows-host-owner/run.ts (Get-Command node).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: node node_modules/electron/install.js
+      - name: Prove the shipped Electron runtime without a window
+        env:
+          ELECTRON_RUN_AS_NODE: "1"
+        run: |
+          bun scripts/windows-host-owner/run.ts "$pwd/node_modules/electron/dist/electron.exe" "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: octant-windows-host-owner-prerequisite-qa
+          path: ${{ runner.temp }}/owner-build/Release/octant-windows-host-owner.node
+          if-no-files-found: error
+          retention-days: 3
