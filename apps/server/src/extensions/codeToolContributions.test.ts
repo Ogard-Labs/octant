@@ -65,10 +65,18 @@ async function removeOwned(root: string): Promise<void> {
 }
 
 describe("installed declarative Code tools", () => {
-  it("requires install, trust, enable and selection, then cancels a held credential card after disable", async () => {
+  const changes = ["package disable", "lower Plan posture"] as const;
+  it.each(changes)("keeps a narrower selected turn and revokes %s", async (change) => {
     const root = await mkdtemp(join(tmpdir(), "octant-code-contribution-"));
     const connection = openSqlite(join(root, "journal.sqlite3"));
-    const credentials = new CredentialRequests();
+    let networkCalls = 0;
+    const credentials = new CredentialRequests({
+      fetch: async () => {
+        networkCalls++;
+        return Response.json({ data: { viewer: { id: "fixture" } } });
+      },
+    });
+    let currentThread = decodeCodeThread({ ...thread, executionPolicy: "full-access" });
     const commands = new CommandCredentialBindings({
       now: () => performance.now(),
       uuid: randomUUID,
@@ -212,7 +220,7 @@ describe("installed declarative Code tools", () => {
           createCodeToolHostPort({
             ...input,
             windowId: String(input.windowId),
-            readThread: () => thread,
+            readThread: () => currentThread,
             credentialRequests: credentials,
             commands,
             operations: () => [linearCredentialOperation],
@@ -222,7 +230,12 @@ describe("installed declarative Code tools", () => {
         kind: "resolved",
         context: [],
       });
-      tools = await resolver({ mode: "code", thread, selections: [selection.selection], windowId });
+      tools = await resolver({
+        mode: "code",
+        thread,
+        selections: [selection.selection],
+        windowId,
+      });
       if (tools.kind !== "resolved" || tools.tools === undefined)
         throw new Error(`Expected selected Code tools: ${JSON.stringify(tools)}`);
       const set = tools.tools;
@@ -236,13 +249,25 @@ describe("installed declarative Code tools", () => {
         name,
         inputJson: '{"operation":"request","id":"linear-account-check"}',
       });
-      expect(credentials.view(String(windowId), String(thread.id)).requests).toHaveLength(1);
-      await lifecycle.setPluginDesired({
-        extensionId: state().extensionId,
-        expectedStateVersion: state().stateVersion,
-        desired: false,
-      });
-      credentials.view(String(windowId), String(thread.id));
+      const cards = credentials.view(String(windowId), String(thread.id)).requests;
+      expect(cards).toHaveLength(1);
+      const card = cards[0];
+      if (card === undefined) throw new Error("Expected pending credential card.");
+      if (change === "package disable")
+        await lifecycle.setPluginDesired({
+          extensionId: state().extensionId,
+          expectedStateVersion: state().stateVersion,
+          desired: false,
+        });
+      else currentThread = decodeCodeThread({ ...currentThread, executionPolicy: "plan" });
+      expect(
+        await credentials.answer(String(windowId), {
+          id: card.id,
+          action: "allow",
+          secret: "fixture-only-token",
+        }),
+      ).toBe(false);
+      expect(networkCalls).toBe(0);
       expect(await held).toMatchObject({ result: { status: "refused" }, isError: true });
       await set.close?.();
     } finally {

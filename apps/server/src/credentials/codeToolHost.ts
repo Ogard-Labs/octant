@@ -1,6 +1,7 @@
 import type { CodeThread } from "@octant/contracts";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import { isToolAllowedByAllowlist } from "@octant/domain";
+import { clampTurnAccessPosture } from "@octant/domain/code-policy";
 import type { CodeToolHostPort, CodeToolContribution } from "@octant/plugin-api/code-tools";
 import type { CredentialOperation } from "@octant/plugin-api/credential-request";
 import type { CommandCredentialBindings } from "../secretStores/commandCredentialBindings";
@@ -37,9 +38,22 @@ export function createCodeToolHostPort(options: {
 }): CodeToolHostPort {
   let closed = false;
   const key = identity(options.thread);
+  const readThread = () => {
+    const thread = options.readThread();
+    if (thread === undefined) return undefined;
+    // Selection composes before the runtime owns the turn. Preserve that
+    // admitted turn's narrower ceiling, and still clamp any later lower grant.
+    return {
+      ...thread,
+      executionPolicy: clampTurnAccessPosture({
+        thread: thread.executionPolicy,
+        requested: options.thread.executionPolicy,
+      }),
+    };
+  };
   const current = () => {
     try {
-      const thread = options.readThread();
+      const thread = readThread();
       return (
         !closed &&
         options.current() &&
@@ -58,7 +72,7 @@ export function createCodeToolHostPort(options: {
     service: options.credentialRequests,
     windowId: options.windowId,
     thread: options.thread,
-    readThread: options.readThread,
+    readThread,
     operations: () =>
       options
         .operations()
