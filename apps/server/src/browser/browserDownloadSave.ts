@@ -242,7 +242,7 @@ async function createExclusively(
       {
         // Start outside the Project so runtime startup cannot read its config.
         cwd: dirname(process.execPath),
-        env: {},
+        env: process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" },
         timeout: 5_000,
         killSignal: "SIGKILL",
         maxBuffer: 512,

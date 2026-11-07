@@ -170,6 +170,13 @@ export class PlaywrightDownloadHold {
       this.#reports.push({ state: "refused", name, reason: "too-large" });
       return;
     }
+    // The watcher can cancel while stat or the header read awaits I/O. Check
+    // again at publication, with no asynchronous gap before committing the hold.
+    if (entry.cancelledFor !== undefined) {
+      await entry.download.delete().catch(() => undefined);
+      this.#reports.push({ state: "refused", name, reason: entry.cancelledFor });
+      return;
+    }
     const id = `d${String(this.#nextOrdinal)}`;
     this.#nextOrdinal += 1;
     this.#held.push({ id, download: entry.download, path });
