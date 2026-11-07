@@ -14350,7 +14350,12 @@ preview had shipped and a Linux self-update from the signed feed had been seen
 on a real image). That ordering was a release-scope choice, not a safety
 rule. The Linux signed-feed update path is still the shared trust root for
 every non-macOS platform, so a Windows feed builds on it and is not trusted
-before the path has been exercised on a real image. Windows Work and Code stay
+before the path has been exercised on a real image. Windows x64 QA packaging uses a matching native build host and emits a portable
+ZIP through `OCTANT_PACKAGE_TARGET=win32-x64`. The hosted Windows job rebuilds
+native dependencies and verifies them inside the packaged Electron runtime.
+This unsigned QA archive is not an installer, a usable Windows release, or an
+enabled signed-update channel; native host admission and credentials remain
+separate prerequisites. Windows Work and Code stay
 unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
@@ -14618,7 +14623,8 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   A bad signature, a non-writable location, or a
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
-  `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
+  `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64|win32-x64` on a matching host only;
+  Windows emits only the QA archive described above.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package

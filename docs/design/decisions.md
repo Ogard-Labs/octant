@@ -305,6 +305,14 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
+### Native Windows QA packaging
+
+A matching Windows x64 host may build a portable desktop QA archive and check
+its native dependencies inside packaged Electron. This does not enable native
+host admission, credentials, Work/Code, an installer, or a signed-update channel.
+
+Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+
 ### First-preview tracks are design-first
 
 Everything on the work board is in scope for the first proper preview release (maintainer decision, 2026-11-06; there is no separate post-preview track). That covers mobile maturity, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package (legal review still required before it ships), and the hub-and-spoke topology, each built only once its specification documents its boundaries.
