@@ -257,9 +257,10 @@ export type RuntimeCompactionOutcome =
       readonly tokensAfter?: number;
       /**
        * A summary the host wrote from the thread's conversation before the
-       * runtime compacted, for a move to another provider to carry.
+       * runtime compacted, for a move to another provider to carry, and the
+       * last message it read.
        */
-      readonly handover?: string;
+      readonly handover?: { readonly content: string; readonly throughSource: ContextSourceRef };
     }
   | {
       readonly kind: "failed";
@@ -792,20 +793,32 @@ export class ContextHarnessService {
    * The summary the limit rule left for a move to another provider: the
    * host's own summary when the host compacted, else the handover it wrote
    * beside the runtime's compaction. Only the latest compaction counts, and
-   * only one the limit rule made; undefined when its text is gone.
+   * only one the limit rule made. `conversation` is the thread's as it stands:
+   * a summary whose last message is no longer in it (the thread was rewound
+   * past it, or that reply retried) covers turns the thread has dropped and is
+   * not handed over. Undefined too when its text is gone.
    */
   handoverSummary(
     subject: ContextSubjectRef,
+    conversation: ReadonlyArray<SessionConversationMessage>,
   ): { readonly content: string; readonly completedAt: string } | undefined {
     this.#assertReady();
     const latest = this.latestCompaction(subject);
     if (latest?.status !== "completed") return undefined;
     const { receipt } = latest;
     if (receipt.cause?.kind !== "limit-near") return undefined;
-    const summaryId =
-      receipt.summary.visibility === "stored"
-        ? receipt.summary.summaryId
-        : receipt.handover?.summaryId;
+    let summaryId: ContextSummaryId | undefined;
+    if (receipt.summary.visibility === "stored") {
+      const { throughTurnId } = receipt.summary;
+      if (!conversation.some((message) => message.exchangeKey === throughTurnId)) return undefined;
+      summaryId = receipt.summary.summaryId;
+    } else if (receipt.handover !== undefined) {
+      const through = contextSourceKey(receipt.handover.throughSource);
+      if (!conversation.some((message) => contextSourceKey(message.source) === through)) {
+        return undefined;
+      }
+      summaryId = receipt.handover.summaryId;
+    }
     if (summaryId === undefined) return undefined;
     const content = readContextSummaryContent(this.#persistence.connection, summaryId);
     return content === undefined || content.length === 0
@@ -1163,7 +1176,8 @@ export class ContextHarnessService {
         ? undefined
         : {
             summaryId: decodeContextSummaryId(this.#uuid()),
-            content: decodeContextSummaryContent(outcome.handover),
+            content: decodeContextSummaryContent(outcome.handover.content),
+            throughSource: outcome.handover.throughSource,
           };
     const receipt = decodeContextCompactionReceipt({
       compactionId,
@@ -1192,7 +1206,9 @@ export class ContextHarnessService {
             },
           }),
       summary: { visibility: "runtime-only" },
-      ...(handover === undefined ? {} : { handover: { summaryId: handover.summaryId } }),
+      ...(handover === undefined
+        ? {}
+        : { handover: { summaryId: handover.summaryId, throughSource: handover.throughSource } }),
       usage:
         usageReconciliation !== undefined
           ? compactionUsageOf(usageReconciliation)

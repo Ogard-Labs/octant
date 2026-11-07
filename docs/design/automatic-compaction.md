@@ -355,12 +355,16 @@ spell waits for the thread's next turn.
   thread's own provider, tool-free, for a summary of the conversation it holds
   (newest first, at most 400,000 characters), then asks the runtime to compact.
   The text is stored in the summary content store, committed with the receipt,
-  which names it as `handover.summaryId`. A host-summarized thread needs none:
-  its stored summary is the handover. A summary that fails lets the compaction
-  go on without one. Its spend is added to the compaction's.
+  which names it as `handover.summaryId` with `throughSource`, the last message
+  it read. A host-summarized thread needs none: its stored summary is the
+  handover. A summary that fails lets the compaction go on without one. What it
+  reads is fixed when the rule asks, and the spend ceiling reserves for it (its
+  input plus 3,000 tokens of answer) beside the compaction, so a ceiling with
+  room for only one refuses the rule.
 - **Switch** (`withHandoverSummary`): a Chat or Work provider switch reads
   `ContextHarnessService.handoverSummary` (the latest compaction, if the limit
-  rule made it) and leads the handoff with it in up to three 4,000-character
+  rule made it, and only while the last message it read is still in the
+  thread, so a rewind past it never brings removed turns back) and leads the handoff with it in up to three 4,000-character
   blocks after the framing block. Where that leaves no room, the oldest verbatim
   messages give way and count as earlier messages. The record says
   `handoverSummary: true`. The summary is cut to 11,500 characters when written,
@@ -430,6 +434,9 @@ cannot be read hands a switch the raw selection, as before.
   turn, so the window-fill rule never ran in that period; that "Switch model"
   opened every picker under the workspace's shared scope; and that a 20,000
   character summary lost its end in a switch. Each is fixed as Slice 3 says.
+- A second review found that a rewind after the limit rule still handed the
+  summary over, with the turns the rewind removed, and that the spend ceiling
+  reserved for the compaction alone. Both are fixed as Slice 3 says.
 
 ### Change log
 

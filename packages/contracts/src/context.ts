@@ -809,7 +809,17 @@ export const ContextCompactionReceipt = Schema.Struct({
    * to another provider can carry it. Only the limit rule writes one; a
    * compaction the host summarized needs none, since its summary is stored.
    */
-  handover: Schema.optional(Schema.Struct({ summaryId: ContextSummaryId }).annotations(strict)),
+  handover: Schema.optional(
+    Schema.Struct({
+      summaryId: ContextSummaryId,
+      /**
+       * The last message the summary read. A move carries the summary only
+       * while that message is still in the thread, so a rewind past it never
+       * brings removed turns back.
+       */
+      throughSource: ContextSourceRef,
+    }).annotations(strict),
+  ),
   usage: ContextCompactionUsage,
   completedAt: UtcTimestamp,
 })

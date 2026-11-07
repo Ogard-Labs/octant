@@ -909,10 +909,12 @@ describe("compacting a session a runtime keeps", () => {
     expect(world.runtime.handoverPrompts).toHaveLength(1);
     expect(world.runtime.handoverPrompts[0]).toContain("User: ");
     expect(world.runtime.compactions).toEqual([String(compactionId)]);
-    expect(world.harness.handoverSummary(subject)).toEqual({
+    expect(world.harness.handoverSummary(subject, conversation)).toEqual({
       content: "Rotate the signing key before the release.",
       completedAt: String(record.receipt.completedAt),
     });
+    // Rewound past the last message it read, the summary covers dropped turns.
+    expect(world.harness.handoverSummary(subject, conversation.slice(0, -1))).toBeUndefined();
     // What the summary spent is part of what the compaction spent.
     expect(record.receipt.usage).toMatchObject({ inputTokens: 80, outputTokens: 30 });
     world.close();
@@ -927,7 +929,35 @@ describe("compacting a session a runtime keeps", () => {
     world.service.start(command(), "local-window", windowId);
     await world.service.settled();
     expect(world.runtime.handoverPrompts).toHaveLength(0);
-    expect(world.harness.handoverSummary(subject)).toBeUndefined();
+    expect(world.harness.handoverSummary(subject, conversation)).toBeUndefined();
+    world.close();
+  });
+
+  it("refuses a limit rule whose handover the spend ceiling cannot also pay for", () => {
+    const world = createRuntimeWorld({ answer: { kind: "compacted" }, handover: "Unused." });
+    planSession(world);
+    const budget = world.harness.inspect(subject).next.plan.safeInputBudget;
+    world.spend.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId },
+      expectedVersion: decodeAggregateVersion(0),
+      // Room for the compaction alone, not for the summary beside it.
+      policy: { tokenBudget: budget + 1_000 },
+      window: { kind: "lifetime" },
+    });
+    const limit = {
+      kind: "limit-near",
+      window: "five_hour",
+      usedPercent: 91,
+      thresholdPercent: 90,
+    } as const;
+    expect(refusalOf(() => world.service.start(command(), "host-policy", windowId, limit))).toBe(
+      "spend-ceiling-reached",
+    );
+    expect(world.harness.latestCompaction(subject)).toBeUndefined();
+    expect(world.service.start(command(), "local-window", windowId)).toMatchObject({
+      kind: "compaction-started",
+    });
     world.close();
   });
 
