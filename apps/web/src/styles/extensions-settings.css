@@ -678,6 +678,13 @@
   overflow-wrap: anywhere;
 }
 
+/* The global reset strips link styling, so a guide link inside the row's prose read as more prose. */
+.connectors__detail a {
+  color: var(--oct-fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .connectors__actions {
   display: inline-flex;
   align-items: center;

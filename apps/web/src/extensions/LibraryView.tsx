@@ -742,6 +742,17 @@ function LibraryDetail(props: LibraryDetailProps) {
           <span className="oct-meta">Address</span> <code>{item.address}</code>
         </p>
       )}
+      {item.docsUrl === undefined ? null : (
+        <a
+          aria-label={`${item.name} setup guide`}
+          className="library-detail__guide"
+          href={item.docsUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Vendor setup guide
+        </a>
+      )}
       {props.inspection?.status === "loading" ? (
         <p className="library__note" role="status">
           Reading what it holds…
