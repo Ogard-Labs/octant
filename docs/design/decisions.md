@@ -301,7 +301,7 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 - Connectors, a Code thread's own Git and pull-request work, a person's merge from any of their clients, host-local routines, the guardrail levels and the key providers' native features are in scope; Octant Shield is in scope and designed.
 - An agent merge or force-push on its own initiative, cloud scheduling, and an Octant-operated hosted service are out of scope.
 - Physical phones and tablets, and app-store upload, submission and release, are out of scope (maintainer decision, 2026-10-29); Octant drives the simulator only.
-- The public Canvas share service is in scope; deploying it is a release step of its own.
+- Public Canvas links are in scope through the self-hostable reference app at `apps/share`; Ogard Labs operates no share-service instance (maintainer decision, 2026-11-07).
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -771,6 +771,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 Threads form one real hierarchy, and Work and Code have server-derived boards; Chat has none. An agent can never mark any thread Done.
 
+- The boards are the bundled Board plugin. Switching it off hides the Work and Code board views and every way to open them in the renderer; the host-owned status policy and the server board projections and routes stay, because thread rows, the dock overview, the planner board read, sibling-thread tools and side tasks read them. Nothing is deleted. Owner: [Workspace](workspace.md#boards-and-integrations).
 - A Code thread is Done only when its user-confirmed delivery target is objectively satisfied, and no person's mark overrides ambiguous state.
 - A Work thread is Done when a person marks it; the mark is final and needs no evidence text.
 - The Work mark locks the thread on the host until it is archived and reactivated: queued messages hold, child results wait, and a due resume ends as invalidated.
@@ -1326,6 +1327,7 @@ A component is active only when its package is installed, its source trusted, th
 - A structured mention cannot install, trust, enable or elevate anything.
 - A curated workspace preset may name skills, and naming is all it does. The host reports each named skill's state (in use, installed but not enabled, not installed). _Here only._
 - Marketplace network access happens only on user action, and opening Settings fetches no catalog.
+- An author writes a plugin without a running host: `octant plugin create` writes a starter Agent Plugins folder and `octant plugin check` reads a folder by the host's folder-import rules and shared loader. Neither installs, trusts or enables anything, and neither reaches the network (2026-11-07).
 
 Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
@@ -2354,7 +2356,7 @@ A public Canvas link is off by default and exists only through the person's expl
 - The payload is a frozen copy with no host, Project, thread or source ids, no file contents and no declared images. A Canvas has at most one active link (30-day default expiry, optional password).
 - The service has no accounts. A per-share owner secret lives in the credential broker, separate from provider credentials, and never in the journal.
 - The service logs no IP address and serves design frames from a separate user-content origin.
-- The service lives in a separate share-service repository; its deployment, DNS and TLS are not built yet.
+- The reference service lives at `apps/share` in this repository and is self-hosted by each user (Bun or Docker); no service address is set by default, and Ogard Labs operates no instance.
 
 Status: Partly built. Since: 2026-10-20. Detail: [Canvas public links](canvas-public-links.md#off-until-the-person-turns-it-on) and [Publishing is the person's act](canvas-public-links.md#publishing-is-the-persons-act).
 

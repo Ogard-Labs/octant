@@ -29,8 +29,6 @@ export const CanvasPublicShareWireVersion = Schema.Literal(CANVAS_PUBLIC_SHARE_W
 export const CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES = CANVAS_EXPORT_BODY_MAX_BYTES;
 export const CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS = 200;
 export const CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS = 1_000;
-/** Default service a person can replace with their own in Settings. */
-export const CANVAS_PUBLIC_SHARE_DEFAULT_SERVICE_URL = "https://canvas.octant.sh";
 /** Revoked and expired links answer 410 for this long, then 404. */
 export const CANVAS_PUBLIC_SHARE_TOMBSTONE_DAYS = 90;
 
@@ -86,6 +84,18 @@ export const CanvasPublicShareServiceUrl = Schema.String.pipe(
   ),
 );
 export type CanvasPublicShareServiceUrl = typeof CanvasPublicShareServiceUrl.Type;
+
+/**
+ * A configured service address, or the empty string when none is set. Octant
+ * operates no share service of its own, so a host starts with no address and
+ * publishing is refused until the person sets one they run or trust. Link
+ * records keep the strict URL, because a link only exists after a publish.
+ */
+export const CanvasPublicLinkServiceAddress = Schema.Union(
+  CanvasPublicShareServiceUrl,
+  Schema.Literal(""),
+);
+export type CanvasPublicLinkServiceAddress = typeof CanvasPublicLinkServiceAddress.Type;
 
 /**
  * What leaves the host: the shared blocks and what a page and a link preview
@@ -225,7 +235,7 @@ export type CanvasPublicShareRefusal = typeof CanvasPublicShareRefusal.Type;
 export const CanvasPublicLinkSettings = Schema.Struct({
   kind: Schema.Literal("canvas-public-link-settings"),
   enabled: Schema.Boolean,
-  serviceUrl: CanvasPublicShareServiceUrl,
+  serviceUrl: CanvasPublicLinkServiceAddress,
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
@@ -236,7 +246,7 @@ export const CanvasPublicLinkSettingsCommand = Schema.Struct({
   schemaVersion: CanvasPublicShareWireVersion,
   kind: Schema.Literal("set-canvas-public-link-settings"),
   enabled: Schema.Boolean,
-  serviceUrl: CanvasPublicShareServiceUrl,
+  serviceUrl: CanvasPublicLinkServiceAddress,
   expectedVersion: AggregateVersion,
 }).annotations(strict);
 export type CanvasPublicLinkSettingsCommand = typeof CanvasPublicLinkSettingsCommand.Type;
@@ -288,7 +298,7 @@ export const CanvasPublicShareList = Schema.Struct({
   kind: Schema.Literal("canvas-public-share-list"),
   canvasId: CanvasId,
   enabled: Schema.Boolean,
-  serviceUrl: CanvasPublicShareServiceUrl,
+  serviceUrl: CanvasPublicLinkServiceAddress,
   shares: Schema.Array(CanvasPublicShareRecord).pipe(Schema.maxItems(64)),
 }).annotations(strict);
 export type CanvasPublicShareList = typeof CanvasPublicShareList.Type;
@@ -380,7 +390,7 @@ export type CanvasPublicShareRevocationSettled = typeof CanvasPublicShareRevocat
 
 export const CanvasPublicLinkSettingsChanged = Schema.Struct({
   enabled: Schema.Boolean,
-  serviceUrl: CanvasPublicShareServiceUrl,
+  serviceUrl: CanvasPublicLinkServiceAddress,
 }).annotations(strict);
 export type CanvasPublicLinkSettingsChanged = typeof CanvasPublicLinkSettingsChanged.Type;
 

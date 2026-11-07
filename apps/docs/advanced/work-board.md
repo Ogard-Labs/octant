@@ -88,6 +88,16 @@ To work in the thread again, archive it and reactivate it, which clears the
 mark; the waiting result then arrives, and you can resume or remove the
 queued messages.
 
+## Turning the Board off
+
+The Work board is the bundled Board plugin. When a person turns the plugin off,
+the board and every way to open it disappear: the sidebar Board row, the
+Running tile, the start screen's Running links (which open Activity instead),
+and the Inbox's Open the Board button. An open board closes. Threads, their
+statuses, and your work are untouched, and turning the plugin back on
+restores the board as it was. Agent tools that read the board, such as the
+planner, keep working.
+
 ## Out of scope
 
 Manual card movement or status assignment, a general issue or task Kanban,

@@ -298,7 +298,7 @@ describe("ShellSidebar", () => {
     expect(openIssues).toHaveBeenCalledOnce();
   });
 
-  it("hides Issues when the GitHub plugin is not effective", () => {
+  it("hides Issues but keeps Pull requests when the GitHub plugin is not effective", () => {
     render(
       <ShellSidebar
         automationsEnabled={false}
@@ -330,7 +330,7 @@ describe("ShellSidebar", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pull requests" })).toBeInTheDocument();
   });
 
   it("hides Issues when issues-read is not available", () => {

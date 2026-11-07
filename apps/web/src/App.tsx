@@ -225,7 +225,10 @@ import {
   StartQuickToolsPlacementProvider,
   type StartQuickToolsServices,
 } from "./shell/StartQuickTools";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./shell/contributionRegistry";
+import {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  isThreadBoardAvailable,
+} from "./shell/contributionRegistry";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
@@ -982,7 +985,7 @@ function LaunchedShell(
     readonly title: string;
     readonly message: string;
   }>();
-  const [codeBoardOpen, setCodeBoardOpen] = useState(false);
+  const [codeBoardRequested, setCodeBoardOpen] = useState(false);
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
@@ -1011,7 +1014,7 @@ function LaunchedShell(
     selectedProjectPullRequest === undefined
       ? undefined
       : projectPullRequestKey(selectedProjectPullRequest);
-  const [workBoardOpen, setWorkBoardOpen] = useState(false);
+  const [workBoardRequested, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [automationCenterFocusId, setAutomationCenterFocusId] = useState<string>();
   // The focus is a one-shot request; keeping it past closing would reselect
@@ -1307,6 +1310,17 @@ function LaunchedShell(
     | undefined
   >(undefined);
   const activeMode = controller.workspace?.activeMode ?? "chat";
+  // Switching the Board plugin off hides the board layers and every opener;
+  // the request flags keep their value so a board that was open closes with
+  // the plugin and the thread data underneath is untouched.
+  const threadBoardAvailable = isThreadBoardAvailable(activeMode, FIRST_PARTY_PLUGINS_EFFECTIVE);
+  const codeBoardOpen = threadBoardAvailable && codeBoardRequested;
+  const workBoardOpen = threadBoardAvailable && workBoardRequested;
+  useEffect(() => {
+    if (threadBoardAvailable) return;
+    setCodeBoardOpen(false);
+    setWorkBoardOpen(false);
+  }, [threadBoardAvailable]);
   // Opening a Chat or Work thread from anywhere also counts as using that kind.
   useEffect(() => {
     if (activeMode === "code") return;
@@ -1814,7 +1828,14 @@ function LaunchedShell(
     () => linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 }),
     [linearClient],
   );
+  const githubPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true;
   useEffect(() => {
+    if (!githubPluginEffective) {
+      setGithubIssuesReadAvailable(false);
+      setGithubPullRequestCapability({ readable: false });
+      setGithubIssuesOpen(false);
+      return;
+    }
     let cancelled = false;
     void githubTransport
       .authenticationSnapshot()
@@ -1832,7 +1853,7 @@ function LaunchedShell(
     return () => {
       cancelled = true;
     };
-  }, [githubTransport]);
+  }, [githubPluginEffective, githubTransport]);
   const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
   const probeLinearAuthentication = shouldProbeLinearAuthentication(
     linearPluginEffective,
@@ -1867,10 +1888,9 @@ function LaunchedShell(
   const trackerReferencePorts = useMemo(
     () =>
       createTrackerReferenceClientPorts({
-        github: {
-          available: githubIssuesReadAvailable,
-          client: githubClient,
-        },
+        ...(githubPluginEffective
+          ? { github: { available: githubIssuesReadAvailable, client: githubClient } }
+          : {}),
         ...(probeLinearAuthentication
           ? {
               linear: {
@@ -1881,6 +1901,7 @@ function LaunchedShell(
           : {}),
       }),
     [
+      githubPluginEffective,
       githubIssuesReadAvailable,
       githubClient,
       probeLinearAuthentication,
@@ -1938,12 +1959,12 @@ function LaunchedShell(
   // clients the composer's "New Project from GitHub repository" uses. Disabled
   // GitHub contributes no tab, exactly as it contributes no composer row.
   const projectCreateGithub = useMemo(() => {
-    if (FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") !== true) return undefined;
+    if (!githubPluginEffective) return undefined;
     const hostName =
       hosts.find((host) => String(host.hostId) === String(createHostId))?.displayName ??
       localHostDisplayName();
     return { client: githubClient, cloneClient: githubCloneClient, hostName };
-  }, [createHostId, githubCloneClient, githubClient, hosts]);
+  }, [createHostId, githubCloneClient, githubClient, githubPluginEffective, hosts]);
   // Drop removed hosts from the environments filter before create preselect runs,
   // otherwise a lone removed remote leaves createHostId pointing at nothing.
   useEffect(() => {
@@ -4965,6 +4986,7 @@ function LaunchedShell(
     onOpenRoutine: actions.openRoutine,
     actions,
     activeMode,
+    threadBoardAvailable,
     activePaneId,
     agentRunClient,
     browserAutomationClient,
@@ -5845,6 +5867,7 @@ function LaunchedShell(
   // The destinations a plugin's sidebar row may open, and the readers the
   // start-screen cards reach for; each closes the other readers first.
   function openThreadBoard() {
+    if (!threadBoardAvailable) return;
     if (activeMode === "code") setCodeBoardOpen(true);
     else setWorkBoardOpen(true);
   }
@@ -7208,6 +7231,7 @@ function LaunchedShell(
                     boundCodeProjectId={controller.boundCodeProjectId}
                     clients={launchedClients}
                     codeBoardOpen={codeBoardOpen}
+                    threadBoardAvailable={threadBoardAvailable}
                     codeBoardProjects={codeBoardProjects}
                     codeNavigationRows={codeController.navigation}
                     codePullRequestsOpen={codePullRequestsOpen}

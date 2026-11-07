@@ -23,7 +23,8 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 - [Shared Memory](/guide/memory) — persist decisions, facts, and context across threads, and what Octant remembers about you across Projects
 - [Promotions](/guide/promotions) — escalate Work work to a linked Code thread
 - [Sync artifacts across your computers](/guide/sync-artifacts) — what leaves this computer, where it goes, and how to turn sync off
-- [Export a Canvas or artifact](/guide/export) — write a readable Markdown or HTML copy into a folder you choose, or publish it as a GitHub Gist
+- [Export a Canvas or artifact](/guide/export) — write a readable Markdown or HTML copy into a folder you choose (including a Google Drive, Dropbox, or other synced folder), publish it as a GitHub Gist, or put it on sharehtml.org as an unlisted page
+- [Share a Canvas with a public link](/guide/public-links) — publish a read-only page through a share service you run yourself or choose
 
 ## Concepts
 

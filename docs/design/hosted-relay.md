@@ -396,8 +396,9 @@ alternatives considered and the reason for the choice follow it.
    the frame contract in `@octant/contracts` and end-to-end tests in one CI.
    The protocol is coupled to the host and client, and self-hosters build from
    the release they run. The slice that creates it adds the ownership row to
-   `AGENTS.md`. Rejected: `octant-webapp` beside the Canvas share service, and
-   a repository of its own.
+   `AGENTS.md`. Rejected: `octant-webapp` (where the Canvas share service lived
+   before it moved to `apps/share` in this repository and became self-hosted),
+   and a repository of its own.
 
 3. **How far to build before evidence.** The self-hostable path end to end
    (slices 1–4), off by default. Self-hosting adds no Octant cloud dependency,

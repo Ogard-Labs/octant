@@ -53,9 +53,9 @@ without over-trusting a surface that has not shipped.
 - [Data residency](/advanced/data-residency) — draft: local-first means this machine, in its region.
 - Shared-host controller footing — draft in the repository at
   `docs/legal/shared-host-controller.md` (pending counsel).
-- [DPA template](/advanced/dpa-template) — draft: processor clauses if an Octant-hosted component ships.
-- [SCC position](/advanced/scc-position) — draft: transfers for BYO inference vs Octant-operated surfaces.
-- [EULA placeholders](/advanced/eula-placeholders) — draft: governing law and venue blanks for a future EULA.
+- DPA template (draft at `docs/legal/dpa-template.md`, not in force) — processor clauses if an Ogard-hosted component ever ships.
+- SCC position (draft at `docs/legal/scc-position.md`) — no Octant SCCs exist today; transfers are the customer's own provider/share-service relationships.
+- EULA placeholders (draft at `docs/legal/eula-placeholders.md`) — governing law and venue blanks for the EULA counsel will deliver.
 - [Recovery and troubleshooting](/advanced/recovery) — replay, rebuilds, conflict recovery, and diagnostic tooling.
 - [Release compatibility](/advanced/release-compatibility) — technical-preview boundaries, data location, and migration notes.
 
