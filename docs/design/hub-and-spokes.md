@@ -787,7 +787,10 @@ that host as `thread.member-reachable-set@1` with its principal. A thread that
 is completed, archived, deleted, or in Plan keeps its tag but takes part in
 nothing until it is active Code outside Plan again. Both ends need the tag: a
 thread may send to another member only while it is tagged itself, so the
-person opted in on both sides and the recipient can always answer.
+person opted in on both sides and the recipient can always answer. Under the
+tag sits a second switch, **Wake when a message arrives**. It is on whenever a
+person turns the tag on, can be turned off on its own, and is journaled with
+the tag (see [Waking an idle thread](#waking-an-idle-thread)).
 
 **Who.** Spokes, the hub's own threads (the hub is also its own spoke), and a
 standby's own threads may send and receive; a guest runs no agents and does
@@ -849,9 +852,52 @@ refuses otherwise. A delivered message marks the
 recipient with `thread.external-content-ingested@1` under the source label
 `member-message` and joins the turn as one context block: a host sentence that
 names the sending member and the sender's remote reference, then the body
-inside the shared external-data frame. Nothing that arrives starts a turn on B,
-grants authority there, or answers an approval there. The agent on B replies
-by sending to the reference in that sentence.
+inside the shared external-data frame. A message grants no authority on B and
+never answers an approval there; the only turn it can start is the wake turn
+below. The agent on B replies by sending to the reference in that sentence.
+
+#### Waking an idle thread
+
+A message waiting for a thread that has nothing running would otherwise wait
+until a person next runs a turn there, so agents could not coordinate on their
+own. When B accepts a message for a thread with **Wake when a message
+arrives** on, and the thread is idle, B starts one turn to carry it.
+
+- **Idle.** The thread is active Code outside Plan, has no turn running or
+  queued, and is not waiting for a person (an approval, a question, or a
+  usage-limit pause). A thread that is not idle carries the message in its next
+  turn as usual, and a running turn is never interrupted.
+- **The wake turn.** B starts it as a host-run turn with the `agent` initiator,
+  the way a routine's Code turn starts, so every approval waits for a person.
+  It runs under the thread's own posture, provider profile, and model, and
+  takes the ordinary turn admission: capacity gating, the Done lock, and the
+  host's usage limits apply, and a turn refused there starts nothing and leaves
+  the messages waiting. The turn's prompt is a host sentence saying a message
+  from the named member started it; the messages themselves arrive as the
+  ordinary delivery block, after the ordinary delivery checks. When every
+  waiting message is refused at those checks, no turn starts. The turn is
+  journaled with the initiator kind `member-message` and the message ids, and
+  the thread's row and transcript say which member woke it.
+- **Bounds.** One wake turn at a time per thread, and at most six per thread in
+  any hour. A message that arrives past either bound waits for the next turn,
+  woken or not. Each message carries a hop count, set by the sending host: zero
+  from a turn a person or routine started, and one more than the message that
+  woke the sender's turn otherwise. A message whose hop count is three or more
+  is delivered but wakes nothing, so two agents answering each other stop
+  waking each other after three rounds and continue only when a person runs a
+  turn. B keeps the higher of the count it is sent and its own record for that
+  sender thread, so a sender that sends a lower count is still held by the
+  hourly bound.
+- **Turning it off.** Turning off the wake switch or the tag stops new wake
+  turns; a wake turn already running finishes like any turn. Cancelling a wake
+  turn is the ordinary cancel.
+
+Rationale: a wake turn starts nothing a person could not have started on that
+thread, under the posture the person chose, and approvals still wait for a
+person, so a message can spend B's provider usage but cannot widen what B's
+agent may do. The hop count and the hourly bound keep two agents, or a
+compromised member, from turning one message into unbounded turns. One-host
+messages still wake nothing; extending waking to them is a separate rule.
 
 **The sender's end after B accepts.** The one-host rule rechecks the sender at
 delivery. Across members B cannot see the sender, so A tells it. When a
@@ -1057,15 +1103,15 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                      | Can                                                                                                                                                                                                                                          | Cannot, and why                                                                                                                                                                                                                         |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act |
-| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                          | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                              |
-| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting; claim to be standing in as hub                          | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster                                                    |
-| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                                                                                                                                        | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                |
-| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                                                                                                                                             | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                           |
-| A spoke's agent            | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                      | Choose the peer grant, tag a thread, start a turn on the receiver, approve on the receiver, widen authority, carry a credential                                                                                                         |
-| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                          | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                |
+| Party                      | Can                                                                                                                                                                                                                                                                                                                 | Cannot, and why                                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata                                                                        | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act |
+| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                 | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                              |
+| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster                                                    |
+| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                               | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                |
+| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                    | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                           |
+| A spoke's agent            | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                             | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                          |
+| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                 | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -1679,13 +1725,17 @@ a numbered slice. Built, with these narrower readings:
     Message peer-grant item (in the full-member grant, and a Message-only
     grant for the hub), remote references, `list` with a `member`, the
     threads, messages, receipts, and withdraw member routes, sending with retry and
-    the 24-hour deadline, delivery on the receiver, and receipts back.
+    the 24-hour deadline, delivery on the receiver, waking an idle thread,
+    and receipts back.
     Acceptance: an untagged thread is never listed and refuses a message in
     the same words as an unknown one; a sender thread without the tag cannot
     send to a member; a member without Message gets an empty list and
     `unauthorized`; a message sent while the receiver is down arrives once
-    after it returns and expires after 24 hours; nothing that arrives starts a
-    turn or reaches an approval on the receiver; untagging or revoking refuses
+    after it returns and expires after 24 hours; a message to an idle thread
+    with the wake switch on starts one `agent`-initiated turn, a busy or
+    waiting thread is not interrupted, and the hourly and hop bounds stop a
+    reply loop after three rounds; nothing that arrives reaches an approval on
+    the receiver; untagging or revoking refuses
     waiting messages; closing or untagging the sender withdraws what B still
     holds; a Claude thread on one host and a Codex thread on another
     exchange a message and a reply. Verification: server tests and a

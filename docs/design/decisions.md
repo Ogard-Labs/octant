@@ -2828,7 +2828,7 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 - Subscription sign-ins held by a provider's own app are never copied; the hub can ask a spoke to sign in itself, and the person finishes it there.
 - An owner with a fresh unlock may copy an API key between hosts; both hosts journal the copy without the value.
 - Delegated work is clamped to the smaller of the peer grant and the receiving spoke's own Project authority, and journaled with the requesting peer.
-- Agent messages between members reach only Code threads a person tagged Reachable on both ends, under the receiver's Message item; they start no turn and grant nothing there. _Designed, not built._
+- Agent messages between members reach only Code threads a person tagged Reachable on both ends, under the receiver's Message item; they grant nothing there, and the only turn one can start is a bounded, `agent`-initiated wake turn on an idle recipient whose person left Wake when a message arrives on. _Designed, not built._
 - Hub provisioning offers are data that land as proposals; auto-apply is per kind and off by default, and a routine always asks.
 - The hub's wake service and push sender are each off until turned on; the hub forwards sealed notifications unchanged.
 

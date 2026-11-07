@@ -3595,7 +3595,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   grant. Each host applies the rules above to its own end, and the receiver
   keeps the final say; the extra rules (the Reachable tag, the Message item,
   remote references, waiting on the sender while the receiver is unreachable,
-  receipts back) are in
+  a bounded wake turn for an idle recipient, receipts back) are in
   [Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members).
   Designed, not built.
 - **Delivery.** Admission is not delivery. When the recipient's next Code turn
