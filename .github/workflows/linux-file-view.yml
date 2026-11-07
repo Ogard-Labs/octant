@@ -21,6 +21,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Read kernel policy prerequisites without changing boot settings
+        run: |
+          sudo python3 scripts/linux-file-view/kernel_prerequisites.py "$RUNNER_TEMP/kernel-policy-prerequisites.json"
       - name: Prepare the owned disposable runner
         run: |
           sudo apt-get update
@@ -57,6 +60,8 @@ jobs:
         if: always()
         with:
           name: linux-file-view-feasibility
-          path: ${{ runner.temp }}/file-view-evidence.json
+          path: |
+            ${{ runner.temp }}/file-view-evidence.json
+            ${{ runner.temp }}/kernel-policy-prerequisites.json
           if-no-files-found: error
           retention-days: 7

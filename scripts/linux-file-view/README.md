@@ -39,3 +39,10 @@ account exceptions, all relevant mounts and aliases, permitted file semantics,
 postures, process/network boundaries and failure behavior. Passing these selected
 fixture measurements alone cannot establish that broader contract. Native data
 and current-source production checks are separate evidence.
+
+The hosted job also records read-only prerequisites for a possible BPF-LSM
+backend: active LSMs, available BTF, and kernel configuration. It does not load
+a policy, install a kernel or change boot settings. A missing active BPF LSM
+blocks further capability execution on that runner; this is not evidence that
+a different backend enforces the policy. Even an eligible prerequisite result
+still needs the dynamic companion/account and alias semantics proven natively.
