@@ -50,7 +50,11 @@ power in another.
 2. Server clamp to recipient mode, Project, thread, and AgentRun ceiling.
 3. Delivered body to recipient context assembly (data framing + taint).
 4. Journal event to projections and remote replay.
-5. One host to another host (out of scope; no cross-host messaging).
+5. One host to another host: only between members of one hub, for threads a
+   person tagged on both ends. Its threats and controls are in
+   [Hub and spokes: threat model](../design/hub-and-spokes.md#threat-model) and
+   [messaging between members](../design/hub-and-spokes.md#messaging-between-members);
+   designed, not built.
 
 ### Assumptions
 

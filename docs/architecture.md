@@ -3590,6 +3590,14 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   messages per sender that no turn has carried yet; a waiting message whose
   recipient closed or left the Project is refused at the sender's next send,
   so it stops holding a slot.
+- **Across a person's computers.** A tagged Code thread may also message a
+  tagged Code thread on another member of its hub, under that member's peer
+  grant. Each host applies the rules above to its own end, and the receiver
+  keeps the final say; the extra rules (the Reachable tag, the Message item,
+  remote references, waiting on the sender while the receiver is unreachable,
+  receipts back) are in
+  [Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members).
+  Designed, not built.
 - **Delivery.** Admission is not delivery. When the recipient's next Code turn
   assembles its context, the host rechecks that the sender is still active,
   that both threads still share a Project, and that the recipient is active,
@@ -13209,7 +13217,10 @@ access` agree); a thread's own change is journaled as
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another. An all-hosts list keeps every registered host;
+  into authority on another. An agent message to a thread on another hub
+  member is not offline work: it carries no authority and the receiver admits
+  it afresh, so it waits on the sender until that member answers
+  ([Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members)). An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
