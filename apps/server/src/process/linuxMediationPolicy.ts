@@ -55,14 +55,25 @@ export async function readLinuxMediationPolicy(
       return complete;
     };
     const objects = new Set<string>();
+    // Directory entries may contain arbitrary non-NUL bytes on Linux. A
+    // one-byte representation preserves identity and ASCII rule syntax; UTF-8
+    // replacement decoding could silently omit a protected id_<invalid> name.
+    const bytePath = (path: string) => Buffer.from(path, "utf8").toString("latin1");
+    const nativePath = (path: string) => Buffer.from(path, "latin1");
+    const entries = policy.entries.map((entry) =>
+      entry.kind === "path"
+        ? { ...entry, path: bytePath(entry.path) }
+        : { ...entry, directory: bytePath(entry.directory) },
+    );
     const own: string[] = [];
-    for (const path of policy.ownAccountPaths) {
+    for (const original of policy.ownAccountPaths) {
+      const path = bytePath(original);
       if (!path.startsWith("/") || path.includes("\0"))
         return { status: "unavailable", reason: "metadata-unavailable" };
       own.push(path);
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
       try {
-        own.push(await realpath(path));
+        own.push((await realpath(nativePath(path), { encoding: "buffer" })).toString("latin1"));
       } catch (error) {
         if (!missing(error)) throw error;
       }
@@ -70,10 +81,12 @@ export async function readLinuxMediationPolicy(
     const inspect = async (path: string, forced = false) => {
       if (!checkBudget()) return undefined;
       try {
-        const identity = await stat(path, { bigint: true });
+        const identity = await stat(nativePath(path), { bigint: true });
         if (!checkBudget()) return undefined;
-        const actual = await realpath(path);
-        if (forced || protectedEntryFor([path, actual], policy.entries, own) !== undefined)
+        const actual = (await realpath(nativePath(path), { encoding: "buffer" })).toString(
+          "latin1",
+        );
+        if (forced || protectedEntryFor([path, actual], entries, own) !== undefined)
           objects.add(linuxMediationObjectKey(identity));
         return identity;
       } catch (error) {
@@ -84,7 +97,7 @@ export async function readLinuxMediationPolicy(
     const namesIn = async (path: string): Promise<ReadonlyArray<string> | undefined> => {
       if (!checkBudget()) return undefined;
       try {
-        const directory = await opendir(path);
+        const directory = await opendir(nativePath(path), { encoding: "latin1" });
         const names: string[] = [];
         // Stream entries: a hostile large directory must not allocate an
         // unbounded readdir result before its metadata budget is checked.
@@ -117,18 +130,19 @@ export async function readLinuxMediationPolicy(
       if (children === undefined) return;
       for (const name of children) await visit(join(path, name), remaining - 1, level + 1, forced);
     };
-    for (const entry of policy.entries) {
+    for (const entry of entries) {
       const path = entry.kind === "path" ? entry.path : entry.directory;
       await visit(path, entry.kind === "path" ? MAX_DIRECTORY_DEPTH + 1 : entry.depth, 0);
     }
     if (policy.sshCompanionDirectory !== undefined) {
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
-      const names = await namesIn(policy.sshCompanionDirectory);
+      const directory = bytePath(policy.sshCompanionDirectory);
+      const names = await namesIn(directory);
       if (names === undefined) return { status: "unavailable", reason: "metadata-unavailable" };
       const present = new Set(names);
       for (const name of names)
         if (!name.endsWith(".pub") && present.has(`${name}.pub`))
-          await visit(join(policy.sshCompanionDirectory, name), MAX_DIRECTORY_DEPTH + 1, 0, true);
+          await visit(join(directory, name), MAX_DIRECTORY_DEPTH + 1, 0, true);
     }
     if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
     const after = await readNamespace();

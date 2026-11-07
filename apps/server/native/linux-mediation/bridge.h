@@ -8,9 +8,11 @@
 #ifdef CONFIG_SECURITY_OCTANT_MEDIATION
 void octant_namespace_begin(void);
 void octant_namespace_end(void);
+bool octant_mediation_restricted(void);
 #else
 static inline void octant_namespace_begin(void) {}
 static inline void octant_namespace_end(void) {}
+static inline bool octant_mediation_restricted(void) { return false; }
 #endif
 
 static inline void octant_namespace_scope_end(bool *entered)

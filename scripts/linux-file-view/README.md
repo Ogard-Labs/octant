@@ -10,6 +10,13 @@ single-thread bootstrap's credentials after `no_new_privs`; existing shared
 address spaces, shared descriptor tables and ring/AIO contexts refuse enrollment.
 Later ordinary threads inherit the same immutable context. A broker close or
 unanswered deadline refuses both pending and subsequent admissions.
+The metadata policy reader consumes the original structured rules rather than
+the startup mount covers, retains exact account exceptions and live companions,
+and indexes actual device/inode identity without opening content. Directory
+names and canonical paths retain their original bytes, including invalid Linux
+UTF-8 names; enumeration streams under finite metadata/depth/time budgets. Its
+epoch comparison is optimistic and never substitutes for the kernel admission.
+The reader still needs the owned broker/production launch integration below.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
@@ -18,7 +25,8 @@ security tree. No kernel is installed, loaded or distributed; the app's MIT
 license is unchanged. The original kernel files are `GPL-2.0 OR MIT`, with
 the syscall-note alternative for UAPI. The job has a twenty-minute bound,
 the guest a forty-five-second outer bound, and the synthetic client finite IPC
-and admission deadlines. Owned process groups are stopped on command failure.
+and admission deadlines. Commands have independent timeout supervisors; retained
+process groups are stopped on interruption or owner-command failure.
 
 This is an implementation increment, not complete confinement. Its status query
 reports `production_coverage: 0`; the host never calls it. Namespace begin/end

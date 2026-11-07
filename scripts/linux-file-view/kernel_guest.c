@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,6 +15,7 @@
 #include <sys/prctl.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -21,6 +23,15 @@
 
 static const char content[] = "synthetic-kernel-admission";
 static volatile sig_atomic_t interrupted;
+struct thread_read { int file, passed; };
+static void *read_on_thread(void *argument)
+{
+  struct thread_read *input = argument;
+  char bytes[64];
+  ssize_t count = pread(input->file, bytes, sizeof(bytes), 0);
+  input->passed = count == (ssize_t)sizeof(content) - 1 && !memcmp(bytes, content, sizeof(content) - 1);
+  return NULL;
+}
 static void alarmed(int number) { interrupted = number; }
 static bool transfer(int fd, void *data, size_t length, bool output)
 {
@@ -33,7 +44,8 @@ static void workload(int enrollment, int commands, int results)
 {
   int held = open("/tmp/ordinary", O_RDONLY | O_CLOEXEC);
   int alias = open("/tmp/alias", O_RDONLY | O_CLOEXEC);
-  if (held < 0 || alias < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
+  int output = open("/tmp/ordinary", O_WRONLY | O_CLOEXEC);
+  if (held < 0 || alias < 0 || output < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
       ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(2);
   close(enrollment);
   for (;;) {
@@ -43,7 +55,28 @@ static void workload(int enrollment, int commands, int results)
     bool denied = command == 'D' || command == 'M' || command == 'X';
     int passed;
     errno = 0;
-    if (command == 'm' || command == 'M') {
+    if (command == 'F') {
+      passed = ftruncate(output, 0) == -1 && errno == EACCES;
+    } else if (command == 'P') {
+      passed = truncate("/tmp/ordinary", 0) == -1 && errno == EACCES;
+    } else if (command == 'O') {
+      int opened = open("/tmp/ordinary", O_TRUNC | O_WRONLY | O_CLOEXEC);
+      passed = opened == -1 && errno == EACCES;
+      if (opened >= 0) close(opened);
+    } else if (command == 'a') {
+      unsigned long context = 0;
+      long ring = syscall(SYS_io_uring_setup, 1, NULL);
+      int ring_error = errno;
+      long aio = syscall(SYS_io_setup, 1, &context);
+      passed = ring == -1 && ring_error == ENOSYS && aio == -1 && errno == ENOSYS;
+    } else if (command == 't') {
+      struct thread_read input = {.file = held};
+      pthread_t thread;
+      passed = pthread_create(&thread, NULL, read_on_thread, &input) == 0;
+      if (passed) passed = pthread_join(thread, NULL) == 0 && input.passed;
+    } else if (command == 'w') {
+      passed = pwrite(output, content, sizeof(content) - 1, 0) == (ssize_t)sizeof(content) - 1;
+    } else if (command == 'm' || command == 'M') {
       void *mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, held, 0);
       passed = denied ? mapped == MAP_FAILED && errno == EACCES :
         mapped != MAP_FAILED && !memcmp(mapped, content, sizeof(content) - 1);
@@ -83,31 +116,33 @@ static int measure(void)
   }
   close(enrollment); close(commands[0]); close(answers[1]);
   if (child < 0) { close(broker); close(commands[1]); close(answers[0]); return 7; }
-  const char operations[] = {'r', 'l', 'm', 'S', 'D', 'M', 'X', 'X'};
+  const char operations[] = {'r', 'l', 'm', 't', 'w', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
   bool passed = true;
   unsigned measured = 0;
   unsigned long long previous = 0;
   for (unsigned i = 0; i < sizeof(operations) && passed; i++) {
     char command = operations[i];
     passed = transfer(commands[1], &command, 1, true);
-    if (passed && i < 7) {
+    if (passed && command != 'a' && i < 13) {
       struct octant_mediation_request request;
       passed = transfer(broker, &request, sizeof(request), false) &&
         request.request_id > previous && request.reserved == 0 &&
         request.inode == (unsigned long long)inode.st_ino &&
         request.device_major == major(inode.st_dev) && request.device_minor == minor(inode.st_dev) &&
-        request.operation == (command == 'm' || command == 'M' ? OCTANT_MEDIATION_MAP : OCTANT_MEDIATION_READ);
+        request.operation == (command == 'm' || command == 'M' ? OCTANT_MEDIATION_MAP :
+          command == 'w' || command == 'F' || command == 'P' || command == 'O' ?
+            OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
       if (!passed) break;
       printf("OCTANT_KERNEL_STEP %u operation=%u epoch=%llu\n", i,
         request.operation, (unsigned long long)request.namespace_epoch);
       previous = request.request_id;
-      if (i == 6) { close(broker); broker = -1; }
+      if (i == 12) { close(broker); broker = -1; }
       else {
         if (command == 'S') {
           int marker = open("/tmp/ordinary.pub", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
           if (marker < 0) { passed = false; break; }
           close(marker);
-          struct octant_mediation_status changed;
+          struct octant_mediation_status changed = {0};
           passed = !ioctl(broker, OCTANT_MEDIATION_STATUS, &changed) &&
             changed.namespace_epoch > request.namespace_epoch && changed.active_mutations == 0;
           printf("OCTANT_KERNEL_MUTATION before=%llu after=%llu active=%u\n",
@@ -118,7 +153,7 @@ static int measure(void)
         struct octant_mediation_answer answer = {
           .request_id = request.request_id,
           .namespace_epoch = request.namespace_epoch,
-          .allow = i < 4,
+          .allow = i < 7,
         };
         passed = write(broker, &answer, sizeof(answer)) == sizeof(answer);
       }

@@ -61,3 +61,14 @@ def install_epochs(kernel: Path, native: Path) -> None:
         "#define OCTANT_MEDIATION_ENABLED 1,\n"
         "#else\n#define OCTANT_MEDIATION_ENABLED\n#endif\n\n" + marker, 1)
     count.write_text(source)
+    aio = kernel / "fs/aio.c"
+    source = aio.read_text()
+    definition = re.compile(r"(?m)^static struct kioctx \*ioctx_alloc\([^;{]*?\)\s*\{")
+    matches = list(definition.finditer(source))
+    if len(matches) != 1:
+        raise ValueError("Pinned native and compat AIO allocation definition differs")
+    at = matches[0].end()
+    source = source[:at] + "\n\tif (octant_mediation_restricted())\n\t\treturn ERR_PTR(-ENOSYS);\n" + source[at:]
+    first_line = source.index("\n") + 1
+    source = source[:first_line] + '#include <linux/octant_mediation_bridge.h>\n' + source[first_line:]
+    aio.write_text(source)

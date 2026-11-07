@@ -17,10 +17,12 @@ DIGEST = "9106a4605da9e31ff17659d958782b815f9591ab308d03b0ee21aad6c7dced4b"
 
 
 def run(*arguments, cwd=None, timeout=900, output=None):
-    process = subprocess.Popen(arguments, cwd=cwd, stdout=output,
+    bounded = ("timeout", "--kill-after=3s", f"{timeout}s", *arguments)
+    process = subprocess.Popen(bounded, cwd=cwd, stdout=output,
                                stderr=subprocess.STDOUT if output else None, start_new_session=True)
+    print(f"OCTANT_KERNEL_COMMAND pid={process.pid} group={process.pid} command={arguments[0]} maximum={timeout}s", flush=True)
     try:
-        result = process.wait(timeout=timeout)
+        result = process.wait(timeout=timeout + 5)
     except BaseException:
         # This process group was created here; never stop a shared host tool.
         try:
@@ -66,18 +68,18 @@ def main():
     with (kernel / "security/Makefile").open("a") as output:
         output.write("\nobj-$(CONFIG_SECURITY_OCTANT_MEDIATION) += octant_mediation/\n")
     with (kernel / "security/Kconfig").open("a") as output:
-        output.write('\nconfig SECURITY_OCTANT_MEDIATION\n\tbool "Octant disposable admission bridge"\n\tdepends on SECURITY\n\tdefault n\n')
+        output.write('\nconfig SECURITY_OCTANT_MEDIATION\n\tbool "Octant disposable admission bridge"\n\tdepends on SECURITY\n\tselect SECURITY_PATH\n\tdefault n\n')
     run("make", "tinyconfig", cwd=kernel)
     for symbol in ("64BIT", "MULTIUSER", "PRINTK", "TTY", "SERIAL_8250", "SERIAL_8250_CONSOLE",
                    "BLK_DEV_INITRD", "BINFMT_ELF", "PROC_FS", "SYSFS", "TMPFS", "SHMEM",
-                   "DEVTMPFS", "SECURITY", "SECURITY_OCTANT_MEDIATION", "IO_URING", "AIO",
+                   "DEVTMPFS", "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION", "IO_URING", "AIO",
                    "FUTEX", "PCI", "BLOCK", "ACPI"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
     run("make", "olddefconfig", cwd=kernel)
     run("make", "-j2", "bzImage", cwd=kernel)
     executable = root / "init"
-    run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror",
+    run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
         str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(executable), timeout=30)
     with (root / "initramfs.cpio").open("wb") as output:
         archive_entry(output, "dev", b"", 0o040755, 1)
@@ -97,4 +99,8 @@ def main():
 
 
 if __name__ == "__main__":
+    def interrupted(number, frame):
+        raise SystemExit(128 + number)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
     main()

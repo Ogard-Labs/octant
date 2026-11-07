@@ -80,6 +80,8 @@ it("retains exact original name rules, symlink target identity, account exceptio
   await mkdir(own);
   const account = join(own, ".credentials.json");
   await writeFile(account, "synthetic sign-in");
+  const custom = join(f.home, "nøkkel");
+  await writeFile(custom, "synthetic custom bytes");
   const snapshot = await readLinuxMediationPolicy(
     f.policy([own, join(f.home, ".ssh")]),
     f.readNamespace,
@@ -88,13 +90,28 @@ it("retains exact original name rules, symlink target identity, account exceptio
   expect(snapshot.protectedObjects.has(await f.key(target))).toBe(true);
   expect(snapshot.protectedObjects.has(await f.key(nested))).toBe(true);
   expect(snapshot.protectedObjects.has(await f.key(account))).toBe(false);
-  applyProtectedFilesChoice({ added: [account], removed: ["ssh-private-keys"] });
+  applyProtectedFilesChoice({ added: [account, custom], removed: ["ssh-private-keys"] });
   const changed = await readLinuxMediationPolicy(f.policy([own]), f.readNamespace);
   if (changed.status !== "ready") throw Error("Missing changed policy snapshot");
   expect(changed.protectedObjects.has(await f.key(target))).toBe(false);
   expect(changed.protectedObjects.has(await f.key(nested))).toBe(false);
   expect(changed.protectedObjects.has(await f.key(account))).toBe(true);
+  expect(changed.protectedObjects.has(await f.key(custom))).toBe(true);
 });
+
+it.skipIf(process.platform !== "linux")(
+  "keeps protected Linux names byte-exact instead of losing invalid UTF-8 aliases",
+  async () => {
+    const f = await fixture();
+    const path = Buffer.concat([Buffer.from(join(f.home, ".ssh", "id_")), Buffer.from([0xff])]);
+    const alias = join(f.home, "alias");
+    await writeFile(path, "synthetic invalid-name bytes");
+    await link(path, alias);
+    const snapshot = await readLinuxMediationPolicy(f.policy(), f.readNamespace);
+    if (snapshot.status !== "ready") throw Error("Missing byte-exact policy snapshot");
+    expect(snapshot.protectedObjects.has(await f.key(alias))).toBe(true);
+  },
+);
 
 it("never treats a scan concurrent with an outside namespace mutation as a valid admission snapshot", async () => {
   const f = await fixture();

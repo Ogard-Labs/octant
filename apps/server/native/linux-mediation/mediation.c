@@ -77,6 +77,11 @@ static struct octant_cred *octant_cred(const struct cred *cred)
 	return cred->security + octant_blobs.lbs_cred;
 }
 
+bool octant_mediation_restricted(void)
+{
+	return initialized && octant_cred(current_cred())->context;
+}
+
 void octant_namespace_begin(void)
 {
 	unsigned long flags;
@@ -135,18 +140,16 @@ static void free_cred(struct cred *cred)
 	put_context(octant_cred(cred)->context);
 }
 
-static int admit_file(struct file *file, u32 operation)
+static int admit_inode(struct inode *inode, u32 operation)
 {
 	struct octant_context *context = octant_cred(current_cred())->context;
 	struct octant_pending *pending = NULL;
-	struct inode *inode;
 	unsigned long flags;
 	long waited;
 	int result, i;
 	u64 epoch;
-	if (!context || !file || !S_ISREG(file_inode(file)->i_mode))
+	if (!context || !inode || !S_ISREG(inode->i_mode))
 		return 0;
-	inode = file_inode(file);
 	spin_lock_irqsave(&namespace_lock, flags);
 	epoch = namespace_epoch;
 	result = namespace_overflow || active_mutations ? -EAGAIN : 0;
@@ -191,6 +194,21 @@ static int admit_file(struct file *file, u32 operation)
 	return result;
 }
 
+static int admit_file(struct file *file, u32 operation)
+{
+	return admit_inode(file ? file_inode(file) : NULL, operation);
+}
+
+static int truncate_file(struct file *file)
+{
+	return admit_file(file, OCTANT_MEDIATION_WRITE);
+}
+
+static int truncate_path(const struct path *path)
+{
+	return admit_inode(d_inode(path->dentry), OCTANT_MEDIATION_WRITE);
+}
+
 static int octant_file_permission(struct file *file, int mask)
 {
 	return admit_file(file, mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
@@ -220,7 +238,7 @@ static int receive_file(struct file *file)
 #ifdef CONFIG_IO_URING
 static int allow_uring(void)
 {
-	return octant_cred(current_cred())->context ? -EACCES : 0;
+	return octant_cred(current_cred())->context ? -ENOSYS : 0;
 }
 #endif
 
@@ -477,6 +495,8 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(cred_transfer, transfer_cred),
 	LSM_HOOK_INIT(cred_free, free_cred),
 	LSM_HOOK_INIT(file_permission, octant_file_permission),
+	LSM_HOOK_INIT(file_truncate, truncate_file),
+	LSM_HOOK_INIT(path_truncate, truncate_path),
 	LSM_HOOK_INIT(mmap_file, mmap_file),
 	LSM_HOOK_INIT(file_mprotect, protect_mapping),
 	LSM_HOOK_INIT(bprm_check_security, check_exec),
