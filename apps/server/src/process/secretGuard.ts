@@ -126,6 +126,36 @@ export function secretGuardEntries(input: {
   return [...entries, ...sshKeys];
 }
 
+export interface SecretGuardMediationPolicy {
+  readonly entries: ReadonlyArray<ResolvedProtectedEntry>;
+  readonly ownAccountPaths: ReadonlyArray<string>;
+  readonly sshCompanionDirectory: string | undefined;
+}
+
+/** Original structured rules, before startup enumeration or mount covers. */
+export function secretGuardMediationPolicy(input: {
+  readonly platform: NodeJS.Platform;
+  readonly homeDirectory?: string;
+  readonly ownAccountPaths: ReadonlyArray<string>;
+}): SecretGuardMediationPolicy {
+  const home = input.homeDirectory ?? homedir();
+  return {
+    entries: resolveProtectedFiles(
+      {
+        platform: secretGuardPlatform(input.platform),
+        home,
+        dataDirectory: state.dataDirectory,
+        runtimeDirectory: state.runtimeDirectory,
+      },
+      state.choice,
+    ),
+    ownAccountPaths: [...input.ownAccountPaths],
+    sshCompanionDirectory: state.choice.removed.includes("ssh-private-keys")
+      ? undefined
+      : join(home, ".ssh"),
+  };
+}
+
 /**
  * The refusal for a file tool that names a protected path, or undefined. The
  * OS rule refuses the read anyway; this answers first so the agent and the
