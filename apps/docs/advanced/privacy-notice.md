@@ -198,7 +198,7 @@ are traffic you pointed Octant at. Remote access is off by default. See
 A Canvas export to sharehtml.org uploads one rendered HTML page to that
 service, which serves it at an unlisted link and can read it; the receipt's
 manage URL (shown once, not stored) is the way to delete it later. See
-[Export a Canvas or artifact](/guide/export#publish-as-a-web-page-on-sharehtmlorg).
+[Export a Canvas or artifact](/guide/export#publish-as-a-web-page-on-sharehtml-org).
 
 A Canvas export to a GitHub Gist publishes content to GitHub. It posts the
 rendered Markdown of one Canvas, with the Canvas title as the gist
