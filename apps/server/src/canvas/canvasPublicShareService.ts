@@ -5,7 +5,6 @@ import {
   CANVAS_PUBLIC_LINK_SETTINGS_AGGREGATE_TYPE,
   CANVAS_PUBLIC_LINK_SETTINGS_CHANGED,
   CANVAS_PUBLIC_SHARE_AGGREGATE_TYPE,
-  CANVAS_PUBLIC_SHARE_DEFAULT_SERVICE_URL,
   CANVAS_PUBLIC_SHARE_EXPIRED,
   CANVAS_PUBLIC_SHARE_PUBLISHED,
   CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE,
@@ -26,7 +25,6 @@ import {
   decodeCanvasPublicShareList,
   decodeCanvasPublicShareRecord,
   decodeCanvasPublicShareRevokeResult,
-  decodeCanvasPublicShareServiceUrl,
   type CanvasPublicLinkSettings,
   type CanvasPublicLinkSettingsCommand,
   type CanvasPublicLinkSettingsResult,
@@ -142,7 +140,8 @@ export class CanvasPublicShareService {
     this.#settings = decodeCanvasPublicLinkSettings({
       kind: "canvas-public-link-settings",
       enabled: false,
-      serviceUrl: CANVAS_PUBLIC_SHARE_DEFAULT_SERVICE_URL,
+      // No service until the person sets one: Octant operates no share service.
+      serviceUrl: "",
       version: 0,
     });
     this.#hydrate();
@@ -242,6 +241,13 @@ export class CanvasPublicShareService {
         kind: "refused",
         code: "not-connected",
         message: "Public links are off in Settings.",
+      };
+    }
+    if (this.#settings.serviceUrl === "") {
+      return {
+        kind: "refused",
+        code: "not-connected",
+        message: "Set a service address in Settings › Permissions › Public links first.",
       };
     }
     const secrets = this.#dependencies.secrets;
@@ -696,7 +702,7 @@ export class CanvasPublicShareService {
             this.#settings = decodeCanvasPublicLinkSettings({
               kind: "canvas-public-link-settings",
               enabled: changed.enabled,
-              serviceUrl: decodeCanvasPublicShareServiceUrl(changed.serviceUrl),
+              serviceUrl: changed.serviceUrl,
               version: envelope.aggregateVersion,
               updatedAt: envelope.occurredAt,
             });

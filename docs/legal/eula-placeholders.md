@@ -22,7 +22,7 @@ fields below as explicit blanks rather than inventing a forum.
 Local-first architecture does not pick a court. The journal still sits on
 the customer's host; these placeholders only matter for disputes about the
 software license and any Octant-operated hosted component that later falls
-under the [DPA template](/advanced/dpa-template).
+under the [DPA template](../apps/docs/advanced/dpa-template.md).
 
 ## Placeholders
 
@@ -64,17 +64,17 @@ protections.
 ## Interaction with privacy drafts
 
 - Controllership of the on-device journal is described in the
-  [privacy notice](/advanced/privacy-notice) and
-  [DPA template](/advanced/dpa-template). Choice of law in the EULA does not
+  [privacy notice](../apps/docs/advanced/privacy-notice.md) and
+  [DPA template](../apps/docs/advanced/dpa-template.md). Choice of law in the EULA does not
   move that journal into an Octant data center.
 - Transfer tools for any future hosted processing sit in the
-  [SCC position](/advanced/scc-position), not in these placeholders.
+  [SCC position](../apps/docs/advanced/scc-position.md), not in these placeholders.
 - BYO providers remain under the customer's contracts with those providers
-  ([Sub-processors](/advanced/sub-processors)).
+  ([Sub-processors](../apps/docs/advanced/sub-processors.md)).
 
 ## Next steps
 
-- [DPA template](/advanced/dpa-template)
-- [SCC position](/advanced/scc-position)
-- [Privacy notice](/advanced/privacy-notice)
-- [Data residency](/advanced/data-residency)
+- [DPA template](../apps/docs/advanced/dpa-template.md)
+- [SCC position](../apps/docs/advanced/scc-position.md)
+- [Privacy notice](../apps/docs/advanced/privacy-notice.md)
+- [Data residency](../apps/docs/advanced/data-residency.md)

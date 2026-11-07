@@ -86,6 +86,16 @@ from the prompt and must be **user-confirmed**. Agents may propose a change
 but cannot lower or redefine the target without user confirmation. Stale
 GitHub metadata is labeled stale and cannot satisfy a delivery target.
 
+## Turning the Board off
+
+The Code board is the bundled Board plugin. When a person turns the plugin off,
+the board and every way to open it disappear: the sidebar Board row, the
+Running tile, the start screen's Running links (which open Activity instead),
+and the Inbox's Open the Board button. An open board closes. Threads, their
+statuses, and your work are untouched, and turning the plugin back on
+restores the board as it was. Agent tools that read the board, such as the
+planner, keep working.
+
 ## Out of scope
 
 Manual card movement or status assignment, a general issue or task Kanban,
