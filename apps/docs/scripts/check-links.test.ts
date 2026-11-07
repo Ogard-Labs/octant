@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { checkLinks, type LinkIssue, type SourceFile } from "./check-links";
+import {
+  checkAnchors,
+  checkLinks,
+  headingSlugs,
+  slugifyHeading,
+  type AnchorIssue,
+  type LinkIssue,
+  type SourceFile,
+} from "./check-links";
 
 const sources: SourceFile[] = [
   { path: "index.md", content: "" },
@@ -66,5 +74,49 @@ describe("check-links", () => {
     expect(
       checkLinks([markdown("guide/index.md", "[Topics](/guide/topics#intro)"), ...sources]),
     ).toEqual([]);
+  });
+});
+
+describe("check-links anchors", () => {
+  const pages: SourceFile[] = [
+    markdown("guide/index.md", "# Guide\n\n## Servers that run the repository's tools\n"),
+    markdown(
+      "guide/topics.md",
+      "# Topics\n\nSee [the services](/guide/index#servers-that-run-the-repository-s-tools).\n\nBroken: [x](/guide/index#nope).\n",
+    ),
+  ];
+
+  it("slugifies headings the way the built site does (punctuation runs become one hyphen)", () => {
+    expect(slugifyHeading("Publish as a web page on sharehtml.org")).toBe(
+      "publish-as-a-web-page-on-sharehtml-org",
+    );
+    expect(slugifyHeading("Servers that run the repository's tools")).toBe(
+      "servers-that-run-the-repository-s-tools",
+    );
+    expect(headingSlugs("# A\n\n```\n# not a heading\n```\n\n## `code` heading\n")).toEqual([
+      "a",
+      "code-heading",
+    ]);
+  });
+
+  it("accepts in-page anchors that match a heading", () => {
+    expect(checkAnchors(pages)).toEqual<AnchorIssue[]>([
+      { file: "guide/topics.md", target: "/guide/index#nope", anchor: "nope" },
+    ]);
+  });
+
+  it("accepts same-page fragment links", () => {
+    const same = [markdown("guide/topics.md", "# Topics\n\n[down](#topics)\n")];
+    expect(checkAnchors(same)).toEqual([]);
+  });
+
+  it("reports a missing same-page heading", () => {
+    expect(checkAnchors([markdown("guide/topics.md", "# Topics\n\n[down](#missing)\n")])).toEqual([
+      { file: "guide/topics.md", target: "#missing", anchor: "missing" },
+    ]);
+  });
+
+  it("keeps a linked heading's visible text in its anchor", () => {
+    expect(headingSlugs("## [A link](https://example.com)\n")).toEqual(["a-link"]);
   });
 });
