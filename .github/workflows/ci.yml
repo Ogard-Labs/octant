@@ -183,6 +183,19 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      # Prove the protocol workers' native boundary before the broader suites.
+      - name: Bun export worker isolation
+        timeout-minutes: 2
+        run: bun run --cwd apps/server canvas:export:plugin:smoke
+      - run: node node_modules/electron/install.js
+      - name: Electron Node export worker isolation
+        timeout-minutes: 2
+        run: |
+          export_smoke_directory=$(mktemp -d "$RUNNER_TEMP/octant-export-smoke.XXXXXX")
+          trap 'rm -r -- "$export_smoke_directory"' EXIT
+          bun build apps/server/src/canvas/canvasExportWorker.smoke.ts --target=node --format=esm --outfile "$export_smoke_directory/canvasExportWorker.smoke.mjs"
+          cp apps/server/src/canvas/canvasExportWorker.mjs "$export_smoke_directory/canvasExportWorker.mjs"
+          ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron "$export_smoke_directory/canvasExportWorker.smoke.mjs"
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
       # Confined Code and Work opens prove where they landed with
@@ -213,22 +226,6 @@ jobs:
           src/code/codeLanguageServiceProcess.test.ts
           src/code/installedLanguageServersProcess.test.ts
           src/code/codeDebugServiceProcess.test.ts
-      # The packaged app runs outside provider drivers on Electron's Node, so
-      # the escape tests below also run a driver on the Electron the desktop
-      # app pins. Electron's package downloads its binary only on demand, not
-      # at install, so it is fetched here; without it that case would skip.
-      - name: Bun export worker isolation
-        timeout-minutes: 2
-        run: bun run --cwd apps/server canvas:export:plugin:smoke
-      - run: node node_modules/electron/install.js
-      - name: Electron Node export worker isolation
-        timeout-minutes: 2
-        run: |
-          export_smoke_directory=$(mktemp -d "$RUNNER_TEMP/octant-export-smoke.XXXXXX")
-          trap 'rm -r -- "$export_smoke_directory"' EXIT
-          bun build apps/server/src/canvas/canvasExportWorker.smoke.ts --target=node --format=esm --outfile "$export_smoke_directory/canvasExportWorker.smoke.mjs"
-          cp apps/server/src/canvas/canvasExportWorker.mjs "$export_smoke_directory/canvasExportWorker.mjs"
-          ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron "$export_smoke_directory/canvasExportWorker.smoke.mjs"
       # The ordinary Nightly client, in this Electron, against a development
       # host on a throwaway folder and port that a synthetic Stable owns with
       # Stable's own lease owner and client lifetime: the renderer, a Chat

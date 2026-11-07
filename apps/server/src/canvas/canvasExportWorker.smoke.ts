@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,12 +23,18 @@ async function main(): Promise<void> {
   });
   if (process.platform !== "darwin" || runtime === undefined)
     throw new Error("This host has no available native export-worker runtime.");
+  if (spawnSync("/usr/bin/true").status !== 0)
+    throw new Error("The native control process was unavailable outside confinement.");
   const root = await mkdtemp(join(await realpath(tmpdir()), "octant-export-native-smoke-"));
   const worker = fileURLToPath(new URL("./canvasExportWorker.mjs", import.meta.url));
   const extensionId = { current: "" };
   const supervisor = new ExtensionSupervisor({
     process: createNodeExtensionProcessPort({ receiptDirectory: join(root, "receipts") }),
     clock: () => new Date().toISOString(),
+    evidence: (event) =>
+      console.log(
+        JSON.stringify({ stage: "worker-lifecycle", state: event.state, reason: event.reason }),
+      ),
     authorizeLaunch: (input) => store.authorizeRuntimeLaunch(input),
   });
   const store = new ExtensionPackageStore({
@@ -49,7 +56,7 @@ export const canvasExport = {
     try { readFileSync(${JSON.stringify(forbidden)}); probe.hostRead = true; } catch {}
     try { writeFileSync(${JSON.stringify(forbiddenWrite)}, 'unexpected'); probe.hostWrite = true; } catch {}
     try { writeFileSync(process.env.TMPDIR + '/owned-cache', 'fixture'); probe.privateWrite = true; } catch {}
-    const child = spawnSync('/usr/bin/true'); probe.child = child.status === 0;
+    try { const child = spawnSync('/usr/bin/true'); probe.child = child.status === 0; } catch {}
     probe.socketDenied = await new Promise(resolve => {
       const socket = createConnection({ host: '127.0.0.1', port: 9 });
       const timer = setTimeout(() => { socket.destroy(); resolve(false); }, 1000);
@@ -148,6 +155,13 @@ export const canvasExport = {
       output,
     };
     const description = await runCanvasExportWorker(options, { ...input, phase: "describe" });
+    console.log(
+      JSON.stringify({
+        stage: "native-description",
+        kind: description.kind,
+        ...(description.kind === "description" ? { probe: description.destination?.note } : {}),
+      }),
+    );
     if (
       description.kind !== "description" ||
       description.destination?.note !==
