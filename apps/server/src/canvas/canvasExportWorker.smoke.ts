@@ -28,8 +28,34 @@ async function main(): Promise<void> {
   const root = await mkdtemp(join(await realpath(tmpdir()), "octant-export-native-smoke-"));
   const worker = fileURLToPath(new URL("./canvasExportWorker.mjs", import.meta.url));
   const extensionId = { current: "" };
+  const nativeProcess = createNodeExtensionProcessPort({
+    receiptDirectory: join(root, "receipts"),
+  });
   const supervisor = new ExtensionSupervisor({
-    process: createNodeExtensionProcessPort({ receiptDirectory: join(root, "receipts") }),
+    process: {
+      receipts: nativeProcess.receipts,
+      start: async (input) => {
+        const handle = await nativeProcess.start(input);
+        let diagnosticBytes = 0;
+        handle.stderr?.on("data", (chunk: Buffer | string) => {
+          if (diagnosticBytes >= 2048) return;
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          const selected = bytes.subarray(0, 2048 - diagnosticBytes);
+          diagnosticBytes += selected.byteLength;
+          const text = selected.toString("utf8");
+          console.error(
+            JSON.stringify({
+              stage: "worker-startup",
+              diagnostic: text.replaceAll(root, "<fixture>").replaceAll(worker, "<bootstrap>"),
+            }),
+          );
+        });
+        void handle.wait.then((exit) =>
+          console.log(JSON.stringify({ stage: "worker-exit", ...exit })),
+        );
+        return handle;
+      },
+    },
     clock: () => new Date().toISOString(),
     evidence: (event) =>
       console.log(

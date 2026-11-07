@@ -185,10 +185,14 @@ jobs:
       - run: bun install --frozen-lockfile
       # Prove the protocol workers' native boundary before the broader suites.
       - name: Bun export worker isolation
+        id: export_worker_bun
         timeout-minutes: 2
         run: bun run --cwd apps/server canvas:export:plugin:smoke
       - run: node node_modules/electron/install.js
+        id: export_worker_electron_binary
+        if: ${{ !cancelled() && (steps.export_worker_bun.outcome == 'success' || steps.export_worker_bun.outcome == 'failure') }}
       - name: Electron Node export worker isolation
+        if: ${{ !cancelled() && steps.export_worker_electron_binary.outcome == 'success' }}
         timeout-minutes: 2
         run: |
           export_smoke_directory=$(mktemp -d "$RUNNER_TEMP/octant-export-smoke.XXXXXX")
