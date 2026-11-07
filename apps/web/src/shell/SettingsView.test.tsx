@@ -473,6 +473,36 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
   });
 
+  it("takes the remote server-folder journey to the existing binding form without sending a command", async () => {
+    const user = userEvent.setup();
+    const command = vi.fn();
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      serverProjectsClient: { read: async () => ({ projects: [] }), command } as never,
+      shieldServersClient: {
+        read: async () => ({
+          servers: [
+            {
+              serverId: "10000000-0000-4000-8000-000000000001",
+              alias: "web-1",
+              user: "deploy",
+              profile: "read-only",
+              deployCommands: [],
+            },
+          ],
+          sshAgent: "available",
+        }),
+        command,
+      } as never,
+    });
+    await user.click(screen.getByRole("button", { name: "Work in a server folder" }));
+    await user.click(screen.getByRole("button", { name: "Continue to server Projects" }));
+
+    const form = await screen.findByRole("form", { name: "Bind a folder on a server" });
+    await waitFor(() => expect(within(form).getByLabelText("Project name")).toHaveFocus());
+    expect(command).not.toHaveBeenCalled();
+  });
+
   it("takes the Add a model endpoint button on a harness slot to the add-endpoint row", async () => {
     const user = userEvent.setup();
     const nativeHarnessClient = {
