@@ -137,6 +137,72 @@ describe("PlaywrightDownloadHold", () => {
     ]);
   });
 
+  it("cancels ambiguous concurrent downloads when an unattributed file exceeds the cap", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "hold-unit-concurrent-"));
+    folders.push(folder);
+    const watch = new DownloadFolderWatch(folder);
+    const first = new PlaywrightDownloadHold(watch);
+    const second = new PlaywrightDownloadHold(watch);
+    first.begin();
+    second.begin();
+    const big = await fakeDownload("big.bin", "", { never: true });
+    const small = await fakeDownload("small.txt", "", { never: true });
+    first.onDownload(big);
+    second.onDownload(small);
+    await writeFile(join(folder, "first.crdownload"), new Uint8Array(25 * 1024 * 1024 + 1));
+    await writeFile(join(folder, "second.crdownload"), "still arriving");
+    try {
+      await vi.waitFor(() => {
+        expect(big.cancelled()).toBe(true);
+        expect(small.cancelled()).toBe(true);
+      });
+      await Promise.all([first.finish(), second.finish()]);
+      expect(first.takeReports()).toEqual([
+        { state: "refused", name: "big.bin", reason: "too-large" },
+      ]);
+      expect(second.takeReports()).toEqual([
+        { state: "refused", name: "small.txt", reason: "too-large" },
+      ]);
+    } finally {
+      await Promise.all([first.dispose(), second.dispose()]);
+    }
+  });
+
+  it("never holds a file whose completion races a size cancellation", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "hold-unit-late-completion-"));
+    folders.push(folder);
+    const path = join(folder, "finished.txt");
+    await writeFile(path, "small final file");
+    await writeFile(join(folder, "large.crdownload"), new Uint8Array(25 * 1024 * 1024 + 1));
+    const watch = new DownloadFolderWatch(folder);
+    watch.finished(path);
+    const hold = new PlaywrightDownloadHold(watch);
+    let finish = (_path: string) => {};
+    const completion = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const download = {
+      suggestedFilename: () => "report.txt",
+      path: () => completion,
+      cancel: vi.fn(async () => {
+        finish(path);
+      }),
+      delete: vi.fn(async () => {}),
+    };
+    hold.begin();
+    hold.onDownload(download);
+    try {
+      await hold.finish();
+      expect(hold.takeReports()).toEqual([
+        { state: "refused", name: "report.txt", reason: "too-large" },
+      ]);
+      expect(hold.claim("d1")).toBeUndefined();
+      expect(download.delete).toHaveBeenCalledOnce();
+    } finally {
+      await hold.dispose();
+    }
+  });
+
   it("stops accepting downloads once it starts waiting, so none slips past the bounded wait", async () => {
     const hold = new PlaywrightDownloadHold();
     hold.begin();

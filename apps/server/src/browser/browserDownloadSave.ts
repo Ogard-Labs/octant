@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, open, realpath } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
   BROWSER_DOWNLOAD_SNIFF_BYTES,
   browserDownloadNameIsExecutable,
@@ -137,13 +138,6 @@ export async function saveBrowserDownload(input: {
     if (target === "unavailable") return refused("download-unavailable", "unavailable", facts);
     const written = await createExclusively(target, name, bytes);
     if (written === undefined) return refused("download-unavailable", "unavailable", facts);
-    // A folder swapped for a link after the check above would send the file
-    // elsewhere; the file written is then taken back out.
-    const canonical = await realpath(join(target, written)).catch(() => undefined);
-    if (canonical === undefined || !samePath(canonical, join(target, written))) {
-      await rm(join(target, written), { force: true }).catch(() => undefined);
-      return refused("download-symlink", "symlink", facts);
-    }
     return {
       status: "saved",
       path: `${BROWSER_DOWNLOAD_FOLDER}/${written}`,
@@ -179,7 +173,7 @@ async function downloadsFolder(
   if (stats.isSymbolicLink()) return "symlink";
   if (!stats.isDirectory()) return "unavailable";
   const canonical = await realpath(folder).catch(() => undefined);
-  return canonical !== undefined && samePath(canonical, folder) ? folder : "symlink";
+  return canonical !== undefined && samePath(canonical, folder) ? canonical : "symlink";
 }
 
 /**
@@ -192,33 +186,70 @@ function samePath(left: string, right: string): boolean {
   return left === right || left.toLowerCase() === right.toLowerCase();
 }
 
+// Node has no portable openat. This fixed child holds the destination as its
+// working directory, proves its physical location before creating anything,
+// and creates only a relative basename. A concurrent ancestor/link swap cannot
+// redirect the write or its cleanup into a different directory.
+const CREATE_DOWNLOAD = `
+const fs = require("node:fs");
+const folder = process.argv.at(-1);
+process.chdir(folder);
+if (fs.realpathSync(".") !== folder) process.exit(3);
+const input = fs.readFileSync(0);
+const length = input.readUInt32BE(0);
+if (length > 1048576 || input.length > 27262980) process.exit(4);
+const names = JSON.parse(input.subarray(4, 4 + length).toString("utf8"));
+const bytes = input.subarray(4 + length);
+for (const name of names) {
+  if (typeof name !== "string" || name === "" || name === "." || name === ".." || name.includes("/") || name.includes("\\0")) process.exit(4);
+  let descriptor;
+  try { descriptor = fs.openSync(name, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o644); }
+  catch (error) { if (error.code === "EEXIST") continue; process.exit(5); }
+  try {
+    fs.writeFileSync(descriptor, bytes);
+    if (fs.realpathSync(".") !== folder) { fs.unlinkSync(name); process.exit(3); }
+    fs.closeSync(descriptor);
+    process.stdout.write(name);
+    process.exit(0);
+  } catch { try { fs.closeSync(descriptor); fs.unlinkSync(name); } catch {} process.exit(5); }
+}
+process.exit(5);
+`;
+
 async function createExclusively(
   folder: string,
   name: string,
   bytes: Uint8Array,
 ): Promise<string | undefined> {
-  for (let copy = 1; copy <= 1_000; copy += 1) {
-    const candidate = numberedBrowserDownloadName(name, copy);
-    let handle;
-    try {
-      handle = await open(
-        join(folder, candidate),
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-        0o644,
-      );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
-      return undefined;
-    }
-    try {
-      await handle.writeFile(bytes);
-    } catch {
-      await handle.close().catch(() => undefined);
-      await rm(join(folder, candidate), { force: true }).catch(() => undefined);
-      return undefined;
-    }
-    await handle.close();
-    return candidate;
-  }
-  return undefined;
+  if (process.platform !== "darwin" && process.platform !== "linux") return undefined;
+  const names = Array.from({ length: 1_000 }, (_, index) =>
+    numberedBrowserDownloadName(name, index + 1),
+  );
+  const header = Buffer.from(JSON.stringify(names), "utf8");
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(header.length);
+  return new Promise((resolve) => {
+    const child = execFile(
+      process.execPath,
+      [
+        ...(process.versions.bun === undefined
+          ? []
+          : ["--config=/dev/null", "--no-env-file", "--no-install", "--no-macros"]),
+        "-e",
+        CREATE_DOWNLOAD,
+        folder,
+      ],
+      {
+        // Start outside the Project so runtime startup cannot read its config.
+        cwd: dirname(process.execPath),
+        env: {},
+        timeout: 5_000,
+        killSignal: "SIGKILL",
+        maxBuffer: 512,
+      },
+      (error, stdout) => resolve(error === null && names.includes(stdout) ? stdout : undefined),
+    );
+    child.stdin?.on("error", () => undefined);
+    child.stdin?.end(Buffer.concat([size, header, bytes]));
+  });
 }

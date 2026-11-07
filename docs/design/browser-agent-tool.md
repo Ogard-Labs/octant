@@ -376,16 +376,23 @@ turned on a switch, and then only after they answer for that file.
   host setting for the same reason the remembered sites are: an agent must not
   be able to widen its own reach. Cancelling at the cap, rather than checking
   afterwards, keeps a page from filling the disk with a file nobody asked for;
-  the headless runtime cannot tell which file in its download folder belongs
-  to which download, so when any file passes the cap it cancels the context's
-  running downloads. The person's own download in the pane stays blocked: this
+  the headless runtime watches the browser's shared download folder. A uniquely
+  attributed file cancels only its own download at the cap. When concurrent
+  arrivals cannot be attributed and an unclaimed file crosses the cap, every
+  still-running candidate is cancelled, including candidates in other contexts;
+  waiting for completion would leave the in-flight limit unenforced. Downloads
+  whose files are already attributed are not candidates. A native completion
+  that races a cancellation remains refused and its file is deleted. The person's own download in the pane stays blocked: this
   switch is for agents' downloads into the workspace only, and a file the
   person wants they can fetch themselves.
+- Destination creation holds the checked folder as a working directory,
+  verifies its physical location before creating a file, and writes only an
+  exclusive relative basename. A concurrent ancestor/directory-link swap
+  cannot redirect that creation or its cleanup to an outside folder. An
+  unavailable destination refuses without a saved receipt. Only macOS and
+  Linux have this save path; unsupported platforms refuse.
 - Not covered: a person's own downloads in the Browser pane, and a download
-  that starts after an action's settling has ended (it is cancelled). The check that the file is not written through a
-  link is made on the folder's path before and after the write; a process of
-  the person's own that swaps `downloads/` for a link in between, which can
-  already write anywhere in the workspace, is not stopped.
+  that starts after an action's settling has ended (it is cancelled).
 
 ## Steps
 
