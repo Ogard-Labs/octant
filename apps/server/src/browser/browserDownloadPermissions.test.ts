@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
+import { Schema } from "effect";
 import {
   decodeAutomationId,
   decodeThreadWorkingDirectory,
@@ -346,16 +347,39 @@ it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
           profile: "personal",
         }),
       ).toMatchObject({ isError: false });
-      expect(await call({ operation: "download-save", downloadId: "d1" })).toMatchObject({
-        isError: true,
-        result: { error: "download-permission-required" },
-      });
       await call({ operation: "click", selector: "#download" });
+      const discovery = await call({ operation: "download-save", downloadId: "d1" });
+      expect(discovery).toMatchObject({
+        isError: true,
+        result: {
+          error: "download-permission-required",
+          permissions: [
+            {
+              permissionId: f.review.permission.permissionId,
+              origin: f.review.permission.origin,
+              sourceOrigins: f.review.permission.sourceOrigins,
+              folder: f.review.permission.folder,
+              directory: "inbox",
+              mediaTypes: f.review.permission.mediaTypes,
+              remainingFiles: f.review.permission.maxFiles,
+              remainingBytes: f.review.permission.maxBytes,
+              expiresAt: f.review.permission.expiresAt,
+            },
+          ],
+        },
+      });
+      expect(await readdir(join(f.root, "inbox"))).toEqual([]);
+      const selected = Schema.decodeUnknownSync(
+        Schema.Struct({
+          permissions: Schema.Array(Schema.Struct({ permissionId: Schema.String })),
+        }),
+      )(discovery.result).permissions[0];
+      if (selected === undefined) throw Error("The routine discovered no reviewed manifest.");
       enabled = false;
       const save = {
         operation: "download-save",
         downloadId: "d1",
-        downloadPermissionId: f.review.permission.permissionId,
+        downloadPermissionId: selected.permissionId,
       };
       expect(await call(save)).toMatchObject({
         isError: true,

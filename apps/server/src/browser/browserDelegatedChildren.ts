@@ -136,7 +136,7 @@ export class BrowserDelegatedChildren {
                     downloadPermissionId: {
                       type: "string",
                       description:
-                        "The exact host-reviewed download manifest id; grants no account access.",
+                        "For download-save, omit this to list this routine/profile's reviewed manifests without saving; retry with the exact matching permissionId as downloadPermissionId. Grants no account access.",
                     },
                   }),
               profile: {
@@ -199,7 +199,7 @@ export class BrowserDelegatedChildren {
             result: {
               error: "download-permission-required",
               message:
-                "A local person reviews the source origins, approved destination, types, limits and expiry in Settings > Data & storage. Account permission authorizes no file transfer.",
+                "Choose a matching reviewed manifest from permissions and retry this download-save with its permissionId as downloadPermissionId. If none fits, ask a local person to review the sources, destination, types, limits and expiry in Settings > Data & storage. Account permission authorizes no file transfer.",
               permissions: input.downloadPermissions?.choices(current, profile) ?? [],
             },
             isError: true,

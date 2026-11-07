@@ -809,6 +809,14 @@ separate permission, and the local host's download switch must stay on.
 The routine must explicitly name its `downloadPermissionId`; neither a parent
 nor an account permission lends file authority. Ordinary turns, children,
 terminals, paired clients and Plan gain no recurring download permission.
+The eligible routine's tool schema explains discovery: a `download-save` call
+without that id lists only this routine and current profile's reviewed manifests,
+including their ids, source/page origins, destination, types, remaining quotas
+and expiry. It saves nothing and consumes neither the held file nor quota.
+The agent selects a matching reviewed scope and retries the save with that
+returned `permissionId` as `downloadPermissionId`. The person need not copy an
+id from Settings. No match means a local person must review a new manifest;
+discovery never creates or broadens a grant.
 
 Review names one current approved main or extra Project folder, an existing
 relative directory, allowed sniffed file types, total count and byte limits
