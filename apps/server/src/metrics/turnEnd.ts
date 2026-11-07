@@ -4,6 +4,7 @@ import type {
   ProjectId,
   ProviderInstanceId,
   ProviderModelId,
+  TurnDiagnostics,
   TurnMetrics,
   TurnMetricsRecord,
   TurnStopReason,
@@ -25,6 +26,8 @@ export interface TurnEndSummary {
   /** Absent when the provider reported no usage. */
   readonly usage?: TurnUsage | undefined;
   readonly metrics: TurnMetrics;
+  /** Tool, retry, limit, and failure counts from the same events as the timing. */
+  readonly diagnostics?: TurnDiagnostics | undefined;
 }
 
 export function summarizeTurnEnd(input: {
@@ -40,6 +43,7 @@ export function summarizeTurnEnd(input: {
     endedAt: input.endedAt,
     ...(finished.usage === undefined ? {} : { usage: finished.usage }),
     metrics: finished.metrics,
+    diagnostics: finished.diagnostics,
   };
 }
 
@@ -61,6 +65,7 @@ export function toTurnMetricsRecord(scope: TurnEndScope, turn: TurnEndSummary): 
     stopReason: turn.stopReason,
     ...(turn.usage === undefined ? {} : { usage: turn.usage }),
     metrics: turn.metrics,
+    ...(turn.diagnostics === undefined ? {} : { diagnostics: turn.diagnostics }),
     startedAt: turn.startedAt as UtcTimestamp,
     endedAt: turn.endedAt as UtcTimestamp,
   };
