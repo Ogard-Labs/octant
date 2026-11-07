@@ -1,7 +1,9 @@
 import type { GithubAssignedWorkItem } from "@octant/contracts";
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { decodeProjectId, type ProjectId } from "@octant/contracts/projects";
-import { needsThePerson, type ThreadAttentionSignal } from "../notifications/threadAttention";
+import type { ThreadAttentionSignal } from "../notifications/threadAttention";
+import type { PendingRequestRowEntry } from "../pendingRequests/usePendingRequestRows";
+import { pendingRequestKey } from "../pendingRequests/pendingRequests";
 import { visibleModeOf, type VisibleMode } from "../shell/workKind";
 
 /**
@@ -23,9 +25,9 @@ const VISIBLE_MODE_NAMES: Readonly<Record<VisibleMode, string>> = {
 };
 
 /**
- * An approval or question stops an agent cold, so it outranks a due follow-up.
- * A finished turn is never listed (see `needsThePerson`); its entry only
- * completes the table.
+ * An approval or question stops an agent cold, so it outranks a due follow-up,
+ * and a finished turn only waits for what is next. A finished turn is listed
+ * only under the Finished filter; see `matchesInboxFilter`.
  */
 const REASON_PRIORITY: Readonly<Record<ThreadAttentionSignal["reason"], number>> = {
   "approval-required": 0,
@@ -56,7 +58,6 @@ export function buildInboxAttentionItems(
   const seen = new Set<string>();
   const items: InboxAttentionItem[] = [];
   for (const signal of signals) {
-    if (!needsThePerson(signal)) continue;
     const key = `${signal.threadId} ${signal.reason}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -99,4 +100,163 @@ export function linearIssueSeenKey(row: LinearIssueRow): string {
 /** Decode the signal's Project so cross-Project opens can switch Project. */
 export function inboxThreadProjectId(signal: ThreadAttentionSignal): ProjectId | undefined {
   return signal.projectId === undefined ? undefined : decodeProjectId(signal.projectId);
+}
+
+export type InboxFilter = "all" | "urgent" | "decide" | "stuck" | "finished";
+
+export const INBOX_FILTERS: ReadonlyArray<{
+  readonly id: InboxFilter;
+  readonly label: string;
+  /** The line shown when the filter matches nothing. */
+  readonly empty: string;
+}> = [
+  { id: "all", label: "All", empty: "No thread is waiting on you" },
+  { id: "urgent", label: "Urgent", empty: "Nothing urgent." },
+  { id: "decide", label: "Decide", empty: "No decisions waiting." },
+  { id: "stuck", label: "Stuck", empty: "Nothing stuck." },
+  { id: "finished", label: "Finished", empty: "No finished turns waiting." },
+];
+
+/**
+ * One thing waiting on the person, ready to filter and group: a pending
+ * request (answered in place) or a thread's attention signal (opened).
+ * `since` is when the wait began, which a signal does not record.
+ */
+export type InboxWaitingItem = {
+  readonly key: string;
+  readonly projectKey: string | undefined;
+  readonly urgent: boolean;
+  readonly deferred: boolean;
+  readonly since: number | undefined;
+} & (
+  | { readonly kind: "request"; readonly entry: PendingRequestRowEntry }
+  | { readonly kind: "attention"; readonly item: InboxAttentionItem }
+);
+
+export function inboxWaitingItems(
+  requests: ReadonlyArray<PendingRequestRowEntry>,
+  attention: ReadonlyArray<InboxAttentionItem>,
+  now: number,
+): ReadonlyArray<InboxWaitingItem> {
+  return [
+    ...requests.map((entry): InboxWaitingItem => {
+      const { request } = entry;
+      return {
+        kind: "request",
+        entry,
+        key: pendingRequestKey(request),
+        projectKey: request.projectId === undefined ? undefined : String(request.projectId),
+        urgent: request.kind === "decision" && request.urgent === true,
+        deferred: request.deferredUntil !== undefined && Date.parse(request.deferredUntil) > now,
+        since: Date.parse(request.requestedAt),
+      };
+    }),
+    ...attention.map(
+      (item): InboxWaitingItem => ({
+        kind: "attention",
+        item,
+        key: `${item.signal.threadId}:${item.signal.reason}`,
+        projectKey: item.signal.projectId,
+        urgent: false,
+        deferred: false,
+        since: undefined,
+      }),
+    ),
+  ];
+}
+
+/**
+ * All is what waits on the person today; a finished turn waits for what is
+ * next, so only its own filter lists it. Stuck is every wait that is not a
+ * decision: approvals, questions, and waiting subagents.
+ */
+export function matchesInboxFilter(item: InboxWaitingItem, filter: InboxFilter): boolean {
+  const finished = item.kind === "attention" && item.item.signal.reason === "turn-finished";
+  switch (filter) {
+    case "all":
+      return !finished;
+    case "urgent":
+      return item.urgent;
+    case "decide":
+      return item.kind === "request" && item.entry.request.kind === "decision";
+    case "stuck":
+      return item.kind === "request"
+        ? item.entry.request.kind !== "decision"
+        : item.item.signal.reason === "approval-required" ||
+            item.item.signal.reason === "question-asked";
+    case "finished":
+      return finished;
+  }
+}
+
+export function inboxFilterCounts(
+  items: ReadonlyArray<InboxWaitingItem>,
+): Readonly<Record<InboxFilter, number>> {
+  const count = (filter: InboxFilter) =>
+    items.filter((item) => matchesInboxFilter(item, filter)).length;
+  return {
+    all: count("all"),
+    urgent: count("urgent"),
+    decide: count("decide"),
+    stuck: count("stuck"),
+    finished: count("finished"),
+  };
+}
+
+export interface InboxProjectGroup {
+  /** Empty for waits that belong to no Project. */
+  readonly projectKey: string;
+  readonly name: string;
+  readonly items: ReadonlyArray<InboxWaitingItem>;
+  readonly urgentCount: number;
+}
+
+export const NO_PROJECT_NAME = "No Project";
+
+const waitingRank = (item: InboxWaitingItem) => (item.urgent ? 0 : item.deferred ? 2 : 1);
+const oldestFirst = (left: number | undefined, right: number | undefined) =>
+  (left ?? Number.POSITIVE_INFINITY) === (right ?? Number.POSITIVE_INFINITY)
+    ? 0
+    : (left ?? Number.POSITIVE_INFINITY) < (right ?? Number.POSITIVE_INFINITY)
+      ? -1
+      : 1;
+
+/**
+ * Groups waits under their Project. Groups holding an urgent wait lead, then
+ * the group that has waited longest; inside a group urgent waits come first,
+ * then the rest oldest first, then deferred ones.
+ */
+export function groupInboxByProject(
+  items: ReadonlyArray<InboxWaitingItem>,
+  projectNames: ReadonlyMap<string, string>,
+): ReadonlyArray<InboxProjectGroup> {
+  const byProject = new Map<string, InboxWaitingItem[]>();
+  for (const item of items) {
+    const key = item.projectKey ?? "";
+    byProject.set(key, [...(byProject.get(key) ?? []), item]);
+  }
+  const groups = [...byProject].map(([projectKey, members]): InboxProjectGroup => {
+    const sorted = members.toSorted(
+      (left, right) =>
+        waitingRank(left) - waitingRank(right) || oldestFirst(left.since, right.since),
+    );
+    return {
+      projectKey,
+      name: projectNames.get(projectKey) ?? NO_PROJECT_NAME,
+      items: sorted,
+      urgentCount: sorted.filter((item) => item.urgent).length,
+    };
+  });
+  const oldest = (group: InboxProjectGroup) =>
+    group.items.reduce<number | undefined>(
+      (best, item) =>
+        item.since !== undefined && (best === undefined || item.since < best) ? item.since : best,
+      undefined,
+    );
+  return groups.toSorted(
+    (left, right) =>
+      Number(right.urgentCount > 0) - Number(left.urgentCount > 0) ||
+      oldestFirst(oldest(left), oldest(right)) ||
+      left.name.localeCompare(right.name),
+  );
 }

@@ -2,10 +2,21 @@ import { describe, expect, it } from "vitest";
 import { decodeProjectId } from "@octant/contracts/projects";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import {
+  codeDecision,
+  workChildApproval,
+  workDecision,
+} from "../palette/pendingRequests.test-fixtures";
+import { decodePendingRequest } from "@octant/contracts/pending-requests";
+import {
   assignedWorkSeenKey,
   buildInboxAttentionItems,
+  groupInboxByProject,
   inboxAttentionMeta,
+  inboxFilterCounts,
   inboxThreadProjectId,
+  inboxWaitingItems,
+  matchesInboxFilter,
+  type InboxWaitingItem,
 } from "./inboxModel";
 
 const signal = (overrides: Partial<ThreadAttentionSignal>): ThreadAttentionSignal => ({
@@ -17,7 +28,7 @@ const signal = (overrides: Partial<ThreadAttentionSignal>): ThreadAttentionSigna
 });
 
 describe("buildInboxAttentionItems", () => {
-  it("lists what needs the person, names the Project, and leaves finished turns out", () => {
+  it("lists what needs the person and names the Project, with finished turns last", () => {
     const items = buildInboxAttentionItems(
       [
         signal({ threadId: "t1", reason: "turn-finished", title: "Done turn" }),
@@ -32,6 +43,7 @@ describe("buildInboxAttentionItems", () => {
       "approval-required",
       "question-asked",
       "follow-up-due",
+      "turn-finished",
     ]);
     expect(items[0]?.projectName).toBe("Octant");
     expect(items[1]?.projectName).toBeUndefined();
@@ -121,5 +133,102 @@ describe("assignedWorkSeenKey", () => {
     expect(assignedWorkSeenKey(item)).not.toBe(
       assignedWorkSeenKey({ ...item, updatedAt: "2026-08-29T10:00:00Z" }),
     );
+  });
+});
+
+const NOW = Date.parse("2026-10-06T08:10:00.000Z");
+
+describe("inbox filters", () => {
+  const urgentDecision = decodePendingRequest({ ...workDecision(), urgent: true });
+  const waiting = inboxWaitingItems(
+    [
+      { request: codeDecision(), unlisted: false },
+      { request: urgentDecision, unlisted: false },
+      { request: workChildApproval(), unlisted: false },
+    ],
+    buildInboxAttentionItems(
+      [
+        signal({ threadId: "t1", reason: "approval-required" }),
+        signal({ threadId: "t2", reason: "turn-finished" }),
+        signal({ threadId: "t3", reason: "follow-up-due" }),
+      ],
+      new Map(),
+      "code",
+    ),
+    NOW,
+  );
+
+  it("counts each chip from the same waiting items, keeping a finished turn out of All", () => {
+    expect(inboxFilterCounts(waiting)).toEqual({
+      all: 5,
+      urgent: 1,
+      decide: 2,
+      stuck: 2,
+      finished: 1,
+    });
+  });
+
+  it("leaves a due follow-up to All only", () => {
+    const followUp = waiting.find(
+      (item) => item.kind === "attention" && item.item.signal.reason === "follow-up-due",
+    );
+    expect(followUp).toBeDefined();
+    const matching = (["all", "urgent", "decide", "stuck", "finished"] as const).filter(
+      (filter) => followUp !== undefined && matchesInboxFilter(followUp, filter),
+    );
+    expect(matching).toEqual(["all"]);
+  });
+});
+
+describe("groupInboxByProject", () => {
+  const item = (
+    overrides: Partial<Pick<InboxWaitingItem, "projectKey" | "urgent" | "deferred" | "since">> & {
+      readonly key: string;
+    },
+  ): InboxWaitingItem => ({
+    projectKey: "p1",
+    urgent: false,
+    deferred: false,
+    since: undefined,
+    kind: "attention",
+    item: { signal: signal({}) },
+    ...overrides,
+  });
+  const names = new Map([
+    ["p1", "Alpha"],
+    ["p2", "Beta"],
+    ["p3", "Gamma"],
+  ]);
+
+  it("leads with a Project holding an urgent wait, then the Project that has waited longest", () => {
+    const groups = groupInboxByProject(
+      [
+        item({ key: "a", projectKey: "p1", since: 3000 }),
+        item({ key: "b", projectKey: "p2", since: 2000 }),
+        item({ key: "c", projectKey: "p3", since: 5000, urgent: true }),
+        item({ key: "d", projectKey: undefined, since: 1000 }),
+      ],
+      names,
+    );
+    expect(groups.map((group) => group.name)).toEqual(["Gamma", "No Project", "Beta", "Alpha"]);
+    expect(groups[0]?.urgentCount).toBe(1);
+  });
+
+  it("orders a group urgent first, then oldest first, then deferred", () => {
+    const [group] = groupInboxByProject(
+      [
+        item({ key: "deferred", since: 1000, deferred: true }),
+        item({ key: "newer", since: 4000 }),
+        item({ key: "older", since: 2000 }),
+        item({ key: "urgent", since: 9000, urgent: true }),
+      ],
+      names,
+    );
+    expect(group?.items.map((entry) => entry.key)).toEqual([
+      "urgent",
+      "older",
+      "newer",
+      "deferred",
+    ]);
   });
 });
