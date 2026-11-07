@@ -12,6 +12,7 @@ import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { CanvasId } from "./canvas";
+import { AutoCompactWindowPercent } from "./context";
 import {
   PreviewDisplayName,
   PreviewHostId,
@@ -509,6 +510,7 @@ export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
 );
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
+export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 
 /**
  * An absolute folder path as the host canonicalized it. Same shape the
@@ -674,6 +676,23 @@ export const ShellSettings = Schema.Struct({
     Schema.NullOr(CompletedThreadArchiveAfterDays),
     { default: () => DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS },
   ),
+  /**
+   * Compact a thread once its window is this full, for threads Octant keeps
+   * the conversation of: Octant Harness, and Chat and Work on a direct
+   * endpoint. Near a full window these otherwise only drop older exchanges
+   * from what they send. `null` means never.
+   */
+  autoCompactOctantWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
+    default: () => DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
+  }),
+  /**
+   * The same rule for threads a runtime keeps (Claude Code, Codex, and the
+   * others), which compact by themselves at their own point. `null` leaves
+   * that to the runtime.
+   */
+  autoCompactRuntimeWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
+    default: () => null,
+  }),
   /**
    * The release ring to follow, once someone has chosen one.
    *

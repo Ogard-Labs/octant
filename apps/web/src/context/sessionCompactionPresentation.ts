@@ -143,15 +143,31 @@ export function compactionResultLine(
   record: ContextCompactionRecord,
   names: CompactionNames,
 ): string {
-  if (record.status === "running") return "Compacting…";
+  if (record.status === "running") {
+    return record.cause === undefined ? "Compacting…" : "Compacting automatically…";
+  }
   if (record.status === "failed") {
     const reason = failureClause(record.reason, executorName(record.executor, names));
+    const verb = record.cause === undefined ? "Couldn't compact" : "Couldn't compact automatically";
     return record.sessionMayHaveChanged
-      ? `Couldn't compact: ${reason}. The session may have changed; the next reply shows what it holds.`
-      : `Couldn't compact: ${reason}.`;
+      ? `${verb}: ${reason}. The session may have changed; the next reply shows what it holds.`
+      : `${verb}: ${reason}.`;
   }
   const { receipt } = record;
   const freed = receipt.tokensFreed;
+  if (receipt.cause !== undefined) {
+    // A rule the person set: say which rule and how full the window was, so
+    // a compaction they did not ask for this time is never a mystery.
+    const parts = [
+      "Compacted automatically",
+      `window ${String(receipt.cause.filledPercent)}% full`,
+      ...(freed.kind === "unknown"
+        ? []
+        : [freed.tokens === 0 ? "nothing freed" : `${compactTokenCount(freed.tokens)} freed`]),
+      `summary by ${executorName(receipt.executor, names)}`,
+    ];
+    return parts.join(" · ");
+  }
   if (receipt.trigger === "automatic") {
     // Nothing revisits a receipt the runtime's own compaction left, so an
     // amount it did not report is left out rather than promised for later.

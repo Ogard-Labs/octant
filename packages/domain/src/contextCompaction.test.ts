@@ -4,6 +4,7 @@ import {
   ContextCompactionRejected,
   decideContextLengthRecovery,
   decideSessionCompaction,
+  decideWindowFillCompaction,
   evaluateSemanticSummary,
   orderContextMaintenance,
   reconcileContextVariance,
@@ -540,5 +541,69 @@ describe("session compaction on request", () => {
     expect(
       decideSessionCompaction({ ...available, owner: "runtime", runtimeCompaction: "supported" }),
     ).toEqual({ status: "available" });
+  });
+
+  it("admits a rule the person set wherever it admits their own window", () => {
+    expect(decideSessionCompaction({ ...available, principal: "host-policy" })).toEqual({
+      status: "available",
+    });
+    expect(
+      decideSessionCompaction({
+        ...available,
+        principal: "host-policy",
+        spendCeilingReached: true,
+      }),
+    ).toEqual({ status: "refused", reason: "spend-ceiling-reached" });
+  });
+});
+
+describe("compacting when the window fills", () => {
+  it("compacts once the window reaches the share the person set, and says how full it was", () => {
+    expect(
+      decideWindowFillCompaction({ thresholdPercent: 70, tokens: 72_000, contextWindow: 100_000 }),
+    ).toEqual({ kind: "window-fill", filledPercent: 72, thresholdPercent: 70 });
+    expect(
+      decideWindowFillCompaction({ thresholdPercent: 70, tokens: 70_000, contextWindow: 100_000 }),
+    ).toEqual({ kind: "window-fill", filledPercent: 70, thresholdPercent: 70 });
+    expect(
+      decideWindowFillCompaction({ thresholdPercent: 70, tokens: 69_999, contextWindow: 100_000 }),
+    ).toBeUndefined();
+  });
+
+  it("does nothing when the rule is off or no window has been named", () => {
+    expect(
+      decideWindowFillCompaction({
+        thresholdPercent: null,
+        tokens: 99_000,
+        contextWindow: 100_000,
+      }),
+    ).toBeUndefined();
+    expect(
+      decideWindowFillCompaction({
+        thresholdPercent: 70,
+        tokens: 99_000,
+        contextWindow: undefined,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not pay again until the window has grown past where the last attempt left it", () => {
+    const facts = { thresholdPercent: 70, contextWindow: 100_000 } as const;
+    // A failed attempt at 72%, or a completed one that only got the window to 72%.
+    const leftAt72 = { leftPercent: 72 } as const;
+    expect(
+      decideWindowFillCompaction({ ...facts, tokens: 76_000, previousAttempt: leftAt72 }),
+    ).toBeUndefined();
+    expect(
+      decideWindowFillCompaction({ ...facts, tokens: 77_000, previousAttempt: leftAt72 }),
+    ).toEqual({ kind: "window-fill", filledPercent: 77, thresholdPercent: 70 });
+    // A compaction that freed most of the window does not hold back the next one.
+    expect(
+      decideWindowFillCompaction({
+        ...facts,
+        tokens: 72_000,
+        previousAttempt: { leftPercent: 20 },
+      }),
+    ).toEqual({ kind: "window-fill", filledPercent: 72, thresholdPercent: 70 });
   });
 });

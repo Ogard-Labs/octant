@@ -18,6 +18,7 @@ import {
   decodeUsageReconciliationId,
   type ContextCapabilityCounts,
   type ContextCommandResult,
+  type ContextCompactionCause,
   type ContextCompactionExecutor,
   type ContextCompactionFailureReason,
   type ContextCompactionId,
@@ -857,6 +858,9 @@ export class ContextHarnessService {
     readonly subject: ContextSubjectRef;
     readonly compactionId: ContextCompactionId;
     readonly executor: ContextCompactionExecutor;
+    /** Absent is a local window; `host-policy` is a rule the person set. */
+    readonly requestedBy?: "local-window" | "host-policy";
+    readonly cause?: ContextCompactionCause;
   }):
     | {
         readonly kind: "requested";
@@ -876,7 +880,8 @@ export class ContextHarnessService {
           compactionId: input.compactionId,
           subject: input.subject,
           executor: input.executor,
-          requestedBy: "local-window",
+          requestedBy: input.requestedBy ?? "local-window",
+          ...(input.cause === undefined ? {} : { cause: input.cause }),
           requestedAt,
         }),
       ],
@@ -887,6 +892,7 @@ export class ContextHarnessService {
         status: "running",
         compactionId: input.compactionId,
         executor: input.executor,
+        ...(input.cause === undefined ? {} : { cause: input.cause }),
         requestedAt,
       }),
       // Read in the same turn of the event loop as the append, so a plan
@@ -997,6 +1003,7 @@ export class ContextHarnessService {
               subject: input.subject,
               executor: hostExecutor(current),
               trigger: "requested",
+              ...(latest.cause === undefined ? {} : { cause: latest.cause }),
               // Both figures are the planner's own estimate of the same request
               // before and after, so their difference is an estimate too.
               tokensBefore: {
@@ -1126,6 +1133,7 @@ export class ContextHarnessService {
       subject,
       executor: latest.executor,
       trigger: "requested",
+      ...(latest.cause === undefined ? {} : { cause: latest.cause }),
       tokensBefore: before,
       ...(outcome.tokensAfter === undefined
         ? {

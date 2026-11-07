@@ -472,7 +472,9 @@ export class CodeOperationEventStore {
   latestWindowOccupancy(
     threadId: CodeThreadId,
     sessionId: ProviderSessionId,
-  ): { readonly tokens: number; readonly observedAt: string } | undefined {
+  ):
+    | { readonly tokens: number; readonly observedAt: string; readonly contextWindow?: number }
+    | undefined {
     try {
       const envelope = this.#journal.latestThreadEvents({
         aggregateType: "code-operation",
@@ -506,6 +508,9 @@ export class CodeOperationEventStore {
       return {
         tokens: frame.event.contextTokens ?? frame.event.inputTokens,
         observedAt: frame.occurredAt,
+        ...(frame.event.contextWindow === undefined
+          ? {}
+          : { contextWindow: frame.event.contextWindow }),
       };
     } catch {
       return undefined;

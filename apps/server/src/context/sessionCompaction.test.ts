@@ -143,6 +143,46 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
+  it("records a compaction a rule the person set started, and why, on its receipt", async () => {
+    const world = createWorld();
+    planSession(world);
+    const fill = world.service.windowFill(subject);
+    expect(fill).toMatchObject({ keeper: "octant" });
+    expect(fill?.tokens).toBe(world.harness.inspect(subject).next.plan.plannedInputTokens);
+
+    const cause = { kind: "window-fill", filledPercent: 91, thresholdPercent: 85 } as const;
+    expect(world.service.start(command(), "host-policy", undefined, cause)).toMatchObject({
+      kind: "compaction-started",
+    });
+    expect(world.harness.latestCompaction(subject)).toMatchObject({ status: "running", cause });
+    await world.service.settled();
+
+    const record = world.harness.latestCompaction(subject);
+    if (record?.status !== "completed") throw new Error("The compaction completed");
+    expect(record.receipt).toMatchObject({ trigger: "requested", cause });
+    const requestedBy = world.fixture.connection
+      .prepare(
+        "SELECT json_extract(payload_json, '$.requestedBy') AS by FROM event_journal WHERE event_name = ?",
+      )
+      .all("context.compaction-requested@1") as ReadonlyArray<{ readonly by: string }>;
+    expect(requestedBy.map((row) => row.by)).toEqual(["host-policy"]);
+    world.close();
+  });
+
+  it("refuses a rule on a Code thread with no window before journaling anything", () => {
+    const world = createWorld();
+    const codeSubject = decodeContextSubjectRef({
+      aggregateType: "code-thread",
+      aggregateId: "82000000-0000-4000-8000-0000000000c1",
+    });
+    expect(world.service.start(command(codeSubject), "host-policy")).toEqual({
+      kind: "compaction-refused",
+      reason: "no-session",
+    });
+    expect(world.harness.latestCompaction(codeSubject)).toBeUndefined();
+    world.close();
+  });
+
   it("answers a repeated compaction id with the compaction it already started", async () => {
     const world = createWorld();
     planSession(world);

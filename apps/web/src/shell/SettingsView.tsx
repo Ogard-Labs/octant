@@ -1923,6 +1923,37 @@ function CompletedThreadArchiveSelect(props: {
   );
 }
 
+const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
+
+/** How full a window may get before a compaction rule acts, plus off. */
+function AutoCompactWindowSelect(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly offLabel: string;
+  readonly percent: number | null;
+  readonly onChange: (percent: number | null) => void;
+}) {
+  const choices =
+    props.percent === null || AUTO_COMPACT_WINDOW_CHOICES.includes(props.percent)
+      ? AUTO_COMPACT_WINDOW_CHOICES
+      : [...AUTO_COMPACT_WINDOW_CHOICES, props.percent].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label={props.label}
+      id={props.id}
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        { id: "off", label: props.offLabel },
+        ...choices.map((percent) => ({
+          id: String(percent),
+          label: `At ${String(percent)}% full`,
+        })),
+      ]}
+      value={props.percent === null ? "off" : String(props.percent)}
+    />
+  );
+}
+
 function ProfileSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
@@ -2035,6 +2066,44 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               onChange={(afterDays) =>
                 props.onSettingsChange({ completedThreadArchiveAfterDays: afterDays })
               }
+            />
+          </SettingRow>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Compaction">
+        <div className="setgroup">
+          <SettingRow
+            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn. The thread keeps every message."
+            focused={focusedSetting === settingId("auto-compact-octant")}
+            label="Compact Octant threads"
+            scope="host"
+            settingId="auto-compact-octant"
+          >
+            <AutoCompactWindowSelect
+              id="auto-compact-octant"
+              label="Compact Octant threads"
+              offLabel="Never"
+              onChange={(percent) =>
+                props.onSettingsChange({ autoCompactOctantWindowPercent: percent })
+              }
+              percent={props.settings.autoCompactOctantWindowPercent}
+            />
+          </SettingRow>
+          <SettingRow
+            description="Claude Code, Codex and the other runtimes compact by themselves. Pick a share to have Octant compact them sooner, between turns."
+            focused={focusedSetting === settingId("auto-compact-runtime")}
+            label="Compact runtime threads"
+            scope="host"
+            settingId="auto-compact-runtime"
+          >
+            <AutoCompactWindowSelect
+              id="auto-compact-runtime"
+              label="Compact runtime threads"
+              offLabel="Runtime decides"
+              onChange={(percent) =>
+                props.onSettingsChange({ autoCompactRuntimeWindowPercent: percent })
+              }
+              percent={props.settings.autoCompactRuntimeWindowPercent}
             />
           </SettingRow>
         </div>
