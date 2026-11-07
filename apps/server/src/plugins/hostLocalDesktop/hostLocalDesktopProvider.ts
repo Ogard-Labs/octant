@@ -409,8 +409,9 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
         input.signal.aborted ||
         running(handle.leaseId) !== session
       ) {
-        await close();
-        return { status: "unavailable" };
+        return (await close()) === "closed"
+          ? { status: "unavailable" }
+          : { status: "unavailable", close };
       }
       const config = btoa(
         JSON.stringify({
@@ -426,8 +427,9 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
         reply.kind !== "line" ||
         reply.words.join(" ") !== `preview-ready ${input.port}`
       ) {
-        await close();
-        return { status: "unavailable" };
+        return (await close()) === "closed"
+          ? { status: "unavailable" }
+          : { status: "unavailable", close };
       }
       return { status: "ready", guestUrl: `http://127.0.0.1:${input.port}/`, close };
     },

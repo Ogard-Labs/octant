@@ -97,7 +97,7 @@ export function createDesktopPreviewService(options: {
       }
       const opened = grant.settled ?? answer;
       try {
-        if (opened.status === "ready" && (await opened.close()) !== "closed") {
+        if (opened.close !== undefined && (await opened.close()) !== "closed") {
           delete grant.close;
           return false;
         }

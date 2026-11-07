@@ -473,6 +473,8 @@ fields and an 8 MiB request body. WebSocket messages are at most 1 MiB; writes
 use backpressure and bounded message queues. Header/request setup has finite
 deadlines; the grant's hard expiry bounds open streams and the guest proxy.
 The provider startup is bounded, and late results after cancellation are closed.
+An unavailable start that cannot confirm its guest stopped retains a cleanup
+handle; reporting unavailable alone never erases that ownership.
 **Stop sharing**, listener stop, window or permission loss, task/binding change,
 provider disablement and lease end cut requests and sockets. An already sent
 request may have effects; nothing is automatically replayed. Unconfirmed guest

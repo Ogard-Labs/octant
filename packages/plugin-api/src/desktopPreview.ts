@@ -54,7 +54,11 @@ export type DesktopPreviewOpened =
       readonly guestUrl: string;
       readonly close: () => Promise<"closed" | "unconfirmed">;
     }
-  | { readonly status: "unavailable" };
+  | {
+      readonly status: "unavailable";
+      /** A failed start retains ownership until its possible guest process is confirmed stopped. */
+      readonly close?: () => Promise<"closed" | "unconfirmed">;
+    };
 
 /** A host-local driver receives only a basename in its own home and an invocation-local proof. */
 export type DesktopPreviewPrepared =

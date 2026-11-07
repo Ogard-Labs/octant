@@ -226,4 +226,28 @@ describe("lease-bound preview permission", () => {
       await f.service.close();
     }
   });
+  it("retains an unavailable opening's cleanup ownership until the guest confirms it stopped", async () => {
+    const f = fixture();
+    f.close.mockResolvedValue("unconfirmed");
+    f.open.mockResolvedValue({ status: "unavailable", close: f.close });
+    const review = await f.request("preview-review");
+    if (review.status !== "preview-review") throw new Error("review missing");
+    expect(
+      await f.service.request(f.caller, {
+        kind: "preview-grant",
+        threadId,
+        leaseId,
+        reviewId: review.reviewId,
+      }),
+    ).toEqual({ status: "preview-refused", reason: "cleanup-unconfirmed" });
+    expect(await f.request("preview-review")).toEqual({
+      status: "preview-refused",
+      reason: "busy",
+    });
+    expect(f.audit.mock.calls.map(([kind]) => kind)).toEqual(["granted"]);
+    f.close.mockResolvedValue("closed");
+    await f.service.sweep();
+    expect(f.audit.mock.calls.map(([kind]) => kind)).toEqual(["granted", "closed"]);
+    await f.service.close();
+  });
 });
