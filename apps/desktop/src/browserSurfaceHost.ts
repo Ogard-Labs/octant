@@ -1172,6 +1172,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         webSecurity: true,
       },
     });
+    const execution = owned.owner;
+    if (execution.kind === "execution")
+      executionViewCurrent.set(
+        view,
+        () => surfaces.get(contextId) === owned && persistentOwner.admits(execution),
+      );
     view.setVisible(false);
     const popups = new BrowserPagePopups();
     view.webContents.session.setPermissionCheckHandler(() => false);
@@ -2388,6 +2394,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
         if (request.downloads === "hold") owned.downloads.begin();
         try {
+          checkObservation();
+          throwIfAborted(signal);
           const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
             const contents = contentsView(owned).webContents;
             // Ended before any check that can refuse, so a stop that is refused
@@ -2419,6 +2427,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               request.destination,
               request.destinationExpected,
             );
+            checkObservation();
+            throwIfAborted(signal);
             switch (request.kind) {
               case "navigate": {
                 if (
@@ -2522,6 +2532,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 // The new tab's own load can raise a dialog too.
                 const releaseTabDialogs = await guardDialogs(opened.view, dialogs);
                 try {
+                  checkObservation();
+                  throwIfAborted(signal);
                   await opened.view.webContents.loadURL(
                     request.target === undefined ? "about:blank" : normalizeUrl(request.target),
                   );
@@ -3316,11 +3328,19 @@ function navigationUrl(event: unknown, details: readonly unknown[]): unknown {
   return undefined;
 }
 
+const executionViewCurrent = new WeakMap<BrowserSurfaceViewPort, () => boolean>();
+function checkExecutionView(view: BrowserSurfaceViewPort): void {
+  if (executionViewCurrent.get(view)?.() === false)
+    throw new Error("Browser execution owner is no longer available.");
+}
+
 function execute(
   view: BrowserSurfaceViewPort,
   code: string,
   userGesture = false,
 ): Promise<unknown> {
+  if (executionViewCurrent.get(view)?.() === false)
+    return Promise.reject(new Error("Browser execution owner is no longer available."));
   // A WebContentsView that has never committed a document queues script
   // evaluations without ever settling them: the call hangs and, because the
   // broker serializes a surface's actions, every later action waits behind it.
@@ -4031,6 +4051,7 @@ async function emulateDevice(
   view: BrowserSurfaceViewPort,
   request: BrowserSurfaceAction,
 ): Promise<void> {
+  checkExecutionView(view);
   const contents = view.webContents;
   const client = contents.debugger;
   const restoring =
@@ -4072,6 +4093,7 @@ async function emulateDevice(
   state.held = true;
   try {
     if (touch !== state.touch) {
+      checkExecutionView(view);
       await client.sendCommand("Emulation.setTouchEmulationEnabled", {
         enabled: touch,
         maxTouchPoints: 1,
@@ -4079,6 +4101,7 @@ async function emulateDevice(
       state.touch = touch;
     }
     if (colorScheme !== state.colorScheme) {
+      checkExecutionView(view);
       await client.sendCommand("Emulation.setEmulatedMedia", {
         features: [
           {
@@ -4679,11 +4702,14 @@ async function withDebugger<T>(
   view: BrowserSurfaceViewPort,
   action: (send: SurfaceProtocolSend) => Promise<T>,
 ): Promise<T> {
+  checkExecutionView(view);
   const client = view.webContents.debugger;
-  const send: SurfaceProtocolSend = (method, parameters, sessionId) =>
-    sessionId === undefined
+  const send: SurfaceProtocolSend = (method, parameters, sessionId) => {
+    checkExecutionView(view);
+    return sessionId === undefined
       ? client.sendCommand(method, parameters)
       : client.sendCommand(method, parameters, sessionId);
+  };
   if (client.isAttached() && agentDebuggers.has(client)) return action(send);
   if (client.isAttached()) throw new Error("Browser automation control is already in use.");
   client.attach("1.3");

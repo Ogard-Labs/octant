@@ -3148,6 +3148,88 @@ describe("native page script ownership", () => {
 });
 
 describe("the native execution owner boundary", () => {
+  it.each(["dialog preparation", "target lookup"] as const)(
+    "refuses an expired execution before dispatch when %s finishes late",
+    async (stage) => {
+      const started = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(started);
+      const native = view();
+      const entered = Promise.withResolvers<void>();
+      const preparation = Promise.withResolvers<void>();
+      const host = createBrowserSurfaceHost({ createView: () => native });
+      try {
+        const ready = await host.persistentOwner.configure(true);
+        if (ready.status !== "ready") throw Error("Expected execution owner");
+        const policy = decodeBrowserContextPolicy({
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60000,
+        });
+        const binding = decodePersistentBrowserLeaseBinding({
+          ownerId: ready.ownerId,
+          grantId: contextId,
+          executionId: contextId,
+          threadId,
+          mode: "work",
+          projectId: contextId,
+          providerId: "provider",
+          modelId: "model",
+          authorityRevision: "revision",
+          profile: policy.profile,
+          origins: policy.allowedOrigins,
+          expiresAt: new Date(started + 60000).toISOString(),
+        });
+        await host.persistentOwner.createContext(
+          decodeBrowserContextId(contextId),
+          policy,
+          new AbortController().signal,
+          binding,
+        );
+        if (stage === "dialog preparation") {
+          native.webContents.debugger.on = vi.fn();
+          vi.mocked(native.webContents.debugger.sendCommand).mockImplementation(async (method) => {
+            if (method === "Page.enable") {
+              entered.resolve();
+              await preparation.promise;
+            }
+          });
+        } else {
+          vi.mocked(native.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+            async () => {
+              entered.resolve();
+              await preparation.promise;
+              return { x: 20, y: 20 };
+            },
+          );
+        }
+        const action = host
+          .act(
+            contextId,
+            stage === "dialog preparation"
+              ? { kind: "navigate", target: "https://example.com/new" }
+              : { kind: "type", target: "#field", value: "synthetic" },
+          )
+          .catch(() => undefined);
+        await entered.promise;
+        clock.mockReturnValue(started + 60001);
+        preparation.resolve();
+        await action;
+        expect(native.webContents.loadURL).not.toHaveBeenCalled();
+        expect(
+          vi
+            .mocked(native.webContents.debugger.sendCommand)
+            .mock.calls.some(([method]) => method.startsWith("Input.")),
+        ).toBe(false);
+      } finally {
+        preparation.resolve();
+        clock.mockRestore();
+        await host.closeAll();
+      }
+    },
+  );
   it("retains only opted-in execution pages when the last renderer closes and lends no renderer control", async () => {
     const created: Array<
       Parameters<Parameters<typeof createBrowserSurfaceHost>[0]["createView"]>[0]
