@@ -1142,6 +1142,13 @@ it.each(["personal", "account"] as const)(
             });
       },
     });
+    Object.defineProperty(fixture.runtime, "profiles", {
+      value: {
+        list: async () => [{ profile, label: "Reviewed test account", sizeBytes: 0 }],
+        clear: async () => undefined,
+        syncExtensions: async () => undefined,
+      },
+    });
     terminal = fixture.service;
     const opening = await open(fixture);
     if (opening.kind !== "granted") throw Error("Expected terminal grant");
@@ -1210,7 +1217,8 @@ it.each(["personal", "account"] as const)(
       });
       if (review.kind !== "browser-session-review") throw Error(JSON.stringify(review));
       await grants.execute(windowId, { kind: "grant", reviewId: review.reviewId });
-      expect(await cli.call(navigate)).toMatchObject({ isError: false });
+      const opened = await cli.call(navigate);
+      expect(opened.isError, JSON.stringify(opened)).toBe(false);
       expect(fixture.runtime.createContext).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ profile }),
