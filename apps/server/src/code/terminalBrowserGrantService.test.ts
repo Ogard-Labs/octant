@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  StoredBrowserProfile,
   ActorId,
   ReplayCursor,
   decodeBrowserThreadId,
@@ -1114,107 +1115,135 @@ describe("octant mcp against a terminal Browser grant", () => {
   });
 });
 
-it("lends a terminal its own explicitly reviewed profile context and ends it with that exact session", async () => {
-  let delegated: BrowserDelegatedChildren | undefined;
-  let terminal: TerminalBrowserGrantService | undefined;
-  const fixture = harness({
-    delegatedBrowserTools: (input) => {
-      const initial = terminal?.currentSessionTarget(input.grantId);
-      return initial === undefined
-        ? undefined
-        : delegated?.tools({
-            target: initial.target,
-            executionId: String(input.grantId),
-            contentThreadId: input.threadId,
-            executionPolicy: input.executionPolicy,
-            current: () => {
-              const row = terminal?.currentSessionTarget(input.grantId);
-              return row?.revision === initial.revision ? row.target : undefined;
+it.each(["personal", "account"] as const)(
+  "lends a terminal its explicitly reviewed %s profile and ends it with that exact session",
+  async (kind) => {
+    const profileId = "40000000-0000-4000-8000-000000000002";
+    const profile = Schema.decodeUnknownSync(StoredBrowserProfile)(
+      kind === "personal" ? { kind } : { kind, profileId },
+    );
+    const profileChoice = kind === "personal" ? "personal" : `account:${profileId}`;
+    let delegated: BrowserDelegatedChildren | undefined;
+    let terminal: TerminalBrowserGrantService | undefined;
+    const fixture = harness({
+      delegatedBrowserTools: (input) => {
+        const initial = terminal?.currentSessionTarget(input.grantId);
+        return initial === undefined
+          ? undefined
+          : delegated?.tools({
+              target: initial.target,
+              executionId: String(input.grantId),
+              contentThreadId: input.threadId,
+              executionPolicy: input.executionPolicy,
+              current: () => {
+                const row = terminal?.currentSessionTarget(input.grantId);
+                return row?.revision === initial.revision ? row.target : undefined;
+              },
+            });
+      },
+    });
+    terminal = fixture.service;
+    const opening = await open(fixture);
+    if (opening.kind !== "granted") throw Error("Expected terminal grant");
+    const grantId = opening.outcome.grantId;
+    const recipient = fixture.service.currentSessionTarget(grantId);
+    expect(recipient?.target.grantee).toEqual({ kind: "terminal", grantId });
+    const grants = new BrowserSessionGrants({
+      now: () => Date.parse(now),
+      uuid: () => crypto.randomUUID(),
+      isLocalWindow: () => true,
+      canReview: () => true,
+      targets: () => fixture.service.sessionTargets(),
+      current: (grantee) =>
+        grantee.kind === "terminal"
+          ? fixture.service.currentSessionTarget(grantee.grantId)
+          : undefined,
+      profileLabel: async () => "Personal",
+      record: () => {},
+      onRevoked: (id) => {
+        void delegated?.revoke(id);
+      },
+    });
+    vi.mocked(fixture.runtime.createContext).mockImplementation(async () => "native-live");
+    delegated = new BrowserDelegatedChildren({
+      runtime: fixture.runtime,
+      grants,
+      now: () => Date.parse(now),
+      uuid: () => crypto.randomUUID(),
+      recordExternalContentIngestion: fixture.recordExternalContentIngestion,
+    });
+    try {
+      const environment = environmentOf(fixture, opening);
+      const cli = await connect(environment.url, environment.token);
+      expect(await cli.list()).toMatchObject({
+        result: {
+          tools: [
+            {
+              inputSchema: {
+                properties: {
+                  profile: {
+                    type: "string",
+                    pattern: expect.stringContaining("account:"),
+                  },
+                },
+              },
             },
-          });
-    },
-  });
-  terminal = fixture.service;
-  const opening = await open(fixture);
-  if (opening.kind !== "granted") throw Error("Expected terminal grant");
-  const grantId = opening.outcome.grantId;
-  const recipient = fixture.service.currentSessionTarget(grantId);
-  expect(recipient?.target.grantee).toEqual({ kind: "terminal", grantId });
-  const grants = new BrowserSessionGrants({
-    now: () => Date.parse(now),
-    uuid: () => crypto.randomUUID(),
-    isLocalWindow: () => true,
-    canReview: () => true,
-    targets: () => fixture.service.sessionTargets(),
-    current: (grantee) =>
-      grantee.kind === "terminal"
-        ? fixture.service.currentSessionTarget(grantee.grantId)
-        : undefined,
-    profileLabel: async () => "Personal",
-    record: () => {},
-    onRevoked: (id) => {
-      void delegated?.revoke(id);
-    },
-  });
-  vi.mocked(fixture.runtime.createContext).mockImplementation(async () => "native-live");
-  delegated = new BrowserDelegatedChildren({
-    runtime: fixture.runtime,
-    grants,
-    now: () => Date.parse(now),
-    uuid: () => crypto.randomUUID(),
-    recordExternalContentIngestion: fixture.recordExternalContentIngestion,
-  });
-  try {
-    const environment = environmentOf(fixture, opening);
-    const cli = await connect(environment.url, environment.token);
-    const navigate = {
-      operation: "navigate",
-      url: "https://example.com/report",
-      profile: "personal",
-    };
-    expect(await cli.call(navigate)).toMatchObject({
-      isError: true,
-      data: { error: "browser-session-permission-required" },
-    });
-    expect(fixture.runtime.createContext).not.toHaveBeenCalled();
-    const review = await grants.execute(windowId, {
-      kind: "review",
-      grantee: { kind: "terminal", grantId },
-      profile: { kind: "personal" },
-      origins: ["https://example.com"],
-      durationMinutes: 15,
-    });
-    if (review.kind !== "browser-session-review") throw Error(JSON.stringify(review));
-    await grants.execute(windowId, { kind: "grant", reviewId: review.reviewId });
-    expect(await cli.call(navigate)).toMatchObject({ isError: false });
-    expect(fixture.runtime.createContext).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ profile: { kind: "personal" } }),
-      expect.anything(),
-      expect.objectContaining({ threadId: String(grantId) }),
-    );
-    expect(fixture.recordExternalContentIngestion).toHaveBeenCalledWith(
-      expect.objectContaining({ threadId: String(threadA) }),
-    );
-    expect(
-      await cli.call({ operation: "navigate", url: "https://other.example", profile: "personal" }),
-    ).toMatchObject({ isError: true });
-    expect(await cli.call({ operation: "download-save", downloadId: "d1" })).toMatchObject({
-      isError: true,
-      data: { error: "transfer-needs-separate-permission" },
-    });
-    fixture.service.terminalClosed(String(terminalA));
-    await vi.waitFor(() => expect(fixture.runtime.closeContext).toHaveBeenCalledOnce());
-    expect(fixture.service.currentSessionTarget(grantId)).toBeUndefined();
-    expect(
-      grants.find({ kind: "terminal", grantId }, { kind: "personal" }, ["https://example.com"]),
-    ).toBeUndefined();
-    expect(fixture.runtime.closeAll).not.toHaveBeenCalled();
-  } finally {
-    grants.close();
-    await delegated.close();
-  }
-});
+          ],
+        },
+      });
+      const navigate = {
+        operation: "navigate",
+        url: "https://example.com/report",
+        profile: profileChoice,
+      };
+      expect(await cli.call(navigate)).toMatchObject({
+        isError: true,
+        data: { error: "browser-session-permission-required" },
+      });
+      expect(fixture.runtime.createContext).not.toHaveBeenCalled();
+      const review = await grants.execute(windowId, {
+        kind: "review",
+        grantee: { kind: "terminal", grantId },
+        profile,
+        origins: ["https://example.com"],
+        durationMinutes: 15,
+      });
+      if (review.kind !== "browser-session-review") throw Error(JSON.stringify(review));
+      await grants.execute(windowId, { kind: "grant", reviewId: review.reviewId });
+      expect(await cli.call(navigate)).toMatchObject({ isError: false });
+      expect(fixture.runtime.createContext).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ profile }),
+        expect.anything(),
+        expect.objectContaining({ threadId: String(grantId) }),
+      );
+      expect(fixture.recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: String(threadA) }),
+      );
+      expect(
+        await cli.call({
+          operation: "navigate",
+          url: "https://other.example",
+          profile: profileChoice,
+        }),
+      ).toMatchObject({ isError: true });
+      expect(await cli.call({ operation: "download-save", downloadId: "d1" })).toMatchObject({
+        isError: true,
+        data: { error: "transfer-needs-separate-permission" },
+      });
+      fixture.service.terminalClosed(String(terminalA));
+      await vi.waitFor(() => expect(fixture.runtime.closeContext).toHaveBeenCalledOnce());
+      expect(fixture.service.currentSessionTarget(grantId)).toBeUndefined();
+      expect(
+        grants.find({ kind: "terminal", grantId }, profile, ["https://example.com"]),
+      ).toBeUndefined();
+      expect(fixture.runtime.closeAll).not.toHaveBeenCalled();
+    } finally {
+      grants.close();
+      await delegated.close();
+    }
+  },
+);
 
 it("refuses a stale terminal profile read instead of falling back to the thread's Private page", async () => {
   let finishClose = () => {};
