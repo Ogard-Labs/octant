@@ -20,7 +20,7 @@ static char backing_path[PATH_MAX];
 static int open_beneath(const char *path, int flags, mode_t mode) {
   struct open_how how = {
     .flags = (unsigned long long)(flags | O_CLOEXEC),
-    .mode = mode,
+    .mode = mode & 07777,
     .resolve = RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS,
   };
   const char *relative = path[0] == '/' ? path + 1 : path;
