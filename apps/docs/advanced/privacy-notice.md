@@ -351,7 +351,7 @@ for who receives it and how to remove it.
 - [Data residency](/advanced/data-residency) for "your machine, your region"
 - Shared-host controller footing (repository draft at
   `docs/legal/shared-host-controller.md`) when a team shares one host
-- [DPA template](/advanced/dpa-template) for processor clauses if a hosted component ships
-- [SCC position](/advanced/scc-position) for transfer posture on BYO vs hosted surfaces
+- DPA template (repository draft at `docs/legal/dpa-template.md`) — not in force while no Ogard-hosted component ships
+- SCC position (repository draft at `docs/legal/scc-position.md`) — no Octant SCCs exist today
 - [Privacy and security](/advanced/privacy-and-security) for approvals and confinement
 - [Recovery](/advanced/recovery) for journal-based recovery

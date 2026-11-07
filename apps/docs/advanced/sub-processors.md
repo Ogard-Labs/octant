@@ -122,6 +122,6 @@ Hosted relay is outside the preview.
 
 - [Privacy notice](/advanced/privacy-notice) for what exists, what leaves, and export or purge
 - [Data residency](/advanced/data-residency) for where the store actually sits
-- [SCC position](/advanced/scc-position) for who would sign transfer tools on BYO vs hosted paths
-- [DPA template](/advanced/dpa-template) if Ogard Labs becomes a processor for a hosted component
+- SCC position (repository draft at `docs/legal/scc-position.md`) for who would sign transfer tools on BYO vs hosted paths
+- DPA template (repository draft at `docs/legal/dpa-template.md`) if Ogard Labs ever becomes a processor for a hosted component
 - [Providers and models](/advanced/providers) for how instances and credentials work

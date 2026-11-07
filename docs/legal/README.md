@@ -3,28 +3,24 @@
 Draft legal and privacy positions for counsel review. They are **not**
 published notices, signed agreements, or certifications of GDPR compliance.
 
-## User-facing privacy drafts
+## User-facing privacy drafts (published in the guide, with draft banners)
 
-These live with the product docs because they describe current product
-behavior for operators:
+These live with the product docs at `apps/docs/advanced/` because they describe
+current product behavior for operators:
 
-- [`apps/docs/advanced/privacy-notice.md`](../../apps/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
-- [`apps/docs/advanced/privacy-and-security.md`](../../apps/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
-- [`apps/docs/advanced/sub-processors.md`](../../apps/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
-- [`apps/docs/advanced/data-residency.md`](../../apps/docs/advanced/data-residency.md) — the host is the region
-- [`apps/docs/advanced/dpa-template.md`](../../apps/docs/advanced/dpa-template.md) — processor clauses kept for a possible future Ogard-operated hosted component; **not in force**, Ogard Labs operates none today
-- [`apps/docs/advanced/scc-position.md`](../../apps/docs/advanced/scc-position.md) — transfer posture: no Octant SCCs; BYO providers and the user-chosen share service are the customer's own relationships
-- [`apps/docs/advanced/eula-placeholders.md`](../../apps/docs/advanced/eula-placeholders.md) — governing-law and venue blanks for a future EULA
+- [`privacy-notice.md`](../../apps/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
+- [`privacy-and-security.md`](../../apps/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
+- [`sub-processors.md`](../../apps/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
+- [`data-residency.md`](../../apps/docs/advanced/data-residency.md) — the host is the region
 
-This directory holds positions that need a quiet home away from those
-concurrent user-guide edits, or that counsel will review before any
-VitePress publication.
-
-## Drafts in this directory
+## Drafts in this directory (not published until counsel signs off)
 
 | Draft                                                         | Topic                                                                                                                                                                           |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Shared-host controller footing](./shared-host-controller.md) | When one host holds several principals' data: who is controller for the journal, logs, and audit export; alignment with collaboration design; shipped export and purge surfaces |
+| [DPA template](./dpa-template.md)                             | **Not in force** stub: no Ogard-operated hosted component exists; what would trigger a DPA if one ever ships                                                                    |
+| [SCC position](./scc-position.md)                             | **No SCCs exist** stub: BYO and the self-hosted share service are the customer's own relationships; what would trigger transfer tools                                           |
+| [EULA placeholders](./eula-placeholders.md)                   | Governing-law and venue blanks for the EULA counsel will deliver — the one live contract deliverable                                                                            |
 
 ## Standard values drafted from the existing Ogard Labs setup
 
