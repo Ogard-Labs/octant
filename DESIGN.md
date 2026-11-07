@@ -1851,8 +1851,8 @@ controls sit above kit sections (overview, token totals, provider limits,
 breakdown), each a label over one card, and the Settings header is the only
 title.
 
-First run is a three-step wizard with a progress rail: Providers, Project, and
-Model, in that order, followed by an uncounted readiness view titled Your first
+First run is a four-step wizard with a progress rail: Providers, Project, Model,
+and Mode, in that order, followed by an uncounted readiness view titled Your first
 task. Each step is pending, current, or completed: the current step is a filled
 card, completed steps show a check, and pending steps show their number. The
 Project step chooses the first task's mode (Work or Code; Code alone when Work
@@ -1871,6 +1871,12 @@ the host refused an answer, the first press of Skip setup or the primary action
 says so in a warning notice and records nothing; the next press goes on without
 that answer, so a refusing host can never leave the dialog impossible to leave.
 A refused outcome is reported the same way and the dialog stays open.
+The readiness view also offers an optional Explore capabilities card for Browser,
+Computer use, helper agents and person memory. It reports current host settings,
+uses labelled static examples and links to existing Settings controls. Dismissing
+it changes no setting or readiness answer. It adds no step or progress count.
+[Start screen](docs/design/start-screen.md#optional-capability-card-in-your-first-task)
+owns its behavior.
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,

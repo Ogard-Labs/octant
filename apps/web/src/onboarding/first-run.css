@@ -405,3 +405,11 @@ button.first-run__fact-action {
   font-size: var(--oct-text-sm);
   color: var(--oct-muted);
 }
+
+.first-run__capabilities [data-slot="card-title"],
+.first-run__capability-title {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  line-height: var(--oct-leading-snug);
+}

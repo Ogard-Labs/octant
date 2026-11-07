@@ -1486,8 +1486,10 @@ except where a bullet says otherwise.
   - A provider: sees memory only in a thread on that provider that uses it.
     Memory learned in a thread on one provider can reach a thread on another,
     and Settings › Memory says so in those words.
-- **First run.** The first-run flow says in one sentence that Octant
-  remembers across threads and that Settings › Memory turns it off.
+- **First run.** The first-run flow explains memory across threads and links
+  to Settings › Memory without assuming that the host's current setting is on.
+  The optional [Your first task capability card](design/start-screen.md#optional-capability-card-in-your-first-task)
+  reports that setting from the host; its examples run nothing and grant no authority.
 
 Work is not cut off from a person's integrations. Work is for files,
 browsers, and documents, and what separates it from Code is which developer

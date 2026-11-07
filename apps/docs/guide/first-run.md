@@ -184,3 +184,19 @@ Explore the three modes in detail:
 - [Chat](/guide/chat) for conversations and virtual Projects
 - [Work](/guide/work) for local knowledge work
 - [Code](/guide/code) for repository engineering
+
+## Explore capabilities, when you want to
+
+**Your first task** includes an optional **Explore capabilities** card for
+Browser, Computer use, helper agents and person memory. It reads current host
+settings. **Not reported** means Octant has no current answer, rather than that
+the capability is enabled. Browser support still depends on the provider and
+the task's access; websites and apps keep their existing approval rules.
+
+The examples are static. They do not run a tool, call a provider or install
+anything. **Review** opens the setting that already owns the capability, where
+you can inspect or change it. Installation and trust remain separate.
+
+**Dismiss capability card** hides only the card for this setup session. You can
+start your task or skip setup without opening it or changing any setting. Memory
+can be off; review its current state and what it keeps in **Settings → Memory**.
