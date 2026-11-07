@@ -55,3 +55,22 @@ describe("Canvas export egress admission", () => {
     expect(request).not.toHaveBeenCalled();
   });
 });
+
+it.each([
+  "https://127.0.0.1/",
+  "https://10.0.0.1/",
+  "https://[::1]/",
+  "https://[::ffff:127.0.0.1]/",
+  "https://2130706433/",
+])("refuses a private IP literal even when that exact origin was declared: %s", async (url) => {
+  vi.mocked(request).mockClear();
+  await expect(
+    canvasExportWorkerFetch(
+      { ...input, url },
+      [new URL(url).origin],
+      () => true,
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow();
+  expect(request).not.toHaveBeenCalled();
+});

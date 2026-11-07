@@ -21,7 +21,13 @@ export function canvasExportWorkerFetch(
 ): Promise<CanvasExportWorkerFetchResponse> {
   return new Promise((resolve, reject) => {
     const url = new URL(input.url);
+    // HTTPS skips custom lookup for IP literals, so they need the same
+    // public-address check before a socket can be created. URL canonicalizes
+    // alternative IPv4 spellings; IPv6 hostnames retain brackets here.
+    const hostname = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+    const privateLiteral = isIP(hostname) !== 0 && isPrivateAddress(hostname);
     if (
+      privateLiteral ||
       url.protocol !== "https:" ||
       url.username ||
       url.password ||
