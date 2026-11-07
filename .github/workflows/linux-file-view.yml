@@ -1,0 +1,62 @@
+name: Linux mediated file-view feasibility
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/linux-file-view.yml
+      - scripts/linux-file-view/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-file-view-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Measure native file-view behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the owned disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libfuse3-dev fuse3 bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          test -c /dev/fuse
+          test -r /dev/fuse -a -w /dev/fuse
+      - name: Compile the bounded fixture
+        run: |
+          gcc -std=c11 -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror \
+            $(pkg-config fuse3 --cflags) scripts/linux-file-view/fixture.c \
+            -o "$RUNNER_TEMP/octant-file-view" $(pkg-config fuse3 --libs)
+      - name: Measure the actual mounted view inside Bubblewrap
+        run: |
+          python3 scripts/linux-file-view/probe.py \
+            "$RUNNER_TEMP/octant-file-view" "$RUNNER_TEMP/file-view-evidence.json"
+      - name: Record the measured verdict
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path(os.environ['RUNNER_TEMP'])/'file-view-evidence.json'
+          if not path.exists():raise SystemExit('No native evidence: prerequisites or compilation failed')
+          result=json.loads(path.read_text())
+          failed=[x['name'] for x in result['measurements'] if not x['passed']]
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
+              output.write('## Native feasibility measurements\n\n')
+              output.write('Production ready: **NO**. This is an isolated fixture, not a shipped boundary.\n\n')
+              output.write('Status: '+result['status']+'\n\n')
+              for name in failed:output.write('- Failed contract measurement: '+name+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-file-view-feasibility
+          path: ${{ runner.temp }}/file-view-evidence.json
+          if-no-files-found: error
+          retention-days: 7
