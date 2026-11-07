@@ -32,7 +32,7 @@ export interface PinnedListenerExchangeRequest {
   readonly serverName: undefined;
   /** A served leaf whose SubjectPublicKeyInfo pin is not one of these is refused during the handshake. */
   readonly pins: ReadonlyArray<string>;
-  /** The whole HTTP/1.1 request, written only after the handshake passed the pin. */
+  /** The whole HTTP/1.1 request, or zero bytes for a handshake-only trust preflight. */
   readonly request: Uint8Array;
   /** Aborting while the exchange opens stops it before the request is written, if it can. */
   readonly signal: AbortSignal | undefined;
@@ -118,8 +118,9 @@ export function createExchangeListenerFetch(options: {
     previous: ListenerOriginTrust,
     next: ListenerOriginTrust,
   ): Promise<void> => {
-    if (JSON.stringify(previous) === JSON.stringify(next)) return;
-    if (JSON.stringify(trust) !== JSON.stringify(previous)) return;
+    if (JSON.stringify(trust) === JSON.stringify(next)) return;
+    if (JSON.stringify(trust) !== JSON.stringify(previous))
+      throw new TypeError("The computer's listener trust changed.");
     await options.onTrust?.(previous, next);
     trust = next;
   };
@@ -139,7 +140,7 @@ export function createExchangeListenerFetch(options: {
     const body = await requestBody(init, fromRequest, encoder);
 
     const previous = trust;
-    const pins = acceptedPins(previous, now());
+    let pins = acceptedPins(previous, now());
     if (pins.length === 0) {
       // Nothing this exchange may accept: a platform trust, or only pins
       // naming a hash this client does not know.
@@ -173,6 +174,40 @@ export function createExchangeListenerFetch(options: {
     // Resolving and reading the body awaited; an abort meanwhile must stop
     // the request before anything is dialled, not discard its answer after.
     signal?.throwIfAborted();
+    let connectionTrust = previous;
+    if (previous.staged !== undefined) {
+      // Native open writes its supplied bytes before returning. Probe with no
+      // HTTP bytes so promotion is durable before a request can leave. The
+      // actual exchange accepts only this exact proved key, closing the race
+      // between the two handshakes without replaying an application request.
+      const probe = await options.port.open({
+        address: judged.address,
+        port,
+        serverName: undefined,
+        pins,
+        request: new Uint8Array(0),
+        signal,
+      });
+      if (probe.status === "failed") throw new TypeError("The listener could not be reached.");
+      if (probe.status === "refused")
+        throw new ListenerTrustRefused(refusalFor(previous, probe.servedPin, now()));
+      try {
+        if (!pins.includes(probe.servedPin)) throw new ListenerTrustRefused("pin-mismatch");
+        const accepted = judgeListenerCertificate({
+          trust: previous,
+          servedPin: probe.servedPin,
+          platformTrusted: false,
+          now: now(),
+        });
+        if (accepted.status !== "accepted") throw new ListenerTrustRefused(accepted.reason);
+        connectionTrust = accepted.trust;
+        pins = [probe.servedPin];
+      } finally {
+        probe.close();
+      }
+      await remember(previous, connectionTrust);
+      signal?.throwIfAborted();
+    }
     const opening = await options.port.open({
       address: judged.address,
       port,
@@ -197,13 +232,13 @@ export function createExchangeListenerFetch(options: {
     try {
       if (signal?.aborted === true) throw signal.reason;
       const judgedTrust = judgeListenerCertificate({
-        trust: previous,
+        trust: connectionTrust,
         servedPin: opening.servedPin,
         platformTrusted: false,
         now: now(),
       });
       if (judgedTrust.status !== "accepted") throw new ListenerTrustRefused(judgedTrust.reason);
-      await remember(previous, judgedTrust.trust);
+      await remember(connectionTrust, judgedTrust.trust);
       const response = await readHttpResponse(reply, method, () => {
         signal?.removeEventListener("abort", abort);
       });

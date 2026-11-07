@@ -12309,6 +12309,10 @@ access` agree); a thread's own change is journaled as
       old public key against the recorded pin, the signature, origin, known
       host id and seven-day interval; response headers from proxied product
       routes cannot introduce or withdraw a stage.
+      Before a phone request under staged trust, a handshake-only exchange sends
+      zero HTTP bytes, rechecks expiry and persists promotion. The request's
+      separate handshake accepts only that proved key, so a storage failure,
+      expired stage or key change between handshakes cannot release HTTP bytes.
       `octant listener activate-key --pin <prepared-new-pin>` rechecks that
       exact prepared key and deadline, durably replaces the TLS key, then uses
       the normal listener restart and session invalidation. A lost response

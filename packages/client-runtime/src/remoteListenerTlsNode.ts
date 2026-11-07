@@ -129,8 +129,9 @@ function createListenerFetchOver(
     previous: ListenerOriginTrust,
     next: ListenerOriginTrust,
   ): Promise<void> => {
-    if (JSON.stringify(previous) === JSON.stringify(next)) return;
-    if (JSON.stringify(trust) !== JSON.stringify(previous)) return;
+    if (JSON.stringify(trust) === JSON.stringify(next)) return;
+    if (JSON.stringify(trust) !== JSON.stringify(previous))
+      throw new TypeError("The computer's listener trust changed.");
     await options.onTrust?.(previous, next);
     trust = next;
   };
