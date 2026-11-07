@@ -195,6 +195,11 @@ destinations, a Canvas export to a GitHub Gist, and remote access you enable
 are traffic you pointed Octant at. Remote access is off by default. See
 [Remote access](/advanced/remote-access).
 
+A Canvas export to sharehtml.org uploads one rendered HTML page to that
+service, which serves it at an unlisted link and can read it; the receipt's
+manage URL (shown once, not stored) is the way to delete it later. See
+[Export a Canvas or artifact](/guide/export#publish-as-a-web-page-on-sharehtml-org).
+
 A Canvas export to a GitHub Gist publishes content to GitHub. It posts the
 rendered Markdown of one Canvas, with the Canvas title as the gist
 description, to github.com through the GitHub connection this host already
@@ -221,14 +226,13 @@ title and a local snapshot of the file you approved publishing, and never
 downloads the page. Take a page down on claude.ai. See
 [Claude artifacts](/advanced/providers#claude-artifacts).
 
-A Canvas published as a public link goes to the public Canvas share service.
-The service is operated by **Ogard Labs** (organisation number 996 198 510,
-Stavanger, Norway), at `https://canvas.octant.sh` unless you enter another URL
-in **Settings › Permissions › Public links**, which is off by default. It is
-hosted in **Norway (EEA)** on Ogard Labs' own infrastructure (Gigahost AS),
-with encrypted offsite backups in Finland (EEA); no data leaves the EEA for
-this service.
-Turning it on sends nothing; the first request is your first publish, after you
+A Canvas published as a public link goes to the share service whose address you
+enter in **Settings › Permissions › Public links** — a service you run yourself
+(the reference app ships in this repository at `apps/share`) or another service
+you choose. Octant operates no share service of its own, so the service's
+location, operator, and terms are yours to pick; the reference app runs wherever
+you host it. Public links are off by default and no address is set until you
+enter one. Turning it on sends nothing; the first request is your first publish, after you
 approve a card that shows the exact content, the audience (anyone with the
 link), the expiry, and an optional password. The service receives the Canvas's
 title, a summary of up to 200 characters, its blocks, and the markup of any
@@ -243,9 +247,9 @@ stays for 90 days. The service writes no IP address or user-agent logs and
 keeps an aggregate view count. Anyone can report a link, without giving their
 address. See [Share a Canvas with a public link](/guide/public-links).
 
-The abuse contact shown on link pages is `hello@octant.sh`. The operator can
-take a link down; a removed link answers "removed". Reports are stored without
-the reporter's address.:
+The abuse contact shown on link pages is the one the service operator sets
+(`OCTANT_SHARE_ABUSE_CONTACT`). The operator can take a link down; a removed
+link answers "removed". Reports are stored without the reporter's address.
 
 ### Provider update checks
 
@@ -347,7 +351,7 @@ for who receives it and how to remove it.
 - [Data residency](/advanced/data-residency) for "your machine, your region"
 - Shared-host controller footing (repository draft at
   `docs/legal/shared-host-controller.md`) when a team shares one host
-- [DPA template](/advanced/dpa-template) for processor clauses if a hosted component ships
-- [SCC position](/advanced/scc-position) for transfer posture on BYO vs hosted surfaces
+- DPA template (repository draft at `docs/legal/dpa-template.md`) — not in force while no Ogard-hosted component ships
+- SCC position (repository draft at `docs/legal/scc-position.md`) — no Octant SCCs exist today
 - [Privacy and security](/advanced/privacy-and-security) for approvals and confinement
 - [Recovery](/advanced/recovery) for journal-based recovery

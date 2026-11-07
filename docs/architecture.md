@@ -2824,6 +2824,26 @@ CI or reviewers should be woken, not left polling).
   switch or a watch is on, through the host's `gh` login. It is not a routine
   and needs no hosted service; a stopped host observes nothing.
 
+**The GitHub plugin switch.** GitHub is a bundled first-party plugin
+(component `github-integration`) a person can switch off; it is on by default,
+and a missing store row counts as on. Switching it off removes the GitHub
+account integration and keeps its data. The server refuses on the effective
+state, not the renderer: the GitHub authentication, catalogue and recents
+routes, the managed-clone routes, issue context for create-from-issue, and the
+`octant_github` read tools all refuse or are absent, and the Canvas export list
+no longer binds the GitHub Gist destination, so an export to it is refused as an
+unknown destination without a `gh` call. The renderer reads the same effective
+state and drops the GitHub Settings section, the Issues destination, the
+GitHub tab and repository picker in project creation and the composer, the
+create-from-issue and issue-reference entries, and the GitHub cards on the home
+screen, and sends no GitHub authentication request. Git, worktrees and the
+pull-request plumbing that Code delivery uses (the pull-request pane and chip,
+review, switch and merge actions, the `pull-requests` sidebar destination,
+failing-check follow-ups, the board's pull-request join) are not the
+integration and stay on with the plugin off. MCP connector catalog entries for
+GitHub are separate connectors the person adds, and keep their own sign-in and
+activation.
+
 **Reading GitHub (`octant_github`).** A Code thread's agent reads the
 repository its Project delivers to through one read-only family, offered to
 Code threads on a provider that carries app-managed tools while the GitHub
@@ -8648,6 +8668,28 @@ a local window, like the rest of package lifecycle, and obey the Marketplace
 fetches preference. The lookup sends only `Accept` and the constrained
 `User-Agent`; there is no telemetry.
 
+**Writing a plugin.** `octant plugin create <name> [--mcp-url <address>]`
+writes a starter Agent Plugins folder in the current folder: `plugin.json`,
+one skill under `skills/<name>/`, a short README, and, with an address, an
+`mcp.json` naming that one Streamable HTTP server (https, or http to this
+computer, with no credentials or fragment in the address). The name must suit both the
+plugin and its skill folder, and an existing folder is refused, never written
+into. `octant plugin check <folder>` reads a folder by the host's folder-import
+rules (git history and links inside the folder left out, a link that leaves it
+refused, the same entry and size bounds) and runs it through the same
+`@octant/plugin-host` loader, then also refuses what the host would: a package
+with nothing to load, a local MCP command missing from the folder, and a
+folder that also holds a language server, provider driver, or debug adapter
+package document (which the import reads as that package instead). It reads
+the Agent Plugins layout only; Claude Code and Codex layouts still import but
+are not checked. A folder
+that passes is one **Import local Agent Plugin…** accepts. Both commands work
+on this computer's files alone: they open no host session, reach no network,
+and install, trust, or enable nothing, so a plugin still arrives untrusted and
+switched off. Choice: the walk is repeated in the CLI rather than shared
+because the host's reader lives in the server app, which a package may not
+import; the loader, which decides validity, is the shared one.
+
 **Selection epoch.** A selected plugin, MCP server, or skill carries the
 catalog epoch it was resolved under, and the host re-resolves it on send, replay,
 resume, and at provider handoff. The epoch is a hash of the facts a selection
@@ -14225,9 +14267,11 @@ documents its authority, privacy, and release boundaries):
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
-- The public Canvas share service, under
-  [Canvas public links](design/canvas-public-links.md); its code lives in the
-  `octant-webapp` repository.
+- Public Canvas links, under
+  [Canvas public links](design/canvas-public-links.md), served by the
+  self-hostable reference app at `apps/share` in this repository. Ogard Labs
+  operates no share-service instance; each user runs one or points Octant at
+  another service they choose.
 
 Out of scope: a merge or force-push an agent starts on its own initiative,
 cloud scheduling, an Octant-operated hosted service, Apple physical devices,
@@ -14381,14 +14425,15 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account.
 
-The public Canvas share service (`https://canvas.octant.sh`, in the
-`octant-webapp` repository) is in scope: an Octant-operated service that stores, and can read, the Canvases
-people publish as public links, under the rules in
-[Canvas public links](design/canvas-public-links.md). It is not an Octant
-account, a relay, or a sync store; nothing reaches it until the person turns
-Public links on and approves a publish, and a self-hosted service URL is a
-Settings choice. Deploying it, its DNS and TLS, and its operator contact are
-release steps of their own.
+Public Canvas links are in scope under the rules in
+[Canvas public links](design/canvas-public-links.md), served by the reference
+share app at `apps/share` in this repository, which each user self-hosts (or
+they point Octant at another service they choose; no service address is set by
+default). Ogard Labs operates no share-service instance: it is not an Octant
+account, a relay, or a sync store, and nothing reaches any service until the
+person turns Public links on, sets an address, and approves a publish. Running
+the service — its host, DNS, TLS, and operator contact — is the user's own
+deployment step, documented in the `apps/share` README.
 
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a

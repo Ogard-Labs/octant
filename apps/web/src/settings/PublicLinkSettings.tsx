@@ -18,7 +18,7 @@ export interface PublicLinkSettingsProps {
 
 /** The sentence the switch is described by: the service reads what is published. */
 export const PUBLIC_LINK_FACT =
-  "Publish a Canvas as a link anyone with it can open. The service stores and can read what you publish.";
+  "Publish a Canvas as a link anyone with it can open. The service you set stores and can read what you publish.";
 
 /**
  * Settings: the switch that lets a Canvas be published as a public link, and
@@ -122,7 +122,7 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
         />
       </SettingRow>
       <SettingRow
-        description="Where public links are published. Change it to use a service you run."
+        description="Where public links are published: a service you run, or another one you trust. Empty means no service is set and no link can be published."
         focused={props.focusedSetting === "public-link-service"}
         htmlFor={urlId}
         label="Service address"
@@ -133,6 +133,7 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
           disabled={busy}
           id={urlId}
           onChange={(event) => setServiceUrl(event.target.value)}
+          placeholder="https://your-share-service.example"
           type="url"
           value={serviceUrl}
         />
