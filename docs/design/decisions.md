@@ -307,7 +307,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundar
 
 ### First-preview tracks are design-first
 
-Everything on the work board is in scope for the first proper preview release (maintainer decision, 2026-11-06; there is no separate post-preview track). That covers mobile maturity, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the compliance package (legal review still required before it ships), and the hub-and-spoke topology, each built only once its specification documents its boundaries.
+Everything on the work board is in scope for the first proper preview release (maintainer decision, 2026-11-06; there is no separate post-preview track). That covers mobile maturity, language services and a debugger, enterprise identity, disposable desktops, outside provider drivers, the terms and privacy documentation for MIT self-hosted distribution (final legal publication review remains required), and the hub-and-spoke topology, each built only once its specification documents its boundaries.
 
 - The authorization covers design and implementation; creating an account, spending money, submitting to a store, deploying a hosted service, or weakening an invariant each needs a separate maintainer action.
 - Remote SSH development environments are in scope; a Code or Work Project on a registered server is built ([Server Projects](server-projects.md)).

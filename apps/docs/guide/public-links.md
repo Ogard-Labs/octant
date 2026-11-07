@@ -243,4 +243,3 @@ without one — see [Export a Canvas or artifact](/guide/export):
 
 - [Export a Canvas or artifact](/guide/export)
 - [Privacy notice](/advanced/privacy-notice)
-- [Sub-processors](/advanced/sub-processors)

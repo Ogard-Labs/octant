@@ -120,9 +120,8 @@ export default defineConfig({
             { text: "Keyboard Workflows", link: "/advanced/keyboard-workflows" },
             { text: "Themes and Appearance", link: "/advanced/themes" },
             { text: "Privacy and Security", link: "/advanced/privacy-and-security" },
-            { text: "Privacy Notice", link: "/advanced/privacy-notice" },
-            { text: "Sub-processors", link: "/advanced/sub-processors" },
-            { text: "Data Residency", link: "/advanced/data-residency" },
+            { text: "Privacy", link: "/advanced/privacy-notice" },
+            { text: "Licence and Contact", link: "/advanced/terms" },
             { text: "Remote Access", link: "/advanced/remote-access" },
             { text: "Hub and spokes", link: "/advanced/hub-and-spokes" },
             {

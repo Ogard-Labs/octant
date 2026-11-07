@@ -48,14 +48,8 @@ without over-trusting a surface that has not shipped.
 
 - [Remote access](/advanced/remote-access) — authenticated LAN and Tailscale access to one host.
 - [Privacy and security](/advanced/privacy-and-security) — local-first storage, credentials, approvals, confinement, and the two host-initiated HTTPS calls.
-- [Privacy notice](/advanced/privacy-notice) — draft: what data exists, where it lives, what leaves, and export or purge.
-- [Sub-processors](/advanced/sub-processors) — draft: BYO providers are the user's processors, not Octant's.
-- [Data residency](/advanced/data-residency) — draft: local-first means this machine, in its region.
-- Shared-host controller footing — draft in the repository at
-  `docs/legal/shared-host-controller.md` (pending counsel).
-- DPA template (draft at `docs/legal/dpa-template.md`, not in force) — processor clauses if an Ogard-hosted component ever ships.
-- SCC position (draft at `docs/legal/scc-position.md`) — no Octant SCCs exist today; transfers are the customer's own provider/share-service relationships.
-- EULA placeholders (draft at `docs/legal/eula-placeholders.md`) — governing law and venue blanks for the EULA counsel will deliver.
+- [Privacy](/advanced/privacy-notice) — local storage, no telemetry, and external connections.
+- [Licence and contact](/advanced/terms) — MIT licence and Ogard Labs contact information.
 - [Recovery and troubleshooting](/advanced/recovery) — replay, rebuilds, conflict recovery, and diagnostic tooling.
 - [Release compatibility](/advanced/release-compatibility) — technical-preview boundaries, data location, and migration notes.
 
