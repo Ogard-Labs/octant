@@ -6,6 +6,14 @@ on:
       - .github/workflows/linux-file-view.yml
       - scripts/linux-file-view/**
   workflow_dispatch:
+    inputs:
+      experiment:
+        description: Bounded native experiment
+        type: choice
+        default: file-view
+        options:
+          - file-view
+          - syscall-admission
 
 permissions:
   contents: read
@@ -16,6 +24,7 @@ concurrency:
 
 jobs:
   native:
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'file-view'
     name: Measure native file-view behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -63,5 +72,45 @@ jobs:
           path: |
             ${{ runner.temp }}/file-view-evidence.json
             ${{ runner.temp }}/kernel-policy-prerequisites.json
+          if-no-files-found: error
+          retention-days: 7
+
+  syscall-admission:
+    name: Measure syscall-entry admission counterexample
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'syscall-admission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the original bounded syscall fixture
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror \
+            scripts/linux-file-view/syscall_admission.c \
+            -o "$RUNNER_TEMP/octant-syscall-admission"
+      - name: Measure held-inode access without a read syscall
+        run: |
+          timeout --kill-after=3s 20s "$RUNNER_TEMP/octant-syscall-admission" \
+            > "$RUNNER_TEMP/syscall-admission.json"
+          cat "$RUNNER_TEMP/syscall-admission.json"
+      - name: State the experiment's limited conclusion
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path(os.environ['RUNNER_TEMP'])/'syscall-admission.json'
+          if not path.exists():raise SystemExit('No native syscall-admission evidence')
+          result=json.loads(path.read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
+              output.write('## Syscall-entry admission counterexample\n\n')
+              output.write('Production ready: **NO**. No production mediator is implemented.\n\n')
+              output.write('Native result: '+result['status']+'\n\n')
+              output.write('An SQPOLL bypass disproves syscall-entry-only mediation with unrestricted rings; it does not disprove a broker/emulator or establish compatibility of denying rings.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-syscall-admission
+          path: ${{ runner.temp }}/syscall-admission.json
           if-no-files-found: error
           retention-days: 7

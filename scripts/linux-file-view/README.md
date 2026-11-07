@@ -46,3 +46,36 @@ a policy, install a kernel or change boot settings. A missing active BPF LSM
 blocks further capability execution on that runner; this is not evidence that
 a different backend enforces the policy. Even an eligible prerequisite result
 still needs the dynamic companion/account and alias semantics proven natively.
+
+## Syscall-entry admission counterexample
+
+`syscall_admission.c` is a separate original x86-64/Linux experiment, not a
+mediator. A parent traces its one owned child with exit-on-tracer-death enabled.
+The child holds an ordinary permitted inode and prepares an SQPOLL ring. At an
+observed syscall stop the parent creates the synthetic `.pub` companion. It
+then refuses new direct `pread` and `mmap` requests on the held descriptor and
+measures whether publishing an SQE reads that inode without another read or
+`io_uring_enter` syscall. No bytes read or mapped before the transition need to
+be forgotten. No kernel, boot, ACL, account or security setting is changed.
+
+The client has a ten-second alarm, parent ownership is bounded to fifteen
+seconds, and CI adds a twenty-second timeout and two-minute job maximum. The
+parent reaps its retained child and removes only its identity-checked temporary
+sentinel directory. Unsupported SQPOLL, tracing, control refusals or cleanup
+produce a blocked result and nonzero exit, never a capability pass.
+
+```sh
+gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/syscall_admission.c \
+  -o /tmp/octant-syscall-admission
+timeout --kill-after=3s 20s /tmp/octant-syscall-admission
+```
+
+Dispatch this workflow with `experiment=syscall-admission` to run only this new
+experiment without repeating the unchanged FUSE measurement. An observed
+bypass rejects syscall-entry-only admission while arbitrary rings remain
+available. It does not reject emulating/brokering asynchronous operations or
+prove compatibility of refusing them. Whole-tree/thread supervision, path/FD
+race prevention, syscall emulation, aliases and effective policy still need
+their own implementation and evidence. See the primary
+[SQPOLL contract](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
+and [ptrace lifecycle contract](https://man7.org/linux/man-pages/man2/ptrace.2.html).
