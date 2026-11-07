@@ -56,6 +56,7 @@ import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRunt
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import {
+  isToolAllowedByAllowlist,
   browserProfileKey,
   defaultShellSettings,
   enabledModes,
@@ -288,6 +289,7 @@ export function wireBrowser(deps: BrowserDependencies) {
             ) === true),
         executionProfileCurrent:
           profile !== undefined &&
+          isToolAllowedByAllowlist(profile.toolConstraints, "octant_browser") &&
           profile.version === definition.executionProfile.profileVersion &&
           profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
       });
