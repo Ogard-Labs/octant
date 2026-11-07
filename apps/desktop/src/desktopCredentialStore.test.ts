@@ -36,13 +36,23 @@ describe("resolveDesktopCredentialBackend", () => {
     expect(backend.purgeStore).toBeUndefined();
   });
 
-  it("uses Credential Manager on Windows", async () => {
+  it("uses the explicitly supplied native credential helper on Windows", async () => {
     const backend = await resolveDesktopCredentialBackend({
       platform: "win32",
+      windowsCredentialHelperPath: "C:\\Octant\\native\\octant-credential-helper.exe",
       keychainHelperPath: helperPath,
       storeScope,
     });
     expect(backend.kind).toBe("credential-manager");
     expect(backend.store).toBeDefined();
   });
+});
+
+it("keeps credentials unavailable when no trusted Windows helper was supplied", async () => {
+  const backend = await resolveDesktopCredentialBackend({
+    platform: "win32",
+    keychainHelperPath: helperPath,
+    storeScope,
+  });
+  expect(backend).toEqual({ kind: "unavailable" });
 });

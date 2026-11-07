@@ -285,6 +285,7 @@ import {
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopHostRuntimePaths,
   resolveDesktopNativeHelperPath,
+  WINDOWS_CREDENTIAL_HELPER_FILENAME,
   resolveManagedToolsDirectory,
   resolveTerminalLauncherDirectory,
   type DesktopNativeHelperPathOptions,
@@ -1559,6 +1560,18 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
+    ...(process.platform === "win32"
+      ? {
+          windowsCredentialHelperPath: resolveDesktopNativeHelperPath(
+            {
+              packaged: app.isPackaged,
+              resourcesPath: process.resourcesPath,
+              moduleUrl: import.meta.url,
+            },
+            WINDOWS_CREDENTIAL_HELPER_FILENAME,
+          ),
+        }
+      : {}),
     storeScope: desktopHostId,
     serviceFamily: desktopKeychainServiceFamily,
   }).then((backend) => {
