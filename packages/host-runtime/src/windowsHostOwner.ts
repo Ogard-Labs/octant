@@ -129,16 +129,26 @@ async function requestControl(
   }
   let id: number | undefined;
   try {
-    const pending = native.beginRequest(scope, encoded);
-    if (
-      !record(pending) ||
-      pending.status !== "pending" ||
-      !Number.isSafeInteger(pending.id) ||
-      typeof pending.id !== "number"
-    )
-      return undefined;
-    id = pending.id;
     const deadline = performance.now() + CONTROL_BOUND_MS;
+    while (performance.now() < deadline) {
+      const pending = native.beginRequest(scope, encoded);
+      if (record(pending) && pending.status === "busy") {
+        // No handle or bytes exist yet. A single-instance pipe needs a turn
+        // to retire its previous client; this is not a dispatched retry.
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        continue;
+      }
+      if (
+        !record(pending) ||
+        pending.status !== "pending" ||
+        typeof pending.id !== "number" ||
+        !Number.isSafeInteger(pending.id)
+      )
+        return undefined;
+      id = pending.id;
+      break;
+    }
+    if (id === undefined) return undefined;
     while (performance.now() < deadline) {
       const result = native.pollRequest(id);
       if (!record(result)) return undefined;
@@ -216,11 +226,14 @@ export async function acquireWindowsHostRuntimeOwner(
   )
     refused();
   let active = false;
+  let preparedForCall = false;
+  let ownedLease: HostRuntimeOwner | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const nonce = randomBytes(32);
   const secret = nonce.toString("base64url");
   try {
     const facts = native.prepare(options.scope);
+    preparedForCall = record(facts) && facts.status === "prepared";
     if (
       !record(facts) ||
       facts.status !== "prepared" ||
@@ -257,6 +270,7 @@ export async function acquireWindowsHostRuntimeOwner(
     if (result.status === "existing") {
       const existing = previousOwner(result, options, facts.endpoint);
       native.close();
+      preparedForCall = false;
       if (existing === undefined) refused();
       const status = await requestControl(native, options.scope, existing.secret, {
         type: "status",
@@ -303,7 +317,7 @@ export async function acquireWindowsHostRuntimeOwner(
       if (!active) return;
       try {
         const event = native.poll();
-        if (!record(event) || event.status === "closed") {
+        if (!record(event) || (event.status !== "idle" && event.status !== "request")) {
           void owner.release();
           return;
         }
@@ -346,11 +360,17 @@ export async function acquireWindowsHostRuntimeOwner(
       }
       if (active) timer = setTimeout(tick, 10);
     };
+    ownedLease = owner;
     anchored.add(owner);
     timer = setTimeout(tick, 0);
     return owner;
   } catch (error) {
-    if (!active) native.close();
+    if (preparedForCall) {
+      active = false;
+      clearTimeout(timer);
+      native.close();
+      if (ownedLease !== undefined) anchored.delete(ownedLease);
+    }
     if (error instanceof HostRuntimeOwnershipError) throw error;
     refused();
   } finally {
