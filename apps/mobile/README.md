@@ -12,6 +12,20 @@ device passes; a public App Store listing stays deferred.
 
 ## Push notifications
 
+Native Android changes also run the **Mobile (Android native modules)** workflow.
+It generates the Android project from the pinned Expo template and compiles the
+device-protection, pinned-TLS and push module release Kotlin targets without
+signing, a Firebase project or an Expo account. To run that compile locally:
+
+```sh
+node ../../node_modules/expo/bin/cli prebuild --platform android --no-install --skip-dependency-update react,react-native,expo,react-native-web
+cd android
+./gradlew --no-daemon --max-workers=2 :octant-device-protection:compileReleaseKotlin :octant-pinned-tls:compileReleaseKotlin :octant-push:compileReleaseKotlin
+```
+
+Run these commands from `apps/mobile`. This is compilation evidence, not an
+installed app or device acceptance pass.
+
 A paired computer can notify this phone when a thread finishes, fails, waits, or
 needs an approval. The spec is
 [Mobile maturity](../../docs/design/mobile-maturity.md#phase-c-host-originated-push);
