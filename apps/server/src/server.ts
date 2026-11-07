@@ -1578,6 +1578,7 @@ export function startOctantServer(
       remoteHost,
     } = wireRemote({
       beginGoogleCliChange,
+      workThreadService,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserAutomationService,
       codeService,

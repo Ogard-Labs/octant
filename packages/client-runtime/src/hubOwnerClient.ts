@@ -733,9 +733,9 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "hub-revoked": "The hub removed this computer.",
   "too-many-challenges": "This computer is busy with other unlocks. Try again in a moment.",
   "posture-stale":
-    "The Code target changed. Refresh its level, then unlock again to apply your choice.",
-  unsupported: "This Code target does not support that change on this host.",
-  "not-found": "That Code thread or Project is no longer active. Refresh the list.",
+    "The task or Project changed. Refresh its level, then unlock again to apply your choice.",
+  unsupported: "This target does not support that change on this host.",
+  "not-found": "That task or Project is no longer active. Refresh the list.",
   "device-revoked": "This computer revoked this device.",
   stale: "This phone's clock is too far from the computer's. Check the time.",
   replayed: "That request was already seen. Try again.",

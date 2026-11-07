@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Journal } from "../persistence/journal";
+import { Schema } from "effect";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite } from "../persistence/sqlitePort";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -32,6 +33,7 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnId,
   WORK_TURN_CAPABILITIES,
+  ReplayCursor,
   type EventEnvelope,
   type Project,
   type WorkThreadId,
@@ -51,6 +53,113 @@ import {
 } from "./workThreadService";
 
 const now = "2026-07-26T21:00:00.000Z" as UtcTimestamp;
+
+describe("owner Work access recovery", () => {
+  it("replays an owner's chosen level and its lowered-guardrail attribution from SQLite", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-owner-work-"));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      journal.append({
+        aggregate: { aggregateType: "work-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: ids.project,
+            eventName: "work.thread-created@1",
+            eventVersion: 1,
+            correlationId: ids.project,
+            actor: { kind: "system", actorId: ids.project },
+            occurredAt: now,
+            payload: { kind: "thread-created", thread: thread() },
+          },
+        ],
+      });
+      let sequence = 100;
+      const fixture = serviceFixture({
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+      });
+      fixture.persistence.journal.append.mockImplementation((input) => {
+        journal.append(input);
+      });
+      fixture.persistence.journal.transaction.mockImplementation((body) =>
+        journal.transaction(body),
+      );
+      const ownerMemberId = "72000000-0000-4000-8000-000000000099";
+      fixture.service.changeOwnerAccess({
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+        ownerMemberId,
+        freshFull: true,
+      });
+      const recovered = new WorkThreadProjection();
+      hydrateWorkThreadProjectionFromJournal({
+        replay: ({ afterSequence, limit }) =>
+          journal.replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence, limit })),
+        projection: recovered,
+      });
+      expect(recovered.read(ids.thread)).toMatchObject({ access: "full-access", version: 2 });
+      const ownerEvents = journal
+        .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+        .filter((event) => event.actor.kind === "owner-unlock");
+      expect(ownerEvents).toHaveLength(2);
+      expect(
+        ownerEvents.every(
+          (event) => event.actor.kind === "owner-unlock" && event.actor.memberId === ownerMemberId,
+        ),
+      ).toBe(true);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it("journals the owner principal and refuses stale, unavailable or non-fresh Full access without a window", () => {
+    const fixture = serviceFixture();
+    const input = {
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access" as const,
+      ownerMemberId: "72000000-0000-4000-8000-000000000099",
+      freshFull: false,
+    };
+    expect(() => fixture.service.changeOwnerAccess(input)).toThrow(/fresh owner unlock/);
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.service.changeOwnerAccess({ ...input, freshFull: true })).toMatchObject({
+      access: "full-access",
+      version: 2,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            actor: {
+              kind: "owner-unlock",
+              actorId: input.ownerMemberId,
+              memberId: input.ownerMemberId,
+            },
+          }),
+        ],
+      }),
+    );
+    expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
+    expect(() => fixture.service.changeOwnerAccess({ ...input, freshFull: true })).toThrow(
+      /changed/,
+    );
+    const unavailable = serviceFixture({ project: { ...workProject(), lifecycle: "archived" } });
+    expect(() => unavailable.service.changeOwnerAccess({ ...input, freshFull: true })).toThrow(
+      /unavailable/,
+    );
+    expect(unavailable.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
 const ids = {
   window: decodeWindowId("72000000-0000-4000-8000-000000000001"),
   project: decodeProjectId("72000000-0000-4000-8000-000000000002"),
