@@ -62,18 +62,18 @@ jobs:
           Copy-Item scripts/windows-host-owner/fixtures.ps1 "$env:RUNNER_TEMP/owner-fixtures.ps1"
       - name: Prove the native Bun owner and client
         run: |
-          bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"
+          bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove the native Node owner and client
         run: |
-          bun scripts/windows-host-owner/run.ts (Get-Command node).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"
+          bun scripts/windows-host-owner/run.ts (Get-Command node).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: node node_modules/electron/install.js
       - name: Prove the shipped Electron runtime without a window
         env:
           ELECTRON_RUN_AS_NODE: "1"
         run: |
-          bun scripts/windows-host-owner/run.ts "$pwd/node_modules/electron/dist/electron.exe" "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node"
+          bun scripts/windows-host-owner/run.ts "$pwd/node_modules/electron/dist/electron.exe" "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
