@@ -15313,6 +15313,37 @@ exercises synthetic targets on an ephemeral Windows runner; real Windows host
 ownership, private runtime paths and lifecycle remain separate prerequisites.
 Work and Code remain refused until their native confinement boundary is proven.
 
+The Windows owned-control prerequisite is an original in-process Node-API
+binding, not a separate owner daemon. Only a host-selected scope UUID reaches
+its fixed per-user `LocalAppData/Octant/runtime` namespace. Native code derives
+the current user, process ID and `GetProcessTimes` birth identity; it holds
+canonical directory ancestors without delete sharing, refuses reparse points
+and unsafe ownership/ACLs, and creates a first-instance named pipe with an
+explicit user-plus-SYSTEM DACL and remote clients refused. A client checks the
+actual pipe server's PID/birth and account before sending host-control data.
+The existing authenticated control schema is shared with the Unix transport;
+16 KiB is the complete wire-frame bound, including its newline, so a Windows
+JSON payload is at most 16,383 UTF-8 bytes. Oversized frames are refused, never
+truncated.
+
+Nonblocking byte-pipe polling has a two-second connection/request deadline and
+retains no overlapped kernel I/O buffer after a call returns. The host strongly
+anchors its owner lease. Closing the endpoint, GC or environment/worker teardown
+cannot remove the native PID/birth record or release its retained directory and
+record guards while that process lives: the first-party module is pinned for
+that process's lifetime. A later claimant refuses a live or unverifiable writer,
+even when the endpoint no longer answers; only an OS-verified dead birth permits
+replacement. Host command callbacks retain their existing host-owned lifecycle;
+a late response cannot dispatch to a closed lease or a different connection.
+Only this control nonce/receipt is stored here, never provider credentials or an
+arbitrary secret selected by a caller.
+
+This prerequisite has no ordinary Windows host-path/startup admission. The
+binding must be proven on native Bun, Node and Electron with synthetic owned
+fixtures; missing or incompatible native code stays unavailable. Full data-path,
+control/lifecycle and credential integration remain separate Windows host
+requirements. It does not enable Chat, Work, Code, a native provider or a release.
+
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):
 
