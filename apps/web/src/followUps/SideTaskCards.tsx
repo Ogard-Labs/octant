@@ -47,6 +47,7 @@ interface SideTasksValue {
   readonly tasks: ReadonlyArray<SideTask>;
   readonly busy: { readonly id: string; readonly action: SideTaskAction } | undefined;
   readonly messages: ReadonlyMap<string, string>;
+  readonly unconfirmedActions: ReadonlyMap<string, string>;
   readonly deliveries: ReadonlyMap<string, NonNullable<SideTask["continuedDelivery"]>>;
   readonly act: (task: SideTask, action: SideTaskAction, context?: SideTaskContext) => void;
   readonly open: (task: SideTask) => void;
@@ -68,6 +69,9 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
   const [busy, setBusy] = useState<SideTasksValue["busy"]>();
   const busyRef = useRef(false);
   const [messages, setMessages] = useState<ReadonlyMap<string, string>>(new Map());
+  const [unconfirmedActions, setUnconfirmedActions] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const [deliveries, setDeliveries] = useState<SideTasksValue["deliveries"]>(new Map());
   const requestGeneration = useRef(0);
   // The pane can move to another thread while an action is on its way.
@@ -84,9 +88,10 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
         const next = await client.sideTasks(threadId);
         if (signal?.aborted !== true && requestGeneration.current === generation) {
           setTasks((current) => (samePollingData(current, next.tasks) ? current : next.tasks));
+          setUnconfirmedActions(new Map());
         }
       } catch {
-        // An offer is not state the person is waiting on; the next read retries.
+        // Keep the last view and any action hold until a fresh host read succeeds.
       }
     },
     [client, threadId],
@@ -98,6 +103,7 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
     requestGeneration.current += 1;
     setTasks(NO_TASKS);
     setMessages(new Map());
+    setUnconfirmedActions(new Map());
     setDeliveries(new Map());
   }, [client, threadId]);
 
@@ -119,8 +125,14 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
 
   const act = useCallback(
     (task: SideTask, action: SideTaskAction, context?: SideTaskContext) => {
-      if (client === undefined || threadId === undefined || busyRef.current) return;
       const id = String(task.offer.id);
+      if (
+        client === undefined ||
+        threadId === undefined ||
+        busyRef.current ||
+        unconfirmedActions.has(id)
+      )
+        return;
       const actedFor = threadId;
       busyRef.current = true;
       setBusy({ id, action });
@@ -149,20 +161,30 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
           } else if (result.kind === "side-task-refused") {
             setMessage(id, result.message);
           }
+          if (result.kind !== "side-task-refused") {
+            setUnconfirmedActions((current) =>
+              new Map(current).set(id, "The host recorded this action."),
+            );
+          }
           await load();
         } catch (failure) {
           if (currentThread.current !== actedFor) return;
-          setMessage(
-            id,
-            failure instanceof SideTaskClientFailure ? failure.message : "The side task failed.",
+          setUnconfirmedActions((current) =>
+            new Map(current).set(
+              id,
+              failure instanceof SideTaskClientFailure
+                ? failure.message
+                : "The action's result is unknown.",
+            ),
           );
+          await load();
         } finally {
           busyRef.current = false;
           setBusy(undefined);
         }
       })();
     },
-    [client, load, setMessage, threadId],
+    [client, load, setMessage, threadId, unconfirmedActions],
   );
 
   const open = useCallback((task: SideTask) => {
@@ -183,8 +205,11 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
   }, []);
 
   const value = useMemo<SideTasksValue | undefined>(
-    () => (client === undefined ? undefined : { tasks, busy, messages, deliveries, act, open }),
-    [act, busy, client, deliveries, messages, open, tasks],
+    () =>
+      client === undefined
+        ? undefined
+        : { tasks, busy, messages, unconfirmedActions, deliveries, act, open },
+    [act, busy, client, deliveries, messages, unconfirmedActions, open, tasks],
   );
   return <SideTasksContext value={value}>{props.children}</SideTasksContext>;
 }
@@ -243,7 +268,11 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
   const hintId = useId();
   const [chosen, setChosen] = useState<SideTaskContext>();
   if (value === undefined) return null;
-  const message = value.messages.get(id);
+  const unconfirmedAction = value.unconfirmedActions.get(id);
+  const message =
+    unconfirmedAction === undefined
+      ? value.messages.get(id)
+      : `${unconfirmedAction} Waiting for the host's recorded status before another action is allowed.`;
   const failure =
     message === undefined ? null : (
       <OctantAlert className="side-task__error" tone="danger">
@@ -294,7 +323,7 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
   }
 
   const busyHere = value.busy?.id === id ? value.busy.action : undefined;
-  const blocked = value.busy !== undefined;
+  const blocked = value.busy !== undefined || unconfirmedAction !== undefined;
   // A fork needs a settled offering turn, so until then the choice shows fresh.
   const context: SideTaskContext = props.running
     ? "fresh"

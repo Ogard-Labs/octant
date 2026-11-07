@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SideTask } from "@octant/contracts";
@@ -151,6 +151,50 @@ describe("SideTaskInline", () => {
     expect(client.start).not.toHaveBeenCalled();
   });
 
+  it.each(["offered", "continued-here"] as const)(
+    "holds every action after a lost response until the host confirms the offer is %s",
+    async (status) => {
+      let responseLost = false;
+      let readable = false;
+      const sideTasks = vi.fn(async () => {
+        if (responseLost && !readable) throw new Error("Host unavailable");
+        return {
+          threadId,
+          tasks: [task(responseLost ? { status, continuedDelivery: "unconfirmed" } : {})],
+        };
+      });
+      const { client } = setup(() => [], {
+        sideTasks,
+        continueHere: vi.fn(async () => {
+          responseLost = true;
+          throw new Error("Response lost after dispatch");
+        }),
+      });
+
+      await userEvent.click(await screen.findByRole("button", { name: "Do it here" }));
+      await waitFor(() => expect(sideTasks).toHaveBeenCalledTimes(2));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Waiting for the host");
+      expect(screen.getByRole("button", { name: "Do it here" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "New worktree" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Dismiss Fix stale install docs" })).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "Do it here" }));
+      expect(client.continueHere).toHaveBeenCalledTimes(1);
+
+      readable = true;
+      act(() => window.dispatchEvent(new Event("online")));
+      if (status === "continued-here") {
+        expect(await screen.findByText(/Delivery is unconfirmed/)).toBeVisible();
+        expect(screen.queryByRole("button", { name: "Do it here" })).toBeNull();
+      } else {
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Do it here" })).toBeEnabled(),
+        );
+      }
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(client.continueHere).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("hands the prompt over when the new thread exists but its first message did not go out", async () => {
     const { onStarted } = setup(() => [task()], {
       start: vi.fn(async () => ({ ...started, sent: false })),
@@ -164,6 +208,35 @@ describe("SideTaskInline", () => {
       ),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("did not go out");
+  });
+
+  it("holds stale choices when delivery was recorded but its following status read fails", async () => {
+    let recorded = false;
+    let readable = false;
+    const sideTasks = vi.fn(async () => {
+      if (recorded && !readable) throw new Error("Status read unavailable");
+      return {
+        threadId,
+        tasks: [task(recorded ? { status: "continued-here", continuedDelivery: "queued" } : {})],
+      };
+    });
+    const { client } = setup(() => [], {
+      sideTasks,
+      continueHere: vi.fn(async () => {
+        recorded = true;
+        return { kind: "side-task-continued-here", sideTaskId, threadId, delivery: "queued" };
+      }),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Do it here" }));
+    await waitFor(() => expect(sideTasks).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Do it here" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New worktree" })).toBeDisabled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("The host recorded this action");
+    readable = true;
+    act(() => window.dispatchEvent(new Event("online")));
+    expect(await screen.findByText(/Queued here/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Do it here" })).toBeNull();
+    expect(client.continueHere).toHaveBeenCalledTimes(1);
   });
 
   it("dismisses an offer without starting anything and leaves a receipt", async () => {

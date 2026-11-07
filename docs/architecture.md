@@ -7877,7 +7877,9 @@ person's confirmation:
   An exception, uncertain send, or failed receipt write retains the claim:
   the card says delivery is unconfirmed and asks the person to inspect the
   thread and its queued messages before sending the prompt themselves.
-  It offers no retry and the host never replays that uncertain action.
+  It offers no retry and the host never replays that uncertain action. A lost
+  action response or unavailable post-action read holds the card's actions
+  until a fresh authoritative read confirms its state.
 - **Dismiss.** The offer closes and nothing is sent.
 
 These are the only places a prompt is sent for the person, and only on their

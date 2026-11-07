@@ -189,6 +189,8 @@ If **Do it here** cannot confirm delivery, its receipt says so and offers no
 retry, including after reopening the app. Check the thread and its queued
 messages before sending the prompt yourself. A clear refusal before anything
 was delivered keeps the offer available; an uncertain action is never replayed.
+If the connection loses the action's response or cannot read its status, the
+card waits for the host's recorded state before allowing another action.
 
 An approved later interaction model is recorded in the architecture decision
 records and is **not** what the app renders today for remaining dock
