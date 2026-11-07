@@ -71,9 +71,10 @@ a missing registry entry cannot mint a profile or an approval. A newly created
 profile opens no page and changes no default. Fork/import rules for task defaults
 remain unchanged. The shared Browser tool schema advertises `account:<id>`
 alongside Private, Project and Personal, including on terminal MCP endpoints;
-the selector itself grants no profile or site authority. The agent uses a named account only through an explicitly
-selected task default; its existing explicit Private/Project/Personal arguments
-retain their behavior.
+the selector itself grants no profile or site authority. The agent may select a
+named account explicitly or through its selected task default; both paths retain
+the same profile and site checks. Existing Private, Project and Personal
+arguments retain their behavior.
 
 Sign out and Clear cookies retain the account's identity and label while removing
 the confirmed data scope. Existing cookie import and extension enablement are
