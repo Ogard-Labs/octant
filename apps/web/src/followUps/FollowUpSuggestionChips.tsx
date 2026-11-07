@@ -27,7 +27,7 @@ import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
-import { SideTaskCards } from "./SideTaskCards";
+import { SideTaskProvider } from "./SideTaskCards";
 import { EnvironmentCard } from "../environment/EnvironmentGroup";
 import "./follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -55,7 +55,10 @@ export interface FollowUpSuggestionChipsProps {
 }
 
 export interface ComposerOffers extends FollowUpSuggestionChipsProps {
-  readonly sideTaskClient?: Pick<SideTaskClient, "sideTasks" | "start" | "dismiss">;
+  readonly sideTaskClient?: Pick<
+    SideTaskClient,
+    "sideTasks" | "start" | "continueHere" | "dismiss"
+  >;
 }
 
 /**
@@ -64,34 +67,41 @@ export interface ComposerOffers extends FollowUpSuggestionChipsProps {
  */
 export const FollowUpSuggestionContext = createContext<ComposerOffers | undefined>(undefined);
 
-/** The side-task cards and follow-up chips for the thread around this composer, if any. */
+/** The follow-up chips for the thread around this composer, if any. */
 export function ComposerFollowUpSuggestions() {
   const context = useContext(FollowUpSuggestionContext);
   if (context === undefined) return null;
-  const { sideTaskClient, ...chips } = context;
+  const { sideTaskClient: _sideTasks, ...chips } = context;
+  return <FollowUpSuggestionChips {...chips} />;
+}
+
+/**
+ * Loads the pane thread's side-task offers once for the transcript's inline
+ * cards, and opens the thread a start creates. It always renders its children,
+ * so a pane with no offers keeps its tree.
+ */
+export function PaneSideTasks(props: { readonly children: ReactNode }) {
+  const context = useContext(FollowUpSuggestionContext);
   return (
-    <>
-      {sideTaskClient === undefined ? null : (
-        <SideTaskCards
-          client={sideTaskClient}
-          onStarted={(started, unsentPrompt) =>
-            context.onCreated({
-              mode: started.mode,
-              created: {
-                kind: "new-thread",
-                mode: started.mode,
-                ...(started.projectId === undefined ? {} : { projectId: started.projectId }),
-                title: started.title,
-                threadId: started.threadId,
-              },
-              prompt: unsentPrompt ?? "",
-            })
-          }
-          threadId={context.threadId}
-        />
-      )}
-      <FollowUpSuggestionChips {...chips} />
-    </>
+    <SideTaskProvider
+      client={context?.sideTaskClient}
+      threadId={context?.threadId}
+      onStarted={(started, unsentPrompt) =>
+        context?.onCreated({
+          mode: started.mode,
+          created: {
+            kind: "new-thread",
+            mode: started.mode,
+            ...(started.projectId === undefined ? {} : { projectId: started.projectId }),
+            title: started.title,
+            threadId: started.threadId,
+          },
+          prompt: unsentPrompt ?? "",
+        })
+      }
+    >
+      {props.children}
+    </SideTaskProvider>
   );
 }
 

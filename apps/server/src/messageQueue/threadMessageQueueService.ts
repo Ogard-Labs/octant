@@ -95,14 +95,20 @@ export class ThreadMessageQueueService {
    * resume, or dispatch lands between the answer and what is done with it.
    * The mode alone cannot answer: it sees the turns it admitted, not a message
    * waiting here behind a pause or a hold.
+   *
+   * A caller that will send the thread a message asks with intent
+   * `dispatch`, so a thread that takes no new message (archived, completed,
+   * marked Done, or without its checkout) reads as unavailable, as it would
+   * for a queued message.
    */
   async withTurnStanding<T>(
     windowId: WindowId,
     scope: ThreadMessageQueueScope,
     act: (standing: ThreadTurnStanding) => T | Promise<T>,
+    intent: "read" | "dispatch" = "read",
   ): Promise<T> {
     return this.#serial(scope, async () => {
-      const inspection = await this.#inspect({ scope, windowId, intent: "read" });
+      const inspection = await this.#inspect({ scope, windowId, intent });
       if (
         inspection.status === "held" ||
         this.#purging.has(queueId(scope)) ||
