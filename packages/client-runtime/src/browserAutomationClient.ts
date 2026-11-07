@@ -1,4 +1,9 @@
 import {
+  BrowserDownloadPermissionsResult,
+  decodeBrowserDownloadPermissionsCommand,
+  type BrowserDownloadPermissionsCommand,
+} from "@octant/contracts/browser-download-permissions";
+import {
   BrowserUploadPermissionsResult,
   decodeBrowserUploadPermissionsCommand,
   type BrowserUploadPermissionsCommand,
@@ -80,6 +85,10 @@ export interface BrowserAutomationClientOptions {
 }
 
 export interface BrowserAutomationClient {
+  manageDownloadPermissions?(
+    command: BrowserDownloadPermissionsCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserDownloadPermissionsResult.Type>;
   manageUploadPermissions?(
     command: BrowserUploadPermissionsCommand,
     signal?: AbortSignal,
@@ -331,6 +340,14 @@ export function createBrowserAutomationClient(
         "/api/browser/extensions",
         decodeBrowserExtensionsCommand(command),
         decodeHostAnswer(BrowserExtensionsResult),
+        signal,
+      ),
+    manageDownloadPermissions: (command, signal) =>
+      post(
+        options,
+        "/api/browser/download-permissions",
+        decodeBrowserDownloadPermissionsCommand(command),
+        decodeHostAnswer(BrowserDownloadPermissionsResult),
         signal,
       ),
     manageUploadPermissions: (command, signal) =>

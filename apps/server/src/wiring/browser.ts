@@ -1,3 +1,5 @@
+import { BrowserDownloadPermissions } from "../browser/browserDownloadPermissions";
+import { browserDownloadPermissionJournal } from "../browser/browserDownloadPermissionJournal";
 import { BrowserUploadPermissions } from "../browser/browserUploadPermissions";
 import { browserUploadPermissionJournal } from "../browser/browserUploadPermissionJournal";
 import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -298,7 +300,7 @@ export function wireBrowser(deps: BrowserDependencies) {
           profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
       });
     };
-    const uploadRecipient = (routineId: AutomationId) => {
+    const transferRecipient = (routineId: AutomationId) => {
       const recipient = routineSessionTarget(routineId);
       if (recipient === undefined) return undefined;
       const projectId = recipient.target.authority.projectId;
@@ -318,10 +320,10 @@ export function wireBrowser(deps: BrowserDependencies) {
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
         windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
-      current: uploadRecipient,
+      current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
-          const row = uploadRecipient(definition.id);
+          const row = transferRecipient(definition.id);
           return row === undefined ? [] : [row];
         }),
       record: browserUploadPermissionJournal({
@@ -334,6 +336,29 @@ export function wireBrowser(deps: BrowserDependencies) {
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
+    const browserDownloadPermissions = new BrowserDownloadPermissions({
+      now: Date.now,
+      uuid: randomUUID,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      canReview: (windowId, target) =>
+        target.authority.mode !== "chat" &&
+        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+      current: transferRecipient,
+      targets: () =>
+        persistence.automationProjection.listDefinitions().flatMap((definition) => {
+          const row = transferRecipient(definition.id);
+          return row === undefined ? [] : [row];
+        }),
+      record: browserDownloadPermissionJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: Date.now,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => browserDownloadPermissions.close()));
     let terminalSessionSource:
       | {
           readonly current: (
@@ -409,6 +434,14 @@ export function wireBrowser(deps: BrowserDependencies) {
       runtime: browserRuntime,
       grants: browserSessionGrants,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      agentDownloadsEnabled: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      downloads: createBrowserDownloadJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
       uuid: randomUUID,
       now: Date.now,
     });
@@ -419,6 +452,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         if (terminalSessionSource === source) terminalSessionSource = undefined;
         browserSessionGrants.revalidate();
         browserUploadPermissions.revalidate();
+        browserDownloadPermissions.revalidate();
         void browserDelegatedChildren.settle();
       };
     };
@@ -483,6 +517,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         target: initial.target,
         executionAuthority: () => (current() === undefined ? undefined : input.currentAuthority()),
         uploadPermissions: browserUploadPermissions,
+        downloadPermissions: browserDownloadPermissions,
         executionId: String(input.routineRun.runId),
         contentThreadId: input.threadId,
         executionPolicy:
@@ -523,6 +558,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       const settle = () => {
         browserSessionGrants.revalidate();
         browserUploadPermissions.revalidate();
+        browserDownloadPermissions.revalidate();
         void browserDelegatedChildren.settle();
       };
       // SQLite-backed task authority is current at commit. Inspect it now so
@@ -535,6 +571,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     onWindowRevoked((windowId) => {
       browserSessionGrants.revokeWindow(windowId);
       browserUploadPermissions.revokeWindow(windowId);
+      browserDownloadPermissions.revokeWindow(windowId);
       void browserDelegatedChildren.closeWindow(windowId);
     });
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
@@ -723,6 +760,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       closePages: async (profile) => {
         browserSessionGrants.invalidateProfile(profile);
         browserUploadPermissions.invalidateProfile(profile);
+        browserDownloadPermissions.invalidateProfile(profile);
         if (!browserCredentialUseService.invalidateProfile(profile))
           throw new Error("Profile login permission revocations could not be recorded.");
         await Promise.all([
@@ -831,6 +869,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       nativeBrowserPresentationRoutes,
       browserSessionGrants,
       browserUploadPermissions,
+      browserDownloadPermissions,
       routineBrowserTools,
       bindTerminalBrowserSessions,
       terminalBrowserTools,

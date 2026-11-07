@@ -1,3 +1,5 @@
+import type { BrowserDownloadPermissions } from "./browserDownloadPermissions";
+import type { BrowserDownloadRecorder } from "./browserDownloadJournal";
 import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import {
   decodeBrowserThreadId,
@@ -41,6 +43,8 @@ interface ChildBrowserEntry {
 
 interface BrowserDelegatedChildrenOptions {
   readonly runtime: BrowserRuntimePort;
+  readonly agentDownloadsEnabled?: () => boolean;
+  readonly downloads?: BrowserDownloadRecorder;
   readonly grants: Pick<
     BrowserSessionGrants,
     "find" | "isCurrent" | "ownerWindowFor" | "forTarget"
@@ -70,6 +74,7 @@ export class BrowserDelegatedChildren {
     readonly contentThreadId?: BrowserThreadId;
     readonly executionAuthority?: () => ToolActionAuthority | undefined;
     readonly uploadPermissions?: Pick<BrowserUploadPermissions, "prepare" | "choices">;
+    readonly downloadPermissions?: Pick<BrowserDownloadPermissions, "prepare" | "choices">;
   }): AppManagedToolSet {
     const id =
       input.target.grantee.kind === "child"
@@ -125,6 +130,15 @@ export class BrowserDelegatedChildren {
                         "The exact host-reviewed upload manifest id; grants no account access.",
                     },
                   }),
+              ...(input.downloadPermissions === undefined
+                ? {}
+                : {
+                    downloadPermissionId: {
+                      type: "string",
+                      description:
+                        "The exact host-reviewed download manifest id; grants no account access.",
+                    },
+                  }),
               profile: {
                 type: "string",
                 description:
@@ -144,6 +158,7 @@ export class BrowserDelegatedChildren {
         const operation = parseBrowserToolInput(call.inputJson, {
           allowProfile: true,
           allowUploadPermission: input.uploadPermissions !== undefined,
+          allowDownloadPermission: input.downloadPermissions !== undefined,
         });
         if (operation === undefined) return refusal("invalid-browser-input");
         const current = input.current();
@@ -153,7 +168,7 @@ export class BrowserDelegatedChildren {
         }
         if (
           (operation.operation === "upload" && input.uploadPermissions === undefined) ||
-          operation.operation === "download-save"
+          (operation.operation === "download-save" && input.downloadPermissions === undefined)
         )
           return refusal("transfer-needs-separate-permission");
         if (operation.operation === "sign-in" || operation.operation === "run-script")
@@ -179,6 +194,16 @@ export class BrowserDelegatedChildren {
               : [];
         if (profile === undefined || origins.length === 0)
           return refusal("browser-session-permission-required");
+        if (operation.operation === "download-save" && operation.downloadPermissionId === undefined)
+          return {
+            result: {
+              error: "download-permission-required",
+              message:
+                "A local person reviews the source origins, approved destination, types, limits and expiry in Settings > Data & storage. Account permission authorizes no file transfer.",
+              permissions: input.downloadPermissions?.choices(current, profile) ?? [],
+            },
+            isError: true,
+          };
         if (operation.operation === "upload" && operation.uploadPermissionId === undefined)
           return {
             result: {
@@ -228,6 +253,25 @@ export class BrowserDelegatedChildren {
                 String(thread) === id &&
                 input.current() !== undefined,
             },
+            ...(this.#options.agentDownloadsEnabled === undefined
+              ? {}
+              : { agentDownloadsEnabled: this.#options.agentDownloadsEnabled }),
+            ...(this.#options.downloads === undefined
+              ? {}
+              : {
+                  downloads: {
+                    saved: (context, file) =>
+                      this.#options.downloads?.saved(
+                        { ...context, threadId: input.contentThreadId ?? context.threadId },
+                        file,
+                      ),
+                    refused: (context, file) =>
+                      this.#options.downloads?.refused(
+                        { ...context, threadId: input.contentThreadId ?? context.threadId },
+                        file,
+                      ),
+                  },
+                }),
             isUnattendedScope: () => true,
             delegatedProfileIsCurrent: ({ profile: candidate, origins: sites }) =>
               permitted(candidate, sites),
@@ -253,6 +297,26 @@ export class BrowserDelegatedChildren {
                 : input.executionAuthority(),
             resolveModelId: () => input.current()?.modelId,
             delegatedProfileIsCurrent: permitted,
+            ...(input.downloadPermissions === undefined
+              ? {}
+              : {
+                  downloadPermission: (request: {
+                    readonly permissionId: string;
+                    readonly profile: StoredBrowserProfile;
+                  }) => {
+                    const live = input.current();
+                    return live === undefined
+                      ? Promise.resolve(undefined)
+                      : (input.downloadPermissions?.prepare({
+                          ...request,
+                          target: live,
+                          callerIsCurrent: () =>
+                            input.current() !== undefined &&
+                            this.#options.agentDownloadsEnabled?.() === true &&
+                            permitted(request.profile, origins),
+                        }) ?? Promise.resolve(undefined));
+                  },
+                }),
             ...(input.uploadPermissions === undefined
               ? {}
               : {
@@ -273,6 +337,7 @@ export class BrowserDelegatedChildren {
               inspectThread: (window, thread) => service.inspectThread(window, thread),
               create: (request) => service.create(request),
               act: (request) => service.act(request),
+              saveDownload: (request) => service.saveDownload(request),
               releaseThread: (window, thread) => service.releaseThread(window, thread),
             },
             approvals: {

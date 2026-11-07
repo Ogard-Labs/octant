@@ -460,3 +460,23 @@ describe("BrowserAutomationClient", () => {
     ).resolves.toBe(false);
   });
 });
+
+it("sends a strict download manifest command through authenticated transport and decodes the host result", async () => {
+  const request = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    expect(new Headers(init?.headers).get("x-octant-window-capability")).toBe(capability);
+    expect(JSON.parse(String(init?.body))).toEqual({ kind: "list" });
+    return Response.json({ kind: "download-permissions", permissions: [] });
+  });
+  const client = createBrowserAutomationClient({
+    baseUrl: "http://127.0.0.1:13773",
+    windowCapability: capability,
+    fetch: request,
+  });
+  expect(await client.manageDownloadPermissions?.({ kind: "list" })).toEqual({
+    kind: "download-permissions",
+    permissions: [],
+  });
+  expect(String(request.mock.calls[0]?.[0])).toBe(
+    "http://127.0.0.1:13773/api/browser/download-permissions",
+  );
+});

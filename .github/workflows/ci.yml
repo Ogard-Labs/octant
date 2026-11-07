@@ -174,6 +174,27 @@ jobs:
             [ "$result" = "success" ] || exit 1
           done
 
+  download-manifest-ui:
+    name: Browser download manifest rendered review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun node_modules/playwright-core/cli.js install --with-deps chromium
+      - run: bun run smoke:browser-download-manifest-ui
+        env:
+          OCTANT_QA_OUTPUT: ${{ runner.temp }}/download-manifest-ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: download-manifest-ui
+          path: ${{ runner.temp }}/download-manifest-ui
+          if-no-files-found: ignore
+
   desktop:
     name: Desktop and scripts (macOS)
     runs-on: macos-15

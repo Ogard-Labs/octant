@@ -62,6 +62,7 @@
     "./browser-profiles": "./src/browserProfiles.ts",
     "./browser-session-grants": "./src/browserSessionGrants.ts",
     "./browser-upload-permissions": "./src/browserUploadPermissions.ts",
+    "./browser-download-permissions": "./src/browserDownloadPermissions.ts",
     "./browser-extensions": "./src/browserExtensions.ts",
     "./canvas": "./src/canvas.ts",
     "./canvas-actions": "./src/canvasActions.ts",

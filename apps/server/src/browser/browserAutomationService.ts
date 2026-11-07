@@ -1,3 +1,8 @@
+import type {
+  BrowserDownloadDestination,
+  BrowserDownloadSaveDecision,
+} from "./browserDownloadSave";
+import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
 import {
   decodeOwnerBrowserTarget,
   type OwnerBrowserControlId,
@@ -283,7 +288,7 @@ interface OwnedContext {
    * The server saves only one of these, by the id the runtime gave, and holds
    * the same bound the runtime does (the oldest goes first).
    */
-  readonly heldDownloads: Map<string, BrowserDownloadFacts>;
+  readonly heldDownloads: Map<string, BrowserDownloadFacts & { readonly origin: string }>;
 }
 
 const hostPolicy: BrowserContextPolicy = {
@@ -400,6 +405,7 @@ export class BrowserAutomationService {
   >();
   /** Each context's staged upload copies, deleted when the context closes. */
   readonly #uploadAdmissions = new Map<BrowserContextId, Set<() => boolean>>();
+  readonly #downloadPermissions = new Map<BrowserContextId, Map<AbortSignal, () => void>>();
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
   readonly #removePersonInputListener: (() => void) | undefined;
@@ -444,6 +450,7 @@ export class BrowserAutomationService {
         }
         owned.evidence.splice(0);
         owned.record = stoppedRecord(owned.record, this.#clock(), "error", "failed");
+        this.#releaseDownloadPermissions(contextId);
         this.#releaseUploads(contextId);
       }
     });
@@ -1832,6 +1839,7 @@ export class BrowserAutomationService {
     for (const report of kept) {
       if (report.state === "held") {
         owned.heldDownloads.set(report.downloadId, {
+          origin: this.#downloadContext(owned).origin,
           name: report.name,
           sizeBytes: report.sizeBytes,
           mediaType: report.mediaType,
@@ -1893,6 +1901,12 @@ export class BrowserAutomationService {
     readonly downloadId: string;
     readonly workspaceRoot: string | undefined;
     readonly signal?: AbortSignal;
+    readonly destination?: BrowserDownloadDestination;
+    readonly permissionSignal?: AbortSignal;
+    readonly finalAdmission?: (
+      facts: BrowserDownloadFacts,
+      origin: string,
+    ) => BrowserDownloadSaveDecision;
     readonly ask: (
       facts: BrowserDownloadFacts,
       origin: string,
@@ -1901,6 +1915,7 @@ export class BrowserAutomationService {
     | {
         readonly status: "saved";
         readonly path: string;
+        readonly destination?: BrowserDownloadDestinationReceipt;
         readonly sizeBytes: number;
         readonly mediaType: string;
       }
@@ -1916,10 +1931,28 @@ export class BrowserAutomationService {
     ) {
       return { status: "refused", error: "download-not-found" };
     }
+    // Consume the held id before any await: retries and concurrent callers
+    // cannot dispatch the same held download twice under one finite grant.
+    owned.heldDownloads.delete(input.downloadId);
     const contextId = owned.record.contextId;
+    if (input.permissionSignal !== undefined) {
+      const watched =
+        this.#downloadPermissions.get(contextId) ?? new Map<AbortSignal, () => void>();
+      if (!watched.has(input.permissionSignal)) {
+        const permissionSignal = input.permissionSignal;
+        const revoked = () => {
+          owned.abort.abort();
+          void this.#destroy(owned, "authority-revoked", "interrupted");
+        };
+        watched.set(permissionSignal, () => permissionSignal.removeEventListener("abort", revoked));
+        permissionSignal.addEventListener("abort", revoked, { once: true });
+        this.#downloadPermissions.set(contextId, watched);
+        if (permissionSignal.aborted) revoked();
+      }
+    }
     const downloadId = input.downloadId;
     const claim = this.#runtime.claimDownload.bind(this.#runtime);
-    const context = this.#downloadContext(owned);
+    const context = { ...this.#downloadContext(owned), origin: held.origin };
     const signal =
       input.signal === undefined
         ? owned.abort.signal
@@ -1933,7 +1966,14 @@ export class BrowserAutomationService {
       workspaceRoot: input.workspaceRoot,
       name: held.name,
       signal,
-      finalAdmission: () => (current() ? "approved" : "cancelled"),
+      ...(input.destination === undefined ? {} : { destination: input.destination }),
+      finalAdmission: (facts) =>
+        current()
+          ? (input.finalAdmission?.(
+              { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
+              context.origin,
+            ) ?? "approved")
+          : "cancelled",
       claim: () => claim(contextId, downloadId),
       ask: async (facts) => {
         const answer = await input.ask(
@@ -1961,6 +2001,7 @@ export class BrowserAutomationService {
           sizeBytes: outcome.sizeBytes,
           mediaType: outcome.mediaType,
           sha256: outcome.sha256,
+          ...(outcome.destination === undefined ? {} : { destination: outcome.destination }),
         });
       } else if (outcome.reason !== undefined) {
         this.#downloads?.refused(context, {
@@ -1981,6 +2022,7 @@ export class BrowserAutomationService {
       ? {
           status: "saved",
           path: outcome.path,
+          ...(outcome.destination === undefined ? {} : { destination: outcome.destination }),
           sizeBytes: outcome.sizeBytes,
           mediaType: outcome.mediaType,
         }
@@ -2648,6 +2690,8 @@ export class BrowserAutomationService {
     this.#expiredContexts.clear();
     this.#removeProcessExitListener?.();
     this.#removePersonInputListener?.();
+    for (const contextId of this.#downloadPermissions.keys())
+      this.#releaseDownloadPermissions(contextId);
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       this.#reclaimOwnerController(owned.record.contextId);
@@ -3330,7 +3374,14 @@ export class BrowserAutomationService {
     }
   }
 
+  #releaseDownloadPermissions(contextId: BrowserContextId): void {
+    const watched = this.#downloadPermissions.get(contextId);
+    this.#downloadPermissions.delete(contextId);
+    for (const release of watched?.values() ?? []) release();
+  }
+
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#releaseDownloadPermissions(contextId);
     this.#reclaimOwnerController(contextId);
     this.#releaseUploads(contextId);
     try {

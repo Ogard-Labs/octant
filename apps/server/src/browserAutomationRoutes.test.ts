@@ -1187,6 +1187,41 @@ describe("browser automation routes", () => {
       expect(uploadPermissions.execute).toHaveBeenCalledOnce();
     });
 
+    it("admits only authenticated local download-manifest commands and strictly decodes their scope", async () => {
+      const downloadPermissions = {
+        execute: vi.fn(async () => ({ kind: "download-permissions" as const, permissions: [] })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        downloadPermissions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      expect(await (await route(post("download-permissions", { kind: "list" })))?.json()).toEqual({
+        kind: "download-permissions",
+        permissions: [],
+      });
+      expect(downloadPermissions.execute).toHaveBeenCalledOnce();
+      expect(
+        await (await route(post("download-permissions", { kind: "list" }, true)))?.json(),
+      ).toMatchObject({ reason: "not-local" });
+      expect(
+        (await route(post("download-permissions", { kind: "list", target: "injected" })))?.status,
+      ).toBe(400);
+      expect(
+        (
+          await route(
+            new Request("http://127.0.0.1/api/browser/download-permissions", {
+              method: "POST",
+              body: JSON.stringify({ kind: "list" }),
+            }),
+          )
+        )?.status,
+      ).toBe(401);
+      expect(downloadPermissions.execute).toHaveBeenCalledOnce();
+    });
+
     it("lists and deletes saved flows for a local window and refuses a paired device", async () => {
       const flowProject = "40000000-0000-4000-8000-000000000001";
       const flows = {

@@ -353,7 +353,7 @@ not establish packaged or personal-account acceptance.
 ### Download
 
 A file comes from a page into a thread's workspace only when the person has
-turned on a switch, and then only after they answer for that file.
+turned on a switch, and then only after they answer for that file or separately review the bounded routine download manifest below.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default. It is a host setting in the shell settings, which only a window
@@ -798,6 +798,47 @@ needed.
 
 The page is the person's as much as the agent's. Neither takes it from the
 other without saying so, and the server, not the pane, decides.
+
+### Recurring download manifests
+
+Settings › Data & storage › Recurring downloads lets a local person review a
+separate file permission for one enabled local Work/Code routine, its current
+definition/model/authority, stored Browser profile, exact requesting-page HTTPS
+origin and complete allowed source-origin set. Account access remains a
+separate permission, and the local host's download switch must stay on.
+The routine must explicitly name its `downloadPermissionId`; neither a parent
+nor an account permission lends file authority. Ordinary turns, children,
+terminals, paired clients and Plan gain no recurring download permission.
+
+Review names one current approved main or extra Project folder, an existing
+relative directory, allowed sniffed file types, total count and byte limits
+(at most 100 files and 250 MiB), and expiry (seven days by default, at most
+30 days). Each file remains capped at 25 MiB. The complete native download
+receipt must attest every redirect origin as an exact member of the reviewed
+set; absent, unsafe, headless or foreign-origin receipts refuse. The page's
+origin never substitutes for source proof. Paths, queries and fragments are
+not retained as source metadata.
+
+The host pins the approved root and reviewed directory identities independently.
+It resolves no agent-supplied root and falls back to no checkout. Changed or
+linked directories, expired/revoked permission, changed routine/model/authority,
+cleared profiles and unsupported writers refuse. The final source/type/current
+checks and synchronous journal-before-dispatch quota reservation follow complete
+byte reads and directory proofs. Concurrent saves share the remaining quota;
+uncertain effects are not refunded. A held download id is consumed before any
+await, so a retry cannot dispatch that same held file a second time. Native
+creation remains exclusive and never overwrites an existing file.
+
+A selected save returns its opaque approved-folder id, path-free label and
+explicit `selected-root` path base. Its path is relative to that selected root,
+not the thread checkout. A distinct selected-save journal event preserves the
+ordinary workspace receipt unchanged. Grant/use audit keeps no bytes or
+absolute roots; it is erased with the Project. A host restart restores no
+permission. Revocation/expiry interrupts pending uses and closes affected
+contexts; a file already dispatched may have been saved and must be inspected
+before retrying. The journal reports actual owning threads, never a temporary
+routine execution id as their data owner. This is implementation scope, not
+packaged, personal-account or cross-platform acceptance evidence.
 
 ### The person's input is kept
 

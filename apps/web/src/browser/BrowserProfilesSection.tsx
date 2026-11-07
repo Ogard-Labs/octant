@@ -1,3 +1,4 @@
+import { BrowserDownloadPermissionsSection } from "./BrowserDownloadPermissionsSection";
 import { BrowserUploadPermissionsSection } from "./BrowserUploadPermissionsSection";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -259,6 +260,11 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
         )}
       </SettingsSection>
       <BrowserSessionGrantsSection
+        client={client}
+        profiles={loaded.kind === "ready" ? loaded.profiles : []}
+        focusedSetting={props.focusedSetting}
+      />
+      <BrowserDownloadPermissionsSection
         client={client}
         profiles={loaded.kind === "ready" ? loaded.profiles : []}
         focusedSetting={props.focusedSetting}

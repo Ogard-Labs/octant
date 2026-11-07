@@ -676,6 +676,7 @@ export function startOctantServer(
       browserCredentialUseService,
       browserSessionGrants,
       browserUploadPermissions,
+      browserDownloadPermissions,
       browserDelegatedChildren,
       bindTerminalBrowserSessions,
       terminalBrowserTools,
@@ -1083,6 +1084,7 @@ export function startOctantServer(
         browserCredentialUseService,
         browserSessionGrants,
         browserUploadPermissions,
+        browserDownloadPermissions,
         agentMessageProjection,
         browserModelBindings,
         browserAuthority,
@@ -1596,6 +1598,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserUploadPermissions,
+      browserDownloadPermissions,
       browserAutomationService,
       codeService,
       projectService,
@@ -1956,6 +1959,7 @@ export function startOctantServer(
             projectBrowserService?.close();
             browserSessionGrants.close();
             browserUploadPermissions.close();
+            browserDownloadPermissions.close();
             await browserDelegatedChildren.close();
             await browserAutomationService?.close();
           } catch (error) {

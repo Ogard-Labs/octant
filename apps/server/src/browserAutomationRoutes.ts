@@ -1,4 +1,9 @@
 import {
+  decodeBrowserDownloadPermissionsCommand,
+  decodeBrowserDownloadPermissionsResult,
+} from "@octant/contracts/browser-download-permissions";
+import type { BrowserDownloadPermissions } from "./browser/browserDownloadPermissions";
+import {
   decodeBrowserUploadPermissionsCommand,
   decodeBrowserUploadPermissionsResult,
 } from "@octant/contracts/browser-upload-permissions";
@@ -93,6 +98,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly downloadPermissions?: Pick<BrowserDownloadPermissions, "execute">;
   readonly uploadPermissions?: Pick<BrowserUploadPermissions, "execute">;
   readonly sessionGrants?: Pick<BrowserSessionGrants, "execute">;
   readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
@@ -504,6 +510,32 @@ export function createBrowserAutomationRouteHandler(
                   reason: "not-found",
                   message: "That flow no longer exists.",
                 },
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/download-permissions") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserDownloadPermissionsResult({
+              kind: "download-permission-refused",
+              reason: "not-local",
+              message: "Download manifests are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.downloadPermissions === undefined)
+          return failure(
+            { category: "unavailable", message: "Recurring download permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserDownloadPermissionsResult(
+            await dependencies.downloadPermissions.execute(
+              windowId,
+              decodeBrowserDownloadPermissionsCommand(decoded.value),
+            ),
           ),
           origin,
         );
