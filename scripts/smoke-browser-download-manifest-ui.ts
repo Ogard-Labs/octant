@@ -176,6 +176,24 @@ createRoot(document.getElementById("root")).render(<main className="settings-pan
           )
             throw Error("Review granted permission.");
           const dialog = page.getByRole("dialog");
+          await dialog
+            .getByRole("heading", { name: "Grant this download manifest?" })
+            .scrollIntoViewIfNeeded();
+          for (const value of [
+            permission.target.label,
+            permission.target.modelId,
+            permission.origin,
+            permission.directory,
+          ])
+            if ((await dialog.getByText(value, { exact: true }).count()) !== 1)
+              throw Error("Review omitted the exact recipient or destination.");
+          await page.screenshot({
+            path: join(artifacts, `review-top-${width}-${scale}.png`),
+            fullPage: true,
+          });
+          await page
+            .getByRole("button", { name: "Grant download manifest" })
+            .scrollIntoViewIfNeeded();
           const overflow = await dialog.evaluate(
             (element) => element.scrollWidth > element.clientWidth + 1,
           );
