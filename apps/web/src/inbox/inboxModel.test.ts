@@ -214,6 +214,18 @@ describe("groupInboxByProject", () => {
     expect(groups[0]?.urgentCount).toBe(1);
   });
 
+  it("files a wait whose Project has no known name under the one No Project group", () => {
+    const groups = groupInboxByProject(
+      [
+        item({ key: "unnamed", projectKey: "p9", since: 1000 }),
+        item({ key: "none", projectKey: undefined, since: 2000 }),
+      ],
+      names,
+    );
+    expect(groups.map((group) => group.name)).toEqual(["No Project"]);
+    expect(groups[0]?.items.map((entry) => entry.key)).toEqual(["unnamed", "none"]);
+  });
+
   it("orders a group urgent first, then oldest first, then deferred", () => {
     const [group] = groupInboxByProject(
       [

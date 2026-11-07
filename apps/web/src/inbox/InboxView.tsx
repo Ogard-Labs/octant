@@ -182,10 +182,14 @@ export function InboxView(props: InboxViewProps) {
     decisionRows,
     (request) => request.kind === "question" || isLeadQuestionPendingRequest(request),
   );
+  // A finished turn that closed with a decision is already listed as that
+  // decision, so it is not listed again under Finished.
+  const deciding = threadsWith(decisionRows, (request) => request.kind === "decision");
   const attentionItems = props.attentionItems.filter(
     (item) =>
       !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)) &&
-      !(item.signal.reason === "question-asked" && asking.has(item.signal.threadId)),
+      !(item.signal.reason === "question-asked" && asking.has(item.signal.threadId)) &&
+      !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)),
   );
 
   const waiting = inboxWaitingItems(

@@ -145,6 +145,33 @@ describe("InboxView triage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No finished turns waiting.");
   });
 
+  it("lists a finished turn that asked a decision once, as the decision", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.codeThread,
+              reason: "turn-finished",
+              title: "Fix the parser",
+              source: "code",
+              detail: "Finished a turn.",
+            },
+          },
+        ]}
+        decisions={decisionSource(decisionClients(), [codeDecision()])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
+    expect(screen.getByRole("button", { name: /Finished/ })).toHaveTextContent("0");
+    await user.click(screen.getByRole("button", { name: /Finished/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("No finished turns waiting.");
+  });
+
   it("heads each Project group with its count and its urgent count", async () => {
     const source = decisionSource(decisionClients(), [
       decodePendingRequest({ ...codeDecision(), urgent: true }),

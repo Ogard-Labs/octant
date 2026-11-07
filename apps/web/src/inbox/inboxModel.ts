@@ -232,7 +232,10 @@ export function groupInboxByProject(
 ): ReadonlyArray<InboxProjectGroup> {
   const byProject = new Map<string, InboxWaitingItem[]>();
   for (const item of items) {
-    const key = item.projectKey ?? "";
+    // A Project this window cannot name joins the one No Project group rather
+    // than heading a second group under the same name.
+    const key =
+      item.projectKey !== undefined && projectNames.has(item.projectKey) ? item.projectKey : "";
     byProject.set(key, [...(byProject.get(key) ?? []), item]);
   }
   const groups = [...byProject].map(([projectKey, members]): InboxProjectGroup => {
