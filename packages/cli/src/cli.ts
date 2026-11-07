@@ -30,7 +30,12 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
-import { resolvePluginCliCommand, runPluginCliCommand } from "./pluginCommand";
+import { runPluginAuthoringCommand } from "./pluginAuthoring";
+import {
+  isPluginAuthoringCommand,
+  resolvePluginCliCommand,
+  runPluginCliCommand,
+} from "./pluginCommand";
 import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
@@ -369,6 +374,14 @@ export async function runCli(
     if (command === undefined) {
       printUsage(context.identity);
       return 1;
+    }
+    if (isPluginAuthoringCommand(command)) {
+      return await runPluginAuthoringCommand({
+        command,
+        cwd: process.cwd(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      });
     }
     return await withLocalControlSession(context, (session) =>
       runPluginCliCommand({
@@ -712,6 +725,8 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "project access <name> full-access|approval-gated" },
   { octant: "plugin install npm:<package>[@<version or range>]" },
   { octant: "plugin check-update <package>" },
+  { octant: "plugin create <name> [--mcp-url <https address>]" },
+  { octant: "plugin check <folder>" },
   { octant: "provider key set <instance> [--replace] [--stdin]" },
   { octant: "provider key status|remove <instance>" },
   { octant: "provider remove <instance>" },

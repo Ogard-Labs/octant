@@ -7,7 +7,8 @@ import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 /**
  * `octant plugin install npm:<package>[@<version or range>]` and
- * `octant plugin check-update <package>`.
+ * `octant plugin check-update <package>`. `create` and `check` run on their own
+ * files (`pluginAuthoring.ts`) and never reach this session.
  *
  * The CLI decides nothing about a package. It asks the running host to look
  * the package up on the registry the person's npm settings name, prints what
@@ -18,14 +19,32 @@ import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 export type PluginCliCommand =
   | { readonly action: "install"; readonly packageName: string; readonly range?: string }
-  | { readonly action: "check-update"; readonly packageName: string };
+  | { readonly action: "check-update"; readonly packageName: string }
+  | { readonly action: "create"; readonly name: string; readonly mcpUrl?: string }
+  | { readonly action: "check"; readonly folder: string };
+
+/** The commands that only read or write files here and never open a host session. */
+export type PluginAuthoringCliCommand = Extract<PluginCliCommand, { action: "create" | "check" }>;
+
+export function isPluginAuthoringCommand(
+  command: PluginCliCommand,
+): command is PluginAuthoringCliCommand {
+  return command.action === "create" || command.action === "check";
+}
 
 export function resolvePluginCliCommand(
   positional: readonly string[],
   flags: Readonly<Record<string, string | boolean>>,
 ): PluginCliCommand | undefined {
   const [action, target, ...rest] = positional;
-  if (Object.keys(flags).length > 0 || target === undefined || rest.length > 0) return undefined;
+  if (target === undefined || rest.length > 0) return undefined;
+  if (action === "create") {
+    const { "mcp-url": mcpUrl, ...others } = flags;
+    if (Object.keys(others).length > 0 || typeof mcpUrl === "boolean") return undefined;
+    return { action: "create", name: target, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
+  }
+  if (Object.keys(flags).length > 0) return undefined;
+  if (action === "check") return { action: "check", folder: target };
   if (action === "install") {
     if (!target.startsWith("npm:")) return undefined;
     const spec = target.slice("npm:".length);
@@ -44,7 +63,7 @@ export function resolvePluginCliCommand(
 }
 
 export interface RunPluginCliCommandInput {
-  readonly command: PluginCliCommand;
+  readonly command: Exclude<PluginCliCommand, PluginAuthoringCliCommand>;
   readonly session: OpenedLocalControlSession;
   readonly stdout: { readonly write: (chunk: string) => unknown };
   readonly stderr: { readonly write: (chunk: string) => unknown };

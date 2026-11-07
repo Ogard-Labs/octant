@@ -241,6 +241,58 @@ for unchanged components; new or capability-expanded executable components
 are **quarantined** until reviewed, and rollback selects only retained,
 integrity-verified earlier versions.
 
+### Make your own plugin
+
+Start from a working folder instead of a blank page:
+
+```sh
+octant plugin create meeting-notes
+```
+
+This makes a `meeting-notes` folder in the current folder with:
+
+- `plugin.json`: the plugin's name, version, and one-line description.
+- `skills/meeting-notes/SKILL.md`: a skill. The `description` line tells an
+  agent when to use it; the text below the `---` line is what the agent follows.
+  Add more skills as more folders under `skills/`. Each folder's name must match
+  the `name` in its `SKILL.md`.
+- `README.md`: these steps.
+
+To give agents a hosted MCP server's tools as well, pass its address:
+
+```sh
+octant plugin create crm --mcp-url https://mcp.example.com/mcp
+```
+
+That adds an `mcp.json` naming the server. The address must use `https`, or
+`http` to this computer, and cannot hold a user name, a password, or a `#` fragment; Octant asks
+you to sign in when it first connects. The name uses lowercase letters, digits,
+and single hyphens, up to 64 characters. `create` never writes into a folder
+that already exists.
+
+When you have edited the files, check the folder:
+
+```sh
+octant plugin check meeting-notes
+```
+
+`check` reads the folder the way Octant does when you import it and lists the
+skills and MCP servers it found, or the problems to fix first. It checks the
+Agent Plugins layout that `create` writes; a Claude Code or Codex plugin folder
+still imports, but `check` does not read those layouts. A folder that also holds
+`octant-language-server.json`, `octant-provider-driver.json`, or
+`octant-debug-adapter.json` is read by Octant as that kind of package instead,
+so `check` refuses it.
+It leaves out a `.git` folder and links inside the folder, as the import does,
+and refuses a link that points outside it. Both commands work only on files on
+this computer: they need no running Octant, reach no network, and install
+nothing.
+
+Then add it in Settings › Skills & Extensions › Marketplace › **Import local
+Agent Plugin…**. It arrives untrusted and switched off like any other plugin;
+review it, trust it, and switch it on there. To share it, publish the folder as
+an npm package and others can [install it from npm](#install-from-npm).
+
 ### Starting an MCP server
 
 On macOS an MCP server runs in a sandbox that cannot follow a `#!` line to its

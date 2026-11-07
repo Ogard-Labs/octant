@@ -1,30 +1,31 @@
 ---
-description: How to share a Canvas with a public link — what you turn on, what leaves your computer, who can open it, and how to update, expire, or revoke it.
+description: How to share a Canvas with a public link — the service you run or choose, what you turn on, what leaves your computer, who can open it, and how to update, expire, or revoke it.
 ---
 
 # Share a Canvas with a public link
 
 A public link lets anyone you give the URL open a read-only copy of a Canvas in
-a browser. The copy is hosted by a share service, `https://canvas.octant.sh` by
-default. Read this before you turn it on: the service can read what you
-publish.
+a browser. The copy is hosted by a share service **you run or choose** — Octant
+ships no hosted service of its own. Read this before you turn it on: the
+service can read what you publish.
 
-Public links are off until you turn them on. Turning them on sends nothing. The
-first request is your first publish.
+Public links are off until you turn them on, and no service address is set until
+you enter one. Turning them on sends nothing. The first request is your first
+publish.
 
 ## Turn Public links on
 
 1. Open **Settings › Permissions**.
-2. Turn on **Public links**.
+2. Set **Service address** to the public origin of your share service (see
+   [Run your own service](#run-your-own-service) below), for example
+   `https://share.example.com`.
+3. Turn on **Public links**.
 
-The row names the service it will use. The default is
-`https://canvas.octant.sh`. To use your own, enter its URL instead. A service
-URL starts with `https://`. A plain `http://` address is accepted only for this
-computer (`127.0.0.1`, `::1`, or `localhost`), so you can try a self-hosted
-service locally.
-
-While the switch is off, the **Public link** destination is not offered and
-Octant makes no request to the service.
+A service address starts with `https://`. A plain `http://` address is accepted
+only for this computer (`127.0.0.1`, `::1`, or `localhost`), so you can try a
+self-hosted service locally. While the switch is off, or no address is set, the
+**Public link** destination is not offered and Octant makes no request to any
+service.
 
 ## Publish a Canvas
 
@@ -78,15 +79,14 @@ Add a password if you want a second gate.
 
 The service can read the published Canvas. That is how it draws the page and
 the preview. Treat a public link like any other file you host with a third
-party.
+party — and remember you are that party's customer, or its operator.
 
 Link pages ask search engines not to index them, send no referrer, and load
 nothing from other sites: no scripts, fonts, analytics, or trackers.
 
 A design that runs script does not load until the viewer clicks **Run**. Static
-designs draw without it. Design frames are served from a separate address
-(`canvas-usercontent.octant.sh`), so design markup never runs on the page
-itself.
+designs draw without it. Design frames are served from the service's separate
+user-content origin, so design markup never runs on the page origin itself.
 
 ### Link previews
 
@@ -147,13 +147,14 @@ Revoke your links first if you want the content gone.
 
 ## Privacy at the service
 
-The service stores the Canvas you published, and its metadata: when it was
-created and updated, when it expires, its size, the password hash, and a count
-of views. The view count is a single total for the link.
+The reference service (below) stores the Canvas you published, and its
+metadata: when it was created and updated, when it expires, its size, the
+password hash, and a count of views. The view count is a single total for the
+link.
 
-The service writes no IP address, browser, or referrer to any log. It counts
-requests per IP address in memory only, to limit abuse, and keeps nothing after
-the short rate-limit window.
+It writes no IP address, browser, or referrer to any log. It counts requests
+per IP address in memory only, to limit abuse, and keeps nothing after the
+short rate-limit window.
 
 When you revoke a link, or it expires, the content is deleted. A small record
 with only the link's id and the time stays for 90 days so the link answers
@@ -165,29 +166,78 @@ Every link page has a report form. A report names a reason from a list and can
 add a note of up to 1,000 characters. It is stored without the reporter's
 address. The operator can take a link down. A removed link answers "removed".
 
-The abuse contact shown on link pages is `hello@octant.sh` (Ogard Labs,
-organisation number 996 198 510, Stavanger, Norway). The service is hosted in
-Norway (EEA) on Ogard Labs' own infrastructure (Gigahost AS), with encrypted
-offsite backups in Finland (Hetzner, EU).
+The abuse contact shown on link pages is whatever the operator sets with
+`OCTANT_SHARE_ABUSE_CONTACT` — when you run the service, that is you.
 
 ## Run your own service
 
-::: info Not available yet
-The share service's source is not public yet, so you cannot run your own copy
-today. These steps apply once it is published.
-:::
+The share service is a small Bun app in this repository at
+[`apps/share`](https://github.com/Ogard-Labs/octant/tree/main/apps/share), with
+a Dockerfile for one-command deploys. See its
+[README](https://github.com/Ogard-Labs/octant/blob/main/apps/share/README.md)
+for the full configuration reference.
 
-You do not have to use `canvas.octant.sh`. The share service is a small Bun app.
-Run it on your own server, put TLS in front of it, and enter its URL in **Settings › Permissions › Public links**. Your links
-then live wherever you run it.
+Quick start from a checkout of this repository:
 
-The service uses two web addresses: one for pages and one for design frames. It
-refuses to start if they are the same.
+```sh
+bun install
+OCTANT_SHARE_DATA_DIR=/var/lib/octant-share \
+OCTANT_SHARE_PUBLIC_ORIGIN=https://share.example.com \
+OCTANT_SHARE_USERCONTENT_ORIGIN=https://usercontent.example.com \
+OCTANT_SHARE_ABUSE_CONTACT=you@example.com \
+bun apps/share/src/main.ts
+```
 
-To take a link down, set `OCTANT_SHARE_OPERATOR_TOKEN` (at least 32
-characters) when you start the service. Then, on the same server, with the same
-token in your shell, run `bun run takedown <id>` in its `apps/share` folder. The command
-asks the running service to remove the link, so the service must be running.
+Or with Docker, from the repository root:
+
+```sh
+docker build -f apps/share/Dockerfile -t octant-share .
+docker run --rm -p 4100:4100 -p 4101:4101 \
+  -e OCTANT_SHARE_DATA_DIR=/data \
+  -e OCTANT_SHARE_PUBLIC_ORIGIN=https://share.example.com \
+  -e OCTANT_SHARE_USERCONTENT_ORIGIN=https://usercontent.example.com \
+  -v octant-share-data:/data octant-share
+```
+
+Any host you control works: your own VPS, a home server behind a reverse
+proxy, or any Docker-friendly platform. Put TLS in front of the two ports. The
+service uses two web addresses — one for pages and API, one for design frames —
+and refuses to start if they are the same. Then enter the public origin in
+**Settings › Permissions › Public links**.
+
+To take a link down as the operator, set `OCTANT_SHARE_OPERATOR_TOKEN` (at
+least 32 characters) when you start the service. Then, on the same server, with
+the same token in your shell:
+
+```sh
+bun apps/share/src/takedown.ts <share-id>
+```
+
+The command asks the running service to remove the link, so the service must be
+running.
+
+## Use a different service
+
+You are not limited to the reference app. **Settings › Permissions › Public
+links** accepts any `https://` address, so a third-party service can serve your
+links if it implements the published wire contract in
+[`@octant/contracts/canvas-public-share`](https://github.com/Ogard-Labs/octant/blob/main/packages/contracts/src/canvasPublicShare.ts):
+`POST /api/v1/shares`, `PUT|DELETE|GET /api/v1/shares/<id>`, and
+`POST /api/v1/shares/<id>/reports`, plus viewer pages on a second origin. A
+plain file host or pastebin does not qualify — it must render the Canvas
+document. Whichever service you choose, it can read everything you publish to
+it, and its own terms and privacy notice apply.
+
+## Share as a file instead
+
+If you do not want to run or trust a link service at all, export the Canvas
+without one — see [Export a Canvas or artifact](/guide/export):
+
+- **sharehtml.org page** — the Canvas as one rendered HTML page at an unlisted
+  link, no account needed on your side;
+- **GitHub Gist** — Markdown, unlisted by default;
+- **a folder** — including one your sync client watches, so the file lands in
+  Google Drive, Dropbox, or another file-share service you already use.
 
 ## Related
 

@@ -2,9 +2,11 @@
 
 This topic specification owns public share links for a Canvas: the Settings
 switch, publishing through the export approval card, what leaves the host,
-the link's terms, the host's record of each link, and the public Canvas share
-service that stores and serves them, which lives in the `octant-webapp`
-repository. Architecture owns the
+the link's terms, the host's record of each link, and the reference Canvas
+share service that stores and serves them, which lives at `apps/share` in this
+repository and is self-hosted: every user runs it on their own host (or points
+Octant at another service they choose), and Ogard Labs operates no instance.
+Architecture owns the
 boundary: the external call it adds
 ([Overview and principles](../architecture.md#overview-and-principles)), what
 a share carries
@@ -16,20 +18,24 @@ Authenticated snapshots and exports to a folder or a gist stay as
 
 Approved by the maintainer on 2026-10-20: the service can read what it is
 sent, so it can draw the page and link previews. The host side, the wire
-contract, and the service are implemented; deploying the service, its DNS,
-and TLS are not part of this change.
+contract, and the reference service (`apps/share`) are implemented. On
+2026-11-07 the maintainer decided the service is self-hosted only: no
+Ogard-operated instance, no default service address, and the reference app
+moved into this repository for one-command deploys (see
+[Current Release Boundary](../architecture.md#current-release-boundary)).
 
 ## Off until the person turns it on
 
-- Settings › Permissions › **Public links** is off by default. Its row names the
-  service URL, `https://canvas.octant.sh` unless the person enters their own.
-  A service URL is `https:`; `http:` is accepted only for a loopback address
-  (`127.0.0.1`, `::1`, `localhost`) so a self-hosted service can be tried on
-  one computer.
-- While the switch is off, the Public link destination is not offered, no
-  request reaches the service, and nothing is prepared for it. Turning the
-  switch on sends nothing either: the first request is the person's first
-  publish.
+- Settings › Permissions › **Public links** is off by default, and no service
+  address is set by default: Octant operates no share service, so the person
+  enters the address of one they run or trust (the reference app at
+  `apps/share`). A service address is `https:`; `http:` is accepted only for a
+  loopback address (`127.0.0.1`, `::1`, `localhost`) so a self-hosted service
+  can be tried on one computer.
+- While the switch is off, or no address is set, the Public link destination is
+  not offered, no request reaches any service, and nothing is prepared for it.
+  Turning the switch on sends nothing either: the first request is the person's
+  first publish.
 - Turning the switch off does not delete links that exist. They live at the
   service until they expire or are revoked, so the Canvas still lists them and
   **Revoke** still works: withdrawing a link only narrows access. **Update**
@@ -156,20 +162,19 @@ only from a local window against the version the window read.
 
 ## The service
 
-The service is a Bun app in the `octant-webapp` repository, beside Octant's
-other web services, because it is deployed with the website rather than
-shipped with the desktop app. It reads the share document with this
-repository's contracts and draws blocks with its domain layout code, bundled
-from one pinned commit of this repository (`packages/share-kit` there, with the
-commit and versions in its `source.json`); it has no other dependency. A host
-that publishes a share format or wire version the running service does not
-know is refused, and nothing is stored, so a change to either version here
-needs the kit synced and the service deployed before the desktop release that
-publishes it. It serves two origins from two listeners: the public origin
-(`https://canvas.octant.sh`) for the API and viewer pages, and a separate
-user-content origin (`https://canvas-usercontent.octant.sh`) for design frames.
-It refuses to start when the two origins are the same. TLS is terminated in
-front of it.
+The reference service is a Bun app at `apps/share` in this repository,
+deployable by anyone with `bun apps/share/src/main.ts` or the Dockerfile beside
+it (see its README). It reads the share document from this repository's
+`@octant/contracts` and draws blocks with the `@octant/domain` layout code
+through `apps/share/src/shareKit.ts`, which names exactly the modules the
+service uses — in-repo, so there is no pinned-bundle sync to redo. A host that
+publishes a share format or wire version the running service does not know is
+refused, and nothing is stored. The operator serves two origins from two
+listeners — a public origin for the API and viewer pages, and a separate
+user-content origin for design frames — configured with
+`OCTANT_SHARE_PUBLIC_ORIGIN` and `OCTANT_SHARE_USERCONTENT_ORIGIN`; the service
+refuses to start when the two are the same. TLS is terminated in front of it by
+the operator's reverse proxy.
 
 ### API (version 1)
 
@@ -278,8 +283,8 @@ keeps Update unambiguous; a second link for the same Canvas is a revoke away.
   exports, or publishes.
 - `packages/host-runtime` `credentialBroker.test.ts`: the owner secrets'
   namespace is out of reach of the provider and sync key routes.
-- The service's tests (in `octant-webapp`): ids are 128-bit, owner secret, expiry, revocation (410),
+- The service's tests (in `apps/share`): ids are 128-bit, owner secret, expiry, revocation (410),
   and password are enforced, viewer headers carry `noindex` and the policy,
   and frames are drawn from the user-content origin.
-- The service's local end-to-end smoke starts it on `127.0.0.1`, publishes,
-  views, revokes, and reads 410.
+- The service's local end-to-end smoke (`bun apps/share/src/shareService.smoke.ts`)
+  starts it on `127.0.0.1`, publishes, views, revokes, and reads 410.

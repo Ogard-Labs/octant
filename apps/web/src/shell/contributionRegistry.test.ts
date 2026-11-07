@@ -5,10 +5,12 @@ import {
   isPreviewViewerAvailable,
   isSettingsSectionAvailable,
   resolveAppearancePresetContributions,
+  isThreadBoardAvailable,
   resolveBoardViewContributions,
   resolvePreviewViewerContributions,
   resolveSettingsSectionContributions,
   resolveSidebarContributions,
+  resolveSidebarDestinationContribution,
   resolveThreadPaneContributions,
   resolveWorkspaceTabContributions,
   type FirstPartyPluginComponentId,
@@ -53,6 +55,15 @@ describe("resolveSidebarContributions", () => {
     expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
   });
 
+  it("keeps pull-requests when the github plugin is not effective, because it is Code delivery plumbing", () => {
+    const effective = effectiveMap({ "github-integration": false });
+    expect(resolveSidebarContributions("code", effective).has("pull-requests")).toBe(true);
+    expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
+    expect(
+      resolveSidebarDestinationContribution("pull-requests", "code", effective)?.destinationId,
+    ).toBe("pull-requests");
+  });
+
   it("includes github-issues only in code mode when github is effective", () => {
     const effective = effectiveMap({ "github-integration": true });
     expect(resolveSidebarContributions("code", effective).has("github-issues")).toBe(true);
@@ -80,8 +91,8 @@ describe("resolveSidebarContributions", () => {
     ).toBe(false);
   });
 
-  it("treats an unlisted component as not effective", () => {
-    expect(resolveSidebarContributions("code", effectiveMap({})).size).toBe(0);
+  it("treats an unlisted component as not effective, keeping only host-owned destinations", () => {
+    expect([...resolveSidebarContributions("code", effectiveMap({}))]).toEqual(["pull-requests"]);
   });
 });
 
@@ -147,6 +158,21 @@ describe("resolveBoardViewContributions", () => {
 
   it("omits the thread-status view when the board plugin is not effective", () => {
     expect(resolveBoardViewContributions("code", effectiveMap({ board: false })).size).toBe(0);
+  });
+});
+
+describe("isThreadBoardAvailable", () => {
+  it("is on for work and code while the board plugin is effective, and never for chat", () => {
+    const effective = effectiveMap({ board: true });
+    expect(isThreadBoardAvailable("work", effective)).toBe(true);
+    expect(isThreadBoardAvailable("code", effective)).toBe(true);
+    expect(isThreadBoardAvailable("chat", effective)).toBe(false);
+  });
+
+  it("is off in every mode when the board plugin is not effective", () => {
+    const effective = effectiveMap({ board: false });
+    expect(isThreadBoardAvailable("work", effective)).toBe(false);
+    expect(isThreadBoardAvailable("code", effective)).toBe(false);
   });
 });
 

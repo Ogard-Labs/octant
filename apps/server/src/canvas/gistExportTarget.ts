@@ -44,6 +44,12 @@ export interface GistExportTargetDependencies {
   /** Whether GitHub is connected, and as whom. Read while the offer is built. */
   readonly availability: () => GistExportAvailability;
   readonly gists: GistCreationPort;
+  /**
+   * Whether the bundled GitHub plugin is on. With it off the destination is
+   * not bound at all: it is not offered, and an export to it is refused as an
+   * unknown destination. Absent means on.
+   */
+  readonly isEffective?: () => boolean;
 }
 
 function refused(code: CanvasExportRefusal["code"], message: string): CanvasExportDelivery {

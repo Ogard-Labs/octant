@@ -1171,6 +1171,32 @@ describe("canvas export service", () => {
     connection.close();
   });
 
+  it("offers no gist destination and refuses to prepare one while the GitHub plugin is off", async () => {
+    const { registration, requests } = gistRegistration({ kind: "ready", account: "octocat" });
+    const gist = registration.gist;
+    if (gist === undefined) throw new Error("the registration carries a gist destination");
+    const off: CanvasExportTargetRegistration = {
+      ...registration,
+      gist: { ...gist, isEffective: () => false },
+    };
+    const on: CanvasExportTargetRegistration = {
+      ...registration,
+      gist: { ...gist, isEffective: () => true },
+    };
+    const ids = (r: CanvasExportTargetRegistration) =>
+      canvasExportTargetBindings(r, canvasId).map(
+        (binding) => binding.target.contribution.targetId,
+      );
+    expect(ids(off)).not.toContain(GIST_EXPORT_TARGET_ID);
+    expect(ids(on)).toContain(GIST_EXPORT_TARGET_ID);
+
+    const { service, connection } = harness(() => canvasExportTargetBindings(off, canvasId));
+    const prepared = await service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    expect(prepared.kind).toBe("refused");
+    expect(requests).toHaveLength(0);
+    connection.close();
+  });
+
   it("posts a public gist when the person chose public on the card, and journals the URL", async () => {
     const { registration, requests } = gistRegistration({ kind: "ready", account: "octocat" });
     const { service, eventStore, connection } = harness(() =>
