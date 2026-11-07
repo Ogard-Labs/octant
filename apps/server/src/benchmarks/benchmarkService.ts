@@ -1,0 +1,239 @@
+import {
+  MAX_BENCHMARK_CELLS,
+  decodeBenchmarkCellId,
+  decodeBenchmarkRun,
+  decodeBenchmarkSuite,
+  decodeUtcTimestamp,
+  type BenchmarkCellMetrics,
+  type BenchmarkRun,
+  type BenchmarkRunCancelRequest,
+  type BenchmarkRunPurgeRequest,
+  type BenchmarkRunReadRequest,
+  type BenchmarkRunReadResponse,
+  type BenchmarkRunsListRequest,
+  type BenchmarkRunsListResponse,
+  type BenchmarkRunStartRequest,
+  type BenchmarkSuite,
+  type BenchmarkSuiteDeleteRequest,
+  type BenchmarkSuiteSaveRequest,
+  type TurnMetricsRecord,
+  type WindowId,
+} from "@octant/contracts";
+import {
+  benchmarkCellCount,
+  benchmarkCellMetrics,
+  benchmarkLeaderboard,
+  planBenchmarkCells,
+  summarizeBenchmarkRun,
+} from "@octant/domain";
+import type { BenchmarkEventStore } from "./benchmarkEventStore";
+import type { BenchmarkProjection } from "./benchmarkProjection";
+
+/** A refusal is a value the route answers with its own status. */
+export type BenchmarkRefusal = {
+  readonly status: "refused";
+  readonly reason: "not-found" | "conflict" | "invalid" | "unavailable";
+  readonly message: string;
+};
+export type BenchmarkOutcome<T> = { readonly status: "ok"; readonly value: T } | BenchmarkRefusal;
+
+export interface BenchmarkServiceOptions {
+  readonly projection: Pick<BenchmarkProjection, "suites" | "suite" | "runs" | "run">;
+  readonly store: Pick<
+    BenchmarkEventStore,
+    "suiteSaved" | "suiteDeleted" | "runStarted" | "runPurged"
+  >;
+  readonly turnMetrics: {
+    readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
+  };
+  readonly runner: {
+    readonly cancel: (runId: string) => Promise<BenchmarkRun | undefined>;
+    readonly kick: () => void;
+  };
+  /** Whether the provider instance exists, is enabled, and offers the model. */
+  readonly contenderAvailable: (providerInstanceId: string, modelId: string) => boolean;
+  /** Creates the Benchmarks Chat Project once; refuses when it cannot be used. */
+  readonly ensureProject: (
+    windowId: WindowId,
+  ) => Promise<
+    { readonly status: "ready" } | { readonly status: "refused"; readonly message: string }
+  >;
+  /** Purges one cell thread through the ordinary thread purge path. */
+  readonly purgeThread: (threadId: string) => Promise<"purged" | "absent" | "failed">;
+  readonly clock: () => string;
+  readonly uuid: () => string;
+}
+
+/**
+ * The commands behind the benchmark routes. Authority is the route's: only a
+ * local window reaches a command that changes anything. What lives here is the
+ * validation every caller shares, applied before anything is journaled.
+ */
+export class BenchmarkService {
+  readonly #options: BenchmarkServiceOptions;
+
+  constructor(options: BenchmarkServiceOptions) {
+    this.#options = options;
+  }
+
+  listSuites(): ReadonlyArray<BenchmarkSuite> {
+    return this.#options.projection.suites();
+  }
+
+  saveSuite(request: BenchmarkSuiteSaveRequest): BenchmarkOutcome<BenchmarkSuite> {
+    const { projection, store, clock } = this.#options;
+    const existing = projection.suite(String(request.suiteId));
+    if (existing === undefined && request.expectedRevision !== undefined) {
+      return refused("not-found", "That suite no longer exists.");
+    }
+    if (existing !== undefined && request.expectedRevision !== existing.revision) {
+      return refused(
+        "conflict",
+        "The suite changed since it was opened. Reload it and edit again.",
+      );
+    }
+    const now = decodeUtcTimestamp(clock());
+    const suite = decodeBenchmarkSuite({
+      suiteId: request.suiteId,
+      revision: (existing?.revision ?? 0) + 1,
+      name: request.name,
+      ...(request.description === undefined ? {} : { description: request.description }),
+      cases: request.cases,
+      ...(request.judge === undefined ? {} : { judge: request.judge }),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+    store.suiteSaved({ suite });
+    return ok(suite);
+  }
+
+  deleteSuite(
+    request: BenchmarkSuiteDeleteRequest,
+  ): BenchmarkOutcome<{ readonly suiteId: BenchmarkSuite["suiteId"] }> {
+    if (this.#options.projection.suite(String(request.suiteId)) === undefined) {
+      return refused("not-found", "That suite does not exist.");
+    }
+    this.#options.store.suiteDeleted({ suiteId: request.suiteId });
+    return ok({ suiteId: request.suiteId });
+  }
+
+  listRuns(request: BenchmarkRunsListRequest): BenchmarkRunsListResponse {
+    return {
+      runs: this.#options.projection
+        .runs()
+        .filter((run) => request.suiteId === undefined || run.suiteId === request.suiteId)
+        .map(summarizeBenchmarkRun),
+    };
+  }
+
+  readRun(request: BenchmarkRunReadRequest): BenchmarkOutcome<BenchmarkRunReadResponse> {
+    const run = this.#options.projection.run(String(request.runId));
+    if (run === undefined) return refused("not-found", "That run does not exist.");
+    const metricsByThread = new Map<string, BenchmarkCellMetrics>();
+    const cellMetrics: Array<{
+      cellId: BenchmarkRun["cells"][number]["cellId"];
+      metrics: BenchmarkCellMetrics;
+    }> = [];
+    for (const cell of run.cells) {
+      if (cell.threadId === undefined) continue;
+      const record = this.#options.turnMetrics.forThread(cell.threadId).at(-1);
+      if (record === undefined) continue;
+      const metrics = benchmarkCellMetrics(record);
+      metricsByThread.set(cell.threadId, metrics);
+      cellMetrics.push({ cellId: cell.cellId, metrics });
+    }
+    return ok({ run, leaderboard: benchmarkLeaderboard(run, metricsByThread), cellMetrics });
+  }
+
+  async startRun(
+    windowId: WindowId,
+    request: BenchmarkRunStartRequest,
+  ): Promise<BenchmarkOutcome<BenchmarkRun>> {
+    const { projection, store, clock, uuid } = this.#options;
+    const existing = projection.run(String(request.runId));
+    if (existing !== undefined) {
+      return existing.suiteId === request.suiteId
+        ? ok(existing)
+        : refused("conflict", "That run id belongs to another suite.");
+    }
+    const suite = projection.suite(String(request.suiteId));
+    if (suite === undefined) return refused("not-found", "That suite does not exist.");
+    const cells = benchmarkCellCount(
+      suite.cases.length,
+      request.contenders.length,
+      request.repetitions,
+    );
+    if (cells > MAX_BENCHMARK_CELLS) {
+      return refused(
+        "invalid",
+        `This run would make ${cells} cells; a run holds at most ${MAX_BENCHMARK_CELLS}.`,
+      );
+    }
+    const unavailable = request.contenders.findIndex(
+      (contender) =>
+        !this.#options.contenderAvailable(
+          String(contender.providerInstanceId),
+          String(contender.modelId),
+        ),
+    );
+    if (unavailable >= 0) {
+      return refused(
+        "invalid",
+        `Contender ${unavailable + 1} is not an enabled provider model on this host.`,
+      );
+    }
+    const project = await this.#options.ensureProject(windowId);
+    if (project.status === "refused") return refused("unavailable", project.message);
+    const run = decodeBenchmarkRun({
+      runId: request.runId,
+      suiteId: suite.suiteId,
+      suiteRevision: suite.revision,
+      suiteName: suite.name,
+      cases: suite.cases,
+      ...(suite.judge === undefined ? {} : { judge: suite.judge }),
+      contenders: request.contenders,
+      repetitions: request.repetitions,
+      budget: request.budget,
+      ...(request.executionLevel === undefined ? {} : { executionLevel: request.executionLevel }),
+      status: "running",
+      startedAt: decodeUtcTimestamp(clock()),
+      cells: planBenchmarkCells(suite.cases, request.contenders, request.repetitions, () =>
+        decodeBenchmarkCellId(uuid()),
+      ),
+    });
+    store.runStarted({ run });
+    this.#options.runner.kick();
+    return ok(run);
+  }
+
+  async cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkOutcome<BenchmarkRun>> {
+    const run = await this.#options.runner.cancel(String(request.runId));
+    return run === undefined ? refused("not-found", "That run does not exist.") : ok(run);
+  }
+
+  async purgeRun(
+    request: BenchmarkRunPurgeRequest,
+  ): Promise<BenchmarkOutcome<{ readonly runId: BenchmarkRun["runId"] }>> {
+    const run = this.#options.projection.run(String(request.runId));
+    if (run === undefined) return refused("not-found", "That run does not exist.");
+    if (run.status === "running") {
+      return refused("conflict", "Cancel the run before purging it.");
+    }
+    for (const cell of run.cells) {
+      if (cell.threadId === undefined) continue;
+      if ((await this.#options.purgeThread(cell.threadId)) === "failed") {
+        return refused("unavailable", "A cell thread could not be purged, so the run was kept.");
+      }
+    }
+    this.#options.store.runPurged({ runId: run.runId });
+    return ok({ runId: run.runId });
+  }
+}
+
+function ok<T>(value: T): BenchmarkOutcome<T> {
+  return { status: "ok", value };
+}
+
+function refused(reason: BenchmarkRefusal["reason"], message: string): BenchmarkRefusal {
+  return { status: "refused", reason, message };
+}

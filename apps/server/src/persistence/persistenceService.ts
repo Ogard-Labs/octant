@@ -157,6 +157,7 @@ import type { AutomationProjection } from "../automation/automationProjection";
 import type { CanvasProjection } from "../canvas/canvasProjection";
 import type { GithubCloneProjection } from "./githubCloneProjection";
 import type { ImageJobProjection } from "../image/imageJobProjection";
+import type { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import type { DesktopLeaseProjection } from "../computerUse/desktopLeaseProjection";
 import type { ReplicaMembershipProjection } from "../replica/replicaMembershipProjection";
 import type { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
@@ -183,6 +184,7 @@ export interface PersistenceService {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
@@ -450,6 +452,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       automationProjection: runtime.automationProjection,
       githubCloneProjection: runtime.githubCloneProjection,
       imageJobProjection: runtime.imageJobProjection,
+      benchmarkProjection: runtime.benchmarkProjection,
       desktopLeaseProjection: runtime.desktopLeaseProjection,
       replicaMembershipProjection: runtime.replicaMembershipProjection,
       replicaArtifactProjection: runtime.replicaArtifactProjection,

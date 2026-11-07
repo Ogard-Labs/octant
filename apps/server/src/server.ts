@@ -23,6 +23,7 @@ import {
   decodeProjectId,
   decodeWindowId,
   decodeChatThreadId,
+  decodeThreadRetentionThreadId,
   decodeWorkTurnRequestId,
   decodeCodeThreadId,
   decodeCodeOperationId,
@@ -101,6 +102,7 @@ import { wireWorkFiles } from "./wiring/workFiles";
 import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { wireBenchmarks, type BenchmarkThreadPurgeSlot } from "./wiring/benchmarks";
 import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
@@ -1181,6 +1183,18 @@ export function startOctantServer(
       workThreadServiceWithWorkflows,
       workTurnService,
     });
+    const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
+    const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
+      chatService,
+      persistence,
+      projectService,
+      threadPurge: benchmarkThreadPurge,
+      turnMetrics,
+      windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
     yield* wireThreadNotifications({
       chatHiddenThreadIds,
       hasPushStanding,
@@ -1492,6 +1506,7 @@ export function startOctantServer(
       artifactMirrorRoutes,
       automationNotificationRoutes,
       automationRoutes,
+      benchmarkRoutes,
       browserAutomationRoutes,
       canvasRoutes,
       chatRoutes,
@@ -1594,6 +1609,7 @@ export function startOctantServer(
       providerCredentialRoutes,
       secretStoresRoutes,
       remoteHost,
+      threadRetention,
     } = wireRemote({
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
@@ -1652,6 +1668,23 @@ export function startOctantServer(
       workTurnService,
       agentRunAdmission,
     });
+    benchmarkThreadPurge.purge = async (threadId) => {
+      const outcome = await threadRetention.purge(
+        {
+          scope: {
+            kind: "thread",
+            mode: "chat",
+            threadId: decodeThreadRetentionThreadId(threadId),
+          },
+          confirm: true,
+        },
+        "local-window",
+      );
+      if ("reason" in outcome) {
+        return outcome.reason === "unknown-thread" ? "absent" : "failed";
+      }
+      return "purged";
+    };
 
     yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
@@ -1660,6 +1693,7 @@ export function startOctantServer(
     // runtime alive on its idle lease with nothing left to close it.
     let warmingProviders: Promise<void> = Promise.resolve();
     let stopArtifactSync: () => void = () => undefined;
+    let stopBenchmarkRunner: () => void = () => undefined;
     let stopPublicShareSweep: () => void = () => undefined;
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
@@ -1771,6 +1805,7 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          stopBenchmarkRunner = benchmarkRunner.start();
           personMemorySweep.start();
           // The memory guard reads the last run's state before it overwrites
           // it, so the next-start notice survives a crash.
@@ -1867,6 +1902,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          stopBenchmarkRunner();
           completedThreadArchiveSweep.stop();
           personMemorySweep.stop();
           personMemory.close();
