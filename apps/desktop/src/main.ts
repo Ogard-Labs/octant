@@ -1311,6 +1311,7 @@ let hostStatusPoll: ReturnType<typeof setInterval> | undefined;
 const pendingCodeDeepLinks: CodeDeepLink[] = [];
 let quitPrepared = false;
 let quitAccepted = false;
+let browserQuitCleanup: Promise<"closed" | "unconfirmed"> | undefined;
 let preparingQuit = false;
 // The active-work confirmation only applies to quits the user starts inside
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
@@ -4401,8 +4402,16 @@ async function quitHostAfterLastClient(
   return quitAccepted ? "accepted" : "cancelled";
 }
 
+function closeBrowserAdmissionForQuit(): void {
+  browserQuitCleanup ??= browserSurfaceHost?.persistentOwner?.close();
+  // The flush can outlast native cleanup. Join this same result below without
+  // leaving a rejected cleanup unobserved while window state is being saved.
+  void browserQuitCleanup?.catch(() => undefined);
+}
+
 async function stopHostForQuit(): Promise<void> {
-  const browserStopped = browserSurfaceHost?.persistentOwner?.close();
+  closeBrowserAdmissionForQuit();
+  const browserStopped = browserQuitCleanup;
   const prototypesStopped = canvasPrototypeSurface?.stop();
   const hostStopped = (async () => {
     await shutdownSecondaryProjectWindows();
@@ -4488,6 +4497,7 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
     forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
+    closeAdmission: closeBrowserAdmissionForQuit,
     flushWindowState,
     stopHost: stopHostForQuit,
     log: logQuitProblem,
@@ -4505,6 +4515,7 @@ async function handleFatalStartup(error: unknown): Promise<void> {
     forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
+    closeAdmission: closeBrowserAdmissionForQuit,
     flushWindowState: async () => undefined,
     stopHost: stopHostForQuit,
     log: logQuitProblem,

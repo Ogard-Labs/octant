@@ -10,6 +10,7 @@ import {
 } from "../../../desktop/src/browserSurfaceHost";
 import { startBrowserRuntimeBroker } from "../../../desktop/src/browserRuntimeBroker";
 import { DesktopBrowserRuntime } from "./desktopBrowserRuntime";
+import { shutDownForQuit } from "../../../desktop/src/quitShutdown";
 
 /** Native-view fixture only: the production host, HTTP broker and adapter are real. */
 function fixtureView(): BrowserSurfaceViewPort {
@@ -141,7 +142,39 @@ it("keeps a native execution lease after its review window closes and invalidate
         )
       ).status,
     ).toBe("created");
-    expect(await host.persistentOwner.close()).toBe("closed");
+    const flush = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let nativeClose: Promise<"closed" | "unconfirmed"> | undefined;
+    const quitting = shutDownForQuit({
+      closeAdmission: () => {
+        nativeClose = host.persistentOwner.close();
+      },
+      flushWindowState: () => {
+        entered.resolve();
+        return flush.promise;
+      },
+      stopHost: async () => {
+        expect(await nativeClose).toBe("closed");
+      },
+      log: vi.fn(),
+    });
+    try {
+      await entered.promise;
+      expect(
+        await runtime.persistentOwner.createContext(
+          decodeBrowserContextId("60000000-0000-4000-8000-000000000002"),
+          policy,
+          new AbortController().signal,
+          { ...binding, ownerId: replacement.ownerId, executionId: "new-after-accepted-quit" },
+        ),
+      ).toEqual({ status: "unavailable" });
+      await expect(
+        runtime.act(contextId, { kind: "observe-diagnostics" }, new AbortController().signal),
+      ).rejects.toThrow();
+    } finally {
+      flush.resolve();
+      await quitting;
+    }
     expect(views[1]?.webContents.close).toHaveBeenCalledOnce();
     expect(await runtime.persistentOwner.configure(true)).toEqual({ status: "unavailable" });
   } finally {

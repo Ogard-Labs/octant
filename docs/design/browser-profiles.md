@@ -433,7 +433,9 @@ invalidates background-bound permissions. A backend or broker restart rotates
 the native generation and restores no workload authority, even if the same
 profile store survives; a confirmed replacement generation invalidates old
 permissions. Explicit accepted Quit closes all execution views and prevents
-re-enabling that stopped native owner. Lost replies, late creates and failed
+re-enabling that stopped native owner. Native admission retires synchronously
+before the accepted quit awaits window-state flushing; later host shutdown joins
+the same bounded cleanup. Lost replies, late creates and failed
 cleanup retain their own reservations until cleanup is confirmed; they never
 close a foreign context or report uncertain cleanup as complete. An already
 dispatched external action may have happened and is never automatically replayed.
