@@ -1136,7 +1136,9 @@ export function startOctantServer(
       contextRoutes,
       idleCompactions,
       windowCanOpenThread,
+      flowRuns,
     } = wireContext({
+      onWindowRevoked,
       browserCredentialUseService,
       agentMessageProjection,
       browserModelBindings,
@@ -2105,6 +2107,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            flowRuns.close();
             projectBrowserService?.close();
             await browserAutomationService?.close();
           } catch (error) {
