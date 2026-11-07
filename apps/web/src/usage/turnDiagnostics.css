@@ -82,3 +82,16 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.turn-diagnostics__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* Many hourly bars outgrow a phone screen; they scroll inside the chart. */
+.turn-diagnostics__trend {
+  min-width: 0;
+  overflow-x: auto;
+}

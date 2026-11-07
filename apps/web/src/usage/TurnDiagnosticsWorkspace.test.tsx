@@ -186,6 +186,42 @@ describe("the Diagnostics page", () => {
   });
 });
 
+describe("the Diagnostics report copy", () => {
+  it("copies the whole report as JSON, and a newer reading replaces the note", async () => {
+    const copyText = vi.fn(async () => undefined);
+    const client = { diagnostics: vi.fn(async () => troubledReport) };
+    render(
+      <TurnDiagnosticsWorkspace
+        client={client}
+        copyText={copyText}
+        now={() => now}
+        timeZone="UTC"
+      />,
+    );
+    await screen.findByRole("region", { name: "Summary" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy diagnostics report as JSON" }));
+    expect(JSON.parse(copyText.mock.calls[0]?.[0] ?? "{}")).toMatchObject({ turns: 2 });
+    expect(screen.getByText("Report copied as JSON.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh diagnostics" }));
+    await waitFor(() => expect(screen.queryByText("Report copied as JSON.")).toBeNull());
+  });
+
+  it("says a provider that never reported its cache has no hit rate rather than 0%", async () => {
+    const client = {
+      diagnostics: vi.fn(async () =>
+        report([turn({ usage: { inputTokens: 5_000, outputTokens: 10 } })]),
+      ),
+    };
+    render(<TurnDiagnosticsWorkspace client={client} now={() => now} timeZone="UTC" />);
+
+    const models = await screen.findByRole("table", { name: "Benchmarks by model" });
+    expect(within(models).getAllByText("Not reported").length).toBeGreaterThan(0);
+    expect(within(models).queryByText("0%")).toBeNull();
+  });
+});
+
 describe("the Usage destination", () => {
   it("offers Diagnostics beside Octant records when the host can report them", async () => {
     const dashboardClient = { load: vi.fn(() => new Promise<never>(() => undefined)) };

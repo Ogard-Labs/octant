@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   DiagnosticsPercentiles,
   OctantMode,
@@ -31,6 +39,27 @@ export interface TurnDiagnosticsWorkspaceProps {
   /** Writes the report for offline analysis; defaults to the clipboard. */
   readonly copyText?: (text: string) => Promise<void>;
   readonly now?: () => number;
+  /**
+   * Inside another page (Settings): no page title or back button, and the
+   * source control, copy, and refresh sit in one row above the filters.
+   */
+  readonly embedded?: boolean;
+}
+
+/** The zone every time on the page is written in, the same one day buckets use. */
+const TimeZoneContext = createContext("UTC");
+
+function useWhen(): (timestamp: string) => string {
+  const timeZone = useContext(TimeZoneContext);
+  return (timestamp) => formatWhen(timestamp, timeZone);
+}
+
+function formatWhen(timestamp: string, timeZone: string): string {
+  try {
+    return new Date(timestamp).toLocaleString(undefined, { timeZone });
+  } catch {
+    return new Date(timestamp).toLocaleString();
+  }
 }
 
 type RangePreset = "24h" | "7d" | "30d" | "90d" | "all";
@@ -159,6 +188,9 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
   }, [props.client, request]);
 
   const report = state.status === "ready" ? state.report : undefined;
+  // A copy result describes the report it copied; asking for another reading
+  // replaces it, even when the host answers with the same figures.
+  useEffect(() => setCopied("idle"), [request]);
 
   const copyReport = useCallback(async () => {
     if (report === undefined) return;
@@ -176,132 +208,153 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
     }
   }, [props.copyText, report]);
 
-  return (
-    <Surface ariaLabel="Diagnostics">
-      <div className="usage-workspace turn-diagnostics">
+  const filtered = filter.mode !== undefined || filter.providerInstanceId !== undefined;
+  const actions = (
+    <>
+      {props.sourceControl}
+      <OctantButton
+        aria-label="Copy diagnostics report as JSON"
+        disabled={report === undefined}
+        onClick={() => void copyReport()}
+        size="icon"
+        type="button"
+        variant="ghost"
+      >
+        <Copy aria-hidden="true" size={14} />
+      </OctantButton>
+      <OctantButton
+        aria-label="Refresh diagnostics"
+        onClick={refresh}
+        size="icon"
+        type="button"
+        variant="ghost"
+      >
+        <RefreshCw aria-hidden="true" size={14} />
+      </OctantButton>
+    </>
+  );
+  const zoneWords = `Days and times in ${timeZone}, hours in UTC`;
+  const body = (
+    <TimeZoneContext.Provider value={timeZone}>
+      {props.embedded === true ? (
+        <div className="turn-diagnostics__toolbar">
+          {actions}
+          <span className="usage-workspace__note">{zoneWords}</span>
+        </div>
+      ) : (
         <SurfaceHeader
-          actions={
-            <>
-              {props.sourceControl}
-              <OctantButton
-                aria-label="Copy diagnostics report as JSON"
-                disabled={report === undefined}
-                onClick={() => void copyReport()}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <Copy aria-hidden="true" size={14} />
-              </OctantButton>
-              <OctantButton
-                aria-label="Refresh diagnostics"
-                onClick={refresh}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <RefreshCw aria-hidden="true" size={14} />
-              </OctantButton>
-            </>
-          }
+          actions={actions}
           {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
-          detail={`Every provider and mode · times in ${timeZone}`}
+          detail={filtered ? `Filtered · ${zoneWords}` : `Every provider and mode · ${zoneWords}`}
           title="Diagnostics"
         />
+      )}
 
-        <div aria-label="Diagnostics filters" className="usage-workspace__filters" role="group">
-          <label className="usage-workspace__field">
-            <span>Range</span>
-            <OctantSelectField
-              aria-label="Diagnostics range"
-              onValueChange={(value) => {
-                setPreset(value as RangePreset);
-                refresh();
-              }}
-              options={RANGE_PRESETS}
-              value={preset}
-            />
-          </label>
-          <label className="usage-workspace__field">
-            <span>Mode</span>
-            <OctantSelectField
-              aria-label="Filter diagnostics by mode"
-              onValueChange={(value) =>
-                setFilter((previous) => withField(previous, "mode", value as OctantMode | ""))
-              }
-              options={[
-                { id: "", label: "All modes" },
-                { id: "chat", label: "Chat" },
-                { id: "work", label: "Work" },
-                { id: "code", label: "Code" },
-              ]}
-              value={filter.mode ?? ""}
-            />
-          </label>
-          <label className="usage-workspace__field">
-            <span>Provider</span>
-            <OctantSelectField
-              aria-label="Filter diagnostics by provider"
-              onValueChange={(value) =>
-                setFilter((previous) => withField(previous, "providerInstanceId", value))
-              }
-              options={[
-                { id: "", label: "All providers" },
-                ...(props.providers ?? []).map((provider) => ({
-                  id: String(provider.id),
-                  label: provider.displayName,
-                })),
-              ]}
-              value={filter.providerInstanceId ?? ""}
-            />
-          </label>
-          <label className="usage-workspace__field">
-            <span>Trend by</span>
-            <OctantSelectField
-              aria-label="Diagnostics trend bucket"
-              onValueChange={(value) => setBucket(value as TurnDiagnosticsBucketSize)}
-              options={[
-                { id: "day", label: "Day" },
-                { id: "hour", label: "Hour" },
-              ]}
-              value={bucket}
-            />
-          </label>
-        </div>
-
-        <p aria-live="polite" className="usage-workspace__status" role="status">
-          {state.status === "loading"
-            ? "Loading diagnostics…"
-            : state.status === "failure"
-              ? "Diagnostics could not be loaded."
-              : copied === "copied"
-                ? "Report copied as JSON."
-                : copied === "failed"
-                  ? "The report could not be copied."
-                  : `Read at ${new Date(state.report.generatedAt).toLocaleString()}.`}
-        </p>
-
-        {state.status === "failure" ? (
-          <OctantAlert tone="warning">
-            <p>{state.message}</p>
-            <OctantButton onClick={refresh} type="button">
-              Retry
-            </OctantButton>
-          </OctantAlert>
-        ) : null}
-
-        {report === undefined ? null : report.turns === 0 ? (
-          <SurfaceEmpty
-            detail="Turns are recorded when they end, on every provider. Widen the range or clear a filter."
-            title="No turns in this range"
+      <div aria-label="Diagnostics filters" className="usage-workspace__filters" role="group">
+        <label className="usage-workspace__field">
+          <span>Range</span>
+          <OctantSelectField
+            aria-label="Diagnostics range"
+            onValueChange={(value) => {
+              setPreset(value as RangePreset);
+              refresh();
+            }}
+            options={RANGE_PRESETS}
+            value={preset}
           />
-        ) : (
-          <ReportSections
-            report={report}
-            {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        </label>
+        <label className="usage-workspace__field">
+          <span>Mode</span>
+          <OctantSelectField
+            aria-label="Filter diagnostics by mode"
+            onValueChange={(value) =>
+              setFilter((previous) => withField(previous, "mode", value as OctantMode | ""))
+            }
+            options={[
+              { id: "", label: "All modes" },
+              { id: "chat", label: "Chat" },
+              { id: "work", label: "Work" },
+              { id: "code", label: "Code" },
+            ]}
+            value={filter.mode ?? ""}
           />
-        )}
+        </label>
+        <label className="usage-workspace__field">
+          <span>Provider</span>
+          <OctantSelectField
+            aria-label="Filter diagnostics by provider"
+            onValueChange={(value) =>
+              setFilter((previous) => withField(previous, "providerInstanceId", value))
+            }
+            options={[
+              { id: "", label: "All providers" },
+              ...(props.providers ?? []).map((provider) => ({
+                id: String(provider.id),
+                label: provider.displayName,
+              })),
+            ]}
+            value={filter.providerInstanceId ?? ""}
+          />
+        </label>
+        <label className="usage-workspace__field">
+          <span>Trend by</span>
+          <OctantSelectField
+            aria-label="Diagnostics trend bucket"
+            onValueChange={(value) => setBucket(value as TurnDiagnosticsBucketSize)}
+            options={[
+              { id: "day", label: "Day" },
+              { id: "hour", label: "Hour" },
+            ]}
+            value={bucket}
+          />
+        </label>
       </div>
+
+      <p aria-live="polite" className="usage-workspace__status" role="status">
+        {state.status === "loading"
+          ? "Loading diagnostics…"
+          : state.status === "failure"
+            ? "Diagnostics could not be loaded."
+            : copied === "copied"
+              ? "Report copied as JSON."
+              : copied === "failed"
+                ? "The report could not be copied."
+                : `Read at ${formatWhen(state.report.generatedAt, timeZone)}.`}
+      </p>
+
+      {state.status === "failure" ? (
+        <OctantAlert tone="warning">
+          <p>{state.message}</p>
+          <OctantButton onClick={refresh} type="button">
+            Retry
+          </OctantButton>
+        </OctantAlert>
+      ) : null}
+
+      {report === undefined ? null : report.turns === 0 ? (
+        <SurfaceEmpty
+          detail="Turns are recorded when they end, on every provider. Widen the range or clear a filter."
+          title="No turns in this range"
+        />
+      ) : (
+        <ReportSections
+          report={report}
+          {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      )}
+    </TimeZoneContext.Provider>
+  );
+  return props.embedded === true ? (
+    <section
+      aria-label="Diagnostics"
+      className="usage-workspace turn-diagnostics"
+      data-embedded="true"
+    >
+      {body}
+    </section>
+  ) : (
+    <Surface ariaLabel="Diagnostics">
+      <div className="usage-workspace turn-diagnostics">{body}</div>
     </Surface>
   );
 }
@@ -482,9 +535,9 @@ function ModelSection({ report }: { readonly report: TurnDiagnosticsReport }) {
                 <td>{pair(row.decodeTokensPerSecond, rate)}</td>
                 <td>{pair(row.wallMs, milliseconds)}</td>
                 <td>
-                  {row.inputTokens === 0
-                    ? "Unavailable"
-                    : percent(row.cacheReadInputTokens / row.inputTokens)}
+                  {row.cache === undefined || row.cache.inputTokens === 0
+                    ? "Not reported"
+                    : percent(Math.min(1, row.cache.readTokens / row.cache.inputTokens))}
                 </td>
                 <td>{row.likelyCacheMisses}</td>
                 <td>{row.costUsd === undefined ? "Not reported" : dollars(row.costUsd)}</td>
@@ -498,6 +551,7 @@ function ModelSection({ report }: { readonly report: TurnDiagnosticsReport }) {
 }
 
 function FailureSection({ report }: { readonly report: TurnDiagnosticsReport }) {
+  const when = useWhen();
   const unexplained =
     report.totals.stopReasons.failed -
     report.failureGroups.reduce((sum, group) => sum + group.count, 0);
@@ -527,8 +581,8 @@ function FailureSection({ report }: { readonly report: TurnDiagnosticsReport }) 
                       : ` · process ${PROCESS_WORDS[group.processKind]}`}
                   </th>
                   <td>{group.count}</td>
-                  <td>{new Date(group.firstAt).toLocaleString()}</td>
-                  <td>{new Date(group.lastAt).toLocaleString()}</td>
+                  <td>{when(group.firstAt)}</td>
+                  <td>{when(group.lastAt)}</td>
                   <td className="turn-diagnostics__message">
                     {group.lastMessage ?? "No message kept"}
                   </td>
@@ -630,6 +684,7 @@ function TroubledTurnSection(props: {
   readonly report: TurnDiagnosticsReport;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
+  const when = useWhen();
   const turns = props.report.troubledTurns;
   if (turns.length === 0) return null;
   return (
@@ -655,11 +710,11 @@ function TroubledTurnSection(props: {
             </tr>
           </thead>
           <tbody>
-            {turns.map((turn) => {
+            {turns.map((turn, index) => {
               const subjectType = SUBJECT_TYPE[turn.mode];
               return (
-                <tr key={`${turn.threadId}/${turn.endedAt}`}>
-                  <th scope="row">{new Date(turn.endedAt).toLocaleString()}</th>
+                <tr key={`${turn.threadId}/${turn.endedAt}/${index}`}>
+                  <th scope="row">{when(turn.endedAt)}</th>
                   <td>
                     <UsageName id={turn.threadId} kind={subjectType} />
                   </td>
@@ -671,7 +726,7 @@ function TroubledTurnSection(props: {
                   <td>
                     {props.onOpenSubject === undefined ? null : (
                       <OctantButton
-                        aria-label={`Open the thread of the turn that ended ${new Date(turn.endedAt).toLocaleString()}`}
+                        aria-label={`Open the thread of the turn that ended ${when(turn.endedAt)}`}
                         onClick={() => props.onOpenSubject?.(subjectType, turn.threadId)}
                         size="sm"
                         type="button"
@@ -692,6 +747,7 @@ function TroubledTurnSection(props: {
 }
 
 function CacheMissSection({ report }: { readonly report: TurnDiagnosticsReport }) {
+  const when = useWhen();
   if (report.cacheMisses.length === 0) return null;
   return (
     <SurfaceSection label="Likely prompt-cache misses">
@@ -712,9 +768,9 @@ function CacheMissSection({ report }: { readonly report: TurnDiagnosticsReport }
             </tr>
           </thead>
           <tbody>
-            {report.cacheMisses.map((miss) => (
-              <tr key={`${miss.threadId}/${miss.endedAt}`}>
-                <th scope="row">{new Date(miss.endedAt).toLocaleString()}</th>
+            {report.cacheMisses.map((miss, index) => (
+              <tr key={`${miss.threadId}/${miss.endedAt}/${index}`}>
+                <th scope="row">{when(miss.endedAt)}</th>
                 <td>
                   <UsageName id={miss.threadId} kind="thread" />
                 </td>

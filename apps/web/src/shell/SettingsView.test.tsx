@@ -1,4 +1,5 @@
 import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { buildTurnDiagnosticsReport } from "@octant/domain";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { ProviderInstance, SettingsDeepLink } from "@octant/contracts";
@@ -1410,6 +1411,59 @@ describe("SettingsView", () => {
     expect(within(source).getByRole("button", { name: "Octant records" })).toBeVisible();
     // The embedded view contributes its controls, not a second page title.
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
+  });
+
+  it("offers Diagnostics in Usage and leaves Settings for the thread of a failed turn", async () => {
+    const threadId = "66000000-0000-4000-8000-0000000000d1";
+    const report = buildTurnDiagnosticsReport(
+      [
+        {
+          threadId,
+          mode: "work",
+          providerInstanceId: "66000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
+          stopReason: "failed",
+          metrics: { precision: "unavailable", wallMs: 1_000 },
+          diagnostics: {
+            toolCalls: 0,
+            toolFailures: 0,
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
+          startedAt: "2026-11-07T10:00:00.000Z",
+          endedAt: "2026-11-07T10:00:01.000Z",
+        } as never,
+      ],
+      { generatedAt: "2026-11-07T12:00:00.000Z", bucket: "day", timeZone: "UTC" },
+    );
+    const usageClient = {
+      query: vi.fn(async () => {
+        throw new Error("ledger unavailable in this test");
+      }),
+      diagnostics: vi.fn(async () => report),
+      export: vi.fn(),
+      reset: vi.fn(),
+      retain: vi.fn(),
+    };
+    const onOpenUsageSubject = vi.fn();
+    renderSettings({ usageClient: usageClient as never, onOpenUsageSubject });
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
+        name: "Usage",
+      }),
+    );
+
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Usage source" })).getByRole("button", {
+        name: "Diagnostics",
+      }),
+    );
+
+    const turns = await screen.findByRole("table", { name: "Turns to investigate" });
+    expect(within(turns).getByText(/Provider stopped\./)).toBeVisible();
+    // Embedded, it adds no second page title to Settings.
+    expect(screen.queryByRole("heading", { name: "Diagnostics" })).toBeNull();
+    fireEvent.click(within(turns).getByRole("button", { name: /Open the thread/ }));
+    expect(onOpenUsageSubject).toHaveBeenCalledWith("work-thread", threadId);
   });
 
   it("forwards isNarrow to the Usage dashboard activity table", async () => {
