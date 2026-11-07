@@ -985,8 +985,9 @@ named standby (was H9).
 ## Delivery plan
 
 Each slice is one reviewable PR and keeps everything off by default. A slice
-that ships user-visible behavior updates the user guide (`apps/docs`) in the
-same PR; slices 3, 5, and 7 together document every row of
+that ships user-visible behavior updates the user guide in
+[octant-site](https://github.com/Ogard-Labs/octant-site/tree/main/docs) through a
+companion PR linked in both descriptions; slices 3, 5, and 7 together document every row of
 [Recovery and approval scenarios](#recovery-and-approval-scenarios) there. Each
 slice says whether an agent can verify it in a Linux container without the
 maintainer's hardware, or names the maintainer gate.

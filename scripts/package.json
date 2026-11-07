@@ -13,6 +13,7 @@
     "@octant/contracts": "workspace:*",
     "@octant/domain": "workspace:*",
     "@octant/host-runtime": "workspace:*",
-    "@octant/provider-sdk": "workspace:*"
+    "@octant/provider-sdk": "workspace:*",
+    "@octant/theme": "workspace:*"
   }
 }

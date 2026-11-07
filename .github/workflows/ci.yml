@@ -31,6 +31,12 @@ jobs:
           # branch. The default depth-1 checkout has no such history, so the
           # history half of that gate would skip on every run.
           fetch-depth: 0
+      - name: Keep guide source in octant-site
+        run: |
+          if git ls-files --error-unmatch -- apps/docs/ >/dev/null 2>&1; then
+            echo "::error::Update the guide in Ogard-Labs/octant-site/docs and link its companion PR."
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -47,9 +53,6 @@ jobs:
       - run: bun run ui:check
       - run: bun run style:check
       - run: bun run decisions:check
-      # The docs link gate is not part of `verify`; keep it in CI so a moved
-      # page or renamed anchor fails here rather than on the published site.
-      - run: bun run --filter @octant/docs check:links
       - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
       # Resolves the phone's Expo configuration for each release profile with
       # every config plugin applied, so a broken plugin or manifest change
