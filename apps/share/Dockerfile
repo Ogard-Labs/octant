@@ -14,7 +14,10 @@ FROM oven/bun:1.3.14
 
 WORKDIR /app
 COPY . .
-RUN bun install --production --frozen-lockfile
+# --ignore-scripts: the share service's import graph (contracts, domain, theme)
+# is pure TypeScript, so the native modules other workspaces declare (node-pty,
+# better-sqlite3) are never loaded and must not be compiled in this image.
+RUN bun install --production --frozen-lockfile --ignore-scripts
 
 ENV OCTANT_SHARE_HOST=0.0.0.0 \
     OCTANT_SHARE_DATA_DIR=/data
