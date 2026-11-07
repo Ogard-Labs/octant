@@ -8,6 +8,9 @@ authorization rules for contributors live in
 [AGENTS.md](../../AGENTS.md#mission-and-precedence); product rules live in the
 specifications below.
 
+Documentation builds and maintainer-owned VPS publication are specified in
+[Documentation build and VPS handoff](../docs-deployment.md).
+
 ## Sources of truth
 
 | Area                       | Owner                                                                                                       | Read when                                                                                                                                                                                                                     |

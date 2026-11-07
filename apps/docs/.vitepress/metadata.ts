@@ -1,4 +1,4 @@
-export const DEFAULT_DOCS_SITE_URL = "https://octant.dev/docs/";
+export const DEFAULT_DOCS_SITE_URL = "https://octant.sh/docs/";
 export const DEFAULT_DOCS_DESCRIPTION =
   "The official Octant guide for working with Chat, Work, and Code.";
 
