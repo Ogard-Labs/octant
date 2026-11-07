@@ -207,6 +207,7 @@ describe("the library view", () => {
       description: "A service that takes a key.",
       category: "business",
       url: "https://keyed.example/mcp",
+      docs: "https://keyed.example/docs",
       auth: {
         kind: "key",
         header: "Authorization",

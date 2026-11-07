@@ -200,23 +200,24 @@ tracker ids in shipped code against `scripts/code-style-baseline.json`.
 
 ## Repository Ownership
 
-| Surface                   | Owns                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------- |
-| `apps/desktop`            | Electron lifecycle, native windows, Keychain, macOS sandbox helpers, packaging           |
-| `apps/server`             | Authoritative command/event control plane, providers, tools, Git, terminals, remote      |
-| `apps/web`                | Shared React renderer for desktop and authenticated remote clients                       |
-| `apps/mobile`             | Expo remote-control client                                                               |
-| `apps/docs`               | VitePress user guide, independently deployable                                           |
-| `packages/contracts`      | Schemas, commands, events, RPC, and versioned wire contracts; no runtime logic           |
-| `packages/domain`         | Pure policies and transitions; no Electron, React, database, filesystem, network, or I/O |
-| `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness         |
-| `packages/client-runtime` | Authenticated transport, reconnect/replay, and query synchronization                     |
-| `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle                          |
-| `packages/plugin-host`    | Manifests, normalized components, trust types, and pure effective-activation policy      |
-| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties            |
-| `packages/theme`          | Semantic theme schema, built-ins, importer, and editor/terminal projections              |
-| `packages/cli`            | `octant` server and browser launcher                                                     |
-| `scripts`                 | Dev loop, packaging, smokes, and repository checks                                       |
+| Surface                   | Owns                                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `apps/desktop`            | Electron lifecycle, native windows, Keychain, macOS sandbox helpers, packaging               |
+| `apps/server`             | Authoritative command/event control plane, providers, tools, Git, terminals, remote          |
+| `apps/web`                | Shared React renderer for desktop and authenticated remote clients                           |
+| `apps/mobile`             | Expo remote-control client                                                                   |
+| `Ogard-Labs/octant-site`  | External VitePress user guide in `docs/`; independent build and publication                  |
+| `apps/share`              | Self-hostable public Canvas share service (reference implementation users deploy themselves) |
+| `packages/contracts`      | Schemas, commands, events, RPC, and versioned wire contracts; no runtime logic               |
+| `packages/domain`         | Pure policies and transitions; no Electron, React, database, filesystem, network, or I/O     |
+| `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness             |
+| `packages/client-runtime` | Authenticated transport, reconnect/replay, and query synchronization                         |
+| `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle                              |
+| `packages/plugin-host`    | Manifests, normalized components, trust types, and pure effective-activation policy          |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties                |
+| `packages/theme`          | Semantic theme schema, built-ins, importer, and editor/terminal projections                  |
+| `packages/cli`            | `octant` server and browser launcher                                                         |
+| `scripts`                 | Dev loop, packaging, smokes, and repository checks                                           |
 
 ## Testing And Verification
 
@@ -332,9 +333,13 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   child when the stack relationship already expresses the dependency. This
   explicit stack operation is the exception to the ordinary no-rewrite rule;
   never rebase unrelated or shared work.
-- Update the owning current specification and affected user documentation in the
-  same PR as a change to design, architecture, setup, workflow, security,
-  deployment, or user-visible behavior. Reconcile conflicting summaries; link to
+- Update the owning current specification in the same PR as a change to design,
+  architecture, setup, workflow, security, deployment, or user-visible behavior.
+  The user guide lives in [Ogard-Labs/octant-site](https://github.com/Ogard-Labs/octant-site/tree/main/docs),
+  outside this monorepo. Update affected guide pages in a companion PR and link
+  both PRs in their descriptions; record why no guide update is needed otherwise.
+  Keep internal product specifications here and do not recreate `apps/docs`.
+  Reconcile conflicting summaries; link to
   the owner rather than duplicating its rules, and update the decision's entry
   in Decisions and requirements. Leave `docs/legacy/` unchanged; a
   specification change never needs a new or superseding record.

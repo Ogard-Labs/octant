@@ -31,6 +31,12 @@ jobs:
           # branch. The default depth-1 checkout has no such history, so the
           # history half of that gate would skip on every run.
           fetch-depth: 0
+      - name: Keep guide source in octant-site
+        run: |
+          if git ls-files --error-unmatch -- apps/docs/ >/dev/null 2>&1; then
+            echo "::error::Update the guide in Ogard-Labs/octant-site/docs and link its companion PR."
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -76,6 +82,35 @@ jobs:
       # scripts tests build the Swift helpers and package the app; they run on the macOS job.
       # The web and server suites have their own sharded jobs below.
       - run: bun run test --filter=!@octant/desktop --filter=!@octant/scripts --filter=!@octant/server --filter=!@octant/web
+
+  # The self-hostable share service (apps/share) ships as a Docker image. Build
+  # it on every PR so the Dockerfile never rots, and push it to GHCR when the
+  # merge queue lands the commit, so users can `docker pull` instead of building.
+  share-image:
+    name: Build the share-service image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'merge_group'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          file: apps/share/Dockerfile
+          push: ${{ github.event_name == 'merge_group' }}
+          tags: |
+            ghcr.io/ogard-labs/octant-share:latest
+            ghcr.io/ogard-labs/octant-share:${{ github.event.merge_group.head_sha || github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   web:
     name: Web tests (${{ matrix.shard }}/5)

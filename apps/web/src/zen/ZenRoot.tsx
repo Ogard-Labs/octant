@@ -6,6 +6,8 @@ import { isApplePlatform } from "../platform";
 export interface ZenRootProps {
   readonly active: boolean;
   readonly children: ReactNode;
+  /** False when the Zen plugin is off: its chords stay with the window. */
+  readonly enabled?: boolean;
   /** Step one space along this window's switcher, wrapping at both ends. */
   readonly onCycleSpace?: (step: 1 | -1) => void;
   readonly onExit: () => void;
@@ -31,6 +33,7 @@ export function ZenRoot(props: ZenRootProps) {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
+      if (props.enabled === false) return;
       const action = matchKeybinding(keybindings, event, isApplePlatform());
       if (action === undefined) return;
       // A text field keeps its own chords whether or not Zen is showing. The

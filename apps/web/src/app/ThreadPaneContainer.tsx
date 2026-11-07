@@ -35,7 +35,7 @@ import type { useMachineChangeFeed } from "../polling/useMachineChangeFeed";
 import type { useProjectController } from "../projects/useProjectController";
 import type { useDiscoveryController } from "../providers/useDiscoveryController";
 import type { ProviderController } from "../providers/useProviderController";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "../shell/contributionRegistry";
+import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
 import {
   SelectionThreadStarterContext,
@@ -248,6 +248,7 @@ export interface ThreadPaneContainerProps {
 export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   props: ThreadPaneContainerProps,
 ) {
+  const firstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const {
     actions,
     activeCodeThreadUsageFallback,
@@ -555,8 +556,27 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 chatReadCursorStore={chatReadCursorStore}
                 {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
                 onChatTurnRevealed={spendRevealChatTurn}
-                onPinTerminal={(request) => void zen.pinTerminal(request)}
-                onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
+                {...(zen.enabled
+                  ? {
+                      onPinTerminal: (request: Parameters<typeof zen.pinTerminal>[0]) =>
+                        void zen.pinTerminal(request),
+                      onPinCanvasInFocusZone: (request: Parameters<typeof zen.pinCanvas>[0]) =>
+                        void zen.pinCanvas(request),
+                      onDockResearch: (request: {
+                        readonly threadId: string;
+                        readonly mode: "work" | "code";
+                      }) =>
+                        void zen.dockResearch({
+                          thread: {
+                            threadId:
+                              request.mode === "code"
+                                ? decodeCodeThreadId(request.threadId)
+                                : decodeWorkThreadId(request.threadId),
+                            mode: request.mode,
+                          },
+                        }),
+                    }
+                  : {})}
                 onStartPlanTask={(request) => {
                   closeWorkspaceReaders();
                   setDraftError(undefined);
@@ -569,17 +589,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   ? {}
                   : { draftPendingPrompt: pendingDraftPrompt })}
                 onDraftPendingPromptConsumed={() => setPendingDraftPrompt(undefined)}
-                onDockResearch={(request) =>
-                  void zen.dockResearch({
-                    thread: {
-                      threadId:
-                        request.mode === "code"
-                          ? decodeCodeThreadId(request.threadId)
-                          : decodeWorkThreadId(request.threadId),
-                      mode: request.mode,
-                    },
-                  })
-                }
                 codeController={codeController}
                 codeControllers={codeThreadControllers}
                 extensionClient={extensionClient}
@@ -825,9 +834,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 }}
                 onDraftPermissionModeChange={setDraftPermissionMode}
                 onDraftCreateThread={handleDraftCreateThread}
-                githubPluginEnabled={
-                  FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
-                }
+                githubPluginEnabled={firstPartyPluginsEffective.get("github-integration") === true}
                 linearClient={linearClient}
                 {...(homeStart === undefined ? {} : { homeStart })}
                 codeHome={{
@@ -859,9 +866,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   onOpenInbox: openInbox,
                   onOpenIssues: () => setGithubIssuesOpen(true),
                 }}
-                linearPluginEnabled={
-                  FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
-                }
+                linearPluginEnabled={firstPartyPluginsEffective.get("linear-integration") === true}
                 onDraftCreateCodeThread={handleDraftCreateCodeThread}
                 onChangeCodeNewThreadWorkspace={setCodeNewThreadWorkspace}
                 draftCodeExecute={codeController.execute}

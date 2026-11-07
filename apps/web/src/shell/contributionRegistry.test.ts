@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { FIRST_PARTY_PLUGIN_CATALOG } from "./firstPartyPluginCatalog";
+import {
+  FIRST_PARTY_PLUGIN_CATALOG,
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+} from "./firstPartyPluginCatalog";
 import {
   isAppearancePresetAvailable,
   isPreviewViewerAvailable,
   isSettingsSectionAvailable,
   resolveAppearancePresetContributions,
+  isThreadBoardAvailable,
   resolveBoardViewContributions,
   resolvePreviewViewerContributions,
   resolveSettingsSectionContributions,
   resolveSidebarContributions,
+  resolveSidebarDestinationContribution,
   resolveThreadPaneContributions,
   resolveWorkspaceTabContributions,
   type FirstPartyPluginComponentId,
@@ -29,8 +34,20 @@ describe("first-party plugin catalog", () => {
       "azure-arm",
       "appearance",
       "preview-viewers",
+      "zen",
     ]);
     expect(FIRST_PARTY_PLUGIN_CATALOG.every((plugin) => plugin.manifestVersion === 1)).toBe(true);
+  });
+});
+
+describe("first-party Zen plugin", () => {
+  it("is a bundled ui-surface allowed in every mode and effective by default", () => {
+    const zen = FIRST_PARTY_PLUGIN_CATALOG.find((plugin) => plugin.slug === "zen");
+    expect(zen?.compatibility.modes).toEqual(["chat", "work", "code"]);
+    expect(zen?.components.map((component) => [String(component.id), component.kind])).toEqual([
+      ["zen", "ui-surface"],
+    ]);
+    expect(FIRST_PARTY_PLUGINS_EFFECTIVE.get("zen")).toBe(true);
   });
 });
 
@@ -51,6 +68,15 @@ describe("resolveSidebarContributions", () => {
     const effective = effectiveMap({ "github-integration": true });
     expect(resolveSidebarContributions("code", effective).has("pull-requests")).toBe(true);
     expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
+  });
+
+  it("keeps pull-requests when the github plugin is not effective, because it is Code delivery plumbing", () => {
+    const effective = effectiveMap({ "github-integration": false });
+    expect(resolveSidebarContributions("code", effective).has("pull-requests")).toBe(true);
+    expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
+    expect(
+      resolveSidebarDestinationContribution("pull-requests", "code", effective)?.destinationId,
+    ).toBe("pull-requests");
   });
 
   it("includes github-issues only in code mode when github is effective", () => {
@@ -80,8 +106,8 @@ describe("resolveSidebarContributions", () => {
     ).toBe(false);
   });
 
-  it("treats an unlisted component as not effective", () => {
-    expect(resolveSidebarContributions("code", effectiveMap({})).size).toBe(0);
+  it("treats an unlisted component as not effective, keeping only host-owned destinations", () => {
+    expect([...resolveSidebarContributions("code", effectiveMap({}))]).toEqual(["pull-requests"]);
   });
 });
 
@@ -147,6 +173,21 @@ describe("resolveBoardViewContributions", () => {
 
   it("omits the thread-status view when the board plugin is not effective", () => {
     expect(resolveBoardViewContributions("code", effectiveMap({ board: false })).size).toBe(0);
+  });
+});
+
+describe("isThreadBoardAvailable", () => {
+  it("is on for work and code while the board plugin is effective, and never for chat", () => {
+    const effective = effectiveMap({ board: true });
+    expect(isThreadBoardAvailable("work", effective)).toBe(true);
+    expect(isThreadBoardAvailable("code", effective)).toBe(true);
+    expect(isThreadBoardAvailable("chat", effective)).toBe(false);
+  });
+
+  it("is off in every mode when the board plugin is not effective", () => {
+    const effective = effectiveMap({ board: false });
+    expect(isThreadBoardAvailable("work", effective)).toBe(false);
+    expect(isThreadBoardAvailable("code", effective)).toBe(false);
   });
 });
 

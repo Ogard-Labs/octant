@@ -20,6 +20,8 @@ export interface McpServerSignInControlProps {
     readonly requestedScopes: readonly string[];
     readonly permissionNotice?: string;
   };
+  /** Told when the sign-in state changes after the first read, so a listing beside it can read again. */
+  readonly onChanged?: (view: McpServerSignInView) => void;
 }
 
 /**
@@ -116,6 +118,18 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
     };
     // The target is the two ids; a new object each render must not re-ask.
   }, [client, extensionId, componentId]);
+
+  // The first read only shows the state; a later change (signed in, signed
+  // out, setup saved) is news to whoever lists this server.
+  const shownKind = useRef<McpServerSignInView["kind"] | undefined>(undefined);
+  const onChanged = useRef(props.onChanged);
+  onChanged.current = props.onChanged;
+  useEffect(() => {
+    if (view === undefined) return;
+    const previous = shownKind.current;
+    shownKind.current = view.kind;
+    if (previous !== undefined && previous !== view.kind) onChanged.current?.(view);
+  }, [view]);
 
   useEffect(() => {
     if (view?.kind !== "awaiting-consent") return;

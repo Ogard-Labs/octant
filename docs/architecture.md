@@ -2824,6 +2824,26 @@ CI or reviewers should be woken, not left polling).
   switch or a watch is on, through the host's `gh` login. It is not a routine
   and needs no hosted service; a stopped host observes nothing.
 
+**The GitHub plugin switch.** GitHub is a bundled first-party plugin
+(component `github-integration`) a person can switch off; it is on by default,
+and a missing store row counts as on. Switching it off removes the GitHub
+account integration and keeps its data. The server refuses on the effective
+state, not the renderer: the GitHub authentication, catalogue and recents
+routes, the managed-clone routes, issue context for create-from-issue, and the
+`octant_github` read tools all refuse or are absent, and the Canvas export list
+no longer binds the GitHub Gist destination, so an export to it is refused as an
+unknown destination without a `gh` call. The renderer reads the same effective
+state and drops the GitHub Settings section, the Issues destination, the
+GitHub tab and repository picker in project creation and the composer, the
+create-from-issue and issue-reference entries, and the GitHub cards on the home
+screen, and sends no GitHub authentication request. Git, worktrees and the
+pull-request plumbing that Code delivery uses (the pull-request pane and chip,
+review, switch and merge actions, the `pull-requests` sidebar destination,
+failing-check follow-ups, the board's pull-request join) are not the
+integration and stay on with the plugin off. MCP connector catalog entries for
+GitHub are separate connectors the person adds, and keep their own sign-in and
+activation.
+
 **Reading GitHub (`octant_github`).** A Code thread's agent reads the
 repository its Project delivers to through one read-only family, offered to
 Code threads on a provider that carries app-managed tools while the GitHub
@@ -4029,6 +4049,14 @@ and no other window's space, is reachable through it.
   A successful result is journaled as outside content under `octant_zen`; the
   seven tools it replaced were journaled under their own `octant_zen_*` names,
   which still read.
+- **Plugin switch.** Zen is a bundled first-party plugin (`zen`, a `ui-surface`
+  component allowed in every mode) that is on by default. While it is off, the
+  host refuses every `/api/zen` route, including the background routes, with a
+  typed `plugin-disabled` result, offers no `octant_zen` tool to any thread, and
+  the renderer cannot open Zen. Switching it off deletes nothing: layouts,
+  backgrounds, focus zones, and events stay on disk and reappear when it is
+  turned back on. The built-in background catalog stays in the host because app
+  backdrops use it too.
 
 ## Persistence
 
@@ -4589,7 +4617,7 @@ or .zip>` write the same files, built by one host command
   capabilities — and why. User-facing
   drafts of the privacy notice, sub-processor position, data-residency
   statement, DPA template, SCC position, and EULA governing-law placeholders
-  live in `apps/docs/advanced/` and are marked pending legal review; they
+  live in `octant-site/docs/advanced/` and are marked pending legal review; they
   describe this behavior rather than changing it. The draft shared-host
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and covers sharing a host the people
@@ -8641,7 +8669,11 @@ subset a plugin author needs as a narrower, named surface. Unknown
 contribution points are rejected. The renderer contribution registry resolves
 `sidebar.destination`, `settings.section`, `workspace.tab`, `thread.pane`,
 `preview.viewer`, `appearance.preset`, and `board.view` from the effective
-first-party catalog; it never decides availability. `apps/server/src/extensions`
+first-party catalog; it never decides availability. Which first-party plugins
+are on comes from the host's extension snapshot, where each switchable bundled
+plugin has a host-written row
+([Plugin boundaries](#plugin-boundaries-and-remaining-extraction)).
+`apps/server/src/extensions`
 owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
 curated catalog, npm Agent Plugins), Agent Plugins ingestion, supervisor, MCP
 session manager, and skill discovery.
@@ -8701,6 +8733,28 @@ fetches turned off, an unsupported package. Looking up and checking stay with
 a local window, like the rest of package lifecycle, and obey the Marketplace
 fetches preference. The lookup sends only `Accept` and the constrained
 `User-Agent`; there is no telemetry.
+
+**Writing a plugin.** `octant plugin create <name> [--mcp-url <address>]`
+writes a starter Agent Plugins folder in the current folder: `plugin.json`,
+one skill under `skills/<name>/`, a short README, and, with an address, an
+`mcp.json` naming that one Streamable HTTP server (https, or http to this
+computer, with no credentials or fragment in the address). The name must suit both the
+plugin and its skill folder, and an existing folder is refused, never written
+into. `octant plugin check <folder>` reads a folder by the host's folder-import
+rules (git history and links inside the folder left out, a link that leaves it
+refused, the same entry and size bounds) and runs it through the same
+`@octant/plugin-host` loader, then also refuses what the host would: a package
+with nothing to load, a local MCP command missing from the folder, and a
+folder that also holds a language server, provider driver, or debug adapter
+package document (which the import reads as that package instead). It reads
+the Agent Plugins layout only; Claude Code and Codex layouts still import but
+are not checked. A folder
+that passes is one **Import local Agent Plugin…** accepts. Both commands work
+on this computer's files alone: they open no host session, reach no network,
+and install, trust, or enable nothing, so a plugin still arrives untrusted and
+switched off. Choice: the walk is repeated in the CLI rather than shared
+because the host's reader lives in the server app, which a package may not
+import; the loader, which decides validity, is the shared one.
 
 **Selection epoch.** A selected plugin, MCP server, or skill carries the
 catalog epoch it was resolved under, and the host re-resolves it on send, replay,
@@ -9242,7 +9296,7 @@ atomic: a temporary file is renamed into place, so a reader never sees a
 half-written export. The folder is stored by its real path, and a write whose
 folder no longer resolves to that path — because it or a folder above it was
 replaced by a link after it was chosen — is refused rather than followed. The
-user guide's exporting page (`apps/docs/guide/export.md`) states the same rules
+user guide's exporting page (`octant-site/docs/guide/export.md`) states the same rules
 for a person.
 
 The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
@@ -9470,9 +9524,12 @@ the person decided to.
 
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
-`@octant/domain`), each with a name, one line, a category, the vendor's own
-address and how it is reached: sign-in through the MCP authorization flow,
-a key the vendor issues sent in one header, or nothing. Nothing is fetched
+`@octant/domain`), each with a name, one line, a category, search keywords,
+the vendor's own address and setup page, and how it is reached: sign-in
+through the MCP authorization flow, a key the vendor issues sent in one
+header, or nothing. An entry whose address stops behaving as its auth says is fixed or
+removed; `bun run connectors:probe` checks every address and setup page
+and runs weekly in CI, never in the app. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. A remote browser's disabled
@@ -9740,6 +9797,39 @@ adopted as current authenticated content. Unrelated components stay usable.
 Only later authoritative task reconciliation initializes and lists again with
 the current broker grant; Settings does not probe tools.
 
+Settings › Skills & Extensions › Installed opens with **Server connections**:
+every installed MCP server and connector with its package, transport, state,
+last error sentence and when the host last saw it connect or fail. The
+listing (`/api/extensions/connections`, `list`) is composed on the host from
+retained facts only: the lifecycle snapshot's switches and blocks, the stored
+sign-in record's status read as a reader (a pending attempt reports its last
+view and is never polled, so a listing cannot finish a sign-in), the session
+manager's memory of open sessions, in-flight connects, failures and the last
+successful connect (kept after an idle close), and the installed `mcp.json`
+read from disk for the transport. Reading it never connects, signs in,
+discovers endpoints or lists tools, so a server no task has used yet reads
+Ready rather than Connected. States, most decisive first: Off (package or
+server switched off), Needs sign-in (sign-in-again, consent pending, client
+setup required for a registered-client connector, or a
+catalog connector that signs in and has no sign-in while not connected;
+signed out alone is only an offer, since a hosted server that takes a key or
+nothing reports it too), Connecting, Not connecting (the newest fact is a
+failed attempt or closed transport, with its reason), Connected, Blocked (a
+lifecycle block such as quarantine, or a sign-in connector on a host whose
+sign-in is refused, such as one without the credential broker), Ready. A server with sessions in several
+task scopes shows its newest fact. The Connectors row and the Library
+card and detail flag a connected server that needs attention with the same
+state and reason. A row that needs sign-in offers the existing sign-in
+control; a failed row offers **Reconnect** (`reconnect`), which retires that
+component's authentication generation, sessions, desired state and failures
+in every task scope through the same path a sign-in change uses, so the next
+authoritative task reconciliation connects fresh; a task using it elsewhere
+connects again on its next turn. Reconnect connects nothing itself and never
+replays a failed call; it is a local-window act, and the route refuses it to a
+paired device, which may read the listing only. Rationale: connecting from
+Settings would discover tools outside a task's authority, so the person's
+action only clears what blocks the next authorized connect.
+
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access
 and refresh each have a ten-second stage bound. A known expired token or a
@@ -10001,7 +10091,7 @@ reconciled with Octant's external-content and approval protections before that
 distribution gate is lifted. See the [Workspace setup guide](https://developers.google.com/workspace/guides/configure-mcp-servers),
 [native client rules](https://developers.google.com/identity/protocols/oauth2/native-app),
 [preview terms](https://developers.google.com/workspace/preview), and the
-[user setup and workflow guide](../apps/docs/advanced/google-workspace.md).
+[user setup and workflow guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/google-workspace.md).
 
 **Computer use plugin.** The bundled Computer component supplies
 `octant_computer` through the provider's existing app-managed tool transport on
@@ -10099,20 +10189,67 @@ filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
 Plugin projections are namespaced by package id and remain rebuildable.
 
-These are the current extraction boundaries; eligibility is not a claim that the
-feature is already an independently packaged plugin:
+**Switchable bundled plugins (maintainer decision, 2026-11-07).** GitHub,
+thread boards, and Zen are first-party plugins built into Octant that a person
+can switch off and on again. Every other surface below stays an integrated core
+feature: usage, diagnostics, Navigator, the automations UI, browser and
+computer use, agent hierarchy, remote and mobile access, the Apple workbench,
+and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                               | Boundary to preserve                                                                                                           |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Thread boards                                                         | Separable projection and UI; Work/Code status policy stays host-owned and Chat has no board                                    |
-| GitHub and Linear                                                     | Integration ports and contributed views; no direct host-service wiring                                                         |
-| Canvas and preview viewers                                            | Scoped artifact contracts, renderer modules, and registered viewers                                                            |
-| Zen, backgrounds, theme presets                                       | Appearance contributions and their scoped state                                                                                |
-| Usage, diagnostics, Navigator, automations UI                         | Scoped reads/actions and independent presentation; underlying authority stays in the host                                      |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
-| Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
-| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
+| Surface                                                               | Status and boundary to preserve                                                                                         |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                       |
+| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board |
+| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                              |
+| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                     |
+| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
+| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
+| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
+| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                   |
+
+The first-party manifests have one definition,
+`@octant/plugin-host/first-party-plugins`, which the server and the renderer
+both read; it also marks which of them are switchable. A switchable plugin's
+switch is its own journaled state, apart from the installed-package lifecycle,
+whose startup verification, quarantine, uninstall, rollback, and drain all
+assume package files on disk:
+
+- **Journaled, default on.** Each switch is an
+  `extension.bundled-plugin-switched@1` event on its own
+  `extension-bundled-plugin-switch` aggregate, keyed by the plugin's extension
+  id, with a rebuildable projection. A plugin nobody switched is on at state
+  version 0.
+- **One row per plugin in the extension snapshot.** The host adds an installed,
+  trusted row with its reviewed bundled source (`app:<slug>`) ahead of the
+  installed packages, and drops any installed package that claims the same
+  extension id, so the host's predicate for a first-party component reads the
+  person's switch. The renderer derives which first-party plugins are on from
+  the same snapshot, re-read on each extension change, and treats every plugin
+  as on until that snapshot has loaded.
+- **Only the switch.** `set-plugin-desired` on a bundled plugin follows the
+  same `expectedStateVersion` rule as an installed package and is refused as
+  stale otherwise. Every other package command that names one (install,
+  update, rollback, uninstall, trust, a component switch, an npm check) is
+  refused with a typed result, and only a local window may send it, as for
+  any lifecycle command.
+- **Not a scope's plugin.** A scope's effective state leaves bundled plugins
+  out, so they are never addressed with `@`, selected or pinned for a turn, or
+  given tools, and a switch does not move the catalog epoch. The Library does
+  not list them; Settings › Skills & Extensions › Installed shows each with
+  only its switch.
+- **Off keeps data.** Switching a plugin off changes what it contributes and
+  deletes nothing; its credentials, projections, and settings stay for when it
+  is switched on again.
+- **Each feature obeys its switch.** On the host, GitHub's routes, issue
+  context, read tools, and Gist export destination, and Zen's routes and tool,
+  read the switch on every request. In the renderer, the switch hides the
+  GitHub Issues destination, Settings section, start-screen cards, and Create
+  Project tab; the Work and Code boards and every way to open them; and Zen's
+  window and openers. Pull requests stay a host-owned destination, and the
+  board's data and the tools that read it stay available, as the owning
+  sections describe.
 
 A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback,
@@ -10141,14 +10278,11 @@ The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
 curated re-export of contracts, preserving the contracts package's dependency
 direction. Some Settings rows remain host-compiled. Linear uses the Integration
-port as a bundled plugin; extracting the remaining GitHub and board packages
-and packaging remaining appearance/viewer assets is unfinished work, tracked in
-Linear.
+port as a bundled plugin.
 
-Preserve the extraction sequence: establish a provider-neutral port and renderer
-seam before moving a feature behind them; keep extraction separate from unrelated
-fixes; move remaining GitHub/board packages before the remaining appearance/viewer
-packaging. Changing host mode policy is a separate explicit design change, not a
+Preserve the sequence: establish a provider-neutral port and renderer seam
+before moving a feature behind them, and keep that work separate from unrelated
+fixes. Changing host mode policy is a separate explicit design change, not a
 permission supplied by an integration plugin. The Integration kind stays Code-mode
 safe until that policy changes. Plugin disable preserves data and selections,
 drains running executables, and removes effective contributions; deleting
@@ -13052,7 +13186,7 @@ access` agree); a thread's own change is journaled as
   plaintext endpoint is refused, and store credentials are not sent on it.
   The storage provider can read the synced content: the artifact versions and
   tombstones are plain files. Settings and the user guide
-  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  (`octant-site/docs/guide/sync-artifacts.md`) say so before sync is turned on.
   Opt-in encryption of replicas is not this rule. A replica import appends
   versions to this journal and adopts nothing else. Membership accepts an
   entry signed by an admitted instance's device signing key, within its cut
@@ -14279,9 +14413,11 @@ documents its authority, privacy, and release boundaries):
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
-- The public Canvas share service, under
-  [Canvas public links](design/canvas-public-links.md); its code lives in the
-  `octant-webapp` repository.
+- Public Canvas links, under
+  [Canvas public links](design/canvas-public-links.md), served by the
+  self-hostable reference app at `apps/share` in this repository. Ogard Labs
+  operates no share-service instance; each user runs one or points Octant at
+  another service they choose.
 
 Out of scope: a merge or force-push an agent starts on its own initiative,
 cloud scheduling, an Octant-operated hosted service, Apple physical devices,
@@ -14435,14 +14571,15 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account.
 
-The public Canvas share service (`https://canvas.octant.sh`, in the
-`octant-webapp` repository) is in scope: an Octant-operated service that stores, and can read, the Canvases
-people publish as public links, under the rules in
-[Canvas public links](design/canvas-public-links.md). It is not an Octant
-account, a relay, or a sync store; nothing reaches it until the person turns
-Public links on and approves a publish, and a self-hosted service URL is a
-Settings choice. Deploying it, its DNS and TLS, and its operator contact are
-release steps of their own.
+Public Canvas links are in scope under the rules in
+[Canvas public links](design/canvas-public-links.md), served by the reference
+share app at `apps/share` in this repository, which each user self-hosts (or
+they point Octant at another service they choose; no service address is set by
+default). Ogard Labs operates no share-service instance: it is not an Octant
+account, a relay, or a sync store, and nothing reaches any service until the
+person turns Public links on, sets an address, and approves a publish. Running
+the service — its host, DNS, TLS, and operator contact — is the user's own
+deployment step, documented in the `apps/share` README.
 
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
@@ -14562,7 +14699,7 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   administrator-reviewed profile for the installed executable and a real
   sandboxed launch. An existing isolated environment that already supports
   Chromium's sandbox may be used without relaxing host policy; the
-  [Linux host guide](../apps/docs/guide/linux-host.md#isolated-desktop-installation)
+  [Linux host guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/guide/linux-host.md#isolated-desktop-installation)
   records the tested rootless Space installation and its evidence boundary.
   The Linux ADE remains available while desktop prerequisites are unmet.
   An AppImage launch checks

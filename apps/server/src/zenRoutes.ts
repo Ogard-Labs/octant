@@ -40,6 +40,8 @@ export interface ZenRouteDependencies {
   readonly zenService: ZenService;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  /** False when the bundled Zen plugin is switched off; every Zen route then refuses. */
+  readonly isEffective?: () => boolean;
 }
 
 export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
@@ -47,6 +49,13 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
+
+    if (
+      (url.pathname === "/api/zen" || url.pathname.startsWith("/api/zen/")) &&
+      dependencies.isEffective?.() === false
+    ) {
+      return pluginDisabledResponse(origin);
+    }
 
     if (!isLoopbackHostname(url.hostname)) {
       return failureResponse("Zen API requests must use loopback.", 400, null);
@@ -511,6 +520,16 @@ function authenticationFailure(error: unknown, action: string, origin: string | 
   return error instanceof WindowAuthorityError
     ? failureResponse(`${action} is unauthorized.`, 401, origin)
     : failureResponse(`${action} request is invalid.`, 400, origin);
+}
+
+function pluginDisabledResponse(origin: string | null): Response {
+  return new Response(
+    JSON.stringify({ error: "The Zen plugin is turned off.", code: "plugin-disabled" }),
+    {
+      status: 403,
+      headers: { "content-type": "application/json", ...corsHeaders(origin) },
+    },
+  );
 }
 
 function zenFailureResponse(error: ZenError, origin: string | null): Response {

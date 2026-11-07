@@ -50,11 +50,11 @@ import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
-  FIRST_PARTY_PLUGINS_EFFECTIVE,
   isSettingsSectionAvailable,
   resolveSettingsSectionContribution,
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
+import { useFirstPartyPluginsEffective } from "./firstPartyPluginsEffective";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
@@ -401,7 +401,8 @@ export function SettingsView(props: SettingsViewProps) {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
   };
-  const effectivePlugins = props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE;
+  const hostEffectivePlugins = useFirstPartyPluginsEffective();
+  const effectivePlugins = props.effectivePlugins ?? hostEffectivePlugins;
   const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
     (section) => isSettingsSectionAvailable(section.id, effectivePlugins),
   );

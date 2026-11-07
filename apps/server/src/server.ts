@@ -659,6 +659,7 @@ export function startOctantServer(
       extensionApiService,
       folderBrowseService,
       gistConnection,
+      githubIntegrationIsEffective,
       imageJobService,
       managedWorktreeReceipts,
       options,
@@ -1049,6 +1050,7 @@ export function startOctantServer(
       wireZen({
         contributeChatTools,
         chatService,
+        githubExtensionSnapshot,
         codeOperationRuntime,
         navigatorAssistantBindings,
         persistence,

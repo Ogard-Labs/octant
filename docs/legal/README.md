@@ -3,76 +3,49 @@
 Draft legal and privacy positions for counsel review. They are **not**
 published notices, signed agreements, or certifications of GDPR compliance.
 
-## User-facing privacy drafts
+## User-facing privacy drafts (published in the guide, with draft banners)
 
-These live with the product docs because they describe current product
-behavior for operators:
+These live with the product docs at `octant-site/docs/advanced/` because they describe
+current product behavior for operators:
 
-- [`apps/docs/advanced/privacy-notice.md`](../../apps/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
-- [`apps/docs/advanced/privacy-and-security.md`](../../apps/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
-- [`apps/docs/advanced/sub-processors.md`](../../apps/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
-- [`apps/docs/advanced/data-residency.md`](../../apps/docs/advanced/data-residency.md) — the host is the region
-- [`apps/docs/advanced/dpa-template.md`](../../apps/docs/advanced/dpa-template.md) — processor clauses for an Octant-operated hosted component
-- [`apps/docs/advanced/scc-position.md`](../../apps/docs/advanced/scc-position.md) — transfer posture on BYO vs Octant-operated surfaces
-- [`apps/docs/advanced/eula-placeholders.md`](../../apps/docs/advanced/eula-placeholders.md) — governing-law and venue blanks for a future EULA
+- [`privacy-notice.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
+- [`privacy-and-security.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
+- [`sub-processors.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
+- [`data-residency.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md) — the host is the region
 
-This directory holds positions that need a quiet home away from those
-concurrent user-guide edits, or that counsel will review before any
-VitePress publication.
-
-## Drafts in this directory
+## Drafts in this directory (not published until counsel signs off)
 
 | Draft                                                         | Topic                                                                                                                                                                           |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Shared-host controller footing](./shared-host-controller.md) | When one host holds several principals' data: who is controller for the journal, logs, and audit export; alignment with collaboration design; shipped export and purge surfaces |
+| [DPA template](./dpa-template.md)                             | **Not in force** stub: no Ogard-operated hosted component exists; what would trigger a DPA if one ever ships                                                                    |
+| [SCC position](./scc-position.md)                             | **No SCCs exist** stub: BYO and the self-hosted share service are the customer's own relationships; what would trigger transfer tools                                           |
+| [EULA placeholders](./eula-placeholders.md)                   | Governing-law and venue blanks for the EULA counsel will deliver — the one live contract deliverable                                                                            |
 
 ## Standard values drafted from the existing Ogard Labs setup
 
-These are filled into the drafts from the infrastructure and legal baseline
-Ogard Labs already operates (prod01 on Gigahost AS in Norway, encrypted
-offsite backups on Hetzner in Finland, entity registered in Stavanger):
-
-- **Controller/operator entity:** Ogard Labs, organisation number
-  996 198 510, Stavanger, Norway; contact `hello@octant.sh`.
-- **Public Canvas share service hosting:** Norway (EEA) on Gigahost AS,
-  backups in Finland (EU) — no restricted transfer while EEA-hosted, so no
-  SCC today; the controller-to-processor module is required before any move
-  outside the EEA/UK. Filled in the privacy notice, public-links guide,
-  sub-processors, data residency, DPA Annex A, and SCC position.
+- **Licensor entity:** Ogard Labs, organisation number 996 198 510,
+  Stavanger, Norway; contact `hello@octant.sh`. Ogard Labs licenses the
+  software; it operates **no** share or hosting service for Octant content.
+- **Public Canvas share service:** there is no Ogard-operated instance. The
+  reference app lives in this repository at `apps/share` and each user runs it
+  on their own host (or uses another service they choose). The privacy notice,
+  public-links guide, sub-processors, data residency, and SCC position all
+  describe that user-operated model; the DPA template is not in force.
 - **EULA proposal:** Norwegian law, Stavanger District Court as agreed
   venue, no arbitration, notices to `hello@octant.sh`, English controlling
   (mirrors the terms already published for Ogard Labs' other products).
 
-## Service launch gate
-
-Every page in this package is already written for the scenario where the
-public Canvas share service **is available** at `https://canvas.octant.sh`:
-operator, hosting region, abuse contact, DPA Annex A, SCC posture, and EULA
-values are filled in above and read as final, behind the standing
-draft-pending-counsel banner. When the service launches, no doc edits are
-needed beyond counsel sign-off. What remains before launch is operational:
-
-- Deploy the share app from the `octant-webapp` repository on prod01
-  (Gigahost AS, Norway), with DNS and TLS for `canvas.octant.sh` and the
-  separate `canvas-usercontent.octant.sh` origin.
-- Set `OCTANT_SHARE_ABUSE_CONTACT=hello@octant.sh` and
-  `OCTANT_SHARE_OPERATOR_TOKEN` in the service environment.
-- Publish the `octant-webapp` source if the self-hosting steps in the
-  public-links guide should apply to readers (the repository is private
-  today).
-- Counsel sign-off on every drafted value; nothing here is a published
-  notice, signed agreement, or certification of GDPR compliance until then.
-
 ## Remaining counsel decisions
 
-- **DPA template:** the customer-side brackets — customer legal name and
-  contact, effective date, governing agreement.
 - **EULA placeholders:** confirm or amend the proposed values (Norwegian law,
-  Stavanger venue, `hello@octant.sh`, English controlling).
+  Stavanger venue, `hello@octant.sh`, English controlling) and deliver the
+  full license text for the preview.
+- **DPA template:** dormant — no Ogard-operated hosted component exists, so no
+  DPA is in force. Revisit only if a future hosted component ships.
 - **Update-check default:** changed to off-by-default (a store that never
-  recorded the preference decodes to off) in the companion branch
-  `fix/update-checks-default-off`; the privacy notice and installation guide
-  describe the new default there.
+  recorded the preference decodes to off); the privacy notice and installation
+  guide describe the new default.
 - **Shared-host controller footing:** confirm or rewrite the default
   "host owner is controller" sentence, and decide the joint-controller and
   processor forms a recorded controller fact needs.

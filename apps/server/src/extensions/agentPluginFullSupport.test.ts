@@ -1009,6 +1009,45 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
+  it("reports a failed server with when it failed, and Reconnect clears the failure without connecting", async () => {
+    const manager = new AgentPluginMcpSessionManager({
+      now: () => new Date("2026-11-07T12:00:00.000Z"),
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: { local: { type: "stdio", command: "./server" } },
+          }),
+      },
+      stdioSupervisor: {
+        startInteractive: async () => {
+          throw new Error("server would not start");
+        },
+      },
+    });
+    const effective = effectiveMcpSnapshot("mcp-local", "local");
+    await manager.reconcile(effective);
+    const extensionId = "15000000-0000-4000-8000-000000000001";
+    expect(manager.connectionObservations()).toEqual([
+      {
+        extensionId,
+        componentId: "mcp-local",
+        state: "failed",
+        reason: "server would not start",
+        at: "2026-11-07T12:00:00.000Z",
+      },
+    ]);
+
+    await manager.reconnect(extensionId, "mcp-local");
+
+    expect(manager.connectionObservations()).toEqual([]);
+    expect(manager.failedComponents()).toEqual([]);
+    expect(manager.sessions()).toHaveLength(0);
+    await manager.drainAll();
+  });
+
   it("reconnects a protocol-limited stdio session only on reconciliation", async () => {
     const stdouts: PassThrough[] = [];
     let starts = 0;

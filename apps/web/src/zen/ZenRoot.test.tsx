@@ -45,6 +45,26 @@ describe("ZenRoot", () => {
     expect(onToggle).toHaveBeenCalledOnce();
   });
 
+  it("leaves the Zen chord alone when the Zen plugin is off", () => {
+    const onToggle = vi.fn();
+    render(
+      <ZenRoot
+        active={false}
+        enabled={false}
+        onExit={() => undefined}
+        onToggle={onToggle}
+        zen={<div>Zen view</div>}
+      >
+        <div>Ordinary shell</div>
+      </ZenRoot>,
+    );
+
+    const notHandled = fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true });
+
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(notHandled).toBe(true);
+  });
+
   it("leaves Redo to the composer instead of opening Zen while someone is typing", () => {
     const onToggle = vi.fn();
     render(

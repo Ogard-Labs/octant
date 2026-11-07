@@ -20,6 +20,7 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
   return {
     actions: noActions,
     activeMode: "code",
+    threadBoardAvailable: true,
     activePaneId: undefined,
     agentRunClient: undefined as never,
     browserAutomationClient: undefined,
@@ -30,6 +31,7 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     computerSnapshots,
     feedRevision: 0,
     githubPullRequestCapability: noPullRequests,
+    githubPluginEffective: true,
     hostFederationTransports: undefined,
     hostResourceClient,
     isDesktop: false,

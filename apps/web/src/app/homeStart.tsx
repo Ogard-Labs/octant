@@ -31,7 +31,6 @@ import { createWorkingNowCard, type WorkingNowCardSource } from "../home/Working
 import type { WorkingNowThread } from "../home/workingNow";
 import type { useHostFederationLifecycle } from "../host/useHostFederationLifecycle";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "../shell/contributionRegistry";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
 import type { useShellController } from "../shell/useShellController";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
@@ -68,6 +67,8 @@ export interface HomeStartInput {
     | "updateSettings"
   >;
   readonly activeMode: OctantMode;
+  /** Off when the Board plugin is switched off: Running cards lead to Activity instead. */
+  readonly threadBoardAvailable: boolean;
   readonly activePaneId: PaneId | undefined;
   readonly agentRunClient: AgentRunClient;
   readonly browserAutomationClient: BrowserAutomationClient | undefined;
@@ -78,6 +79,8 @@ export interface HomeStartInput {
   /** The sum of every mode's navigation revision: when a turn starts or ends. */
   readonly feedRevision: number;
   readonly githubPullRequestCapability: PullRequestCardCapability;
+  /** Whether the person has the bundled GitHub plugin switched on. */
+  readonly githubPluginEffective: boolean;
   /**
    * The paired computers as the federation lifecycle last listed them, read by
    * the shell on each lifecycle change so the Computers card re-derives then
@@ -135,6 +138,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
   const {
     actions,
     activeMode,
+    threadBoardAvailable,
     activePaneId,
     agentRunClient,
     browserAutomationClient,
@@ -144,6 +148,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     codeThreads,
     feedRevision,
     githubPullRequestCapability,
+    githubPluginEffective,
     computerSnapshots,
     hostFederationTransports,
     hostResourceClient,
@@ -234,7 +239,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     // The same place the sidebar's Running tile goes: Chat has no board, so
     // its running threads lead the Activity feed instead.
     onOpenRunning: () => {
-      if (activeMode === "chat") {
+      if (activeMode === "chat" || !threadBoardAvailable) {
         actions.openSidebarList("activity");
         return;
       }
@@ -292,7 +297,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     createPullRequestsCard({
       available: pullRequestCardAvailable({
         mode: activeMode,
-        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        pluginEffective: githubPluginEffective,
         capability: githubPullRequestCapability,
       }),
       viewerLogin: githubPullRequestCapability.login ?? "",
@@ -317,7 +322,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       ...(input.onOpenRoutine === undefined ? {} : { onOpenRoutine: input.onOpenRoutine }),
       available: pullRequestCardAvailable({
         mode: activeMode,
-        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        pluginEffective: githubPluginEffective,
         capability: githubPullRequestCapability,
       }),
       viewerLogin: githubPullRequestCapability.login ?? "",
@@ -348,7 +353,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       readResources: readComputerResources,
       onOpenRunning: (hostId) => {
         actions.setEnvironmentSelection({ kind: "some", hostIds: new Set([hostId]) });
-        if (activeMode === "chat") {
+        if (activeMode === "chat" || !threadBoardAvailable) {
           actions.openSidebarList("activity");
           return;
         }

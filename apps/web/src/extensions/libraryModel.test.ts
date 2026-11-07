@@ -165,6 +165,26 @@ describe("the library model", () => {
     expect(on).toMatchObject({ state: "on", steps: { enable: "done" } });
   });
 
+  it("leaves plugins built into Octant out, since their only control is the switch under Installed", () => {
+    const items = buildLibrary({
+      snapshot: snapshot(
+        pkg(
+          "github",
+          { trusted: true, pluginDesired: true },
+          {
+            source: { kind: "bundled", sourceRef: "app:github" },
+          },
+        ),
+        pkg("a", {}),
+      ),
+      connectors: [],
+    });
+    const packages = items.flatMap((item) =>
+      item.packageRef === undefined ? [] : [item.packageRef.extensionId],
+    );
+    expect(packages).toEqual(["a"]);
+  });
+
   it("says a desired, trusted package that the host blocks is blocked, with the reason", () => {
     const [item] = buildLibrary({
       snapshot: snapshot(pkg("a", { trusted: true, pluginDesired: true })),
@@ -205,6 +225,40 @@ describe("the library model", () => {
     expect(linear[0]).toMatchObject({ kind: "connector", state: "on", source: "Connector" });
   });
 
+  it("carries the host's connection state onto the installed item, the server needing attention first", () => {
+    const connected = pkg(
+      "x",
+      { trusted: true, pluginDesired: true, componentDesired: true },
+      { slug: "connector-linear", addedInSettings: true },
+      ["mcp"],
+      "effective",
+    );
+    const extensionId = String(connected.extensionId);
+    const connection = (state: "connected" | "failed", componentId: string) =>
+      ({
+        extensionId,
+        packageId: connected.packageId,
+        componentId,
+        packageName: "Linear",
+        serverName: componentId,
+        transport: "streamable-http",
+        state,
+        ...(state === "failed" ? { reason: "Could not connect: fetch failed" } : {}),
+      }) as never;
+    const items = buildLibrary({
+      snapshot: snapshot(connected),
+      connections: [connection("connected", "first"), connection("failed", "second")],
+    });
+    expect(items.find((item) => item.connectorId === "linear")?.connection).toEqual({
+      state: "failed",
+      reason: "Could not connect: fetch failed",
+    });
+    expect(
+      buildLibrary({ snapshot: snapshot(connected) }).find((item) => item.connectorId === "linear")
+        ?.connection,
+    ).toBeUndefined();
+  });
+
   it("filters by words, kind and state, and puts items needing a decision first", () => {
     const items = buildLibrary({
       snapshot: snapshot(pkg("alpha", { trusted: true }), pkg("beta", {})),
@@ -231,6 +285,13 @@ describe("the library model", () => {
     });
     expect(postgres.length).toBeGreaterThan(0);
     expect(postgres.every((item) => item.kind === "connector")).toBe(true);
+    const jira = filterLibrary(items, {
+      query: "jira",
+      kind: "all",
+      state: "all",
+      provider: ALL_PROVIDERS,
+    });
+    expect(jira.map((item) => item.connectorId)).toEqual(["atlassian"]);
   });
 
   it("offers what was found in Claude Code and Codex as not yet installed here", () => {

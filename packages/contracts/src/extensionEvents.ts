@@ -181,6 +181,22 @@ export const decodeExtensionProjectPinChanged = Schema.decodeUnknownSync(
   ExtensionProjectPinChanged,
 );
 
+/**
+ * A person switched a plugin built into Octant on or off. One aggregate per
+ * bundled plugin, by its extension id. Nothing is installed or removed: the
+ * plugin's code ships with the app, and switching it off keeps its data.
+ */
+export const BUNDLED_PLUGIN_SWITCH_AGGREGATE = "extension-bundled-plugin-switch";
+export const BUNDLED_PLUGIN_SWITCH_EVENT_NAMES = {
+  switched: "extension.bundled-plugin-switched@1",
+} as const;
+export const BundledPluginSwitched = Schema.Struct({
+  extensionId: ToolExtensionId,
+  desired: Schema.Boolean,
+}).annotations(strict);
+export type BundledPluginSwitched = typeof BundledPluginSwitched.Type;
+export const decodeBundledPluginSwitched = Schema.decodeUnknownSync(BundledPluginSwitched);
+
 export const EXTENSION_TOOL_GRANT_AGGREGATE = "extension-tool-grant";
 export const EXTENSION_TOOL_GRANT_EVENT_NAMES = {
   recorded: "extension.tool-grant-recorded@1",

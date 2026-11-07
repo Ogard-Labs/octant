@@ -40,7 +40,7 @@ When a shared host holds several principals' personal data in one journal:
 4. **BYO AI providers remain the user's processors** for inference the host
    sends under each principal's provider use grants. They are not Octant
    sub-processors. See
-   [`apps/docs/advanced/sub-processors.md`](../../apps/docs/advanced/sub-processors.md).
+   [`octant-site/docs/advanced/sub-processors.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md).
 
 "Host owner" here means the principal who enrolled the host and holds
 local-host-required administration (listener enablement, pairing approval,
@@ -60,7 +60,7 @@ for that host's journal, logs, and audit export unless a recorded
 controller fact says otherwise. Operators should not assume that giving
 someone a Project grant, or seating the VM in a particular region, silently
 moves controllership. Residency remains "this machine, this region"; see
-[`apps/docs/advanced/data-residency.md`](../../apps/docs/advanced/data-residency.md).
+[`octant-site/docs/advanced/data-residency.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md).
 
 Counsel must decide how to state joint-controller or processor arrangements
 in published documents. This draft does not invent those forms.
@@ -96,7 +96,7 @@ and names the cut time. Secrets, raw provider payloads, resume cursors, and
 filesystem paths are unrepresentable. Bulk content outside the journal is
 listed as omissions. A paired device may export only a thread it can
 already read. This is not a host-wide dump. See
-[`apps/docs/advanced/privacy-notice.md`](../../apps/docs/advanced/privacy-notice.md).
+[`octant-site/docs/advanced/privacy-notice.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md).
 
 **Retain and purge.** Retention windows never delete on their own. A
 confirmed purge deletes purgeable bulk content, removes derived
@@ -168,8 +168,8 @@ truth.
 
 ## Related product docs
 
-- [Privacy notice](../../apps/docs/advanced/privacy-notice.md)
-- [Sub-processors](../../apps/docs/advanced/sub-processors.md)
-- [Data residency](../../apps/docs/advanced/data-residency.md)
-- [Privacy and security](../../apps/docs/advanced/privacy-and-security.md)
-- [Remote access](../../apps/docs/advanced/remote-access.md)
+- [Privacy notice](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md)
+- [Sub-processors](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md)
+- [Data residency](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md)
+- [Privacy and security](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-and-security.md)
+- [Remote access](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/remote-access.md)

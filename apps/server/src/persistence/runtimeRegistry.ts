@@ -169,6 +169,8 @@ import {
   ExtensionToolGrantRevoked,
   EXTENSION_PROJECT_PIN_EVENT_NAMES,
   ExtensionProjectPinChanged,
+  BUNDLED_PLUGIN_SWITCH_EVENT_NAMES,
+  BundledPluginSwitched,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   WORKTREE_PREPARATION_UPDATED,
@@ -326,6 +328,7 @@ import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
+import { BundledPluginSwitchProjection } from "./bundledPluginSwitchProjection";
 import { ThreadNativeSetupProjection } from "./threadNativeSetupProjection";
 import {
   THREAD_NATIVE_SETUP_EVENT_NAMES,
@@ -665,6 +668,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
     .register(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed, 1, ExtensionProjectPinChanged)
+    .register(BUNDLED_PLUGIN_SWITCH_EVENT_NAMES.switched, 1, BundledPluginSwitched)
     .register(THREAD_NATIVE_SETUP_EVENT_NAMES.changed, 1, ThreadNativeSetupChanged)
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
@@ -796,6 +800,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ExtensionProjection())
       .register(new ExtensionToolGrantProjection())
       .register(new ExtensionProjectPinProjection())
+      .register(new BundledPluginSwitchProjection())
       .register(new ThreadNativeSetupProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
