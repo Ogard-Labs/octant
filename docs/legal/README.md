@@ -6,11 +6,11 @@ collection. The documentation follows that scope:
 
 - [LICENSE](../../LICENSE) is the software licence; keep its copyright and
   permission notice with redistributed copies.
-- [Licence and contact](../../apps/docs/advanced/terms.md) identifies the
+- [Licence and contact](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/terms.md) identifies the
   distributor and links the licence, with mandatory rights preserved.
-- [Privacy](../../apps/docs/advanced/privacy-notice.md) states the software's
+- [Privacy](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) states the software's
   data boundary and external connections.
-- [Privacy and security](../../apps/docs/advanced/privacy-and-security.md)
+- [Privacy and security](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-and-security.md)
   documents host storage, export, purge, approvals, and network controls.
 
 There is no separate EULA, customer-data DPA, SCC template, or declaration

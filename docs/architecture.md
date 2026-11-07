@@ -4618,9 +4618,9 @@ or .zip>` write the same files, built by one host command
   limited to the MIT licence, distributor/contact information, the self-hosted
   data boundary, and external connections. Ogard Labs does not receive or
   process workspace data and operates no content service or telemetry
-  collection. The pages are `apps/docs/advanced/terms.md` and
-  `apps/docs/advanced/privacy-notice.md`; operational export/purge limits stay
-  in `apps/docs/advanced/privacy-and-security.md`. There is no separate EULA,
+  collection. The pages live in `Ogard-Labs/octant-site`: `docs/advanced/terms.md` and
+  `docs/advanced/privacy-notice.md`; operational export/purge limits stay
+  in `docs/advanced/privacy-and-security.md` there. There is no separate EULA,
   DPA/SCC template, or automatic assignment of a GDPR role to a host owner or
   provider. Preserve mandatory rights and assess any changed processing model
   on its facts; [documentation scope](legal/README.md) records the basis.

@@ -574,6 +574,7 @@ for how this sits next to marketplace fetches.
 ## Next steps
 
 After installation, continue with [First Run](/guide/first-run) to configure
-providers and create your first Project. [Privacy](/advanced/privacy-notice)
-describes where data lives and which connections leave the machine.
-[Licence and contact](/advanced/terms) identifies the distributor and licence.
+providers and create your first Project. Drafts of the
+[privacy notice](/advanced/privacy-notice) and
+[data residency](/advanced/data-residency) statements describe what the
+data directory holds and which requests leave the machine.
