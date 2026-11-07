@@ -10,6 +10,7 @@ const PROOF_HEADER = "x-octant-preview-key";
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_MESSAGE = 1024 * 1024;
 const MAX_CONNECTIONS = 8;
+const MAX_OPERATIONS = 8;
 const UNAVAILABLE = "Preview unavailable.";
 
 /** One private socket in one lease's existing home; the relay already holds the exact approved target. */
@@ -22,7 +23,7 @@ export async function createDesktopPreviewBridge(options: {
   readonly signal: AbortSignal;
 }): Promise<{ readonly close: () => Promise<void> }> {
   const sockets = new Set<Socket>();
-  const controllers = new Set<AbortController>();
+  const controllers = new Map<AbortController, Socket>();
   let closing: Promise<void> | undefined;
   let identity: { readonly dev: number; readonly ino: number } | undefined;
   let stopped = false;
@@ -60,6 +61,13 @@ export async function createDesktopPreviewBridge(options: {
     return headers;
   };
   const server = createServer({ maxHeaderSize: 16 * 1024 }, async (request, response) => {
+    if (request.socket.destroyed) return;
+    // HTTP pipelining can create many operations on one connection. Do not
+    // queue a rejection behind its held responses or allocate more body work.
+    if (controllers.size >= MAX_OPERATIONS) {
+      request.socket.destroy();
+      return;
+    }
     if (!authorized(request)) {
       response.writeHead(401).end(UNAVAILABLE);
       return;
@@ -73,8 +81,9 @@ export async function createDesktopPreviewBridge(options: {
       return;
     }
     const controller = new AbortController();
-    controllers.add(controller);
-    response.once("close", () => controller.abort());
+    controllers.set(controller, request.socket);
+    const abort = () => controller.abort();
+    response.once("close", abort);
     try {
       let size = 0;
       const chunks: Buffer[] = [];
@@ -126,6 +135,7 @@ export async function createDesktopPreviewBridge(options: {
       if (!response.headersSent) response.writeHead(502).end(UNAVAILABLE);
       else response.destroy();
     } finally {
+      response.removeListener("close", abort);
       controllers.delete(controller);
       controller.abort();
     }
@@ -140,7 +150,10 @@ export async function createDesktopPreviewBridge(options: {
       return;
     }
     sockets.add(socket);
-    socket.once("close", () => sockets.delete(socket));
+    socket.once("close", () => {
+      sockets.delete(socket);
+      for (const [controller, owner] of controllers) if (owner === socket) controller.abort();
+    });
   });
   server.on("upgrade", async (request, connection, head) => {
     if (!(connection instanceof Socket)) {
@@ -148,6 +161,10 @@ export async function createDesktopPreviewBridge(options: {
       return;
     }
     const socket = connection;
+    if (socket.destroyed || controllers.size >= MAX_OPERATIONS) {
+      socket.destroy();
+      return;
+    }
     const key = request.headers["sec-websocket-key"];
     if (
       !authorized(request) ||
@@ -161,7 +178,7 @@ export async function createDesktopPreviewBridge(options: {
       return;
     }
     const controller = new AbortController();
-    controllers.add(controller);
+    controllers.set(controller, socket);
     socket.once("close", () => {
       controllers.delete(controller);
       controller.abort();
@@ -206,7 +223,7 @@ export async function createDesktopPreviewBridge(options: {
     closing ??= (async () => {
       stopped = true;
       options.signal.removeEventListener("abort", abort);
-      for (const controller of controllers) controller.abort();
+      for (const controller of controllers.keys()) controller.abort();
       for (const socket of sockets) socket.destroy();
       if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
       const existing = await lstat(options.exposedPath).catch(() => undefined);

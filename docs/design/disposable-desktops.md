@@ -471,8 +471,11 @@ guest replacement during shutdown. The exposed alias is removed only while
 its inode still matches; a replacement remains until normal owned-lease
 teardown. Removing or replacing the alias can break only that lease's preview.
 
-The bridge permits at most eight connections, 16 KiB of headers, 64 header
-fields and an 8 MiB request body. WebSocket messages are at most 1 MiB; writes
+The bridge permits at most eight connections and eight active HTTP/WebSocket
+operations across them, 16 KiB of headers, 64 header fields and an 8 MiB request
+body. Admission precedes controller allocation, body reading and relay work;
+a saturated socket closes and cancels its operations instead of queuing
+rejection responses behind held pipelined requests. WebSocket messages are at most 1 MiB; writes
 use backpressure and bounded message queues. Header/request setup has finite
 deadlines; the grant's hard expiry bounds open streams and the guest proxy.
 The provider startup is bounded, and late results after cancellation are closed.

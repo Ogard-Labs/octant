@@ -1,4 +1,6 @@
 import { request } from "node:http";
+import { connect } from "node:net";
+import type { DesktopPreviewRelay } from "@octant/plugin-api/desktop-provider";
 import { mkdtemp, rm, lstat, unlink, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,5 +104,43 @@ describe("a desktop lease's private preview bridge", () => {
     await writeFile(socketPath, "replacement");
     await bridge.close();
     expect(await readFile(socketPath, "utf8")).toBe("replacement");
+  });
+  it("caps active work before pipelined requests can dispatch and cancels the saturated socket", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "op-"));
+    cleanups.push(() => rm(directory, { recursive: true, force: true }));
+    const socketPath = join(directory, "p.sock");
+    const nonce = "a".repeat(43);
+    const relay = vi.fn<DesktopPreviewRelay["request"]>(
+      (input) =>
+        new Promise((resolve) => {
+          input.signal.addEventListener(
+            "abort",
+            () => resolve(new Response(null, { status: 503 })),
+            { once: true },
+          );
+        }),
+    );
+    const bridge = await createDesktopPreviewBridge({
+      socketPath: socketPath + ".host",
+      exposedPath: socketPath,
+      nonce,
+      relay: { request: relay, upgrade: async () => ({ status: "refused" }) },
+      signal: new AbortController().signal,
+    });
+    cleanups.push(bridge.close);
+    const socket = connect(socketPath);
+    socket.on("error", () => undefined);
+    socket.resume();
+    cleanups.push(async () => {
+      socket.destroy();
+    });
+    const packet = `GET /page HTTP/1.1\r\nHost: guest\r\nx-octant-preview-key: ${nonce}\r\n\r\n`;
+    socket.write(packet.repeat(8));
+    await vi.waitFor(() => expect(relay).toHaveBeenCalledTimes(8));
+    socket.write(packet.repeat(32));
+    await vi.waitFor(() => expect(socket.destroyed || relay.mock.calls.length > 8).toBe(true));
+    expect(relay).toHaveBeenCalledTimes(8);
+    await vi.waitFor(() => expect(socket.destroyed).toBe(true));
+    expect(relay.mock.calls.every(([input]) => input.signal.aborted)).toBe(true);
   });
 });
