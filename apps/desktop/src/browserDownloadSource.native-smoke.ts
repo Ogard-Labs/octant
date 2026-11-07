@@ -136,7 +136,8 @@ async function probe(root: string) {
     );
   }
 }
-const root = process.argv[2];
+const rootIndex = process.argv.indexOf("--octant-fixture-root");
+const root = rootIndex < 0 ? undefined : process.argv[rootIndex + 1];
 if (root === undefined) throw Error("An owned fixture root is required.");
 const pending = probe(root);
 void pending.catch(() => undefined);

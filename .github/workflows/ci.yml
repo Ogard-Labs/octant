@@ -183,6 +183,10 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - run: node node_modules/electron/install.js
+      - name: Native download redirect source receipt
+        timeout-minutes: 2
+        run: bun run smoke:browser-download-source
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
       # Confined Code and Work opens prove where they landed with
@@ -217,10 +221,6 @@ jobs:
       # the escape tests below also run a driver on the Electron the desktop
       # app pins. Electron's package downloads its binary only on demand, not
       # at install, so it is fetched here; without it that case would skip.
-      - run: node node_modules/electron/install.js
-      - name: Native download redirect source receipt
-        timeout-minutes: 2
-        run: bun run smoke:browser-download-source
       # The ordinary Nightly client, in this Electron, against a development
       # host on a throwaway folder and port that a synthetic Stable owns with
       # Stable's own lease owner and client lifetime: the renderer, a Chat

@@ -47,7 +47,7 @@ async function main() {
     delete environment.ELECTRON_RUN_AS_NODE;
     native = await _electron.launch({
       executablePath,
-      args: [entry, root],
+      args: [entry, "--octant-fixture-root", root],
       env: environment,
       timeout: 15_000,
     });
