@@ -1819,9 +1819,10 @@ The listener serves a pasted certificate or a self-made one, and a client pins a
 - A pinned origin passes only on the public-key hash; an unpinned origin passes only on platform validation, so it never accepts a self-made certificate.
 - A client sends nothing unless every address the origin resolves to, and the connected peer, is private LAN or private mesh; a public answer refuses the whole name.
 - Desktop and phone pin through a main-process or native channel that applies one shared rule; the desktop window never connects to a paired computer itself.
-- Staged trust for key rotation is planned, with no announcement route yet (not built yet).
+- Local CLI preparation signs the host, exact origin, old/new pins and fixed seven-day window with the old TLS key; trusted hello responses stage it durably in desktop main and phone secure storage. Explicit activation names the displayed new pin and restarts the listener without rotating host identity or revoking devices. Missed or expired windows require re-pairing, never an unknown-pin fallback.
+- Cancellation withdraws only an unactivated stage; offline copies retain their original deadline. Activation refuses an enabled hub or joined spoke, preserving signed roster authority; explicit detach/rejoin is required. Roster trust migration is not built.
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Listener certificate](../architecture.md#security-and-authority).
+Status: Built for paired apps; roster trust migration remains unbuilt. Since: —. Detail: [Architecture: Security and authority, Listener certificate](../architecture.md#security-and-authority).
 
 ### App pairing code and one-step pairing
 

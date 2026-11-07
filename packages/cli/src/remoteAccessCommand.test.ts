@@ -122,6 +122,25 @@ describe("resolvePairCliCommand", () => {
 });
 
 describe("resolveListenerCliCommand", () => {
+  it("requires an explicit prepared pin for key activation and rejects unrelated options", () => {
+    expect(resolveListenerCliCommand(["prepare-key"], {})).toEqual({
+      action: "listener-transition",
+      operation: "prepare",
+    });
+    expect(resolveListenerCliCommand(["cancel-key"], {})).toEqual({
+      action: "listener-transition",
+      operation: "cancel",
+    });
+    expect(resolveListenerCliCommand(["activate-key"], { pin: TLS_PIN })).toEqual({
+      action: "listener-transition",
+      operation: "activate",
+      newPin: TLS_PIN,
+    });
+    expect(resolveListenerCliCommand(["activate-key"], {})).toBeUndefined();
+    expect(
+      resolveListenerCliCommand(["activate-key"], { pin: TLS_PIN, hostname: "other" }),
+    ).toBeUndefined();
+  });
   it("shows the listener status by default", () => {
     expect(resolveListenerCliCommand([], {})).toEqual({ action: "listener-status" });
     expect(resolveListenerCliCommand(["status"], {})).toEqual({ action: "listener-status" });
@@ -167,6 +186,60 @@ describe("resolveListenerCliCommand", () => {
     expect(resolveListenerCliCommand(["enable"], { ...complete, port: "84a" })).toBeUndefined();
     expect(resolveListenerCliCommand(["disable"], { hostname: "100.64.0.7" })).toBeUndefined();
   });
+});
+
+it("shows the fixed listener transition window and requires the displayed pin when activating", async () => {
+  const transition = {
+    version: 1,
+    hostId: "11111111-1111-4111-8111-111111111111",
+    origin: SELF_MADE_STATUS.origin,
+    oldPin: TLS_PIN,
+    newPin: `sha256-${"B".repeat(43)}`,
+    oldPublicKey: "C".repeat(122),
+    preparedAt: "2026-11-07T10:00:00.000Z",
+    expiresAt: "2026-11-14T10:00:00.000Z",
+    signature: "A".repeat(86),
+  };
+  const test = fixture((request) => ({
+    status: 200,
+    body: {
+      status: {
+        ...SELF_MADE_STATUS,
+        tlsPin:
+          request.body !== undefined &&
+          typeof request.body === "object" &&
+          request.body !== null &&
+          "action" in request.body &&
+          request.body.action === "activate"
+            ? transition.newPin
+            : TLS_PIN,
+        keyTransition: transition,
+      },
+    },
+  }));
+  expect(await test.run({ action: "listener-transition", operation: "prepare" })).toBe(0);
+  expect(test.sent[0]).toEqual({
+    path: "/api/desktop/private-listener/key-transition",
+    method: "POST",
+    body: { action: "prepare" },
+  });
+  expect(test.out.join("")).toContain(
+    "Seven-day window 2026-11-07T10:00:00.000Z to 2026-11-14T10:00:00.000Z",
+  );
+  expect(test.out.join("")).toContain(`activate-key --pin ${transition.newPin}`);
+  expect(
+    await test.run({
+      action: "listener-transition",
+      operation: "activate",
+      newPin: transition.newPin,
+    }),
+  ).toBe(0);
+  expect(test.sent[1]).toEqual({
+    path: "/api/desktop/private-listener/key-transition",
+    method: "POST",
+    body: { action: "activate", newPin: transition.newPin },
+  });
+  expect(test.out.join("")).toContain("explicitly re-paired");
 });
 
 describe("resolveAuthCliCommand", () => {

@@ -10,6 +10,8 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { Readable } from "node:stream";
 import { connect as connectTls, type TLSSocket } from "node:tls";
+import { LISTENER_KEY_TRANSITION_HEADER } from "@octant/domain";
+import { listenerTrustAfterResponse } from "./listenerKeyTransition";
 import {
   judgeListenerAddresses,
   judgeListenerCertificate,
@@ -42,6 +44,12 @@ export interface ListenerConnectionOptions {
   readonly origin: string;
   readonly trust: ListenerOriginTrust;
   readonly now?: () => number;
+  readonly hostId?: string;
+  /** Persist before a new key carries a request; reject if the pairing was forgotten or replaced. */
+  readonly onTrust?: (
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ) => Promise<void> | void;
 }
 
 /**
@@ -70,8 +78,22 @@ const SYSTEM_NETWORK: ListenerNetwork = {
  * failure is a value and the socket is already closed; only an origin that is
  * not exactly an HTTPS origin, which no pairing record holds, throws.
  */
-export function connectListener(options: ListenerConnectionOptions): Promise<ListenerConnection> {
-  return connectListenerOver(options, SYSTEM_NETWORK);
+export async function connectListener(
+  options: ListenerConnectionOptions,
+): Promise<ListenerConnection> {
+  const connection = await connectListenerOver(options, SYSTEM_NETWORK);
+  if (
+    connection.status === "connected" &&
+    JSON.stringify(options.trust) !== JSON.stringify(connection.trust)
+  ) {
+    try {
+      await options.onTrust?.(options.trust, connection.trust);
+    } catch (error) {
+      connection.socket.destroy();
+      throw error;
+    }
+  }
+  return connection;
 }
 
 /**
@@ -102,6 +124,16 @@ function createListenerFetchOver(
   options: ListenerConnectionOptions,
   network: ListenerNetwork,
 ): typeof globalThis.fetch {
+  let trust = options.trust;
+  const remember = async (
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ): Promise<void> => {
+    if (JSON.stringify(previous) === JSON.stringify(next)) return;
+    if (JSON.stringify(trust) !== JSON.stringify(previous)) return;
+    await options.onTrust?.(previous, next);
+    trust = next;
+  };
   return async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -110,10 +142,17 @@ function createListenerFetchOver(
     }
     request.signal.throwIfAborted();
     const body = request.body === null ? undefined : Buffer.from(await request.arrayBuffer());
-    const connection = await connectListenerOver(options, network);
+    const previous = trust;
+    const connection = await connectListenerOver({ ...options, trust: previous }, network);
     if (connection.status === "refused") throw new ListenerTrustRefused(connection.reason);
     if (connection.status === "failed") throw new TypeError("The listener could not be reached.");
     const socket = connection.socket;
+    try {
+      await remember(previous, connection.trust);
+    } catch (error) {
+      socket.destroy();
+      throw error;
+    }
     const headers: Record<string, string> = {};
     request.headers.forEach((value, name) => {
       headers[name] = value;
@@ -136,12 +175,24 @@ function createListenerFetchOver(
         },
         (incoming) => {
           request.signal.removeEventListener("abort", abort);
-          try {
-            resolve(responseOf(incoming));
-          } catch {
+          void (async () => {
+            const response = responseOf(incoming);
+            const next = await listenerTrustAfterResponse({
+              header:
+                request.method === "GET" && url.pathname === "/api/remote/hello"
+                  ? response.headers.get(LISTENER_KEY_TRANSITION_HEADER)
+                  : null,
+              origin: options.origin,
+              ...(options.hostId === undefined ? {} : { hostId: options.hostId }),
+              trust: connection.trust,
+              now: (options.now ?? Date.now)(),
+            });
+            await remember(connection.trust, next);
+            resolve(response);
+          })().catch(() => {
             incoming.destroy();
             reject(new TypeError("The listener sent a response Octant cannot read."));
-          }
+          });
         },
       );
       outgoing.once("error", () => {

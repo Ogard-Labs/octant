@@ -17,6 +17,8 @@ import {
   type ListenerOriginTrust,
   type ListenerTrust,
 } from "./remoteListenerTrust";
+import { LISTENER_KEY_TRANSITION_HEADER } from "@octant/domain";
+import { listenerTrustAfterResponse } from "./listenerKeyTransition";
 
 export interface PinnedListenerExchangeRequest {
   /** The IP address to dial, already judged private; never a name. */
@@ -95,6 +97,11 @@ export function createExchangeListenerFetch(options: {
   readonly trust: ListenerOriginTrust;
   readonly port: PinnedListenerExchangePort;
   readonly now?: () => number;
+  readonly hostId?: string;
+  readonly onTrust?: (
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ) => Promise<void> | void;
 }): typeof globalThis.fetch {
   const match = HTTPS_ORIGIN.exec(options.origin);
   const host = match?.[1];
@@ -106,6 +113,16 @@ export function createExchangeListenerFetch(options: {
   const isAddress = IPV4_LITERAL.test(hostname) || hostname.includes(":");
   const now = options.now ?? Date.now;
   const encoder = new TextEncoder();
+  let trust = options.trust;
+  const remember = async (
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ): Promise<void> => {
+    if (JSON.stringify(previous) === JSON.stringify(next)) return;
+    if (JSON.stringify(trust) !== JSON.stringify(previous)) return;
+    await options.onTrust?.(previous, next);
+    trust = next;
+  };
 
   return async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -121,7 +138,8 @@ export function createExchangeListenerFetch(options: {
     const headers = new Headers(init?.headers ?? fromRequest?.headers);
     const body = await requestBody(init, fromRequest, encoder);
 
-    const pins = acceptedPins(options.trust, now());
+    const previous = trust;
+    const pins = acceptedPins(previous, now());
     if (pins.length === 0) {
       // Nothing this exchange may accept: a platform trust, or only pins
       // naming a hash this client does not know.
@@ -178,9 +196,31 @@ export function createExchangeListenerFetch(options: {
     signal?.addEventListener("abort", abort, { once: true });
     try {
       if (signal?.aborted === true) throw signal.reason;
-      return await readHttpResponse(reply, method, () => {
+      const judgedTrust = judgeListenerCertificate({
+        trust: previous,
+        servedPin: opening.servedPin,
+        platformTrusted: false,
+        now: now(),
+      });
+      if (judgedTrust.status !== "accepted") throw new ListenerTrustRefused(judgedTrust.reason);
+      await remember(previous, judgedTrust.trust);
+      const response = await readHttpResponse(reply, method, () => {
         signal?.removeEventListener("abort", abort);
       });
+      await remember(
+        judgedTrust.trust,
+        await listenerTrustAfterResponse({
+          header:
+            method === "GET" && path.split("?", 1)[0] === "/api/remote/hello"
+              ? response.headers.get(LISTENER_KEY_TRANSITION_HEADER)
+              : null,
+          origin: options.origin,
+          ...(options.hostId === undefined ? {} : { hostId: options.hostId }),
+          trust: judgedTrust.trust,
+          now: now(),
+        }),
+      );
+      return response;
     } catch (error) {
       signal?.removeEventListener("abort", abort);
       reply.close();
