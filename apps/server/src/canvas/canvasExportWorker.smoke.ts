@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
@@ -69,7 +70,29 @@ async function main(): Promise<void> {
     outsideDriverRuntime: runtime,
     canvasExportWorkerEntryPoint: worker,
   });
+  let connections = 0;
+  const socketControl = createServer((socket) => {
+    connections += 1;
+    socket.end();
+  });
   try {
+    await new Promise<void>((resolve, reject) => {
+      socketControl.once("error", reject);
+      socketControl.listen(0, "127.0.0.1", resolve);
+    });
+    const address = socketControl.address();
+    if (address === null || typeof address === "string") throw Error("Socket control unavailable.");
+    const controlConnection = () =>
+      new Promise<void>((resolve, reject) => {
+        const socket = createConnection({ host: "127.0.0.1", port: address.port });
+        socket.setTimeout(1000, () => socket.destroy(Error("Socket control timed out.")));
+        socket.once("error", reject);
+        socket.once("connect", () => {
+          socket.end();
+          resolve();
+        });
+      });
+    await controlConnection();
     const forbidden = join(root, "host-only.txt");
     const forbiddenWrite = join(root, "host-write.txt");
     await writeFile(forbidden, "disposable fixture only");
@@ -84,10 +107,10 @@ export const canvasExport = {
     try { writeFileSync(process.env.TMPDIR + '/owned-cache', 'fixture'); probe.privateWrite = true; } catch {}
     try { const child = spawnSync('/usr/bin/true'); probe.child = child.status === 0; } catch {}
     probe.socketDenied = await new Promise(resolve => {
-      const socket = createConnection({ host: '127.0.0.1', port: 9 });
+      const socket = createConnection({ host: '127.0.0.1', port: ${address.port} });
       const timer = setTimeout(() => { socket.destroy(); resolve(false); }, 1000);
       socket.on('connect', () => { clearTimeout(timer); socket.destroy(); resolve(false); });
-      socket.on('error', error => { clearTimeout(timer); process.stderr.write(JSON.stringify({socketError: error.code, errno: error.errno, message: String(error.message).slice(0, 256)})); resolve(['EPERM','EACCES'].includes(error.code)); });
+      socket.on('error', error => { clearTimeout(timer); process.stderr.write(JSON.stringify({socketError: error.code, errno: error.errno, message: String(error.message).slice(0, 256)})); resolve(['EPERM','EACCES','ECONNREFUSED'].includes(error.code)); });
     });
     try { await fetch('https://example.test/'); } catch { probe.bridgeDenied = true; }
     return { note: JSON.stringify(probe) };
@@ -188,6 +211,11 @@ export const canvasExport = {
         ...(description.kind === "description" ? { probe: description.destination?.note } : {}),
       }),
     );
+    // Bun maps the kernel socket refusal to ECONNREFUSED. A live endpoint,
+    // successful controls on both sides and no worker connection distinguish
+    // that refusal from an absent service; a closed port alone proves nothing.
+    await controlConnection();
+    if (connections !== 2) throw Error("The confined worker reached the socket control.");
     if (
       description.kind !== "description" ||
       description.destination?.note !==
@@ -217,6 +245,10 @@ export const canvasExport = {
     );
   } finally {
     if (extensionId.current !== "") await supervisor.drain(extensionId.current);
+    if (socketControl.listening)
+      await new Promise<void>((resolve, reject) =>
+        socketControl.close((error) => (error === undefined ? resolve() : reject(error))),
+      );
     const writable = async (path: string): Promise<void> => {
       await chmod(path, 0o700);
       for (const entry of await readdir(path, { withFileTypes: true })) {
