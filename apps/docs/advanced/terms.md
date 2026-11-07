@@ -5,7 +5,11 @@ description: Octant's MIT licence and Ogard Labs contact information.
 # Licence and contact
 
 Octant is distributed by **Ogard Labs**, organisation number **996 198 510**,
-Stavanger, Norway. Contact: [hello@octant.sh](mailto:hello@octant.sh).
+Stavanger, Norway.
+
+Postal address: Postboks 5520, 4081 Tjensvoll, Norway.
+
+Contact: [hello@octant.sh](mailto:hello@octant.sh).
 
 ## Software licence
 
