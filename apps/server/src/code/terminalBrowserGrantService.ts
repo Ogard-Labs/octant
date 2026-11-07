@@ -1,3 +1,6 @@
+import type { CurrentBrowserSessionTarget } from "../browser/browserSessionGrants";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { parseBrowserToolInput } from "../browser/browserToolOperations";
 import {
   AggregateId,
   AggregateVersion,
@@ -24,7 +27,7 @@ import {
   type TerminalBrowserGrantRevokeReason,
   type WindowId,
 } from "@octant/contracts";
-import { clampTurnAccessPosture } from "@octant/domain";
+import { clampTurnAccessPosture, isToolAllowedByAllowlist } from "@octant/domain";
 import { Schema } from "effect";
 import {
   createBrowserAppManagedTools,
@@ -90,6 +93,11 @@ export interface TerminalBrowserGrantServiceOptions {
    * person's own `octant` is used.
    */
   readonly launcher?: TerminalLauncher;
+  readonly delegatedBrowserTools?: (input: {
+    readonly grantId: TerminalBrowserGrantId;
+    readonly threadId: BrowserThreadId;
+    readonly executionPolicy: CodeThread["executionPolicy"];
+  }) => AppManagedToolSet | undefined;
   readonly journal: Pick<Journal, "append">;
   /** Speaks for the person who asked, and who switches a grant off. */
   readonly personActor: EventActorValue;
@@ -132,6 +140,10 @@ interface LiveGrant {
   readonly endpoint: AcpManagedToolsBridge;
   readonly environment: ReadonlyMap<string, string>;
   ended: boolean;
+  browserMode: "private" | "stored";
+  changingProfile: boolean;
+  delegatedTools?: AppManagedToolSet;
+  delegatedRevision?: string;
   /** Settles once the endpoint has stopped listening. */
   closed?: Promise<void>;
 }
@@ -243,6 +255,8 @@ export class TerminalBrowserGrantService {
         [`${REFERENCE_PREFIX}${grantId}:token`, token],
       ]),
       ended: false,
+      browserMode: "private",
+      changingProfile: false,
     };
     grant = live;
     try {
@@ -351,6 +365,50 @@ export class TerminalBrowserGrantService {
     };
   }
 
+  /** Non-secret host proof for a separate stored-profile permission. */
+  currentSessionTarget(grantId: TerminalBrowserGrantId): CurrentBrowserSessionTarget | undefined {
+    const grant = this.#byId.get(String(grantId));
+    if (grant === undefined || grant.ended || !this.#options.terminalIsRunning(grant.terminalId))
+      return undefined;
+    const thread = this.#options.readThread(grant.threadId);
+    if (
+      thread === undefined ||
+      !isActive(thread) ||
+      !isToolAllowedByAllowlist(thread.toolConstraints ?? [], BROWSER_TOOL_DEFINITION.name)
+    )
+      return undefined;
+    const authority = this.#options.browser?.resolveAuthority(
+      decodeBrowserThreadId(String(thread.id)),
+      "code",
+    );
+    if (authority === undefined) return undefined;
+    return {
+      target: {
+        grantee: { kind: "terminal", grantId },
+        label: `${thread.title.slice(0, 192)} · terminal ${String(grant.terminalId)}`,
+        authority,
+        modelId: thread.modelId,
+      },
+      revision: JSON.stringify({
+        grantId,
+        issuedAt: grant.issuedAt,
+        terminalId: grant.terminalId,
+        threadId: thread.id,
+        modelId: thread.modelId,
+        authority,
+        executionPolicy: thread.executionPolicy,
+        toolConstraints: thread.toolConstraints,
+      }),
+    };
+  }
+
+  sessionTargets(): ReadonlyArray<CurrentBrowserSessionTarget> {
+    return [...this.#byId.values()].flatMap((grant) => {
+      const row = this.currentSessionTarget(grant.grantId);
+      return row === undefined ? [] : [row];
+    });
+  }
+
   /** The person switching a live grant off, without closing the terminal. */
   async switchOff(input: {
     readonly windowId: WindowId;
@@ -440,13 +498,51 @@ export class TerminalBrowserGrantService {
       this.#end(grant, "terminal-closed", this.#hostActor, ANSWER_GRACE_MS);
       return UNAUTHORIZED;
     }
-    if (!(await this.#windowCanOpen(grant.windowId, thread))) return UNAUTHORIZED;
-    const tools = this.#browserTools(
-      grant.windowId,
-      thread,
-      grant.browserThreadId,
-      grant.modelBindings,
-    );
+    if (!(await this.#windowCanOpen(grant.windowId, thread)) || grant.ended) return UNAUTHORIZED;
+    if (grant.changingProfile) return { resultJson: '{"error":"browser-busy"}', isError: true };
+    const operation = parseBrowserToolInput(inputJson, { allowProfile: true });
+    const recipient = this.currentSessionTarget(grant.grantId);
+    const staleProfile =
+      grant.delegatedTools !== undefined && recipient?.revision !== grant.delegatedRevision;
+    const explicitProfile = operation?.operation === "navigate" ? operation.profile : undefined;
+    if (this.#options.delegatedBrowserTools !== undefined && explicitProfile !== undefined)
+      grant.browserMode = explicitProfile === "private" ? "private" : "stored";
+    if (
+      grant.delegatedTools !== undefined &&
+      (recipient?.revision !== grant.delegatedRevision ||
+        (operation?.operation === "navigate" && operation.profile === "private"))
+    ) {
+      grant.changingProfile = true;
+      try {
+        await grant.delegatedTools.close?.();
+      } finally {
+        grant.changingProfile = false;
+      }
+      delete grant.delegatedTools;
+      delete grant.delegatedRevision;
+    }
+    if (staleProfile && explicitProfile === undefined)
+      return { resultJson: '{"error":"browser-authority-stale"}', isError: true };
+    const wantsStoredProfile = grant.browserMode === "stored";
+    if (
+      this.#options.delegatedBrowserTools !== undefined &&
+      (wantsStoredProfile || grant.delegatedTools !== undefined)
+    ) {
+      if (recipient === undefined) return UNAUTHORIZED;
+      const delegated =
+        grant.delegatedTools ??
+        this.#options.delegatedBrowserTools({
+          grantId: grant.grantId,
+          threadId: decodeBrowserThreadId(String(thread.id)),
+          executionPolicy: thread.executionPolicy,
+        });
+      if (delegated === undefined) return UNAVAILABLE;
+      grant.delegatedTools = delegated;
+      grant.delegatedRevision = recipient.revision;
+    }
+    const tools =
+      grant.delegatedTools ??
+      this.#browserTools(grant.windowId, thread, grant.browserThreadId, grant.modelBindings);
     if (tools === undefined) return UNAVAILABLE;
     try {
       const outcome = await tools.execute({
@@ -585,7 +681,10 @@ export class TerminalBrowserGrantService {
   }
 
   #closeEndpoint(grant: LiveGrant): Promise<void> {
-    grant.closed ??= grant.endpoint.close().catch(() => undefined);
+    grant.closed ??= Promise.all([
+      grant.endpoint.close().catch(() => undefined),
+      grant.delegatedTools?.close?.().catch(() => undefined),
+    ]).then(() => undefined);
     return grant.closed;
   }
 

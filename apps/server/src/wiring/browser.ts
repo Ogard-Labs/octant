@@ -80,6 +80,7 @@ import {
   currentManagedChildBrowserTarget,
 } from "../browser/browserDelegatedChildren";
 import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
+import type { TerminalBrowserGrantId, ProviderExecutionPolicy } from "@octant/contracts";
 import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
 import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
 
@@ -294,10 +295,19 @@ export function wireBrowser(deps: BrowserDependencies) {
           profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
       });
     };
+    let terminalSessionSource:
+      | {
+          readonly current: (
+            grantId: TerminalBrowserGrantId,
+          ) => CurrentBrowserSessionTarget | undefined;
+          readonly targets: () => ReadonlyArray<CurrentBrowserSessionTarget>;
+        }
+      | undefined;
     const currentSessionTarget = (
       grantee: BrowserSessionGrantee,
     ): CurrentBrowserSessionTarget | undefined => {
       if (grantee.kind === "routine") return routineSessionTarget(grantee.routineId);
+      if (grantee.kind === "terminal") return terminalSessionSource?.current(grantee.grantId);
       if (grantee.kind !== "child") return undefined;
       const run = persistence.agentRunProjection.getById(grantee.runId);
       return run === undefined ? undefined : childSessionTarget(run);
@@ -309,7 +319,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       localWindows: () => windowAuthorityStore.listWindowIds(),
       canReview: (windowId, target) => {
-        if (target.grantee.kind === "routine")
+        if (target.grantee.kind === "routine" || target.grantee.kind === "terminal")
           return (
             target.authority.mode !== "chat" &&
             windowHoldsProject(windowId, target.authority.projectId, target.authority.mode)
@@ -326,6 +336,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         );
       },
       targets: () => [
+        ...(terminalSessionSource?.targets() ?? []),
         ...persistence.automationProjection.listDefinitions().flatMap((definition) => {
           const row = routineSessionTarget(definition.id);
           return row === undefined ? [] : [row];
@@ -363,6 +374,32 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: Date.now,
     });
     const browserDelegatedChildren = delegatedChildren;
+    const bindTerminalBrowserSessions = (source: NonNullable<typeof terminalSessionSource>) => {
+      terminalSessionSource = source;
+      return () => {
+        if (terminalSessionSource === source) terminalSessionSource = undefined;
+        browserSessionGrants.revalidate();
+        void browserDelegatedChildren.settle();
+      };
+    };
+    const terminalBrowserTools = (input: {
+      readonly grantId: TerminalBrowserGrantId;
+      readonly threadId: BrowserThreadId;
+      readonly executionPolicy: ProviderExecutionPolicy;
+    }) => {
+      const initial = terminalSessionSource?.current(input.grantId);
+      if (initial === undefined) return undefined;
+      return browserDelegatedChildren.tools({
+        target: initial.target,
+        executionId: String(input.grantId),
+        contentThreadId: input.threadId,
+        executionPolicy: input.executionPolicy,
+        current: () => {
+          const row = terminalSessionSource?.current(input.grantId);
+          return row?.revision === initial.revision ? row.target : undefined;
+        },
+      });
+    };
     const routineBrowserTools = (input: {
       readonly routineRun: AutomationRunReference;
       readonly threadId: BrowserThreadId;
@@ -430,6 +467,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       if (
         !append.events.some((event) =>
           [
+            "terminal-browser-grant",
             "automation-definition",
             "automation-run",
             "project",
@@ -441,11 +479,15 @@ export function wireBrowser(deps: BrowserDependencies) {
         )
       )
         return;
-      // Automation's in-memory projection is applied after its journal append.
-      queueMicrotask(() => {
+      const settle = () => {
         browserSessionGrants.revalidate();
         void browserDelegatedChildren.settle();
-      });
+      };
+      // SQLite-backed task authority is current at commit. Inspect it now so
+      // changing a model away and back cannot preserve the earlier permission.
+      settle();
+      // Automation/Work in-memory projections apply after the journal append.
+      queueMicrotask(settle);
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeSessionAuthority));
     onWindowRevoked((windowId) => {
@@ -745,6 +787,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       nativeBrowserPresentationRoutes,
       browserSessionGrants,
       routineBrowserTools,
+      bindTerminalBrowserSessions,
+      terminalBrowserTools,
       browserDelegatedChildren,
       browserAutomationService,
       browserCredentialUseService,

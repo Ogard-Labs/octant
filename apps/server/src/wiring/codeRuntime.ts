@@ -329,6 +329,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     BrowserWiring,
+    | "bindTerminalBrowserSessions"
+    | "terminalBrowserTools"
     | "routineBrowserTools"
     | "browserAutomationService"
     | "browserFlows"
@@ -373,6 +375,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     bindDeviceApprovals,
     browserAuthority,
     browserModelBindings,
+    bindTerminalBrowserSessions,
+    terminalBrowserTools,
     routineBrowserTools,
     browserAutomationService,
     browserFlows,
@@ -525,6 +529,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       const grants = new TerminalBrowserGrantService({
         readThread: persistence.readCodeThread,
         canAccessProject: canAccessCodeProject,
+        delegatedBrowserTools: terminalBrowserTools,
         terminalIsRunning: (terminalId) => {
           try {
             return codeOperationRuntime?.terminals?.attach(String(terminalId)).status === "running";
@@ -551,6 +556,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
       });
+      const unbindTerminalSessions = bindTerminalBrowserSessions({
+        current: (grantId) => grants.currentSessionTarget(grantId),
+        targets: () => grants.sessionTargets(),
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(unbindTerminalSessions));
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       onWindowRevoked((windowId) => codeOperationRuntime?.revokeTerminalStreams(windowId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
