@@ -386,14 +386,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   useEffect(() => {
     if (props.tab.threadId === undefined) return;
     const contextId = replacementContextId ?? props.tab.contextId ?? ownedContextId;
-    if (props.startFresh === true && contextId === undefined) {
-      setStatus("ready");
-      return;
-    }
+    const fresh = props.startFresh === true && contextId === undefined;
     const controller = new AbortController();
     let active = true;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    setStatus("waiting");
+    setStatus(fresh ? "ready" : "waiting");
     const refresh = async () => {
       let nextDelay = BROWSER_REFRESH_INTERVAL_MS;
       try {
@@ -402,7 +399,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // would move this tab onto whatever was opened last.
         const next =
           contextId === undefined
-            ? await props.client.inspectThread({ threadId: props.tab.threadId! }, controller.signal)
+            ? await props.client.inspectThread(
+                { threadId: props.tab.threadId!, ...(fresh ? { freshPicture: false } : {}) },
+                controller.signal,
+              )
             : await props.client.inspect(
                 { contextId, threadId: props.tab.threadId! },
                 controller.signal,
@@ -420,11 +420,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 availability,
               },
         );
-        const revision = snapshotRevision(next);
+        const revision = fresh ? JSON.stringify(availability) : snapshotRevision(next);
         const changed = revision !== lastPolledRevision.current;
         lastPolledRevision.current = revision;
         unchangedPolls.current = changed ? 0 : unchangedPolls.current + 1;
         nextDelay = browserRefreshDelay(unchangedPolls.current);
+        // A fresh tab reads only the thread's admission fact. Its current page
+        // belongs to another tab until this one creates its own context.
+        if (fresh) {
+          setStatus("ready");
+          return;
+        }
         if (changed) {
           currentSnapshotRevision.current = revision;
           currentObservationRevision.current = next.observation?.revision;
