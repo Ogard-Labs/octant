@@ -230,9 +230,14 @@ it, and its own terms and privacy notice apply.
 
 ## Share as a file instead
 
-If you do not want to run or trust a link service at all, export the Canvas to a
-**GitHub Gist** (Markdown, unlisted by default) or to a folder — see
-[Export a Canvas or artifact](/guide/export). No share service is involved.
+If you do not want to run or trust a link service at all, export the Canvas
+without one — see [Export a Canvas or artifact](/guide/export):
+
+- **sharehtml.org page** — the Canvas as one rendered HTML page at an unlisted
+  link, no account needed on your side;
+- **GitHub Gist** — Markdown, unlisted by default;
+- **a folder** — including one your sync client watches, so the file lands in
+  Google Drive, Dropbox, or another file-share service you already use.
 
 ## Related
 

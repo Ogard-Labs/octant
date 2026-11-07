@@ -7,8 +7,8 @@ description: How exporting a Canvas or artifact works — saving or copying it a
 Export writes a readable copy of a Canvas or an artifact somewhere you choose.
 The copy is Markdown, HTML, PNG images, or a PDF, so any editor, viewer, or
 other tool can open it.
-Three destinations ship today: a folder on this computer, a GitHub Gist, and a
-public link.
+Four destinations ship today: a folder on this computer, a GitHub Gist, a
+public link, and a sharehtml.org page.
 
 Whatever the destination, Octant renders the document first and shows it to you
 before anything is sent or written. A destination is called only after you
@@ -72,7 +72,10 @@ itself a link, a folder inside it counts, and a link inside your home folder
 that leads outside it does not.
 
 Put the folder inside a folder your sync client already watches if you want the
-files on your other computers. Octant adds no cloud of its own for this.
+files on your other computers and in their cloud copies — for example
+`~/Google Drive/…`, `~/Dropbox/…`, or any other file-share service that keeps a
+local synced folder. Octant adds no cloud of its own for this; the sync client
+is the one that uploads, under its own terms.
 
 ### What the approval card shows
 
@@ -159,6 +162,41 @@ The gist destination reports one of three states:
   stored in plain text on this computer, so Octant will not send through it. The same
   rule applies to Octant's other GitHub features.
 
+## Publish as a web page on sharehtml.org
+
+sharehtml.org turns one HTML file into a link: unlisted, no account needed,
+served byte-for-byte on its own origin with nothing injected. This destination
+takes the Canvas rendered as **one HTML page** — the same file **Save as HTML
+file** produces — and uploads it after you approve the card. It needs no sign-in
+on your side; anonymous uploads are part of its API.
+
+### What the approval card shows
+
+The card carries the exact rendered page and a note that the page is **unlisted**:
+anyone with the link can open it, and sharehtml.org can read it. Nothing is sent
+until you approve.
+
+### The receipt, and its one-time manage link
+
+The receipt is the page's URL and id. An anonymous upload also returns a
+**manage URL, shown once** — with it you can later replace or delete the page on
+sharehtml.org. Octant does not store it; copy it from the receipt if you want to
+keep it.
+
+### Limits and refusals
+
+Free pages are capped at 5 MB and rate-limited (a few uploads a minute, a daily
+anonymous cap); an export past that is refused with the service's reason and
+can be retried later. A page that fails sharehtml.org's abuse screening is
+refused, and nothing is uploaded. The document goes through the same checks as
+every other export: no absolute file paths and no secret-shaped values leave
+this computer.
+
+### Status
+
+The sharehtml.org destination is ready on every host — it needs no local
+connection — and reports when the service could not be reached.
+
 ## Publish a public link
 
 A public link is a read-only page hosted by a share service, so anyone you give
@@ -171,7 +209,8 @@ service can read what you publish. See
 ## Formats and platforms
 
 Markdown, HTML, PNG and PDF are rendered. The folder destination accepts all
-four; the Gist destination takes Markdown only.
+four; the Gist destination takes Markdown only; the sharehtml.org destination
+takes one HTML page.
 
 ### Pictures: PNG and PDF
 
