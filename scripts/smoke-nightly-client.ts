@@ -194,10 +194,12 @@ async function startPageFixture(): Promise<{
 <body><input id="field" autocomplete="off"><select id="choice"><option>First</option><option>Second</option><option>Third</option></select>
 <script>
 let presses = 0;
+let releases = 0;
 let keys = 0;
 const arrows = [];
-const report = () => { const state = "field=" + document.getElementById("field").value + ";choice=" + document.getElementById("choice").value + ";presses=" + presses + ";keys=" + keys + ";arrows=" + arrows.join(","); document.title = state; fetch("/report?" + encodeURIComponent(state)).catch(() => {}); };
+const report = () => { const state = "field=" + document.getElementById("field").value + ";choice=" + document.getElementById("choice").value + ";presses=" + presses + ";keys=" + keys + ";arrows=" + arrows.join(",") + ";releases=" + releases; document.title = state; fetch("/report?" + encodeURIComponent(state)).catch(() => {}); };
 addEventListener("mousedown", () => { presses++; report(); }, true);
+addEventListener("mouseup", () => { releases++; report(); }, true);
 addEventListener("keydown", (event) => { keys++; if (event.key.startsWith("Arrow")) arrows.push("down:" + event.key); report(); }, true);
 addEventListener("keyup", (event) => { if (event.key.startsWith("Arrow")) arrows.push("up:" + event.key); report(); }, true);
 document.getElementById("field").addEventListener("input", report);
@@ -1031,21 +1033,8 @@ try {
           const answer = record(
             await present({ kind: "input", presentationId, input: value, frameSequence: sequence }),
           );
-          if (answer.status === "refused") {
-            const trace = stableA.events
-              .matching(
-                (event) =>
-                  event.id === presentationId &&
-                  (event.event === "presentation-layout" ||
-                    event.type === "mouseDown" ||
-                    event.type === "mouseUp"),
-              )
-              .slice(-10)
-              .map(({ id: _id, ...event }) => event);
-            throw new Error(
-              `Input refused: ${JSON.stringify(value)} Trace: ${JSON.stringify(trace)}`,
-            );
-          }
+          if (answer.status === "refused")
+            throw new Error(`Input refused: ${JSON.stringify(value)}`);
         };
         const click = async (x: number, y: number) => {
           await input({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
@@ -1079,11 +1068,24 @@ try {
         );
         const menuMark = nightly.events.mark();
         await nextFrame();
-        // Hold the physical release until AppKit's menu has actually opened:
-        // this is the schedule that intermittently failed the ordinary click.
+        // Nightly releases held page buttons before AppKit opens a menu.
+        // Wait for that real transition: a later physical release is a
+        // duplicate, correctly refused rather than delivered to the page twice.
         await input({ type: "mouseDown", x: 120, y: 120, button: "left", clickCount: 1 });
         const menu = await nightly.events.next((event) => event.event === "menu", menuMark, 15_000);
-        await input({ type: "mouseUp", x: 120, y: 120, button: "left", clickCount: 1 });
+        await waitFor("The popup's page-button release", 15_000, () =>
+          pageFixture.reports.some((report) => report.endsWith(";releases=2")) ? true : undefined,
+        );
+        const lateRelease = record(
+          await present({
+            kind: "input",
+            presentationId,
+            frameSequence: sequence,
+            input: { type: "mouseUp", x: 120, y: 120, button: "left", clickCount: 1 },
+          }),
+        );
+        if (lateRelease.status !== "refused")
+          throw new Error("The popup's already-consumed button release reached the page twice.");
         if (!JSON.stringify(menu.labels).includes("Third"))
           throw new Error(`The select menu offered ${JSON.stringify(menu.labels)}.`);
         await waitFor("The chosen option in the page", 15_000, () =>
