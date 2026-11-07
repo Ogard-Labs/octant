@@ -1063,40 +1063,46 @@ export function startOctantServer(
         workTurnService,
         zenEventStore,
       });
-    const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
-      wireContext({
-        browserCredentialUseService,
-        agentMessageProjection,
-        browserModelBindings,
-        browserAuthority,
-        browserAutomationService,
-        browserCaptures,
-        browserExtensionService,
-        browserFlowService,
-        browserProfileService,
-        canAccessCodeProject,
-        capacityScheduler,
-        chatService,
-        codeOperationRuntime,
-        codeSessionAuthority,
-        configuredDriverOptions,
-        contextHarness,
-        hostShield,
-        liveProjectBrowsers,
-        nativeHarnessHooks,
-        persistence,
-        projectService,
-        providerRuntimeRegistry,
-        browserToolApprovalService,
-        routeCodeService,
-        serverProjectStore,
-        spendCeilingService,
-        windowAuthorityStore,
-        workThreadProjection,
-        workThreadService,
-        workTurnProjection,
-        workTurnService,
-      });
+    const {
+      agentMessageRoutes,
+      browserAutomationRoutes,
+      contextRoutes,
+      windowCanOpenThread,
+      flowRuns,
+    } = wireContext({
+      onWindowRevoked,
+      browserCredentialUseService,
+      agentMessageProjection,
+      browserModelBindings,
+      browserAuthority,
+      browserAutomationService,
+      browserCaptures,
+      browserExtensionService,
+      browserFlowService,
+      browserProfileService,
+      canAccessCodeProject,
+      capacityScheduler,
+      chatService,
+      codeOperationRuntime,
+      codeSessionAuthority,
+      configuredDriverOptions,
+      contextHarness,
+      hostShield,
+      liveProjectBrowsers,
+      nativeHarnessHooks,
+      persistence,
+      projectService,
+      providerRuntimeRegistry,
+      browserToolApprovalService,
+      routeCodeService,
+      serverProjectStore,
+      spendCeilingService,
+      windowAuthorityStore,
+      workThreadProjection,
+      workThreadService,
+      workTurnProjection,
+      workTurnService,
+    });
     const {
       imageRoutes,
       previewHandoffBridgeRoutes,
@@ -1935,6 +1941,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            flowRuns.close();
             projectBrowserService?.close();
             await browserAutomationService?.close();
           } catch (error) {

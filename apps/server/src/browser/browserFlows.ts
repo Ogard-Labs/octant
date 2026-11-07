@@ -650,11 +650,13 @@ interface ReplayedStep {
  * page's path and title are compared with the recorded ones; the first step
  * that differs, fails, or is refused ends the replay and is named.
  */
-async function replayBrowserFlow(
+export async function replayBrowserFlow(
   flow: BrowserFlow,
   deps: {
     readonly refs: () => BrowserFlowRefs;
     readonly run: (step: BrowserToolStep) => Promise<BrowserToolAnswer>;
+    readonly startAt?: number;
+    readonly onStep?: (index: number) => void;
   },
 ): Promise<BrowserToolAnswer> {
   const completed: ReplayedStep[] = [];
@@ -668,6 +670,7 @@ async function replayBrowserFlow(
     isError: true,
   });
   for (const [index, stored] of flow.steps.entries()) {
+    if (index < (deps.startAt ?? 0)) continue;
     const record: Record<string, unknown> = { ...stored.input };
     if (stored.targets !== undefined && Object.keys(stored.targets).length > 0) {
       const snapshot = await deps.run({ operation: "snapshot" });
@@ -738,6 +741,7 @@ async function replayBrowserFlow(
       ...(typeof changed === "string" ? { changed } : {}),
     });
     last = answer;
+    deps.onStep?.(index);
   }
   return {
     result: { ...(last?.result as Record<string, unknown>), flow: flow.name, steps: completed },
