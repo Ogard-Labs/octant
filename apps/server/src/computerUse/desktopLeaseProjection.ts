@@ -11,6 +11,7 @@ import {
   DesktopLeaseLeftoverCleared,
   DesktopLeaseOperated,
   DesktopLeaseRequested,
+  DesktopPreviewAudit,
   DesktopLeaseTransitioned,
   decodeDesktopArtifactSent,
   decodeDesktopLease,
@@ -30,6 +31,8 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 
 export function registerDesktopLeaseEvents(registry: EventRegistry): EventRegistry {
   return registry
+    .register("desktop.preview-granted@1", 1, DesktopPreviewAudit)
+    .register("desktop.preview-closed@1", 1, DesktopPreviewAudit)
     .register(DESKTOP_LEASE_EVENT_NAMES.requested, 1, DesktopLeaseRequested)
     .register(DESKTOP_LEASE_EVENT_NAMES.transitioned, 1, DesktopLeaseTransitioned)
     .register(DESKTOP_LEASE_EVENT_NAMES.extended, 1, DesktopLeaseExtended)
