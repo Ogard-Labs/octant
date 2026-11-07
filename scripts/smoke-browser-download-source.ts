@@ -127,7 +127,8 @@ async function main() {
     }),
   );
 }
-void main().catch(() => {
+void main().catch((error: unknown) => {
+  if (error instanceof Error) console.error(error.message.slice(0, 2048));
   console.error("Native download source proof failed; no native acceptance claim is established.");
   process.exitCode = 1;
 });
