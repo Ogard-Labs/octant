@@ -593,7 +593,15 @@ export function wireContext(deps: ContextDependencies) {
       code?.executionPolicy ??
       workThreadAccessOf(work?.access ?? DEFAULT_WORK_ACCESS).executionPolicy;
     if (policy === "plan") return undefined;
-    const context = browserAutomationService.inspectThread(windowId, task.threadId).context;
+    const inspectedContext = browserAutomationService.inspectThread(
+      windowId,
+      task.threadId,
+    ).context;
+    // A stopped/expired page does not choose the profile for a new navigation.
+    const context =
+      inspectedContext?.state === "active" || inspectedContext?.state === "creating"
+        ? inspectedContext
+        : undefined;
     const choice = thread.browserTaskProfile ?? "private";
     const profile =
       context === undefined
