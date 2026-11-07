@@ -146,6 +146,8 @@ export interface AcpProviderProfile {
   readonly usageVersions?: ReadonlyArray<string>;
   /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
   readonly fileReviewVersions?: ReadonlyArray<string>;
+  /** Exact releases whose signed-in nonempty compaction and resume semantics passed. */
+  readonly compactionVersions?: ReadonlyArray<string>;
   /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
   /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
