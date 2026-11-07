@@ -5980,6 +5980,57 @@ reports no timing has no speed rather than zero. A turn recorded before
 diagnostics were counted counts toward how it ended and its speed, never toward
 tool, retry, or limit totals.
 
+**Benchmarks.** A person can run one prompt on several models and compare
+them. The journal holds two aggregates. A `benchmark-suite` aggregate keeps the
+suite as the person wrote it (cases, checks, an optional judge and rubric) as
+`benchmark-suite-saved` and `benchmark-suite-deleted`. A `benchmark-run`
+aggregate keeps one run: `benchmark-run-started` carries the whole run with
+every cell queued, a snapshot of the suite's cases and judge so editing the
+suite later never rewrites a finished run, then `benchmark-cell-started`,
+`benchmark-cell-settled`, `benchmark-cell-judged`, `benchmark-cell-rated`,
+`benchmark-run-ended` and `benchmark-run-purged`. Prompt text sits in these
+events because the person wrote it as a definition; an answer never does. It is
+read from the cell's own thread. `BenchmarkProjection` holds both in memory,
+rebuilt at start from those two aggregates alone, and applies an event only
+past the version its aggregate already reached, so replay is idempotent.
+
+A run is cells: one per case, contender (provider instance, model, optional
+reasoning effort) and repetition, planned repetition-first so an early stop
+still compares every contender. `BenchmarkRunner` is a host service that ticks
+every two seconds while a run is `running` and resumes running runs from the
+projection at start. A cell is an ordinary Chat thread in the **Benchmarks**
+Project (one fixed Project id, created once at the first start), created and
+sent exactly as a routine's Chat dispatch does it: the thread and the turn's
+submission id are derived from the cell id, so a retry after a crash finds the
+thread and turn it already made. The turn goes through the ordinary Chat
+commands, so the capacity scheduler, the Project spend ceiling and the
+provider's capability refusal all apply: the runner adds no bypass. A refusal
+settles the cell `failed` with the refusal's sentence, and a turn the scheduler
+has no room for yet leaves the cell queued. At most two cells run per provider
+instance and four per host. When the turn completes, the runner scores the
+cell's deterministic checks against the answer (`scoreBenchmarkChecks`), journals
+the result, and archives the thread so it stays off every list. A turn still
+running after 30 minutes is interrupted and settles `failed` as timed out. Before
+each cell starts, `benchmarkBudgetDecision` projects spend from the cells that
+settled (tokens and cost read from `TurnMetricsStore` by thread id) and, when the
+next cell would pass the run's token or cost budget, skips the queued cells and
+ends the run `budget-reached`. Code cases are defined and stored, but their cells
+settle `failed` until the Code runner exists; the judge, stars, and exports are
+later work, and their contract fields and events are already in place.
+
+The routes are all `POST` JSON. `/api/benchmarks/suites/list`,
+`/runs/list` and `/runs/read` (a run with its leaderboard and each cell's
+figures joined from turn metrics) answer a local window and a remote device
+that reaches the loopback handler with a bound principal. `/suites/save`,
+`/suites/delete`, `/runs/start`, `/runs/cancel` and `/runs/purge` spend money or
+erase threads, so a principal other than a local window is refused with 403
+before the body is read. Start refuses a missing suite (404), a contender that
+is not an enabled provider model on this host, and a run over 2,000 cells (422),
+and answers a retried run id with the run it already made. Purging a run
+purges each cell thread through the ordinary thread purge path and keeps the run
+if any purge fails. None of these paths is on the remote forward list yet, so a
+paired device does not reach them until that admission is added.
+
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
 refusals and journal events, the per-thread `compaction` answer on the
