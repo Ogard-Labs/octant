@@ -1,0 +1,55 @@
+name: Packaged Canvas native smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/packaged-canvas-native-smoke.yml
+      - scripts/smoke-packaged-canvas-native.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaged-canvas-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Packaged primary-window native controller
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require existing native interaction permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          enabled=$(/usr/bin/osascript -e 'tell application "System Events" to get UI elements enabled')
+          if test "$enabled" != true; then
+            echo "::error::This isolated runner has no native Accessibility controller. No permission changes are attempted."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/packaged-canvas-native"
+          /usr/sbin/screencapture -x "$RUNNER_TEMP/packaged-canvas-native/controller-preflight.png"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: node node_modules/electron/install.js
+      - name: Package current source without signing or publication
+        timeout-minutes: 25
+        run: bun run package:desktop
+      - name: Observe the real packaged primary window
+        timeout-minutes: 3
+        env:
+          OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
+        run: bun scripts/smoke-packaged-canvas-native.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packaged-canvas-native
+          path: ${{ runner.temp }}/packaged-canvas-native
+          if-no-files-found: ignore
+          retention-days: 7
