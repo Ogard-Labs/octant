@@ -125,6 +125,7 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
       ) : null}
       {loaded.kind !== "ready" ? null : (
         <SettingRow
+          focused={props.focusedSetting === "browser-accounts"}
           label="Named account profiles"
           description="Separate sign-ins on this host, reusable across Projects only when you choose them. Creating a profile grants no site or task access."
           scope="host"
