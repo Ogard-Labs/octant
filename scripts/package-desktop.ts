@@ -850,7 +850,7 @@ export function createPackagerOptions(
         }
       : {}),
     ...(target.platform === "win32"
-      ? {}
+      ? { win32metadata: { CompanyName: "Ogard Labs" } }
       : {
           icon: resolve(
             dir,

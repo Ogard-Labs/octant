@@ -287,6 +287,9 @@ describe("desktop packaging boundary", () => {
       ),
     ).toThrow(/matching host/);
     expect(nativePayloadsToStrip(target.platform)).toEqual([]);
+    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0", target)).toMatchObject({
+      win32metadata: { CompanyName: "Ogard Labs" },
+    });
   });
 
   it("packages Nightly under its own bundle, executable and link scheme and stamps its flavor", () => {
