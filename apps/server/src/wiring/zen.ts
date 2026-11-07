@@ -13,6 +13,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
 import { ZenThreadCatalog } from "../zen/zenThreadCatalog";
 import { localHostDisplayName } from "../localHostDisplayName";
+import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import { zenLayoutOf } from "../zen/zenLayoutReadPort";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -57,6 +58,14 @@ export function wireZen(deps: ZenDependencies) {
     workTurnService,
     zenEventStore,
   } = deps;
+
+  // Bundled Zen is on by default: a missing extension-store row keeps today's
+  // routes and tools. Until the server's extension snapshot is wired here, the
+  // empty snapshot stands in for it, the same stand-in the GitHub and Linear
+  // gates use. Switching Zen off never deletes layouts, backgrounds, focus
+  // zones or events; it only refuses the routes and withholds the tool.
+  const zenIsEffective = () =>
+    isFirstPartyIntegrationEffective({ packages: [] }, "zen", { missingRow: "effective" });
 
   const zenThreadCatalog = new ZenThreadCatalog({
     localHostId: LOCAL_HOST_ID,
@@ -189,9 +198,14 @@ export function wireZen(deps: ZenDependencies) {
   const zenAssistantTools = new ZenAssistantTools({
     zenService,
     zenLayout: { layout: (windowId) => zenLayoutOf(zenService.bootstrap(windowId).space) },
+    isEffective: zenIsEffective,
   });
   contributeChatTools((windowId, thread) => zenAssistantTools.forThread(windowId, thread));
-  const zenRoutes = createZenRouteHandler({ zenService, windowAuthorityStore });
+  const zenRoutes = createZenRouteHandler({
+    zenService,
+    windowAuthorityStore,
+    isEffective: zenIsEffective,
+  });
   // Navigator is the production consumer of the `navigatorAssistant`
   // settings section: the conversation runs on the configured default model
   // through the ordinary Chat commands below, and reports itself
@@ -272,6 +286,7 @@ export function wireZen(deps: ZenDependencies) {
     store: new ZenBackgroundStore({ dataDirectory: providerDataDirectory }),
     zenService,
     windowAuthorityStore,
+    isEffective: zenIsEffective,
     liveAssets: () =>
       new Map(
         persistence.readZenSpaces().flatMap((space) => {

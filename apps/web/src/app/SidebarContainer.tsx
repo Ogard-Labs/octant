@@ -56,6 +56,8 @@ import type { ShellNavigationModel } from "./shellNavigationModel";
 type ProjectController = ReturnType<typeof useProjectController>;
 
 export interface SidebarContainerProps {
+  /** False when the Zen plugin is off: the profile menu offers no Zen row. */
+  readonly zenEnabled: boolean;
   readonly actions: Pick<
     ShellActions,
     | "archiveCodeThread"
@@ -659,7 +661,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         history={props.windowHistory}
         onOpenNavigator={openNavigator}
         onOpenSettings={(deepLink) => void openSettings(deepLink)}
-        onOpenZen={() => void enterZen()}
+        {...(props.zenEnabled ? { onOpenZen: () => void enterZen() } : {})}
         onRetryChat={() => void retryChat()}
         onSelectMode={handleSelectVisibleMode}
         {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}

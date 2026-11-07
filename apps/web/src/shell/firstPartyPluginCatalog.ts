@@ -18,7 +18,8 @@ export type FirstPartyPluginComponentId =
   | "linear-integration"
   | "azure-arm-integration"
   | "appearance-pack"
-  | "preview-viewers";
+  | "preview-viewers"
+  | "zen";
 
 const digest = (nibble: string) => decodeExtensionContentDigest(`sha256:${nibble.repeat(64)}`);
 
@@ -354,6 +355,41 @@ const azurePlugin = firstPartyManifest({
   contributions: [],
 });
 
+/**
+ * Bundled Zen workspace. The Zen layouts, backgrounds, focus zones and events
+ * stay on disk when the plugin is off; the surface, its routes and its
+ * assistant tool are what go away. The built-in background catalog stays in
+ * the host because app backdrops use it too.
+ */
+const zenPlugin = firstPartyManifest({
+  manifestVersion: 1,
+  extensionId: "10000000-0000-4000-8000-000000000051",
+  packageId: "20000000-0000-4000-8000-000000000051",
+  slug: "zen",
+  displayName: "Zen",
+  version: "1.0.0",
+  digest: digest("5"),
+  source: { kind: "bundled", sourceRef: "app:zen" },
+  provenance: { publisher: "Octant", reviewed: true },
+  license: { kind: "spdx", identifier: "MIT" },
+  compatibility: {
+    platforms: ["macos"],
+    modes: ["chat", "work", "code"],
+    providerFamilies: [],
+  },
+  declaredCapabilities: [],
+  primaryComponentId: "zen",
+  components: [
+    {
+      id: "zen",
+      kind: "ui-surface",
+      displayName: "Zen",
+      declaredCapabilities: [],
+    },
+  ],
+  contributions: [],
+});
+
 export const FIRST_PARTY_PLUGIN_CATALOG: ReadonlyArray<ExtensionPackageManifest> = [
   boardPlugin,
   githubPlugin,
@@ -361,6 +397,7 @@ export const FIRST_PARTY_PLUGIN_CATALOG: ReadonlyArray<ExtensionPackageManifest>
   azurePlugin,
   appearancePlugin,
   previewPlugin,
+  zenPlugin,
 ];
 
 /**
@@ -377,6 +414,7 @@ export const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponen
     ["azure-arm-integration", true],
     ["appearance-pack", true],
     ["preview-viewers", true],
+    ["zen", true],
   ]);
 
 export function firstPartyContributions(): ReadonlyArray<ExtensionContribution> {
@@ -390,6 +428,7 @@ export function isFirstPartyPluginComponentId(value: string): value is FirstPart
     value === "linear-integration" ||
     value === "azure-arm-integration" ||
     value === "appearance-pack" ||
-    value === "preview-viewers"
+    value === "preview-viewers" ||
+    value === "zen"
   );
 }

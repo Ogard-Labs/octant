@@ -22,7 +22,7 @@ export function ProjectActionRunDialog(props: {
   readonly storageKey: string;
   readonly open: boolean;
   readonly onClose: () => void;
-  readonly onOpenTerminal: (id: ReturnType<typeof decodeCodeTerminalId>) => void;
+  readonly onOpenTerminal?: (id: ReturnType<typeof decodeCodeTerminalId>) => void;
 }) {
   const [preview, setPreview] = useState<Preview>();
   const [run, setRun] = useState<Run>();
@@ -216,9 +216,11 @@ export function ProjectActionRunDialog(props: {
           </OctantButton>
         ) : (
           <>
-            <OctantButton onClick={() => props.onOpenTerminal(terminalId)} type="button">
-              Open terminal
-            </OctantButton>
+            {props.onOpenTerminal === undefined ? null : (
+              <OctantButton onClick={() => props.onOpenTerminal?.(terminalId)} type="button">
+                Open terminal
+              </OctantButton>
+            )}
             <OctantButton
               disabled={busy || run?.terminal.state !== "running"}
               onClick={() => void stop()}
