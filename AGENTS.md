@@ -200,23 +200,24 @@ tracker ids in shipped code against `scripts/code-style-baseline.json`.
 
 ## Repository Ownership
 
-| Surface                   | Owns                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------- |
-| `apps/desktop`            | Electron lifecycle, native windows, Keychain, macOS sandbox helpers, packaging           |
-| `apps/server`             | Authoritative command/event control plane, providers, tools, Git, terminals, remote      |
-| `apps/web`                | Shared React renderer for desktop and authenticated remote clients                       |
-| `apps/mobile`             | Expo remote-control client                                                               |
-| `apps/docs`               | VitePress user guide, independently deployable                                           |
-| `packages/contracts`      | Schemas, commands, events, RPC, and versioned wire contracts; no runtime logic           |
-| `packages/domain`         | Pure policies and transitions; no Electron, React, database, filesystem, network, or I/O |
-| `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness         |
-| `packages/client-runtime` | Authenticated transport, reconnect/replay, and query synchronization                     |
-| `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle                          |
-| `packages/plugin-host`    | Manifests, normalized components, trust types, and pure effective-activation policy      |
-| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties            |
-| `packages/theme`          | Semantic theme schema, built-ins, importer, and editor/terminal projections              |
-| `packages/cli`            | `octant` server and browser launcher                                                     |
-| `scripts`                 | Dev loop, packaging, smokes, and repository checks                                       |
+| Surface                   | Owns                                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `apps/desktop`            | Electron lifecycle, native windows, Keychain, macOS sandbox helpers, packaging               |
+| `apps/server`             | Authoritative command/event control plane, providers, tools, Git, terminals, remote          |
+| `apps/web`                | Shared React renderer for desktop and authenticated remote clients                           |
+| `apps/mobile`             | Expo remote-control client                                                                   |
+| `apps/docs`               | VitePress user guide, independently deployable                                               |
+| `apps/share`              | Self-hostable public Canvas share service (reference implementation users deploy themselves) |
+| `packages/contracts`      | Schemas, commands, events, RPC, and versioned wire contracts; no runtime logic               |
+| `packages/domain`         | Pure policies and transitions; no Electron, React, database, filesystem, network, or I/O     |
+| `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness             |
+| `packages/client-runtime` | Authenticated transport, reconnect/replay, and query synchronization                         |
+| `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle                              |
+| `packages/plugin-host`    | Manifests, normalized components, trust types, and pure effective-activation policy          |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties                |
+| `packages/theme`          | Semantic theme schema, built-ins, importer, and editor/terminal projections                  |
+| `packages/cli`            | `octant` server and browser launcher                                                         |
+| `scripts`                 | Dev loop, packaging, smokes, and repository checks                                           |
 
 ## Testing And Verification
 

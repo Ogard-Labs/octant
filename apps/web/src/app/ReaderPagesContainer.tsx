@@ -91,6 +91,8 @@ export interface ReaderPagesContainerProps {
   readonly boundCodeProjectId: ShellController["boundCodeProjectId"];
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeBoardOpen: boolean;
+  /** Off when the Board plugin is switched off. */
+  readonly threadBoardAvailable: boolean;
   readonly codeBoardProjects: WorkspaceRailLayersProps["codeBoardProjects"];
   readonly codeNavigationRows: CodeController["navigation"];
   readonly codePullRequestsOpen: boolean;
@@ -148,6 +150,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
   const {
     actions,
     activeMode,
+    threadBoardAvailable,
     activeProjectId,
     agentsCenterVisible,
     allProjects,
@@ -425,7 +428,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         }}
         // Chat has no board: asking for one there opens a layer that
         // hides the workspace and renders nothing in its place.
-        {...(activeMode === "chat"
+        {...(activeMode === "chat" || !threadBoardAvailable
           ? {}
           : {
               onOpenBoard: () => {
@@ -444,6 +447,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             }
           : {})}
         codeBoardOpen={codeBoardOpen}
+        threadBoardAvailable={threadBoardAvailable}
         codePullRequestsOpen={codePullRequestsOpen}
         githubIssuesOpen={githubIssuesOpen}
         githubClient={githubClient}

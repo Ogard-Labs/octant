@@ -171,6 +171,15 @@ displayed GitHub device-login link, complete authorization, then choose
 **Refresh status** in Octant. When issue access is available, the Issues
 destination appears without reloading the workspace.
 
+GitHub is a bundled plugin you can switch off. With it off, Octant hides the
+GitHub settings page, the Issues destination, GitHub repository setup in
+project creation and the composer, issue-based thread creation and GitHub cards
+on Home, and the host refuses those requests. Your saved GitHub data is kept, and
+switching the plugin back on restores everything. Git itself, worktrees and
+pull-request delivery (the pull-request pane, the **Pull requests** destination,
+review and merge actions) keep working, and so does any GitHub connector you
+added yourself.
+
 Choose the provider, model, and access posture in the new-thread composer.
 Execution profiles are no longer offered in Settings or the command palette
 and do not supply new-thread defaults. Existing saved profile records remain

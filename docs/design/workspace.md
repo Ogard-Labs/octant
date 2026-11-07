@@ -980,7 +980,17 @@ ordinary Review views.
 
 Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. A person marks a Work thread Done with **Mark done** in the
+Chat has no board. The boards are the bundled Board plugin. Switching it off
+is a presentation switch only: the Work and Code board views, the sidebar
+Board row, and every other way to open them (the Running tile and cards on the
+start screen, the Inbox's Open the Board button, back and forward, keyboard and
+command palette) are gone, and a board that is open closes. Running tiles and
+cards lead to the Activity list instead, as they do in Chat. Nothing is
+deleted, and the host keeps deriving the board data and status policy
+([`threadBoardPolicy`](../../packages/domain/src/threadBoardPolicy.ts)) because the
+thread rows, the dock overview, the planner board read, the sibling-thread
+tools and side tasks read the same projections. Turning the plugin on again
+brings the boards back with no migration. A person marks a Work thread Done with **Mark done** in the
 task's Task actions menu, after a confirmation, and the card moves to Done and
 stays there; a Code thread reaches Done only by its objectively satisfied
 delivery target

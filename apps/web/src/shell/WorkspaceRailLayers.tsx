@@ -89,6 +89,8 @@ export interface WorkspaceRailLayersProps {
   readonly railPlaceholder?: { readonly title: string; readonly message: string };
   readonly onDismissRailPlaceholder: () => void;
   readonly codeBoardOpen: boolean;
+  /** Off when the Board plugin is switched off: neither board layer renders. */
+  readonly threadBoardAvailable: boolean;
   readonly codePullRequestsOpen: boolean;
   readonly githubIssuesOpen: boolean;
   readonly githubClient: GithubClient;
@@ -275,7 +277,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           </LazyRailSurface>
         </div>
       ) : null}
-      {props.codeBoardOpen && props.activeMode === "code" ? (
+      {props.threadBoardAvailable && props.codeBoardOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="Thread board">
             <CodeThreadBoard
@@ -301,7 +303,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           </LazyRailSurface>
         </div>
       ) : null}
-      {props.workBoardOpen && props.activeMode === "work" ? (
+      {props.threadBoardAvailable && props.workBoardOpen && props.activeMode === "work" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="Thread board">
             <WorkThreadBoard

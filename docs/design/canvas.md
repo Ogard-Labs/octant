@@ -1229,8 +1229,13 @@ a fixed height) or an A4 PDF the browser paginates. A set is placed like a
 single file: the card names which files of the set are already there, approving
 it replaces exactly those, and any other file already taken, including one that
 appeared after the card, is numbered.
-The Gist destination declares Markdown only, so it is never offered either
-form. Pictures of design frames are as unreadable to the share filter as the
+The Gist destination declares Markdown only and the sharehtml.org destination
+declares one HTML page, so neither is offered the picture forms. The sharehtml
+destination uploads the rendered HTML to sharehtml.org's anonymous API and
+returns the unlisted link plus the one-time manage URL as the receipt; it is
+offered on every host because it needs no local connection. Folder exports to a
+synced folder (Google Drive, Dropbox, any client that watches a local folder)
+are the file-share path: Octant adds no cloud of its own. Pictures of design frames are as unreadable to the share filter as the
 markup, so their card sets `drawsDesignFrames` for the person to acknowledge,
 and a themed design needs the window's `frameTheme` as in HTML export.
 The export approval card says when the document writes design markup

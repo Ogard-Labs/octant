@@ -87,6 +87,20 @@ describe("resolvePluginCliCommand", () => {
     expect(resolvePluginCliCommand(["install", "npm:demo"], { registry: "x" })).toBeUndefined();
     expect(resolvePluginCliCommand(["enable", "demo"], {})).toBeUndefined();
   });
+
+  it("reads create with an optional MCP address and check with a folder", () => {
+    expect(resolvePluginCliCommand(["create", "notes"], {})).toEqual({
+      action: "create",
+      name: "notes",
+    });
+    expect(
+      resolvePluginCliCommand(["create", "crm"], { "mcp-url": "https://mcp.example.com/mcp" }),
+    ).toEqual({ action: "create", name: "crm", mcpUrl: "https://mcp.example.com/mcp" });
+    expect(resolvePluginCliCommand(["check", "."], {})).toEqual({ action: "check", folder: "." });
+    expect(resolvePluginCliCommand(["create", "crm"], { "mcp-url": true })).toBeUndefined();
+    expect(resolvePluginCliCommand(["create", "crm"], { force: true })).toBeUndefined();
+    expect(resolvePluginCliCommand(["check", "."], { "mcp-url": "x" })).toBeUndefined();
+  });
 });
 
 describe("runPluginCliCommand", () => {

@@ -64,10 +64,11 @@ A provider turn is processed where **that provider** processes it, under
 the contract you have with them. That is independent of where your Octant
 store lives. See [Sub-processors](/advanced/sub-processors).
 
-A Canvas you publish as a public link is stored by the public Canvas share
-service: **Norway (EEA)**, on Ogard Labs' own servers (Gigahost AS), with
-encrypted offsite backups in Finland (Hetzner, EU). Self-hosting keeps links
-wherever you run the service.:
+A Canvas you publish as a public link is stored by the share service whose
+address you set in **Settings › Permissions › Public links**. Octant operates no
+share service, so the link lives wherever you host that service — your server,
+your region. The reference app (`apps/share` in this repository) keeps its store
+in its `OCTANT_SHARE_DATA_DIR` on that machine.
 
 An update check or marketplace fetch is processed where the feed or
 registry you contacted is hosted. Those requests do not relocate the
@@ -84,7 +85,7 @@ see the draft at `docs/legal/shared-host-controller.md`.
 ## Next steps
 
 - [Privacy notice](/advanced/privacy-notice) for what the store holds and what can leave
-- [SCC position](/advanced/scc-position) for transfers that are not "move the journal"
+- SCC position (repository draft at `docs/legal/scc-position.md`) for transfers that are not "move the journal"
 - [Privacy and security](/advanced/privacy-and-security) for owner-only permissions and credentials
 - [Release compatibility](/advanced/release-compatibility) for preview platform boundaries
 - [Installation](/guide/installation) for `OCTANT_DATA_DIR` and update-check location

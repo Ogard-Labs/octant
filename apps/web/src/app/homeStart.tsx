@@ -67,6 +67,8 @@ export interface HomeStartInput {
     | "updateSettings"
   >;
   readonly activeMode: OctantMode;
+  /** Off when the Board plugin is switched off: Running cards lead to Activity instead. */
+  readonly threadBoardAvailable: boolean;
   readonly activePaneId: PaneId | undefined;
   readonly agentRunClient: AgentRunClient;
   readonly browserAutomationClient: BrowserAutomationClient | undefined;
@@ -136,6 +138,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
   const {
     actions,
     activeMode,
+    threadBoardAvailable,
     activePaneId,
     agentRunClient,
     browserAutomationClient,
@@ -236,7 +239,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     // The same place the sidebar's Running tile goes: Chat has no board, so
     // its running threads lead the Activity feed instead.
     onOpenRunning: () => {
-      if (activeMode === "chat") {
+      if (activeMode === "chat" || !threadBoardAvailable) {
         actions.openSidebarList("activity");
         return;
       }
@@ -350,7 +353,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       readResources: readComputerResources,
       onOpenRunning: (hostId) => {
         actions.setEnvironmentSelection({ kind: "some", hostIds: new Set([hostId]) });
-        if (activeMode === "chat") {
+        if (activeMode === "chat" || !threadBoardAvailable) {
           actions.openSidebarList("activity");
           return;
         }

@@ -25,7 +25,10 @@ import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { ServerProjectsSidebarGroup } from "../projects/ServerProjectsSidebarGroup";
 import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { useProjectController } from "../projects/useProjectController";
-import { resolveSidebarDestinationContributions } from "../shell/contributionRegistry";
+import {
+  isThreadBoardAvailable,
+  resolveSidebarDestinationContributions,
+} from "../shell/contributionRegistry";
 import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { SidebarNavigationDescriptorId } from "../shell/navigationModel";
@@ -664,9 +667,12 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         inboxCount={inboxCount}
         countTiles={{
           ...sidebarTileCounts,
-          // Chat has no board, so its Running tile opens the Activity feed,
+          // Chat has no board (and a switched-off Board plugin has none), so its Running tile opens the Activity feed,
           // where running threads lead.
-          ...(activeMode === "chat" ? { onOpenRunning: () => openSidebarList("activity") } : {}),
+          ...(activeMode === "chat" ||
+          !isThreadBoardAvailable(activeMode, firstPartyPluginsEffective)
+            ? { onOpenRunning: () => openSidebarList("activity") }
+            : {}),
           onOpenReview: openReview,
           onOpenDone: () => openSidebarList("completed"),
         }}

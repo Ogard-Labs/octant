@@ -659,6 +659,7 @@ export function startOctantServer(
       extensionApiService,
       folderBrowseService,
       gistConnection,
+      githubIntegrationIsEffective,
       imageJobService,
       managedWorktreeReceipts,
       options,
