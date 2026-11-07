@@ -67,7 +67,7 @@ export function canvasExportTargetBindings(
   const links = registration.publicLinks;
   return [
     folder,
-    ...(gist === undefined
+    ...(gist === undefined || gist.isEffective?.() === false
       ? []
       : [
           { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },

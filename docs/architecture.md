@@ -2824,6 +2824,26 @@ CI or reviewers should be woken, not left polling).
   switch or a watch is on, through the host's `gh` login. It is not a routine
   and needs no hosted service; a stopped host observes nothing.
 
+**The GitHub plugin switch.** GitHub is a bundled first-party plugin
+(component `github-integration`) a person can switch off; it is on by default,
+and a missing store row counts as on. Switching it off removes the GitHub
+account integration and keeps its data. The server refuses on the effective
+state, not the renderer: the GitHub authentication, catalogue and recents
+routes, the managed-clone routes, issue context for create-from-issue, and the
+`octant_github` read tools all refuse or are absent, and the Canvas export list
+no longer binds the GitHub Gist destination, so an export to it is refused as an
+unknown destination without a `gh` call. The renderer reads the same effective
+state and drops the GitHub Settings section, the Issues destination, the
+GitHub tab and repository picker in project creation and the composer, the
+create-from-issue and issue-reference entries, and the GitHub cards on the home
+screen, and sends no GitHub authentication request. Git, worktrees and the
+pull-request plumbing that Code delivery uses (the pull-request pane and chip,
+review, switch and merge actions, the `pull-requests` sidebar destination,
+failing-check follow-ups, the board's pull-request join) are not the
+integration and stay on with the plugin off. MCP connector catalog entries for
+GitHub are separate connectors the person adds, and keep their own sign-in and
+activation.
+
 **Reading GitHub (`octant_github`).** A Code thread's agent reads the
 repository its Project delivers to through one read-only family, offered to
 Code threads on a provider that carries app-managed tools while the GitHub

@@ -143,7 +143,10 @@ export function sameCanvasSkillScope(
 export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "agentRunPersistence" | "browserCaptures" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "contributeChildTools" | "managedWorktreeReceipts"> &
-  Pick<IntegrationsWiring, "gistConnection" | "threadOutsideContentMarks"> &
+  Pick<
+    IntegrationsWiring,
+    "gistConnection" | "githubIntegrationIsEffective" | "threadOutsideContentMarks"
+  > &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<CodeWiring, "folderBrowseService"> &
   Pick<ProvidersWiring, "chatDataDirectory" | "extensionApiService" | "imageJobService"> &
@@ -166,6 +169,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     extensionApiService,
     folderBrowseService,
     gistConnection,
+    githubIntegrationIsEffective,
     imageJobService,
     managedWorktreeReceipts,
     options,
@@ -1069,6 +1073,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     gist: {
       availability: () => gistConnection.availability(),
       gists: createGhGistCreationPort(options.ghExecutable),
+      isEffective: githubIntegrationIsEffective,
     },
     publicLinks: canvasPublicShareService,
   };
@@ -1215,7 +1220,10 @@ export function wireCanvas(deps: CanvasDependencies) {
     // destination then stays not-connected without spawning anything.
     ...(options.ghExecutable === undefined
       ? {}
-      : { refreshCanvasExportTargets: () => gistConnection.refresh() }),
+      : {
+          refreshCanvasExportTargets: () =>
+            githubIntegrationIsEffective() ? gistConnection.refresh() : Promise.resolve(),
+        }),
     canvasExportFolderService,
     resolveFolderCandidate: (windowId, input) =>
       folderBrowseService.resolveCandidate(windowId, input),

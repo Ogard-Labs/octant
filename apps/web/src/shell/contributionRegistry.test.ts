@@ -9,6 +9,7 @@ import {
   resolvePreviewViewerContributions,
   resolveSettingsSectionContributions,
   resolveSidebarContributions,
+  resolveSidebarDestinationContribution,
   resolveThreadPaneContributions,
   resolveWorkspaceTabContributions,
   type FirstPartyPluginComponentId,
@@ -51,6 +52,15 @@ describe("resolveSidebarContributions", () => {
     const effective = effectiveMap({ "github-integration": true });
     expect(resolveSidebarContributions("code", effective).has("pull-requests")).toBe(true);
     expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
+  });
+
+  it("keeps pull-requests when the github plugin is not effective, because it is Code delivery plumbing", () => {
+    const effective = effectiveMap({ "github-integration": false });
+    expect(resolveSidebarContributions("code", effective).has("pull-requests")).toBe(true);
+    expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
+    expect(
+      resolveSidebarDestinationContribution("pull-requests", "code", effective)?.destinationId,
+    ).toBe("pull-requests");
   });
 
   it("includes github-issues only in code mode when github is effective", () => {
