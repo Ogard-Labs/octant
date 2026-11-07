@@ -87,10 +87,8 @@ async function main(): Promise<void> {
         const socket = createConnection({ host: "127.0.0.1", port: address.port });
         socket.setTimeout(1000, () => socket.destroy(Error("Socket control timed out.")));
         socket.once("error", reject);
-        socket.once("connect", () => {
-          socket.end();
-          resolve();
-        });
+        socket.once("connect", () => socket.end());
+        socket.once("end", resolve);
       });
     await controlConnection();
     const forbidden = join(root, "host-only.txt");
@@ -260,7 +258,8 @@ export const canvasExport = {
     await rm(root, { recursive: true, force: true });
   }
 }
-void main().catch(() => {
+void main().catch((error: unknown) => {
+  if (error instanceof Error) console.error(error.message.slice(0, 1024));
   console.error(
     "Native export worker smoke failed; no isolation or external-export claim is established.",
   );
