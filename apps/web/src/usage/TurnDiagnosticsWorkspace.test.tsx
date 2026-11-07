@@ -163,7 +163,7 @@ describe("the Diagnostics page", () => {
         .map(([request]) => request)
         .filter((request) => request.filter?.mode === "work");
       expect(work.map((request) => [request.filter?.from, request.filter?.to])).toEqual([
-        ["2026-10-31T12:00:00.000Z", undefined],
+        ["2026-10-31T12:00:00.000Z", "2026-11-07T12:00:00.000Z"],
         ["2026-10-24T12:00:00.000Z", "2026-10-31T12:00:00.000Z"],
       ]);
     });

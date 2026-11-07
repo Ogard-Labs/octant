@@ -138,7 +138,12 @@ const SUBJECT_TYPE: Readonly<Record<OctantMode, string>> = {
 
 type LoadState =
   | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly report: TurnDiagnosticsReport }
+  | {
+      readonly status: "ready";
+      readonly report: TurnDiagnosticsReport;
+      /** The request this reading answered, so a span-before reading can be matched to it. */
+      readonly request: object;
+    }
   | { readonly status: "failure"; readonly message: string };
 
 /**
@@ -160,13 +165,28 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
   // Counts explicit refreshes, so Retry asks again even when the clock has not moved.
   const [reads, setReads] = useState(0);
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  // The same span just before this one, for each headline's change.
-  const [previous, setPrevious] = useState<TurnDiagnosticsReport | undefined>(undefined);
+  // The same span just before this one, for each headline's change, kept with
+  // the request it was read for so it is only ever shown beside that reading.
+  const [previous, setPrevious] = useState<
+    | {
+        readonly forRequest: object;
+        readonly report: TurnDiagnosticsReport;
+        readonly label: string;
+      }
+    | undefined
+  >(undefined);
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
 
   const request = useMemo(() => {
+    // A bounded range ends at the anchor too, so it is exactly as long as the
+    // span before it that its changes are measured against.
     const range =
-      preset === "all" ? {} : { from: new Date(anchor - RANGE_MS[preset]).toISOString() };
+      preset === "all"
+        ? {}
+        : {
+            from: new Date(anchor - RANGE_MS[preset]).toISOString(),
+            to: new Date(anchor).toISOString(),
+          };
     return {
       filter: { ...filter, ...range } as UsageQueryFilter,
       bucket,
@@ -183,7 +203,7 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
     setState((previous) => (previous.status === "ready" ? previous : { status: "loading" }));
     props.client.diagnostics(request).then(
       (report) => {
-        if (current) setState({ status: "ready", report });
+        if (current) setState({ status: "ready", report, request });
       },
       (error: unknown) => {
         if (current) {
@@ -199,10 +219,13 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
     };
   }, [props.client, request]);
 
-  const previousRequest = useMemo(() => {
-    if (preset === "all") return undefined;
+  useEffect(() => {
+    let current = true;
+    setPrevious(undefined);
+    if (preset === "all") return;
     const span = RANGE_MS[preset];
-    return {
+    const label = `vs the ${PREVIOUS_WORDS[preset]}`;
+    const previousRequest = {
       ...request,
       filter: {
         ...request.filter,
@@ -210,22 +233,16 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
         to: new Date(anchor - span).toISOString(),
       } as UsageQueryFilter,
     };
-  }, [preset, anchor, request]);
-
-  useEffect(() => {
-    let current = true;
-    setPrevious(undefined);
-    if (previousRequest === undefined) return;
     props.client.diagnostics(previousRequest).then(
       (report) => {
-        if (current) setPrevious(report);
+        if (current) setPrevious({ forRequest: request, report, label });
       },
       () => undefined,
     );
     return () => {
       current = false;
     };
-  }, [props.client, previousRequest]);
+  }, [props.client, request, preset, anchor]);
 
   const report = state.status === "ready" ? state.report : undefined;
   // A copy result describes the report it copied; asking for another reading
@@ -379,8 +396,11 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       ) : (
         <ReportSections
           report={report}
-          previous={previous}
-          previousLabel={preset === "all" ? undefined : `vs the ${PREVIOUS_WORDS[preset]}`}
+          {...(previous !== undefined &&
+          state.status === "ready" &&
+          previous.forRequest === state.request
+            ? { previous: previous.report, previousLabel: previous.label }
+            : { previous: undefined, previousLabel: undefined })}
           {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
         />
       )}
@@ -425,6 +445,7 @@ function ReportSections(props: {
       />
       <h2 className="diagnostics-dashboard__details-heading">Details</h2>
       <ModelSection report={report} />
+      <TrendTableSection report={report} />
       <FailureSection report={report} />
       <ToolSection report={report} />
       <PressureSection report={report} />
@@ -441,6 +462,53 @@ function ReportSections(props: {
         </p>
       ) : null}
     </>
+  );
+}
+
+/** Every bucket's readings as text, including the ones the dashboard draws only as sparklines. */
+function TrendTableSection({ report }: { readonly report: TurnDiagnosticsReport }) {
+  if (report.trend.length === 0) return null;
+  const label = report.bucket === "hour" ? "hour" : "day";
+  return (
+    <SurfaceSection label={`Turns by ${label}`}>
+      <details className="turn-diagnostics__details">
+        <summary>Show every {label}</summary>
+        <div className="usage-table-scroll">
+          <table aria-label={`Turns by ${label}`} className="usage-table">
+            <thead>
+              <tr>
+                <th scope="col">{label === "hour" ? "Hour (UTC)" : "Day"}</th>
+                <th scope="col">Turns</th>
+                <th scope="col">Failed</th>
+                <th scope="col">Stopped</th>
+                <th scope="col">Tool failures</th>
+                <th scope="col">Retries</th>
+                <th scope="col">First token, typical</th>
+                <th scope="col">Speed, typical</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...report.trend].reverse().map((bucket) => (
+                <tr key={bucket.key}>
+                  <th scope="row">
+                    {bucket.key.length > 10
+                      ? `${bucket.key.slice(0, 10)} ${bucket.key.slice(11, 16)}`
+                      : bucket.key}
+                  </th>
+                  <td>{bucket.turns}</td>
+                  <td>{bucket.failed}</td>
+                  <td>{bucket.cancelled}</td>
+                  <td>{countAndShare(bucket.toolFailures, bucket.toolCalls, "calls")}</td>
+                  <td>{bucket.retries}</td>
+                  <td>{milliseconds(bucket.timeToFirstTokenP50Ms)}</td>
+                  <td>{rate(bucket.decodeTokensPerSecondP50)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </SurfaceSection>
   );
 }
 

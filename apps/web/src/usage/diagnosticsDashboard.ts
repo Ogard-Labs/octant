@@ -51,6 +51,10 @@ interface Figures {
   readonly failed: number;
   readonly toolFailureRate: number | undefined;
   readonly firstTokenP50s: number | undefined;
+  readonly firstTokenP95s: number | undefined;
+  readonly turnP50s: number | undefined;
+  readonly stopped: number;
+  readonly cutOff: number;
   readonly speedP50: number | undefined;
   readonly turnP95s: number | undefined;
   readonly retries: number;
@@ -71,6 +75,10 @@ function figures(report: TurnDiagnosticsReport): Figures {
     failed: totals.stopReasons.failed,
     toolFailureRate: totals.toolCalls === 0 ? undefined : totals.toolFailures / totals.toolCalls,
     firstTokenP50s: seconds(totals.timeToFirstTokenMs?.p50),
+    firstTokenP95s: seconds(totals.timeToFirstTokenMs?.p95),
+    turnP50s: seconds(totals.wallMs?.p50),
+    stopped: totals.stopReasons.cancelled,
+    cutOff: totals.stopReasons["max-tokens"],
     speedP50: totals.decodeTokensPerSecond?.p50,
     turnP95s: seconds(totals.wallMs?.p95),
     retries: totals.retries.reduce((sum, tally) => sum + tally.count, 0),
@@ -103,17 +111,21 @@ export function diagnosticsDashboard(
       readonly good?: CanvasMetricBlock["goodDirection"];
       readonly prior?: number | undefined;
       readonly sparkline?: ReadonlyArray<number>;
+      /** Decimal places kept; a small cost or a sub-second wait must not round to zero. */
+      readonly digits?: number;
     } = {},
   ): CanvasMetricBlock | undefined => {
     if (value === undefined) return undefined;
     const delta =
-      options.prior === undefined ? undefined : round(value - options.prior, options.format);
+      options.prior === undefined
+        ? undefined
+        : round(value - options.prior, options.format, options.digits);
     return metricBlock({
       blockId: `diagnostics-kpi-${id}`,
       schemaVersion: CANVAS_SCHEMA_VERSION,
       kind: "metric",
       label,
-      value: round(value, options.format),
+      value: round(value, options.format, options.digits),
       ...(options.format === undefined ? {} : { format: options.format }),
       ...(options.unit === undefined ? {} : { unit: options.unit }),
       ...(delta === undefined ? {} : { delta }),
@@ -155,6 +167,7 @@ export function diagnosticsDashboard(
     tile("first-token", "First token, typical", now.firstTokenP50s, {
       format: "number",
       unit: "s",
+      digits: 2,
       good: "down",
       prior: before?.firstTokenP50s,
       sparkline: trend.flatMap((bucket) =>
@@ -170,10 +183,33 @@ export function diagnosticsDashboard(
         bucket.decodeTokensPerSecondP50 === undefined ? [] : [bucket.decodeTokensPerSecondP50],
       ),
     }),
+    tile("first-token-p95", "First token, slow (p95)", now.firstTokenP95s, {
+      format: "number",
+      unit: "s",
+      digits: 2,
+      good: "down",
+      prior: before?.firstTokenP95s,
+    }),
+    tile("turn-p50", "Turn length, typical", now.turnP50s, {
+      format: "duration",
+      good: "down",
+      prior: before?.turnP50s,
+    }),
     tile("turn-p95", "Turn length, slow (p95)", now.turnP95s, {
       format: "duration",
       good: "down",
       prior: before?.turnP95s,
+    }),
+    tile("stopped", "Stopped turns", now.stopped, {
+      format: "number",
+      good: "down",
+      prior: before?.stopped,
+      sparkline: trend.map((bucket) => bucket.cancelled),
+    }),
+    tile("cut-off", "Cut at output limit", now.cutOff, {
+      format: "number",
+      good: "down",
+      prior: before?.cutOff,
     }),
     tile("retries", "Retries", now.retries, {
       format: "number",
@@ -184,6 +220,7 @@ export function diagnosticsDashboard(
     tile("cost", "Provider-reported cost", now.costUsd, {
       format: "number",
       unit: "USD",
+      digits: 3,
       good: "down",
       prior: before?.costUsd,
     }),
@@ -197,8 +234,13 @@ export function diagnosticsDashboard(
   const buckets = report.trend.slice(-MAX_CHART_POINTS);
   const span = report.bucket === "hour" ? "hour (UTC)" : "day";
   // A short axis label: "11-07", or "11-07 14h" for an hour, so ticks are not cut.
+  // A trend over more than one calendar year keeps the year, or two days a year
+  // apart would share a label and the stacked chart would refuse the series.
+  const firstKey = report.trend[0]?.key ?? "";
+  const lastKey = report.trend.at(-1)?.key ?? "";
+  const spansYears = firstKey.slice(0, 4) !== lastKey.slice(0, 4);
   const tick = (key: string) =>
-    key.length > 10 ? `${key.slice(5, 10)} ${key.slice(11, 13)}h` : key.slice(5);
+    key.length > 10 ? `${key.slice(5, 10)} ${key.slice(11, 13)}h` : spansYears ? key : key.slice(5);
   const turnsOverTime =
     buckets.length === 0
       ? undefined
@@ -431,8 +473,8 @@ function seconds(ms: number | undefined): number | undefined {
 }
 
 /** Keeps a tile's value and delta at the precision its format shows. */
-function round(value: number, format: CanvasMetricBlock["format"]): number {
-  if (format === "percent") return Math.round(value * 1_000) / 1_000;
-  if (format === "duration") return Math.round(value * 100) / 100;
-  return Math.round(value * 10) / 10;
+function round(value: number, format: CanvasMetricBlock["format"], digits?: number): number {
+  const places = digits ?? (format === "percent" ? 3 : format === "duration" ? 2 : 1);
+  const scale = 10 ** places;
+  return Math.round(value * scale) / scale;
 }

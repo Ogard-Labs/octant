@@ -87,4 +87,45 @@ describe("the Diagnostics dashboard", () => {
     expect(dashboard.speedByModel).toBeUndefined();
     expect(dashboard.toolFailures).toBeUndefined();
   });
+
+  it("keeps a small cost and a sub-second wait instead of rounding them to zero", () => {
+    const report = buildTurnDiagnosticsReport(
+      [
+        turn(0, {
+          usage: { inputTokens: 100, outputTokens: 10, costUsd: 0.04 },
+          metrics: {
+            precision: "exact",
+            wallMs: 2_000,
+            timeToFirstTokenMs: 40,
+            decodeOutputTokens: 10,
+            decodeMs: 1_000,
+            toolMs: 0,
+            modelCalls: 1,
+          },
+        }),
+      ],
+      options,
+    );
+
+    const dashboard = diagnosticsDashboard(report, undefined, undefined);
+    const value = (label: string) => dashboard.kpis.find((block) => block.label === label)?.value;
+
+    expect(value("Provider-reported cost")).toBe(0.04);
+    expect(value("First token, typical")).toBe(0.04);
+  });
+
+  it("keeps the year on day labels when the trend crosses a year, so the chart is not refused", () => {
+    const day = (iso: string) => turn(0, { startedAt: iso, endedAt: iso });
+    const report = buildTurnDiagnosticsReport(
+      [day("2025-11-07T10:00:00.000Z"), day("2026-11-07T10:00:00.000Z")],
+      { ...options, bucket: "day" },
+    );
+
+    const dashboard = diagnosticsDashboard(report, undefined, undefined);
+
+    expect(dashboard.turnsOverTime?.series[0]?.points.map((point) => point.x)).toEqual([
+      "2025-11-07",
+      "2026-11-07",
+    ]);
+  });
 });
