@@ -787,10 +787,10 @@ that host as `thread.member-reachable-set@1` with its principal. A thread that
 is completed, archived, deleted, or in Plan keeps its tag but takes part in
 nothing until it is active Code outside Plan again. Both ends need the tag: a
 thread may send to another member only while it is tagged itself, so the
-person opted in on both sides and the recipient can always answer. Under the
-tag sits a second switch, **Wake when a message arrives**. It is on whenever a
-person turns the tag on, can be turned off on its own, and is journaled with
-the tag (see [Waking an idle thread](#waking-an-idle-thread)).
+person opted in on both sides and the recipient can always answer. Turning the
+tag on also turns on the thread's **Wake when a message arrives** switch,
+which can then be turned off on its own (see
+[Waking an idle thread](#waking-an-idle-thread)).
 
 **Who.** Spokes, the hub's own threads (the hub is also its own spoke), and a
 standby's own threads may send and receive; a guest runs no agents and does
@@ -858,46 +858,25 @@ below. The agent on B replies by sending to the reference in that sentence.
 
 #### Waking an idle thread
 
-A message waiting for a thread that has nothing running would otherwise wait
-until a person next runs a turn there, so agents could not coordinate on their
-own. When B accepts a message for a thread with **Wake when a message
-arrives** on, and the thread is idle, B starts one turn to carry it.
+Waking follows the one-host rule in
+[Architecture: agent-to-agent messaging](../architecture.md#modes-chat-work-and-code):
+a message to an idle thread whose **Wake when a message arrives** switch is on
+starts one bounded, `agent`-initiated turn there. Across members, only these
+parts differ:
 
-- **Idle.** The thread is active Code outside Plan, has no turn running or
-  queued, and is not waiting for a person (an approval, a question, or a
-  usage-limit pause). A thread that is not idle carries the message in its next
-  turn as usual, and a running turn is never interrupted.
-- **The wake turn.** B starts it as a host-run turn with the `agent` initiator,
-  the way a routine's Code turn starts, so every approval waits for a person.
-  It runs under the thread's own posture, provider profile, and model, and
-  takes the ordinary turn admission: capacity gating, the Done lock, and the
-  host's usage limits apply, and a turn refused there starts nothing and leaves
-  the messages waiting. The turn's prompt is a host sentence saying a message
-  from the named member started it; the messages themselves arrive as the
-  ordinary delivery block, after the ordinary delivery checks. When every
-  waiting message is refused at those checks, no turn starts. The turn is
-  journaled with the initiator kind `member-message` and the message ids, and
-  the thread's row and transcript say which member woke it.
-- **Bounds.** One wake turn at a time per thread, and at most six per thread in
-  any hour. A message that arrives past either bound waits for the next turn,
-  woken or not. Each message carries a hop count, set by the sending host: zero
-  from a turn a person or routine started, and one more than the message that
-  woke the sender's turn otherwise. A message whose hop count is three or more
-  is delivered but wakes nothing, so two agents answering each other stop
-  waking each other after three rounds and continue only when a person runs a
-  turn. B keeps the higher of the count it is sent and its own record for that
-  sender thread, so a sender that sends a lower count is still held by the
-  hourly bound.
-- **Turning it off.** Turning off the wake switch or the tag stops new wake
-  turns; a wake turn already running finishes like any turn. Cancelling a wake
-  turn is the ordinary cancel.
+- B starts the wake turn when it accepts the message, and the turn's host
+  sentence and the thread's row name the member that woke it. The turn is
+  journaled with the initiator kind `member-message`.
+- The hop count travels in A's signed request, set by A from its own record.
+  B cannot check it, so a member that sends a false count is still held by
+  B's one-at-a-time and hourly bounds, which B counts itself and which cover
+  local and member messages together.
+- Turning the tag off stops new wake turns from members, as turning off the
+  wake switch does.
 
-Rationale: a wake turn starts nothing a person could not have started on that
-thread, under the posture the person chose, and approvals still wait for a
-person, so a message can spend B's provider usage but cannot widen what B's
-agent may do. The hop count and the hourly bound keep two agents, or a
-compromised member, from turning one message into unbounded turns. One-host
-messages still wake nothing; extending waking to them is a separate rule.
+Rationale: a compromised member could otherwise turn one message into
+unbounded turns on B. B's own bounds cap what it can spend there without B
+having to trust anything A counts.
 
 **The sender's end after B accepts.** The one-host rule rechecks the sender at
 delivery. Across members B cannot see the sender, so A tells it. When a

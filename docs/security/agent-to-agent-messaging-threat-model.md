@@ -147,7 +147,11 @@ path meets the threats above.
   frame every other external source uses. This channel adds no escaping of its
   own, so its data boundary is exactly as strong as that framing function.
 - **A message may wait indefinitely.** Delivery happens only when the
-  recipient's next turn starts, and messaging starts none. The sender is told
+  recipient's next turn starts. Messaging starts one only on a recipient whose
+  person turned on Wake when a message arrives (designed, not built), within
+  the bounds the architecture states; that wake spends the recipient's
+  provider usage but is `agent`-initiated, so approvals still wait for a
+  person. The sender is told
   `sent` initially and can read its own bounded receipt metadata later. Queued
   messages have no recorded expiry policy; age alone is not an expired fact.
 - **Delivery is at least once.** `agent.message-delivered@1` is appended only
