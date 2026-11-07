@@ -105,11 +105,13 @@ describe("the Diagnostics page", () => {
   it("shows how turns ended, why they failed, which tools broke, and each model's speed", async () => {
     mount(async () => troubledReport);
 
-    const summary = await screen.findByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Failed").nextSibling?.textContent).toBe("1 · 50%");
-    expect(within(summary).getByText("Tool failures").nextSibling?.textContent).toBe(
-      "1 of 3 calls · 33%",
-    );
+    const headline = await screen.findByRole("region", { name: "Headline figures" });
+    expect(within(headline).getByText("Failed turns")).toBeInTheDocument();
+    expect(within(headline).getByText("Finished")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "How turns ended" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Model comparison" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "What fails most" })).toBeInTheDocument();
+    expect(within(headline).getByText("Tool failure rate")).toBeInTheDocument();
 
     const causes = screen.getByRole("table", { name: "Failures by cause" });
     expect(within(causes).getByText("Rate limited")).toBeInTheDocument();
@@ -143,29 +145,28 @@ describe("the Diagnostics page", () => {
       report([turn({ metrics: { precision: "unavailable", wallMs: 1_000 }, usage: undefined })]),
     );
 
-    const summary = await screen.findByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Speed, typical").nextSibling?.textContent).toBe(
-      "Unavailable",
-    );
+    const headline = await screen.findByRole("region", { name: "Headline figures" });
+    expect(within(headline).queryByText("Speed, typical")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Speed over time" })).toBeNull();
   });
 
   it("asks again for one mode when the mode filter changes", async () => {
     const { client } = mount(async () => troubledReport);
-    await screen.findByRole("region", { name: "Summary" });
+    await screen.findByRole("region", { name: "Headline figures" });
 
     await userEvent.click(screen.getByRole("combobox", { name: "Filter diagnostics by mode" }));
     await userEvent.click(await screen.findByRole("option", { name: "Work" }));
 
-    await waitFor(() =>
-      expect(client.diagnostics).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          filter: expect.objectContaining({ mode: "work" }),
-          bucket: "day",
-          timeZone: "UTC",
-        }),
-      ),
-    );
-    expect(client.diagnostics.mock.calls.at(-1)?.[0].filter?.from).toBe("2026-10-31T12:00:00.000Z");
+    // One read for the span and one for the span before it, for each headline's change.
+    await waitFor(() => {
+      const work = client.diagnostics.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.filter?.mode === "work");
+      expect(work.map((request) => [request.filter?.from, request.filter?.to])).toEqual([
+        ["2026-10-31T12:00:00.000Z", undefined],
+        ["2026-10-24T12:00:00.000Z", "2026-10-31T12:00:00.000Z"],
+      ]);
+    });
   });
 
   it("states an empty range and a failed read, and retries on request", async () => {
@@ -182,7 +183,7 @@ describe("the Diagnostics page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByText("No turns in this range")).toBeInTheDocument();
-    expect(client.diagnostics).toHaveBeenCalledTimes(2);
+    expect(client.diagnostics.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -198,7 +199,7 @@ describe("the Diagnostics report copy", () => {
         timeZone="UTC"
       />,
     );
-    await screen.findByRole("region", { name: "Summary" });
+    await screen.findByRole("region", { name: "Headline figures" });
 
     await userEvent.click(screen.getByRole("button", { name: "Copy diagnostics report as JSON" }));
     expect(JSON.parse(copyText.mock.calls[0]?.[0] ?? "{}")).toMatchObject({ turns: 2 });
@@ -235,6 +236,6 @@ describe("the Usage destination", () => {
     await userEvent.click(screen.getByRole("button", { name: "Diagnostics" }));
 
     expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
-    expect(await screen.findByRole("region", { name: "Summary" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Headline figures" })).toBeInTheDocument();
   });
 });

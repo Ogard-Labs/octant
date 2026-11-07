@@ -23,6 +23,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { DiagnosticsDashboardView } from "./DiagnosticsDashboardView";
 import { HostHealthSection } from "./HostHealthSection";
 import { UsageName } from "./UsageName";
 import "./usageWorkspace.css";
@@ -73,6 +74,13 @@ const RANGE_PRESETS: ReadonlyArray<{ readonly id: RangePreset; readonly label: s
   { id: "90d", label: "Last 90 days" },
   { id: "all", label: "All recorded turns" },
 ];
+
+const PREVIOUS_WORDS: Readonly<Record<Exclude<RangePreset, "all">, string>> = {
+  "24h": "24 hours before",
+  "7d": "7 days before",
+  "30d": "30 days before",
+  "90d": "90 days before",
+};
 
 const RANGE_MS: Readonly<Record<Exclude<RangePreset, "all">, number>> = {
   "24h": 24 * 3_600_000,
@@ -152,6 +160,8 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
   // Counts explicit refreshes, so Retry asks again even when the clock has not moved.
   const [reads, setReads] = useState(0);
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  // The same span just before this one, for each headline's change.
+  const [previous, setPrevious] = useState<TurnDiagnosticsReport | undefined>(undefined);
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
 
   const request = useMemo(() => {
@@ -188,6 +198,34 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       current = false;
     };
   }, [props.client, request]);
+
+  const previousRequest = useMemo(() => {
+    if (preset === "all") return undefined;
+    const span = RANGE_MS[preset];
+    return {
+      ...request,
+      filter: {
+        ...request.filter,
+        from: new Date(anchor - 2 * span).toISOString(),
+        to: new Date(anchor - span).toISOString(),
+      } as UsageQueryFilter,
+    };
+  }, [preset, anchor, request]);
+
+  useEffect(() => {
+    let current = true;
+    setPrevious(undefined);
+    if (previousRequest === undefined) return;
+    props.client.diagnostics(previousRequest).then(
+      (report) => {
+        if (current) setPrevious(report);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [props.client, previousRequest]);
 
   const report = state.status === "ready" ? state.report : undefined;
   // A copy result describes the report it copied; asking for another reading
@@ -341,6 +379,8 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       ) : (
         <ReportSections
           report={report}
+          previous={previous}
+          previousLabel={preset === "all" ? undefined : `vs the ${PREVIOUS_WORDS[preset]}`}
           {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
         />
       )}
@@ -371,13 +411,19 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
 
 function ReportSections(props: {
   readonly report: TurnDiagnosticsReport;
+  readonly previous: TurnDiagnosticsReport | undefined;
+  readonly previousLabel: string | undefined;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
   const { report } = props;
   return (
     <>
-      <SummarySection report={report} />
-      <TrendSection report={report} />
+      <DiagnosticsDashboardView
+        previous={props.previous}
+        previousLabel={props.previousLabel}
+        report={report}
+      />
+      <h2 className="diagnostics-dashboard__details-heading">Details</h2>
       <ModelSection report={report} />
       <FailureSection report={report} />
       <ToolSection report={report} />
@@ -395,112 +441,6 @@ function ReportSections(props: {
         </p>
       ) : null}
     </>
-  );
-}
-
-function SummarySection({ report }: { readonly report: TurnDiagnosticsReport }) {
-  const { totals } = report;
-  const stopped = totals.stopReasons;
-  return (
-    <SurfaceSection label="Summary">
-      <dl className="usage-workspace__totals">
-        <Figure label="Turns" value={report.turns.toLocaleString("en")} />
-        <Figure label="Failed" value={countAndShare(stopped.failed, report.turns)} />
-        <Figure label="Stopped" value={countAndShare(stopped.cancelled, report.turns)} />
-        <Figure
-          label="Cut at output limit"
-          value={countAndShare(stopped["max-tokens"], report.turns)}
-        />
-        <Figure
-          label="Tool failures"
-          value={countAndShare(totals.toolFailures, totals.toolCalls, "calls")}
-        />
-        <Figure
-          label="Retries"
-          value={totals.retries.reduce((sum, tally) => sum + tally.count, 0).toLocaleString("en")}
-        />
-        <Figure label="Likely cache misses" value={totals.likelyCacheMisses.toLocaleString("en")} />
-        <Figure label="First token, typical" value={milliseconds(totals.timeToFirstTokenMs?.p50)} />
-        <Figure
-          label="First token, slow (p95)"
-          value={milliseconds(totals.timeToFirstTokenMs?.p95)}
-        />
-        <Figure label="Speed, typical" value={rate(totals.decodeTokensPerSecond?.p50)} />
-        <Figure label="Turn length, typical" value={milliseconds(totals.wallMs?.p50)} />
-        <Figure label="Turn length, slow (p95)" value={milliseconds(totals.wallMs?.p95)} />
-      </dl>
-    </SurfaceSection>
-  );
-}
-
-/**
- * Turns per bucket as bars, with failed and stopped turns as a marked segment
- * at the base. The table beside it carries the same readings, so nothing is
- * told by colour or height alone.
- */
-function TrendSection({ report }: { readonly report: TurnDiagnosticsReport }) {
-  const maximum = Math.max(1, ...report.trend.map((bucket) => bucket.turns));
-  const label = report.bucket === "hour" ? "hour" : "day";
-  return (
-    <SurfaceSection label={`Turns by ${label}`}>
-      <figure className="turn-diagnostics__trend">
-        <ul aria-hidden="true" className="turn-diagnostics__bars">
-          {report.trend.map((bucket) => {
-            const troubled = bucket.failed + bucket.cancelled;
-            return (
-              <li
-                className="turn-diagnostics__bar"
-                key={bucket.key}
-                style={{ height: `${Math.max(4, (bucket.turns / maximum) * 100)}%` }}
-                title={`${bucketWords(bucket.key)} · ${bucket.turns} turns · ${bucket.failed} failed · ${bucket.cancelled} stopped`}
-              >
-                <span
-                  className="turn-diagnostics__bar-troubled"
-                  style={{ height: `${(troubled / bucket.turns) * 100}%` }}
-                />
-              </li>
-            );
-          })}
-        </ul>
-        <figcaption className="turn-diagnostics__legend">
-          <span className="turn-diagnostics__swatch" data-kind="ok" /> Finished or cut off
-          <span className="turn-diagnostics__swatch" data-kind="troubled" /> Failed or stopped
-        </figcaption>
-      </figure>
-      <details className="turn-diagnostics__details">
-        <summary>Show as a table</summary>
-        <div className="usage-table-scroll">
-          <table aria-label={`Turns by ${label}`} className="usage-table">
-            <thead>
-              <tr>
-                <th scope="col">{label === "hour" ? "Hour (UTC)" : "Day"}</th>
-                <th scope="col">Turns</th>
-                <th scope="col">Failed</th>
-                <th scope="col">Stopped</th>
-                <th scope="col">Tool failures</th>
-                <th scope="col">Retries</th>
-                <th scope="col">First token, typical</th>
-                <th scope="col">Speed, typical</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.trend.map((bucket) => (
-                <tr key={bucket.key}>
-                  <th scope="row">{bucketWords(bucket.key)}</th>
-                  <td>{bucket.turns}</td>
-                  <td>{bucket.failed}</td>
-                  <td>{bucket.cancelled}</td>
-                  <td>{countAndShare(bucket.toolFailures, bucket.toolCalls, "calls")}</td>
-                  <td>{bucket.retries}</td>
-                  <td>{milliseconds(bucket.timeToFirstTokenP50Ms)}</td>
-                  <td>{rate(bucket.decodeTokensPerSecondP50)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </SurfaceSection>
   );
 }
 
@@ -863,10 +803,6 @@ function pair(
 
 function dollars(value: number): string {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
-}
-
-function bucketWords(key: string): string {
-  return key.length > 10 ? `${key.slice(0, 10)} ${key.slice(11, 16)}` : key;
 }
 
 function resolveTimeZone(): string {
