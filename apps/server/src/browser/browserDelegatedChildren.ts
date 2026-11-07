@@ -1,11 +1,18 @@
 import {
   decodeBrowserThreadId,
+  LOCAL_HOST_ID,
+  type AgentRun,
+  type BrowserThreadId,
+  type ToolActionAuthority,
+  type ProviderInstanceId,
+  type ProviderModelId,
   type WindowId,
   type ProviderExecutionPolicy,
   type StoredBrowserProfile,
 } from "@octant/contracts";
 import type { BrowserSessionTarget } from "@octant/contracts/browser-session-grants";
 import {
+  effectiveAgentRunExecutionTarget,
   browserProfileChoiceOf,
   browserProfileFromChoice,
   storedBrowserProfile,
@@ -21,7 +28,7 @@ import { createBrowserAppManagedTools } from "./browserAppManagedTools";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import { parseBrowserToolInput } from "./browserToolOperations";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
-import type { BrowserSessionGrants } from "./browserSessionGrants";
+import type { CurrentBrowserSessionTarget, BrowserSessionGrants } from "./browserSessionGrants";
 
 interface ChildBrowserEntry {
   readonly service: BrowserAutomationService;
@@ -268,4 +275,64 @@ function originOf(value: string): ReadonlyArray<string> {
   } catch {
     return [];
   }
+}
+
+/** A site-limited native Browser grant never changes the child's ambient network grant. */
+export function currentManagedChildBrowserTarget(
+  run: AgentRun,
+  input: {
+    readonly canReview: (run: AgentRun) => boolean;
+    readonly resolveParent: (
+      threadId: BrowserThreadId,
+      mode: "work" | "code",
+    ) => ToolActionAuthority | undefined;
+    readonly supportsTools: (
+      providerInstanceId: ProviderInstanceId,
+      modelId: ProviderModelId,
+    ) => boolean;
+  },
+): CurrentBrowserSessionTarget | undefined {
+  if (
+    run.executionKind !== "octant-managed" ||
+    String(run.routingReceipt.executionResolution.hostId) !== String(LOCAL_HOST_ID) ||
+    !run.authority.tools ||
+    run.workspaceReceipt.kind === "chat-virtual" ||
+    !input.canReview(run)
+  )
+    return undefined;
+  if (run.workspaceReceipt.kind === "code-worktree" && !run.workspaceReceipt.verified)
+    return undefined;
+  const parent = decodeBrowserThreadId(String(run.parentThreadId));
+  const mode = run.workspaceReceipt.mode;
+  const parentAuthority = input.resolveParent(parent, mode);
+  if (
+    parentAuthority === undefined ||
+    String(parentAuthority.projectId) !== String(run.workspaceReceipt.projectId)
+  )
+    return undefined;
+  const execution = effectiveAgentRunExecutionTarget(run.routingReceipt);
+  if (!input.supportsTools(execution.providerInstanceId, execution.modelId)) return undefined;
+  const authority: ToolActionAuthority = {
+    hostId: parentAuthority.hostId,
+    mode,
+    projectId: run.workspaceReceipt.projectId,
+    providerInstanceId: execution.providerInstanceId,
+    extension: { kind: "core" },
+  };
+  return {
+    target: {
+      grantee: { kind: "child", runId: run.id },
+      label: run.task.slice(0, 256),
+      authority,
+      modelId: execution.modelId,
+    },
+    revision: JSON.stringify({
+      requestId: run.requestId,
+      generation: run.generation ?? 1,
+      workspace: run.workspaceReceipt,
+      authority: run.authority,
+      parent: parentAuthority,
+      digest: run.routingReceipt.effectiveAuthorityDigest,
+    }),
+  };
 }

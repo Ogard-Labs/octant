@@ -352,7 +352,10 @@ The permission binds one execution host, run/generation, model/provider,
 Project/workspace authority, profile and origin set. Another Project's profile,
 HTTP, URL paths, credentials and query values refuse. Queued and waiting
 children may be reviewed without starting or resuming them; only a currently
-active child with its own tools and network authority can execute. Completed, failed or cancelled
+active child with its own tool authority can execute. Work retains its
+ambient `network: false`: the explicit site-limited host Browser permission
+allows only this Browser context, without granting network access to the
+child process or other tools. Completed, failed or cancelled
 children, Chat children, provider-native children and unavailable or unverified
 workspaces are not eligible. Routine and terminal-session caller grants are not
 yet available; their existing refusals remain.

@@ -63,11 +63,13 @@ import {
   BrowserSessionGrants,
   type CurrentBrowserSessionTarget,
 } from "../browser/browserSessionGrants";
-import { BrowserDelegatedChildren } from "../browser/browserDelegatedChildren";
+import {
+  BrowserDelegatedChildren,
+  currentManagedChildBrowserTarget,
+} from "../browser/browserDelegatedChildren";
 import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
 import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
-import { decodeAgentRunId, type AgentRun, type ToolActionAuthority } from "@octant/contracts";
-import { effectiveAgentRunExecutionTarget } from "@octant/domain";
+import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
 
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -230,59 +232,18 @@ export function wireBrowser(deps: BrowserDependencies) {
             native: desktopBrowserRuntime,
             headless: headlessBrowserRuntime,
           }));
-    const childSessionTarget = (run: AgentRun): CurrentBrowserSessionTarget | undefined => {
-      if (
-        run.executionKind !== "octant-managed" ||
-        String(run.routingReceipt.executionResolution.hostId) !== String(LOCAL_HOST_ID) ||
-        !run.authority.tools ||
-        !run.authority.network ||
-        run.workspaceReceipt.kind === "chat-virtual" ||
-        !agentRunInteractions.canReviewSession(run)
-      )
-        return undefined;
-      if (run.workspaceReceipt.kind === "code-worktree" && !run.workspaceReceipt.verified)
-        return undefined;
-      const parent = decodeBrowserThreadId(String(run.parentThreadId));
-      const mode = run.workspaceReceipt.mode;
-      const parentAuthority = browserAuthority.resolve(parent, mode);
-      if (
-        parentAuthority === undefined ||
-        String(parentAuthority.projectId) !== String(run.workspaceReceipt.projectId)
-      )
-        return undefined;
-      const execution = effectiveAgentRunExecutionTarget(run.routingReceipt);
-      const observed = providerRuntimeRegistry.observedState(execution.providerInstanceId);
-      if (
-        observed?.capabilities.appManagedTools !== "supported" &&
-        observed?.verifiedToolModelIds?.some(
-          (modelId) => String(modelId) === String(execution.modelId),
-        ) !== true
-      )
-        return undefined;
-      const authority: ToolActionAuthority = {
-        hostId: parentAuthority.hostId,
-        mode,
-        projectId: run.workspaceReceipt.projectId,
-        providerInstanceId: execution.providerInstanceId,
-        extension: { kind: "core" },
-      };
-      return {
-        target: {
-          grantee: { kind: "child", runId: run.id },
-          label: run.task.slice(0, 256),
-          authority,
-          modelId: execution.modelId,
+    const childSessionTarget = (run: AgentRun): CurrentBrowserSessionTarget | undefined =>
+      currentManagedChildBrowserTarget(run, {
+        canReview: (candidate) => agentRunInteractions.canReviewSession(candidate),
+        resolveParent: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+        supportsTools: (providerInstanceId, modelId) => {
+          const observed = providerRuntimeRegistry.observedState(providerInstanceId);
+          return (
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) === true
+          );
         },
-        revision: JSON.stringify({
-          requestId: run.requestId,
-          generation: run.generation ?? 1,
-          workspace: run.workspaceReceipt,
-          authority: run.authority,
-          parent: parentAuthority,
-          digest: run.routingReceipt.effectiveAuthorityDigest,
-        }),
-      };
-    };
+      });
     const currentSessionTarget = (
       grantee: BrowserSessionGrantee,
     ): CurrentBrowserSessionTarget | undefined => {
@@ -343,7 +304,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     const browserDelegatedChildren = delegatedChildren;
     contributeChildTools(({ run, authority }) => {
       const target = childSessionTarget(run)?.target;
-      if (target === undefined || !authority.tools || !authority.network) return undefined;
+      if (target === undefined || !authority.tools) return undefined;
       return browserDelegatedChildren.tools({
         target,
         executionPolicy: authority.executionPolicy,
