@@ -77,7 +77,7 @@ export function canvasExportTargetBindings(
   const sharehtml = registration.sharehtml;
   return [
     folder,
-    ...(gist === undefined
+    ...(gist === undefined || gist.isEffective?.() === false
       ? []
       : [
           { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },

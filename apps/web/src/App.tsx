@@ -1828,7 +1828,14 @@ function LaunchedShell(
     () => linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 }),
     [linearClient],
   );
+  const githubPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true;
   useEffect(() => {
+    if (!githubPluginEffective) {
+      setGithubIssuesReadAvailable(false);
+      setGithubPullRequestCapability({ readable: false });
+      setGithubIssuesOpen(false);
+      return;
+    }
     let cancelled = false;
     void githubTransport
       .authenticationSnapshot()
@@ -1846,7 +1853,7 @@ function LaunchedShell(
     return () => {
       cancelled = true;
     };
-  }, [githubTransport]);
+  }, [githubPluginEffective, githubTransport]);
   const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
   const probeLinearAuthentication = shouldProbeLinearAuthentication(
     linearPluginEffective,
@@ -1881,10 +1888,9 @@ function LaunchedShell(
   const trackerReferencePorts = useMemo(
     () =>
       createTrackerReferenceClientPorts({
-        github: {
-          available: githubIssuesReadAvailable,
-          client: githubClient,
-        },
+        ...(githubPluginEffective
+          ? { github: { available: githubIssuesReadAvailable, client: githubClient } }
+          : {}),
         ...(probeLinearAuthentication
           ? {
               linear: {
@@ -1895,6 +1901,7 @@ function LaunchedShell(
           : {}),
       }),
     [
+      githubPluginEffective,
       githubIssuesReadAvailable,
       githubClient,
       probeLinearAuthentication,
@@ -1952,12 +1959,12 @@ function LaunchedShell(
   // clients the composer's "New Project from GitHub repository" uses. Disabled
   // GitHub contributes no tab, exactly as it contributes no composer row.
   const projectCreateGithub = useMemo(() => {
-    if (FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") !== true) return undefined;
+    if (!githubPluginEffective) return undefined;
     const hostName =
       hosts.find((host) => String(host.hostId) === String(createHostId))?.displayName ??
       localHostDisplayName();
     return { client: githubClient, cloneClient: githubCloneClient, hostName };
-  }, [createHostId, githubCloneClient, githubClient, hosts]);
+  }, [createHostId, githubCloneClient, githubClient, githubPluginEffective, hosts]);
   // Drop removed hosts from the environments filter before create preselect runs,
   // otherwise a lone removed remote leaves createHostId pointing at nothing.
   useEffect(() => {

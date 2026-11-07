@@ -30,6 +30,13 @@ const HOST_PREVIEW_VIEWER_KINDS = new Set<ExtensionPreviewViewerKind>([
   "image",
 ]);
 
+/**
+ * Sidebar destinations the host keeps whichever plugin declares them. Pull
+ * requests are Code delivery plumbing, not a GitHub account integration, so
+ * switching the GitHub plugin off must not take the destination away.
+ */
+const HOST_SIDEBAR_DESTINATION_IDS = new Set(["pull-requests"]);
+
 function catalog(): ReadonlyArray<ExtensionContribution> {
   return firstPartyContributions();
 }
@@ -47,7 +54,10 @@ function contributionsOf<T extends ExtensionContribution>(
 ): ReadonlyArray<T> {
   return catalog().filter(
     (contribution): contribution is T =>
-      contribution.point === point && isEffective(contribution.componentId, effective),
+      contribution.point === point &&
+      (isEffective(contribution.componentId, effective) ||
+        (contribution.point === "sidebar.destination" &&
+          HOST_SIDEBAR_DESTINATION_IDS.has(contribution.destinationId))),
   );
 }
 
