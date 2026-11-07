@@ -90,6 +90,18 @@ def install_epochs(kernel: Path, native: Path) -> None:
             # directly; it does not pass through vfs_create.
             source = instrument(source, "lookup_open", "(op->open_flag & O_CREAT) != 0")
             source = instrument_namespace_preparation(source)
+            rename = re.compile(r"(?m)^int vfs_rename\([^;{]*?\)\s*\{")
+            matches = list(rename.finditer(source))
+            if len(matches) != 1:
+                raise ValueError("Pinned VFS rename entry differs")
+            at = matches[0].end()
+            # The epoch scope must begin first so the final comparison can
+            # distinguish this exact mutation from simultaneous foreign work.
+            anchor = "\n\toctant_namespace_scope(true);\n"
+            if not source[at:].startswith(anchor):
+                raise ValueError("Pinned VFS rename epoch entry differs")
+            at += len(anchor)
+            source = source[:at] + "\tif (octant_namespace_check_rename(rd))\n\t\treturn -EACCES;\n" + source[at:]
         path.write_text(include_bridge(source))
     shutil.copyfile(native / "bridge.h", kernel / "include/linux/octant_mediation_bridge.h")
     shutil.copyfile(native / "octant_mediation.h", kernel / "include/uapi/linux/octant_mediation.h")

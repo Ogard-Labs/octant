@@ -323,10 +323,13 @@ static int check_rmdir(struct inode *parent, struct dentry *name)
 	return check_namespace(OCTANT_MEDIATION_RMDIR, parent, name, NULL, NULL, 0);
 }
 
-static int check_rename(struct inode *source, struct dentry *name,
-	struct inode *destination, struct dentry *new_name, unsigned int flags)
+/* inode_rename omits flags and expands EXCHANGE into two callbacks. Keep
+ * the original flags at the actual VFS entry, under the same parent locks. */
+int octant_namespace_check_rename(const struct renamedata *operation)
 {
-	return check_namespace(OCTANT_MEDIATION_RENAME, source, name, destination, new_name, flags);
+	return check_namespace(OCTANT_MEDIATION_RENAME,
+		d_inode(operation->old_parent), operation->old_dentry,
+		d_inode(operation->new_parent), operation->new_dentry, operation->flags);
 }
 
 static int admit_file(struct file *file, u32 operation)
@@ -633,7 +636,6 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(file_permission, octant_file_permission),
 	LSM_HOOK_INIT(inode_unlink, check_unlink),
 	LSM_HOOK_INIT(inode_rmdir, check_rmdir),
-	LSM_HOOK_INIT(inode_rename, check_rename),
 	LSM_HOOK_INIT(file_truncate, truncate_file),
 	LSM_HOOK_INIT(path_truncate, truncate_path),
 	LSM_HOOK_INIT(mmap_file, mmap_file),
