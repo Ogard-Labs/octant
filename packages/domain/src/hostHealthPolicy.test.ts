@@ -1,9 +1,18 @@
-import { MAX_HOST_HEALTH_POINTS, type HostHealthSample } from "@octant/contracts";
+import {
+  decodeHostHealthSample,
+  MAX_HOST_HEALTH_POINTS,
+  type HostHealthSample,
+} from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import { hostHealthPoints } from "./hostHealthPolicy";
 
-function sample(minute: number, overrides: Partial<HostHealthSample> = {}): HostHealthSample {
-  return {
+function sample(
+  minute: number,
+  overrides: Omit<Partial<HostHealthSample>, "processStartedAt"> & {
+    readonly processStartedAt?: string;
+  } = {},
+): HostHealthSample {
+  return decodeHostHealthSample({
     sampledAt: new Date(Date.UTC(2026, 10, 7, 10, 0) + minute * 60_000).toISOString(),
     windowMs: 60_000,
     processStartedAt: "2026-11-07T09:00:00.000Z",
@@ -16,7 +25,7 @@ function sample(minute: number, overrides: Partial<HostHealthSample> = {}): Host
     slowStatementWorstMs: 0,
     latency: [{ key: "rpc", count: 10, p50Ms: 5, p95Ms: 20, maxMs: 30 }],
     ...overrides,
-  } as HostHealthSample;
+  });
 }
 
 describe("host health points", () => {

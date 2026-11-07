@@ -215,6 +215,7 @@ describe("UsageClient.hostHealth", () => {
         generatedAt: "2026-11-07T12:00:00.000Z",
         resolution: "minute",
         retentionDays: 14,
+        processStarts: [],
         samples: [],
       }),
     );
