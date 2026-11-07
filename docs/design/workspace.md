@@ -1185,7 +1185,14 @@ states. Project memory lives on every mode's Project Overview. Navigator is one 
 as an app-wide popover from the bottom-left profile and Settings control, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
-fourth authority mode. Zen's Add terminal offers the window's Code Project as
+fourth authority mode. Zen is a bundled plugin that is on by default. While it
+is off, the Zen keyboard chord does nothing, the profile menu has no Zen row,
+the command palette has no Zen entry, no Pin in Zen or Add to Zen action is
+offered, the recovery banner is hidden, and a Zen that was open closes back to
+the workspace; the host refuses the Zen routes and the assistant gets no Zen
+tool. Turning it off deletes no layout, background, focus zone, or event, and
+app backgrounds keep working because the built-in background catalog is shared
+with them. Zen's Add terminal offers the window's Code Project as
 "This Project" ahead of the Code threads that can open one; choosing it starts
 a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card

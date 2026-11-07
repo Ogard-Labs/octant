@@ -911,7 +911,13 @@ function LaunchedShell(
   );
   const shellBackdropCoversSidebar =
     shellBackdrop !== undefined && resolvedAppBackground?.coversSidebar === true;
+  // The one Zen plugin switch. Every Zen entry point below reads `zen.enabled`
+  // (derived from this) rather than the map again.
+  // The host's switch is read further down, after the clients exist; it is
+  // carried here through state so Zen follows it one render later.
+  const [zenPluginEffective, setZenPluginEffective] = useState(true);
   const zen = useZenController({
+    enabled: zenPluginEffective,
     ...(props.zenClient === undefined ? {} : { client: props.zenClient }),
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
@@ -1586,6 +1592,8 @@ function LaunchedShell(
     extensionClient,
     machineChanges.extensions,
   );
+  const zenSwitchedOn = firstPartyPluginsEffective.get("zen") === true;
+  useEffect(() => setZenPluginEffective(zenSwitchedOn), [zenSwitchedOn]);
   // Switching the Board plugin off hides the board layers and every opener;
   // the request flags keep their value so a board that was open closes with
   // the plugin and the thread data underneath is untouched.
@@ -6956,10 +6964,14 @@ function LaunchedShell(
         }),
     onOpenReview: openReview,
     ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
-    onOpenZen: () => {
-      if (zen.active) zen.exitZen();
-      else void zen.enterZen();
-    },
+    ...(zen.enabled
+      ? {
+          onOpenZen: () => {
+            if (zen.active) zen.exitZen();
+            else void zen.enterZen();
+          },
+        }
+      : {}),
     threads: threadSearchThreads
       .filter((thread) => thread.lifecycle === "active")
       .map((thread) => ({
@@ -7144,6 +7156,7 @@ function LaunchedShell(
         sidebar={
           <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
             <SidebarContainer
+              zenEnabled={zen.enabled}
               windowHistory={windowHistory}
               actions={actions}
               {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
@@ -7707,15 +7720,19 @@ function LaunchedShell(
                         current === undefined ? undefined : { ...current, open: false },
                       )
                     }
-                    onOpenTerminal={(terminalId) => {
-                      void (async () => {
-                        if (!zen.active) await zen.enterZen();
-                        await zen.pinProjectTerminal({
-                          projectId: projectActionRun.target.projectId,
-                          terminalId,
-                        });
-                      })();
-                    }}
+                    {...(zen.enabled
+                      ? {
+                          onOpenTerminal: (terminalId: ReturnType<typeof decodeCodeTerminalId>) => {
+                            void (async () => {
+                              if (!zen.active) await zen.enterZen();
+                              await zen.pinProjectTerminal({
+                                projectId: projectActionRun.target.projectId,
+                                terminalId,
+                              });
+                            })();
+                          },
+                        }
+                      : {})}
                   />
                 )}
 

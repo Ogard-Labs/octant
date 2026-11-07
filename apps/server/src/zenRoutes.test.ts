@@ -38,6 +38,60 @@ const entry = decodeZenThreadCatalogEntry({
   },
 });
 
+describe("Zen routes with the Zen plugin off", () => {
+  function build(isEffective: boolean) {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId, capability, now: 0 });
+    const bootstrap = vi.fn(() => ({ space: null, windowId }));
+    const handleCommand = vi.fn(() => ({ result: "recover" as const }));
+    const handler = createZenRouteHandler({
+      windowAuthorityStore,
+      zenService: { bootstrap, handleCommand } as never,
+      now: () => 0,
+      isEffective: () => isEffective,
+    });
+    return { handler, bootstrap, handleCommand };
+  }
+
+  it("refuses every Zen route with a typed plugin-disabled result and touches no Zen data", async () => {
+    const { handler, bootstrap, handleCommand } = build(false);
+    for (const [method, path] of [
+      ["GET", "/api/zen"],
+      ["POST", "/api/zen/command"],
+      ["GET", "/api/zen/assistant"],
+      ["POST", "/api/zen/threads/pin"],
+    ] as const) {
+      const response = await handler(
+        new Request(`http://127.0.0.1${path}`, {
+          method,
+          headers: { "x-octant-window-capability": capability },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ code: "plugin-disabled" });
+    }
+    expect(bootstrap).not.toHaveBeenCalled();
+    expect(handleCommand).not.toHaveBeenCalled();
+  });
+
+  it("leaves routes outside /api/zen to the next handler", async () => {
+    const { handler } = build(false);
+    expect(await handler(new Request("http://127.0.0.1/api/other"))).toBeUndefined();
+  });
+
+  it("serves the same route normally while the plugin is on", async () => {
+    const { handler, bootstrap } = build(true);
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen", {
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(bootstrap).toHaveBeenCalled();
+  });
+});
+
 describe("Zen routes", () => {
   it("decodes a command body from the request stream", async () => {
     const windowAuthorityStore = new WindowAuthorityStore();

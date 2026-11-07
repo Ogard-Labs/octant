@@ -4049,6 +4049,14 @@ and no other window's space, is reachable through it.
   A successful result is journaled as outside content under `octant_zen`; the
   seven tools it replaced were journaled under their own `octant_zen_*` names,
   which still read.
+- **Plugin switch.** Zen is a bundled first-party plugin (`zen`, a `ui-surface`
+  component allowed in every mode) that is on by default. While it is off, the
+  host refuses every `/api/zen` route, including the background routes, with a
+  typed `plugin-disabled` result, offers no `octant_zen` tool to any thread, and
+  the renderer cannot open Zen. Switching it off deletes nothing: layouts,
+  backgrounds, focus zones, and events stay on disk and reappear when it is
+  turned back on. The built-in background catalog stays in the host because app
+  backdrops use it too.
 
 ## Persistence
 
