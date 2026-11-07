@@ -362,13 +362,14 @@ export function BrowserDownloadPermissionsSection(props: {
                         <OctantCheckbox
                           aria-label={label}
                           checked={mediaTypes.includes(type)}
-                          onCheckedChange={(checked) =>
+                          onChange={(event) => {
+                            const checked = event.target.checked;
                             setMediaTypes((values) =>
-                              checked === true
+                              checked
                                 ? [...values.filter((value) => value !== type), type]
                                 : values.filter((value) => value !== type),
-                            )
-                          }
+                            );
+                          }}
                         />
                         {label}
                       </label>

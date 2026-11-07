@@ -32,7 +32,7 @@ async function main() {
     ),
     folder: { id: `folder_${"b".repeat(64)}`, kind: "extra", label: "Reports" },
     directory: "daily/reports",
-    mediaTypes: ["text/plain", "application/pdf"],
+    mediaTypes: ["text/plain", "image/png"],
     maxFiles: 5,
     maxBytes: 125 * 1_048_576,
     grantedAt: "2026-11-07T10:00:00.000Z",
@@ -167,6 +167,8 @@ createRoot(document.getElementById("root")).render(<main className="settings-pan
           await page
             .getByRole("textbox", { name: "Download destination directory" })
             .fill(permission.directory);
+          await page.getByRole("checkbox", { name: "PDF", exact: true }).uncheck();
+          await page.getByRole("checkbox", { name: "PNG images", exact: true }).check();
           await page.getByRole("button", { name: "Review sources and destination" }).click();
           await page.getByRole("button", { name: "Grant download manifest" }).waitFor();
           if (

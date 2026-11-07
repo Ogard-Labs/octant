@@ -20,7 +20,10 @@ import { BrowserSessionGrantsSection } from "./BrowserSessionGrantsSection";
 export interface BrowserProfilesSectionProps {
   readonly client: Pick<
     BrowserAutomationClient,
-    "manageProfiles" | "manageSessionGrants" | "manageUploadPermissions"
+    | "manageProfiles"
+    | "manageSessionGrants"
+    | "manageUploadPermissions"
+    | "manageDownloadPermissions"
   >;
   readonly focusedSetting?: string | undefined;
 }

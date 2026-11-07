@@ -23,7 +23,7 @@ const permission = {
   folder: { id: `folder_${"b".repeat(64)}`, label: "Reports", kind: "extra" },
   sourceOrigins: ["https://example.com", "https://files.example.com"],
   directory: "reports",
-  mediaTypes: ["text/plain", "application/pdf"],
+  mediaTypes: ["text/plain", "image/png"],
   maxFiles: 5,
   maxBytes: 125 * 1_048_576,
   grantedAt: "2026-11-07T10:00:00.000Z",
@@ -84,6 +84,10 @@ it("reviews the exact routine, destination, complete source sites, file types an
     screen.getByRole("textbox", { name: "Download destination directory" }),
     "reports",
   );
+  await user.click(screen.getByRole("checkbox", { name: "PDF" }));
+  expect(screen.getByRole("checkbox", { name: "PDF" })).not.toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: "PNG images" }));
+  expect(screen.getByRole("checkbox", { name: "PNG images" })).toBeChecked();
   await user.click(screen.getByRole("button", { name: "Review sources and destination" }));
   expect(await screen.findByText("example-model")).toBeVisible();
   expect(screen.getByText("https://files.example.com")).toBeVisible();
@@ -97,7 +101,7 @@ it("reviews the exact routine, destination, complete source sites, file types an
     folderId: permission.folder.id,
     sourceOrigins: permission.sourceOrigins,
     directory: "reports",
-    mediaTypes: ["text/plain", "application/pdf"],
+    mediaTypes: ["text/plain", "image/png"],
     maxFiles: 5,
     maxBytes: permission.maxBytes,
     durationMinutes: 10080,
