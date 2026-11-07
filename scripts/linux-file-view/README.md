@@ -1,5 +1,34 @@
 # Native mediated-file-view feasibility
 
+## Kernel admission implementation
+
+`apps/server/native/linux-mediation/` contains an original, unshipped built-in
+kernel admission core and its fixed-size UAPI. A context has at most 32 pending
+requests, each with a two-second deadline. The actual kernel-held file supplies
+device/inode/operation identity. A one-use enrollment descriptor binds a fresh
+single-thread bootstrap's credentials after `no_new_privs`; existing shared
+address spaces, shared descriptor tables and ring/AIO contexts refuse enrollment.
+Later ordinary threads inherit the same immutable context. A broker close or
+unanswered deadline refuses both pending and subsequent admissions.
+
+Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
+guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
+archive has a fixed SHA-256, and only the original admission files enter its
+security tree. No kernel is installed, loaded or distributed; the app's MIT
+license is unchanged. The original kernel files are `GPL-2.0 OR MIT`, with
+the syscall-note alternative for UAPI. The job has a twenty-minute bound,
+the guest a forty-five-second outer bound, and the synthetic client finite IPC
+and admission deadlines. Owned process groups are stopped on command failure.
+
+This is an implementation increment, not complete confinement. Its status query
+reports `production_coverage: 0`; the host never calls it. Namespace begin/end
+and final epoch comparison exist, but complete VFS mutation/pre-effect hooks,
+the effective structured-policy broker, all file/alias/process routes, the real
+production Bubblewrap launch and the complete native compatibility matrix are
+still required. The initial guest check covers actual read/alias/new-mapping
+admissions and fail-closed group loss only. Neither compilation nor a successful
+guest-core result enables a provider or closes the production acceptance gap.
+
 ## Modern stock pre-access check
 
 `pre_access.c` checks Linux 6.14+'s `FAN_PRE_ACCESS` before selecting a new

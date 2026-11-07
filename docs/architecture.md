@@ -13528,6 +13528,22 @@ cards; general Azure CLI credentials remain unavailable by design.
   device. The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
+- **Linux access-time mediation is not yet shipped.** Existing Bubblewrap
+  file covers are prepared at launch; they do not enforce the complete rule
+  for absent files or later companion/alias changes. The replacement must use
+  the original structured rules and exact own-account exceptions, preserve live
+  permitted files, durable writes, real hardlinks and native notifications, and
+  leave Full access unchanged. Modern pre-access hooks cover new mappings as
+  well as reads, but the measured stock listener permits unanswered and future
+  reads after its group closes. Its lifecycle cannot be a fail-closed guard.
+  An original credential-bound kernel admission core is being built only in an
+  owned networkless disposable guest. It has finite requests, one-use enrollment
+  after `no_new_privs`, and broker-loss refusal; its production coverage remains
+  zero. Complete namespace and pre-effect mutation ordering, effective policy,
+  aliases and process/data routes, the production launch and native compatibility
+  proof remain required before any production integration. No live kernel,
+  driver, boot configuration or installed host policy changes as part of this
+  development path. Prior admitted operations and mappings need not be erased.
 - **Work goes through the channel instead of the file.** SSH through the
   agent socket in `SSH_AUTH_SOCK`, a password manager's SSH agent included;
   Git over HTTPS through the system credential helper, which reaches the

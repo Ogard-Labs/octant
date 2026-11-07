@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/linux-file-view.yml
       - scripts/linux-file-view/**
+      - apps/server/native/linux-mediation/**
   workflow_dispatch:
     inputs:
       experiment:
@@ -17,6 +18,7 @@ on:
           - async-compatibility
           - concurrent-admission
           - pre-access
+          - kernel-admission
 
 permissions:
   contents: read
@@ -26,6 +28,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  kernel-admission:
+    name: Compile and boot owned kernel admission core
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'kernel-admission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare build tooling only in the disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential flex bison libssl-dev libelf-dev bc qemu-system-x86
+      - name: Build and boot the pinned networkless guest, never install its kernel
+        run: python3 scripts/linux-file-view/kernel_build.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-kernel-admission-core
+          path: |
+            ${{ runner.temp }}/octant-kernel-guest/guest.log
+            ${{ runner.temp }}/octant-kernel-guest/linux-6.18/.config
+          if-no-files-found: error
+          retention-days: 7
   pre-access:
     name: Measure stock pre-access admissions and group loss
     if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'pre-access'
