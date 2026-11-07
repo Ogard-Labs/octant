@@ -384,6 +384,9 @@ napi_value poll(napi_env env, napi_callback_info) {
   if (!state.connected) {
     const bool connected = ConnectNamedPipe(state.pipe.value, nullptr) != FALSE;
     const DWORD error = connected ? ERROR_SUCCESS : GetLastError();
+    // A client can close before the first poll. Windows keeps that instance
+    // at ERROR_NO_DATA until disconnected, otherwise every later client is busy.
+    if (!connected && error == ERROR_NO_DATA) { reset_connection(state); return object(env, "idle"); }
     if (!connected && error != ERROR_PIPE_CONNECTED) return object(env, "idle");
     ULONG client = 0;
     if (!GetNamedPipeClientProcessId(state.pipe.value, &client) || !same_user(client, *state.root)) { reset_connection(state); return object(env, "idle"); }

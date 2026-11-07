@@ -7,13 +7,17 @@ import { createInterface } from "node:readline";
 const runtime = process.argv[2];
 const fixture = process.argv[3];
 const binding = process.argv[4];
+const launcher = process.argv[5];
 if (
   process.platform !== "win32" ||
   runtime === undefined ||
   fixture === undefined ||
-  binding === undefined
+  binding === undefined ||
+  launcher === undefined ||
+  !win32.isAbsolute(launcher) ||
+  win32.basename(launcher) !== "octant-windows-owner-reader.exe"
 )
-  throw new Error("Supply the three owned fixture paths on Windows.");
+  throw new Error("Supply the four owned fixture paths on Windows.");
 const local = process.env.LOCALAPPDATA;
 if (local === undefined) throw new Error("No local fixture profile.");
 const parent = win32.resolve(local, "Octant", "runtime").toLowerCase();
@@ -28,7 +32,7 @@ ownScope(initialScope);
 const args = runtime.toLowerCase().includes("bun.exe")
   ? [fixture, binding, "parent", initialScope]
   : ["--expose-gc", fixture, binding, "parent", initialScope];
-const child = spawn(runtime, args, {
+const child = spawn(launcher, [runtime, ...args], {
   stdio: ["ignore", "pipe", "inherit"],
   env: { ...process.env },
   windowsHide: true,
