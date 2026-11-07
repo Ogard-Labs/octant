@@ -4647,6 +4647,10 @@ or .zip>` write the same files, built by one host command
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. A missing thread and one the caller cannot read get
   the same `not-found` refusal, so an export never reveals a hidden thread.
+  Moving a thread to another hub member sends the same cut with the
+  thread-owned parts it omits; the destination opens it as a new thread under
+  its own journal and adopts nothing else
+  ([Hub and spokes: moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)).
   Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. The thread's generated images and retained
@@ -14434,7 +14438,9 @@ documents its authority, privacy, and release boundaries):
   the web app over a private network such as Tailscale) enrolls the person's
   other computers and phones, introduces them, fails over to a standby, and
   runs their wake and push services, including a self-hosted wake service
-  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). An
+  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). A person can
+  move a thread from one member to another before a planned shutdown
+  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)). An
   Octant-operated wake service is not in scope.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
   signed in to, or chosen from the bundled catalog): user-added packages
