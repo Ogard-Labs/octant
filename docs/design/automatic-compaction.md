@@ -302,7 +302,9 @@ for 5 more points after its last attempt; a restart closes a running rule compac
   checks the time first, so a thread not yet due costs no read; a due thread is
   skipped if any compaction ran or started since its last turn. One attempt per
   quiet spell, under an id derived from the turn that began it; only
-  `turn-running` keeps the spell for the next pass. The timer starts once the
+  `turn-running` keeps the spell for the next pass. While the rule is off the
+  pass forgets every spell, so turning it on never compacts a backlog at once.
+  The timer starts once the
   host serves and stops at shutdown, like the completed-thread sweep.
 - **Service**: option `windowOpen`, read from the window authority store. A rule
   on a Code thread whose window has closed is refused `no-session` before

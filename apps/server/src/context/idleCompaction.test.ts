@@ -165,10 +165,26 @@ describe("compacting a thread that has gone quiet", () => {
     expect(small.starts).toHaveLength(0);
   });
 
-  it("does nothing while the person has the rule off", () => {
-    const { idle, starts, at } = harness({ idleMinutes: null });
+  it("does nothing while the person has the rule off, nor for those spells once it is on", () => {
+    let rule: number | null = null;
+    const starts: Array<Start> = [];
+    let now = minutes(0);
+    const idle = new IdleCompactions({
+      compactions: {
+        windowFill: () => ({ tokens: 60_000, contextWindow: 200_000, keeper: "runtime" }),
+        start: (...args: Start) => {
+          starts.push(args);
+          return { kind: "compaction-refused", reason: "no-session" };
+        },
+      },
+      latestCompaction: () => undefined,
+      idleMinutes: () => rule,
+      clock: () => now,
+    });
     idle.turnEnded({ subject, endedAt, windowId });
-    at(600);
+    now = minutes(600);
+    idle.pass();
+    rule = 30;
     idle.pass();
     expect(starts).toHaveLength(0);
   });

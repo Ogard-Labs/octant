@@ -76,7 +76,13 @@ export class IdleCompactions {
   /** One pass over the quiet threads. Exposed so a test can drive it without the timer. */
   pass(): void {
     const thresholdMinutes = this.#options.idleMinutes();
-    if (thresholdMinutes === null) return;
+    if (thresholdMinutes === null) {
+      // Forgotten while the rule is off, so turning it on later counts only
+      // turns from then on, rather than compacting every thread the host has
+      // seen go quiet in one pass.
+      this.#quiet.clear();
+      return;
+    }
     const now = this.#clock();
     for (const [threadKey, quiet] of this.#quiet) {
       if (this.#stopped) return;
