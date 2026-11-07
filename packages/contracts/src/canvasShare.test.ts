@@ -1,3 +1,4 @@
+import { isCanvasShareSafeText } from "./canvasShare";
 import type { SchemaAST } from "effect";
 import { describe, expect, it } from "vitest";
 import { CanvasBlock } from "./canvas";
@@ -992,4 +993,16 @@ describe("Canvas share contracts", () => {
       }),
     ).toThrow();
   });
+});
+
+it("checks embedded credential URLs after long scheme-less text and punctuation", () => {
+  const prefix = "A".repeat(32768);
+  expect(isCanvasShareSafeText(prefix)).toBe(true);
+  expect(isCanvasShareSafeText(`${prefix} https://example.test/?access_token=fixture`)).toBe(false);
+  expect(
+    isCanvasShareSafeText(
+      "Read (https://example.test/?safe=fixture), then https://example.test/#token=fixture.",
+    ),
+  ).toBe(false);
+  expect(isCanvasShareSafeText("Read https://example.test/?safe=fixture.")).toBe(true);
 });

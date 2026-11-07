@@ -11,9 +11,22 @@ function extractCandidateUrls(value: string): string[] {
   const candidates = new Set<string>();
   const trimmed = value.trim();
   if (trimmed) candidates.add(trimmed);
-  const embedded = value.match(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>]+/g) ?? [];
-  for (const match of embedded) {
-    candidates.add(trimTrailingUrlPunctuation(match));
+  // Scanning from each letter with an unanchored scheme regex retries a long
+  // scheme-less word quadratically. Consume each candidate once instead.
+  let offset = 0;
+  let separator: number;
+  while ((separator = value.indexOf("://", offset)) !== -1) {
+    let start = separator;
+    while (start > offset && /[A-Za-z0-9+.-]/.test(value.charAt(start - 1))) start -= 1;
+    while (start < separator && !/[A-Za-z]/.test(value.charAt(start))) start += 1;
+    if (start === separator) {
+      offset = separator + 3;
+      continue;
+    }
+    let end = separator + 3;
+    while (end < value.length && !/[\s"'`<>]/.test(value.charAt(end))) end += 1;
+    candidates.add(trimTrailingUrlPunctuation(value.slice(start, end)));
+    offset = end;
   }
   return [...candidates];
 }
