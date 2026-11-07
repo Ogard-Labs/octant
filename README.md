@@ -71,7 +71,7 @@ Code; moving to a linked Code thread requires explicit approval.
   composer meter.
 
 Not everything above is equally polished; this is a technical preview. See the
-user guide in `apps/docs` for the current honest boundaries of each area.
+[user guide source](https://github.com/Ogard-Labs/octant-site/tree/main/docs) for the current honest boundaries of each area.
 
 ## Supported providers
 
@@ -264,7 +264,7 @@ scripts (`bun run smoke:*`) and are not part of `verify`.
 | `apps/server`             | Authoritative API, event journal, providers, tools, Projects, recovery       |
 | `apps/web`                | Shared React renderer for desktop and authenticated browser clients          |
 | `apps/mobile`             | Expo remote-control client (device distribution is a separate gate)          |
-| `apps/docs`               | VitePress user guide, independently deployable                               |
+| `Ogard-Labs/octant-site`  | External VitePress user guide in `docs/`, independently built                |
 | `packages/contracts`      | Versioned schemas, commands, events, and RPC contracts (schema-only)         |
 | `packages/domain`         | Pure policy and state transitions                                            |
 | `packages/provider-sdk`   | Provider driver interface, normalized runtime events, discovery, conformance |
@@ -285,7 +285,8 @@ import apps; provider-specific payloads stop at adapters.
 - [Workspace behavior](docs/design/workspace.md)
 - [Visual design system](DESIGN.md)
 - [Decisions and requirements](docs/design/decisions.md)
-- [User guide](apps/docs/) (VitePress; `bun run --cwd apps/docs dev`)
+- [Documentation build and VPS handoff](docs/docs-deployment.md)
+- [User guide](https://octant.sh/docs/) ([source in octant-site](https://github.com/Ogard-Labs/octant-site/tree/main/docs); update through linked companion PRs)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

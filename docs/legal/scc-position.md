@@ -11,11 +11,11 @@ hosted component and receives no Octant content:
 
 - The on-device journal never leaves the customer's host through an Octant
   channel — residency is the machine's location
-  ([data residency](../apps/docs/advanced/data-residency.md)).
+  ([data residency](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md)).
 - BYO provider turns go from the customer's host to the provider the customer
   configured, under the customer's own contract; any SCCs are between the
   customer and that provider, not Ogard Labs
-  ([sub-processors](../apps/docs/advanced/sub-processors.md)).
+  ([sub-processors](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md)).
 - A Canvas published as a public link goes to a share service the user runs or
   chooses — the reference app at `apps/share`, self-hosted — so the operator is
   that user or third party, not Ogard Labs.
@@ -24,7 +24,7 @@ hosted component and receives no Octant content:
   Gravatar lookup) are user-initiated and carry only request metadata, not
   journal content. Whether they need transfer wording or a DPF reliance noted in
   the privacy notice is counsel's call
-  ([privacy notice](../apps/docs/advanced/privacy-notice.md)).
+  ([privacy notice](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md)).
 
 ## What would trigger an SCC
 
@@ -38,4 +38,4 @@ assessment, and record it here.
 
 - [DPA stub](./dpa-template.md) — not in force
 - [EULA placeholders](./eula-placeholders.md)
-- [Privacy notice](../apps/docs/advanced/privacy-notice.md)
+- [Privacy notice](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md)

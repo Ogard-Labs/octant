@@ -4617,7 +4617,7 @@ or .zip>` write the same files, built by one host command
   capabilities — and why. User-facing
   drafts of the privacy notice, sub-processor position, data-residency
   statement, DPA template, SCC position, and EULA governing-law placeholders
-  live in `apps/docs/advanced/` and are marked pending legal review; they
+  live in `octant-site/docs/advanced/` and are marked pending legal review; they
   describe this behavior rather than changing it. The draft shared-host
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and covers sharing a host the people
@@ -9238,7 +9238,7 @@ atomic: a temporary file is renamed into place, so a reader never sees a
 half-written export. The folder is stored by its real path, and a write whose
 folder no longer resolves to that path — because it or a folder above it was
 replaced by a link after it was chosen — is refused rather than followed. The
-user guide's exporting page (`apps/docs/guide/export.md`) states the same rules
+user guide's exporting page (`octant-site/docs/guide/export.md`) states the same rules
 for a person.
 
 The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
@@ -10033,7 +10033,7 @@ reconciled with Octant's external-content and approval protections before that
 distribution gate is lifted. See the [Workspace setup guide](https://developers.google.com/workspace/guides/configure-mcp-servers),
 [native client rules](https://developers.google.com/identity/protocols/oauth2/native-app),
 [preview terms](https://developers.google.com/workspace/preview), and the
-[user setup and workflow guide](../apps/docs/advanced/google-workspace.md).
+[user setup and workflow guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/google-workspace.md).
 
 **Computer use plugin.** The bundled Computer component supplies
 `octant_computer` through the provider's existing app-managed tool transport on
@@ -13128,7 +13128,7 @@ access` agree); a thread's own change is journaled as
   plaintext endpoint is refused, and store credentials are not sent on it.
   The storage provider can read the synced content: the artifact versions and
   tombstones are plain files. Settings and the user guide
-  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  (`octant-site/docs/guide/sync-artifacts.md`) say so before sync is turned on.
   Opt-in encryption of replicas is not this rule. A replica import appends
   versions to this journal and adopts nothing else. Membership accepts an
   entry signed by an admitted instance's device signing key, within its cut
@@ -14641,7 +14641,7 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   administrator-reviewed profile for the installed executable and a real
   sandboxed launch. An existing isolated environment that already supports
   Chromium's sandbox may be used without relaxing host policy; the
-  [Linux host guide](../apps/docs/guide/linux-host.md#isolated-desktop-installation)
+  [Linux host guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/guide/linux-host.md#isolated-desktop-installation)
   records the tested rootless Space installation and its evidence boundary.
   The Linux ADE remains available while desktop prerequisites are unmet.
   An AppImage launch checks
