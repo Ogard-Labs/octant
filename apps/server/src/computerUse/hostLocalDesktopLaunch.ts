@@ -12,8 +12,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { chmod, rename, unlink, writeFile } from "node:fs/promises";
+import { randomBytes, randomUUID } from "node:crypto";
+import { chmod, lstat, open, rename, rmdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { decodeDesktopLeaseId, type DesktopHostTag, type DesktopLeaseId } from "@octant/contracts";
 import type {
@@ -35,6 +35,7 @@ import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import { createDesktopPreviewBridge } from "./desktopPreviewBridge";
 
 /**
  * The host's confined launch port for host-local desktops.
@@ -45,7 +46,9 @@ import {
  * and of the host's own files only its lease directory's `home` (writable) and
  * `inbox` (read-only). No checkout, home directory, session bus, keyring, or
  * SSH agent is bound, and its environment is a fixed allowlist, so no
- * `OCTANT_*` value reaches it. Its standard streams are its only channel.
+ * `OCTANT_*` value reaches it. Standard streams are the default channel; an
+ * explicitly approved preview may add one lease-owned socket, as specified
+ * in docs/design/disposable-desktops.md#lease-bound-dev-server-preview.
  *
  * The launch is a detached process group with an ownership receipt, so a
  * restarted host finds and reaps it. Bubblewrap's `--die-with-parent` already
@@ -98,6 +101,8 @@ export function createHostLocalDesktopLaunch(
   };
   const desktops = join(options.directory, "desktops");
   const running = new Map<string, RunningDesktop>();
+  const previews = new Map<string, () => Promise<void>>();
+  const preparingPreviews = new Set<string>();
 
   const leaseDirectory = (leaseId: DesktopLeaseId) => join(desktops, String(leaseId));
   // Both files sit beside the bound `home` and `inbox`, never inside them, so
@@ -262,6 +267,7 @@ export function createHostLocalDesktopLaunch(
 
   const stop: DesktopLaunchPort["stop"] = async (leaseId): Promise<DesktopReleaseResult> => {
     try {
+      await previews.get(String(leaseId))?.();
       const live = running.get(String(leaseId));
       const recorded = await receiptsFor(leaseId);
       const targets =
@@ -358,7 +364,122 @@ export function createHostLocalDesktopLaunch(
     }
   };
 
-  return { readiness, launch, stop, inspect, deliver, listOwned };
+  const preparePreview: NonNullable<DesktopLaunchPort["preparePreview"]> = async (
+    leaseId,
+    input,
+  ) => {
+    const key = String(leaseId);
+    const owner = running.get(key);
+    if (
+      options.platform !== "linux" ||
+      owner === undefined ||
+      previews.has(key) ||
+      preparingPreviews.has(key) ||
+      input.signal.aborted ||
+      readiness(["node"]).status !== "ready"
+    )
+      return { status: "unavailable" };
+    preparingPreviews.add(key);
+    const controller = new AbortController();
+    let finish: (() => Promise<void>) | undefined;
+    const abort = () => {
+      controller.abort();
+      void finish?.();
+    };
+    input.signal.addEventListener("abort", abort, { once: true });
+    const socketName = `preview-${randomUUID().slice(0, 12)}.sock`;
+    const nonce = randomBytes(32).toString("base64url");
+    // AF_UNIX limits the address string, even when the owned data path is long.
+    // This host-only directory descriptor makes the address short without a new
+    // mount; the guest connects to the basename inside its already-bound home.
+    const directory = await open(
+      join(leaseDirectory(leaseId), "home"),
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    ).catch(() => undefined);
+    if (directory === undefined) {
+      preparingPreviews.delete(key);
+      input.signal.removeEventListener("abort", abort);
+      return { status: "unavailable" };
+    }
+    const privatePath = join(leaseDirectory(leaseId), "preview");
+    const privateDirectory = await (async () => {
+      try {
+        mkdirSync(privatePath, { mode: 0o700 });
+        return await open(
+          privatePath,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+      } catch {
+        return undefined;
+      }
+    })();
+    if (privateDirectory === undefined) {
+      await directory.close();
+      preparingPreviews.delete(key);
+      input.signal.removeEventListener("abort", abort);
+      return { status: "unavailable" };
+    }
+    try {
+      const held = await directory.stat();
+      const named = await lstat(join(leaseDirectory(leaseId), "home"));
+      const privateHeld = await privateDirectory.stat();
+      const privateNamed = await lstat(privatePath);
+      if (
+        !held.isDirectory() ||
+        held.uid !== process.getuid?.() ||
+        (held.mode & 0o777) !== 0o700 ||
+        named.dev !== held.dev ||
+        named.ino !== held.ino ||
+        !named.isDirectory()
+      )
+        throw new Error("Preview directory changed.");
+      if (
+        !privateHeld.isDirectory() ||
+        privateHeld.uid !== process.getuid?.() ||
+        (privateHeld.mode & 0o777) !== 0o700 ||
+        !privateNamed.isDirectory() ||
+        privateNamed.dev !== privateHeld.dev ||
+        privateNamed.ino !== privateHeld.ino
+      )
+        throw new Error("Private preview directory changed.");
+      const bridge = await createDesktopPreviewBridge({
+        socketPath: `/proc/self/fd/${privateDirectory.fd}/${socketName}`,
+        exposedPath: `/proc/self/fd/${directory.fd}/${socketName}`,
+        nonce,
+        relay: input.relay,
+        signal: controller.signal,
+      });
+      let closed = false;
+      const close = async () => {
+        if (closed) return;
+        closed = true;
+        controller.abort();
+        input.signal.removeEventListener("abort", abort);
+        await bridge.close();
+        await directory.close();
+        await privateDirectory.close();
+        await rmdir(privatePath).catch(() => undefined);
+        if (previews.get(key) === close) previews.delete(key);
+      };
+      finish = close;
+      previews.set(key, close);
+      if (running.get(key) !== owner || input.signal.aborted) {
+        await close();
+        return { status: "unavailable" };
+      }
+      return { status: "prepared", socketName, nonce, close };
+    } catch {
+      controller.abort();
+      input.signal.removeEventListener("abort", abort);
+      await directory.close();
+      await privateDirectory.close();
+      await rmdir(privatePath).catch(() => undefined);
+      return { status: "unavailable" };
+    } finally {
+      preparingPreviews.delete(key);
+    }
+  };
+  return { readiness, launch, stop, inspect, deliver, listOwned, preparePreview };
 }
 
 /** One file name that stays in the inbox: no separator, no NUL, not `.` or `..`. */

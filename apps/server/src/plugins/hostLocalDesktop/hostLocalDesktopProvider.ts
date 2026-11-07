@@ -29,6 +29,7 @@ import {
   type LaunchedDesktop,
 } from "@octant/plugin-api/desktop-provider";
 import { DesktopStreamChannel, type DesktopReply } from "./hostLocalDesktopChannel";
+import { HOST_LOCAL_PREVIEW_PROXY } from "./hostLocalPreviewProxy";
 
 export const HOST_LOCAL_DESKTOP_PROVIDER_ID = decodeDesktopProviderId("host-local");
 
@@ -83,9 +84,37 @@ frame=/tmp/octant-frame.png
 text=/tmp/octant-text
 inbox="\${HOME%/*}/inbox"
 apps="$HOME/.octant-apps"
+preview_pid=
 answer() { if "$@" >/dev/null 2>&1 </dev/null; then echo ok; else echo "error input"; fi; }
 while read -r verb a b c d; do
   case "$verb" in
+    preview-start)
+      if [ -n "$preview_pid" ] || ! command -v node >/dev/null 2>&1; then echo "error preview"; continue; fi
+      ready=/tmp/octant-preview-ready
+      rm -f "$ready"
+      printf '%s' "$a" | base64 -d | node "$inbox/octant-preview-proxy.mjs" >"$ready" 2>/dev/null &
+      preview_pid=$!
+      tries=0
+      until [ -s "$ready" ]; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 100 ] || ! kill -0 "$preview_pid" 2>/dev/null; then break; fi
+        sleep 0.05
+      done
+      if [ -s "$ready" ]; then
+        read -r ready_word ready_port < "$ready"
+        if [ "$ready_word" = ready ]; then echo "preview-ready $ready_port"; else echo "error preview"; fi
+      else
+        echo "error preview"
+      fi
+      rm -f "$ready"
+      ;;
+    preview-stop)
+      if [ -n "$preview_pid" ]; then
+        kill "$preview_pid" 2>/dev/null || true
+        wait "$preview_pid" 2>/dev/null || true
+        preview_pid=
+      fi
+      echo ok ;;
     launch)
       if [ -f "$inbox/$a" ] && mkdir -p "$apps" && rm -f "$apps/$a" &&
         cp "$inbox/$a" "$apps/$a" && chmod 0500 "$apps/$a"; then
@@ -354,6 +383,53 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
         close: async () => undefined,
       };
       return { status: "ready", screen };
+    },
+    openPreview: async (handle, input) => {
+      const session = running(handle.leaseId);
+      if (session === undefined || launch.preparePreview === undefined || input.signal.aborted)
+        return { status: "unavailable" };
+      const prepared = await launch.preparePreview(handle.leaseId, input);
+      if (prepared.status !== "prepared") return prepared;
+      const close = async () => {
+        await prepared.close();
+        if (running(handle.leaseId) !== session) return "closed" as const;
+        if (session.channel.broken) return "unconfirmed" as const;
+        const reply = await session.channel.request("preview-stop", REQUEST_TIMEOUT_MS);
+        return reply.kind === "line" && reply.words.join(" ") === "ok"
+          ? ("closed" as const)
+          : ("unconfirmed" as const);
+      };
+      const delivered = await launch.deliver(
+        handle.leaseId,
+        "octant-preview-proxy.mjs",
+        new TextEncoder().encode(HOST_LOCAL_PREVIEW_PROXY),
+      );
+      if (
+        delivered.status !== "delivered" ||
+        input.signal.aborted ||
+        running(handle.leaseId) !== session
+      ) {
+        await close();
+        return { status: "unavailable" };
+      }
+      const config = btoa(
+        JSON.stringify({
+          socketName: prepared.socketName,
+          nonce: prepared.nonce,
+          port: input.port,
+          expiresAt: input.expiresAt,
+        }) + "\n",
+      );
+      const reply = await session.channel.request(`preview-start ${config}`, REQUEST_TIMEOUT_MS);
+      if (
+        input.signal.aborted ||
+        reply.kind !== "line" ||
+        reply.words.join(" ") !== `preview-ready ${input.port}`
+      ) {
+        await close();
+        return { status: "unavailable" };
+      }
+      return { status: "ready", guestUrl: `http://127.0.0.1:${input.port}/`, close };
     },
     control: async (handle, command): Promise<ComputerControlResult> => {
       const session = running(handle.leaseId);

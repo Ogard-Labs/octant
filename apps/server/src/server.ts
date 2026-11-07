@@ -375,6 +375,8 @@ export function startOctantServer(
       computerUseTools,
       threadDesktopDestination,
       desktopPaneRoutes,
+      desktopLeases,
+      installDesktopPreviewRequest,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -844,6 +846,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      desktopLeases,
+      installDesktopPreviewRequest,
       workThreadProjection,
       agentRunPersistence,
       worktreePreparation,

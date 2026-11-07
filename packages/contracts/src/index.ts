@@ -191,6 +191,7 @@ export * from "./canvasTags";
 
 export * from "./computerUsePlugin";
 export * from "./desktopLease";
+export { DesktopPreviewRequest, DesktopPreviewAnswer, DesktopPreviewAudit } from "./desktopPreview";
 export * from "./simulatorDevice";
 export * from "./gitHistory";
 
