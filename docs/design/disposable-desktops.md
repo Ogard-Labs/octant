@@ -265,16 +265,19 @@ lease anyway.
 
 ### Isolation
 
-- A desktop holds no host credential and no checkout. Nothing of the host is
-  mounted, bound, or synced into it. It receives: the recipe's own contents,
-  artifacts sent by an explicit transfer, and input.
+- A desktop holds no host credential and no checkout. No host user directory
+  is mounted, bound, or synced into it. It receives the recipe's own contents,
+  artifacts sent by an explicit transfer, input, and the application traffic
+  of a separately approved [lease-bound preview](#lease-bound-dev-server-preview).
 - A host-local desktop runs as a dedicated Bubblewrap launch through
   `ProcessConfinementPort` with no checkout, no home directory, no Secret
   Service or session bus, no SSH agent, an allowlisted environment with no
   `OCTANT_*` value, a private writable home and inbox under a host-private lease
   directory, and its own network namespace. It cannot reach the host's loopback,
-  so it can never reach the Octant server. Its only channel to the host is the
-  launch's standard streams.
+  so it can never reach the Octant server. Standard streams carry the launch's
+  screen and control protocol. A separately approved
+  [lease-bound preview](#lease-bound-dev-server-preview) may expose only its
+  exact owned socket inode in that desktop's existing private home.
 - A cloud desktop's API key stays in the host credential store. The host
   attaches it to calls the driver makes, only over HTTPS and only to hosts the
   driver declares in code. It never enters the desktop, a provider runtime, a
