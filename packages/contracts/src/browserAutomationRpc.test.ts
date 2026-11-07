@@ -76,9 +76,14 @@ describe("browser automation RPC", () => {
         threadId: "50000000-0000-4000-8000-000000000001",
         mode: "chat",
         origin: "https://example.com",
+        script: { source: "document.title" },
         requestedAt: "2026-09-09T10:00:00.000Z",
       }),
-    ).toMatchObject({ mode: "chat", origin: "https://example.com" });
+    ).toMatchObject({
+      mode: "chat",
+      origin: "https://example.com",
+      script: { source: "document.title" },
+    });
     expect(
       decodeBrowserToolApprovalDecision({
         approvalId: "80000000-0000-4000-8000-000000000001",
