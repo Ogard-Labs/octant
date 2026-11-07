@@ -8,6 +8,7 @@ import {
   BrowserContextRecord,
   BrowserObservation,
   BrowserThreadId,
+  BrowserDownloadSource,
   MAX_BROWSER_THREAD_CONTEXTS,
 } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
@@ -75,6 +76,7 @@ export const BrowserToolApproval = Schema.Struct({
       name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
       sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
       mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      source: Schema.optional(BrowserDownloadSource),
     }).annotations(strict),
   ),
   /**

@@ -422,7 +422,15 @@ describe("WorkThreadWorkspace", () => {
       threadId: String(threadId),
       mode: "work",
       origin: "https://example.com",
-      download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+      download: {
+        name: "report.pdf",
+        sizeBytes: 1_258_291,
+        mediaType: "application/pdf",
+        source: {
+          kind: "https-origin-chain",
+          origins: ["https://example.com", "https://files.example.com"],
+        },
+      },
       requestedAt: "2026-09-09T10:00:00.000Z",
     };
     const browserAutomationClient = {
@@ -444,7 +452,7 @@ describe("WorkThreadWorkspace", () => {
 
     const row = await screen.findByRole("group", { name: "Browser download approval" });
     expect(row).toHaveTextContent(
-      "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
+      "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: https://example.com → https://files.example.com.",
     );
     expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
     await user.click(within(row).getByRole("button", { name: "Save once" }));

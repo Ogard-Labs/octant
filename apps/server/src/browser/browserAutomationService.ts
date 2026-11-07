@@ -1835,6 +1835,7 @@ export class BrowserAutomationService {
           name: report.name,
           sizeBytes: report.sizeBytes,
           mediaType: report.mediaType,
+          ...(report.source === undefined ? {} : { source: report.source }),
         });
         while (owned.heldDownloads.size > MAX_BROWSER_HELD_DOWNLOADS) {
           const oldest = owned.heldDownloads.keys().next().value;
@@ -1923,7 +1924,10 @@ export class BrowserAutomationService {
       name: held.name,
       claim: () => claim(contextId, downloadId),
       ask: async (facts) => {
-        const answer = await input.ask(facts, context.origin);
+        const answer = await input.ask(
+          { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
+          context.origin,
+        );
         // A question can wait minutes: the page and the thread's authority
         // must still be there when it is answered.
         if (

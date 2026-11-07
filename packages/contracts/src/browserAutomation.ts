@@ -302,6 +302,29 @@ export type BrowserDialogReport = typeof BrowserDialogReport.Type;
  * workspace; the agent saves it with `download-save` naming `downloadId`, and
  * the person is asked then. A refused one was cancelled and holds nothing.
  */
+const DownloadHttpsOrigin = Schema.String.pipe(
+  Schema.maxLength(2048),
+  Schema.filter((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === "https:" &&
+        url.origin === value &&
+        url.username === "" &&
+        url.password === ""
+      );
+    } catch {
+      return false;
+    }
+  }),
+);
+/** Host-observed complete redirect chain, reduced to HTTPS origins only. */
+export const BrowserDownloadSource = Schema.Struct({
+  kind: Schema.Literal("https-origin-chain"),
+  origins: Schema.Array(DownloadHttpsOrigin).pipe(Schema.minItems(1), Schema.maxItems(32)),
+}).annotations(strict);
+export type BrowserDownloadSource = typeof BrowserDownloadSource.Type;
+
 export const BrowserDownloadReport = Schema.Union(
   Schema.Struct({
     state: Schema.Literal("held"),
@@ -310,6 +333,7 @@ export const BrowserDownloadReport = Schema.Union(
     sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
     /** Sniffed from the file's first bytes, never from the page's header. */
     mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+    source: Schema.optional(BrowserDownloadSource),
   }).annotations(strict),
   Schema.Struct({
     state: Schema.Literal("refused"),

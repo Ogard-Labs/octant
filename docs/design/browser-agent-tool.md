@@ -375,10 +375,22 @@ turned on a switch, and then only after they answer for that file.
   file's own bytes, never from the page's header. A file that was stopped
   (over the cap, unfinished after 10 seconds, or failed) is reported by name
   and reason and holds nothing. Each is reported once.
+  A native runtime may attach `source` with `kind: https-origin-chain` and
+  the complete redirect chain reduced to exact HTTPS origins, at most 32.
+  It comes from that completed native download item, never from the requesting
+  page or an agent argument. URL paths, query values and fragments are removed;
+  a missing, oversized, credential-bearing or non-HTTPS chain is unverified.
+  The headless runtime currently supplies no complete-chain receipt. Omitting
+  it preserves ordinary per-file review and grants no recurring authority.
 - **Saving.** `download-save` names a reported `downloadId`. The server checks
   the file, then asks the person every time: "Let the agent save report.pdf
-  (1.2 MB, PDF) from https://example.com into this thread's workspace?" It
-  names the file, its size, its type, and the site. The answer covers that file
+  (1.2 MB, PDF) into this thread's workspace? Page: https://example.com.
+  Download source: https://example.com → https://files.example.com." It
+  names the file, its size, its type, the requesting page and the attested
+  source origins separately. Without a native receipt, it says "Download
+  source: unverified." A page address is never substituted as source proof.
+  Code refuses a save whose complete review exceeds its approval-summary byte
+  limit; it never offers approval of a truncated source chain. The answer covers that file
   once and is never remembered, so the card has no "Always allow", and it is
   asked at every access level, Full access included. Work asks in the thread's
   Browser approval card ("Save once" or "Deny"); Code asks in the thread's tool

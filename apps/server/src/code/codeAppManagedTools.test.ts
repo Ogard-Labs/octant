@@ -2,6 +2,7 @@ import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
+  BrowserDownloadSource,
   CodeOperationCommand,
   CodeOperationResult,
   CodeProjectPullRequestSwitchTarget,
@@ -1422,6 +1423,7 @@ describe("Code app-managed tools", () => {
   describe("saving a download", () => {
     function downloadTools(options: {
       readonly executionPolicy?: "plan";
+      readonly source?: BrowserDownloadSource;
       readonly refusal?: string;
       readonly request?: ReturnType<typeof vi.fn>;
     }) {
@@ -1435,10 +1437,17 @@ describe("Code app-managed tools", () => {
             origin: string,
           ) => Promise<unknown>;
         }) => {
-          await input.ask(
-            { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+          const answer = await input.ask(
+            {
+              name: "report.pdf",
+              sizeBytes: 1_258_291,
+              mediaType: "application/pdf",
+              ...(options.source === undefined ? {} : { source: options.source }),
+            },
             "https://example.com",
           );
+          if (answer !== "approved")
+            return { status: "refused" as const, error: "browser-download-cancelled" };
           return {
             status: "saved" as const,
             path: "downloads/report.pdf",
@@ -1491,9 +1500,22 @@ describe("Code app-managed tools", () => {
         expect.objectContaining({ workspaceRoot: "/checkout", downloadId: "d1" }),
       );
       expect(request).toHaveBeenCalledWith(
-        "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
+        "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
         undefined,
       );
+    });
+
+    it("refuses a source chain that cannot be reviewed in full without asking or saving", async () => {
+      const origins = Array.from(
+        { length: 16 },
+        (_, index) => `https://${"a".repeat(63)}.${"b".repeat(60)}${index}.example`,
+      );
+      const { tools, request } = downloadTools({ source: { kind: "https-origin-chain", origins } });
+      expect(await save(tools)).toEqual({
+        result: { error: "browser-download-cancelled" },
+        isError: true,
+      });
+      expect(request).not.toHaveBeenCalled();
     });
 
     it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
