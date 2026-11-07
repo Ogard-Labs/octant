@@ -87,7 +87,7 @@ export const canvasExport = {
       const socket = createConnection({ host: '127.0.0.1', port: 9 });
       const timer = setTimeout(() => { socket.destroy(); resolve(false); }, 1000);
       socket.on('connect', () => { clearTimeout(timer); socket.destroy(); resolve(false); });
-      socket.on('error', error => { clearTimeout(timer); console.error(JSON.stringify({socketError: error.code, errno: error.errno, message: String(error.message).slice(0, 256)})); resolve(['EPERM','EACCES'].includes(error.code)); });
+      socket.on('error', error => { clearTimeout(timer); process.stderr.write(JSON.stringify({socketError: error.code, errno: error.errno, message: String(error.message).slice(0, 256)})); resolve(['EPERM','EACCES'].includes(error.code)); });
     });
     try { await fetch('https://example.test/'); } catch { probe.bridgeDenied = true; }
     return { note: JSON.stringify(probe) };
