@@ -7,6 +7,41 @@ import { ownerApprovalFileContext } from "./ownerApprovalFile";
 
 describe("owner file approval scope", () => {
   it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
+    "refuses unresolved existing entries while admitting ordinary new files and resolved inside links",
+    () => {
+      const base = mkdtempSync(join(tmpdir(), "octant-owner-file-resolution-"));
+      const root = join(base, "project");
+      const outside = join(base, "outside");
+      mkdirSync(root);
+      mkdirSync(outside);
+      const context = (name: string) =>
+        ownerApprovalFileContext(
+          decodeOwnerApprovalAction({
+            kind: "file-write",
+            tool: "Write",
+            input: JSON.stringify({ file_path: join(root, name), content: "fixture" }),
+          }),
+          root,
+        );
+      try {
+        expect(context("ordinary-new.txt")).toBeDefined();
+        writeFileSync(join(root, "existing.txt"), "fixture");
+        symlinkSync(join(root, "existing.txt"), join(root, "inside-link.txt"));
+        const insideLink = context("inside-link.txt");
+        expect(insideLink).toBeDefined();
+        expect(insideLink?.physicalPath).toBe(context("existing.txt")?.physicalPath);
+        symlinkSync(join(outside, "not-created.txt"), join(root, "dangling-outside.txt"));
+        expect(context("dangling-outside.txt")).toBeUndefined();
+        symlinkSync(join(root, "not-created.txt"), join(root, "dangling-inside.txt"));
+        expect(context("dangling-inside.txt")).toBeUndefined();
+        symlinkSync("loop.txt", join(root, "loop.txt"));
+        expect(context("loop.txt")).toBeUndefined();
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
+  it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
     "keeps the live bound root identity and refuses outside, credential and Git paths including aliases",
     () => {
       const base = mkdtempSync(join(tmpdir(), "octant-owner-file-scope-"));

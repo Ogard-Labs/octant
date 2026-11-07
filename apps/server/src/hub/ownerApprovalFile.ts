@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -47,7 +47,17 @@ export function ownerApprovalFileContext(
     let physicalPath: string;
     try {
       physicalPath = realpathSync(path);
-    } catch {
+    } catch (error) {
+      // Only an absent leaf may become a new ordinary file. A dangling link
+      // also fails realpath, but writing it would follow its unresolved target.
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "ENOENT" ||
+        lstatSync(path, { throwIfNoEntry: false }) !== undefined
+      )
+        return undefined;
       physicalPath = join(realpathSync(dirname(path)), basename(path));
     }
     if (credentialName(physicalPath)) return undefined;
