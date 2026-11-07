@@ -138,3 +138,36 @@ does not implement whole-thread/descendant supervision, descriptor transfer,
 FD reuse, cross-process memory access, general path/inode policy, concurrent
 outside mutations or a production mediator. Those obligations remain open;
 this controlled fixture must not be wired into production.
+
+## Concurrent descriptor admission
+
+`concurrent_admission.c` measures the next controlled scheduling obligation,
+under inherited asynchronous I/O refusal. A seized client starts a real pthread
+sharing its FD table. In twenty rounds, the tracer parks every owned peer,
+resolves the requested descriptor's device/inode, arms the peer's attempted
+`dup2` swap from permitted to protected, and keeps the peer parked until the
+admitted read exits. The allowed read must return permitted bytes; the later
+swapped descriptor's read and mapping must be refused, while another native
+inode's mapping remains usable. Freeze windows check that the swap counter
+cannot advance between identity decision and kernel use.
+
+The operation linearizes at the stable identity/protection decision after peers
+are stopped. A previously admitted read may complete after a protection
+transition; no earlier bytes/pages need to be erased. Non-file syscalls run
+concurrently so that pthread waits, child waits and pipes can make progress.
+The fixture exercises traced clone, fork, vfork and exec; it refuses
+`CLONE_UNTRACED` and returns `ENOSYS` for clone3 rather than continuing a mutable
+flags pointer. A separate phase kills the retained tracer after its child,
+pthread and fork child are traced/stopped, then uses a task-local subreaper to
+join the processes killed by inherited exit-on-tracer-death. No other task's
+processes are stopped or signalled.
+
+Dispatch `experiment=concurrent-admission`. Each tracer phase is bounded to
+twelve seconds, the owner to thirty seconds, the outer timeout to thirty-five
+seconds and the hosted job to two minutes. The native fixture contains only
+synthetic files outside Bubblewrap and removes its identity-checked directory.
+These selected concurrency/lifecycle cases do not implement a general tracer:
+untrusted pathname memory, external mutation/alias linearization, FD transfer,
+process-memory routes, all syscall variants, effective policy and production
+integration remain open. Existing hardlink/watch/write compatibility evidence
+is separate. No new kernel component or production enablement is claimed.

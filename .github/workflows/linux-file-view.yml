@@ -15,6 +15,7 @@ on:
           - file-view
           - syscall-admission
           - async-compatibility
+          - concurrent-admission
 
 permissions:
   contents: read
@@ -157,5 +158,32 @@ jobs:
           path: |
             ${{ runner.temp }}/async-compatibility.json
             ${{ runner.temp }}/owned-inode-admission.json
+          if-no-files-found: error
+          retention-days: 7
+
+  concurrent-admission:
+    name: Measure owned concurrent descriptor admission
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'concurrent-admission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the original bounded scheduling fixture
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -pthread scripts/linux-file-view/concurrent_admission.c \
+            -o "$RUNNER_TEMP/octant-concurrent-admission"
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/async_refusal.c \
+            -o "$RUNNER_TEMP/octant-concurrent-async-refusal"
+      - name: Measure FD swaps, owned lifecycle and tracer-death cleanup
+        run: |
+          timeout --kill-after=3s 35s "$RUNNER_TEMP/octant-concurrent-async-refusal" ENOSYS \
+            "$RUNNER_TEMP/octant-concurrent-admission" \
+            > "$RUNNER_TEMP/concurrent-admission.json"
+          cat "$RUNNER_TEMP/concurrent-admission.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-concurrent-admission
+          path: ${{ runner.temp }}/concurrent-admission.json
           if-no-files-found: error
           retention-days: 7
