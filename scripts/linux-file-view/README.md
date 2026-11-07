@@ -1,5 +1,28 @@
 # Native mediated-file-view feasibility
 
+## Modern stock pre-access check
+
+`pre_access.c` checks Linux 6.14+'s `FAN_PRE_ACCESS` before selecting a new
+kernel component. It uses one private synthetic inode and its real hardlink,
+with the mark installed before the child opens either descriptor. It measures
+ordinary reads, alias reads and a warm-cache new mapping before and after an
+outside `.pub` transition. It then closes the last notification-group descriptor
+while a read is waiting for a decision, and checks a subsequent read separately.
+An unanswered operation is not an admitted operation. This distinguishes actual
+stock group-loss behavior from assumptions about killing a broker's children.
+
+Dispatch `experiment=pre-access`. The original check has an eighteen-second
+owner alarm, a fifteen-second child alarm, two-second IPC/event bounds, and a
+twenty-five-second outer timeout. It needs `CAP_SYS_ADMIN` only inside the owned
+ephemeral CI runner to create the pre-content group; no policy, kernel, boot,
+mount or live-host configuration is changed. Missing kernel/filesystem support
+fails the measurement. Passing controls is not production readiness: this does
+not implement effective policy, namespace mutation ordering, complete aliases,
+provider supervision or enforcement after broker death. The kernel's actual
+[pre-access hooks](https://github.com/torvalds/linux/blob/v6.14/include/linux/fsnotify.h)
+include new mappings; the older read-only-hook limitation is not inferred for
+this modern API.
+
 This executable fixture measures a FUSE-backed live view inside Bubblewrap.
 It is never called by the host or packaged with the product. It is not an
 implementation of the production secret policy and must not enable a provider.

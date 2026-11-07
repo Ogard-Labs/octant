@@ -16,6 +16,7 @@ on:
           - syscall-admission
           - async-compatibility
           - concurrent-admission
+          - pre-access
 
 permissions:
   contents: read
@@ -25,6 +26,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pre-access:
+    name: Measure stock pre-access admissions and group loss
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'pre-access'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the bounded original stock-kernel check
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/pre_access.c -o "$RUNNER_TEMP/octant-pre-access"
+      - name: Measure current stock read and mapping admission without changing the kernel
+        run: |
+          sudo timeout --kill-after=3s 25s "$RUNNER_TEMP/octant-pre-access" > "$RUNNER_TEMP/pre-access.json"
+          cat "$RUNNER_TEMP/pre-access.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-stock-pre-access
+          path: ${{ runner.temp }}/pre-access.json
+          if-no-files-found: error
+          retention-days: 7
   native:
     if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'file-view'
     name: Measure native file-view behavior
