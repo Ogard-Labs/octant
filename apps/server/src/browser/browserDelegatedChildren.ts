@@ -67,6 +67,7 @@ export class BrowserDelegatedChildren {
     /** A host-proven run/session identity, independent of the reusable recipient. */
     readonly executionId?: string;
     readonly contentThreadId?: BrowserThreadId;
+    readonly executionAuthority?: () => ToolActionAuthority | undefined;
   }): AppManagedToolSet {
     const id =
       input.target.grantee.kind === "child"
@@ -190,7 +191,10 @@ export class BrowserDelegatedChildren {
             runtime: this.#options.runtime,
             sharedRuntime: true,
             authority: {
-              resolve: () => input.current()?.authority,
+              resolve: () =>
+                input.executionAuthority === undefined
+                  ? input.current()?.authority
+                  : input.executionAuthority(),
               canAccessWindow: (window, thread) =>
                 String(window) === String(windowId) &&
                 String(thread) === id &&
@@ -215,7 +219,10 @@ export class BrowserDelegatedChildren {
             modelId: current.modelId,
             executionPolicy: input.executionPolicy,
             modelBindings: new Map(),
-            resolveAuthority: () => input.current()?.authority,
+            resolveAuthority: () =>
+              input.executionAuthority === undefined
+                ? input.current()?.authority
+                : input.executionAuthority(),
             resolveModelId: () => input.current()?.modelId,
             delegatedProfileIsCurrent: permitted,
             browser: {

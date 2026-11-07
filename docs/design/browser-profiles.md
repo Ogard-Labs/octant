@@ -360,6 +360,14 @@ child process or other tools. Completed, failed or cancelled
 children, Chat children, provider-native children and unavailable or unverified
 workspaces are not eligible. Terminal-session caller grants are not yet
 available; their existing refusal remains.
+For Code routines, the reviewed source checkout remains part of the definition
+identity. Each dispatched run executes in its own managed checkout. The host
+proves that checkout belongs to the exact run thread and repository, and checks
+its current Project binding, provider and model before granting Browser access.
+Browser operations carry that execution checkout's authority; a missing,
+unavailable or unrelated checkout refuses rather than borrowing the reviewed
+source checkout's authority.
+
 A routine permission binds its definition revision, execution profile/model,
 Project binding and effective authority. Only enabled local Work/Code routines
 with current Project/provider/profile receipts and managed-tool support are

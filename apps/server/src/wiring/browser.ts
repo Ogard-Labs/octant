@@ -383,12 +383,28 @@ export function wireBrowser(deps: BrowserDependencies) {
           target,
           threadId: input.threadId,
           authority: input.currentAuthority(),
+          codeExecution:
+            definition?.mode === "code"
+              ? (() => {
+                  const thread = persistence.readCodeThread(
+                    decodeCodeThreadId(String(input.threadId)),
+                  );
+                  return {
+                    thread,
+                    checkout:
+                      thread === undefined
+                        ? undefined
+                        : persistence.readCodeCheckout(thread.checkoutId),
+                  };
+                })()
+              : undefined,
         })
           ? target?.target
           : undefined;
       };
       return browserDelegatedChildren.tools({
         target: initial.target,
+        executionAuthority: () => (current() === undefined ? undefined : input.currentAuthority()),
         executionId: String(input.routineRun.runId),
         contentThreadId: input.threadId,
         executionPolicy:
