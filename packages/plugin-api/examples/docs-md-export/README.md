@@ -39,8 +39,8 @@ connected-but-refusing target reports `refused` honestly.
 
 - `index.mjs` — `createPageHostExportTarget(config)` factory + the `canvasExport`
   entry a host loads from the plugin package.
-- `index.test.mjs` — run with `bun test packages/plugin-api/examples/docs-md-export/`
-  from the repository root (6 tests).
+- `index.test.mjs` — vitest, so it runs with the package suite:
+  `bun run --filter @octant/plugin-api test` (6 tests in this file).
 
 ## Credentials
 

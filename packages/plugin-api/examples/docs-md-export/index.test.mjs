@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { createPageHostExportTarget, DEFAULT_API_BASE } from "./index.mjs";
 
 function document(input = {}) {
