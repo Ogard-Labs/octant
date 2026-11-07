@@ -65,7 +65,7 @@ int main(int count, char **arguments) {
       sizeof(calls) / sizeof(calls[0]), expected);
     return refused == sizeof(calls) / sizeof(calls[0]) ? 0 : 1;
   }
-  if (count < 4 || (strcmp(arguments[1], "EPERM") && strcmp(arguments[1], "ENOSYS"))) return 2;
+  if (count < 3 || (strcmp(arguments[1], "EPERM") && strcmp(arguments[1], "ENOSYS"))) return 2;
 #if !defined(__x86_64__)
   fputs("This bounded compatibility fixture requires x86_64 Linux.\n", stderr);
   return 2;
