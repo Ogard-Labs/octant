@@ -98,6 +98,8 @@ static int measure(void)
         request.device_major == major(inode.st_dev) && request.device_minor == minor(inode.st_dev) &&
         request.operation == (command == 'm' || command == 'M' ? OCTANT_MEDIATION_MAP : OCTANT_MEDIATION_READ);
       if (!passed) break;
+      printf("OCTANT_KERNEL_STEP %u operation=%u epoch=%llu\n", i,
+        request.operation, (unsigned long long)request.namespace_epoch);
       previous = request.request_id;
       if (i == 6) { close(broker); broker = -1; }
       else {
@@ -108,6 +110,9 @@ static int measure(void)
           struct octant_mediation_status changed;
           passed = !ioctl(broker, OCTANT_MEDIATION_STATUS, &changed) &&
             changed.namespace_epoch > request.namespace_epoch && changed.active_mutations == 0;
+          printf("OCTANT_KERNEL_MUTATION before=%llu after=%llu active=%u\n",
+            (unsigned long long)request.namespace_epoch,
+            (unsigned long long)changed.namespace_epoch, changed.active_mutations);
           if (!passed) break;
         }
         struct octant_mediation_answer answer = {

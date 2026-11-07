@@ -37,6 +37,9 @@ def install_epochs(kernel: Path, native: Path) -> None:
             source = instrument(source, name)
         if relative == "fs/namei.c":
             source = instrument(source, "atomic_open", "(open_flag & O_CREAT) != 0")
+            # The non-atomic negative-dentry path invokes i_op->create
+            # directly; it does not pass through vfs_create.
+            source = instrument(source, "lookup_open", "(op->open_flag & O_CREAT) != 0")
         first_line = source.index("\n") + 1
         source = source[:first_line] + '#include <linux/octant_mediation_bridge.h>\n' + source[first_line:]
         path.write_text(source)
