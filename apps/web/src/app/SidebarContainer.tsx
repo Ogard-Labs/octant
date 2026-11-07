@@ -27,6 +27,7 @@ import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { useProjectController } from "../projects/useProjectController";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
+  isThreadBoardAvailable,
   resolveSidebarDestinationContributions,
 } from "../shell/contributionRegistry";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -665,9 +666,12 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         inboxCount={inboxCount}
         countTiles={{
           ...sidebarTileCounts,
-          // Chat has no board, so its Running tile opens the Activity feed,
+          // Chat has no board (and a switched-off Board plugin has none), so its Running tile opens the Activity feed,
           // where running threads lead.
-          ...(activeMode === "chat" ? { onOpenRunning: () => openSidebarList("activity") } : {}),
+          ...(activeMode === "chat" ||
+          !isThreadBoardAvailable(activeMode, FIRST_PARTY_PLUGINS_EFFECTIVE)
+            ? { onOpenRunning: () => openSidebarList("activity") }
+            : {}),
           onOpenReview: openReview,
           onOpenDone: () => openSidebarList("completed"),
         }}

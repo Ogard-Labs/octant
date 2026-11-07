@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./contributionRegistry";
 import {
   chats,
   chatShellBootstrap,
@@ -409,6 +410,51 @@ describe("WorkspaceRailLayers", () => {
     expect(
       await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
     ).toBeVisible();
+  });
+
+  it("closes the Work Thread Board when the Board plugin is switched off and leaves the Running tile on Activity", async () => {
+    const user = userEvent.setup();
+    const effective = FIRST_PARTY_PLUGINS_EFFECTIVE as Map<string, boolean>;
+    const queryBoard = vi.fn(async () => ({
+      version: 1 as const,
+      query: { version: 1 as const },
+      cards: [],
+      generatedAt: "2026-07-26T09:30:00.000Z",
+    }));
+    const workThreadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [] })),
+      execute: vi.fn(),
+      queryBoard,
+    };
+    const app = (
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={workProjects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(workShellBootstrap())}
+        workThreadClient={workThreadClient as never}
+      />
+    );
+    const { rerender } = render(app);
+    try {
+      await user.click(await screen.findByRole("button", { name: /^Running, \d+$/ }));
+      expect(await screen.findByRole("region", { name: "Thread board" })).toBeVisible();
+
+      effective.set("board", false);
+      rerender(<>{app}</>);
+      await waitFor(() =>
+        expect(screen.queryByRole("region", { name: "Thread board" })).not.toBeInTheDocument(),
+      );
+      queryBoard.mockClear();
+      await user.click(screen.getByRole("button", { name: /^Running, \d+$/ }));
+      expect(screen.queryByRole("region", { name: "Thread board" })).not.toBeInTheDocument();
+      expect(queryBoard).not.toHaveBeenCalled();
+    } finally {
+      effective.set("board", true);
+    }
   });
 
   it("does not offer a Board in Chat", async () => {
