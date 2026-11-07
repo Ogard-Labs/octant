@@ -12,9 +12,24 @@ returns a receipt or a typed refusal. Nothing about the seam reaches host
 internals — the in-tree destinations (folder, GitHub Gist, sharehtml.org, public
 link) use this same port.
 
-A complete, runnable example lives at
+A callable reference factory lives at
 [`packages/plugin-api/examples/docs-md-export`](https://github.com/Ogard-Labs/octant/tree/main/packages/plugin-api/examples/docs-md-export)
 (share a Canvas as an unlisted page on an external REST host).
+
+## Host registration
+
+The host registers the factory's `CanvasExportTarget` alongside its destinations
+and supplies the installed, trusted, enabled, effective and connection facts.
+Those facts are host-owned; a package cannot assert them. The production export
+service applies the same activation policy and approval card to that target as
+it does to folder and Gist exports. Its integration test loads the actual example,
+proves each activation gate, approves one payload, replays its journaled receipt,
+and refuses a held approval after disablement. Preparation and denial upload
+nothing.
+
+This is a host registration example. The current Settings installer does not
+discover arbitrary JavaScript export modules; selecting this example's folder
+does not load it into the server.
 
 ## The contract
 
@@ -50,10 +65,17 @@ credential-bearing URLs. A plugin that still sees one must refuse, never ship it
 
 ## Credentials
 
-Take API keys through the host credential broker, not the plugin's environment:
-name the credential reference and let the host attach it with the
-`x-octant-credential-ref` header (see `@octant/plugin-api/integration`). The raw
-key never enters the plugin process.
+The host passes `IntegrationHostPort.fetch` as the factory's `fetch` and an
+authorized opaque `credentialRef`. The example names that reference with
+`x-octant-credential-ref`; the host port checks the destination and attaches the
+key (see `@octant/plugin-api/integration`). The raw key never enters the plugin.
+A reference without the host port is refused before network access. An anonymous
+page host can omit both.
+
+Successful responses are decoded through the public delivery schema. Invalid
+JSON or link/id fields return `malformed`; an unreadable response returns
+`unavailable`. Neither proves that an upload created nothing remotely. The
+example never retries uploads automatically.
 
 ## Status reporting
 

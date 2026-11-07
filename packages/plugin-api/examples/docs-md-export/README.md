@@ -24,8 +24,8 @@ concrete service.
 
 The host owns rendering, the share filter (no paths, no secret-shaped values
 leave), the approval card, and the `canvas.export@1` journal event. The plugin
-never sees credentials unless the person gave it one, and never decides when it
-is called.
+receives an opaque credential reference and a host-authorized fetch port, never
+a key. It never decides when it is called.
 
 ## Activation ladder
 
@@ -40,18 +40,32 @@ connected-but-refusing target reports `refused` honestly.
 - `index.mjs` — `createPageHostExportTarget(config)` factory + the `canvasExport`
   entry a host loads from the plugin package.
 - `index.test.mjs` — vitest, so it runs with the package suite:
-  `bun run --filter @octant/plugin-api test` (6 tests in this file).
+  `bun run --filter @octant/plugin-api test` (12 tests in this file).
+- `apps/server/src/canvas/canvasExportService.test.ts` — the host registers this
+  actual factory through the production export service, checks each activation
+  gate, denies one card, approves the exact rendered payload, replays its
+  journaled receipt, and refuses a held card after the target is disabled.
 
 ## Credentials
 
-The example reads `DOCS_MD_API_KEY` from the environment for simplicity. A
-production plugin should take its key through the host credential broker and let
-the host attach it via the `x-octant-credential-ref` header (see
-`@octant/plugin-api/integration`), so the raw key never sits in the plugin's
-environment.
+The host supplies `fetch` from `IntegrationHostPort` and the opaque
+`credentialRef` it authorized for this destination. The request carries
+`x-octant-credential-ref`; the host port validates the destination and attaches
+the credential, so the plugin never receives the raw key. Without that port, a
+credential reference is refused before any request. Anonymous hosts can omit
+both. The example's default export has no credential and reads only an optional
+`DOCS_MD_API_BASE` address from the environment.
 
-## Manifest note
+## Host registration
 
-The `canvas-export-target` manifest component kind (so a host knows to load the
-`canvasExport` export from the plugin entry) is the remaining host-side wiring;
-until it lands, this example documents the port contract. Tracked in OCT-810.
+This example is a callable `CanvasExportTarget` factory for a host to register,
+as the in-tree destinations are registered. The host owns package resolution and
+the installed/trusted/enabled/effective facts; the factory cannot supply those
+facts or approve itself. There is no Settings installer for arbitrary JavaScript
+export modules, and this example is not a claim that selecting its folder loads
+code into the server. The integration test proves the supported host
+registration and approval path without importing untrusted code into the
+authority process.
+
+A refused or unreadable response after upload does not prove the remote host
+created nothing. The example does not retry uploads automatically.

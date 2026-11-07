@@ -12,6 +12,7 @@
  * filter, and journals the completed export; the plugin only ships what it was
  * given and returns a receipt or a typed refusal.
  */
+import { decodeCanvasExportDelivery } from "@octant/plugin-api/canvas-export";
 
 /** docs-md-style API. Confirm the provider's current API before shipping. */
 export const DEFAULT_API_BASE = "https://docs-md.com/api/v1";
@@ -20,9 +21,8 @@ export const DEFAULT_API_BASE = "https://docs-md.com/api/v1";
  * Build a `CanvasExportTarget` for an HTTP page host.
  *
  * config.apiBase  — the host's API root (see DEFAULT_API_BASE).
- * config.apiKey   — the person's own key for the host. In a production plugin,
- *                   take this through the host credential broker and the
- *                   `x-octant-credential-ref` header instead of reading env.
+ * config.fetch   — the host's authorized fetch port from IntegrationHostPort.
+ * config.credentialRef — an opaque reference for that host port, never a key.
  * config.targetId / label — how the destination is named in the export panel.
  */
 export function createPageHostExportTarget(config) {
@@ -61,30 +61,54 @@ export function createPageHostExportTarget(config) {
       if (output.body.length === 0) {
         return refuse("malformed", "The rendered document is empty.");
       }
+      if (config.credentialRef !== undefined && config.fetch === undefined) {
+        return refuse(
+          "not-connected",
+          "This destination needs the host's credential-aware connection.",
+        );
+      }
       let response;
       try {
-        response = await fetch(`${apiBase}/pages`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...(config.apiKey === undefined ? {} : { authorization: `Bearer ${config.apiKey}` }),
-          },
-          body: JSON.stringify({
-            title: output.title,
-            format: output.format,
-            body: output.body,
+        response = await (config.fetch ?? globalThis.fetch)(
+          new Request(`${apiBase}/pages`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(config.credentialRef === undefined
+                ? {}
+                : { "x-octant-credential-ref": config.credentialRef }),
+            },
+            body: JSON.stringify({
+              title: output.title,
+              format: output.format,
+              body: output.body,
+            }),
+            signal: AbortSignal.timeout(30_000),
           }),
-          signal: AbortSignal.timeout(30_000),
-        });
+        );
       } catch {
         return refuse("unavailable", "The page host could not be reached.");
       }
       if (response.status === 201 || response.status === 200) {
-        const page = await response.json();
-        return {
-          kind: "receipt",
-          receipt: { kind: "link", href: page.url, remoteId: page.id },
-        };
+        let body;
+        try {
+          body = await response.text();
+        } catch {
+          return refuse("unavailable", "The page host's response could not be read.");
+        }
+        try {
+          const page = JSON.parse(body);
+          return decodeCanvasExportDelivery({
+            kind: "receipt",
+            receipt: {
+              kind: "link",
+              href: page.url,
+              ...(page.id === undefined ? {} : { remoteId: page.id }),
+            },
+          });
+        } catch {
+          return refuse("malformed", "The page host returned an invalid page receipt.");
+        }
       }
       if (response.status === 401 || response.status === 403) {
         return refuse("unauthorized", "The page host refused the API key.");
@@ -106,5 +130,4 @@ export const canvasExport = createPageHostExportTarget({
   label: "docs-md (example)",
   formats: ["markdown", "html"],
   apiBase: process.env.DOCS_MD_API_BASE,
-  apiKey: process.env.DOCS_MD_API_KEY,
 });

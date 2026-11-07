@@ -29,11 +29,12 @@ function fakeFetch(status, payload, fail = false) {
   return { calls, fetchImpl };
 }
 
-function targetWith(_fetchImpl, config = {}) {
+function targetWith(fetchImpl, config = {}) {
   return createPageHostExportTarget({
     targetId: "docs-md-example",
     label: "docs-md (example)",
-    apiKey: "test-key",
+    fetch: fetchImpl,
+    credentialRef: "example-account-key",
     ...config,
   });
 }
@@ -89,9 +90,26 @@ describe("example page-host export target", () => {
     } finally {
       globalThis.fetch = original;
     }
-    expect(calls[0].input).toBe(`${DEFAULT_API_BASE}/pages`);
-    expect(calls[0].init.headers.authorization).toBe("Bearer test-key");
-    expect(JSON.parse(calls[0].init.body).title).toBe("Launch plan");
+    expect(calls[0].input.url).toBe(`${DEFAULT_API_BASE}/pages`);
+    expect(calls[0].input.headers.get("x-octant-credential-ref")).toBe("example-account-key");
+    expect(calls[0].input.headers.has("authorization")).toBe(false);
+    expect((await calls[0].input.json()).title).toBe("Launch plan");
+  });
+
+  test("refuses a credential reference without a host fetch port before sending anything", async () => {
+    const { calls, fetchImpl } = fakeFetch(201, { url: "https://pages.example/page" });
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+    try {
+      expect(
+        await createPageHostExportTarget({ credentialRef: "example-account-key" }).exportDocument(
+          document(),
+        ),
+      ).toMatchObject({ kind: "refused", code: "not-connected" });
+      expect(calls).toEqual([]);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   test("maps an unauthorized answer to a typed refusal", async () => {
@@ -104,6 +122,48 @@ describe("example page-host export target", () => {
         kind: "refused",
         code: "unauthorized",
         message: "The page host refused the API key.",
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test.each([
+    "not json",
+    "{}",
+    '{"url":"javascript:alert(1)"}',
+    '{"url":"https://pages.example/page","id":7}',
+  ])("refuses an unusable successful response without reporting a link: %s", async (body) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => new Response(body, { status: 201 });
+    try {
+      await expect(createPageHostExportTarget({}).exportDocument(document())).resolves.toEqual({
+        kind: "refused",
+        code: "malformed",
+        message: "The page host returned an invalid page receipt.",
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("reports an unreadable successful response as unavailable", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new Error("truncated"));
+          },
+        }),
+        { status: 201 },
+      );
+    try {
+      await expect(
+        createPageHostExportTarget({}).exportDocument(document()),
+      ).resolves.toMatchObject({
+        kind: "refused",
+        code: "unavailable",
       });
     } finally {
       globalThis.fetch = original;
