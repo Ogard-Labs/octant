@@ -15,9 +15,9 @@
 // Native feasibility only. No host launcher imports or packages this fixture.
 namespace fs = std::filesystem;
 
-struct Failure { DWORD code; };
+struct Failure { DWORD code; const char* operation = "native fixture operation"; };
 static bool processes_exited = true;
-static void require(BOOL result) { if (!result) throw Failure{GetLastError()}; }
+static void require(BOOL result, const char* operation = "native fixture operation") { if (!result) throw Failure{GetLastError(), operation}; }
 static void hresult(HRESULT result) { if (FAILED(result)) throw Failure{static_cast<DWORD>(result)}; }
 
 class Handle {
@@ -116,8 +116,8 @@ static bool appcontainer_token(HANDLE process) {
   require(OpenProcessToken(process, TOKEN_QUERY, &raw));
   Handle token(raw);
   DWORD app = 0, lpac = 0, length = 0;
-  require(GetTokenInformation(token.get(), TokenIsAppContainer, &app, sizeof(app), &length));
-  require(GetTokenInformation(token.get(), TokenIsLessPrivilegedAppContainer, &lpac, sizeof(lpac), &length));
+  require(GetTokenInformation(token.get(), TokenIsAppContainer, &app, sizeof(app), &length), "query AppContainer token");
+  require(GetTokenInformation(token.get(), TokenIsLessPrivilegedAppContainer, &lpac, sizeof(lpac), &length), "query LPAC token");
   return app != 0 && lpac != 0;
 }
 
@@ -143,11 +143,11 @@ public:
     DWORD policy = PROCESS_CREATION_ALL_APPLICATION_PACKAGES_OPT_OUT;
     HANDLE inherited[] = {ready_.get(), gate_.get()};
     require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-      &capabilities, sizeof(capabilities), nullptr, nullptr));
+      &capabilities, sizeof(capabilities), nullptr, nullptr), "set AppContainer creation attribute");
     require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY,
-      &policy, sizeof(policy), nullptr, nullptr));
+      &policy, sizeof(policy), nullptr, nullptr), "set LPAC creation attribute");
     require(UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-      inherited, sizeof(inherited), nullptr, nullptr));
+      inherited, sizeof(inherited), nullptr, nullptr), "set inherited handle allowlist");
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
     startup.lpAttributeList = list;
@@ -157,12 +157,12 @@ public:
     PROCESS_INFORMATION created{};
     require(CreateProcessW(binary.c_str(), command.data(), nullptr, nullptr, TRUE,
       EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW,
-      nullptr, binary.parent_path().c_str(), &startup.StartupInfo, &created));
+      nullptr, binary.parent_path().c_str(), &startup.StartupInfo, &created), "create suspended LPAC child");
     Handle thread(created.hThread);
     process_.adopt(created.hProcess);
     try {
       // Verify the actual token and assign the Job before the first instruction.
-      require(AssignProcessToJobObject(job_.get(), process_.get()));
+      require(AssignProcessToJobObject(job_.get(), process_.get()), "assign suspended child to Job");
       if (!appcontainer_token(process_.get())) throw Failure{ERROR_BAD_TOKEN_TYPE};
       if (ResumeThread(thread.get()) == static_cast<DWORD>(-1)) throw Failure{GetLastError()};
       if (WaitForSingleObject(ready_.get(), 5000) != WAIT_OBJECT_0) throw Failure{WAIT_TIMEOUT};
@@ -279,6 +279,7 @@ int wmain(int argc, wchar_t** argv) {
     bool profile_created = false, root_created = false;
     std::vector<Measurement> measurements;
     DWORD failure = 0;
+    const char* failed_operation = "none";
     try {
       hresult(CreateAppContainerProfile(name.c_str(), L"Octant feasibility", L"Disposable native measurements", nullptr, 0, &sid));
       profile_created = true;
@@ -322,7 +323,7 @@ int wmain(int argc, wchar_t** argv) {
         Child process(binary, sid, L"subtree ignored");
         measurements.push_back({"closing the owned Job exits child and descendant", process.kill_subtree() ? 0u : ERROR_PROCESS_ABORTED, 0});
       }
-    } catch (const Failure& error) { failure = error.code; }
+    } catch (const Failure& error) { failure = error.code; failed_operation = error.operation; }
       catch (const std::exception&) { failure = ERROR_GEN_FAILURE; }
     if (sid) FreeSid(sid);
     bool profile_removed = !profile_created || SUCCEEDED(DeleteAppContainerProfile(name.c_str()));
@@ -332,7 +333,7 @@ int wmain(int argc, wchar_t** argv) {
     bool cleanup = profile_removed && processes_exited && fixture_removed;
     std::ofstream output{fs::path(argv[1])};
     output << "{\"productionReady\":false,\"status\":\"" << (failure ? "failed" : "measured")
-      << "\",\"error\":" << failure << ",\"profileRemoved\":" << (profile_removed ? "true" : "false")
+      << "\",\"error\":" << failure << ",\"errorOperation\":\"" << failed_operation << "\",\"profileRemoved\":" << (profile_removed ? "true" : "false")
       << ",\"processesExited\":" << (processes_exited ? "true" : "false")
       << ",\"fixtureRemoved\":" << (fixture_removed ? "true" : "false") << ",\"measurements\":[";
     for (size_t index = 0; index < measurements.size(); ++index) {
