@@ -141,6 +141,19 @@ describe("BrowserWorkspace", () => {
     expect(screen.queryByText("Agent can use this Browser.")).toBeNull();
     expect(screen.getByText("Browser availability is unknown.")).toBeVisible();
   });
+  it("keeps an invalid host response inside polling failure handling", async () => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue(undefined as never);
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{ kind: "browser", id: threadId, mode: "work", title: "Browser", threadId } as never}
+      />,
+    );
+    expect(await screen.findByText("Browser availability is unknown.")).toBeVisible();
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+    expect(screen.getByRole("region", { name: "Browser automation" })).toBeVisible();
+  });
   it("keeps compact browser chrome ahead of the live or remote page surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 

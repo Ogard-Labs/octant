@@ -408,15 +408,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 controller.signal,
               );
         if (!active || controller.signal.aborted) return;
+        const availability = next.agentAvailability;
         setAgentRead((previous) =>
           previous?.client === props.client &&
           previous.threadId === String(props.tab.threadId) &&
-          JSON.stringify(previous.availability) === JSON.stringify(next.agentAvailability)
+          JSON.stringify(previous.availability) === JSON.stringify(availability)
             ? previous
             : {
                 client: props.client,
                 threadId: String(props.tab.threadId),
-                availability: next.agentAvailability,
+                availability,
               },
         );
         const revision = snapshotRevision(next);
