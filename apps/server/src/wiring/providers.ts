@@ -192,6 +192,7 @@ import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
 import { githubRoutineEventSources } from "../extensions/githubRoutineEventSources";
 import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
+import { BundledPluginSwitchStore } from "../extensions/bundledPluginSwitchStore";
 import type {
   ExtensionProjectPinListing,
   McpServerSignInView,
@@ -995,6 +996,13 @@ export function wireProviders(deps: ProvidersDependencies) {
       lifecycle: extensionLifecycleService,
       resolver: extensionPackageResolver,
       skills: standaloneSkillService,
+      bundledPlugins: new BundledPluginSwitchStore({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
       // Packages from the npm registry the person's own npm settings name.
       // The registry address is read from those settings at each lookup;
       // nothing else in them is read.

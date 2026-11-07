@@ -505,7 +505,11 @@ function discoveredItems(listing: DiscoveredAgentToolingListing): ReadonlyArray<
  */
 export function buildLibrary(sources: LibrarySources): ReadonlyArray<LibraryItem> {
   const connectors = sources.connectors ?? connectorCatalog();
-  const packages = (sources.snapshot?.packages ?? []).filter((pkg) => pkg.activation.installed);
+  // A plugin built into Octant has only its switch, under Installed; it is not
+  // something to find, review, or install.
+  const packages = (sources.snapshot?.packages ?? []).filter(
+    (pkg) => pkg.activation.installed && pkg.source.kind !== "bundled",
+  );
   const installed = packages.map((pkg) => packageItem(pkg, connectors));
   const connected = new Set(
     installed.flatMap((item) => (item.connectorId ? [item.connectorId] : [])),

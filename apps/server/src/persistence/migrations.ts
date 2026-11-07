@@ -2424,6 +2424,18 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 93,
+    name: "create_bundled_plugin_switch_projection",
+    sql: `
+      CREATE TABLE bundled_plugin_switch_projection (
+        extension_id TEXT PRIMARY KEY CHECK(length(trim(extension_id)) > 0),
+        desired INTEGER NOT NULL CHECK(desired IN (0, 1)),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

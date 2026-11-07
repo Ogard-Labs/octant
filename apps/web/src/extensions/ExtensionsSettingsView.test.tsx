@@ -11,6 +11,7 @@ import type {
   ExtensionSnapshot,
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionActivationScope } from "@octant/contracts/extensions";
+import { FIRST_PARTY_PLUGIN_CATALOG } from "../shell/firstPartyPluginCatalog";
 import { ExtensionsSettingsView } from "./ExtensionsSettingsView";
 
 const extensionId = "15000000-0000-4000-8000-000000000001";
@@ -862,6 +863,56 @@ describe("ExtensionsSettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
     await waitFor(() =>
       expect(c.calls.some((command) => command.kind === "uninstall-package")).toBe(true),
+    );
+  });
+
+  it("shows a plugin built into Octant with only its on/off switch, and switches it off through the client", async () => {
+    const github = FIRST_PARTY_PLUGIN_CATALOG.find((plugin) => plugin.slug === "github");
+    if (github === undefined) throw new Error("GitHub is not in the first-party catalog.");
+    const on = baseActivation({ trusted: true, pluginDesired: true, componentDesired: true });
+    const snapshot = {
+      ...installedSnapshot(),
+      packages: [
+        {
+          extensionId: github.extensionId,
+          packageId: github.packageId,
+          slug: github.slug,
+          displayName: github.displayName,
+          stateVersion: 2 as never,
+          version: github.version,
+          digest: github.digest,
+          source: github.source,
+          compatibility: github.compatibility,
+          activation: on,
+          components: github.components.map((component) => ({
+            component,
+            activation: on,
+            effectiveState: { kind: "effective" as const },
+          })),
+          diagnostics: [],
+        },
+      ],
+    } as ExtensionSnapshot;
+    const c = client({ snapshot });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    const card = (await screen.findByText("GitHub")).closest("li");
+    if (card === null) throw new Error("The GitHub card is missing.");
+    expect(within(card).getByText("Built into Octant")).toBeInTheDocument();
+    const toggle = within(card).getByRole("switch", { name: "Enable GitHub" });
+    expect(toggle).toBeChecked();
+    for (const name of [/uninstall/i, /trust/i, /enable plugin/i, /component/i]) {
+      expect(within(card).queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(c.calls).toContainEqual({
+        kind: "set-plugin-desired",
+        commandVersion: 1,
+        extensionId: github.extensionId,
+        expectedStateVersion: 2,
+        desired: false,
+      }),
     );
   });
 
