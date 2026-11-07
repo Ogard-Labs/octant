@@ -41,3 +41,20 @@ def install_epochs(kernel: Path, native: Path) -> None:
         source = source[:first_line] + '#include <linux/octant_mediation_bridge.h>\n' + source[first_line:]
         path.write_text(source)
     shutil.copyfile(native / "bridge.h", kernel / "include/linux/octant_mediation_bridge.h")
+    # The modern static-call allocation counts configured LSMs explicitly.
+    # Register this original component in that count; selecting CONFIG_LSM
+    # alone otherwise leaves only the capability slot and skips initialization.
+    count = kernel / "include/linux/lsm_count.h"
+    source = count.read_text()
+    anchor = "\t\tCAPABILITIES_ENABLED\t\\\n"
+    if source.count(anchor) != 1:
+        raise ValueError("Pinned LSM count anchor differs")
+    source = source.replace(anchor, anchor + "\t\tOCTANT_MEDIATION_ENABLED\t\\\n", 1)
+    marker = "#define MAX_LSM_COUNT\t\t\t\\\n"
+    if source.count(marker) != 1:
+        raise ValueError("Pinned LSM count definition differs")
+    source = source.replace(marker,
+        "#if IS_ENABLED(CONFIG_SECURITY_OCTANT_MEDIATION)\n"
+        "#define OCTANT_MEDIATION_ENABLED 1,\n"
+        "#else\n#define OCTANT_MEDIATION_ENABLED\n#endif\n\n" + marker, 1)
+    count.write_text(source)

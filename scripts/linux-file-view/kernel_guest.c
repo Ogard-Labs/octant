@@ -69,7 +69,7 @@ static int measure(void)
   struct stat inode;
   if (stat("/tmp/ordinary", &inode)) return 3;
   int broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
-  if (broker < 0) return 4;
+  if (broker < 0) { printf("OCTANT_KERNEL_DEVICE_ERRNO %d\n", errno); return 4; }
   struct octant_mediation_status status;
   if (ioctl(broker, OCTANT_MEDIATION_STATUS, &status) || status.abi != OCTANT_MEDIATION_ABI ||
       status.production_coverage != 0) { close(broker); return 5; }

@@ -491,6 +491,7 @@ static int __init octant_security_init(void)
 {
 	security_add_hooks(octant_hooks, ARRAY_SIZE(octant_hooks), &octant_lsm_id);
 	initialized = true;
+	pr_info("Octant mediation: experimental production coverage=0\n");
 	return 0;
 }
 
