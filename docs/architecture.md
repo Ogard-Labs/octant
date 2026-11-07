@@ -8644,6 +8644,28 @@ a local window, like the rest of package lifecycle, and obey the Marketplace
 fetches preference. The lookup sends only `Accept` and the constrained
 `User-Agent`; there is no telemetry.
 
+**Writing a plugin.** `octant plugin create <name> [--mcp-url <address>]`
+writes a starter Agent Plugins folder in the current folder: `plugin.json`,
+one skill under `skills/<name>/`, a short README, and, with an address, an
+`mcp.json` naming that one Streamable HTTP server (https, or http to this
+computer, with no credentials in the address). The name must suit both the
+plugin and its skill folder, and an existing folder is refused, never written
+into. `octant plugin check <folder>` reads a folder by the host's folder-import
+rules (git history and links inside the folder left out, a link that leaves it
+refused, the same entry and size bounds) and runs it through the same
+`@octant/plugin-host` loader, then also refuses what the host would: a package
+with nothing to load, a local MCP command missing from the folder, and a
+folder that also holds a language server, provider driver, or debug adapter
+package document (which the import reads as that package instead). It reads
+the Agent Plugins layout only; Claude Code and Codex layouts still import but
+are not checked. A folder
+that passes is one **Import local Agent Plugin…** accepts. Both commands work
+on this computer's files alone: they open no host session, reach no network,
+and install, trust, or enable nothing, so a plugin still arrives untrusted and
+switched off. Choice: the walk is repeated in the CLI rather than shared
+because the host's reader lives in the server app, which a package may not
+import; the loader, which decides validity, is the shared one.
+
 **Selection epoch.** A selected plugin, MCP server, or skill carries the
 catalog epoch it was resolved under, and the host re-resolves it on send, replay,
 resume, and at provider handoff. The epoch is a hash of the facts a selection

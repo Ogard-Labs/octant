@@ -172,6 +172,8 @@
         "@octant/contracts": "workspace:*",
         "@octant/domain": "workspace:*",
         "@octant/host-runtime": "workspace:*",
+        "@octant/plugin-api": "workspace:*",
+        "@octant/plugin-host": "workspace:*",
         "@octant/theme": "workspace:*",
         "@opentui/core": "0.5.10",
         "lean-qr": "2.7.4",
