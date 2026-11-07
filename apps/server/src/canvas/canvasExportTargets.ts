@@ -15,6 +15,10 @@ import {
 } from "./gistExportTarget";
 import type { CanvasPublicShareService } from "./canvasPublicShareService";
 import { createPublicLinkExportTarget, publicLinkActivationFacts } from "./publicLinkExportTarget";
+import {
+  createSharehtmlExportTarget,
+  type SharehtmlExportTargetDependencies,
+} from "./sharehtmlExportTarget";
 
 /**
  * In-tree export destinations.
@@ -48,6 +52,11 @@ export interface CanvasExportTargetRegistration {
    * privacy › Public links is on, so with it off nothing is offered and nothing is sent.
    */
   readonly publicLinks?: CanvasPublicShareService;
+  /**
+   * The sharehtml.org page destination. It needs no local account — anonymous
+   * uploads are allowed — so it is offered on every host.
+   */
+  readonly sharehtml?: SharehtmlExportTargetDependencies;
 }
 
 export function canvasExportTargetBindings(
@@ -65,6 +74,7 @@ export function canvasExportTargetBindings(
   };
   const gist = registration.gist;
   const links = registration.publicLinks;
+  const sharehtml = registration.sharehtml;
   return [
     folder,
     ...(gist === undefined
@@ -72,7 +82,10 @@ export function canvasExportTargetBindings(
       : [
           { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
         ]),
-    ...(links === undefined || !links.enabled()
+    ...(sharehtml === undefined
+      ? []
+      : [{ facts: sharehtmlActivationFacts(), target: createSharehtmlExportTarget(sharehtml) }]),
+    ...(links === undefined || !links.enabled() || links.settings().serviceUrl === ""
       ? []
       : [{ facts: publicLinkActivationFacts(links), target: createPublicLinkExportTarget(links) }]),
   ];
@@ -125,6 +138,20 @@ export function activationFacts(
   return availability.kind === "refused"
     ? { ...facts, standingRefusal: availability.reason }
     : facts;
+}
+
+/**
+ * The sharehtml.org destination's activation facts: anonymous uploads need no
+ * local connection, so the target is connected on every host.
+ */
+export function sharehtmlActivationFacts(): CanvasExportActivationFacts {
+  return {
+    installed: true,
+    trusted: true,
+    desiredEnabled: true,
+    effectiveState: { kind: "effective" },
+    connected: true,
+  };
 }
 
 /**

@@ -1,0 +1,7 @@
+.git
+node_modules
+dist
+.turbo
+coverage
+apps/docs/dist
+apps/docs/.vitepress/cache

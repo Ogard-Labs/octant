@@ -14221,9 +14221,11 @@ documents its authority, privacy, and release boundaries):
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
-- The public Canvas share service, under
-  [Canvas public links](design/canvas-public-links.md); its code lives in the
-  `octant-webapp` repository.
+- Public Canvas links, under
+  [Canvas public links](design/canvas-public-links.md), served by the
+  self-hostable reference app at `apps/share` in this repository. Ogard Labs
+  operates no share-service instance; each user runs one or points Octant at
+  another service they choose.
 
 Out of scope: a merge or force-push an agent starts on its own initiative,
 cloud scheduling, an Octant-operated hosted service, Apple physical devices,
@@ -14377,14 +14379,15 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account.
 
-The public Canvas share service (`https://canvas.octant.sh`, in the
-`octant-webapp` repository) is in scope: an Octant-operated service that stores, and can read, the Canvases
-people publish as public links, under the rules in
-[Canvas public links](design/canvas-public-links.md). It is not an Octant
-account, a relay, or a sync store; nothing reaches it until the person turns
-Public links on and approves a publish, and a self-hosted service URL is a
-Settings choice. Deploying it, its DNS and TLS, and its operator contact are
-release steps of their own.
+Public Canvas links are in scope under the rules in
+[Canvas public links](design/canvas-public-links.md), served by the reference
+share app at `apps/share` in this repository, which each user self-hosts (or
+they point Octant at another service they choose; no service address is set by
+default). Ogard Labs operates no share-service instance: it is not an Octant
+account, a relay, or a sync store, and nothing reaches any service until the
+person turns Public links on, sets an address, and approves a publish. Running
+the service — its host, DNS, TLS, and operator contact — is the user's own
+deployment step, documented in the `apps/share` README.
 
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a

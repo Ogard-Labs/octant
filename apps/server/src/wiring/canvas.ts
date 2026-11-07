@@ -81,6 +81,7 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "../canvas/canvasExportTargets";
+import { createSharehtmlPort } from "../canvas/sharehtmlPort";
 import {
   authorizeCanvasInventoryAccess,
   chatThreadHoldsCanvas as threadLifecycleHoldsCanvas,
@@ -1070,6 +1071,9 @@ export function wireCanvas(deps: CanvasDependencies) {
       availability: () => gistConnection.availability(),
       gists: createGhGistCreationPort(options.ghExecutable),
     },
+    // The sharehtml.org destination needs no local account: anonymous uploads
+    // are part of its API, and the page is unlisted by default.
+    sharehtml: { pages: createSharehtmlPort() },
     publicLinks: canvasPublicShareService,
   };
   // Destinations arrive through the export contribution and are offered

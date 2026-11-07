@@ -119,6 +119,20 @@
         "vitest": "catalog:",
       },
     },
+    "apps/share": {
+      "name": "@octant/share",
+      "bin": {
+        "octant-share-takedown": "src/takedown.ts",
+      },
+      "dependencies": {
+        "@octant/contracts": "workspace:*",
+        "@octant/domain": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "apps/web": {
       "name": "@octant/web",
       "dependencies": {
@@ -750,6 +764,8 @@
     "@octant/scripts": ["@octant/scripts@workspace:scripts"],
 
     "@octant/server": ["@octant/server@workspace:apps/server"],
+
+    "@octant/share": ["@octant/share@workspace:apps/share"],
 
     "@octant/theme": ["@octant/theme@workspace:packages/theme"],
 

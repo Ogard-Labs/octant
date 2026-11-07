@@ -1063,7 +1063,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("public-link-service"),
           label: "Service address",
           scope: "host",
-          keywords: "public links service address url canvas.octant.sh self-hosted publish",
+          keywords: "public links service address url self-hosted publish share",
         },
         {
           id: settingId("browser-site-approvals"),
