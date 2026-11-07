@@ -2310,7 +2310,20 @@ describe.skipIf(chrome === undefined)(
       async (path) => {
         const f = await surface(path);
         try {
-          await f.page.setViewportSize({ width: 640, height: 480 });
+          // Use the real content viewport rather than Playwright's emulated window
+          // size; a native view's declared bounds must match the captured document.
+          const sizing = await f.page.context().newCDPSession(f.page);
+          await sizing.send("Emulation.clearDeviceMetricsOverride");
+          await sizing.send("Page.captureScreenshot", {
+            format: "jpeg",
+            captureBeyondViewport: false,
+          });
+          const metrics = await sizing.send("Page.getLayoutMetrics");
+          const viewport = {
+            width: metrics.cssVisualViewport.clientWidth,
+            height: metrics.cssVisualViewport.clientHeight,
+          };
+          await sizing.detach();
           f.host.attach(
             f.contextId,
             f.owner,
@@ -2319,7 +2332,7 @@ describe.skipIf(chrome === undefined)(
               isDestroyed: () => false,
               webContents: { send: () => undefined },
             },
-            { x: 0, y: 0, width: 640, height: 480 },
+            { x: 0, y: 0, ...viewport },
           );
           f.host.setPointSelection(f.contextId, f.owner, true, crypto.randomUUID());
           f.personPoint(
@@ -2341,7 +2354,7 @@ describe.skipIf(chrome === undefined)(
           if (result.status !== "described")
             throw Error(`Real point capture refused: ${JSON.stringify(result)}`);
           expect(result.element.context?.captureId).toMatch(/^[a-f0-9]{64}$/);
-          expect(result.element.context?.viewport).toEqual({ width: 640, height: 480 });
+          expect(result.element.context?.viewport).toEqual(viewport);
           expect(result.element.context?.omissions).toContain("form-values-excluded");
           if (path === "/feedback-frame") {
             expect(result.element.selector).toBe("#feedback-container");

@@ -4,6 +4,7 @@ import {
   decodeProductFeedbackNote,
   type ProductFeedbackCommand,
 } from "@octant/contracts/product-feedback";
+import { StrictMode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useProductFeedback } from "./useProductFeedback";
@@ -103,6 +104,25 @@ function host(options: { timeout?: number; prepare?: () => Promise<Response> } =
 const point = { contextId, expectedObservationRevision: 7, point: { x: 0.2, y: 0.3 } };
 
 describe("feedback surface through the actual typed host client", () => {
+  it("keeps notes and capture commands available after development effect replay", async () => {
+    const fixture = host();
+    const { result } = renderHook(
+      () => useProductFeedback({ threadId, mode: "code", client: fixture.client }),
+      { wrapper: StrictMode },
+    );
+    await waitFor(() => expect(result.current.pending).toHaveLength(1));
+    let prepared = false;
+    await act(async () => {
+      prepared = await result.current.prepare(point);
+    });
+    expect(prepared).toBe(true);
+    expect(result.current.preview?.id).toBe(previewId);
+    await act(async () => {
+      await result.current.commit("After effect replay");
+    });
+    expect(result.current.pending[0]?.comment).toBe("After effect replay");
+  });
+
   it("previews before commit, then amends, chooses and removes the exact pending version without sending", async () => {
     const h = host();
     const view = renderHook(() => useProductFeedback({ threadId, mode: "code", client: h.client }));

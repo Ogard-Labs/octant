@@ -33,7 +33,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   browserSurfaceOpenExternal: "local",
   browserSurfaceState: "replaced",
   browserSurfaceTab: "local",
-  browserSurfacePoint: "local",
+  browserSurfacePoint: "brokered",
   browserExtensionPopupOpen: "brokered",
   browserExtensionPopupClose: "brokered",
   browserExtensionTabs: "brokered",

@@ -3533,6 +3533,7 @@ async function selectedSurface(extraTab = false) {
                 styles: [{ property: "color", value: "rgb(0, 0, 0)" }],
                 omissions: [],
               },
+              cropBounds: { x: 64, y: 48, width: 64, height: 48 },
               cropBlocked: false,
             },
           },

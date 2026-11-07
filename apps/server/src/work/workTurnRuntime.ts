@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -97,7 +98,7 @@ export interface WorkTurnRuntimePort {
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     /** Claims only the exact prepared notes after the final admission check. */
-    readonly takeProductFeedback?: () => {
+    readonly takeProductFeedback?: (maxAttachments?: number) => {
       readonly context?: string;
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     };
@@ -628,12 +629,14 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             });
           let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
           try {
-            feedback = input.takeProductFeedback?.();
+            feedback = input.takeProductFeedback?.(
+              MAX_PROVIDER_ATTACHMENTS - (input.attachments?.length ?? 0),
+            );
           } catch {
             return Effect.fail({
               category: "provider-failed" as const,
               message:
-                "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+                "Selected product notes or the attachment budget changed. Refresh notes or remove attachments before sending again.",
             });
           }
           if (input.signal.aborted || input.admissionCurrent?.() === false)

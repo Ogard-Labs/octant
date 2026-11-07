@@ -1239,7 +1239,9 @@ Comments can be amended or removed while pending, and the person chooses which
 notes accompany an ordinary message. The original capture remains immutable.
 No note action sends, queues, steers, approves or resolves work. Automatic
 continuations leave chosen notes pending. Native Electron input acceptance is a
-separate runtime gate from controlled-port tests or real Chromium DOM tests.
+separate runtime gate from controlled-port tests or real Chromium DOM tests. The
+embedded native-client presentation does not support pointing yet; its control
+stays disabled with an explicit unavailable reason.
 A note has split provenance: its comment is the person's request, while the
 selector, DOM, style and image are outside content that taints the destination
 thread and is framed as evidence, never instructions.

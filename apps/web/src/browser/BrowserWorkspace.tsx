@@ -275,13 +275,15 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     ? "Open a Browser page before choosing an element."
     : snapshot?.waitingForPerson === "sign-in"
       ? "Finish sign-in and Continue before choosing an element."
-      : nativeContext &&
-          (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
-            props.hostBridge.subscribeBrowserSurfaceState === undefined)
-        ? "This app build cannot select a native Browser element."
-        : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
-          ? "Refresh the page preview before choosing an element."
-          : undefined;
+      : nativeSurface.embedded !== undefined
+        ? "Element selection is not available in this embedded Browser presentation yet."
+        : nativeContext &&
+            (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
+              props.hostBridge.subscribeBrowserSurfaceState === undefined)
+          ? "This app build cannot select a native Browser element."
+          : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
+            ? "Refresh the page preview before choosing an element."
+            : undefined;
   const feedbackPointing = useBrowserFeedbackPointing({
     contextId:
       snapshot?.context?.contextId === undefined ? undefined : String(snapshot.context.contextId),

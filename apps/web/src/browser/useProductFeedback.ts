@@ -112,7 +112,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
     () => ({ client, threadId: options.threadId, mode: options.mode }),
     [client, options.threadId, options.mode],
   );
-  const lifetime = useMemo(() => new AbortController(), [owner]);
+  const lifetime = useMemo(() => ({ current: new AbortController() }), [owner]);
   const latestOwner = useRef(owner);
   latestOwner.current = owner;
   const [state, setState] = useState(() => empty(owner));
@@ -129,7 +129,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
   const refreshPaused = useMemo(() => ({ current: false }), [owner]);
   const current = useCallback(
     (signal?: AbortSignal) =>
-      latestOwner.current === owner && !lifetime.signal.aborted && signal?.aborted !== true,
+      latestOwner.current === owner && !lifetime.current.signal.aborted && signal?.aborted !== true,
     [owner, lifetime],
   );
   const patch = useCallback(
@@ -144,10 +144,15 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
     [owner, current],
   );
 
-  useEffect(
-    () => () => {
-      lifetime.abort();
-      if (operation.current?.owner === owner) operation.current.abort.abort();
+  useEffect(() => {
+    const active = new AbortController();
+    lifetime.current = active;
+    return () => {
+      active.abort();
+      if (operation.current?.owner === owner) {
+        operation.current.abort.abort();
+        operation.current = undefined;
+      }
       const preview = previewHolder.current;
       if (preview !== undefined && owner.client !== undefined && owner.threadId !== undefined)
         void owner.client
@@ -160,9 +165,8 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
             AbortSignal.timeout(2_000),
           )
           .catch(() => undefined);
-    },
-    [owner, lifetime, previewHolder],
-  );
+    };
+  }, [owner, lifetime, previewHolder]);
 
   const perform = useCallback(
     async (
@@ -184,7 +188,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
       previous?.abort.abort();
       const abort = new AbortController();
       operation.current = { owner, abort, foreground, kind };
-      const signal = AbortSignal.any([abort.signal, lifetime.signal]);
+      const signal = AbortSignal.any([abort.signal, lifetime.current.signal]);
       if (foreground) patch({ busy: true, message: undefined });
       try {
         return await work(signal);

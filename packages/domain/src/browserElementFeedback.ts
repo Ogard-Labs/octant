@@ -9,6 +9,12 @@ export interface BrowserFeedbackElementRead {
     "kind" | "url" | "title" | "context"
   >;
   readonly context: Omit<ProductFeedbackBrowserContext, "captureId">;
+  readonly cropBounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
   readonly cropBlocked: boolean;
 }
 
@@ -22,6 +28,8 @@ export function readBrowserFeedbackElement(argument: {
   readonly y: number;
   readonly viewportWidth: number;
   readonly viewportHeight: number;
+  readonly pageX?: number;
+  readonly pageY?: number;
 }): BrowserFeedbackElementRead | null {
   const element = document.elementFromPoint(argument.x, argument.y);
   if (element === null || /^(?:iframe|frame)$/i.test(element.tagName)) return null;
@@ -112,6 +120,23 @@ export function readBrowserFeedbackElement(argument: {
   const rect = element.getBoundingClientRect();
   const padX = Math.min(24, argument.viewportWidth * 0.05);
   const padY = Math.min(24, argument.viewportHeight * 0.05);
+  const pageX = argument.pageX ?? 0;
+  const pageY = argument.pageY ?? 0;
+  // Inspect exactly the same viewport-clipped document rectangle the host captures.
+  const cropX = Math.max(pageX, Math.floor(pageX + rect.left - padX));
+  const cropY = Math.max(pageY, Math.floor(pageY + rect.top - padY));
+  const right = Math.min(pageX + argument.viewportWidth, Math.ceil(pageX + rect.right + padX));
+  const bottom = Math.min(pageY + argument.viewportHeight, Math.ceil(pageY + rect.bottom + padY));
+  const cropBounds = {
+    x: cropX,
+    y: cropY,
+    width: Math.max(0, right - cropX),
+    height: Math.max(0, bottom - cropY),
+  };
+  const cropLeft = cropX - pageX;
+  const cropTop = cropY - pageY;
+  const cropRight = cropLeft + cropBounds.width;
+  const cropBottom = cropTop + cropBounds.height;
   let cropBlocked = element.closest(editable) !== null;
   // A screenshot cannot be described as value-free merely because text was
   // filtered. Withhold it when an editable control overlaps the padded crop.
@@ -125,10 +150,10 @@ export function readBrowserFeedbackElement(argument: {
     if (
       box.width > 0 &&
       box.height > 0 &&
-      box.right > rect.left - padX &&
-      box.left < rect.right + padX &&
-      box.bottom > rect.top - padY &&
-      box.top < rect.bottom + padY
+      box.right > cropLeft &&
+      box.left < cropRight &&
+      box.bottom > cropTop &&
+      box.top < cropBottom
     ) {
       cropBlocked = true;
       opaqueCrop = /^(?:iframe|frame|embed|object)$/i.test(control.tagName);
@@ -153,10 +178,10 @@ export function readBrowserFeedbackElement(argument: {
     if (
       box.width > 0 &&
       box.height > 0 &&
-      box.right > rect.left - padX &&
-      box.left < rect.right + padX &&
-      box.bottom > rect.top - padY &&
-      box.top < rect.bottom + padY
+      box.right > cropLeft &&
+      box.left < cropRight &&
+      box.bottom > cropTop &&
+      box.top < cropBottom
     ) {
       cropBlocked = true;
       opaqueCrop = true;
@@ -190,6 +215,7 @@ export function readBrowserFeedbackElement(argument: {
         ...(opaqueCrop ? ["crop-withheld-for-uninspected-region" as const] : []),
       ],
     },
+    cropBounds,
     cropBlocked,
   };
 }

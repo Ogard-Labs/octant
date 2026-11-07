@@ -2229,8 +2229,8 @@ export class WorkTurnService {
         ...(input.preparedProductFeedback === undefined
           ? {}
           : {
-              takeProductFeedback: () => {
-                const carried = input.preparedProductFeedback?.take();
+              takeProductFeedback: (maxAttachments) => {
+                const carried = input.preparedProductFeedback?.take(maxAttachments);
                 if (
                   carried === undefined ||
                   carried.context !== input.preparedProductFeedback?.context

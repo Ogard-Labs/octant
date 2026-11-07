@@ -105,6 +105,8 @@ export async function captureBrowserFeedbackPoint(
       y: point.y * viewport.clientHeight,
       viewportWidth: viewport.clientWidth,
       viewportHeight: viewport.clientHeight,
+      pageX: viewport.pageX,
+      pageY: viewport.pageY,
     };
     const hit = record(
       await send("DOM.getNodeForLocation", {
@@ -154,6 +156,25 @@ export async function captureBrowserFeedbackPoint(
     ) {
       throw new Error("Feedback description is invalid.");
     }
+    const crop = record(description.cropBounds);
+    if (
+      crop === undefined ||
+      typeof crop.x !== "number" ||
+      typeof crop.y !== "number" ||
+      typeof crop.width !== "number" ||
+      typeof crop.height !== "number" ||
+      !Number.isFinite(crop.x) ||
+      !Number.isFinite(crop.y) ||
+      !Number.isFinite(crop.width) ||
+      !Number.isFinite(crop.height) ||
+      crop.x < viewport.pageX ||
+      crop.y < viewport.pageY ||
+      crop.width < 0 ||
+      crop.height < 0 ||
+      crop.x + crop.width > viewport.pageX + viewport.clientWidth ||
+      crop.y + crop.height > viewport.pageY + viewport.clientHeight
+    )
+      throw new Error("Feedback crop is invalid.");
     const decoded = decodeProductFeedbackElement({
       kind: "browser-element",
       ...element,
@@ -174,6 +195,7 @@ export async function captureBrowserFeedbackPoint(
       },
       element: selected,
       cropBlocked: description.cropBlocked,
+      cropBounds: { x: crop.x, y: crop.y, width: crop.width, height: crop.height },
       ...(typeof result.title === "string" ? { title: result.title.trim().slice(0, 1_024) } : {}),
     };
   };
@@ -194,21 +216,14 @@ export async function captureBrowserFeedbackPoint(
     await pause();
     let cropDataUrl: string | undefined;
     if (!before.cropBlocked) {
-      const bounds = before.element.bounds;
-      const viewport = before.viewport;
-      const padX = Math.min(24, viewport.width * 0.05);
-      const padY = Math.min(24, viewport.height * 0.05);
-      const x = Math.max(0, bounds.x * viewport.width - padX);
-      const y = Math.max(0, bounds.y * viewport.height - padY);
-      const width = Math.min(viewport.width - x, bounds.width * viewport.width + padX * 2);
-      const height = Math.min(viewport.height - y, bounds.height * viewport.height + padY * 2);
+      const { x, y, width, height } = before.cropBounds;
       if (width >= 1 && height >= 1) {
         const screenshot = record(
           await send("Page.captureScreenshot", {
             format: "jpeg",
             quality: 60,
             captureBeyondViewport: false,
-            clip: { x: x + viewport.pageX, y: y + viewport.pageY, width, height, scale: 1 },
+            clip: { x, y, width, height, scale: 1 },
           }).catch(() => undefined),
         );
         if (

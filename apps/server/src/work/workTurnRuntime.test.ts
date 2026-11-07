@@ -1970,6 +1970,7 @@ describe("WorkTurnRuntime", () => {
       expect(feedback).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
       expect(send).toHaveBeenCalledTimes(stillCurrent ? 1 : 0);
       if (stillCurrent) {
+        expect(feedback).toHaveBeenCalledWith(15);
         expect(order).toEqual(["feedback", "send"]);
         expect(send.mock.calls[0]?.[0]).toMatchObject({
           prompt: "Use my selected notes",

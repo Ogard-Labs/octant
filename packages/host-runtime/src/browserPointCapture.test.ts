@@ -58,6 +58,7 @@ function fixture() {
                   styles: [{ property: "color", value: "rgb(0, 0, 0)" }],
                   omissions: blocked ? ["crop-withheld-for-uninspected-region"] : [],
                 },
+                cropBounds: { x: 136, y: 196, width: 112, height: 96 },
                 cropBlocked: blocked,
               },
             },

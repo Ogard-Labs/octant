@@ -959,6 +959,7 @@ describe("bounded headless element feedback", () => {
                         styles: [{ property: "color", value: "black" }],
                         omissions: [],
                       },
+                      cropBounds: { x: 296, y: 336, width: 176, height: 84 },
                       cropBlocked: false,
                     },
               },

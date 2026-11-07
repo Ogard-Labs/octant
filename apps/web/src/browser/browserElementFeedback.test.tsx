@@ -19,6 +19,26 @@ afterEach(() => {
 });
 
 describe("the shared host element reader", () => {
+  it.each([
+    { left: 10, outside: 140, width: 134 },
+    { left: -30, outside: 100, width: 94 },
+  ])(
+    "inspects the viewport-clipped crop beside an editable control ($left)",
+    ({ left, outside, width }) => {
+      const button = select(
+        `<button id="save">Save</button><input value="private value">`,
+        "#save",
+      );
+      vi.mocked(button.getBoundingClientRect).mockReturnValue(new DOMRect(left, 10, 100, 40));
+      const field = document.querySelector("input");
+      if (field === null) throw Error("Missing adjacent control");
+      vi.spyOn(field, "getBoundingClientRect").mockReturnValue(new DOMRect(outside, 10, 20, 20));
+      const read = readBrowserFeedbackElement(point);
+      expect(read?.cropBlocked).toBe(false);
+      expect(read?.cropBounds).toEqual({ x: 0, y: 0, width, height: 74 });
+    },
+  );
+
   it("names the document element when the selected point is outside body content", () => {
     Object.defineProperty(document, "elementFromPoint", {
       configurable: true,
