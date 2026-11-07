@@ -696,7 +696,6 @@ export function startOctantServer(
       externalContentIngestionStore,
       options,
       persistence,
-      projectService,
       localPluginImportReceipts,
       providerDataDirectory,
       shellService,
