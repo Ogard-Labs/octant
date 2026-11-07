@@ -2460,6 +2460,11 @@ interface ActiveTurn {
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
   readonly carriedSentContext: CarriedSentContext;
+  /**
+   * Whether this is the thread's first turn on a context of its own: no earlier
+   * turn, and no session, handoff or fork conversation carried in.
+   */
+  readonly firstTurn: boolean;
   /** Which of this turn's context blocks are Octant's instructions and skills. */
   readonly sentContext?: CodeTurnSentContext;
   readonly secrets: readonly string[];
@@ -3335,6 +3340,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ]),
       ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
       driver,
+      firstTurn:
+        !priorTurn &&
+        resumeCursor === undefined &&
+        switchHandoff?.record === undefined &&
+        forkHandoff?.record === undefined &&
+        forkMerges.records.length === 0,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
         forkSeeded,
@@ -5061,7 +5072,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 },
               }),
           onTurnEnded: (ended) => {
-            endedTurn = withPromptDigest(ended, this.#options.nativeHarness?.promptDigest, prompt);
+            endedTurn = withPromptDigest(ended, this.#options.nativeHarness?.promptDigest, prompt, {
+              firstTurn: active.firstTurn,
+            });
           },
           ...(this.#options.liveTurns === undefined
             ? {}

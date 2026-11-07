@@ -6145,6 +6145,8 @@ export class ChatService {
                   ended,
                   this.#nativeHarness?.promptDigest,
                   input.prompt,
+                  // A branch carries earlier turns, so its own first turn is not sequence 1.
+                  { firstTurn: input.turn.sequence === 1 },
                 );
               },
               ...(this.#liveTurns === undefined

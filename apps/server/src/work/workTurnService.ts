@@ -2209,6 +2209,13 @@ export class WorkTurnService {
             ended,
             this.#nativeHarness?.promptDigest,
             input.command.prompt,
+            {
+              // A subagent result delivery is the host's text, never a task a person set.
+              firstTurn:
+                input.command.delivery === undefined &&
+                String(this.#projection.listForThread(input.command.threadId)[0]?.requestId) ===
+                  String(input.command.requestId),
+            },
           );
         },
         ...(this.#liveTurns === undefined

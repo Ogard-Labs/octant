@@ -13,7 +13,7 @@ the same task measured the same way on each: how fast, how many tokens, what
 it cost, how often tools failed, and how good the answer was. Diagnostics
 already measures every turn. Benchmarks add three things on top:
 
-1. **Same prompt, compared.** Ordinary turns that sent the same prompt are
+1. **Same prompt, compared.** Ordinary threads that opened with the same prompt are
    grouped, so everyday use already compares models.
 2. **Suites you can run.** A suite of prompt and Code tasks runs on chosen
    models in one go, with repetitions.
@@ -34,7 +34,12 @@ already measures every turn. Benchmarks add three things on top:
 
 - Each `turn-metrics-recorded` frame gains an optional `promptDigest`. It is an
   HMAC-SHA-256 of the prompt as sent, with whitespace normalized, keyed with a
-  host-local secret. It is never the prompt text. The key never leaves the host,
+  host-local secret. It is never the prompt text. Only a thread's first turn
+  carries a digest, on its own context: a short follow-up such as "continue" or
+  "yes" means something only inside its conversation, and grouping it with the
+  same words elsewhere would compare unrelated work. A subagent result
+  delivery, a branch's own turns, and a Code turn on a carried-in session,
+  handoff, or fork are never first turns. The key never leaves the host,
   so a digest cannot be matched against a guessed prompt on another machine.
   A thread purge erases the frame and its digest.
 - The diagnostics report adds a **Same prompt** list: prompts sent to two or
