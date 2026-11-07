@@ -80,3 +80,33 @@ race prevention, syscall emulation, aliases and effective policy still need
 their own implementation and evidence. See the primary
 [SQPOLL contract](https://man7.org/linux/man-pages/man2/io_uring_setup.2.html)
 and [ptrace lifecycle contract](https://man7.org/linux/man-pages/man2/ptrace.2.html).
+
+## Asynchronous I/O refusal compatibility
+
+`async_refusal.c` installs a process-owned, inherited seccomp filter solely for
+compatibility measurement. It returns `EPERM` or `ENOSYS` for all three io_uring
+syscalls and the Linux AIO context, submission, cancellation and completion
+syscalls. No filesystem policy is implemented. `async_compatibility.py` measures
+both errno choices against Bun 1.4.4, the runner's recorded Node version, the
+Claude Agent SDK native executable 0.3.211 and Codex 0.164.0. The first two pins
+match the repository's package manager and dependency; Codex is the documented
+observed protocol revision, not a claim that every installed revision works.
+
+The deterministic JavaScript fixture exercises real asynchronous file reads,
+writes, fsync, held descriptors, hard-link inode identity, persistent rename,
+child creation and a native watch event from a child writer. It also checks
+Bun's file API and runs the native refusal check in a spawned descendant.
+Provider executables only print version/help in a Bubblewrap network namespace,
+with empty temporary account/configuration directories and no inherited
+credentials. No provider request is made. If the standard Bubblewrap capsule
+cannot start, provider checks remain blocked; deterministic Bun/Node results
+are separately labelled as outside the capsule. No AppArmor, sysctl, boot or
+other host security setting is changed by this job.
+
+Dispatch `experiment=async-compatibility` for this experiment only. The Python
+owner has a 90-second lifetime, each operation is bounded to ten seconds, the
+outer timeout is 100 seconds and the job is limited to five minutes. Retained
+process leaders are joined; timeout cleanup kills only the owned process group.
+The private fixture is identity-checked before removal. Passing startup and
+selected file checks does not prove authenticated provider behavior, a complete
+syscall mediator or production readiness.

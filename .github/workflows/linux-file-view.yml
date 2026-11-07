@@ -14,6 +14,7 @@ on:
         options:
           - file-view
           - syscall-admission
+          - async-compatibility
 
 permissions:
   contents: read
@@ -112,5 +113,38 @@ jobs:
         with:
           name: linux-syscall-admission
           path: ${{ runner.temp }}/syscall-admission.json
+          if-no-files-found: error
+          retention-days: 7
+
+  async-compatibility:
+    name: Measure runtime compatibility with refused asynchronous I/O
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'async-compatibility'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Prepare standard tooling and pinned provider executables
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          npm install --prefix "$RUNNER_TEMP/octant-provider-startup" --ignore-scripts --no-audit --no-fund \
+            @anthropic-ai/claude-agent-sdk-linux-x64@0.3.211 @openai/codex@0.164.0
+      - name: Compile the process-owned inherited refusal fixture
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/async_refusal.c \
+            -o "$RUNNER_TEMP/octant-async-refusal"
+      - name: Measure only deterministic files and no-auth startup
+        run: |
+          timeout --kill-after=3s 100s python3 scripts/linux-file-view/async_compatibility.py \
+            "$RUNNER_TEMP/octant-async-refusal" "$(command -v bun)" \
+            "$RUNNER_TEMP/octant-provider-startup" "$RUNNER_TEMP/async-compatibility.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-async-refusal-compatibility
+          path: ${{ runner.temp }}/async-compatibility.json
           if-no-files-found: error
           retention-days: 7
