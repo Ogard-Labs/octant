@@ -94,10 +94,6 @@ export default defineConfig({
             { text: "Native Harness", link: "/advanced/native-harness" },
             { text: "Plugins and Skills", link: "/advanced/plugins-and-skills" },
             { text: "Build a Provider Driver", link: "/advanced/provider-drivers" },
-            {
-              text: "Build an Export Destination Plugin",
-              link: "/advanced/build-export-destination-plugin",
-            },
           ],
         },
         {
