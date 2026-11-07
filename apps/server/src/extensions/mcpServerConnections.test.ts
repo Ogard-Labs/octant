@@ -35,7 +35,10 @@ function server(
   } as never;
 }
 
-function snapshot(components: ReadonlyArray<ExtensionPackageState["components"][number]>) {
+function snapshot(
+  components: ReadonlyArray<ExtensionPackageState["components"][number]>,
+  slug = "connector-linear",
+) {
   return {
     sequence: 0,
     snapshotAt: "2026-11-07T12:00:00.000Z",
@@ -45,6 +48,8 @@ function snapshot(components: ReadonlyArray<ExtensionPackageState["components"][
         extensionId,
         packageId: "linear",
         displayName: "Linear",
+        slug,
+        addedInSettings: true,
         version: "1.0.0",
         digest: `sha256:${"a".repeat(64)}`,
         components: [
@@ -60,23 +65,21 @@ async function list(input: {
   readonly components: ReadonlyArray<ExtensionPackageState["components"][number]>;
   readonly signIn?: Record<string, McpServerSignInView>;
   readonly observations?: ReadonlyArray<McpConnectionObservation>;
+  readonly slug?: string;
 }) {
   const signInStatus = vi.fn(
     async (_extensionId: string, componentId: string): Promise<McpServerSignInView> =>
       input.signIn?.[componentId] ?? { kind: "not-applicable" },
   );
-  const listing = await listMcpServerConnections(
-    {
-      snapshot: () => snapshot(input.components),
-      observations: () => input.observations ?? [],
-      signInStatus,
-      readConfiguration: async (_packageState, componentId) =>
-        componentId === "local"
-          ? JSON.stringify({ mcpServers: { local: { command: "node", args: ["server.js"] } } })
-          : JSON.stringify({ mcpServers: { remote: { url: "https://mcp.example.com/mcp" } } }),
-    },
-    "local-window",
-  );
+  const listing = await listMcpServerConnections({
+    snapshot: () => snapshot(input.components, input.slug),
+    observations: () => input.observations ?? [],
+    signInStatus,
+    readConfiguration: async (_packageState, componentId) =>
+      componentId === "local"
+        ? JSON.stringify({ mcpServers: { local: { command: "node", args: ["server.js"] } } })
+        : JSON.stringify({ mcpServers: { remote: { url: "https://mcp.example.com/mcp" } } }),
+  });
   return { listing, signInStatus };
 }
 
@@ -186,6 +189,38 @@ describe("the server connection listing", () => {
   it("asks only for the stored sign-in status, once per server", async () => {
     const { signInStatus } = await list({ components: [server("remote")] });
     expect(signInStatus).toHaveBeenCalledTimes(1);
-    expect(signInStatus).toHaveBeenCalledWith(extensionId, "remote", "local-window");
+    expect(signInStatus).toHaveBeenCalledWith(extensionId, "remote");
+  });
+
+  it("does not flag signed out for a server that works without a sign-in, or one that is connected", async () => {
+    const keyed = await list({
+      components: [server("remote")],
+      signIn: { remote: { kind: "signed-out" } },
+      slug: "my-own-server",
+    });
+    expect(keyed.listing.servers[0]?.state).toBe("ready");
+    const connected = await list({
+      components: [server("remote")],
+      signIn: { remote: { kind: "signed-out" } },
+      observations: [{ extensionId, componentId: "remote", state: "connected" }],
+    });
+    expect(connected.listing.servers[0]?.state).toBe("connected");
+  });
+
+  it("blocks a sign-in connector on a host that cannot sign in, naming why", async () => {
+    const { listing } = await list({
+      components: [server("remote")],
+      signIn: {
+        remote: {
+          kind: "refused",
+          reason: "unavailable",
+          message: "Signing in needs the credential broker.",
+        },
+      },
+    });
+    expect(listing.servers[0]).toMatchObject({
+      state: "blocked",
+      reason: "Signing in needs the credential broker.",
+    });
   });
 });

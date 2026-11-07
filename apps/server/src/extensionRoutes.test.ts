@@ -1625,7 +1625,7 @@ describe("server connection status in Settings", () => {
     expect(
       (await handler(pairedDeviceRequest("/api/extensions/connections", { kind: "list" })))?.status,
     ).toBe(200);
-    expect(connections.list).toHaveBeenLastCalledWith("remote-device");
+    expect(connections.list).toHaveBeenCalledTimes(2);
 
     const remote = await handler(
       pairedDeviceRequest("/api/extensions/connections", { kind: "reconnect", ...target }),

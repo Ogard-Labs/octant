@@ -1188,28 +1188,27 @@ export function wireProviders(deps: ProvidersDependencies) {
           ),
       },
       mcpServerConnections: {
-        list: (principalKind) =>
-          listMcpServerConnections(
-            {
-              snapshot: () => extensionLifecycleService.snapshot(),
-              observations: () => agentPluginMcpSessionManager.connectionObservations(),
-              signInStatus: (extensionId, componentId, kind) =>
-                signInOrUnavailable(extensionId, componentId, (signIn) =>
-                  signIn.status(extensionId, componentId, kind),
-                ),
-              readConfiguration: (packageState, componentId) =>
-                extensionPackageStore.readVerifiedConfiguration(
-                  {
-                    extensionId: packageState.extensionId,
-                    packageId: packageState.packageId,
-                    version: packageState.version,
-                    digest: packageState.digest,
-                  },
-                  componentId,
-                ),
-            },
-            principalKind,
-          ),
+        list: () =>
+          listMcpServerConnections({
+            snapshot: () => extensionLifecycleService.snapshot(),
+            observations: () => agentPluginMcpSessionManager.connectionObservations(),
+            // Asked as a reader: a local window's status read polls a pending
+            // sign-in and may finish it, which a listing must never do.
+            signInStatus: (extensionId, componentId) =>
+              signInOrUnavailable(extensionId, componentId, (signIn) =>
+                signIn.status(extensionId, componentId, "remote-device"),
+              ),
+            readConfiguration: (packageState, componentId) =>
+              extensionPackageStore.readVerifiedConfiguration(
+                {
+                  extensionId: packageState.extensionId,
+                  packageId: packageState.packageId,
+                  version: packageState.version,
+                  digest: packageState.digest,
+                },
+                componentId,
+              ),
+          }),
         reconnect: async (extensionId, componentId) => {
           const installed = extensionLifecycleService
             .snapshot()

@@ -189,8 +189,9 @@ export class AgentPluginMcpSessionManager {
   >();
   readonly #now: () => Date;
   /**
-   * When each server last opened a session. Kept after an idle close so
-   * Settings can say when it last worked; dropped with the component.
+   * When each server last opened a session in any scope or version, keyed
+   * by extension and component. Kept after an idle close so Settings can say
+   * when it last worked; dropped with the component.
    */
   readonly #lastConnected = new Map<
     string,
@@ -237,34 +238,53 @@ export class AgentPluginMcpSessionManager {
    * connected. A read of memory only; it never connects or lists tools.
    */
   connectionObservations(): ReadonlyArray<McpConnectionObservation> {
-    const observations = new Map<string, McpConnectionObservation>();
-    // Later facts replace earlier ones: last connected < failed < connecting < connected.
-    for (const { target, at } of this.#lastConnected.values())
-      observations.set(authenticationKey(target), { ...pick(target), state: "idle", at });
-    for (const { target, reason, at } of this.#failures.values())
-      observations.set(authenticationKey(target), { ...pick(target), state: "failed", reason, at });
-    for (const { target } of this.#connections.values()) {
-      const previous = observations.get(authenticationKey(target));
-      observations.set(authenticationKey(target), {
-        ...pick(target),
-        state: "connecting",
-        ...(previous?.at === undefined ? {} : { at: previous.at }),
-      });
+    // One server can hold sessions and failures in several task scopes and
+    // package versions; the row shows the newest fact. A connect in flight
+    // wins, then the latest failure unless a session connected after it.
+    type Facts = {
+      readonly target: AgentPluginMcpSessionKey;
+      connecting: boolean;
+      connected: boolean;
+      failure?: { readonly reason: string; readonly at: string };
+    };
+    const components = new Map<string, Facts>();
+    const entry = (target: AgentPluginMcpSessionKey): Facts => {
+      const key = authenticationKey(target);
+      const known = components.get(key);
+      if (known !== undefined) return known;
+      const created: Facts = { target, connecting: false, connected: false };
+      components.set(key, created);
+      return created;
+    };
+    for (const { target } of this.#lastConnected.values()) entry(target);
+    for (const { target, reason, at } of this.#failures.values()) {
+      const known = entry(target);
+      if (known.failure === undefined || known.failure.at < at) known.failure = { reason, at };
     }
-    for (const [key, record] of this.#sessions) {
-      const at = this.#lastConnected.get(key)?.at;
-      observations.set(authenticationKey(record), {
-        ...pick(record),
-        state: "connected",
-        ...(at === undefined ? {} : { at }),
-      });
-    }
-    return [...observations.values()];
+    for (const { target } of this.#connections.values()) entry(target).connecting = true;
+    for (const record of this.#sessions.values()) entry(record).connected = true;
+    return [...components.entries()].map(([key, known]) => {
+      const lastConnected = this.#lastConnected.get(key)?.at;
+      const since = lastConnected === undefined ? {} : { at: lastConnected };
+      if (known.connecting) return { ...pick(known.target), state: "connecting", ...since };
+      if (
+        known.failure !== undefined &&
+        (!known.connected || lastConnected === undefined || known.failure.at >= lastConnected)
+      )
+        return {
+          ...pick(known.target),
+          state: "failed",
+          reason: known.failure.reason,
+          at: known.failure.at,
+        };
+      return { ...pick(known.target), state: known.connected ? "connected" : "idle", ...since };
+    });
   }
 
   /**
-   * A person's Reconnect: drop the server's sessions and its failure so the
-   * next task's authority reconciliation connects fresh. Nothing connects
+   * A person's Reconnect: drop the server's sessions and failures in every
+   * task scope so the next task's authority reconciliation connects fresh;
+   * a task using it elsewhere connects again on its next turn. Nothing connects
    * from here and no failed call is replayed; connecting stays with the task
    * that has authority to use the server.
    */
@@ -702,8 +722,8 @@ export class AgentPluginMcpSessionManager {
         ),
       ),
     );
-    for (const [key, { target }] of this.#lastConnected) {
-      if (!installed.has(authenticationKey(target))) this.#lastConnected.delete(key);
+    for (const key of this.#lastConnected.keys()) {
+      if (!installed.has(key)) this.#lastConnected.delete(key);
     }
   }
 
@@ -843,7 +863,10 @@ export class AgentPluginMcpSessionManager {
       return;
     }
     this.#sessions.set(key, record);
-    this.#lastConnected.set(key, { target, at: this.#now().toISOString() });
+    this.#lastConnected.set(authenticationKey(target), {
+      target,
+      at: this.#now().toISOString(),
+    });
     this.#touchIdle(key);
     this.#reindex();
   }

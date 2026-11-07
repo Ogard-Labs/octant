@@ -9,9 +9,8 @@ import {
   type McpServerSignInView,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { CONNECTOR_PACKAGE_PREFIX, connectorById } from "@octant/domain";
 import type { McpConnectionObservation } from "./agentPluginMcpSessionManager";
-
-type PrincipalKind = "local-window" | "remote-device";
 
 /**
  * Where the Settings connection listing reads from. Every source is a
@@ -22,11 +21,11 @@ type PrincipalKind = "local-window" | "remote-device";
 export interface McpServerConnectionSources {
   readonly snapshot: () => ExtensionSnapshot;
   readonly observations: () => ReadonlyArray<McpConnectionObservation>;
-  readonly signInStatus: (
-    extensionId: string,
-    componentId: string,
-    principalKind: PrincipalKind,
-  ) => Promise<McpServerSignInView>;
+  /**
+   * The stored sign-in state as a reader sees it: a pending attempt reports
+   * its last known view and is never polled, so reading cannot finish one.
+   */
+  readonly signInStatus: (extensionId: string, componentId: string) => Promise<McpServerSignInView>;
   readonly readConfiguration: (
     packageState: ExtensionPackageState,
     componentId: string,
@@ -66,6 +65,12 @@ const SIGN_IN_AGAIN: Record<
 export function describeMcpServerConnection(input: {
   readonly component: ComponentState;
   readonly signIn: McpServerSignInView;
+  /**
+   * Whether the server cannot work without a sign-in. Signed out means only
+   * that a sign-in is offered: a hosted server that takes a key or nothing
+   * reports it too, so it counts only for a catalog connector that signs in.
+   */
+  readonly signInRequired: boolean;
   readonly observation?: McpConnectionObservation;
 }): {
   readonly state: McpServerConnectionState;
@@ -82,10 +87,14 @@ export function describeMcpServerConnection(input: {
       (effective.reason === "plugin-disabled" || effective.reason === "component-disabled"))
   )
     return { state: "off", reason: "Switched off." };
-  if (signIn.kind === "signed-out")
+  if (signIn.kind === "signed-out" && input.signInRequired && observation?.state !== "connected")
     return { state: "needs-sign-in", reason: "Not signed in.", ...at };
   if (signIn.kind === "sign-in-again")
     return { state: "needs-sign-in", reason: SIGN_IN_AGAIN[signIn.reason], ...at };
+  // A host without the credential broker refuses every sign-in, so a
+  // connector that needs one cannot work here whatever else is true.
+  if (signIn.kind === "refused" && input.signInRequired && observation?.state !== "connected")
+    return { state: "blocked", reason: signIn.message, ...at };
   if (signIn.kind === "awaiting-consent")
     return { state: "needs-sign-in", reason: "Finish signing in in the browser.", ...at };
   if (observation?.state === "connected") return { state: "connected", ...at };
@@ -127,9 +136,16 @@ export function transportOf(configuration: string): McpServerConnection["transpo
   }
 }
 
+/** Whether the package is a catalog connector whose entry signs in. */
+function catalogSignIn(packageState: ExtensionPackageState): boolean {
+  if (packageState.addedInSettings !== true) return false;
+  const slug = packageState.slug ?? "";
+  if (!slug.startsWith(CONNECTOR_PACKAGE_PREFIX)) return false;
+  return connectorById(slug.slice(CONNECTOR_PACKAGE_PREFIX.length))?.auth.kind === "sign-in";
+}
+
 export async function listMcpServerConnections(
   sources: McpServerConnectionSources,
-  principalKind: PrincipalKind,
 ): Promise<McpServerConnectionListing> {
   const observations = new Map(
     sources
@@ -147,7 +163,7 @@ export async function listMcpServerConnections(
       const componentId = String(component.component.id);
       const [signIn, configuration] = await Promise.all([
         sources
-          .signInStatus(extensionId, componentId, principalKind)
+          .signInStatus(extensionId, componentId)
           .catch((): McpServerSignInView => ({ kind: "not-applicable" })),
         sources.readConfiguration(packageState, componentId).catch(() => ""),
       ]);
@@ -163,6 +179,7 @@ export async function listMcpServerConnections(
         ...describeMcpServerConnection({
           component,
           signIn,
+          signInRequired: catalogSignIn(packageState),
           ...(observation === undefined ? {} : { observation }),
         }),
       });

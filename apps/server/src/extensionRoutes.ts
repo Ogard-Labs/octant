@@ -110,7 +110,7 @@ export function createExtensionRouteHandler(options: {
    * A paired device may read it; only a local window may reconnect.
    */
   readonly mcpServerConnections?: {
-    list(principalKind: "local-window" | "remote-device"): Promise<McpServerConnectionListing>;
+    list(): Promise<McpServerConnectionListing>;
     reconnect(extensionId: string, componentId: string): Promise<McpServerReconnectResult>;
   };
   /** Lists what other agent tools on this computer know, for the person to add. */
@@ -641,7 +641,7 @@ export function createExtensionRouteHandler(options: {
       try {
         return response(
           connection.kind === "list"
-            ? await options.mcpServerConnections.list(principalKind)
+            ? await options.mcpServerConnections.list()
             : await options.mcpServerConnections.reconnect(
                 String(connection.extensionId),
                 String(connection.componentId),

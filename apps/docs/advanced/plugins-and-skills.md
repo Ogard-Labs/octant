@@ -444,8 +444,8 @@ Octant last saw it connect or fail:
   Use the row's sign-in button.
 - **Not connecting**: the last connection failed; the row says why. Press
   **Reconnect**, then run your task again. Reconnect drops the broken
-  connection so the next task connects fresh. It does not repeat the failed
-  action.
+  connection, in every task using that server, so the next task connects
+  fresh. It does not repeat the failed action.
 - **Off** or **Blocked**: the package or server is switched off, or Octant
   will not run it, for the reason shown.
 

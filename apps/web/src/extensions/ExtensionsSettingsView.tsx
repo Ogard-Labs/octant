@@ -452,12 +452,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [effective, setEffective] = useState<ExtensionEffectiveSnapshot | undefined>();
   // How each installed server is connecting; undefined when the host could not say.
   const [connections, setConnections] = useState<ReadonlyArray<McpServerConnection> | undefined>();
+  // Only the newest read lands, so an older answer cannot replace a newer one.
+  const connectionsEpoch = useRef(0);
   const loadConnections = useCallback(async () => {
+    const epoch = ++connectionsEpoch.current;
+    let next: ReadonlyArray<McpServerConnection> | undefined;
     try {
-      setConnections((await props.client.mcpServerConnections()).servers);
+      next = (await props.client.mcpServerConnections()).servers;
     } catch {
-      setConnections(undefined);
+      next = undefined;
     }
+    if (epoch === connectionsEpoch.current) setConnections(next);
   }, [props.client]);
   const [failure, setFailure] = useState<FailureBanner | undefined>();
   const [marketplaceQuery, setMarketplaceQuery] = useState("");
