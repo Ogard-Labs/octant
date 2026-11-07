@@ -113,7 +113,7 @@ describe("thread purge sweep", () => {
     for (const [runId, threadId] of [
       [purgedRun, threads.code.id],
       [keptRun, controlThreadId],
-    ]) {
+    ] as const) {
       insertEvent(harness.connection, "agent-run", runId, {
         run: { id: runId, parentThreadId: threadId },
       });
