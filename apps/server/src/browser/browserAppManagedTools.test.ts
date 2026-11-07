@@ -1998,3 +1998,24 @@ describe("octant_browser in Plan mode", () => {
     expect(act).not.toHaveBeenCalled();
   });
 });
+
+it("advertises the named account selectors that the Browser parser accepts", () => {
+  const schema: Readonly<Record<string, unknown>> =
+    BROWSER_TOOL_DEFINITION.inputSchema.properties.profile;
+  const accepts = (choice: string) =>
+    (!Array.isArray(schema.enum) || schema.enum.includes(choice)) &&
+    (typeof schema.pattern !== "string" || new RegExp(schema.pattern).test(choice));
+  for (const choice of [
+    "private",
+    "project",
+    "personal",
+    "account:40000000-0000-4000-8000-000000000002",
+  ])
+    expect(accepts(choice)).toBe(true);
+  for (const choice of [
+    "account:invalid",
+    "account:40000000-0000-4000-8000-000000000002/extra",
+    "other",
+  ])
+    expect(accepts(choice)).toBe(false);
+});
