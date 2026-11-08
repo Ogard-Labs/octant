@@ -1275,6 +1275,7 @@ Direct-endpoint providers run under the native harness, which owns the agent loo
 - When a request outgrows the endpoint, the loop first compacts earlier turns tool-less on the session's own endpoint, then trims. The lead can read cut exchanges back through a read-only journal lookup.
 - The harness never parses prose as a tool call. An unknown tool name, version, id or argument, or an unoffered capability, fails closed, and an ambiguously accepted call becomes waiting or failed rather than an unsafe replay. _Here only._
 - After any context reduction or summary, the goal, its acceptance criteria and the recently edited files are restored to the request. Reduction changes only the assembled request, never the journal. _Here only._
+- The harness's standing instructions include one fixed About Octant block, the same in every mode: the modes and what each may touch, Projects and the board, that an agent never marks a thread Done, access levels and read-only Plan mode, Project memory, skills, Canvas and helper agents, each tool named only as "when offered".
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
