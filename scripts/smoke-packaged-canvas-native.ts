@@ -743,7 +743,7 @@ const timer = setInterval(() => {
     await observeUntil(
       "owned-publish-card",
       (snapshot) =>
-        hasText(snapshot, "Export to Public link") &&
+        snapshot.texts.filter((row) => row.text.trim() === "Export to Public link").length === 1 &&
         hasOwnedCardAccount(snapshot) &&
         hasOwnedStaticPayload(snapshot) &&
         hasText(snapshot, "Canvas page") &&
@@ -869,7 +869,7 @@ const timer = setInterval(() => {
     await observeUntil(
       "update-owned-card",
       (snapshot) =>
-        hasText(snapshot, "Export to Public link") &&
+        snapshot.texts.filter((row) => row.text.trim() === "Export to Public link").length === 1 &&
         hasOwnedCardAccount(snapshot) &&
         hasOwnedStaticPayload(snapshot) &&
         hasText(snapshot, "Updates") &&
