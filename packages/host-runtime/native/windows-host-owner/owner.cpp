@@ -453,7 +453,7 @@ struct CertificateStage {
   }
 };
 bool replace_listener_certificate(const Root& root, HANDLE directory, const std::wstring& path,
-    const Bytes& candidate, FILE_ID_INFO& created_identity) {
+    const Bytes& candidate, FILE_ID_INFO& created_identity, DWORD& rename_error) {
   // The existing certificate must be a private regular record, even when its
   // public X.509 contents need renewal. Never follow an alias during recovery.
   Handle prior(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL,
@@ -485,7 +485,10 @@ bool replace_listener_certificate(const Root& root, HANDLE directory, const std:
   rename->RootDirectory = directory;
   rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
   std::memcpy(rename->FileName, name.data(), rename->FileNameLength);
-  if (!SetFileInformationByHandle(stage.file.value, FileRenameInfo, rename, static_cast<DWORD>(rename_bytes.size()))) return false;
+  if (!SetFileInformationByHandle(stage.file.value, FileRenameInfo, rename, static_cast<DWORD>(rename_bytes.size()))) {
+    rename_error = GetLastError();
+    return false;
+  }
   // Once renamed, failure must never delete the complete destination. A later
   // ensure validates it again and keeps the immutable key and its pin.
   stage.committed = true;
@@ -551,7 +554,12 @@ napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls
     : (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem"));
   FILE_ID_INFO created_identity{}; bool wrote_identity = false;
   if (certificate && create) {
-    if (!replace_listener_certificate(*root, remote.value, path, candidate, created_identity)) return object(env, "refused");
+    DWORD rename_error = 0;
+    if (!replace_listener_certificate(*root, remote.value, path, candidate, created_identity, rename_error)) {
+      napi_value refusal = object(env, "refused");
+      if (rename_error != 0) number(env, refusal, "certificateRenameError", rename_error);
+      return refusal;
+    }
     wrote_identity = true;
   }
   Handle file(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,

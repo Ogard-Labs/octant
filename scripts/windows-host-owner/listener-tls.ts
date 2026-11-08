@@ -67,6 +67,39 @@ try {
   } else {
     const result = createSelfMadeListenerCertificateStore(options).ensure("100.64.0.7");
     if (mode === "concurrent" && result.status === "refused") {
+      const key = files.read("key");
+      const certificate = files.read("certificate");
+      console.log(
+        JSON.stringify({ profile, keyStatus: key.status, certificateStatus: certificate.status }),
+      );
+      if (key.status === "ready") {
+        try {
+          if ("listenerTlsFile" in native && typeof native.listenerTlsFile === "function") {
+            const diagnostic: unknown = native.listenerTlsFile(
+              profile,
+              paths.profileId,
+              paths.dataDirectory,
+              "certificate",
+              Buffer.from("owned public certificate diagnostic"),
+            );
+            if (
+              typeof diagnostic === "object" &&
+              diagnostic !== null &&
+              "certificateRenameError" in diagnostic &&
+              typeof diagnostic.certificateRenameError === "number"
+            )
+              console.log(
+                JSON.stringify({
+                  profile,
+                  certificateRenameError: diagnostic.certificateRenameError,
+                }),
+              );
+          }
+        } finally {
+          key.bytes.fill(0);
+        }
+      }
+      if (certificate.status === "ready") certificate.bytes.fill(0);
       console.log(
         JSON.stringify({ profile, concurrentTlsAdmission: "refused", runtime: process.versions }),
       );
