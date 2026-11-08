@@ -712,7 +712,7 @@ export class WorkTurnService {
     try {
       return this.#contextHarness?.handoverSummary(
         decodeContextSubjectRef({ aggregateType, aggregateId: String(threadId) }),
-        this.sessionCompactionConversation(threadId),
+        () => this.sessionCompactionConversation(threadId),
       );
     } catch {
       // A ledger that cannot be read hands over the raw selection, as before.

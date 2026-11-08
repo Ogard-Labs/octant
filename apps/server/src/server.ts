@@ -208,6 +208,7 @@ export function startOctantServer(
       conversationInputTransfer,
       browserAuthority,
       codeBoardEventStore,
+      codeSessionConversation,
       codeEvidence,
       hostMemoryGuard,
       isProjectPolicyTargetAllowed,
@@ -743,6 +744,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       threadMoveHolds,
+      codeSessionConversation,
       worktreePreparation,
       conversationInputTransfer,
       browserModelBindings,
@@ -1108,6 +1110,7 @@ export function startOctantServer(
       chatService,
       codeOperationRuntime,
       codeSessionAuthority,
+      codeSessionConversation,
       configuredDriverOptions,
       contextHarness,
       hostShield,
