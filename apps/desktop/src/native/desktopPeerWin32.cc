@@ -7,6 +7,7 @@
 #include <node_api.h>
 #include <algorithm>
 #include <atomic>
+#include <array>
 #include <cmath>
 #include <chrono>
 #include <cstdint>
@@ -47,9 +48,14 @@ struct Handle {
   explicit operator bool() const { return value != INVALID_HANDLE_VALUE && value != nullptr; }
 };
 struct Wire {
-  uint32_t magic = 0x4f435450, protocol = 1, operation = 0, status = 0;
-  uint64_t generation = 0, sequence = 0;
-  char window[37]{}, version[64]{}, payload[4096]{};
+  uint32_t magic, protocol, operation, status;
+  uint64_t generation, sequence;
+  char window[37], version[64], payload[4096];
+  // Fixed frames include ABI padding. Initialize/copy the complete byte range,
+  // not just the members, so no stack bytes can enter the local transport.
+  Wire() { std::memset(this, 0, sizeof(*this)); magic = 0x4f435450; protocol = 1; }
+  Wire(const Wire& source) { std::memcpy(this, &source, sizeof(*this)); }
+  Wire& operator=(const Wire& source) { if (this != &source) std::memcpy(this, &source, sizeof(*this)); return *this; }
   ~Wire() { SecureZeroMemory(this, sizeof(*this)); }
 };
 struct Principal {
@@ -239,7 +245,9 @@ bool main_thread() {
     if (entry.th32OwnerProcessID != GetCurrentProcessId()) continue;
     Handle thread(OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ThreadID));
     FILETIME created{}, exited{}, kernel{}, user{};
-    if (!thread || !GetThreadTimes(thread.value, &created, &exited, &kernel, &user)) return false;
+    if (!thread) { if (GetLastError() == ERROR_INVALID_PARAMETER) continue; return false; }
+    if (GetProcessIdOfThread(thread.value) != GetCurrentProcessId()) continue;
+    if (!GetThreadTimes(thread.value, &created, &exited, &kernel, &user)) return false;
     if (CompareFileTime(&created, &earliest) < 0) { earliest = created; primary = entry.th32ThreadID; }
   } while (Thread32Next(snapshot.value, &entry));
   return primary == GetCurrentThreadId();
@@ -273,7 +281,7 @@ bool valid_request(const Wire& wire) {
       !std::memchr(wire.version, 0, sizeof(wire.version))) return false;
   if (wire.operation == 0) return wire.generation == 0 && wire.window[0] == 0 && wire.payload[0] == 0 && wire.payload[1] == 0;
   return wire.generation > 0 && wire.generation <= safe_integer && wire.window[36] == 0 &&
-    std::strlen(wire.window) == 36 && wire.payload[0] == 0 &&
+    uuid(wire.window) && wire.payload[0] == 0 &&
     std::memcmp(wire.payload + 1, "native-main-v1", sizeof("native-main-v1")) == 0;
 }
 void put(napi_env env, napi_value value, const char* key, const std::string& text) {
@@ -337,6 +345,12 @@ void serve(const std::shared_ptr<Runtime>& state, Connection& connection) {
     if (!admitted) {
       ULONG pid = 0;
       if (!GetNamedPipeClientProcessId(connection.pipe.value, &pid) || !process_peer(pid, *state, peer)) break;
+      // A new connection is a new lease incarnation even in the same process.
+      // Its old queued EOF notice must not revoke a replacement connection.
+      std::array<unsigned char, 32> nonce{};
+      if (BCryptGenRandom(nullptr, nonce.data(), static_cast<ULONG>(nonce.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) break;
+      peer.key = hash(peer.key + std::string(reinterpret_cast<const char*>(nonce.data()), nonce.size()));
+      if (peer.key.size() != 64) break;
       admitted = true;
     }
     if (!from_client(connection.pipe.value, *state, peer) || !valid_request(request)) break;
@@ -370,7 +384,7 @@ Handle server_pipe(const Runtime& state, bool first) {
   SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), state.security, FALSE};
   return Handle(CreateNamedPipeW(state.endpoint.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0),
     PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-    static_cast<DWORD>(max_connections + 1), sizeof(Wire), sizeof(Wire), operation_bound, &attributes));
+    static_cast<DWORD>(max_connections + 2), sizeof(Wire), sizeof(Wire), operation_bound, &attributes));
 }
 void accept_connections(const std::shared_ptr<Runtime>& state, Handle first) {
   struct JoinedConnections {
@@ -613,7 +627,7 @@ napi_value operation(napi_env env, napi_callback_info info) {
   }
   if (job->name == "openWindow" || job->name == "renewWindow" || job->name == "revokeWindow") {
     double generation = 0;
-    valid = valid && count == 2 && string_arg(env, args[0], job->window, 36) && job->window.size() == 36 &&
+    valid = valid && count == 2 && string_arg(env, args[0], job->window, 36) && uuid(job->window) &&
       napi_get_value_double(env, args[1], &generation) == napi_ok && generation >= 1 && generation <= static_cast<double>(safe_integer) && std::floor(generation) == generation;
     if (valid) job->generation = static_cast<uint64_t>(generation);
   } else if (job->name == "listenWindows") {
