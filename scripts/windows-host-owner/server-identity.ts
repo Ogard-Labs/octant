@@ -20,7 +20,7 @@ if (
   !mode
 )
   throw new Error("Supply the owned Windows identity fixture.");
-const native = loadWindowsHostProfileNative(binding);
+const native = loadWindowsHostProfileNative(win32.resolve(binding));
 if (native === undefined) throw new Error("Native profile unavailable.");
 const value: unknown = native.openProfile(profile);
 if (
