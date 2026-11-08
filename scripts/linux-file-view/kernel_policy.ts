@@ -176,10 +176,8 @@ try {
   ended = await running;
   metadataVerified =
     runtime !== undefined ||
-    (ended.status === "exited" &&
-      ended.code === 0 &&
-      spawnSync("/policy-workload", ["--verify-metadata"], { stdio: "inherit", timeout: 2_000 })
-        .status === 0);
+    spawnSync("/policy-workload", ["--verify-metadata"], { stdio: "inherit", timeout: 2_000 })
+      .status === 0;
   result =
     ready &&
     ended.status === "exited" &&

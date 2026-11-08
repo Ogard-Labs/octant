@@ -159,6 +159,16 @@ cleanup, and xattr scopes begin before either ACL or generic dispatch. Unknown
 unprepared internal paths refuse rather than sharing a preceding operation's
 allow. Native runtime/public-positive proof remains required for this increment.
 
+The next bounded metadata-write controls require held/path chmod, chown using
+the current uid/gid, and timestamp changes to refuse on the protected synthetic
+key. A public positive performs the same six operations and checks actual mode,
+owner and timestamp state. Before publishing the companion, the workload saves
+its synthetic inode's metadata after the initial admitted read and xattr seed.
+The independent owner compares identity, mode, uid/gid, atime/mtime/ctime and
+private xattrs after the command exits, including a failing command. This source
+is a RED measurement against unchanged guards until actual native evidence and
+the pre-lock/final-check correction exist; it enables no production capability.
+
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
 archive has a fixed SHA-256, and only the original admission files enter its

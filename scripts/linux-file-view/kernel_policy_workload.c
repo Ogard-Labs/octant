@@ -17,6 +17,7 @@
 
 #define ROOT "/tmp/octant-policy-broker"
 #define KEY ROOT "/home/.ssh/deployment"
+#define METADATA_BEFORE ROOT "/metadata-before"
 static const char attribute[] = "synthetic attribute";
 static const char *private_attributes[] = {
   "user.octant.read", "user.octant.write", "user.octant.remove",
@@ -65,6 +66,19 @@ static bool metadata_controls(int held, int public)
   passed = metadata_case("acl-write-refused", fsetxattr(held, "system.posix_acl_access", &acl, sizeof(acl), 0) == -1 && errno == EACCES) && passed;
   errno = 0;
   passed = metadata_case("acl-remove-refused", fremovexattr(held, "system.posix_acl_access") == -1 && errno == EACCES) && passed;
+  errno = 0;
+  passed = metadata_case("held-mode-refused", fchmod(held, 0640) == -1 && errno == EACCES) && passed;
+  errno = 0;
+  passed = metadata_case("path-mode-refused", chmod(KEY, 0644) == -1 && errno == EACCES) && passed;
+  errno = 0;
+  passed = metadata_case("held-owner-refused", fchown(held, getuid(), getgid()) == -1 && errno == EACCES) && passed;
+  errno = 0;
+  passed = metadata_case("path-owner-refused", chown(KEY, getuid(), getgid()) == -1 && errno == EACCES) && passed;
+  const struct timespec changed_times[2] = {{.tv_sec = 123456789}, {.tv_sec = 123456790}};
+  errno = 0;
+  passed = metadata_case("held-time-refused", futimens(held, changed_times) == -1 && errno == EACCES) && passed;
+  errno = 0;
+  passed = metadata_case("path-time-refused", utimensat(AT_FDCWD, KEY, changed_times, 0) == -1 && errno == EACCES) && passed;
   bool public_metadata = !fstat(public, &identity) && S_ISREG(identity.st_mode) &&
     !lstat(ROOT "/home/.ssh/link.pub", &identity) && S_ISLNK(identity.st_mode) &&
     readlink(ROOT "/home/.ssh/link.pub", bytes, sizeof(bytes)) == (ssize_t)strlen("deployment.pub") &&
@@ -81,6 +95,14 @@ static bool metadata_controls(int held, int public)
   errno = 0;
   bool absent = fgetxattr(public, "trusted.octant.absent", bytes, sizeof(bytes)) == -1 && errno == ENODATA;
   passed = metadata_case("public-error-clears-scope", absent && !fstat(public, &identity)) && passed;
+  bool public_changes = !fchmod(public, 0640) && !chmod(KEY ".pub", 0600) &&
+    !fchown(public, getuid(), getgid()) && !chown(KEY ".pub", getuid(), getgid()) &&
+    !futimens(public, changed_times) && !utimensat(AT_FDCWD, KEY ".pub", changed_times, 0) &&
+    !fstat(public, &identity) && (identity.st_mode & 0777) == 0600 &&
+    identity.st_uid == getuid() && identity.st_gid == getgid() &&
+    identity.st_atim.tv_sec == changed_times[0].tv_sec && identity.st_atim.tv_nsec == 0 &&
+    identity.st_mtim.tv_sec == changed_times[1].tv_sec && identity.st_mtim.tv_nsec == 0;
+  passed = metadata_case("public-mode-owner-time-allowed", public_changes) && passed;
   return passed;
 }
 
@@ -88,14 +110,22 @@ static bool metadata_controls(int held, int public)
  * It verifies refusals before effects rather than trusting an errno alone. */
 static int verify_metadata(void)
 {
-  struct stat identity;
+  struct stat identity = {0}, before = {0};
   char bytes[128];
-  if (stat(KEY, &identity) || (identity.st_mode & 0777) != 0600) return 1;
+  int saved = open(METADATA_BEFORE, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  bool baseline = saved >= 0 && read(saved, &before, sizeof(before)) == sizeof(before);
+  if (saved >= 0) close(saved);
+  bool unchanged = baseline && !stat(KEY, &identity) &&
+    identity.st_dev == before.st_dev && identity.st_ino == before.st_ino &&
+    identity.st_mode == before.st_mode && identity.st_uid == before.st_uid && identity.st_gid == before.st_gid &&
+    identity.st_atim.tv_sec == before.st_atim.tv_sec && identity.st_atim.tv_nsec == before.st_atim.tv_nsec &&
+    identity.st_mtim.tv_sec == before.st_mtim.tv_sec && identity.st_mtim.tv_nsec == before.st_mtim.tv_nsec &&
+    identity.st_ctim.tv_sec == before.st_ctim.tv_sec && identity.st_ctim.tv_nsec == before.st_ctim.tv_nsec;
   for (unsigned i = 0; i < sizeof(private_attributes) / sizeof(private_attributes[0]); i++)
     if (getxattr(KEY, private_attributes[i], bytes, sizeof(bytes)) != sizeof(attribute) - 1 ||
-        memcmp(bytes, attribute, sizeof(attribute) - 1)) return 2;
-  printf("OCTANT_METADATA_OWNER {\"pid\":%ld,\"parent\":%ld,\"unchanged\":true}\n", (long)getpid(), (long)getppid());
-  return 0;
+        memcmp(bytes, attribute, sizeof(attribute) - 1)) unchanged = false;
+  printf("OCTANT_METADATA_OWNER {\"pid\":%ld,\"parent\":%ld,\"unchanged\":%s}\n", (long)getpid(), (long)getppid(), unchanged ? "true" : "false");
+  return unchanged ? 0 : 1;
 }
 int main(int argc, char **argv)
 {
@@ -113,6 +143,15 @@ int main(int argc, char **argv)
       printf("OCTANT_METADATA_SEED {\"attribute\":%u,\"errno\":%d}\n", i, errno);
       return 20;
     }
+  // Capture metadata after the admitted read/xattr seed, before the companion
+  // exists. The independent owner compares effects even if the workload fails.
+  struct stat before = {0};
+  int saved = open(METADATA_BEFORE, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if (saved < 0 || fstat(held, &before) || write(saved, &before, sizeof(before)) != sizeof(before)) {
+    if (saved >= 0) close(saved);
+    return 21;
+  }
+  close(saved);
   int stage = open(ROOT "/stage", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
   if (stage < 0) return 3;
   close(stage);
