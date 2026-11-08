@@ -1681,9 +1681,9 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
   );
 }
 
-async function resolveExistingHostAttachment(startingInstanceId?: string) {
+async function resolveExistingHostAttachment(startingChild?: ChildProcess) {
   if (desktopWindowsHost !== undefined)
-    return await attachWindowsDesktopHost(desktopWindowsHost, startingInstanceId);
+    return await attachWindowsDesktopHost(desktopWindowsHost, startingChild);
   return await resolveStableHostAttachment({
     readReceipt: () => readHostInfoReceipt(desktopPosixHostPaths()),
     readBridgeSecret: () => readStoredDesktopBridgeSecret(desktopDataDirectory),
@@ -2008,7 +2008,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
             },
           }),
       resolveAttachedHost: async () => {
-        return (await resolveExistingHostAttachment(instanceId))?.probe;
+        return (await resolveExistingHostAttachment(child))?.probe;
       },
     });
     if (attached !== undefined) {

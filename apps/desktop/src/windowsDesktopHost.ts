@@ -5,7 +5,11 @@ import {
   type WindowsHostProfileNative,
   type WindowsHostProfilePaths,
 } from "@octant/host-runtime";
-import { probeHostInfoReceipt, resolveStableHostAttachment } from "./serverProcess";
+import {
+  probeHostInfoReceipt,
+  resolveStableHostAttachment,
+  type ManagedChildProcess,
+} from "./serverProcess";
 
 export interface WindowsDesktopHost {
   readonly native: WindowsHostProfileNative;
@@ -31,8 +35,16 @@ export function resolveWindowsDesktopHost(options: {
 /** Only positive native absence permits launch; unsafe discovery never becomes a second host. */
 export async function attachWindowsDesktopHost(
   host: WindowsDesktopHost,
-  startingInstanceId?: string,
+  startingChild?: Pick<ManagedChildProcess, "exitCode" | "signalCode">,
 ) {
+  // Startup may own the pipe before its event loop can answer control requests.
+  // Keep waiting for this held child's health; discover a winner after it exits.
+  if (
+    startingChild !== undefined &&
+    startingChild.exitCode === null &&
+    startingChild.signalCode === null
+  )
+    return undefined;
   const found = await attachWindowsHostRuntimeOwner({
     native: host.native,
     scope: host.paths.profileId,
@@ -43,9 +55,6 @@ export async function attachWindowsDesktopHost(
   if (found.status !== "attached")
     throw new Error("Octant could not authenticate its existing native Windows host.");
   const owner = found.attachment.owner;
-  // The authenticated child owns its endpoint before it publishes discovery.
-  // Its own startup wait uses health readiness; only competing owners attach.
-  if (startingInstanceId !== undefined && owner.instanceId === startingInstanceId) return undefined;
   const attached = await resolveStableHostAttachment({
     readReceipt: async () => {
       const receipt = await host.startup.readHostInfo();
