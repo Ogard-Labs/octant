@@ -35,7 +35,6 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
-      - run: node node_modules/electron/install.js
       - name: Identify unchanged production inputs for the unsigned package cache
         id: package-source
         shell: bash
@@ -126,6 +125,15 @@ jobs:
         id: package-cache-proof
         if: steps.native-package-cache.outputs.cache-hit == 'true'
         run: bun "$RUNNER_TEMP/native-package-cache.mjs" verify
+      - name: Download Electron only for a fresh package
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if node node_modules/electron/install.js; then exit 0; fi
+            sleep 2
+          done
+          exit 1
       - name: Package current source without signing or publication
         if: steps.package-cache-proof.outputs.verified != 'true'
         timeout-minutes: 25

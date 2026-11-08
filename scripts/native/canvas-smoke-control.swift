@@ -47,6 +47,7 @@ struct Observation: Codable {
     let windowId: UInt32
     let texts: [TextTarget]
     let clicked: Bool
+    let pointerProof: String?
 }
 
 guard CommandLine.arguments.count >= 2 else { refuse("Supply preflight, observe, click or settings.") }
@@ -61,7 +62,8 @@ guard CommandLine.arguments.count >= 5, let pid = Int32(CommandLine.arguments[2]
 }
 let imagePath = CommandLine.arguments[3]
 let expected = CommandLine.arguments[4]
-_ = NSApplication.shared
+let controllerApplication = NSApplication.shared
+_ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
@@ -94,6 +96,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
         y: Double(owned.bounds.minY + (1 - result.boundingBox.midY) * owned.bounds.height))
 }
 var clicked = false
+var pointerProof: String?
 if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let partialMatches = (request.results ?? []).flatMap { result -> [TextTarget] in
@@ -121,24 +124,35 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
     // AppKit's actual mouse-down hit test skips windows that ignore input or
     // are transparent at this point. Rectangular WindowServer bounds do not.
     let hit = NSWindow.windowNumber(at: CGPoint(x: point.x, y: primary.frame.height - point.y), belowWindowWithWindowNumber: 0)
-    guard hit > 0 else {
+    let covering = windows().first { (row: [String: Any]) in
+        (row[kCGWindowNumber as String] as? NSNumber)?.intValue == hit
+    }
+    var hitOwner = (covering?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+    if hit > 0 && hitOwner != nil { pointerProof = "appkit-mouse-down-window" }
+    if hit <= 0 && AXIsProcessTrusted() {
+        let system = AXUIElementCreateSystemWide()
+        var element: AXUIElement?
+        if AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success,
+           let element {
+            var owner: pid_t = 0
+            if AXUIElementGetPid(element, &owner) == .success && owner > 1 {
+                hitOwner = owner
+                pointerProof = "accessibility-hit-owner"
+            }
+        }
+    }
+    guard hitOwner == pid else {
         let direct = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
         let display = CGDisplayBounds(CGMainDisplayID())
         let diagnostic: [String: Any] = ["hit": hit, "directCoordinateHit": direct,
             "point": [point.x, point.y],
+            "accessibilityTrusted": AXIsProcessTrusted(), "hitOwner": hitOwner ?? -1,
             "primaryFrame": [primary.frame.minX, primary.frame.minY, primary.frame.width, primary.frame.height],
             "quartzDisplay": [display.minX, display.minY, display.width, display.height],
             "ownedBounds": [owned.bounds.minX, owned.bounds.minY, owned.bounds.width, owned.bounds.height]]
         if let data = try? JSONSerialization.data(withJSONObject: diagnostic), let message = String(data: data, encoding: .utf8) {
             FileHandle.standardError.write(Data((message + "\n").utf8))
         }
-        refuse("No native window would receive this pointer event.")
-    }
-    let covering = windows().first { (row: [String: Any]) in
-        (row[kCGWindowNumber as String] as? NSNumber)?.intValue == hit
-    }
-    guard let covering,
-          (covering[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid else {
         let owner = (covering?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? -1
         let layer = (covering?[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
         let identifier = (covering?[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0
@@ -225,7 +239,8 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
     up.postToPid(pid)
 } else if mode != "observe" { refuse("Unknown native controller operation.") }
 do {
-    let encoded = try JSONEncoder().encode(Observation(pid: pid, windowId: owned.id, texts: targets, clicked: clicked))
+    let encoded = try JSONEncoder().encode(Observation(pid: pid, windowId: owned.id, texts: targets, clicked: clicked, pointerProof: pointerProof))
+    try encoded.write(to: URL(fileURLWithPath: imagePath + ".json"), options: .atomic)
     FileHandle.standardOutput.write(encoded)
     print("")
 } catch { refuse("The native observation could not be recorded.") }
