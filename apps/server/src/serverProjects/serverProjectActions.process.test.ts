@@ -258,6 +258,12 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       localStart,
       localResolve,
       localSuggestions,
+      endedReasons: () =>
+        sqlite
+          .prepare(
+            "SELECT json_extract(payload_json, '$.reason') AS reason FROM event_journal WHERE event_name = 'code.project-terminal-ended@1'",
+          )
+          .all(),
       changeWorkAccess: () => {
         workThread = { ...workThread, access: "full-access" };
       },
@@ -512,6 +518,36 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       ).toMatchObject({ kind: "project-terminal-refused" });
       f.loseWorkProject();
       expect((await f.preview()).kind).toBe("project-terminal-refused");
+      expect(f.localStart).not.toHaveBeenCalled();
+      expect(f.localResolve).not.toHaveBeenCalled();
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("stops a Work action's owned connection when its originating window is revoked", async () => {
+    const f = await fixture(
+      "printf started >> starts.txt; printf ready; exec sleep 30",
+      false,
+      true,
+    );
+    try {
+      const run = await f.start();
+      expect(run.result.kind).toBe("project-terminal");
+      await vi.waitFor(
+        () =>
+          expect(f.terminals.attach(String(run.terminalId)).transcript.chunks.join("")).toContain(
+            "ready",
+          ),
+        { timeout: 15000 },
+      );
+      f.closeWindow();
+      await f.service.settleActionAuthorities();
+      expect(f.terminals.attach(String(run.terminalId)).status).not.toBe("running");
+      expect((await f.preview()).kind).toBe("project-terminal-refused");
+      await f.service.settleActionAuthorities();
+      expect(readFileSync(join(f.taskRoot, "starts.txt"), "utf8")).toBe("started");
+      expect(f.endedReasons()).toEqual([{ reason: "server-stop-unconfirmed" }]);
       expect(f.localStart).not.toHaveBeenCalled();
       expect(f.localResolve).not.toHaveBeenCalled();
     } finally {

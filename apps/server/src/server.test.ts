@@ -61,6 +61,7 @@ import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceServic
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
 import * as contextWiring from "./wiring/context";
 import { ServerProjectStore } from "./serverProjects/serverProjectStore";
+import { ProjectTerminalService } from "./code/projectTerminalService";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 
@@ -79,6 +80,63 @@ afterEach(() => {
 });
 
 describe("startOctantServer", () => {
+  it("retires saved action authority when a window closes without a journal commit", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-action-window-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const settle = vi.spyOn(ProjectTerminalService.prototype, "settleActionAuthorities");
+    const append = vi.spyOn(Journal.prototype, "append");
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* startOctantServer({
+              hostname: "127.0.0.1",
+              port: 0,
+              desktopBridgeSecret: "desktop-secret",
+              serve: (options) => {
+                routeHandler = options.fetch;
+                return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+              },
+            });
+            const windowId = randomUUID();
+            const registered = yield* Effect.promise(() =>
+              Promise.resolve(
+                routeHandler?.(
+                  new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                    method: "POST",
+                    headers: { "x-octant-desktop-secret": "desktop-secret" },
+                    body: JSON.stringify({ windowId, capability: "A".repeat(43) }),
+                  }),
+                ),
+              ).then(assertResponse),
+            );
+            expect(registered.status).toBe(204);
+            settle.mockClear();
+            append.mockClear();
+            const revoked = yield* Effect.promise(() =>
+              Promise.resolve(
+                routeHandler?.(
+                  new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                    method: "DELETE",
+                    headers: { "x-octant-desktop-secret": "desktop-secret" },
+                    body: JSON.stringify({ windowId }),
+                  }),
+                ),
+              ).then(assertResponse),
+            );
+            expect(revoked.status).toBe(204);
+            expect(append).not.toHaveBeenCalled();
+            expect(settle).toHaveBeenCalledOnce();
+          }),
+        ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      );
+    } finally {
+      append.mockRestore();
+      settle.mockRestore();
+    }
+  });
+
   it("finishes server cleanup before persistence when its owning program is interrupted", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-cloud-interrupted-"));
     directories.push(directory);

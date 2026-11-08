@@ -106,7 +106,10 @@ import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
   Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
-  Pick<AuthorityWiring, "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore" | "onWindowRevoked"
+  > &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
@@ -148,6 +151,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     extensionLifecycleService,
     extensionPackageStore,
     managedWorktreeReceipts,
+    onWindowRevoked,
     options,
     persistence,
     projectRootPort,
@@ -495,6 +499,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             clock: () => new Date().toISOString(),
           });
     projectTerminals?.reconcile();
+    // Closing a window revokes its in-memory authority without a journal
+    // commit. Retire its saved actions at that boundary, before another call.
+    onWindowRevoked(() => void projectTerminals?.settleActionAuthorities());
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
