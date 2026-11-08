@@ -36,6 +36,7 @@ export interface ServerProjectsSettingsProps {
   readonly terminalClient?: ProjectTerminalClient;
   readonly actionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
+  readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
 }
 
@@ -230,7 +231,8 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                 {(project.mode === "work" && project.developerTools?.enabled !== true) ||
                 props.terminalClient === undefined ? null : (
                   <span className="shield-servers__row-actions min-w-0 max-w-full flex-wrap">
-                    {String(props.codeProjectId) !== String(project.id) ? (
+                    {String(project.mode === "work" ? props.workProjectId : props.codeProjectId) !==
+                    String(project.id) ? (
                       <>
                         <span>Open this Project to run actions and read suggestions.</span>
                         {props.onOpenServerProject === undefined ? null : (
@@ -268,7 +270,9 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                       key={`${project.id}:${project.actionsVersion ?? 0}`}
                       project={project}
                       {...(props.terminalClient === undefined ||
-                      String(props.codeProjectId) !== String(project.id)
+                      String(
+                        project.mode === "work" ? props.workProjectId : props.codeProjectId,
+                      ) !== String(project.id)
                         ? {}
                         : { client: props.terminalClient })}
                       disabled={busy}
@@ -414,6 +418,7 @@ export function ServerAccessSettings(props: {
   readonly terminalClient?: ProjectTerminalClient;
   readonly actionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
+  readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
   readonly servers: ShieldServersClient | undefined;
   readonly projects:
@@ -448,6 +453,7 @@ export function ServerAccessSettings(props: {
       />
       <ServerProjectsSettings
         codeProjectId={props.codeProjectId}
+        workProjectId={props.workProjectId}
         {...(props.onOpenServerProject === undefined
           ? {}
           : { onOpenServerProject: props.onOpenServerProject })}

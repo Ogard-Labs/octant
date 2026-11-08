@@ -309,6 +309,9 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   remote reads or effects. Project-level runs still require that live window's
   persisted Work Project. An explicit local-person Run approves only its saved
   SSH command; it grants no additional agent, terminal or credential authority.
+  Settings uses this window's Work binding for its suggestions and Run controls;
+  a different or unbound Work Project offers the same explicit Open Project
+  transition as Code, while manual action edits remain available.
 
   The Work server Project's **Show developer tools** switch is off by default
   in its existing Settings → Access → Servers row. A local-only

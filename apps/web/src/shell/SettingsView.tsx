@@ -278,6 +278,7 @@ export interface SettingsViewProps {
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
+  readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
@@ -1401,6 +1402,7 @@ function ActiveSectionContent({
           />
           <ServerAccessSettings
             codeProjectId={props.codeProjectId}
+            workProjectId={props.workProjectId}
             {...(props.onOpenServerProject === undefined
               ? {}
               : { onOpenServerProject: props.onOpenServerProject })}

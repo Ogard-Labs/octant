@@ -49,6 +49,7 @@ function setup(options: {
   readonly answer?: (command: ServerProjectsCommand) => ServerProjectsCommandResult;
   readonly terminalClient?: ProjectTerminalClient;
   readonly codeProjectId?: ProjectId;
+  readonly workProjectId?: ProjectId;
   readonly onOpenServerProject?: (project: ServerProject) => void;
 }) {
   const initial = options.initial ?? { projects: [SITE] };
@@ -70,6 +71,7 @@ function setup(options: {
       servers={servers}
       {...(options.terminalClient === undefined ? {} : { terminalClient: options.terminalClient })}
       {...(options.codeProjectId === undefined ? {} : { codeProjectId: options.codeProjectId })}
+      {...(options.workProjectId === undefined ? {} : { workProjectId: options.workProjectId })}
       {...(options.onOpenServerProject === undefined
         ? {}
         : { onOpenServerProject: options.onOpenServerProject })}
@@ -126,6 +128,44 @@ describe("ServerProjectsSettings", () => {
     const { user } = setup({
       initial: { projects: [{ ...SITE, actions: [TEST_ACTION] }] },
       codeProjectId: SITE.id,
+      terminalClient: { execute },
+    });
+    await user.click(await screen.findByRole("button", { name: "Run Test" }));
+    expect(await screen.findByRole("button", { name: "Run action" })).toBeEnabled();
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "preview-action",
+      projectId: SITE.id,
+      actionId: TEST_ACTION.id,
+    });
+  });
+  it("uses the Work binding rather than the Code binding for Work action reads and review", async () => {
+    const project = Schema.decodeUnknownSync(ServerProjectSchema)({
+      ...SITE,
+      mode: "work",
+      actions: [TEST_ACTION],
+      developerTools: {
+        enabled: true,
+        changedBy: { kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" },
+        changedAt: "2026-11-07T10:00:00.000Z",
+      },
+    });
+    const execute = vi.fn(async () =>
+      decodeProjectTerminalResult({
+        kind: "project-action-preview",
+        projectId: SITE.id,
+        projectVersion: 0,
+        action: {
+          actionId: TEST_ACTION.id,
+          name: TEST_ACTION.name,
+          folder: SITE.folder,
+          branch: "main",
+        },
+      }),
+    );
+    const { user } = setup({
+      initial: { projects: [project] },
+      codeProjectId: decodeProjectId("11111111-1111-4111-8111-222222222222"),
+      workProjectId: SITE.id,
       terminalClient: { execute },
     });
     await user.click(await screen.findByRole("button", { name: "Run Test" }));

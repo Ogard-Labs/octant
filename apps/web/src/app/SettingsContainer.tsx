@@ -289,6 +289,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(providerToolingClient === undefined ? {} : { providerToolingClient })}
       {...(serverProjectsClient === undefined ? {} : { serverProjectsClient })}
       codeProjectId={controller.workspace?.contextByMode.code.projectId ?? undefined}
+      workProjectId={controller.workspace?.contextByMode.work.projectId ?? undefined}
       {...(props.onOpenServerProject === undefined
         ? {}
         : { onOpenServerProject: props.onOpenServerProject })}
