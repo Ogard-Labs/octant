@@ -15,3 +15,11 @@ set_property(TARGET octant-desktop-peer-windows PROPERTY MSVC_RUNTIME_LIBRARY "M
 target_compile_options(octant-desktop-peer-windows PRIVATE /W4 /WX /EHsc /utf-8)
 target_link_options(octant-desktop-peer-windows PRIVATE /DELAYLOAD:node.exe)
 target_link_libraries(octant-desktop-peer-windows PRIVATE "${OCTANT_NODE_IMPORT_LIB}" delayimp advapi32 bcrypt)
+
+# Disposable hosted QA only; never stage this executable in the app resources.
+add_executable(octant-windows-peer-launcher ../../../../scripts/windows-desktop-peer/launch.cpp)
+target_compile_features(octant-windows-peer-launcher PRIVATE cxx_std_17)
+target_compile_definitions(octant-windows-peer-launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+set_property(TARGET octant-windows-peer-launcher PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_compile_options(octant-windows-peer-launcher PRIVATE /W4 /WX /EHsc /utf-8)
+target_link_libraries(octant-windows-peer-launcher PRIVATE advapi32)
