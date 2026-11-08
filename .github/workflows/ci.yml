@@ -184,6 +184,12 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/desktop typecheck
+      # Desktop tests import the pinned Electron package too, so install it
+      # before they run rather than waiting for the later native smokes.
+      - name: Install pinned Electron for native process checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ensure-ci-electron.ts
       - run: bun run --cwd apps/desktop test
       # Confined Code and Work opens prove where they landed with
       # O_NOFOLLOW_ANY on macOS and /proc/self/fd on Linux. The server job
@@ -217,10 +223,6 @@ jobs:
       # the escape tests below also run a driver on the Electron the desktop
       # app pins. Electron's package downloads its binary only on demand, not
       # at install, so it is fetched here; without it that case would skip.
-      - name: Install pinned Electron for native process checks
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bun scripts/ensure-ci-electron.ts
       # The ordinary Nightly client, in this Electron, against a development
       # host on a throwaway folder and port that a synthetic Stable owns with
       # Stable's own lease owner and client lifetime: the renderer, a Chat
