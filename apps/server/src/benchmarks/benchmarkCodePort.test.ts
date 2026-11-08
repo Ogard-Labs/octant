@@ -184,7 +184,21 @@ describe("benchmark Code port", () => {
     expect(outcome.status === "refused" && outcome.message).toContain('The ref "nope"');
     expect(commands.some((command) => command.kind === "create-managed-code-thread")).toBe(false);
     expect(await port.checkRef(projectId, "nope")).toMatchObject({ status: "refused" });
-    expect(await port.checkRef(projectId, "main")).toEqual({ status: "ok" });
+    expect(await port.checkRef(projectId, "main")).toEqual({ status: "ok", commit: head });
+  });
+
+  it("starts from the pinned commit without reading the ref again, so a branch that moved changes nothing", async () => {
+    const { port, commands } = setup();
+    const pinned = "c".repeat(40);
+
+    expect((await port.startTurn(input({ commit: pinned }))).status).toBe("started");
+
+    expect(commands.some((command) => command.kind === "preview-code-worktree-source")).toBe(false);
+    expect(commands.find((command) => command.kind === "create-managed-code-thread")).toMatchObject(
+      {
+        sourceRevision: pinned,
+      },
+    );
   });
 
   it("leaves a cell queued when Code has no room yet", async () => {

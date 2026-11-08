@@ -27,6 +27,7 @@ import {
 } from "@octant/contracts";
 import {
   benchmarkCellCount,
+  benchmarkCodeBranch,
   benchmarkExecutionLevel,
   benchmarkCellMetrics,
   benchmarkLeaderboard,
@@ -79,15 +80,18 @@ export interface BenchmarkServiceOptions {
   readonly codeCases?: {
     /** The mode a new thread starts in; absent unless it is an active Code Project. */
     readonly projectMode: (projectId: ProjectId) => PermissionMode | undefined;
+    /** Resolves the ref to the commit every cell of the case will start from. */
     readonly checkRef: (
       projectId: ProjectId,
       ref: string,
     ) => Promise<
-      { readonly status: "ok" } | { readonly status: "refused"; readonly message: string }
+      | { readonly status: "ok"; readonly commit: string }
+      | { readonly status: "refused"; readonly message: string }
     >;
     /** Removes a cell's managed worktree; a missing one is "absent", which counts as done. */
     readonly removeWorktree: (
       threadId: string,
+      branch: string,
     ) => Promise<"removed" | "absent" | { readonly status: "refused"; readonly message: string }>;
   };
   readonly clock: () => string;
@@ -267,8 +271,8 @@ export class BenchmarkService {
         `Contender ${unavailable + 1} is not an enabled provider model on this host.`,
       );
     }
-    const codeRefusal = await this.#checkCodeCases(suite.cases, request.executionLevel);
-    if (codeRefusal !== undefined) return codeRefusal;
+    const codeChecked = await this.#checkCodeCases(suite.cases, request.executionLevel);
+    if (codeChecked.status === "refused") return codeChecked;
     const project = await this.#options.ensureProject(windowId);
     if (project.status === "refused") return refused("unavailable", project.message);
     const run = decodeBenchmarkRun({
@@ -282,6 +286,7 @@ export class BenchmarkService {
       repetitions: request.repetitions,
       budget: request.budget,
       ...(request.executionLevel === undefined ? {} : { executionLevel: request.executionLevel }),
+      ...(codeChecked.commits.length === 0 ? {} : { codeCommits: codeChecked.commits }),
       status: "running",
       startedAt: decodeUtcTimestamp(clock()),
       cells: planBenchmarkCells(suite.cases, request.contenders, request.repetitions, () =>
@@ -301,14 +306,29 @@ export class BenchmarkService {
   async #checkCodeCases(
     cases: BenchmarkSuite["cases"],
     executionLevel: BenchmarkRunStartRequest["executionLevel"],
-  ): Promise<BenchmarkRefusal | undefined> {
+  ): Promise<
+    | BenchmarkRefusal
+    | {
+        readonly status: "ok";
+        readonly commits: ReadonlyArray<{
+          readonly caseId: BenchmarkSuite["cases"][number]["caseId"];
+          readonly commit: string;
+        }>;
+      }
+  > {
     const codeCases = cases.filter((candidate) => candidate.code !== undefined);
-    if (codeCases.length === 0) return undefined;
+    if (codeCases.length === 0) return { status: "ok", commits: [] };
     const support = this.#options.codeCases;
     if (support === undefined) {
       return refused("unavailable", "Code cases cannot run on this host.");
     }
-    const checked = new Set<string>();
+    // The ref is read once per Project and ref, and every case on it is pinned
+    // to that commit, so the cells of a run compare on the same files.
+    const checked = new Map<string, string>();
+    const commits: Array<{
+      readonly caseId: BenchmarkSuite["cases"][number]["caseId"];
+      readonly commit: string;
+    }> = [];
     for (const benchmarkCase of codeCases) {
       const target = benchmarkCase.code;
       if (target === undefined) continue;
@@ -322,14 +342,19 @@ export class BenchmarkService {
       const level = benchmarkExecutionLevel(executionLevel, mode);
       if (level.status === "refused") return refused("invalid", level.message);
       const key = `${String(target.codeProjectId)}\0${target.ref}`;
-      if (checked.has(key)) continue;
-      checked.add(key);
-      const ref = await support.checkRef(target.codeProjectId, target.ref);
-      if (ref.status === "refused") {
-        return refused("invalid", `"${benchmarkCase.title}": ${ref.message}`);
+      let commit = checked.get(key);
+      if (commit === undefined) {
+        const ref = await support.checkRef(target.codeProjectId, target.ref);
+        if (ref.status === "refused") {
+          return refused("invalid", `"${benchmarkCase.title}": ${ref.message}`);
+        }
+        commit = ref.commit;
+        checked.set(key, commit);
       }
+      // Only a full SHA-1 can be pinned; any other form keeps resolving per cell.
+      if (/^[a-f0-9]{40}$/.test(commit)) commits.push({ caseId: benchmarkCase.caseId, commit });
     }
-    return undefined;
+    return { status: "ok", commits };
   }
 
   async cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkOutcome<BenchmarkRun>> {
@@ -357,7 +382,10 @@ export class BenchmarkService {
         const removal =
           this.#options.codeCases === undefined
             ? "absent"
-            : await this.#options.codeCases.removeWorktree(cellThreadId);
+            : await this.#options.codeCases.removeWorktree(
+                cellThreadId,
+                benchmarkCodeBranch(String(run.runId), String(cell.cellId)),
+              );
         if (typeof removal === "object") {
           return refused(
             "unavailable",

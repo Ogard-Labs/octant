@@ -4,6 +4,7 @@ import {
   type BenchmarkRunStartRequest,
   type PermissionMode,
 } from "@octant/contracts";
+import { benchmarkCodeBranch } from "@octant/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import { benchmarkCellIdentity } from "./benchmarkRunner";
 import { BenchmarkService } from "./benchmarkService";
@@ -42,7 +43,7 @@ function setup(
   options: {
     readonly mode?: PermissionMode | undefined;
     readonly ref?:
-      | { readonly status: "ok" }
+      | { readonly status: "ok"; readonly commit: string }
       | { readonly status: "refused"; readonly message: string };
     readonly removal?:
       | "removed"
@@ -54,7 +55,8 @@ function setup(
   const opened = openBenchmarkTestStore();
   opened.store.suiteSaved({ suite: suite() });
   const purged: Array<[string, string]> = [];
-  const removed: string[] = [];
+  const removed: Array<[string, string]> = [];
+  const reads: Array<[string, string]> = [];
   const service = new BenchmarkService({
     projection: opened.projection,
     store: opened.store,
@@ -71,9 +73,12 @@ function setup(
       : {
           codeCases: {
             projectMode: () => ("mode" in options ? options.mode : "ask-first"),
-            checkRef: async () => options.ref ?? { status: "ok" },
-            removeWorktree: async (threadId: string) => {
-              removed.push(threadId);
+            checkRef: async (projectId: string, ref: string) => {
+              reads.push([projectId, ref]);
+              return options.ref ?? { status: "ok", commit: "a".repeat(40) };
+            },
+            removeWorktree: async (threadId: string, branch: string) => {
+              removed.push([threadId, branch]);
               return options.removal ?? "removed";
             },
           },
@@ -81,7 +86,7 @@ function setup(
     clock: () => BENCHMARK_TEST_NOW,
     uuid: opened.uuid,
   });
-  return { ...opened, service, purged, removed };
+  return { ...opened, service, purged, removed, reads };
 }
 
 const windowId = "66300000-0000-4000-8000-000000000001" as never;
@@ -132,6 +137,16 @@ describe("starting a run with Code cases", () => {
     expect(projection.runs()).toHaveLength(0);
   });
 
+  it("pins each Code case to the commit its ref resolved to, reading the ref once", async () => {
+    const { service, reads } = setup({ ref: { status: "ok", commit: "b".repeat(40) } });
+    const outcome = await service.startRun(windowId, request());
+    expect(outcome.status).toBe("ok");
+    expect(outcome.status === "ok" && outcome.value.codeCommits).toEqual([
+      { caseId: benchmarkIds.caseA, commit: "b".repeat(40) },
+    ]);
+    expect(reads).toHaveLength(1);
+  });
+
   it("refuses Code cases on a host that cannot run them", async () => {
     const { service } = setup({ supported: false });
     expect(await service.startRun(windowId, request())).toMatchObject({
@@ -153,7 +168,7 @@ describe("purging a run with Code cells", () => {
     return started.value;
   }
 
-  it("removes each cell's worktree, then purges its Code thread, and forgets the run", async () => {
+  it("removes each cell's worktree and branch, then purges its Code thread, and forgets the run", async () => {
     const ctx = setup();
     const run = await finishedRun(ctx);
     const threadId = benchmarkCellIdentity(String(run.cells[0]!.cellId)).threadId;
@@ -161,7 +176,10 @@ describe("purging a run with Code cells", () => {
     const outcome = await ctx.service.purgeRun({ runId: run.runId });
 
     expect(outcome.status).toBe("ok");
-    expect(ctx.removed).toEqual([threadId]);
+    // Only the branch this cell made is named for deletion.
+    expect(ctx.removed).toEqual([
+      [threadId, benchmarkCodeBranch(String(run.runId), String(run.cells[0]!.cellId))],
+    ]);
     expect(ctx.purged).toContainEqual([threadId, "code"]);
     expect(ctx.projection.run(String(run.runId))).toBeUndefined();
   });

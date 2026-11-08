@@ -38,6 +38,11 @@ export type BenchmarkCodeTurnReading =
       readonly state: "in-flight" | "completed" | "interrupted" | "failed";
       /** The turn is parked on an approval or a question only a person can answer. */
       readonly awaitingApproval: boolean;
+      /**
+       * When the wait began, as the journal recorded it. Absent when the host
+       * cannot say, which a restart must not read as "just now".
+       */
+      readonly waitingSince?: string;
       readonly failureMessage?: string;
     };
 
@@ -52,6 +57,8 @@ export interface BenchmarkCodeTurnInput {
   readonly title: string;
   readonly codeProjectId: ProjectId;
   readonly ref: string;
+  /** The commit the run pinned the ref to; absent on an older run, which resolves the ref itself. */
+  readonly commit?: string;
   /** The local branch the cell works on; never pushed. */
   readonly branch: string;
   readonly providerInstanceId: ProviderInstanceId;
@@ -82,11 +89,14 @@ export type BenchmarkWorktreeRemoval =
  * exactly as they do to a routine's Code thread.
  */
 export interface BenchmarkCodePort {
-  /** Whether the ref resolves in the Code Project's repository. Reads only. */
+  /** The commit the ref resolves to in the Code Project's repository. Reads only. */
   checkRef(
     codeProjectId: ProjectId,
     ref: string,
-  ): Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly message: string }>;
+  ): Promise<
+    | { readonly status: "ok"; readonly commit: string }
+    | { readonly status: "refused"; readonly message: string }
+  >;
   /** Creates the managed thread if missing and starts its one turn. Safe to repeat. */
   startTurn(input: BenchmarkCodeTurnInput): Promise<BenchmarkCodeTurnStart>;
   readTurn(threadId: string, submissionId: string): Promise<BenchmarkCodeTurnReading>;
@@ -95,8 +105,11 @@ export interface BenchmarkCodePort {
   archiveThread(threadId: string): Promise<void>;
   /** The cell's worktree folder, when it still exists. */
   worktreeRoot(threadId: string): Promise<string | undefined>;
-  /** Removes the cell's managed worktree through the managed-worktree service. */
-  removeWorktree(threadId: string): Promise<BenchmarkWorktreeRemoval>;
+  /**
+   * Removes the cell's managed worktree, uncommitted changes included, and the
+   * one local branch the cell made, through the managed-worktree service.
+   */
+  removeWorktree(threadId: string, branch: string): Promise<BenchmarkWorktreeRemoval>;
 }
 
 /** The slice of the Code route service the adapter uses. */
@@ -136,10 +149,12 @@ export interface CreateBenchmarkCodePortOptions {
     | undefined;
   /** Whether the thread's running turn waits on an approval or a question. */
   readonly awaitsPerson: (threadId: string) => boolean;
+  /** When the thread's oldest pending request was asked, from the journal; absent when unknown. */
+  readonly pendingSince?: (threadId: string) => Promise<string | undefined> | string | undefined;
   readonly evidence: { readonly put: (text: string) => CodeEvidenceReference };
   readonly clock: () => string;
   readonly resolveRoot: (threadId: string) => Promise<string | undefined>;
-  readonly removeWorktree: (threadId: string) => Promise<BenchmarkWorktreeRemoval>;
+  readonly removeWorktree: (threadId: string, branch: string) => Promise<BenchmarkWorktreeRemoval>;
 }
 
 const SOURCE_REFUSAL: Readonly<Record<string, string>> = {
@@ -183,13 +198,27 @@ export function createBenchmarkCodePort(
     | { readonly status: "refused"; readonly message: string }
     | { readonly status: "waiting"; readonly message: string };
 
-  const resolveSource = async (projectId: ProjectId, ref: string): Promise<Source> => {
+  const resolveSource = async (
+    projectId: ProjectId,
+    ref: string,
+    pinned?: string,
+  ): Promise<Source> => {
     const prepared = await code.execute(
       windowId,
       decodeCodeCommand({ kind: "prepare-code-project-checkout", projectId }),
     );
     if (prepared.kind !== "checkout-prepared") {
       return { status: "refused", message: "The Code Project's repository is unavailable." };
+    }
+    // A pinned commit is the run's own answer: the ref is not read again, so a
+    // branch that moved since the run started changes nothing.
+    if (pinned !== undefined) {
+      return {
+        status: "ready",
+        bindingRevisionId: String(prepared.bindingRevisionId),
+        repositoryId: String(prepared.checkout.repositoryId),
+        resolvedHead: pinned,
+      };
     }
     let reason = "ref-unavailable";
     for (const refIntent of candidates(ref)) {
@@ -240,7 +269,7 @@ export function createBenchmarkCodePort(
       try {
         const source = await resolveSource(codeProjectId, ref);
         return source.status === "ready"
-          ? { status: "ok" }
+          ? { status: "ok", commit: source.resolvedHead }
           : { status: "refused", message: source.message };
       } catch (error) {
         return {
@@ -258,7 +287,7 @@ export function createBenchmarkCodePort(
         const threadId = decodeCodeThreadId(input.threadId);
         let thread = options.readThread(input.threadId);
         if (thread === undefined) {
-          const source = await resolveSource(input.codeProjectId, input.ref);
+          const source = await resolveSource(input.codeProjectId, input.ref, input.commit);
           if (source.status !== "ready") return source;
           const created = await code.execute(
             windowId,
@@ -367,11 +396,14 @@ export function createBenchmarkCodePort(
             : turn.status === "failed"
               ? "failed"
               : "in-flight";
+      const awaitingApproval = state === "in-flight" && options.awaitsPerson(threadId);
+      const waitingSince = awaitingApproval ? await options.pendingSince?.(threadId) : undefined;
       return {
         status: "turn",
         turnId: operationId,
         state,
-        awaitingApproval: state === "in-flight" && options.awaitsPerson(threadId),
+        awaitingApproval,
+        ...(waitingSince === undefined ? {} : { waitingSince }),
         ...(turn.failure === undefined ? {} : { failureMessage: turn.failure.message }),
       };
     },
@@ -457,9 +489,9 @@ export function createBenchmarkCodePort(
 
     worktreeRoot: (threadId) => options.resolveRoot(threadId),
 
-    async removeWorktree(threadId) {
+    async removeWorktree(threadId, branch) {
       try {
-        return await options.removeWorktree(threadId);
+        return await options.removeWorktree(threadId, branch);
       } catch (error) {
         return {
           status: "refused",

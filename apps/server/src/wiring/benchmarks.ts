@@ -64,6 +64,8 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
     };
     /** Whether a Code thread's running turn waits on an approval or a question. */
     readonly awaitsPerson: (threadId: string) => boolean;
+    /** When the thread's oldest pending request was asked, from the journal; absent when unknown. */
+    readonly pendingSince: (threadId: string) => Promise<string | undefined>;
     /** The confined, network-less shell Octant's own tools use; check commands run in it. */
     readonly harnessOfflineShell: NativeHarnessShellPort;
     readonly managedWorktreeService: Pick<ManagedWorktreeService, "cleanup">;
@@ -89,6 +91,7 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
 export function wireBenchmarks(deps: BenchmarksDependencies) {
   const {
     awaitsPerson,
+    pendingSince,
     codeEvidence,
     harnessOfflineShell,
     managedWorktreeReceipts,
@@ -146,7 +149,10 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     );
     return root !== undefined && existsSync(root.rootPath) ? root.rootPath : undefined;
   };
-  const removeWorktree = async (threadId: string): Promise<BenchmarkWorktreeRemoval> => {
+  const removeWorktree = async (
+    threadId: string,
+    branch: string,
+  ): Promise<BenchmarkWorktreeRemoval> => {
     const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
     if (thread === undefined) return "absent";
     const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(String(thread.checkoutId)));
@@ -164,18 +170,19 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
         lifecycle: "archived",
       });
     }
-    // The existing managed-worktree cleanup: it keeps a worktree that still has
-    // uncommitted changes, and it removes no branch.
+    // The existing managed-worktree cleanup, asked to discard changes. The
+    // service accepts that only for this exact benchmark branch on the
+    // checkout derived from its own thread, and removes only that branch.
     const result = await managedWorktreeService.cleanup(
-      { receiptId, confirmedByLocalUser: true },
+      { receiptId, confirmedByLocalUser: true, discardChanges: { branch } },
       new AbortController().signal,
     );
     if (result.status === "removed") return "removed";
     return {
       status: "refused",
       message:
-        result.status === "refused" && result.reason === "dirty"
-          ? "it still holds uncommitted changes, which worktree cleanup keeps."
+        result.status === "refused"
+          ? `worktree cleanup refused it (${result.reason}).`
           : `worktree cleanup answered ${result.status}.`,
     };
   };
@@ -213,6 +220,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
                 };
           },
           awaitsPerson,
+          pendingSince,
           evidence: codeEvidence,
           clock: () => new Date().toISOString(),
           resolveRoot,
@@ -276,7 +284,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
           codeCases: {
             projectMode,
             checkRef: (projectId, ref) => codePort.checkRef(projectId, ref),
-            removeWorktree: (threadId) => codePort.removeWorktree(threadId),
+            removeWorktree: (threadId, branch) => codePort.removeWorktree(threadId, branch),
           },
         }),
     purgeThread: async (threadId, mode) => (await threadPurge.purge?.(threadId, mode)) ?? "failed",

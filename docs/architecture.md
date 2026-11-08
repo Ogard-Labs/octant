@@ -6033,7 +6033,11 @@ commands and operations under the host's own scope (`ROUTINE_HOST_SCOPE_ID`, the
 scope routines and goal rounds act under): `prepare-code-project-checkout`, a
 `preview-code-worktree-source` read of the ref (a bare name tries the branch,
 then the tag), `create-managed-code-thread` pinned to the resolved commit with
-`sourceRevision`, and `start-provider-turn`. The thread, the turn's operation id
+`sourceRevision`, and `start-provider-turn`. Start resolves each Code case's ref
+once and stores the commit on the run (`codeCommits`, a full 40-hex SHA per Code
+case), so every cell of the case starts from the same files even if the branch
+moves mid-run; a run started before this existed has none and resolves the ref
+per cell. The thread, the turn's operation id
 and the branch (`benchmark/<run>/<cell>`) are derived from the run and cell ids,
 so a restart finds what it made. The delivery target is `local-implementation`
 on that local branch; nothing is pushed and nothing proposes a pull request. The
@@ -6055,8 +6059,12 @@ policy, which the host can only narrow.
 _Approvals._ A Code turn parked on an approval or a question is read with the
 same signal the sibling-threads read uses (`turnAwaitsPerson` or a harness
 approval). After 10 minutes parked, the runner interrupts the turn
-(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. The clock is
-in memory and starts again after a restart or once the request is answered.
+(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. The wait is
+dated by the journaled time the approval was asked (the pending request's
+`requestedAt`). Where nothing journaled dates it, a turn this process saw run and
+then park is timed from the moment it parked, and one first met already parked
+after a restart is timed from the cell's `startedAt`, an upper bound, so a
+restart never grants another ten minutes. Answering the request resets it.
 
 _Result and checks._ The reply is read from the turn's evidence through the
 Code conversation read, and the changed files from the turn's own
@@ -6081,10 +6089,14 @@ stays blind.
 _Purge._ Purging a run removes each Code cell's managed worktree through
 `ManagedWorktreeService.cleanup` (the thread is archived first, as that service
 requires), then purges the cell's Code thread with the ordinary thread purge. A
-missing worktree counts as done. That cleanup keeps a worktree that still holds
-uncommitted changes and removes no branch, so a run whose worktree is dirty is
-kept with the reason, and the local `benchmark/...` branches are left in the
-repository.
+missing worktree counts as done. Cleanup keeps a worktree with uncommitted
+changes for every other caller. The benchmark purge passes `discardChanges` with
+the cell's exact `benchmark/<run>/<cell>` branch, and the service accepts that
+only when the branch matches that shape, the receipt was made for that branch,
+the receipt's checkout id is the one derived from its own thread, and no other
+worktree holds the branch. It then removes the worktree with
+`git worktree remove --force` and deletes that one branch with `git branch -D`.
+Any other receipt or branch is refused before anything is touched.
 
 **Judge scoring.** When the run's judge snapshot is set, a cell that settles
 `answered` owes a score, and the run stays `running` until every judgement it

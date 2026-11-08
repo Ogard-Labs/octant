@@ -64,7 +64,7 @@ class FakeCode implements BenchmarkCodePort {
   root: string | undefined = "/worktrees/cell";
 
   async checkRef() {
-    return { status: "ok" } as const;
+    return { status: "ok", commit: "a".repeat(40) } as const;
   }
   async startTurn(input: BenchmarkCodeTurnInput) {
     this.starts.push(input);
@@ -124,6 +124,8 @@ function setup(
     readonly projectMode?: PermissionMode | undefined;
     readonly executionLevel?: BenchmarkRun["executionLevel"];
     readonly judge?: boolean;
+    readonly repetitions?: number;
+    readonly commit?: string;
   } = {},
 ) {
   const clock = { now: BENCHMARK_TEST_NOW };
@@ -146,6 +148,7 @@ function setup(
     });
   const base = sampleRun({
     suite: codeSuite(options.checks ?? []),
+    ...(options.repetitions === undefined ? {} : { repetitions: options.repetitions }),
     ...(options.judge === true
       ? { judge: { providerInstanceId: benchmarkIds.judgeProvider, modelId: "judge-model" } }
       : {}),
@@ -153,6 +156,9 @@ function setup(
   const run = decodeBenchmarkRun({
     ...base,
     ...(options.executionLevel === undefined ? {} : { executionLevel: options.executionLevel }),
+    ...(options.commit === undefined
+      ? {}
+      : { codeCommits: [{ caseId: benchmarkIds.caseA, commit: options.commit }] }),
   });
   opened.store.runStarted({ run });
   const cell = () => opened.projection.run(benchmarkIds.run)!.cells[0]!;
@@ -189,6 +195,25 @@ describe("benchmark Code cells", () => {
     });
     expect(cell().state).toBe("running");
     expect(cell().threadId).toBe(benchmarkCellIdentity(cellId).threadId);
+  });
+
+  it("starts every cell of a case from the commit the run pinned", async () => {
+    const pinned = "d".repeat(40);
+    const { runner, code, advance } = setup({ repetitions: 2, commit: pinned });
+    await runner.tick();
+    // The branch moves between the cells; the run's own answer does not.
+    advance(1_000);
+    code.turn = { ...code.turn, state: "completed" };
+    await settle(runner);
+    await runner.tick();
+    expect(code.starts.length).toBeGreaterThanOrEqual(2);
+    expect(code.starts.map((start) => start.commit)).toEqual(code.starts.map(() => pinned));
+  });
+
+  it("resolves the ref per cell on an older run that pinned nothing", async () => {
+    const { runner, code } = setup();
+    await runner.tick();
+    expect(code.starts[0]?.commit).toBeUndefined();
   });
 
   it("keeps the level the run asked for when the Project holds it", async () => {
@@ -232,6 +257,34 @@ describe("benchmark Code cells", () => {
     expect(cell().state).toBe("blocked-on-approval");
     expect(code.interrupted).toEqual([benchmarkCellIdentity(String(cell().cellId)).threadId]);
     expect(code.archived).toHaveLength(1);
+  });
+
+  it("counts a wait from when the journal says it began, so a restart grants no new ten minutes", async () => {
+    const { runner, make, code, cell, advance } = setup();
+    await runner.tick();
+    const askedAt = new Date(Date.parse(BENCHMARK_TEST_NOW) - 9 * 60_000).toISOString();
+    code.turn = { ...code.turn, awaitingApproval: true, waitingSince: askedAt };
+    advance(30_000);
+    const restarted = make();
+
+    await restarted.tick();
+    expect(cell().state).toBe("running");
+
+    advance(30_000);
+    await restarted.tick();
+
+    expect(cell().state).toBe("blocked-on-approval");
+  });
+
+  it("counts from the cell's start when a restarted runner first meets a turn already parked and nothing dates the wait", async () => {
+    const { runner, make, code, cell, advance } = setup();
+    await runner.tick();
+    advance(10 * 60_000);
+    code.turn = { ...code.turn, awaitingApproval: true };
+
+    await make().tick();
+
+    expect(cell().state).toBe("blocked-on-approval");
   });
 
   it("starts the approval clock again when the approval is answered", async () => {

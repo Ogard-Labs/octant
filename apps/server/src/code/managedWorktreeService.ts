@@ -23,6 +23,7 @@ import type {
   ManagedWorktreeReceiptState,
   ManagedWorktreeSourceProvenance,
 } from "./managedWorktreeReceiptStore";
+import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 
 export type ManagedWorktreeRefObservation =
@@ -77,9 +78,22 @@ export interface ManagedWorktreeGitPort {
     | Readonly<{ status: "unavailable" | "failed" }>
   >;
   removeWorktree(
-    input: Readonly<{ repositoryRoot: string; targetPath: string }>,
+    input: Readonly<{
+      repositoryRoot: string;
+      targetPath: string;
+      /** Discards uncommitted changes (`git worktree remove --force`); only a discarding cleanup sets it. */
+      force?: boolean;
+    }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "removed" | "rejected" }>>;
+  /**
+   * Deletes one local branch by its exact name (`git branch -D`). Only a
+   * discarding cleanup calls it; a port without it cannot discard.
+   */
+  deleteBranch?(
+    input: Readonly<{ repositoryRoot: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "deleted" | "rejected" }>>;
   /**
    * Drop the checkpoint anchors of a checkout that is gone. The anchors live in
    * the repository's shared ref store, not in the worktree, so removing the
@@ -120,6 +134,13 @@ export interface ManagedWorktreeReceiptPort {
     state: ManagedWorktreeReceiptState,
   ): Promise<ManagedWorktreeReceipt>;
 }
+
+/**
+ * What a discarding cleanup may remove: a throwaway worktree of a Benchmarks
+ * Code cell and the one local branch that cell made. Both names are fixed by
+ * the run and the cell, so nothing else can match.
+ */
+export const BENCHMARK_DISCARD_BRANCH = /^benchmark\/[a-f0-9]{8}\/[a-f0-9]{12}$/;
 
 export type ManagedWorktreeRefusalReason =
   | "active-thread"
@@ -631,12 +652,34 @@ export class ManagedWorktreeService {
     return { status: "ready", targetPath: receipt.canonicalWorktreePath, receipt };
   }
 
+  /**
+   * Removes one owned worktree once its thread is archived. `discardChanges`
+   * is the only way past uncommitted changes, and it is narrow on purpose: it
+   * names the exact `benchmark/<run>/<cell>` branch, and the receipt must be
+   * the one made for that branch, on the checkout identity derived from its
+   * own thread. Any other worktree, or any branch outside that shape, is
+   * refused before anything is touched. It also deletes that one branch, and
+   * never one another worktree has checked out.
+   */
   async cleanup(
-    input: Readonly<{ receiptId: string; confirmedByLocalUser: boolean }>,
+    input: Readonly<{
+      receiptId: string;
+      confirmedByLocalUser: boolean;
+      discardChanges?: Readonly<{ branch: string }>;
+    }>,
     signal: AbortSignal,
   ): Promise<ManagedWorktreeCleanupResult> {
     if (!input.confirmedByLocalUser) {
       return { status: "refused", reason: "confirmation-required" };
+    }
+    const discard = input.discardChanges?.branch;
+    if (
+      input.discardChanges !== undefined &&
+      (discard === undefined ||
+        !BENCHMARK_DISCARD_BRANCH.test(discard) ||
+        this.#git.deleteBranch === undefined)
+    ) {
+      return { status: "refused", reason: "mismatched" };
     }
 
     let receipt: ManagedWorktreeReceipt | undefined;
@@ -647,6 +690,17 @@ export class ManagedWorktreeService {
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
     if (receipt.state === "removed") return { status: "removed", receipt };
+    if (
+      discard !== undefined &&
+      (receipt.branchIntent !== discard ||
+        receipt.checkoutId !==
+          deriveManagedWorktreeCheckoutId({
+            repositoryId: receipt.repositoryId,
+            threadId: receipt.threadId,
+          }))
+    ) {
+      return { status: "refused", reason: "mismatched" };
+    }
 
     const authority = await this.#observeCleanupAuthority(receipt, signal);
     if (authority !== undefined) return authority;
@@ -694,7 +748,7 @@ export class ManagedWorktreeService {
       } catch {
         return { status: "interrupted", receipt };
       }
-      return this.#finishRemovedReceipt(receipt);
+      return this.#finishDiscardedReceipt(receipt, observation, discard, signal);
     }
     if (targets.length !== 1) {
       return { status: "refused", reason: "inventory-ambiguous" };
@@ -706,15 +760,26 @@ export class ManagedWorktreeService {
     if (target.branch !== branchRef(receipt.branchIntent)) {
       return { status: "refused", reason: "mismatched" };
     }
-
-    let dirty: Awaited<ReturnType<ManagedWorktreeGitPort["isDirty"]>>;
-    try {
-      dirty = await this.#git.isDirty(receipt.canonicalWorktreePath, signal);
-    } catch {
-      return { status: "interrupted", receipt };
+    // The branch is deleted only when this worktree is the one holding it.
+    if (
+      discard !== undefined &&
+      observation.worktrees.filter(
+        (worktree) => worktree.status === "present" && worktree.branch === branchRef(discard),
+      ).length !== 1
+    ) {
+      return { status: "refused", reason: "inventory-ambiguous" };
     }
-    if (dirty.status !== "observed") return { status: "waiting", receipt };
-    if (dirty.dirty) return { status: "refused", reason: "dirty" };
+
+    if (discard === undefined) {
+      let dirty: Awaited<ReturnType<ManagedWorktreeGitPort["isDirty"]>>;
+      try {
+        dirty = await this.#git.isDirty(receipt.canonicalWorktreePath, signal);
+      } catch {
+        return { status: "interrupted", receipt };
+      }
+      if (dirty.status !== "observed") return { status: "waiting", receipt };
+      if (dirty.dirty) return { status: "refused", reason: "dirty" };
+    }
 
     try {
       receipt = await this.#receipts.transition(receipt.receiptId, "cleanup-pending");
@@ -726,6 +791,7 @@ export class ManagedWorktreeService {
         {
           repositoryRoot: observation.repositoryRoot,
           targetPath: receipt.canonicalWorktreePath,
+          ...(discard === undefined ? {} : { force: true }),
         },
         signal,
       );
@@ -759,6 +825,42 @@ export class ManagedWorktreeService {
       }
     } catch {
       return { status: "interrupted", receipt };
+    }
+    return this.#finishDiscardedReceipt(receipt, confirmation, discard, signal);
+  }
+
+  /**
+   * Finishes a cleanup. A discarding one first deletes its one local branch,
+   * which is already known to be the cell's and checked out nowhere else; a
+   * branch Git still refuses to delete leaves the receipt pending so a retry
+   * finds it.
+   */
+  async #finishDiscardedReceipt(
+    receipt: ManagedWorktreeReceipt,
+    observation: RepositoryIdentityObservation,
+    discard: string | undefined,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeCleanupResult> {
+    if (discard !== undefined) {
+      if (
+        observation.status !== "available" ||
+        observation.worktrees.some(
+          (worktree) => worktree.status === "present" && worktree.branch === branchRef(discard),
+        )
+      ) {
+        return { status: "waiting", receipt };
+      }
+      try {
+        if (await this.#git.branchExists(receipt.canonicalRepositoryPath, discard, signal)) {
+          const deleted = await this.#git.deleteBranch?.(
+            { repositoryRoot: receipt.canonicalRepositoryPath, branch: discard },
+            signal,
+          );
+          if (deleted?.status !== "deleted") return { status: "waiting", receipt };
+        }
+      } catch {
+        return { status: "interrupted", receipt };
+      }
     }
     return this.#finishRemovedReceipt(receipt);
   }

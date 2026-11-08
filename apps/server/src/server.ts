@@ -102,6 +102,7 @@ import { wireWorkFiles } from "./wiring/workFiles";
 import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
 import { wireBenchmarks, type BenchmarkThreadPurgeSlot } from "./wiring/benchmarks";
 import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
@@ -1190,6 +1191,16 @@ export function startOctantServer(
       awaitsPerson: (threadId) =>
         codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
         threadAwaitsHarnessApproval(threadId),
+      // The journaled time an approval or question was asked, so a restart
+      // keeps counting the wait from when it began.
+      pendingSince: async (threadId) => {
+        const pending = await codeOperationRuntime?.pendingRequests?.(ROUTINE_HOST_SCOPE_ID);
+        const asked = (pending ?? [])
+          .filter((request) => String(request.threadId) === threadId)
+          .map((request) => String(request.requestedAt))
+          .sort();
+        return asked[0];
+      },
       codeEvidence,
       harnessOfflineShell,
       managedWorktreeReceipts,

@@ -134,8 +134,10 @@ export class BenchmarkRunner {
   readonly #judgeSeen = new Map<string, number>();
   /** Cells put back to queued in this pass; they wait for the next tick to try again. */
   readonly #requeued = new Set<string>();
-  /** When a Code turn was first seen parked on an approval; a restart starts the clock again. */
+  /** When this process first saw a Code turn park on an approval nothing journaled dated. */
   readonly #approvalSince = new Map<string, number>();
+  /** Code cells this process has already read once; a first sight says nothing about how long a wait has lasted. */
+  readonly #sighted = new Set<string>();
   /** Check commands running in the background for Code cells whose turns finished. */
   readonly #checking = new Map<
     string,
@@ -689,11 +691,16 @@ export class BenchmarkRunner {
     }
     const cellId = String(cell.cellId);
     const { threadId, submissionId } = benchmarkCellIdentity(cellId);
+    const pinnedCommit = run.codeCommits?.find(
+      (pin) => pin.caseId === benchmarkCase.caseId,
+    )?.commit;
     const started = await code.startTurn({
       threadId,
       title: threadTitle(run.suiteName, benchmarkCase.title, String(contender.modelId)),
       codeProjectId: target.codeProjectId,
       ref: target.ref,
+      // Every cell of the case starts from the commit the run pinned at start.
+      ...(pinnedCommit === undefined ? {} : { commit: pinnedCommit }),
       branch: benchmarkCodeBranch(String(run.runId), cellId),
       providerInstanceId: contender.providerInstanceId,
       modelId: contender.modelId,
@@ -780,9 +787,19 @@ export class BenchmarkRunner {
       return true;
     }
     const now = Date.parse(this.#options.clock());
+    const startedMs = cell.startedAt === undefined ? Number.NaN : Date.parse(cell.startedAt);
     if (reading.awaitingApproval) {
-      const since = this.#approvalSince.get(cellId) ?? now;
-      this.#approvalSince.set(cellId, since);
+      // The wait began when the journal says the approval was asked. Without
+      // that, a turn this process saw run and then park is timed from the
+      // moment it parked; one first met already parked (after a restart) is
+      // timed from the cell's start, an upper bound, so a restart never grants
+      // another ten minutes.
+      const journaled =
+        reading.waitingSince === undefined ? Number.NaN : Date.parse(reading.waitingSince);
+      const since = Number.isNaN(journaled)
+        ? (this.#approvalSince.get(cellId) ?? (this.#sighted.has(cellId) ? now : startedMs))
+        : journaled;
+      if (Number.isNaN(journaled)) this.#approvalSince.set(cellId, since);
       if (now - since >= (this.#options.approvalWaitMs ?? BENCHMARK_APPROVAL_WAIT_MS)) {
         this.#approvalSince.delete(cellId);
         await code.interruptTurn(threadId, submissionId);
@@ -798,7 +815,7 @@ export class BenchmarkRunner {
     } else {
       this.#approvalSince.delete(cellId);
     }
-    const startedMs = cell.startedAt === undefined ? Number.NaN : Date.parse(cell.startedAt);
+    this.#sighted.add(cellId);
     if (now - startedMs > (this.#options.turnTimeoutMs ?? BENCHMARK_TURN_TIMEOUT_MS)) {
       await code.interruptTurn(threadId, submissionId);
       this.#settle(run, cell, "failed", "timed out");
