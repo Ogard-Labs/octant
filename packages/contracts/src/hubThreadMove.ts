@@ -319,6 +319,185 @@ export const OwnerThreadMoveTicketRequest = Schema.Struct({
 }).annotations(strict);
 export type OwnerThreadMoveTicketRequest = typeof OwnerThreadMoveTicketRequest.Type;
 
+/**
+ * The source asks a member which of its Projects would take a thread of this
+ * mode (for Code, which are bound to a clone of the same repository). The
+ * answer names Projects only; it opens nothing.
+ */
+export const ThreadMoveProjectsRequest = Schema.Struct({
+  mode: OctantMode,
+  repositoryRemotes: Schema.optional(Schema.Array(bounded(2_048)).pipe(Schema.maxItems(16))),
+}).annotations(strict);
+export type ThreadMoveProjectsRequest = typeof ThreadMoveProjectsRequest.Type;
+
+export const ThreadMoveProjectChoice = Schema.Struct({
+  projectId: ProjectId,
+  title: bounded(256),
+}).annotations(strict);
+export type ThreadMoveProjectChoice = typeof ThreadMoveProjectChoice.Type;
+
+export const ThreadMoveProjects = Schema.Struct({
+  status: Schema.Literal("listed"),
+  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  /** A Chat thread may also arrive in no Project. */
+  noProjectAllowed: Schema.Boolean,
+}).annotations(strict);
+export type ThreadMoveProjects = typeof ThreadMoveProjects.Type;
+
+// ── Window routes ──────────────────────────────────────────────────────────
+// A window on the source asks for these through the loopback desktop bridge.
+
+/** The thread a window's Environment tool shows. */
+export const ThreadMoveThreadRequest = Schema.Struct({
+  thread: MovedThreadReference,
+}).annotations(strict);
+export type ThreadMoveThreadRequest = typeof ThreadMoveThreadRequest.Type;
+
+/** One member computer as the Computer card lists it for one thread. */
+export const ThreadMoveDestination = Schema.Struct({
+  memberId: HubMemberId,
+  name: bounded(256),
+  role: Schema.Literal("hub", "spoke"),
+  /** Whether it answered just now. */
+  reachable: Schema.Boolean,
+  /** Set when it answered but cannot take this thread. */
+  refusal: Schema.optional(Schema.Literal("refused", "no-eligible-project")),
+  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  noProjectAllowed: Schema.Boolean,
+}).annotations(strict);
+export type ThreadMoveDestination = typeof ThreadMoveDestination.Type;
+
+export const ThreadMoveDestinations = Schema.Struct({
+  status: Schema.Literal("listed"),
+  /** Why the thread cannot move from here at all, before any destination is asked. */
+  blocked: Schema.optional(Schema.Literal("busy", "delegated", "refused")),
+  /** A turn runs or the thread waits on the person: Move after this turn is offered. */
+  busy: Schema.Boolean,
+  destinations: Schema.Array(ThreadMoveDestination).pipe(Schema.maxItems(64)),
+}).annotations(strict);
+export type ThreadMoveDestinations = typeof ThreadMoveDestinations.Type;
+
+export const ThreadMoveChallengeRequest = Schema.Struct({
+  destinationMemberId: HubMemberId,
+}).annotations(strict);
+export type ThreadMoveChallengeRequest = typeof ThreadMoveChallengeRequest.Type;
+
+/**
+ * The destination's owner challenge for the move ticket, with every field the
+ * unlock key signs, so this Mac's Touch ID prompt signs exactly that one action.
+ */
+export const ThreadMoveUnlockChallenge = Schema.Struct({
+  challengeId: Schema.UUID,
+  nonce: bounded(64),
+  hostMemberId: HubMemberId,
+  ownerMemberId: HubMemberId,
+  method: Schema.Literal("POST"),
+  path: bounded(128),
+  bodyHash: digest,
+  expiresAt: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type ThreadMoveUnlockChallenge = typeof ThreadMoveUnlockChallenge.Type;
+
+export const ThreadMoveChallengeOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("challenge"), challenge: ThreadMoveUnlockChallenge }),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    kind: Schema.Literal("unlock-required", "destination-unreachable", "refused"),
+  }),
+);
+export type ThreadMoveChallengeOutcome = typeof ThreadMoveChallengeOutcome.Type;
+
+/** When the move starts: now, or once the running turn ends. */
+export const ThreadMoveTiming = Schema.Literal("now", "after-turn");
+export type ThreadMoveTiming = typeof ThreadMoveTiming.Type;
+
+export const ThreadMoveStartRequest = Schema.Struct({
+  thread: MovedThreadReference,
+  destinationMemberId: HubMemberId,
+  destinationProjectId: Schema.optional(ProjectId),
+  timing: ThreadMoveTiming,
+  /** The raw ES256 signature this Mac's unlock key made over the challenge. */
+  unlock: Schema.Struct({
+    challengeId: Schema.UUID,
+    signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
+  }).annotations(strict),
+}).annotations(strict);
+export type ThreadMoveStartRequest = typeof ThreadMoveStartRequest.Type;
+
+export const ThreadMoveStartOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("started", "waiting-for-turn") }),
+  Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
+);
+export type ThreadMoveStartOutcome = typeof ThreadMoveStartOutcome.Type;
+
+export const ThreadMoveControlRequest = Schema.Struct({
+  moveId: ThreadMoveId,
+}).annotations(strict);
+export type ThreadMoveControlRequest = typeof ThreadMoveControlRequest.Type;
+
+/** A thread that moved away from this host, for its "Moved to" tombstone. */
+export const ThreadMoveDeparture = Schema.Struct({
+  moveId: ThreadMoveId,
+  thread: MovedThreadReference,
+  destinationMemberId: HubMemberId,
+  destinationThread: MovedThreadReference,
+  /** A worktree moved out of the managed folder because it held what the move did not carry. */
+  keptWorktree: Schema.optional(bounded(4_096)),
+  /** The Project's own checkout kept the thread's changes too. */
+  changesRemainInCheckout: Schema.Boolean,
+  movedAt: UtcTimestamp,
+}).annotations(strict);
+export type ThreadMoveDeparture = typeof ThreadMoveDeparture.Type;
+
+/** Where one thread stands, as its Environment tool and its notices show it. */
+export const ThreadMoveThreadStatus = Schema.Struct({
+  status: Schema.Literal("read"),
+  /** Moving away: frozen here while the move runs. */
+  sending: Schema.optional(
+    Schema.Struct({
+      moveId: ThreadMoveId,
+      destinationMemberId: HubMemberId,
+      destinationName: bounded(256),
+      state: Schema.Literal("frozen", "offered", "arrived", "committed"),
+      bytesSent: NonNegativeInt,
+      bytesTotal: NonNegativeInt,
+      startedAt: UtcTimestamp,
+    }).annotations(strict),
+  ),
+  /** Set to move once the running turn ends. */
+  waiting: Schema.optional(
+    Schema.Struct({
+      destinationMemberId: HubMemberId,
+      destinationName: bounded(256),
+    }).annotations(strict),
+  ),
+  /** Arrived here and not yet committed by its source. */
+  arriving: Schema.optional(
+    Schema.Struct({
+      moveId: ThreadMoveId,
+      originMemberId: HubMemberId,
+      originName: bounded(256),
+      /** The source has been silent for five minutes: Activate anyway is offered. */
+      mayActivateAnyway: Schema.Boolean,
+    }).annotations(strict),
+  ),
+  /** The last move of this thread that could not finish, until the person dismisses it. */
+  failure: Schema.optional(
+    Schema.Struct({
+      moveId: ThreadMoveId,
+      reason: ThreadMoveFailureReason,
+      failedAt: UtcTimestamp,
+    }).annotations(strict),
+  ),
+  /** The thread moved away and was erased here: its "Moved to" tombstone. */
+  departed: Schema.optional(
+    Schema.Struct({ ...ThreadMoveDeparture.fields, destinationName: bounded(256) }).annotations(
+      strict,
+    ),
+  ),
+}).annotations(strict);
+export type ThreadMoveThreadStatus = typeof ThreadMoveThreadStatus.Type;
+
 export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveTicketRequest,
 );
@@ -327,3 +506,17 @@ export const decodeThreadMoveDestinationState = Schema.decodeUnknownSync(
   ThreadMoveDestinationState,
 );
 export const decodeHandoverNotice = Schema.decodeUnknownSync(HandoverNotice);
+export const decodeThreadMoveProjectsRequest = Schema.decodeUnknownSync(ThreadMoveProjectsRequest);
+export const decodeThreadMoveProjects = Schema.decodeUnknownSync(ThreadMoveProjects);
+export const decodeThreadMoveThreadRequest = Schema.decodeUnknownSync(ThreadMoveThreadRequest);
+export const decodeThreadMoveChallengeRequest = Schema.decodeUnknownSync(
+  ThreadMoveChallengeRequest,
+);
+export const decodeThreadMoveStartRequest = Schema.decodeUnknownSync(ThreadMoveStartRequest);
+export const decodeThreadMoveControlRequest = Schema.decodeUnknownSync(ThreadMoveControlRequest);
+export const decodeThreadMoveDestinations = Schema.decodeUnknownSync(ThreadMoveDestinations);
+export const decodeThreadMoveChallengeOutcome = Schema.decodeUnknownSync(
+  ThreadMoveChallengeOutcome,
+);
+export const decodeThreadMoveStartOutcome = Schema.decodeUnknownSync(ThreadMoveStartOutcome);
+export const decodeThreadMoveThreadStatus = Schema.decodeUnknownSync(ThreadMoveThreadStatus);

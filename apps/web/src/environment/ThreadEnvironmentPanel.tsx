@@ -28,6 +28,12 @@ export interface ThreadEnvironmentPanelProps {
    * state of the work read as one object.
    */
   readonly headerContent?: ReactNode;
+  /**
+   * The Computer card: where the thread runs, and the one place it moves to
+   * another of the person's computers. It comes first, above the header card,
+   * because where a thread runs is what a move changes.
+   */
+  readonly computer?: ReactNode;
   readonly children?: ReactNode;
 }
 
@@ -79,6 +85,9 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
           changed. It had carried the name, the branch and a Changes pill, and
           the section under it then listed the branch and the repository
           again. */}
+      {props.computer === undefined ? null : (
+        <div className="thread-environment-dock__computer">{props.computer}</div>
+      )}
       <header className="thread-environment-dock__header">
         <h2 className="visually-hidden">Environment</h2>
         {/* The whole summary stays one sentence for assistive technology;

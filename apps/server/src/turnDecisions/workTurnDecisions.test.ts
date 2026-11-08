@@ -31,6 +31,10 @@ describe("Work turn decisions", () => {
         { label: "Revenue", recommended: true },
         { label: "Headcount", recommended: false },
       ],
+      askedBy: {
+        providerInstanceId: "00000000-0000-4000-8000-000000000b04",
+        modelId: "model-a",
+      },
       answer: {
         threadId,
         turnId: "00000000-0000-4000-8000-000000000201",
@@ -45,6 +49,16 @@ describe("Work turn decisions", () => {
           modelId: "model-b",
         },
       },
+    });
+  });
+
+  it("carries the why and urgency the block states onto the request", () => {
+    const block =
+      '```octant-decision\n{"ask":"Which chart leads?","why":"The board meets today.","urgent":true,"options":[{"label":"Revenue","recommended":true,"detail":"Matches last quarter"}]}\n```';
+    expect(workTurnDecision(workThread(), [turn(1, "completed", block)])).toMatchObject({
+      why: "The board meets today.",
+      urgent: true,
+      options: [{ label: "Revenue", recommended: true, detail: "Matches last quarter" }],
     });
   });
 

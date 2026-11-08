@@ -35,6 +35,10 @@ import {
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
   decodePairedMergeUnlockRequest,
+  decodeThreadMoveChallengeRequest,
+  decodeThreadMoveControlRequest,
+  decodeThreadMoveStartRequest,
+  decodeThreadMoveThreadRequest,
 } from "@octant/contracts";
 import { Schema } from "effect";
 
@@ -230,6 +234,52 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/sign-in/check",
     decodeBody: decodeHubSignInDecisionRequest,
+  },
+  // Moving one thread to another member, from that thread's Environment tool.
+  "thread-move-destinations": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/destinations",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  "thread-move-challenge": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/challenge",
+    decodeBody: decodeThreadMoveChallengeRequest,
+  },
+  "thread-move-start": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/start",
+    decodeBody: decodeThreadMoveStartRequest,
+  },
+  "thread-move-status": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/status",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  "thread-move-stop-waiting": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/stop-waiting",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  "thread-move-cancel": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/cancel",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
+  "thread-move-take-back": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/take-back",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
+  "thread-move-activate": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/activate",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
+  "thread-move-dismiss": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/dismiss",
+    decodeBody: decodeThreadMoveThreadRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

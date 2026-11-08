@@ -8,7 +8,7 @@ import type {
   RosterMember,
   ThreadMoveId,
 } from "@octant/contracts";
-import { defaultHubGrant } from "./hubAndSpokesPolicy";
+import { defaultHubGrant, fullMemberPeerGrant } from "./hubAndSpokesPolicy";
 import {
   ACTIVATE_ANYWAY_AFTER_MS,
   authorizeMoveIn,
@@ -18,6 +18,7 @@ import {
   mayActivateAnyway,
   mayRemoveMovedWorktree,
   normalizeRepositoryRemote,
+  peerGrantAllowsMoveIn,
   recoverSourceMove,
   SHUTDOWN_RECENT_WINDOW_MS,
   shutdownListing,
@@ -252,6 +253,27 @@ describe("whether a destination accepts a move", () => {
     expect(ask({ ownerMemberId: memberId(4), ownerIdentityKeyFingerprint: key(4) })).toEqual(
       refused,
     );
+  });
+
+  it("reads Move in as on for a full member whose grant was stored before Move in existed", () => {
+    const { moveIn: _absent, ...stored } = fullMemberPeerGrant(member(3, "spoke"));
+    expect(peerGrantAllowsMoveIn(stored)).toBe(true);
+    expect(ask({ grants: [stored] }).status).toBe("allowed");
+  });
+
+  it("keeps Move in off for a grant the person narrowed, turned off, or held until confirmed", () => {
+    const { moveIn: _absent, ...stored } = fullMemberPeerGrant(member(3, "spoke"));
+    const delegation = stored.delegation;
+    if (delegation === undefined) throw new Error("A full member delegates.");
+    expect(peerGrantAllowsMoveIn({ ...stored, moveIn: false })).toBe(false);
+    expect(
+      peerGrantAllowsMoveIn({ ...stored, delegation: { ...delegation, modes: ["work"] } }),
+    ).toBe(false);
+    expect(
+      peerGrantAllowsMoveIn({ ...stored, delegation: { ...delegation, projects: [projectId(5)] } }),
+    ).toBe(false);
+    expect(peerGrantAllowsMoveIn({ memberId: memberId(3), readStatus: true })).toBe(false);
+    expect(peerGrantAllowsMoveIn(fullMemberPeerGrant(member(4, "guest")))).toBe(false);
   });
 
   it("never lets an administration session cover a move", () => {

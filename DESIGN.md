@@ -2003,8 +2003,11 @@ this is how it looks.
   its glyph, its name, and one pill for its state. Eligible members come first
   (Online, or Asleep when the hub's wake service could wake it). Members that
   cannot take this thread stay listed and disabled, with the reason as the pill
-  (No matching repository, Owners off, Not an owner there, Offline), so the
-  person learns why rather than wondering where a computer went. Choosing a
+  (No matching repository, or No matching Project for Chat and Work; Not
+  accepting moves; Offline), so the person learns why rather than wondering
+  where a computer went. A member answers Move in off, Owners off, and a
+  source it no longer lists in the same words, so they share one pill; a Mac
+  that is not an owner there is told so at the unlock, in the move sheet. Choosing a
   member shows its Project under it: chosen for the person when exactly one
   Project fits, otherwise a compact picker listing only Projects that fit (for
   Code, each with its repository in mono). **Review move** is the row's own
@@ -2504,7 +2507,8 @@ account and model). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
 reviewer in Settings › Code › Access, **Automatic model calls** in Settings ›
 Providers & Models (a section with one select per job, a plain note of where the
-work goes, and the account's problem when it has one), and the reviewer
+work goes, and the account's problem when it has one; the second opinion on
+decisions starts at **Off** and is the only job with no default account), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Access as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
