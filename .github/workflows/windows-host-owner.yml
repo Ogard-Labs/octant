@@ -6,6 +6,7 @@ on:
       - .github/workflows/windows-host-owner.yml
       - packages/host-runtime/native/windows-host-owner/**
       - packages/host-runtime/src/windowsHostOwner*
+      - packages/host-runtime/src/windowsHostProfile*
       - packages/host-runtime/src/ownerControlProtocol.ts
       - packages/host-runtime/src/owner.ts
       - packages/host-runtime/src/ownerReceipt.ts
@@ -60,6 +61,8 @@ jobs:
           bun build scripts/windows-host-owner/worker.ts --target=node --outfile "$env:RUNNER_TEMP/owner-worker.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item scripts/windows-host-owner/fixtures.ps1 "$env:RUNNER_TEMP/owner-fixtures.ps1"
+          bun build scripts/windows-host-owner/profile.ts --target=node --outfile "$env:RUNNER_TEMP/profile-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
@@ -74,6 +77,10 @@ jobs:
           ELECTRON_RUN_AS_NODE: "1"
         run: |
           bun scripts/windows-host-owner/run.ts "$pwd/node_modules/electron/dist/electron.exe" "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove private persistent profiles and actual scoped owner consumers
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

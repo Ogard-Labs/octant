@@ -15346,6 +15346,29 @@ fixtures; missing or incompatible native code stays unavailable. Full data-path,
 control/lifecycle and credential integration remain separate Windows host
 requirements. It does not enable Chat, Work, Code, a native provider or a release.
 
+The dependent Windows persistent-profile boundary uses the native current user's
+LocalAppData known folder, with closed profiles at `Octant/hosts/octant` and
+`Octant/hosts/nightly-test-data`. Their `data`, `config`, `state` and `logs`
+directories have protected owner-plus-SYSTEM DACLs with object/container
+inheritance, so ordinary descendants do not acquire the process token's broader
+default DACL. The separate transient control namespace retains its existing
+non-inheriting DACLs. Native-held canonical directory handles exclude reparse
+points and prevent rename/replacement for the writer process's lifetime.
+
+A bounded, private native profile record binds a random persistent UUID to its
+profile kind and physical profile/data directory identities. A missing record can be
+created; a malformed, aliased, transplanted or unsafe record is refused rather
+than replaced. That UUID selects the control scope and owner receipt's runtime
+host identifier. It is not the cryptographic remote host/member identity:
+the private-listener signing port, key generation and journaled remote identity
+remain separate and receive no Windows admission from this boundary. The
+profile-aware owner consumer uses only these native facts. Windows external
+`OCTANT_DATA_DIR` and `OCTANT_LOGS_DIR` overrides are not supported and refuse
+explicitly; environment strings never select another profile store. Persistent
+guards and the profile record remain held until actual process exit, including
+owner release or environment teardown. This boundary still admits no Windows
+desktop/server startup, migration/restore path, provider, Chat, Work or Code.
+
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):
 
