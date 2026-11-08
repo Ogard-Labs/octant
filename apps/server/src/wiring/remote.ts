@@ -96,7 +96,7 @@ import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
-import { ThreadHandovers } from "../hub/threadHandovers";
+import { HandoverClaims, ThreadHandovers } from "../hub/threadHandovers";
 import { HandoverExchange } from "../hub/handoverExchange";
 import { createHandoverRouteHandler } from "../hub/handoverRoutes";
 import { readHandoverNote, remoteNamedFor } from "../hub/codeThreadHandoverGit";
@@ -1282,7 +1282,10 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // Where a handover goes after its push: a notice to the chosen member, and
   // Continue handover there, which tells this host to erase its copy.
+  // One set of claims for every step that acts on a handover's thread here.
+  const handoverClaims = new HandoverClaims();
   const handoverExchange = new HandoverExchange({
+    claims: handoverClaims,
     state: deps.threadMoveState,
     authenticate: threadMoveSenders.authenticate,
     send: (targetMemberId, path, body) => threadMoves.sendSigned(targetMemberId, path, body),
@@ -1373,6 +1376,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const handoverRoutes = createHandoverRouteHandler({ exchange: handoverExchange });
   // A Code thread that cannot move hands over through its branch.
   const threadHandovers = new ThreadHandovers({
+    claims: handoverClaims,
     source: byMode.source,
     code: {
       checkoutRoot: async (threadId) => {

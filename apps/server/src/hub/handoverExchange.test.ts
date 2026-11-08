@@ -8,6 +8,7 @@ import {
   HandoverExchange,
   type HandoverExchangeOptions,
 } from "./handoverExchange";
+import { HandoverClaims, ThreadHandovers } from "./threadHandovers";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
 
 const LAPTOP = "33333333-3333-4333-8333-333333333333";
@@ -40,7 +41,10 @@ function store() {
   return createThreadMoveStateStore(folder);
 }
 
-function world(overrides: Partial<HandoverExchangeOptions> = {}) {
+function world(
+  overrides: Partial<HandoverExchangeOptions> = {},
+  laptopOverrides: Partial<HandoverExchangeOptions> = {},
+) {
   const laptopState = store();
   laptopState.save({
     ...laptopState.load(),
@@ -93,7 +97,8 @@ function world(overrides: Partial<HandoverExchangeOptions> = {}) {
     clock: () => "2026-11-08T13:00:00.000Z",
     uuid: () => NEW_THREAD,
   });
-  laptop = new HandoverExchange({ ...base(DESKTOP), state: laptopState });
+  laptop = new HandoverExchange({ ...base(DESKTOP), state: laptopState, ...laptopOverrides });
+  const source = laptop;
   const desktopState = store();
   const desktop = new HandoverExchange({
     ...base(LAPTOP),
@@ -107,7 +112,7 @@ function world(overrides: Partial<HandoverExchangeOptions> = {}) {
     },
     ...overrides,
   });
-  return { desktop, desktopState, laptopState, erased, created, notes, signed };
+  return { desktop, desktopState, laptop: source, laptopState, erased, created, notes, signed };
 }
 
 describe("continuing a handover on another computer", () => {
@@ -176,6 +181,84 @@ describe("continuing a handover on another computer", () => {
       destinationThread: { mode: "code", threadId: NEW_THREAD },
       keptWorktree: "/w/octant-moved-out",
     });
+  });
+
+  it("makes one thread when Continue handover is pressed twice at once, and answers both with it", async () => {
+    let release: (() => void) | undefined;
+    let made = 0;
+    let ids = 0;
+    const { desktop, signed } = world({
+      uuid: () => `8888888${String(ids++)}-8888-4888-8888-888888888888`,
+      createThread: async () => {
+        made += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    await desktop.receiveNotice(signed(notice));
+    const request = { handoverId: HANDOVER as never, projectId: PROJECT as never };
+
+    const first = desktop.continueHandover(request);
+    const second = desktop.continueHandover(request);
+    await expect.poll(() => release).toBeDefined();
+    release?.();
+    const answers = await Promise.all([first, second]);
+
+    expect(made).toBe(1);
+    expect(answers[0]).toEqual(answers[1]);
+    expect(answers[0]?.status).toBe("continued");
+    // A later retry gets the same thread rather than a second one.
+    expect(await desktop.continueHandover(request)).toEqual(answers[0]);
+    expect(made).toBe(1);
+  });
+
+  it("refuses Take back here once the source has begun erasing a continued handover", async () => {
+    const claims = new HandoverClaims();
+    let finishErase: (() => void) | undefined;
+    const { laptop, laptopState, signed } = world(
+      {},
+      {
+        claims,
+        source: {
+          erase: async () => {
+            await new Promise<void>((resolve) => {
+              finishErase = resolve;
+            });
+            return { worktreeKept: false };
+          },
+          unfreeze: () => {},
+        },
+      },
+    );
+    const handovers = new ThreadHandovers({
+      claims,
+      source: {
+        read: async () => ({ status: "missing" }),
+        freeze: () => {},
+        unfreeze: () => {},
+        isFrozen: () => true,
+      },
+      code: {
+        checkoutRoot: async () => undefined,
+        provider: () => undefined,
+        latest: async () => ({}),
+      },
+      record: { handoverStarted: () => {} },
+      state: laptopState,
+      originName: () => "Laptop",
+      clock: () => "2026-11-08T13:00:00.000Z",
+    });
+
+    const erasing = laptop.receiveContinued(
+      signed({ handoverId: HANDOVER, thread: { mode: "code", threadId: NEW_THREAD } }),
+    );
+    await expect.poll(() => finishErase).toBeDefined();
+    expect(handovers.takeBack(HANDOVER)).toEqual({ status: "refused", reason: "busy" });
+
+    finishErase?.();
+    expect((await erasing).body).toEqual({ status: "erased" });
+    expect(laptopState.load().handovers).toEqual([]);
   });
 
   it("refuses to continue without the provider kind the thread ran on, or without the branch's note", async () => {

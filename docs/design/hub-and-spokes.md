@@ -2306,11 +2306,14 @@ a numbered slice. Built, with these narrower readings:
     `handover-note`, and its first turn reads the note framed as outside
     content. The destination then reports (`POST
 /api/hub/peer/handovers/continued`, the handover and the new thread in
-    the body). The source erases its frozen copy the way a moved thread is
-    erased, keeping a worktree that holds anything the handover did not
-    carry, and records "Moved to" for old links. What it does not do yet: a
-    branch found by fetching without a notice, the agent's own summary turn,
-    and the report retried when the source was unreachable.
+    the body). Continue handover makes one thread per handover: a second
+    press, from any window, gets the first one's answer. The source erases
+    its frozen copy the way a moved thread is erased, claiming the thread
+    first so Take back here is refused until the erase ends, keeping a
+    worktree that holds anything the handover did not carry, and records
+    "Moved to" for old links. What it does not do yet: a branch found by
+    fetching without a notice, the agent's own summary turn, and the report
+    retried when the source was unreachable.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

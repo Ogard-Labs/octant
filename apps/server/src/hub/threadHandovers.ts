@@ -63,17 +63,44 @@ export interface ThreadHandoversOptions {
   readonly originName: () => string;
   readonly clock: () => string;
   readonly uuid?: () => string;
+  /** Shared with the exchange that erases a continued handover's thread. */
+  readonly claims?: HandoverClaims;
+}
+
+/**
+ * The threads a handover step is working on right now: handing one over, or
+ * erasing it once a destination continued it. A step claims its thread before
+ * it awaits anything and releases it when it ends, and Take back here refuses
+ * a claimed thread, so no step can release or erase a thread another step is
+ * still holding. One set is shared by everything that acts on handovers.
+ */
+export class HandoverClaims {
+  readonly #claimed = new Set<string>();
+
+  /** Claims the thread; false when another step already holds it. */
+  claim(thread: MovedThreadReference): boolean {
+    const claim = claimOf(thread);
+    if (this.#claimed.has(claim)) return false;
+    this.#claimed.add(claim);
+    return true;
+  }
+
+  release(thread: MovedThreadReference): void {
+    this.#claimed.delete(claimOf(thread));
+  }
+
+  has(thread: MovedThreadReference): boolean {
+    return this.#claimed.has(claimOf(thread));
+  }
 }
 
 export class ThreadHandovers {
   readonly #options: ThreadHandoversOptions;
-  // Threads a handover has claimed, from before its planning awaits anything
-  // until it ends, so two windows handing over one thread cannot both plan
-  // and then have the loser's unfreeze release the winner's hold.
-  readonly #claimed = new Set<string>();
+  readonly #claims: HandoverClaims;
 
   constructor(options: ThreadHandoversOptions) {
     this.#options = options;
+    this.#claims = options.claims ?? new HandoverClaims();
   }
 
   /** What a handover of this thread would do, with nothing frozen or written. */
@@ -99,17 +126,15 @@ export class ThreadHandovers {
     thread: MovedThreadReference,
     destinationMemberId?: string,
   ): Promise<HandoverOutcome> {
-    const claim = claimOf(thread);
-    // A thread another handover claimed, or one a move or handover already
+    // A thread another step claimed, or one a move or handover already
     // holds, is busy: this attempt never freezes or unfreezes it.
-    if (this.#claimed.has(claim) || this.#options.source.isFrozen(thread)) {
+    if (this.#options.source.isFrozen(thread) || !this.#claims.claim(thread)) {
       return { status: "refused", reason: "busy" };
     }
-    this.#claimed.add(claim);
     try {
       return await this.#handOverClaimed(thread, destinationMemberId);
     } finally {
-      this.#claimed.delete(claim);
+      this.#claims.release(thread);
     }
   }
 
@@ -204,9 +229,9 @@ export class ThreadHandovers {
 
   /**
    * Take back here: the thread unfreezes; the branch and its commit stay where
-   * they are. Refused while that handover is still committing or pushing,
-   * which would otherwise save it as handed over again over a thread already
-   * writable here.
+   * they are. Refused while a step holds the thread: a handover still
+   * committing or pushing would save itself as handed over again, and an
+   * erase for a continued handover would purge a thread already writable.
    */
   takeBack(
     handoverId: string,
@@ -215,7 +240,7 @@ export class ThreadHandovers {
     const handover = (state.handovers ?? []).find(
       (entry) => String(entry.handoverId) === handoverId,
     );
-    if (handover !== undefined && this.#claimed.has(claimOf(handover.thread))) {
+    if (handover !== undefined && this.#claims.has(handover.thread)) {
       return { status: "refused", reason: "busy" };
     }
     if (handover !== undefined) {

@@ -14,8 +14,10 @@ import {
   UtcTimestamp,
   decodeHandoverContinuedReport,
   decodeHandoverNotice,
+  type HandedOverThread,
   type HandoverContinueOutcome,
   type HandoverContinueRequest,
+  type HandoverContinuedReport,
   type HandoverListing,
   type HandoverNotice,
   type MovedThreadReference,
@@ -29,6 +31,7 @@ import type {
   SignedRequest,
   DestinationAnswer,
 } from "./threadMoveService";
+import { HandoverClaims } from "./threadHandovers";
 import { THREAD_MOVE_DEPARTURES_KEPT, type ThreadMoveStatePort } from "./threadMoveStateStore";
 
 export const HANDOVER_ROUTES = {
@@ -100,13 +103,21 @@ export interface HandoverExchangeOptions {
   readonly source: Pick<ThreadMoveSourceHost, "erase" | "unfreeze">;
   readonly clock: () => string;
   readonly uuid?: () => string;
+  /** Shared with the handovers this host starts, so Take back here cannot race an erase. */
+  readonly claims?: HandoverClaims;
 }
 
 export class HandoverExchange {
   readonly #options: HandoverExchangeOptions;
+  readonly #claims: HandoverClaims;
+  // One continuation per handover: a second press, from this window or
+  // another, waits for the first and gets its answer, and a continued
+  // handover keeps its answer, so no request makes a second thread.
+  readonly #continuations = new Map<string, Promise<HandoverContinueOutcome>>();
 
   constructor(options: HandoverExchangeOptions) {
     this.#options = options;
+    this.#claims = options.claims ?? new HandoverClaims();
   }
 
   // ── Destination ────────────────────────────────────────────────────────
@@ -175,7 +186,22 @@ export class HandoverExchange {
    * opened on it. The source is told so it erases its copy; one that cannot
    * be reached learns it the next time it asks.
    */
-  async continueHandover(request: HandoverContinueRequest): Promise<HandoverContinueOutcome> {
+  continueHandover(request: HandoverContinueRequest): Promise<HandoverContinueOutcome> {
+    const key = String(request.handoverId);
+    const running = this.#continuations.get(key);
+    if (running !== undefined) return running;
+    const continuing = this.#continue(request);
+    this.#continuations.set(key, continuing);
+    void continuing.then(
+      (outcome) => {
+        if (outcome.status !== "continued") this.#continuations.delete(key);
+      },
+      () => this.#continuations.delete(key),
+    );
+    return continuing;
+  }
+
+  async #continue(request: HandoverContinueRequest): Promise<HandoverContinueOutcome> {
     const received = (this.#options.state.load().receivedHandovers ?? []).find(
       (entry) => String(entry.notice.handoverId) === String(request.handoverId),
     );
@@ -272,6 +298,29 @@ export class HandoverExchange {
       (entry) => String(entry.handoverId) === String(report.handoverId),
     );
     if (handover === undefined) return { httpStatus: 200, body: { status: "unknown" } };
+    // The erase claims the thread first, so Take back here cannot release it
+    // halfway through; a thread another step holds answers busy, and the
+    // handover stays held here until that step ends.
+    if (!this.#claims.claim(handover.thread)) {
+      return { httpStatus: 409, body: { status: "busy" } };
+    }
+    try {
+      return await this.#eraseContinued(report, handover, sender.memberId);
+    } finally {
+      this.#claims.release(handover.thread);
+    }
+  }
+
+  async #eraseContinued(
+    report: HandoverContinuedReport,
+    claimed: HandedOverThread,
+    destinationMemberId: string,
+  ): Promise<DestinationAnswer> {
+    // Taken back between the report's read and the claim: nothing to erase.
+    const handover = (this.#options.state.load().handovers ?? []).find(
+      (entry) => String(entry.handoverId) === String(claimed.handoverId),
+    );
+    if (handover === undefined) return { httpStatus: 200, body: { status: "unknown" } };
     const moveId = decodeMoveId(String(handover.handoverId));
     const erased = await this.#options.source.erase({ thread: handover.thread, moveId });
     this.#options.source.unfreeze(handover.thread);
@@ -286,7 +335,7 @@ export class HandoverExchange {
         {
           moveId,
           thread: handover.thread,
-          destinationMemberId: decodeMemberId(sender.memberId),
+          destinationMemberId: decodeMemberId(destinationMemberId),
           destinationThread: report.thread,
           ...(erased.keptWorktree === undefined ? {} : { keptWorktree: erased.keptWorktree }),
           changesRemainInCheckout: erased.changesRemainInCheckout === true,
