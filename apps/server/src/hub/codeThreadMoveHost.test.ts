@@ -55,7 +55,11 @@ function world() {
   return { laptop, desktop, parts };
 }
 
-function host(input: { readonly laptop: string; readonly desktop: string }) {
+function host(input: {
+  readonly laptop: string;
+  readonly desktop: string;
+  readonly marked?: boolean;
+}) {
   const created: Array<Parameters<CodeThreadMoveHostOptions["createThread"]>[0]> = [];
   const histories: Array<Parameters<CodeThreadMoveHostOptions["journalHistory"]>[0]> = [];
   const purged: string[] = [];
@@ -80,7 +84,7 @@ function host(input: { readonly laptop: string; readonly desktop: string }) {
         occurredAt: "2026-11-08T10:00:00.000Z" as never,
       },
     ],
-    externalContentIngested: () => false,
+    externalContentIngested: () => input.marked === true,
     purge: async (id) => {
       purged.push(String(id));
     },
@@ -155,6 +159,29 @@ describe("moving a Code thread", () => {
     );
     expect(start.head).toBe(git(laptop, "rev-parse", "HEAD"));
     expect(histories).toMatchObject([{ threadId: ARRIVING, moveId: MOVE }]);
+  });
+
+  it("starts the destination thread marked when the source thread had read outside content", async () => {
+    const { laptop, desktop, parts } = world();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    const { moveHost, created } = host({ laptop, desktop, marked: true });
+    const source: MovedThreadReference = { mode: "code", threadId: THREAD };
+    const packed = await moveHost.source.pack(source, parts, MOVE);
+    if (packed.status !== "packed") throw new Error("Nothing was packed.");
+    const offer = offerFor(packed.parts, [git(laptop, "remote", "get-url", "origin")]);
+
+    await moveHost.destination.arrive({
+      thread: { mode: "code", threadId: ARRIVING },
+      offer,
+      parts: new Map(packed.parts.map((part) => [part.partId, part.path])),
+      origin: { memberId: "x" as never, thread: source },
+      ownerMemberId: "y" as never,
+    });
+
+    expect(created[0]?.inheritedMark).toEqual({
+      sourceLabel: "moved-thread",
+      contentReference: `moved-thread-${MOVE}`,
+    });
   });
 
   it("refuses a destination Project bound to another repository", async () => {

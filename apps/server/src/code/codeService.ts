@@ -1371,7 +1371,13 @@ export class CodeService {
       } catch {
         throw this.#failure("invalid", "Code command is invalid.");
       }
-      if ("threadId" in command && this.#moveHold?.(String(command.threadId)) === true) {
+      // A creation names a thread that does not exist yet, except the move's own
+      // arrival, which opens the planned thread it already holds.
+      if (
+        "threadId" in command &&
+        command.kind !== "create-managed-code-thread" &&
+        this.#moveHold?.(String(command.threadId)) === true
+      ) {
         throw this.#failure("conflict", THREAD_MOVING_REFUSAL);
       }
       // A fork is a managed creation whose start the host resolves itself, so

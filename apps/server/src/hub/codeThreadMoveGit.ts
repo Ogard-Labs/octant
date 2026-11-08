@@ -65,32 +65,44 @@ export async function captureCheckoutForMove(input: {
   const head = await git(root, ["rev-parse", "HEAD"]);
   const branch = await git(root, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "");
   const gitDir = await git(root, ["rev-parse", "--absolute-git-dir"]);
-  const indexTree = await git(root, ["write-tree"]);
 
   const scratch = await mkdtemp(join(tmpdir(), "octant-move-index-"));
   try {
-    const scratchIndex = join(scratch, "index");
+    // Two throwaway indexes, so the checkout's own index is never changed: one
+    // for the staged snapshot, one for the working tree as it stands on disk.
+    const stagedIndex = join(scratch, "staged");
+    const scratchIndex = join(scratch, "worktree");
+    await copyFile(join(gitDir, "index"), stagedIndex).catch(() => undefined);
     await copyFile(join(gitDir, "index"), scratchIndex).catch(() => undefined);
+    const withStagedIndex = { GIT_INDEX_FILE: stagedIndex };
     const withScratchIndex = { GIT_INDEX_FILE: scratchIndex };
     // Everything Git does not ignore, tracked or not, as it stands on disk.
     await git(root, ["add", "-A", "--", "."], withScratchIndex);
-    const changed = (
-      await git(
-        root,
-        ["diff", "--cached", "--name-only", "--no-renames", "-z", head],
-        withScratchIndex,
-      )
-    )
-      .split("\0")
-      .filter((path) => path.length > 0);
+    const changedIn = async (env: Readonly<Record<string, string>>) =>
+      (await git(root, ["diff", "--cached", "--name-only", "--no-renames", "-z", head], env))
+        .split("\0")
+        .filter((path) => path.length > 0);
+    const changed = [
+      ...new Set([...(await changedIn(withStagedIndex)), ...(await changedIn(withScratchIndex))]),
+    ];
+    // Both versions of every changed file are read: a secret that is staged
+    // and then edited out of the file on disk would otherwise still travel in
+    // the staged snapshot.
     const refusedFiles: string[] = [];
     for (const path of changed) {
-      if (await holdsSecret(join(root, path))) refusedFiles.push(path);
+      if (
+        (await holdsSecret(join(root, path))) ||
+        holdsSecretText(await stagedText(root, path, withStagedIndex))
+      ) {
+        refusedFiles.push(path);
+      }
     }
     for (const path of refusedFiles) {
-      // A refused file keeps its committed version in the snapshot, or none.
+      // A refused file keeps its committed version in both snapshots, or none.
+      await git(root, ["reset", "-q", head, "--", path], withStagedIndex);
       await git(root, ["reset", "-q", head, "--", path], withScratchIndex);
     }
+    const indexTree = await git(root, ["write-tree"], withStagedIndex);
     const worktreeTree = await git(root, ["write-tree"], withScratchIndex);
 
     const identity = {
@@ -270,4 +282,19 @@ export async function repositoryRemotes(repositoryRoot: string): Promise<Readonl
     if (url.length > 0) urls.push(url);
   }
   return urls;
+}
+
+/** The staged version of a file, or nothing when the index holds none or it is too large to read. */
+async function stagedText(
+  root: string,
+  path: string,
+  env: Readonly<Record<string, string>>,
+): Promise<string | undefined> {
+  const size = await git(root, ["cat-file", "-s", `:${path}`], env).catch(() => "");
+  if (size.length === 0 || Number(size) > SECRET_SCAN_LIMIT_BYTES) return undefined;
+  return git(root, ["show", `:${path}`], env).catch(() => undefined);
+}
+
+function holdsSecretText(text: string | undefined): boolean {
+  return text !== undefined && redactSecrets(text).redacted;
 }

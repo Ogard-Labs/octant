@@ -102,6 +102,8 @@ export interface CodeThreadMoveHostOptions {
     readonly head: string;
     readonly provider: { readonly providerInstanceId: string; readonly modelId: string };
     readonly files: { readonly worktree: string; readonly index: string };
+    /** Set when the source thread had read outside content; the new thread starts marked too. */
+    readonly inheritedMark?: { readonly sourceLabel: string; readonly contentReference: string };
   }) => Promise<void>;
   readonly journalHistory: (input: {
     readonly threadId: string;
@@ -269,6 +271,14 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
           head: received.checkout.head,
           provider,
           files: { worktree: received.checkout.worktreeTree, index: received.checkout.indexTree },
+          ...(moved.externalContentIngested
+            ? {
+                inheritedMark: {
+                  sourceLabel: "moved-thread",
+                  contentReference: `moved-thread-${String(offer.moveId)}`,
+                },
+              }
+            : {}),
         });
       } catch {
         options.holds.release(planned);

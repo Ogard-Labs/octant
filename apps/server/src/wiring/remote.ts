@@ -1016,12 +1016,17 @@ export function wireRemote(deps: RemoteDependencies) {
         "local-window",
         { mode: "code", threadId: String(threadId) },
       );
-      if (exported.kind !== "exported") return [];
-      return exported.bundle.transcript.entries.map((entry) => ({
-        role: entry.role === "user" ? ("person" as const) : ("assistant" as const),
-        text: entry.text,
-        occurredAt: entry.occurredAt,
-      }));
+      // A thread that already moved here once carries its earlier history on.
+      const earlier = deps.movedThreadHistory.history(String(threadId)) ?? [];
+      if (exported.kind !== "exported") return earlier;
+      return [
+        ...earlier,
+        ...exported.bundle.transcript.entries.map((entry) => ({
+          role: entry.role === "user" ? ("person" as const) : ("assistant" as const),
+          text: entry.text,
+          occurredAt: entry.occurredAt,
+        })),
+      ];
     },
     externalContentIngested: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
@@ -1084,6 +1089,7 @@ export function wireRemote(deps: RemoteDependencies) {
       });
       await deps.codeService.execute(ROUTINE_HOST_SCOPE_ID, command, undefined, {
         movedFiles: input.files,
+        ...(input.inheritedMark === undefined ? {} : { inheritedMark: input.inheritedMark }),
       });
     },
     journalHistory: (input) => deps.movedThreadHistory.journalImported(input),

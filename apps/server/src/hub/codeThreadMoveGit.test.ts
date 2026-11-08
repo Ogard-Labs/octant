@@ -118,6 +118,30 @@ describe("carrying a Code checkout between computers", () => {
     );
   });
 
+  it("leaves behind a secret that was staged and then edited out of the file on disk", async () => {
+    const { laptop, desktop } = repositories();
+    writeFileSync(join(laptop, "config.ts"), `export const token = "ghp_${"b".repeat(36)}";\n`);
+    git(laptop, "add", "config.ts");
+    writeFileSync(join(laptop, "config.ts"), "export const token = process.env.TOKEN;\n");
+    const bundlePath = join(laptop, "..", "move.bundle");
+
+    const captured = await captureCheckoutForMove({
+      checkoutRoot: laptop,
+      moveId: MOVE,
+      bundlePath,
+    });
+
+    expect(captured.refusedFiles).toEqual(["config.ts"]);
+    const received = await receiveCheckoutFromMove({
+      repositoryRoot: desktop,
+      moveId: MOVE,
+      bundlePath,
+    });
+    if (received.status !== "received") throw new Error("The bundle was refused.");
+    expect(() => show(desktop, `${received.checkout.indexTree}:config.ts`)).toThrow();
+    expect(() => show(desktop, `${received.checkout.worktreeTree}:config.ts`)).toThrow();
+  });
+
   it("lets the source remove a checkout only when it holds nothing the move did not carry", async () => {
     const { laptop } = repositories();
     writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
