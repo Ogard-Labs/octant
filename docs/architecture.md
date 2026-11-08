@@ -15399,6 +15399,13 @@ first-use. Unsafe, malformed and wrong-curve keys refuse without replacement or
 permission repair. Public SPKI and SHA-256/P1363 signatures retain their format;
 private transfer buffers are erased after import. Windows without this internal
 storage dependency refuses before ordinary-file access.
+The three existing hub, delegation and Tailscale-certificate authority records
+use closed native profile storage with bounded chunk sessions and their existing
+domain schemas and retention rules. Only the active claimed owner in the same
+native environment/profile/current PID-birth may commit a flushed private atomic
+replacement. Stable read snapshots do not block newer authority commits; corrupt
+or unsafe records refuse instead of becoming empty state. Detail and ownership:
+[boot-key and authority storage](design/hub-and-spokes.md#the-hub-is-a-server-first).
 This is not Windows startup, encryption-warning, service or confinement admission.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,

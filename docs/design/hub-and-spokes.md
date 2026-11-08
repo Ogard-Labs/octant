@@ -288,8 +288,31 @@ the CLI. The hub depends on that:
     and SHA-256/P1363 signatures; transfer buffers are erased after import.
     Restarts and concurrent first-use preserve the existing key. Missing native
     roster storage refuses on Windows before ordinary-file operations.
+    The three mutable authority records, `hub/hub-state.json`,
+    `hub/delegations.json` and `hub/tailscale-certificate.json`, use closed native
+    storage ports on this same physical profile. Their domain schemas, history
+    retention and positive-missing defaults stay owned by their existing stores.
+    Corrupt UTF-8, invalid JSON/schema, unsafe records and I/O failures refuse;
+    a save never resets or overwrites such a record. Missing native storage on
+    Windows refuses before ordinary-file access.
+    Native transfers use opaque environment/profile/purpose-bound sessions with
+    sequential offsets and at most 16 KiB per chunk. Safe-integer lengths and
+    exact completion preserve existing state sizes without new product limits.
+    Read sessions hold an immutable snapshot. Only the currently claimed native
+    host owner in that same process, environment and profile may replace state;
+    merely preparing an owner grants nothing. Open and commit revalidate the
+    native owner PID/birth record, private DACLs and physical profile identity.
+    A replacement is exclusively staged and flushed, then renamed into the
+    fixed leaf with native POSIX replacement semantics and checked against the
+    reopened file identity. Existing read snapshots cannot block a newly
+    committed revocation; a new read sees the replacement. Snapshot readers do
+    not erase old lawful bytes. Owner loss aborts writes, environment teardown
+    closes its sessions, and incomplete or invalid transfers discard their stage.
+    The physical hub directory stays held for the process lifetime. Store calls
+    remain synchronous inside the single owner process; services retain their
+    existing reload and cancellation-generation fences across asynchronous work.
     These internal prerequisites do not admit Windows desktop/server startup;
-    other hub storage, encrypted-disk setup checks and the boot service
+    encrypted-disk setup checks and the boot service
     remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a
     power failure where the platform allows it, and explains what full-disk

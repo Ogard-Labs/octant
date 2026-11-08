@@ -3,7 +3,7 @@ param(
   [ValidateSet('octant', 'nightly-test-data')]
   [string]$Profile,
   [Parameter(Mandatory = $true)]
-  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data', 'identity-inspect', 'identity-unsafe', 'identity-restore', 'tls-inspect', 'tls-unsafe', 'tls-restore', 'tls-cert-unsafe', 'tls-cert-restore', 'roster-inspect', 'roster-unsafe', 'roster-restore')]
+  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data', 'identity-inspect', 'identity-unsafe', 'identity-restore', 'tls-inspect', 'tls-unsafe', 'tls-restore', 'tls-cert-unsafe', 'tls-cert-restore', 'roster-inspect', 'roster-unsafe', 'roster-restore', 'authority-inspect', 'authority-unsafe', 'authority-restore')]
   [string]$Mode
 )
 $ErrorActionPreference = 'Stop'
@@ -13,10 +13,10 @@ if (-not $octantNode.PSIsContainer -or ($octantNode.Attributes -band [IO.FileAtt
 $octantUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $octantAcl = [Security.AccessControl.DirectorySecurity]::new($octantRoot, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)
 if ($octantAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value) { throw 'Profile fixture has another owner' }
-if ($Mode.StartsWith('identity-') -or $Mode.StartsWith('tls-') -or $Mode.StartsWith('roster-')) {
-  $octantFiles = if ($Mode.StartsWith('roster-')) { @('roster-signing-key.pem') } elseif ($Mode.StartsWith('tls-')) { @('private-listener-tls-key.pem', 'private-listener-tls-cert.pem') } else { @('private-listener-host-id', 'private-listener-host-key.pem') }
-  $octantMutatedFile = if ($Mode.StartsWith('roster-')) { 'roster-signing-key.pem' } elseif ($Mode.StartsWith('tls-cert-')) { 'private-listener-tls-cert.pem' } elseif ($Mode.StartsWith('tls-')) { 'private-listener-tls-key.pem' } else { 'private-listener-host-key.pem' }
-  $octantSubdir = if ($Mode.StartsWith('roster-')) { 'hub' } else { 'remote' }
+if ($Mode.StartsWith('identity-') -or $Mode.StartsWith('tls-') -or $Mode.StartsWith('roster-') -or $Mode.StartsWith('authority-')) {
+  $octantFiles = if ($Mode.StartsWith('authority-')) { @('hub-state.json', 'delegations.json', 'tailscale-certificate.json') } elseif ($Mode.StartsWith('roster-')) { @('roster-signing-key.pem') } elseif ($Mode.StartsWith('tls-')) { @('private-listener-tls-key.pem', 'private-listener-tls-cert.pem') } else { @('private-listener-host-id', 'private-listener-host-key.pem') }
+  $octantMutatedFile = if ($Mode.StartsWith('authority-')) { 'hub-state.json' } elseif ($Mode.StartsWith('roster-')) { 'roster-signing-key.pem' } elseif ($Mode.StartsWith('tls-cert-')) { 'private-listener-tls-cert.pem' } elseif ($Mode.StartsWith('tls-')) { 'private-listener-tls-key.pem' } else { 'private-listener-host-key.pem' }
+  $octantSubdir = if ($Mode.StartsWith('roster-') -or $Mode.StartsWith('authority-')) { 'hub' } else { 'remote' }
   foreach ($octantFile in $octantFiles) {
     $octantFilePath = Join-Path $octantRoot "data\$octantSubdir\$octantFile"
     $octantFileEntry = Get-Item -LiteralPath $octantFilePath -Force
