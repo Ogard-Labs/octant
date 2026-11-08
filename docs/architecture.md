@@ -14616,7 +14616,16 @@ native environment/profile/current PID-birth may commit a flushed private atomic
 replacement. Stable read snapshots do not block newer authority commits; corrupt
 or unsafe records refuse instead of becoming empty state. Detail and ownership:
 [boot-key and authority storage](design/hub-and-spokes.md#the-hub-is-a-server-first).
-This is not Windows startup, encryption-warning, service or confinement admission.
+These individual storage prerequisites alone do not admit Windows startup,
+encryption warnings, service integration or execution confinement. The Windows
+foreground entry composes their actual native owner and profile with the journal,
+usage cache, closed credential stores, policy, logs and discovery projections
+before importing server/persistence runtimes. Its loopback Chat lifecycle requires
+actual ready, authority-refusal, verified-backup and joined-shutdown proof for both
+profiles. Executable providers/extensions and Work/Code remain unavailable;
+desktop/Nightly bootstrap and service/encryption integration retain separate gates.
+The owning rules and local-owner trust limits are in
+[foreground storage and lifecycle](design/hub-and-spokes.md#the-hub-is-a-server-first).
 
 The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
