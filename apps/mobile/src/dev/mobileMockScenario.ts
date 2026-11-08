@@ -832,6 +832,22 @@ function createMockTransport(input: {
             command.prompt.byteLength !== undefined
           ) {
             const existing = codeTurns.get(command.threadId) ?? [];
+            const assistant: Array<{
+              readonly contentId: string;
+              readonly digest: string;
+              readonly byteLength: number;
+            }> = [];
+            const prompt = codeEvidence.get(command.prompt.contentId);
+            if (prompt !== undefined) {
+              const text = `Mock reply to: ${prompt.text}`;
+              const reply = {
+                contentId: globalThis.crypto.randomUUID(),
+                digest: mockDigest(codeEvidence.size + 1),
+                byteLength: new TextEncoder().encode(text).byteLength,
+              };
+              codeEvidence.set(reply.contentId, { ...reply, text });
+              assistant.push(reply);
+            }
             codeTurns.set(command.threadId, [
               ...existing,
               {
@@ -844,7 +860,7 @@ function createMockTransport(input: {
                   digest: command.prompt.digest,
                   byteLength: command.prompt.byteLength,
                 },
-                assistant: [],
+                assistant,
                 status: "completed",
                 startedAt: NOW,
                 updatedAt: NOW,
