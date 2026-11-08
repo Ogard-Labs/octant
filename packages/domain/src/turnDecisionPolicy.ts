@@ -223,14 +223,26 @@ export type DecisionReviewReading =
  * JSON wrapper is tolerated; anything else, or a label that is not one of the
  * options, is unreadable rather than guessed at.
  */
+/**
+ * The body of a ```json (or bare ```) fence, or the text unchanged. Plain string
+ * steps rather than a regular expression: the reply is model output, and a
+ * lazy match after `\s*\n` backtracks for a long time on a run of blank lines.
+ */
+function withoutJsonFence(text: string): string {
+  const firstBreak = text.indexOf("\n");
+  if (!text.startsWith("```") || !text.endsWith("```") || firstBreak === -1) return text;
+  const opener = text.slice(3, firstBreak).trim();
+  if (opener !== "" && opener !== "json") return text;
+  return text.slice(firstBreak + 1, text.length - 3);
+}
+
 export function readDecisionReview(
   reply: string,
   optionLabels: ReadonlyArray<string>,
 ): DecisionReviewReading {
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(reply.trim());
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fenced?.[1] ?? reply.trim());
+    parsed = JSON.parse(withoutJsonFence(reply.trim()));
   } catch {
     return { status: "unreadable" };
   }

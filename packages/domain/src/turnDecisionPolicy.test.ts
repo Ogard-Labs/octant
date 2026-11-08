@@ -185,6 +185,17 @@ describe("a second opinion's reading of a decision", () => {
     expect(
       readDecisionReview('```json\n{"backs":"Open it","reason":"It is ready."}\n```', options),
     ).toEqual({ status: "reviewed", backs: "Open it", reason: "It is ready." });
+    expect(
+      readDecisionReview('```\n{"backs":"Open it","reason":"It is ready."}```', options),
+    ).toEqual({ status: "reviewed", backs: "Open it", reason: "It is ready." });
+  });
+
+  it("reads a long run of blank fenced lines quickly as unreadable", () => {
+    const started = performance.now();
+    expect(readDecisionReview(`\`\`\`\n${"\n ".repeat(20_000)}x`, options).status).toBe(
+      "unreadable",
+    );
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it("refuses a label that is not an option, a missing reason, and text that is not JSON", () => {
