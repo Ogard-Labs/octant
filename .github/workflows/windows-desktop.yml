@@ -108,7 +108,8 @@ jobs:
       - name: Measure and validate the actual packaged artifact boundary
         if: ${{ !cancelled() && steps.peer_fixture.conclusion == 'success' && steps.portable.conclusion == 'success' && steps.job_fixture.conclusion == 'success' }}
         run: |
-          & "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" --profile-user-owner "$env:RUNNER_TEMP/peer-qa/Release/octant-windows-desktop-artifact-qa.exe" "$pwd/out/Octant-win32-x64/Octant.exe" artifact scan owned
+          $octantArtifactImage = (Resolve-Path -LiteralPath (Join-Path $pwd 'out/Octant-win32-x64/Octant.exe')).ProviderPath
+          & "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" --profile-user-owner "$env:RUNNER_TEMP/peer-qa/Release/octant-windows-desktop-artifact-qa.exe" $octantArtifactImage artifact scan owned
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start and attach the normal packaged Windows desktop
         run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"

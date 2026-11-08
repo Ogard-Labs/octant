@@ -1292,9 +1292,10 @@ stop an otherwise valid host. A private host-log entry retains only the fixed
 result/reason and bounded elapsed-time/entry-count measurements.
 
 Nightly requests launch through the native profile port without claiming its
-host owner. Native code reads that fixed record, validates and holds the
-physical no-reparse image, ancestors and package resources against untrusted other-user
-write access and the recorded identity, then uses `CreateProcessW` with only
+host owner. Native code reads that fixed record, validates the physical
+no-reparse image, ancestors and resource tree against untrusted other-user write
+access and the recorded identity, and holds the image and physical directories
+through `CreateProcessW` with only
 `--octant-host-only`, no inherited handles and a minimal native environment.
 JavaScript supplies no executable path, record bytes or environment authority;
 no shell is involved. Validation runs outside the Electron event loop, with a
