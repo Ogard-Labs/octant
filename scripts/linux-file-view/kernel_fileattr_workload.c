@@ -91,6 +91,14 @@ static bool refused_creation(const char *kind, int result, int error)
 }
 static bool creation_controls(void)
 {
+  errno = 0;
+  int existing = open(KEY, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  bool existing_open = existing == -1 && errno == EEXIST;
+  if (existing >= 0) close(existing);
+  errno = 0;
+  bool existing_link = link(KEY, KEY ".pub") == -1 && errno == EEXIST;
+  errno = 0;
+  bool existing_symlink = symlink("synthetic target", KEY) == -1 && errno == EEXIST;
   int public = open(ROOT "/home/.ssh/created.pub", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
   bool published = public >= 0 && write(public, public_created, sizeof(public_created) - 1) == sizeof(public_created) - 1;
   if (public >= 0) close(public);
@@ -121,11 +129,12 @@ static bool creation_controls(void)
     source.st_dev == alias.st_dev && source.st_ino == alias.st_ino && alias.st_size == 2;
   bool temporary_removed = temporary_linked && !unlink(ROOT "/temporary-alias");
   if (temporary >= 0) close(temporary);
-  printf("OCTANT_CREATE_PUBLIC {\"regularPersisted\":%s,\"directory\":%s,\"fifo\":%s,\"symlink\":%s,\"hardlinkIdentity\":%s,\"anonymousLinked\":%s}\n",
+  printf("OCTANT_CREATE_PUBLIC {\"existingErrors\":%s,\"regularPersisted\":%s,\"directory\":%s,\"fifo\":%s,\"symlink\":%s,\"hardlinkIdentity\":%s,\"anonymousLinked\":%s}\n",
+    existing_open && existing_link && existing_symlink ? "true" : "false",
     published ? "true" : "false", directory_removed ? "true" : "false", pipe_observed && pipe_removed ? "true" : "false",
     symbolic_observed && symbolic_removed ? "true" : "false", same_inode && alias_removed ? "true" : "false",
     temporary_observed && temporary_removed ? "true" : "false");
-  bool positives = published && directory_removed && pipe_observed && pipe_removed && symbolic_observed &&
+  bool positives = existing_open && existing_link && existing_symlink && published && directory_removed && pipe_observed && pipe_removed && symbolic_observed &&
     symbolic_removed && same_inode && alias_removed && temporary_observed && temporary_removed;
   errno = 0;
   int opened = open(private_created[0], O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
