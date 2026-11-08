@@ -350,7 +350,12 @@ Only this rollback may wait through a pending signal within the unchanged
 two-second admission limit. This permits unwind without masking signals or
 changing ordinary interruptible waits. Broker loss, policy refusal and changed
 identity or epoch still refuse cleanup, and every exit discards unused approval.
-Native acceptance of the caller and rollback correction remains pending.
+Actual guest execution passes public bind, protected refusal and second-bind
+EINVAL with no leftover node. A separate synthetic transport case observes a
+pending SIGUSR1 during the real rollback wait, then confirms handler delivery,
+the first socket intact, the second absent, exact child join and cleanup. It
+does not force bind-mutex contention to return EINTR; module/config-off execution
+also remains unproved.
 
 That fixture run also observes an owned process reaped between two proc-stat
 reads. The session controller now snapshots first, tolerates only ENOENT/ESRCH,
@@ -358,7 +363,9 @@ and revalidates the exact receipt identity before using the snapshot's state.
 Every other error still fails. The exact orphan-one/PID1 join and the five-second
 observation and thirty-five-second suite limits stay unchanged; actual-source
 replay covers disappearance, reused identity, other errors and orphan/live states.
-The next guest run must establish native acceptance of this fixture correction.
+The subsequent guest run passes all seven session scenarios, the exact orphan
+join, both default runtime workloads and final zero-leftover cleanup. This
+establishes scoped native acceptance without diagnosing older controller faults.
 Internal or stacked creation paths without the exact prepared scope refuse;
 complete filesystem/runtime parity is not established by these audited entries.
 
