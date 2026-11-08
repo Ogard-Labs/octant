@@ -90,7 +90,7 @@ describe("moving a Work thread", () => {
   it("moves the conversation and opens the thread held, with its history, in the chosen Project", async () => {
     const { moveHost, created, histories, holds } = host();
     const { offer, parts } = await packAndOffer(moveHost);
-    expect(await moveHost.destination.acceptsProject(offer)).toBe(true);
+    expect(await moveHost.destination.acceptsProject(placementOf(offer))).toBe(true);
 
     expect(await arriveWith(moveHost, offer, parts)).toEqual({
       status: "arrived",
@@ -153,3 +153,15 @@ describe("moving a Work thread", () => {
     expect(histories).toEqual([ARRIVING]);
   });
 });
+
+function placementOf(offer: ThreadMoveOffer) {
+  return {
+    mode: offer.source.mode,
+    ...(offer.destinationProjectId === undefined
+      ? {}
+      : { destinationProjectId: String(offer.destinationProjectId) }),
+    ...(offer.repositoryRemotes === undefined
+      ? {}
+      : { repositoryRemotes: offer.repositoryRemotes }),
+  };
+}

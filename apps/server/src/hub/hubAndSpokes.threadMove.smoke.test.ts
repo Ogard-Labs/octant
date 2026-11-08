@@ -5,6 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HubMemberId, type MovedThreadReference } from "@octant/contracts";
+import { ownerUnlockSigningPayload } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { publicKeyFingerprint } from "./hubCrypto";
@@ -38,13 +39,14 @@ const CONVERSATION = JSON.stringify({ title: "Plan the trip", turns: ["Where sho
 function leavingThreads(folder: string) {
   const frozen = new Set<string>();
   const erased: string[] = [];
+  const turn = { running: false };
   const source: ThreadMoveSourceHost = {
     read: async (thread) =>
       thread.threadId === THREAD.threadId && !erased.includes(thread.threadId)
         ? {
             status: "found",
             title: "Plan the trip",
-            busy: false,
+            busy: turn.running,
             delegated: false,
             repositoryRemotes: [],
           }
@@ -70,7 +72,7 @@ function leavingThreads(folder: string) {
     discard: async () => {},
   };
   void folder;
-  return { hosts: { source, destination }, frozen, erased };
+  return { hosts: { source, destination }, frozen, erased, turn };
 }
 
 /** A computer that opens Chat threads moved to it. */
@@ -78,7 +80,7 @@ function arrivingThreads() {
   const opened: string[] = [];
   const active: string[] = [];
   const destination: ThreadMoveDestinationHost = {
-    acceptsProject: (offer) => offer.source.mode === "chat",
+    acceptsProject: (placement) => placement.mode === "chat",
     arrive: async ({ parts }) => {
       const { readFile } = await import("node:fs/promises");
       for (const path of parts.values()) opened.push(await readFile(path, "utf8"));
@@ -133,7 +135,7 @@ function listAsOwner(spoke: HubTestHost, phone: HubTestHost, authenticator: Soft
   if (listed.status !== "changed") throw new Error(JSON.stringify(listed));
 }
 
-async function startWorld() {
+async function startWorld(options: { readonly laptopIsOwner?: boolean } = {}) {
   const network = new HubTestNetwork();
   const leaving = leavingThreads("laptop");
   const arriving = arrivingThreads();
@@ -164,9 +166,11 @@ async function startWorld() {
     cleanups,
   });
   const authenticator = softwareAuthenticator();
+  // This Mac's own unlock key (Touch ID), for a move started at its window.
+  const laptopUnlock = softwareAuthenticator();
   hub.hub.enable(window);
   await joinHub(hub, phone, { owner: true, unlockPublicKey: authenticator.publicKey });
-  await joinHub(hub, laptop, { owner: false });
+  await joinHub(hub, laptop, { owner: true, unlockPublicKey: laptopUnlock.publicKey });
   await joinHub(hub, desktop, { owner: false });
   await vi.waitFor(() => {
     for (const [spoke, other] of [
@@ -180,6 +184,7 @@ async function startWorld() {
     }
   });
   listAsOwner(desktop, phone, authenticator);
+  if (options.laptopIsOwner === true) listAsOwner(desktop, laptop, laptopUnlock);
   const unlock = { authenticator, shape: "raw" } as const;
   const ticket = async (withUnlock = true) =>
     ownerCall({
@@ -190,7 +195,21 @@ async function startWorld() {
       body: { sourceMemberId: laptop.hostId },
       ...(withUnlock ? { unlock } : {}),
     });
-  return { laptop, desktop, leaving, arriving, ticket };
+  return { laptop, desktop, leaving, arriving, ticket, laptopUnlock };
+}
+
+/** What this Mac's Touch ID prompt signs: exactly the destination's challenge. */
+async function unlockAtWindow(
+  laptop: HubTestHost,
+  desktop: HubTestHost,
+  key: SoftwareAuthenticator,
+): Promise<{ readonly challengeId: string; readonly signature: string }> {
+  const asked = await laptop.threadMovesFromWindow.challenge(desktop.hostId);
+  if (asked.status !== "challenge") throw new Error(JSON.stringify(asked));
+  return {
+    challengeId: asked.challenge.challengeId,
+    signature: key.sign(ownerUnlockSigningPayload(asked.challenge)),
+  };
 }
 
 describe("moving a thread between two of the person's computers", () => {
@@ -233,5 +252,73 @@ describe("moving a thread between two of the person's computers", () => {
     expect(leaving.erased).toEqual([]);
     expect(leaving.frozen.size).toBe(0);
     expect(laptop.threadMoveRecords).toEqual(["move-started", "move-failed"]);
+  }, 60_000);
+
+  it("moves a thread from its window with this Mac's own unlock on the destination", async () => {
+    const { laptop, desktop, leaving, arriving, laptopUnlock } = await startWorld({
+      laptopIsOwner: true,
+    });
+    const listed = await laptop.threadMovesFromWindow.destinations(THREAD);
+    expect(listed.destinations.find((entry) => entry.name === "Desktop")).toMatchObject({
+      reachable: true,
+      noProjectAllowed: true,
+    });
+
+    const started = await laptop.threadMovesFromWindow.start({
+      thread: THREAD,
+      destinationMemberId: decodeMemberId(desktop.hostId),
+      timing: "now",
+      unlock: await unlockAtWindow(laptop, desktop, laptopUnlock),
+    });
+
+    expect(started).toEqual({ status: "started" });
+    await vi.waitFor(() =>
+      expect(laptop.threadMovesFromWindow.status(THREAD).departed).toMatchObject({
+        destinationName: "Desktop",
+        destinationThread: ARRIVED,
+      }),
+    );
+    expect(arriving.opened).toEqual([CONVERSATION]);
+    expect(leaving.erased).toEqual([THREAD.threadId]);
+  }, 60_000);
+
+  it("waits for the running turn to end, then moves without asking again", async () => {
+    const { laptop, desktop, leaving, laptopUnlock } = await startWorld({ laptopIsOwner: true });
+    leaving.turn.running = true;
+
+    const started = await laptop.threadMovesFromWindow.start({
+      thread: THREAD,
+      destinationMemberId: decodeMemberId(desktop.hostId),
+      timing: "after-turn",
+      unlock: await unlockAtWindow(laptop, desktop, laptopUnlock),
+    });
+
+    expect(started).toEqual({ status: "waiting-for-turn" });
+    expect(laptop.threadMovesFromWindow.status(THREAD).waiting?.destinationName).toBe("Desktop");
+    expect(leaving.frozen.size).toBe(0);
+    leaving.turn.running = false;
+    await vi.waitFor(() => expect(leaving.erased).toEqual([THREAD.threadId]));
+  }, 60_000);
+
+  it("refuses a Mac that is not an owner on the destination, and says so on the thread until dismissed", async () => {
+    const { laptop, desktop, leaving, arriving } = await startWorld();
+    expect(await laptop.threadMovesFromWindow.challenge(desktop.hostId)).toEqual({
+      status: "refused",
+      kind: "unlock-required",
+    });
+
+    const started = await laptop.threadMovesFromWindow.start({
+      thread: THREAD,
+      destinationMemberId: decodeMemberId(desktop.hostId),
+      timing: "now",
+      unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "AAAA" },
+    });
+
+    expect(started).toEqual({ status: "refused", reason: "unlock-required" });
+    expect(laptop.threadMovesFromWindow.status(THREAD).failure?.reason).toBe("unlock-required");
+    expect(arriving.opened).toEqual([]);
+    expect(leaving.frozen.size).toBe(0);
+    laptop.threadMovesFromWindow.dismiss(THREAD);
+    expect(laptop.threadMovesFromWindow.status(THREAD).failure).toBeUndefined();
   }, 60_000);
 });

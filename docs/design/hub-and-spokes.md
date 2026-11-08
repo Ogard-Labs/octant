@@ -958,6 +958,21 @@ the person touches Touch ID on the laptop they are leaving; a phone that is an
 owner on both hosts can start the move instead. A source that is not an owner
 on the destination is told so, with how to mark it.
 
+A full member's grant stored before Move in existed has no such item. It
+reads as on while the rest of it is still exactly the full-member grant, and
+as off once the person narrowed it, so existing hubs take moves without
+re-joining. Rationale: a member joining now gets Move in, and the owner
+unlock, not the item, is what authorizes a move.
+
+On a Mac source, the window asks its own host for the destination's owner
+challenge, which the source fetches signed with its member identity and which
+names the ticket route and that exact request body; the desktop's unlock key
+signs it after Touch ID, and only the signature passes back through the
+source, which sends the ticket request with it. The ticket that answers lasts
+fifteen minutes and opens one move from that source. Rationale: Move after
+this turn waits for the turn to end without asking the person again, and a
+turn that outlasts the ticket ends the move with `unlock-required`.
+
 **The person is the same everywhere.** A host has one person, and every member
 is that person's own device, so a moved thread arrives as the person's own
 thread, as if they had made it in a window on the destination. It is journaled
@@ -1013,6 +1028,14 @@ and questions.
   The receipt names each one that applied to the thread.
 
 **Steps.**
+
+Before the person picks a destination, the Computer card asks each member
+which of its Projects would take the thread
+(`POST /api/hub/peer/thread-moves/projects`, naming the mode and, for Code,
+the source checkout's remotes). A member answers with Project names and ids
+only when its peer grant for the source has Move in; every other sender gets
+the refusal a move would, and a member that does not answer is listed as
+unreachable.
 
 1. **Freeze.** The source journals `thread.move-started@1`, and the thread
    becomes read-only, showing "Moving to" and the member's name. Nothing leaves
@@ -2115,7 +2138,8 @@ a numbered slice. Built, with these narrower readings:
     the destination's Move in check, Prepare to shut down's starting choices
     and destination, recovery, Activate anyway, keeping a worktree that holds
     unmoved files, and the handover branch). A grant stored before Move in
-    existed reads as off until a later part upgrades full members.
+    existed read as off until the fifth part, which reads it as described
+    under [Every move is an owner act](#moving-a-thread-to-another-member).
 
     The second part is the move itself for Chat threads between spokes: the
     owner route that issues the one-use ticket (own-class unlock, every
@@ -2147,6 +2171,35 @@ a numbered slice. Built, with these narrower readings:
     other bulk parts, accept moves on the hub (which keeps no peer grants
     and needs its own Accept moved threads setting), offer a window route
     to start a move, or show any screen.
+
+    The fifth part lets a person start a move from the thread's Environment.
+    The window route, under `/api/desktop/hub/thread-moves/`, is
+    loopback-only behind the desktop secret and a window capability, and
+    acts only on a thread the window shows. It lists the member computers
+    and their Projects (through the new `projects` member route), fetches
+    the destination's owner challenge for this Mac's Touch ID, redeems the
+    signature for the ticket and starts the move now or after the running
+    turn, and reads where the thread stands: sending with its progress,
+    waiting for its turn, arriving with Activate anyway after five minutes
+    of silence, its This thread can't move notice until dismissed, and the
+    "Moved to" record with any kept worktree. Cancel, Take back here, and
+    Activate anyway go through it too. The notices and the last 500 records
+    are kept beside the move state, so a restart keeps them, and a move
+    refused before anything froze (the unlock declined or expired, the
+    destination unreachable, a busy or delegated thread) journals its
+    reason the same way. The desktop forwards each as a hub administration
+    operation. Environment's Computer card lists the computers with their
+    pills, picks the one fitting Project, opens the move sheet (what moves,
+    what stays, the erase sentence, Move with Touch ID, or Move after this
+    turn for a busy thread), and shows the progress line with Cancel move,
+    Take back here, the This thread can't move notice with Choose another
+    computer and Dismiss, the Arriving notice with Activate anyway, and the
+    Moved notice. What it does not do yet: replace the composer with the
+    frozen bar (the held thread still refuses every command with the
+    moving reason), the pane tombstone with Open there and Remove worktree,
+    sizes and an estimate in the sheet, Stop and move, Hand over instead,
+    an unlock other than this Mac's Touch ID, carry bulk parts, accept
+    moves on the hub, or Prepare to shut down.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

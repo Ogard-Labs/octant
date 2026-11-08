@@ -276,7 +276,16 @@ export type HubAdministrationOperation =
   | "sign-in-ask"
   | "sign-in-accept"
   | "sign-in-decline"
-  | "sign-in-check";
+  | "sign-in-check"
+  | "thread-move-destinations"
+  | "thread-move-challenge"
+  | "thread-move-start"
+  | "thread-move-status"
+  | "thread-move-stop-waiting"
+  | "thread-move-cancel"
+  | "thread-move-take-back"
+  | "thread-move-activate"
+  | "thread-move-dismiss";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

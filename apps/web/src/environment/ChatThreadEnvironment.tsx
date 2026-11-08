@@ -8,6 +8,10 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { EnvironmentCard } from "./EnvironmentGroup";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
+import {
+  ThreadMoveComputerCard,
+  type ThreadMoveEnvironment,
+} from "./threadMove/ThreadMoveComputerCard";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import type { UsageDashboardClient, UsageQueryFilter } from "@octant/client-runtime";
 
@@ -15,6 +19,8 @@ type ChatThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "chat-threa
 type ChatProject = Extract<ProjectSummary, { readonly type: "chat" }>;
 
 export interface ChatThreadEnvironmentProps {
+  /** Where the thread runs and how it moves to another computer; absent, no Computer card. */
+  readonly threadMove?: ThreadMoveEnvironment;
   readonly children: ReactNode;
   readonly controller: ChatController;
   readonly projects: ReadonlyArray<ProjectSummary>;
@@ -54,6 +60,17 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
     <div className="thread-environment-wrapper">
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
+        {...(props.threadMove === undefined
+          ? {}
+          : {
+              computer: (
+                <ThreadMoveComputerCard
+                  {...props.threadMove}
+                  thread={{ mode: "chat", threadId: String(props.tab.threadId) }}
+                  threadTitle={props.tab.title}
+                />
+              ),
+            })}
         open={environmentOpen}
         summary={{ identity: projection.identity }}
       >

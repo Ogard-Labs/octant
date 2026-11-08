@@ -73,7 +73,9 @@ import { ProjectOverview } from "../projects/ProjectOverview";
 import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
-import type { OctantHostBridge } from "./hostBridge";
+import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
+import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMoveComputerCard";
+import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
@@ -1407,6 +1409,7 @@ function renderCodeTab(
         >
           <CodeThreadEnvironment
             active={paneIsActive(props, paneId)}
+            threadMove={threadMoveEnvironmentFor(props, "code")}
             observe={codeController.conversationHistory === "loaded"}
             checkoutAvailability={checkoutAvailability}
             {...(props.environmentDockOpen === undefined
@@ -1788,6 +1791,7 @@ function renderNonCodeTab(
   if (tab.kind === "chat-thread") {
     return (
       <ChatThreadWorkspace
+        threadMove={threadMoveEnvironmentFor(props, "chat")}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         chatClient={props.chatClient}
         chatReadCursorStore={props.chatReadCursorStore}
@@ -1882,6 +1886,7 @@ function renderNonCodeTab(
         {({ displayReady, onDisplayReadyChange }) => (
           <WorkThreadEnvironment
             active={paneIsActive(props, paneId)}
+            threadMove={threadMoveEnvironmentFor(props, "work")}
             {...(props.environmentDockOpen === undefined
               ? {}
               : { environmentOpen: props.environmentDockOpen })}
@@ -2550,6 +2555,33 @@ function resolveCodeTabCheckoutId(
     ?.checkoutId;
 }
 
+/**
+ * The Computer card's facts for a thread in this mode: the host it runs on,
+ * and, only when that is this computer and the window is a local desktop
+ * window, the move routes and this Mac's unlock key.
+ */
+function threadMoveEnvironmentFor(
+  props: WorkspaceViewProps,
+  mode: "chat" | "code" | "work",
+): ThreadMoveEnvironment {
+  const host = props.workspace.contextByMode[mode].host;
+  const isThisComputer = host === "local";
+  const hostName =
+    props.hosts?.find((item) => String(item.hostId) === String(host))?.displayName ??
+    (isThisComputer ? "This computer" : String(host));
+  const hub = isThisComputer ? hubAdministrationOf(props.hostBridge) : undefined;
+  const unlock = ownerUnlockOf(props.hostBridge);
+  return {
+    hostName,
+    isThisComputer,
+    ...(hub === undefined || props.hostBridge === undefined
+      ? {}
+      : { client: threadMoveClientForBridge(props.hostBridge, hub) }),
+    ...(unlock === undefined ? {} : { unlock }),
+    ...(props.onOpenSettings === undefined ? {} : { onOpenHubSettings: props.onOpenSettings }),
+  };
+}
+
 function paneIsActive(props: WorkspaceViewProps, paneId: PaneId): boolean {
   return paneId === (props.focusedPaneId ?? props.workspace.activePaneIds[props.mode]);
 }
@@ -2595,6 +2627,7 @@ function threadBrowserReveal(
 }
 
 function ChatThreadWorkspace(props: {
+  readonly threadMove?: ThreadMoveEnvironment;
   readonly agentRunClient?: AgentRunClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -2665,6 +2698,7 @@ function ChatThreadWorkspace(props: {
   );
   return (
     <ChatThreadEnvironment
+      {...(props.threadMove === undefined ? {} : { threadMove: props.threadMove })}
       {...(props.active === undefined ? {} : { active: props.active })}
       {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
       {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}

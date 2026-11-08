@@ -185,7 +185,7 @@ export function authorizeMoveIn(input: {
     sameId(member.memberId, input.senderMemberId),
   );
   const grant = input.grants.find((entry) => sameId(entry.memberId, input.senderMemberId));
-  if (sender === undefined || grant?.moveIn !== true) {
+  if (sender === undefined || !peerGrantAllowsMoveIn(grant)) {
     return { status: "refused", reason: "refused" };
   }
   const owner = authorizeOwnerRequest({
@@ -393,4 +393,31 @@ function trimCharacter(text: string, character: string): string {
   while (start < end && text[start] === character) start += 1;
   while (end > start && text[end - 1] === character) end -= 1;
   return text.slice(start, end);
+}
+
+/**
+ * Whether a peer grant has Move in. A full member's grant stored before Move
+ * in existed has no such item; it reads as on while the rest of it is still
+ * exactly the full-member grant (decision H2), because a full member joining
+ * now gets Move in, and every move still needs an owner's own fresh unlock on
+ * the destination. A grant the person narrowed, a guest's, a member's held
+ * until confirmed, and one with Move in turned off read as they are.
+ */
+export function peerGrantAllowsMoveIn(grant: PeerGrant | undefined): boolean {
+  if (grant === undefined) return false;
+  if (grant.moveIn !== undefined) return grant.moveIn;
+  const delegation = grant.delegation;
+  return (
+    grant.readStatus &&
+    grant.answerApprovals !== true &&
+    delegation !== undefined &&
+    delegation.projects === "all" &&
+    delegation.modes.length === 2 &&
+    delegation.modes.includes("work") &&
+    delegation.modes.includes("code") &&
+    delegation.posture === "approval-gated" &&
+    delegation.fullAccess === undefined &&
+    delegation.providerProfiles.allowDefault &&
+    delegation.providerProfiles.profileIds.length === 0
+  );
 }
