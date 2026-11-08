@@ -926,6 +926,11 @@ export function wireHarness(deps: HarnessDependencies) {
       codeSessionAuthority,
       codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
+    readFullAccessSandbox: (threadId) => {
+      const code = persistence.readCodeThread(threadId as never);
+      if (code !== undefined) return code.fullAccessSandbox === true;
+      return workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
+    },
     resolveWebSearch: () =>
       searxngHarnessWebSearch({
         readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,

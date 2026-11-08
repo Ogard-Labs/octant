@@ -10545,6 +10545,14 @@ mechanisms are:
     actions and publishing to an outside target included. An agent acts on
     pull requests, pushes, and merges only because the person asked in the
     thread; that is behavior, journaled, not a prompt.
+  - **Opt-in sandbox at Full access.** A thread (Code or Work) may set
+    `fullAccessSandbox`: prompts stay off exactly as at Full access, but the
+    launch keeps Octant's OS confinement (bound-root writes, protected-file
+    denies), the network stays proxied to the provider endpoints and approved
+    hosts, and Codex runs `workspace-write` instead of `danger-full-access`.
+    The flag is dropped at any other posture, is set from the terminal with
+    `octant agent --access full-access --sandbox`, and replays as off on
+    journals written before it existed.
   - **Full access is full access for secret files too** (maintainer
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell

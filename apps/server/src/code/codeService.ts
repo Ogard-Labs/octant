@@ -3945,11 +3945,17 @@ export class CodeService {
    * which has nothing left to answer.
    */
   #withGuardrailStamp(thread: CodeThread): CodeThread {
-    const { autoApprove, ...rest } = thread;
+    const { autoApprove, fullAccessSandbox, ...rest } = thread;
     if (rest.executionPolicy !== "full-access") {
+      // The sandbox flag only means something at Full access; at any other
+      // level it is dropped rather than journaled.
       return decodeCodeThread({ ...rest, ...(autoApprove === true ? { autoApprove } : {}) });
     }
-    return decodeCodeThread({ ...rest, permissionPersistence: "project-default" });
+    return decodeCodeThread({
+      ...rest,
+      permissionPersistence: "project-default",
+      ...(fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+    });
   }
 
   /**

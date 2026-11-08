@@ -2768,6 +2768,13 @@ describe("Codex execution authority and approvals", () => {
       sandbox: "danger-full-access",
       approvalsReviewer: "user",
     });
+    // The opt-in sandbox at Full access keeps Codex's own sandbox on while
+    // prompts stay off.
+    expect(codexExecutionSettings("full-access", false, true)).toEqual({
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      approvalsReviewer: "user",
+    });
     expect(codexExecutionSettings("approval-gated")).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",

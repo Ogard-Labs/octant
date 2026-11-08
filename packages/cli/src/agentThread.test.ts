@@ -153,7 +153,15 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
   const created = () =>
     seen.find(
       (request) => (request.body as { kind?: string } | undefined)?.kind === "create-code-thread",
-    )?.body as { thread: { executionPolicy: string; permissionPersistence: string } } | undefined;
+    )?.body as
+      | {
+          thread: {
+            executionPolicy: string;
+            permissionPersistence: string;
+            fullAccessSandbox?: boolean;
+          };
+        }
+      | undefined;
   const projectCommands = () =>
     seen
       .filter((request) => request.path === "/api/projects/commands")
@@ -331,6 +339,24 @@ describe("starting a Code thread from the terminal", () => {
     expect(fake.created()?.thread).toMatchObject({
       executionPolicy: "plan",
       permissionPersistence: "current-session",
+    });
+  });
+
+  it("records the opt-in sandbox on the thread when --access full-access --sandbox is asked", async () => {
+    const fake = host("current-session");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Sandboxed full run",
+      projectName: "Repo",
+      access: "full-access",
+      sandbox: true,
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "full-access",
+      fullAccessSandbox: true,
     });
   });
 

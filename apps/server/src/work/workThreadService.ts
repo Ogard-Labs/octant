@@ -611,6 +611,15 @@ export class WorkThreadService {
               ? undefined
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess,
+          // The opt-in sandbox only rides along when the resolved access is
+          // Full access; the CLI asks with --sandbox beside --access full-access.
+          ...(command.fullAccessSandbox === true &&
+          ((project.defaultPermissionMode === undefined
+            ? undefined
+            : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+            this.#currentSettings().defaultAccess) === "full-access"
+            ? { fullAccessSandbox: true }
+            : {}),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -1270,6 +1279,10 @@ export class WorkThreadService {
       bindingRevisionId,
       workingDirectory: ".",
       access: this.#currentSettings().defaultAccess,
+      ...(command.fullAccessSandbox === true &&
+      this.#currentSettings().defaultAccess === "full-access"
+        ? { fullAccessSandbox: true }
+        : {}),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),

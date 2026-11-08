@@ -729,7 +729,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   },
   {
     octant:
-      "agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+      "agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
   },
   { octant: "harness slots [--json]" },
   { octant: "harness session <thread-id> [--json]" },

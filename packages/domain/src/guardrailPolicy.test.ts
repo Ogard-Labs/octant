@@ -91,6 +91,31 @@ describe("guardrail levels", () => {
     });
   });
 
+  it("keeps Octant's confinement and proxied egress at Full access when the thread opted into the sandbox", () => {
+    for (const capabilities of [claudeOrCodex, wrappedRuntime]) {
+      expect(
+        resolveGuardrail({
+          access: { executionPolicy: "full-access", fullAccessSandbox: true },
+          capabilities,
+        }),
+      ).toMatchObject({
+        status: "supported",
+        level: "full-access",
+        sandbox: capabilities.providerSandbox ? "both" : "octant",
+        approver: "none",
+        egress: "provider-endpoints-only",
+        outsideContent: "recorded",
+      });
+    }
+    // Absent flag: unchanged, fully open.
+    expect(
+      resolveGuardrail({
+        access: { executionPolicy: "full-access" },
+        capabilities: claudeOrCodex,
+      }),
+    ).toMatchObject({ sandbox: "none", egress: "unrestricted" });
+  });
+
   it("runs Full access with no sandbox for every runtime, wrapped or not", () => {
     for (const capabilities of [claudeOrCodex, wrappedRuntime]) {
       expect(

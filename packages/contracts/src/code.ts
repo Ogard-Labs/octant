@@ -392,6 +392,14 @@ export const CodeThread = Schema.Struct({
    */
   autoApprove: Schema.optional(Schema.Boolean),
   sandboxOff: RetiredSandboxOffSwitch,
+  /**
+   * Opt-in sandbox at Full access: when the posture is `full-access` and this
+   * is true, the launch stays inside Octant's OS confinement (bound-root
+   * writes, protected-file denies) and network stays proxied to the provider
+   * endpoints, while approval prompts stay off. Optional so a journal written
+   * before the flag existed replays as off (Full access stays fully open).
+   */
+  fullAccessSandbox: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,

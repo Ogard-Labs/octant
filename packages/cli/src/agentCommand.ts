@@ -84,6 +84,8 @@ export type AgentCliCommand =
       readonly model?: string;
       /** The access a new Work or Code thread starts at, as the composer's mode picker names it. */
       readonly access?: AgentAccessMode;
+      /** Keep the OS sandbox and proxied network on at Full access (needs --access full-access). */
+      readonly sandbox?: boolean;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean }
@@ -115,6 +117,7 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "mode",
   "model",
   "access",
+  "sandbox",
 ];
 
 export function resolveAgentCliCommand(
@@ -146,6 +149,7 @@ export function resolveAgentCliCommand(
       ...(title === undefined ? {} : { title }),
       ...(model === undefined ? {} : { model }),
       ...(access === undefined ? {} : { access }),
+      ...(flags.sandbox === true ? { sandbox: true } : {}),
       json: flags.json === true,
       plain: flags.plain === true,
       last: flags.last === true,
@@ -1075,6 +1079,7 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     projectName: input.command.project,
     model: input.command.model,
     access: input.command.access,
+    sandbox: input.command.sandbox === true,
   });
   if (created.kind === "refused") {
     input.stderr.write(`${created.message}\n`);

@@ -393,6 +393,7 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+        ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.

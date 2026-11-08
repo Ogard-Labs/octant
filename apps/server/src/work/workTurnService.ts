@@ -1596,6 +1596,7 @@ export class WorkTurnService {
         command,
         ...(thread === undefined ? {} : { thread }),
         ...(thread === undefined ? {} : { access: turnAccess }),
+        ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         windowId: authenticatedWindowId,
         providerSessionId,
         ...(resumeCursor === undefined ? {} : { resumeCursor }),

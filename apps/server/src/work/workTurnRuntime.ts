@@ -99,6 +99,8 @@ export interface WorkTurnRuntimePort {
     readonly modelOptionValues?: ProviderModelOptionValues;
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
+    /** The thread's opt-in sandbox at Full access; dropped unless access is Full access. */
+    readonly fullAccessSandbox?: boolean;
     /** The thread chose the runtime's own artifact tool and this turn offers it. */
     readonly nativeArtifacts?: boolean;
     /** What the session may load of the provider's own setup; absent keeps it all off. */
@@ -361,6 +363,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         // still checks the root before it allows an edit, and one without a
         // reviewer of its own keeps asking at Auto.
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
+        ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),

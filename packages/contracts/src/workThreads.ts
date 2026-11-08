@@ -88,6 +88,12 @@ export const WorkThread = Schema.Struct({
    */
   access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
   /**
+   * Opt-in sandbox at Full access, same meaning as `CodeThread.fullAccessSandbox`:
+   * confinement and proxied egress stay on, prompts stay off. Optional so an
+   * older journal replays as off.
+   */
+  fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
    * The thread's pending usage-resume opt-in, when a person asked the host to
    * resume a usage-limited turn at the provider's declared reset. Journaled on
    * this thread's own stream; absent means no recovery is pending.
@@ -135,6 +141,11 @@ export const CreateWorkThreadCommand = Schema.Struct({
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
   /** A terminal session in the Project's folder the thread starts from. */
   terminalSession: Schema.optional(TerminalSessionImportRequest),
+  /**
+   * Opt-in sandbox when the thread's access is Full access; the create route
+   * clamps it off at every other level.
+   */
+  fullAccessSandbox: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
