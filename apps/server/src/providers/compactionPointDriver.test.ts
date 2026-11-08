@@ -1,6 +1,6 @@
 import type { ProviderModelId } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { claudeAutoCompactWindow } from "./claudeDriver";
 import { compactionPointFor, withCompactionPoint } from "./compactionPointDriver";
@@ -9,6 +9,12 @@ function recordingDriver() {
   const started: Array<unknown> = [];
   const resumed: Array<unknown> = [];
   const connection = {
+    subscribe: Effect.succeed(
+      Stream.make(
+        { kind: "usage", sessionId: "a", contextWindow: 400_000 },
+        { kind: "completed", sessionId: "a" },
+      ),
+    ),
     start: (input: unknown) =>
       Effect.sync(() => {
         started.push(input);
@@ -58,6 +64,30 @@ describe("handing a session the person's compaction point", () => {
     expect(started[0]).toMatchObject({ compactionPoint: point });
     expect(started[1]).not.toHaveProperty("compactionPoint");
     expect(resumed[0]).toMatchObject({ compactionPoint: point });
+  });
+
+  it("remembers the window a session's runtime reported, for a model whose catalogue names none", async () => {
+    const { driver } = recordingDriver();
+    const remembered: Array<[string, number]> = [];
+    const pointed = withCompactionPoint(
+      driver,
+      () => undefined,
+      (modelId, window) => remembered.push([String(modelId), window]),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* pointed.acquire({} as never);
+          yield* connection.start({
+            sessionId: "a",
+            modelId: model,
+            executionPolicy: "approval-gated",
+          } as never);
+          yield* Stream.runDrain(yield* connection.subscribe);
+        }),
+      ),
+    );
+    expect(remembered).toEqual([["model-a", 400_000]]);
   });
 
   it("names no point without a share, or for a model whose window nobody reported", () => {

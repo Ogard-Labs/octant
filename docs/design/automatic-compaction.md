@@ -399,9 +399,14 @@ contextWindow }`, optional on `ProviderSessionStart` and
 - **Handing it over** (`compactionPointDriver.ts`): the host wraps every driver
   it builds so each start and resume carries the point, from the share for the
   driver's keeper (`autoCompactOctantWindowPercent` for Octant Harness,
-  `autoCompactRuntimeWindowPercent` for runtimes) and the model's reported
-  window, read at that moment. A one-request session gets none, nor a model
-  whose window nobody reported.
+  `autoCompactRuntimeWindowPercent` for runtimes) and the model's window, read
+  at that moment: the window the request-fitting rules settle on
+  (`resolveModelContextWindow`: an override, a learned window, the catalogue's,
+  a reviewed profile), else the window the runtime itself last reported with
+  its usage for that model on that instance (kept in host memory). A
+  one-request session gets none, nor a model whose window nothing names yet,
+  so a runtime whose catalogue names no window gets the point from its second
+  session on.
 - **Claude Code** (`claudeAutoCompactWindow`): it compacts at its
   auto-compact window less a fixed 13,000-token reserve, the window being the
   smaller of the model's and the `autoCompactWindow` setting (clamped to

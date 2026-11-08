@@ -1,6 +1,6 @@
 import type { ProviderModelId } from "@octant/contracts";
 import type { ProviderCompactionPoint, ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 
 /**
  * Hands every session a driver opens the compaction point the person set in
@@ -13,6 +13,11 @@ import { Effect } from "effect";
 export function withCompactionPoint(
   driver: ProviderDriver,
   point: (modelId: ProviderModelId) => ProviderCompactionPoint | undefined,
+  /**
+   * Told the window a session's runtime reported with its usage, for a model
+   * whose catalogue names none; the next session's point can use it.
+   */
+  rememberWindow?: (modelId: ProviderModelId, contextWindow: number) => void,
 ): ProviderDriver {
   const pointFor = (modelId: ProviderModelId | undefined) => {
     if (modelId === undefined) return {};
@@ -23,21 +28,45 @@ export function withCompactionPoint(
     ...driver,
     acquire: (input) =>
       driver.acquire(input).pipe(
-        Effect.map((connection) => ({
-          ...connection,
-          start: (start) =>
-            connection.start(
-              start.singleUse === true || start.compactionPoint !== undefined
-                ? start
-                : { ...start, ...pointFor(start.modelId) },
-            ),
-          resume: (resume) =>
-            connection.resume(
-              resume.compactionPoint !== undefined
-                ? resume
-                : { ...resume, ...pointFor(resume.modelId) },
-            ),
-        })),
+        Effect.map((connection) => {
+          const modelOf = new Map<string, ProviderModelId>();
+          return {
+            ...connection,
+            subscribe:
+              rememberWindow === undefined
+                ? connection.subscribe
+                : connection.subscribe.pipe(
+                    Effect.map((events) =>
+                      events.pipe(
+                        Stream.tap((event) =>
+                          Effect.sync(() => {
+                            if (event.kind !== "usage" || event.contextWindow === undefined) return;
+                            const modelId = modelOf.get(String(event.sessionId));
+                            if (modelId !== undefined) rememberWindow(modelId, event.contextWindow);
+                          }),
+                        ),
+                      ),
+                    ),
+                  ),
+            start: (start) => {
+              modelOf.set(String(start.sessionId), start.modelId);
+              return connection.start(
+                start.singleUse === true || start.compactionPoint !== undefined
+                  ? start
+                  : { ...start, ...pointFor(start.modelId) },
+              );
+            },
+            resume: (resume) => {
+              if (resume.modelId !== undefined)
+                modelOf.set(String(resume.sessionId), resume.modelId);
+              return connection.resume(
+                resume.compactionPoint !== undefined
+                  ? resume
+                  : { ...resume, ...pointFor(resume.modelId) },
+              );
+            },
+          };
+        }),
       ),
   };
 }

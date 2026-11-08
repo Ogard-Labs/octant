@@ -23,6 +23,7 @@ import {
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
+  type ProviderModelId,
   type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
@@ -217,6 +218,7 @@ import {
   isImageProfileDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
+  resolveModelContextWindow,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
@@ -274,6 +276,13 @@ export interface ConfiguredProviderDriverOptions {
     instance: ProviderInstance,
   ) => ProviderLocalUsageHistorySource | undefined;
 }
+
+/**
+ * The window each runtime last reported for a model, by instance, for the
+ * compaction point of a model its catalogue gives no window. Process memory:
+ * one figure per model an instance ran, gone with the host.
+ */
+const REPORTED_MODEL_WINDOWS = new Map<string, number>();
 
 export function makeConfiguredProviderDriver(
   instance: ProviderInstance,
@@ -432,13 +441,26 @@ export function makeConfiguredProviderDriver(
     // A runtime that keeps its own conversation takes the runtime share; one
     // that runs on Octant Harness takes the share for threads Octant keeps.
     const keeper = providerKeepsConversation(instance.driverKind) ? "runtime" : "octant";
-    driver = withCompactionPoint(driver, (modelId) =>
-      compactionPointFor(
-        share(keeper),
-        options.runtimeRegistry
+    const windowKey = (modelId: ProviderModelId) =>
+      `${String(instance.id)}\u0000${String(modelId)}`;
+    driver = withCompactionPoint(
+      driver,
+      (modelId) => {
+        const model = options.runtimeRegistry
           .observedState(instance.id)
-          ?.models.find((model) => String(model.id) === String(modelId))?.contextLimit,
-      ),
+          ?.models.find((candidate) => String(candidate.id) === String(modelId));
+        // The window the request-fitting rules settle on (an override, a
+        // learned window, the catalogue's, a reviewed profile), else the one
+        // the runtime itself last reported for this model: a runtime's
+        // catalogue often names none.
+        const window =
+          (model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow) ??
+          REPORTED_MODEL_WINDOWS.get(windowKey(modelId));
+        return compactionPointFor(share(keeper), window);
+      },
+      (modelId, contextWindow) => {
+        REPORTED_MODEL_WINDOWS.set(windowKey(modelId), contextWindow);
+      },
     );
   }
   // Redaction comes first, so every consumer of the stream, the usage tap
