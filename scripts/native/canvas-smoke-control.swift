@@ -114,12 +114,15 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
     let current = window(pid)
     guard current.id == owned.id, current.bounds == owned.bounds else { refuse("The owned window moved after its capture.") }
     let point = CGPoint(x: match.x, y: match.y)
-    let covering = windows().first { row in
-        guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.intValue, layer >= 0,
-              ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,
-              let data = row[kCGWindowBounds as String] as? [String: Any],
-              let rect = CGRect(dictionaryRepresentation: data as CFDictionary) else { return false }
-        return rect.contains(point)
+    guard let primary = NSScreen.screens.first(where: {
+        ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID()
+    }) else { refuse("The primary screen coordinate mapping is unavailable.") }
+    // AppKit's actual mouse-down hit test skips windows that ignore input or
+    // are transparent at this point. Rectangular WindowServer bounds do not.
+    let hit = NSWindow.windowNumber(at: CGPoint(x: point.x, y: primary.frame.height - point.y), belowWindowWithWindowNumber: 0)
+    guard hit > 0 else { refuse("No native window would receive this pointer event.") }
+    let covering = windows().first { (row: [String: Any]) in
+        (row[kCGWindowNumber as String] as? NSNumber)?.intValue == hit
     }
     guard let covering,
           (covering[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid else {
