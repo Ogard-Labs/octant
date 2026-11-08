@@ -14559,6 +14559,17 @@ guards and the profile record remain held until actual process exit, including
 owner release or environment teardown. This boundary still admits no Windows
 desktop/server startup, migration/restore path, provider, Chat, Work or Code.
 
+The Windows server/member P-256 identity storage prerequisite consumes that
+native-held profile boundary through the existing private-listener signing port.
+Only its fixed host-id and private-key files are admitted; the native operation
+revalidates current filesystem authority on every read/create, independent of
+JavaScript path facts. The public signer still exposes only SPKI, fingerprint
+and signatures; profile/control UUID, desktop HMAC identity and roster/TLS keys
+remain distinct. See [boot-key storage](design/hub-and-spokes.md#the-hub-is-a-server-first) for the
+owner, format, creation and refusal rules. The existing remote/member and push
+consumers carry a host-internal storage dependency; absence refuses on Windows.
+This is not Windows startup, encryption-warning, service or confinement admission.
+
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):
 

@@ -2811,6 +2811,7 @@ A person's own devices form a hub-and-spoke topology: a hub is an ordinary Octan
 - A spoke accepts new members automatically as full members, every spoke and owner device alerts on each, and a setting can hold new members until an owner confirms.
 - Browser guests reach each spoke directly at its own name, so the hub never sees spoke traffic.
 - The hub runs as a boot service under the person's account and keeps its keys in an owner-only file on an encrypted disk.
+- The Windows server/member P-256 identity prerequisite uses the native-held private profile root for two fixed identity records, preserves projected host identity and the existing non-exporting public signing contract, and refuses unsafe or malformed records without replacement. It does not admit Windows startup, roster/TLS storage, disk-encryption setup or service integration. Detail: [boot-key storage](hub-and-spokes.md#the-hub-is-a-server-first).
 - Live checks on real phones, passkeys, networks and providers are owed.
 
 Status: Built. Since: 2026-10-28. Detail: [Hub and spokes: roles](hub-and-spokes.md#roles), [hub grant](hub-and-spokes.md#what-the-hub-may-do-on-a-spoke) and [decisions](hub-and-spokes.md#decisions).

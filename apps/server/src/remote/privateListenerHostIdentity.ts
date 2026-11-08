@@ -14,6 +14,7 @@
 // on identity; the server-owned signing key remains authoritative for the
 // listener the server process binds.
 
+import type { WindowsServerIdentityFiles, ServerIdentityFile } from "@octant/host-runtime";
 import {
   createHash,
   createPrivateKey,
@@ -46,6 +47,8 @@ export interface ResolvePrivateListenerHostIdentityOptions {
   readonly connection: SqliteConnection;
   readonly dataDirectory: string;
   readonly fallbackDisplayName?: string;
+  /** Host-internal native storage; never supplied by a remote client. */
+  readonly identityFiles?: WindowsServerIdentityFiles | undefined;
 }
 
 /**
@@ -56,16 +59,22 @@ export interface ResolvePrivateListenerHostIdentityOptions {
 export function resolvePrivateListenerHostIdentity(
   options: ResolvePrivateListenerHostIdentityOptions,
 ): PrivateListenerHostIdentity {
+  const files = admittedFiles(options.dataDirectory, options.identityFiles);
   const directory = join(options.dataDirectory, HOST_IDENTITY_SUBDIR);
-  mkdirSync(directory, { recursive: true });
+  if (files === undefined) mkdirSync(directory, { recursive: true });
 
   const projected = readHostIdentity(options.connection);
   const hostId =
-    projected !== undefined ? decodeStableHostId(projected.host_id) : loadOrCreateHostId(directory);
+    projected !== undefined
+      ? decodeStableHostId(projected.host_id)
+      : files === undefined
+        ? loadOrCreateHostId(directory)
+        : storedHostId(files);
   const displayName = boundedDisplayName(
     projected?.display_name ?? options.fallbackDisplayName ?? safeHostname(),
   );
-  const signing = loadOrCreateSigning(directory);
+  const signing = files === undefined ? loadOrCreateSigning(directory) : storedSigning(files, true);
+  if (signing === undefined) return identityUnavailable();
   return { hostId, displayName, signing };
 }
 
@@ -82,7 +91,12 @@ export function privateListenerDisplayName(connection: SqliteConnection): string
  * delivery signs with the key the phones paired with, and a host that never
  * enabled its listener has no paired phone to notify.
  */
-export function existingPrivateListenerSigning(dataDirectory: string): HostSigningPort | undefined {
+export function existingPrivateListenerSigning(
+  dataDirectory: string,
+  identityFiles?: WindowsServerIdentityFiles,
+): HostSigningPort | undefined {
+  const files = admittedFiles(dataDirectory, identityFiles);
+  if (files !== undefined) return storedSigning(files, false);
   const directory = join(dataDirectory, HOST_IDENTITY_SUBDIR);
   if (!existsSync(join(directory, HOST_KEY_FILE))) return undefined;
   return loadOrCreateSigning(directory);
@@ -122,6 +136,94 @@ function loadOrCreateSigning(directory: string): HostSigningPort {
         dsaEncoding: "ieee-p1363",
       }).toString("base64url"),
   };
+}
+
+function identityUnavailable(): never {
+  throw new Error("The host private identity storage is unavailable or unsafe.");
+}
+
+function admittedFiles(dataDirectory: string, files: WindowsServerIdentityFiles | undefined) {
+  if (files !== undefined && files.dataDirectory !== dataDirectory) return identityUnavailable();
+  if (process.platform === "win32" && files === undefined) return identityUnavailable();
+  return files;
+}
+
+function storedBytes(
+  files: WindowsServerIdentityFiles,
+  purpose: ServerIdentityFile,
+  create?: () => Buffer,
+): Buffer | undefined {
+  let result = files.read(purpose);
+  if (result.status === "missing" && create !== undefined) {
+    const candidate = create();
+    try {
+      result = files.create(purpose, candidate);
+    } finally {
+      candidate.fill(0);
+    }
+  }
+  if (result.status === "missing" && create === undefined) return undefined;
+  if (result.status !== "ready") return identityUnavailable();
+  const maximum = purpose === "host-id" ? 37 : 4096;
+  if (result.bytes.length === 0 || result.bytes.length > maximum) {
+    result.bytes.fill(0);
+    return identityUnavailable();
+  }
+  return result.bytes;
+}
+
+function storedHostId(files: WindowsServerIdentityFiles): StableHostId {
+  const bytes = storedBytes(files, "host-id", () => Buffer.from(`${randomUUID()}\n`));
+  if (bytes === undefined) return identityUnavailable();
+  try {
+    return decodeStableHostId(bytes.toString("utf8").trim());
+  } catch {
+    return identityUnavailable();
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+function storedSigning(
+  files: WindowsServerIdentityFiles,
+  create: boolean,
+): HostSigningPort | undefined {
+  const bytes = storedBytes(
+    files,
+    "host-key",
+    create
+      ? () =>
+          Buffer.from(
+            generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({
+              format: "pem",
+              type: "pkcs8",
+            }),
+          )
+      : undefined,
+  );
+  if (bytes === undefined) return undefined;
+  try {
+    const privateKey = createPrivateKey(bytes);
+    if (
+      privateKey.asymmetricKeyType !== "ec" ||
+      privateKey.asymmetricKeyDetails?.namedCurve !== "prime256v1"
+    )
+      return identityUnavailable();
+    const publicDer = createPublicKey(bytes).export({ format: "der", type: "spki" });
+    return {
+      hostKeyFingerprint: createHash("sha256").update(publicDer).digest("hex"),
+      hostPublicKey: publicDer.toString("base64url"),
+      signHostPayload: (payload) =>
+        cryptoSign("sha256", Buffer.from(payload, "utf8"), {
+          key: privateKey,
+          dsaEncoding: "ieee-p1363",
+        }).toString("base64url"),
+    };
+  } catch {
+    return identityUnavailable();
+  } finally {
+    bytes.fill(0);
+  }
 }
 
 function boundedDisplayName(value: string): string {

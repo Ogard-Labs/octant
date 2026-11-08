@@ -1,10 +1,22 @@
+import { generateKeyPairSync } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import { lstat, readFile, writeFile, rename, rm, symlink, unlink, link } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  writeFile,
+  rename,
+  rm,
+  symlink,
+  unlink,
+  link,
+} from "node:fs/promises";
 import { win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const [launcher, binding, fixture, ...runtimes] = process.argv.slice(2);
+const identityMode = process.argv[2] === "--server-identity";
+const [launcher, binding, fixture, ...runtimes] = process.argv.slice(identityMode ? 3 : 2);
 if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
   throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
 const children = new Set<ChildProcess>();
@@ -62,6 +74,8 @@ const profiles = ["octant", "nightly-test-data"] as const;
 const roots = profiles.map((profile) => win32.join(hosts, profile));
 const cleanup = new Set<string>();
 const identities = new Map<string, string>();
+const signingIdentities = new Map<string, string>();
+let concurrentReady = 0;
 const checks: string[] = [];
 let allJobsJoined = true;
 function record(value: unknown): value is Record<string, unknown> {
@@ -111,6 +125,23 @@ async function run(
       return;
     }
     if (record(value) && value.ownedJobJoined === true) joined = true;
+    if (
+      identityMode &&
+      record(value) &&
+      typeof value.profile === "string" &&
+      typeof value.hostKeyFingerprint === "string" &&
+      typeof value.hostId === "string"
+    ) {
+      const identity = `${value.hostId}:${value.hostKeyFingerprint}`;
+      const prior = signingIdentities.get(value.profile);
+      if (prior !== undefined && prior !== identity) {
+        invalidOutput = true;
+        child.kill();
+        return;
+      }
+      signingIdentities.set(value.profile, identity);
+      if (value.concurrentAdmission === "ready") concurrentReady++;
+    }
     if (record(value) && typeof value.fixtureScope === "string") {
       if (
         !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
@@ -157,6 +188,8 @@ async function run(
 const first = runtimes[0];
 if (first === undefined) throw new Error("Missing owned runtime.");
 async function probe(runtime: string, profile: string, mode = "normal") {
+  if (launcher === undefined || fixture === undefined || binding === undefined)
+    throw new Error("Missing owned probe inputs.");
   await run(
     launcher,
     ["--profile-user-owner", runtime, fixture, binding, profile, mode],
@@ -196,99 +229,194 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  for (const profile of profiles) {
-    await run(first, [fixture, binding, profile, "refuse"], { ...process.env }, 30_000);
-    for (const root of roots)
-      if (!(await absent(root)))
-        throw new Error("Refused default-owner context mutated a profile.");
-  }
-  checks.push("the original administrator default-owner context refuses before profile creation");
-  for (const runtime of runtimes) {
-    for (const profile of profiles) {
-      await probe(runtime, profile);
-      await acl(profile, "inspect");
-    }
-  }
-  if (identities.size !== 2 || new Set(identities.values()).size !== 2)
-    throw new Error("Profile identities are not isolated.");
-  checks.push("both closed profiles persist independently across Bun, Node and Electron");
-  const stable = roots[0];
-  const nightly = roots[1];
-  if (stable === undefined || nightly === undefined) throw new Error("Missing owned profiles.");
-  const recordPath = win32.join(stable, "profile.bin");
-  const original = await readFile(recordPath);
-  await writeFile(recordPath, Buffer.from("malformed-owned-fixture"));
-  await probe(first, "octant", "refuse");
-  if (!(await readFile(recordPath)).equals(Buffer.from("malformed-owned-fixture")))
-    throw new Error("Malformed identity was silently replaced.");
-  await writeFile(recordPath, original);
-  checks.push("malformed identity refuses without regeneration");
-
-  const otherRecord = win32.join(nightly, "profile.bin");
-  const other = await readFile(otherRecord);
-  await writeFile(otherRecord, original);
-  await probe(first, "nightly-test-data", "refuse");
-  await writeFile(otherRecord, other);
-  checks.push("another profile's identity cannot be transplanted");
-
-  const alias = win32.join(stable, "alias.bin");
-  await link(recordPath, alias);
-  await probe(first, "octant", "refuse");
-  await unlink(alias);
-  checks.push("hardlinked profile metadata refuses");
-
-  await acl("octant", "unsafe");
-  await probe(first, "octant", "refuse");
-  await acl("octant", "restore");
-  checks.push("a profile with an additional Everyone grant refuses");
-
-  for (const target of [stable, win32.join(stable, "data")]) {
-    const originalPath = target + ".original";
-    await rename(target, originalPath);
+  if (identityMode) {
+    const selected = roots[0];
+    if (selected === undefined) throw new Error("Missing owned identity root.");
+    for (const profile of profiles) await probe(first, profile, "missing");
+    checks.push("read-only signing leaves both profiles without identity records");
+    await Promise.all(Array.from({ length: 8 }, () => probe(first, "octant", "concurrent")));
+    if (concurrentReady === 0) throw new Error("Concurrent first-use had no successful signer.");
+    checks.push("concurrent first-use refuses competing writes or preserves one actual winner");
+    for (const runtime of runtimes)
+      for (const profile of profiles) {
+        await probe(runtime, profile, "normal");
+        await acl(profile, "identity-inspect");
+      }
+    if (signingIdentities.size !== 2 || new Set(signingIdentities.values()).size !== 2)
+      throw new Error("Signing identities are not profile isolated.");
+    checks.push("Bun, Node and Electron preserve both profile identities across process restarts");
+    const remote = win32.join(selected, "data", "remote");
+    const key = win32.join(remote, "private-listener-host-key.pem");
+    const id = win32.join(remote, "private-listener-host-id");
+    const originalKey = await readFile(key);
+    const originalId = await readFile(id);
     try {
-      await symlink(originalPath, target, "junction");
+      const wrongCurve = generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({
+        format: "pem",
+        type: "pkcs8",
+      });
+      for (const invalid of [
+        Buffer.alloc(0),
+        Buffer.from("malformed-owned-key"),
+        Buffer.alloc(4097, 120),
+        Buffer.from(wrongCurve),
+      ]) {
+        await writeFile(key, invalid);
+        await probe(first, "octant", "refuse");
+        if (!(await readFile(key)).equals(invalid))
+          throw new Error("Invalid owned key was changed.");
+      }
+      await writeFile(key, originalKey);
+      await writeFile(id, "invalid-owned-host-id");
+      await probe(first, "octant", "refuse");
+      if ((await readFile(id)).toString() !== "invalid-owned-host-id")
+        throw new Error("Invalid host id was changed.");
+      await writeFile(id, originalId);
+      checks.push(
+        "empty, malformed, oversized, wrong-curve keys and malformed ids refuse without replacement",
+      );
+      const alias = key + ".alias";
+      await link(key, alias);
       try {
         await probe(first, "octant", "refuse");
       } finally {
-        await unlink(target);
+        await unlink(alias);
       }
+      checks.push("a hardlinked private key refuses");
+      await rename(key, key + ".original");
+      try {
+        await mkdir(key);
+        await probe(first, "octant", "refuse");
+      } finally {
+        await rm(key, { recursive: true, force: true });
+        await rename(key + ".original", key);
+      }
+      checks.push("a directory in place of a private key refuses");
+      await rename(remote, remote + ".original");
+      try {
+        await symlink(remote + ".original", remote, "junction");
+        await probe(first, "octant", "refuse");
+      } finally {
+        await unlink(remote);
+        await rename(remote + ".original", remote);
+      }
+      checks.push("a reparse replacement for the identity directory refuses");
+      await acl("octant", "identity-unsafe");
+      try {
+        await probe(first, "octant", "refuse");
+      } finally {
+        await acl("octant", "identity-restore");
+      }
+      checks.push("an extra key-file Everyone grant refuses without narrowing it");
+      await probe(first, "octant", "normal");
+      checks.push("restoring the exact owned records retains the original identity");
     } finally {
-      await rename(originalPath, target);
+      originalKey.fill(0);
+      originalId.fill(0);
     }
-  }
-  checks.push("profile and data reparse replacements refuse");
-
-  const data = win32.join(stable, "data");
-  const originalDataIdentity = await lstat(data, { bigint: true });
-  await rename(data, data + ".original");
-  try {
-    await acl("octant", "prepare-data");
-    const replacement = await lstat(data, { bigint: true });
-    if (
-      originalDataIdentity.ino === 0n ||
-      replacement.ino === 0n ||
-      (originalDataIdentity.ino === replacement.ino && originalDataIdentity.dev === replacement.dev)
-    )
-      throw new Error("The owned replacement is not a different physical directory.");
+    console.log(
+      JSON.stringify({
+        serverIdentityLifecycleChecks: checks,
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else {
+    for (const profile of profiles) {
+      await run(first, [fixture, binding, profile, "refuse"], { ...process.env }, 30_000);
+      for (const root of roots)
+        if (!(await absent(root)))
+          throw new Error("Refused default-owner context mutated a profile.");
+    }
+    checks.push("the original administrator default-owner context refuses before profile creation");
+    for (const runtime of runtimes) {
+      for (const profile of profiles) {
+        await probe(runtime, profile);
+        await acl(profile, "inspect");
+      }
+    }
+    if (identities.size !== 2 || new Set(identities.values()).size !== 2)
+      throw new Error("Profile identities are not isolated.");
+    checks.push("both closed profiles persist independently across Bun, Node and Electron");
+    const stable = roots[0];
+    const nightly = roots[1];
+    if (stable === undefined || nightly === undefined) throw new Error("Missing owned profiles.");
+    const recordPath = win32.join(stable, "profile.bin");
+    const original = await readFile(recordPath);
+    await writeFile(recordPath, Buffer.from("malformed-owned-fixture"));
     await probe(first, "octant", "refuse");
-    if (!(await readFile(recordPath)).equals(original))
-      throw new Error("Refused replacement changed persistent metadata.");
-  } finally {
-    await rm(data, { recursive: true, force: true });
-    await rename(data + ".original", data);
+    if (!(await readFile(recordPath)).equals(Buffer.from("malformed-owned-fixture")))
+      throw new Error("Malformed identity was silently replaced.");
+    await writeFile(recordPath, original);
+    checks.push("malformed identity refuses without regeneration");
+
+    const otherRecord = win32.join(nightly, "profile.bin");
+    const other = await readFile(otherRecord);
+    await writeFile(otherRecord, original);
+    await probe(first, "nightly-test-data", "refuse");
+    await writeFile(otherRecord, other);
+    checks.push("another profile's identity cannot be transplanted");
+
+    const alias = win32.join(stable, "alias.bin");
+    await link(recordPath, alias);
+    await probe(first, "octant", "refuse");
+    await unlink(alias);
+    checks.push("hardlinked profile metadata refuses");
+
+    await acl("octant", "unsafe");
+    await probe(first, "octant", "refuse");
+    await acl("octant", "restore");
+    checks.push("a profile with an additional Everyone grant refuses");
+
+    for (const target of [stable, win32.join(stable, "data")]) {
+      const originalPath = target + ".original";
+      await rename(target, originalPath);
+      try {
+        await symlink(originalPath, target, "junction");
+        try {
+          await probe(first, "octant", "refuse");
+        } finally {
+          await unlink(target);
+        }
+      } finally {
+        await rename(originalPath, target);
+      }
+    }
+    checks.push("profile and data reparse replacements refuse");
+
+    const data = win32.join(stable, "data");
+    const originalDataIdentity = await lstat(data, { bigint: true });
+    await rename(data, data + ".original");
+    try {
+      await acl("octant", "prepare-data");
+      const replacement = await lstat(data, { bigint: true });
+      if (
+        originalDataIdentity.ino === 0n ||
+        replacement.ino === 0n ||
+        (originalDataIdentity.ino === replacement.ino &&
+          originalDataIdentity.dev === replacement.dev)
+      )
+        throw new Error("The owned replacement is not a different physical directory.");
+      await probe(first, "octant", "refuse");
+      if (!(await readFile(recordPath)).equals(original))
+        throw new Error("Refused replacement changed persistent metadata.");
+    } finally {
+      await rm(data, { recursive: true, force: true });
+      await rename(data + ".original", data);
+    }
+    checks.push(
+      "an ordinary replacement with a correct private DACL still fails physical data identity",
+    );
+    await probe(first, "octant");
+    checks.push("restored physical data and profile identities remain usable");
+    console.log(
+      JSON.stringify({
+        profileLifecycleChecks: checks,
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
   }
-  checks.push(
-    "an ordinary replacement with a correct private DACL still fails physical data identity",
-  );
-  await probe(first, "octant");
-  checks.push("restored physical data and profile identities remain usable");
-  console.log(
-    JSON.stringify({
-      profileLifecycleChecks: checks,
-      startupAdmitted: false,
-      workCodeEnabled: false,
-    }),
-  );
 } catch (error) {
   runFailure = error;
 } finally {

@@ -86,7 +86,7 @@ struct Client {
   ULONGLONG started = 0;
 };
 struct AdmissionGuard { std::unique_ptr<Root> root; Handle record; };
-struct Profile { std::unique_ptr<Root> root; Handle identity; std::string scope; };
+struct Profile { std::unique_ptr<Root> root; Handle identity; std::string scope; std::map<std::string, std::vector<Handle>> identity_guards; };
 std::map<std::string, std::unique_ptr<Profile>> profiles;
 std::vector<AdmissionGuard> admitted;
 std::unique_ptr<Owner> owner;
@@ -441,6 +441,103 @@ napi_value open_profile(napi_env env, napi_callback_info info) {
   // Native guards and the identity handle remain until this process exits.
   return result;
 }
+
+// These two records belong to server/member P256 identity, not the profile
+// control UUID or the login-bound desktop HMAC key. No caller supplies a path.
+napi_value identity_file(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 5; napi_value arguments[5];
+  napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
+  if (count != 5 || !per_user_creation_context()) return object(env, "refused");
+  const std::string name = string_arg(env, arguments[0]);
+  const std::string scope = string_arg(env, arguments[1]);
+  const std::string expected_data = string_arg(env, arguments[2]);
+  const std::string purpose = string_arg(env, arguments[3]);
+  const auto found = profiles.find(name);
+  if (found == profiles.end() || found->second->scope != scope ||
+      (purpose != "host-id" && purpose != "host-key")) return object(env, "refused");
+  const DWORD maximum = purpose == "host-id" ? 37 : 4096;
+  napi_valuetype candidate_type;
+  if (napi_typeof(env, arguments[4], &candidate_type) != napi_ok) return object(env, "refused");
+  const bool create = candidate_type != napi_null;
+  Bytes candidate;
+  if (create && (!byte_arg(env, arguments[4], candidate, maximum) || candidate.empty())) return object(env, "refused");
+  // Reopen/revalidate the native known-folder path and current ACLs on every
+  // operation. Cached JavaScript path facts are not filesystem admission.
+  auto root = private_root({L"hosts", std::wstring(name.begin(), name.end())}, false, true);
+  if (!root || utf8(root->display_path + L"\\data") != expected_data) return object(env, "refused");
+  std::array<FILE_ID_INFO, 2> directories{};
+  if (!GetFileInformationByHandleEx(root->ancestors.back().value, FileIdInfo, &directories[0], sizeof(FILE_ID_INFO))) return object(env, "refused");
+  Handle data = open_directory(root->path + L"\\data");
+  if (!data || !private_acl(data.value, *root, directory_inheritance) ||
+      !GetFileInformationByHandleEx(data.value, FileIdInfo, &directories[1], sizeof(FILE_ID_INFO))) return object(env, "refused");
+  const auto& held = *found->second;
+  BY_HANDLE_FILE_INFORMATION profile_metadata{}; LARGE_INTEGER profile_size{};
+  if (!private_acl(held.identity.value, *root) ||
+      !GetFileInformationByHandle(held.identity.value, &profile_metadata) || profile_metadata.nNumberOfLinks != 1 ||
+      (profile_metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+      !GetFileSizeEx(held.identity.value, &profile_size) || profile_size.QuadPart != static_cast<LONGLONG>(profile_record_size)) return object(env, "refused");
+  LARGE_INTEGER start{}; DWORD got = 0;
+  std::array<unsigned char, profile_record_size> encoded{};
+  if (!SetFilePointerEx(held.identity.value, start, nullptr, FILE_BEGIN) ||
+      !ReadFile(held.identity.value, encoded.data(), static_cast<DWORD>(encoded.size()), &got, nullptr) || got != encoded.size() ||
+      !std::equal(profile_magic.begin(), profile_magic.end(), encoded.begin()) ||
+      encoded[8] != (name == "octant" ? 1 : 2) || profile_scope(encoded.data() + profile_scope_offset) != scope) return object(env, "refused");
+  for (size_t i = 0; i < directories.size(); ++i)
+    if (std::memcmp(encoded.data() + 9 + i * 24, &directories[i].VolumeSerialNumber, 8) != 0 ||
+        std::memcmp(encoded.data() + 17 + i * 24, directories[i].FileId.Identifier, 16) != 0) return object(env, "refused");
+  const std::wstring remote_path = root->path + L"\\data\\remote";
+  SECURITY_ATTRIBUTES directory_attributes{sizeof(SECURITY_ATTRIBUTES), root->directory_security, FALSE};
+  if (create && !CreateDirectoryW(remote_path.c_str(), &directory_attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return object(env, "refused");
+  if (!create && GetFileAttributesW(remote_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    const DWORD missing = GetLastError();
+    return object(env, missing == ERROR_PATH_NOT_FOUND || missing == ERROR_FILE_NOT_FOUND ? "missing" : "refused");
+  }
+  Handle remote = open_directory(remote_path);
+  if (!remote) return object(env, "refused");
+  if (!private_acl(remote.value, *root, directory_inheritance)) return object(env, "refused");
+  const std::wstring path = remote_path + (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem");
+  FILE_ID_INFO created_identity{}; bool wrote_identity = false;
+  Handle file(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
+    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!file) {
+    const DWORD failure = GetLastError();
+    if (failure != ERROR_FILE_NOT_FOUND) return object(env, "refused");
+    if (!create) return object(env, "missing");
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), root->security, FALSE};
+    // CREATE_NEW never replaces a winner or a corrupt prior record. During
+    // the bounded write no other opener can observe a partial identity.
+    Handle created(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+      0, &attributes, CREATE_NEW, FILE_FLAG_WRITE_THROUGH | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (!created) return object(env, "refused");
+    DWORD wrote = 0;
+    if (!private_acl(created.value, *root) ||
+        !WriteFile(created.value, candidate.data(), static_cast<DWORD>(candidate.size()), &wrote, nullptr) ||
+        wrote != candidate.size() || !FlushFileBuffers(created.value) ||
+        !GetFileInformationByHandleEx(created.value, FileIdInfo, &created_identity, sizeof(created_identity))) return object(env, "refused");
+    wrote_identity = true;
+    created.reset();
+    file = Handle(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
+      nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  }
+  BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
+  if (!file || !private_acl(file.value, *root) || !GetFileInformationByHandle(file.value, &metadata) ||
+      metadata.nNumberOfLinks != 1 || (metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+      !GetFileSizeEx(file.value, &size) || size.QuadPart <= 0 || size.QuadPart > maximum) return object(env, "refused");
+  FILE_ID_INFO observed_identity{};
+  if (!GetFileInformationByHandleEx(file.value, FileIdInfo, &observed_identity, sizeof(observed_identity)) ||
+      (wrote_identity && (created_identity.VolumeSerialNumber != observed_identity.VolumeSerialNumber ||
+      std::memcmp(created_identity.FileId.Identifier, observed_identity.FileId.Identifier, 16) != 0))) return object(env, "refused");
+  Bytes bytes; bytes.resize(static_cast<size_t>(size.QuadPart)); got = 0;
+  if (!ReadFile(file.value, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != bytes.size()) return object(env, "refused");
+  napi_value result = object(env, "ready");
+  put(env, result, "dataDirectory", expected_data); buffer(env, result, "bytes", bytes);
+  auto& retained = found->second->identity_guards[purpose];
+  retained.clear();
+  retained.push_back(std::move(remote));
+  retained.push_back(std::move(file));
+  return result;
+}
+
 void record_fields(napi_env env, napi_value result, const Record& record) {
   number(env, result, "pid", record.identity.pid); put(env, result, "processStart", birth(record.identity.born));
   buffer(env, result, "secret", record.secret); buffer(env, result, "receipt", record.receipt);
@@ -643,6 +740,7 @@ NAPI_MODULE_INIT() {
   napi_add_env_cleanup_hook(env, cleanup_env, env);
   const napi_property_descriptor methods[] = {
     {"openProfile", nullptr, open_profile, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"identityFile", nullptr, identity_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"prepare", nullptr, prepare, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"claim", nullptr, claim, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lookup", nullptr, lookup, nullptr, nullptr, nullptr, napi_default, nullptr},

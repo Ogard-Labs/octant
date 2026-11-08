@@ -367,6 +367,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const resolveRemoteGatewayServices = (): Omit<RemoteGatewayServices, "config" | "serve"> => {
     if (injectedRemoteListenerServices !== undefined) return injectedRemoteListenerServices;
     const identity = resolvePrivateListenerHostIdentity({
+      identityFiles: options.serverIdentityFiles,
       connection: persistence.connection,
       dataDirectory: providerDataDirectory,
     });
@@ -451,6 +452,7 @@ export function wireRemote(deps: RemoteDependencies) {
   let hostIdentity: PrivateListenerHostIdentity | undefined;
   const resolveHubIdentity = (): PrivateListenerHostIdentity => {
     hostIdentity ??= resolvePrivateListenerHostIdentity({
+      identityFiles: options.serverIdentityFiles,
       connection: persistence.connection,
       dataDirectory: providerDataDirectory,
     });

@@ -1142,6 +1142,7 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      options,
       integrationEventSources: integrationEventSources([
         githubRoutineEventSources,
         linearRoutineEventSources,
