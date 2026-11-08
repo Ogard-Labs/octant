@@ -1068,6 +1068,13 @@ napi_value lookup(napi_env env, napi_callback_info info) {
   }
   return result;
 }
+napi_value closed_connection(napi_env env, Owner& state) {
+  const unsigned id = state.connection; const bool written = state.response_sent;
+  reset_connection(state);
+  napi_value result = object(env, "connection-closed"); number(env, result, "id", id);
+  napi_value encoded; napi_get_boolean(env, written, &encoded);
+  napi_set_named_property(env, result, "responseWritten", encoded); return result;
+}
 napi_value poll(napi_env env, napi_callback_info) {
   Guard guard;
   if (!owner || owner->env != env || !owner->pipe) return object(env, "closed");
@@ -1077,17 +1084,17 @@ napi_value poll(napi_env env, napi_callback_info) {
     const DWORD error = connected ? ERROR_SUCCESS : GetLastError();
     // A client can close before the first poll. Windows keeps that instance
     // at ERROR_NO_DATA until disconnected, otherwise every later client is busy.
-    if (!connected && error == ERROR_NO_DATA) { reset_connection(state); return object(env, "idle"); }
+    if (!connected && error == ERROR_NO_DATA) { return closed_connection(env, state); }
     if (!connected && error != ERROR_PIPE_CONNECTED) return object(env, "idle");
     ULONG client = 0;
-    if (!GetNamedPipeClientProcessId(state.pipe.value, &client) || !same_user(client, *state.root)) { reset_connection(state); return object(env, "idle"); }
+    if (!GetNamedPipeClientProcessId(state.pipe.value, &client) || !same_user(client, *state.root)) { return closed_connection(env, state); }
     state.connected = true; state.connected_at = GetTickCount64(); ++state.connection;
   }
-  if (GetTickCount64() - state.connected_at > io_bound) { reset_connection(state); return object(env, "idle"); }
+  if (GetTickCount64() - state.connected_at > io_bound) { return closed_connection(env, state); }
   if (!state.outgoing.empty()) {
     DWORD wrote = 0;
     const DWORD remaining = static_cast<DWORD>(state.outgoing.size() - state.written);
-    if (!WriteFile(state.pipe.value, state.outgoing.data() + state.written, remaining, &wrote, nullptr)) { reset_connection(state); return object(env, "idle"); }
+    if (!WriteFile(state.pipe.value, state.outgoing.data() + state.written, remaining, &wrote, nullptr)) { return closed_connection(env, state); }
     state.written += wrote;
     if (state.written == state.outgoing.size()) {
       SecureZeroMemory(state.outgoing.data(), state.outgoing.size()); state.outgoing.clear(); state.response_sent = true;
@@ -1096,26 +1103,26 @@ napi_value poll(napi_env env, napi_callback_info) {
   }
   if (state.response_sent) {
     DWORD remaining = 0;
-    if (!PeekNamedPipe(state.pipe.value, nullptr, 0, nullptr, &remaining, nullptr)) reset_connection(state);
+    if (!PeekNamedPipe(state.pipe.value, nullptr, 0, nullptr, &remaining, nullptr)) return closed_connection(env, state);
     return object(env, "idle");
   }
   if (state.awaiting_reply) return object(env, "idle");
   DWORD available = 0;
-  if (!PeekNamedPipe(state.pipe.value, nullptr, 0, nullptr, &available, nullptr)) { reset_connection(state); return object(env, "idle"); }
+  if (!PeekNamedPipe(state.pipe.value, nullptr, 0, nullptr, &available, nullptr)) { return closed_connection(env, state); }
   if (available == 0) return object(env, "idle");
   const size_t offset = state.incoming.size();
   const DWORD wanted = std::min(available, frame_limit + 1 - static_cast<DWORD>(offset));
   state.incoming.resize(offset + wanted); DWORD got = 0;
-  if (!ReadFile(state.pipe.value, state.incoming.data() + offset, wanted, &got, nullptr)) { reset_connection(state); return object(env, "idle"); }
+  if (!ReadFile(state.pipe.value, state.incoming.data() + offset, wanted, &got, nullptr)) { return closed_connection(env, state); }
   state.incoming.resize(offset + got);
   const auto end = std::find(state.incoming.begin(), state.incoming.end(), '\n');
   if (end != state.incoming.end()) {
-    if (static_cast<size_t>(end - state.incoming.begin()) >= frame_limit) { reset_connection(state); return object(env, "idle"); }
+    if (static_cast<size_t>(end - state.incoming.begin()) >= frame_limit) { return closed_connection(env, state); }
     state.incoming.resize(static_cast<size_t>(end - state.incoming.begin()));
     state.awaiting_reply = true;
     napi_value result = object(env, "request"); number(env, result, "id", state.connection); buffer(env, result, "bytes", state.incoming); return result;
   }
-  if (state.incoming.size() >= frame_limit) reset_connection(state);
+  if (state.incoming.size() >= frame_limit) return closed_connection(env, state);
   return object(env, "idle");
 }
 napi_value reply(napi_env env, napi_callback_info info) {

@@ -285,6 +285,7 @@ export async function acquireWindowsHostRuntimeOwner(
   )
     refused();
   let active = false;
+  let pendingStop: number | undefined;
   let preparedForCall = false;
   let ownedLease: HostRuntimeOwner | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -365,6 +366,7 @@ export async function acquireWindowsHostRuntimeOwner(
       release: async () => {
         if (!active) return;
         active = false;
+        pendingStop = undefined;
         clearTimeout(timer);
         native.close();
         anchored.delete(owner);
@@ -376,9 +378,25 @@ export async function acquireWindowsHostRuntimeOwner(
       if (!active) return;
       try {
         const event = native.poll();
-        if (!record(event) || (event.status !== "idle" && event.status !== "request")) {
+        if (
+          !record(event) ||
+          (event.status !== "idle" &&
+            event.status !== "request" &&
+            event.status !== "connection-closed")
+        ) {
           void owner.release();
           return;
+        }
+        if (
+          pendingStop !== undefined &&
+          event.status === "connection-closed" &&
+          event.id === pendingStop
+        ) {
+          pendingStop = undefined;
+          if (event.responseWritten === true)
+            void Promise.resolve()
+              .then(() => options.onStopRequested?.())
+              .catch(() => owner.release());
         }
         if (
           event.status === "request" &&
@@ -409,7 +427,11 @@ export async function acquireWindowsHostRuntimeOwner(
             line,
             receipt,
             secret,
-            options.onStopRequested,
+            options.onStopRequested === undefined
+              ? undefined
+              : () => {
+                  pendingStop = id;
+                },
             options.onControlRequest,
           ).catch(() => reply({ ok: false, error: "handler-failed" }));
         }
