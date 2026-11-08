@@ -696,7 +696,12 @@ describe("authenticated product route dispatch", () => {
   });
 
   it("classifies the POST-only Usage reads as reads and leaves the ledger purges denied", () => {
-    for (const path of ["/api/usage/dashboard", "/api/usage/query", "/api/usage/export"]) {
+    for (const path of [
+      "/api/usage/dashboard",
+      "/api/usage/query",
+      "/api/usage/diagnostics",
+      "/api/usage/export",
+    ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBe("settings.read-non-secret");
@@ -712,17 +717,22 @@ describe("authenticated product route dispatch", () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
 
-    for (const path of ["/api/usage/dashboard", "/api/usage/query", "/api/usage/export"]) {
+    for (const path of [
+      "/api/usage/dashboard",
+      "/api/usage/query",
+      "/api/usage/diagnostics",
+      "/api/usage/export",
+    ]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(200);
     }
-    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenCalledTimes(4);
 
     for (const path of ["/api/usage/reset", "/api/usage/retain"]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(403);
     }
-    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenCalledTimes(4);
   });
 
   it("classifies the POST-only Extension, validation, and Context reads as reads", () => {

@@ -123,6 +123,7 @@ export function buildTurnDiagnosticsReport(
   let toolCalls = 0;
   let toolFailures = 0;
   let unfinishedToolCalls = 0;
+  let toolTalliesTruncatedTurns = 0;
   let approvalRequests = 0;
   let inputRequests = 0;
   let rateLimitWarnings = 0;
@@ -212,6 +213,7 @@ export function buildTurnDiagnosticsReport(
           waitMs: total.waitMs + tally.waitMs,
         });
       }
+      if (diagnostics.toolsTruncated === true) toolTalliesTruncatedTurns += 1;
       for (const tally of diagnostics.tools ?? []) {
         unfinishedToolCalls += tally.unfinished;
         const tool = tools.get(tally.toolName) ?? newTool();
@@ -323,6 +325,7 @@ export function buildTurnDiagnosticsReport(
       toolCalls,
       toolFailures,
       unfinishedToolCalls,
+      toolTalliesTruncatedTurns,
       retries,
       approvalRequests,
       inputRequests,
