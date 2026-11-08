@@ -488,6 +488,10 @@ bool replace_listener_certificate(const Root& root, const std::wstring& path,
   rename->RootDirectory = nullptr;
   rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
   std::memcpy(rename->FileName, name.data(), rename->FileNameLength);
+  // Classic Windows replacement refuses an open destination, including our
+  // validation handle. Its private parent and the complete staging source
+  // stay held; renaming replaces the fixed leaf rather than following it.
+  prior.reset();
   if (!SetFileInformationByHandle(stage.file.value, FileRenameInfo, rename, static_cast<DWORD>(rename_bytes.size()))) return false;
   // Once renamed, failure must never delete the complete destination. A later
   // ensure validates it again and keeps the immutable key and its pin.
