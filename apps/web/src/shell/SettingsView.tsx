@@ -85,6 +85,10 @@ import { SupportBundleControl } from "../support/SupportBundleControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import {
+  runtimeCompactionDefaultsText,
+  useRuntimeCompactionDefaults,
+} from "../settings/runtimeCompactionDefaults";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
@@ -1950,6 +1954,9 @@ function CompletedThreadArchiveSelect(props: {
 
 const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
 
+const RUNTIME_COMPACTION_DESCRIPTION =
+  "Claude Code, Codex and the other runtimes compact by themselves. Pick a share to have Octant compact them sooner: Claude Code and Codex then compact at it inside a turn too, and the others between turns.";
+
 /** How full a window may get before a compaction rule acts, plus off. */
 function AutoCompactWindowSelect(props: {
   readonly id: string;
@@ -2064,6 +2071,7 @@ function ProfileSection({ focusedSetting, props }: SectionProps) {
 }
 
 function GeneralSection({ focusedSetting, props }: SectionProps) {
+  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
       <SettingsSection title="Available modes">
@@ -2159,7 +2167,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Compaction">
         <div className="setgroup">
           <SettingRow
-            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn. The thread keeps every message."
+            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn, and Octant Harness inside a long turn too. The thread keeps every message."
             focused={focusedSetting === settingId("auto-compact-octant")}
             label="Compact Octant threads"
             scope="host"
@@ -2176,7 +2184,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Claude Code, Codex and the other runtimes compact by themselves. Pick a share to have Octant compact them sooner, between turns."
+            description={
+              runtimeDefaults === undefined
+                ? RUNTIME_COMPACTION_DESCRIPTION
+                : `${RUNTIME_COMPACTION_DESCRIPTION} ${runtimeCompactionDefaultsText(runtimeDefaults)}`
+            }
             focused={focusedSetting === settingId("auto-compact-runtime")}
             label="Compact runtime threads"
             scope="host"

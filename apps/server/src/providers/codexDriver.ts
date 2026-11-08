@@ -28,6 +28,7 @@ import {
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
+  ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
@@ -140,6 +141,12 @@ export interface CodexThreadConfig {
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
   readonly project_doc_max_bytes?: 0;
+  /**
+   * The person's compaction point for this thread, in tokens: Codex compacts
+   * once the context passes it, mid-turn too. Passed in the thread's own
+   * config, never written to the account's `config.toml`.
+   */
+  readonly model_auto_compact_token_limit?: number;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
@@ -551,7 +558,17 @@ function codexChatCapabilities(
       work: sessionCompaction,
       code: sessionCompaction,
     },
+    // A thread's config carries `model_auto_compact_token_limit` (Codex has
+    // applied a thread's `config` since 0.56.0), so every version that can
+    // compact can take the point.
+    compactionPoint: sessionCompaction,
   };
+}
+
+function codexCompactionLimit(
+  point: ProviderCompactionPoint | undefined,
+): Pick<CodexThreadConfig, "model_auto_compact_token_limit"> {
+  return point === undefined ? {} : { model_auto_compact_token_limit: point.tokens };
 }
 
 /**
@@ -2072,7 +2089,11 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             const modeConfig = yield* modeThreadConfig(input.nativeSetup);
-            const config = { ...optionSettings.config, ...modeConfig };
+            const config = {
+              ...optionSettings.config,
+              ...modeConfig,
+              ...codexCompactionLimit(input.compactionPoint),
+            };
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
@@ -2171,7 +2192,7 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    config: modeConfig,
+                    config: { ...modeConfig, ...codexCompactionLimit(input.compactionPoint) },
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),

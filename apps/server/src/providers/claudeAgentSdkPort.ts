@@ -144,6 +144,11 @@ export interface ClaudeOpenQueryInput {
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * The auto-compact window for this query alone, from the person's
+   * compaction point; absent leaves the runtime its own.
+   */
+  readonly autoCompactWindow?: number;
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
@@ -587,6 +592,7 @@ export interface ClaudeFlagSettings {
   readonly availableModels?: readonly string[];
   readonly disableAllHooks?: true;
   readonly autoMemoryEnabled?: false;
+  readonly autoCompactWindow?: number;
 }
 
 export interface ClaudeNativeQueryOptions {
@@ -911,6 +917,9 @@ function liveBridge(): ClaudeAgentSdkBridge {
                   : { availableModels: [...settings.availableModels] }),
                 ...(settings.disableAllHooks === undefined ? {} : { disableAllHooks: true }),
                 ...(settings.autoMemoryEnabled === undefined ? {} : { autoMemoryEnabled: false }),
+                ...(settings.autoCompactWindow === undefined
+                  ? {}
+                  : { autoCompactWindow: settings.autoCompactWindow }),
               },
             }),
         settingSources: [...invocation.options.settingSources],
@@ -1214,6 +1223,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               (input.model === "haiku" || input.model.startsWith("claude-haiku-"))
                 ? { availableModels: [input.model] }
                 : {}),
+              ...(input.autoCompactWindow === undefined
+                ? {}
+                : { autoCompactWindow: input.autoCompactWindow }),
             };
             const invocationOptions: ClaudeAgentSdkInvocationOptions = {
               cwd: input.projectRoot,

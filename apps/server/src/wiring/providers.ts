@@ -140,6 +140,7 @@ import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStor
 import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
+import { compactionPointFor, withCompactionPoint } from "../providers/compactionPointDriver";
 import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
@@ -215,6 +216,7 @@ import {
   effectiveClaudeAccountConfigDirectory,
   isImageProfileDriverKind,
   isKeyProviderDriverKind,
+  providerKeepsConversation,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
@@ -247,6 +249,12 @@ export interface ConfiguredProviderDriverOptions {
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
+  /**
+   * The share of a model's window, from Settings, at which the person wants a
+   * session compacted: for threads Octant keeps, or for runtimes; `null` for
+   * none. Read at every session start and resume.
+   */
+  readonly compactionShare?: (keeper: "octant" | "runtime") => number | null;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
@@ -418,6 +426,20 @@ export function makeConfiguredProviderDriver(
   }
   if (localUsageHistory !== undefined) {
     driver = { ...driver, localUsageHistory };
+  }
+  if (options.compactionShare !== undefined) {
+    const share = options.compactionShare;
+    // A runtime that keeps its own conversation takes the runtime share; one
+    // that runs on Octant Harness takes the share for threads Octant keeps.
+    const keeper = providerKeepsConversation(instance.driverKind) ? "runtime" : "octant";
+    driver = withCompactionPoint(driver, (modelId) =>
+      compactionPointFor(
+        share(keeper),
+        options.runtimeRegistry
+          .observedState(instance.id)
+          ?.models.find((model) => String(model.id) === String(modelId))?.contextLimit,
+      ),
+    );
   }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
@@ -1860,6 +1882,12 @@ export function wireProviders(deps: ProvidersDependencies) {
     const chatDataDirectory = join(providerDataDirectory, "chat");
     const chatAttachmentStore = new ChatAttachmentStore(chatDataDirectory);
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      compactionShare: (keeper) => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return keeper === "octant"
+          ? settings.autoCompactOctantWindowPercent
+          : settings.autoCompactRuntimeWindowPercent;
+      },
       openCodeProcess,
       codexProcess,
       acpProcess,
