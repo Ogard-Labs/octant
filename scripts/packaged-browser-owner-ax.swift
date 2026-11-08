@@ -1435,6 +1435,17 @@ if mode == "click" || mode == "reveal" || fillsFixtureField {
                         }
                         let topPid = (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
                         action["pointWindowOwnerPid"] = topPid
+                        action["pointWindowLayer"] = (top?[kCGWindowLayer as String] as? NSNumber).map { $0 as Any } ?? NSNull()
+                        let coveringAlpha = (top?[kCGWindowAlpha as String] as? NSNumber)?.doubleValue
+                        action["pointWindowAlpha"] = coveringAlpha.flatMap {
+                            $0.isFinite && (0...1).contains($0) ? $0 as Any : nil
+                        } ?? NSNull()
+                        action["pointWindowOwnerMatched"] = (top?[kCGWindowOwnerPID as String] as? NSNumber).map {
+                            ($0.int32Value == processId) as Any
+                        } ?? NSNull()
+                        action["pointWindowContainsOwnedWindow"] = top.flatMap { cgBounds($0) }.map {
+                            $0.contains(windowBounds) as Any
+                        } ?? NSNull()
                         action["postEventAccess"] = CGPreflightPostEventAccess()
                         if let top, let frame = cgBounds(top) { action["pointWindowBounds"] = rectangle(frame) }
                         if windowBounds.contains(targetBounds), onScreen, topPid == processId, let top, let frame = cgBounds(top),
