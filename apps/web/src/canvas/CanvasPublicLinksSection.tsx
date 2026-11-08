@@ -100,7 +100,13 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
       </p>
     );
   }
-  if (list === undefined) return null;
+  if (list === undefined) {
+    return (
+      <p className="canvas-share__note" role="status">
+        Reading public links…
+      </p>
+    );
+  }
   if (!list.enabled && list.shares.length === 0) {
     return (
       <p className="canvas-share__note" data-testid="canvas-public-links-off">

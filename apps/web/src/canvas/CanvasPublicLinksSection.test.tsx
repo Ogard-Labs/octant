@@ -3,7 +3,7 @@ import type {
   CanvasPublicShareList,
   CanvasPublicShareRecord,
 } from "@octant/contracts/canvas-public-share";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CanvasPublicLinksSection } from "./CanvasPublicLinksSection";
@@ -82,13 +82,16 @@ describe("CanvasPublicLinksSection", () => {
   it("lets a paired reader copy links without offering owner actions", async () => {
     const user = userEvent.setup();
     const copyText = vi.fn(async () => undefined);
+    const reading = Promise.withResolvers<CanvasPublicShareList>();
     render(
       <CanvasPublicLinksSection
         canvasId={canvasId}
         copyText={copyText}
-        onList={async () => list([record()])}
+        onList={() => reading.promise}
       />,
     );
+    expect(screen.getByRole("status")).toHaveTextContent("Reading public links…");
+    await act(async () => reading.resolve(list([record()])));
     await user.click(await screen.findByRole("button", { name: "Copy link" }));
     expect(copyText).toHaveBeenCalledWith(record().url);
     expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
