@@ -59,7 +59,18 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertGreaterThan(project.frame.width, 0)
         XCTAssertGreaterThan(host.frame.width, 0)
         XCTAssertTrue(context.frame.contains(project.frame))
-        XCTAssertTrue(context.frame.contains(host.frame))
+        let contextBounds = context.frame
+        let hostBounds = host.frame
+        let hostContained = contextBounds.contains(hostBounds)
+        if !hostContained {
+            let evidence = XCTAttachment(screenshot: app.screenshot())
+            evidence.name = "Context host containment failure"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+        }
+        let contextEdges = [Double(contextBounds.minX), Double(contextBounds.minY), Double(contextBounds.maxX), Double(contextBounds.maxY)]
+        let hostEdges = [Double(hostBounds.minX), Double(hostBounds.minY), Double(hostBounds.maxX), Double(hostBounds.maxY)]
+        XCTAssertTrue(hostContained, "Edges [minX, minY, maxX, maxY]: context \(contextEdges) must contain host \(hostEdges)")
         XCTAssertTrue(app.windows.firstMatch.frame.contains(context.frame))
         XCTAssertFalse(project.frame.intersects(host.frame))
         XCTAssertLessThanOrEqual(context.frame.maxY, input.frame.minY)
