@@ -555,7 +555,14 @@ const timer = setInterval(() => {
         try {
           const raw = await runBoundedCommand(
             nativeControllerPath,
-            ["observe", String(ownPid), join(artifacts, `${stage}.png`), stage],
+            [
+              stage === "owned-publish-card" || stage === "update-owned-card"
+                ? "observe-detail"
+                : "observe",
+              String(ownPid),
+              join(artifacts, `${stage}.png`),
+              stage,
+            ],
             process.env,
             8000,
           );

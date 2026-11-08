@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 import Vision
+import CoreImage
 
 func refuse(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -87,7 +88,17 @@ let request = VNRecognizeTextRequest()
 request.recognitionLevel = .accurate
 request.usesLanguageCorrection = false
 request.recognitionLanguages = ["en-US"]
-do { try VNImageRequestHandler(url: URL(fileURLWithPath: imagePath)).perform([request]) }
+do {
+    if mode == "observe-detail" {
+        guard let original = CIImage(contentsOf: URL(fileURLWithPath: imagePath)) else { refuse("The owned detail image is unavailable.") }
+        let enlarged = original.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: 2.0, kCIInputAspectRatioKey: 1.0])
+        guard let image = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(enlarged, from: enlarged.extent) else {
+            refuse("The owned detail observation could not be prepared.")
+        }
+        request.minimumTextHeight = 0.005
+        try VNImageRequestHandler(cgImage: image).perform([request])
+    } else { try VNImageRequestHandler(url: URL(fileURLWithPath: imagePath)).perform([request]) }
+}
 catch { refuse("The owned-window text could not be recognized.") }
 let targets = (request.results ?? []).compactMap { result -> TextTarget? in
     guard let value = result.topCandidates(1).first else { return nil }
@@ -269,7 +280,7 @@ if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mod
     down.postToPid(pid)
     usleep(50_000)
     up.postToPid(pid)
-} else if mode != "observe" { refuse("Unknown native controller operation.") }
+} else if mode != "observe" && mode != "observe-detail" { refuse("Unknown native controller operation.") }
 do {
     let encoded = try JSONEncoder().encode(Observation(pid: pid, windowId: owned.id, texts: targets, clicked: clicked, pointerProof: pointerProof))
     try encoded.write(to: URL(fileURLWithPath: imagePath + ".json"), options: .atomic)
