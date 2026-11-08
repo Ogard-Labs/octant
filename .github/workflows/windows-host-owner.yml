@@ -133,6 +133,29 @@ jobs:
         run: |
           bun build scripts/windows-host-owner/sqlite-store.ts --target=bun --outfile "$env:RUNNER_TEMP/sqlite-store-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Stage the actual Windows foreground server layout
+        run: |
+          cmake -S apps/desktop/native/windows-credential-helper -B "$env:RUNNER_TEMP/credential-build" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/credential-build" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run --cwd apps/server build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $octantForegroundResources = "$env:RUNNER_TEMP/foreground/resources"
+          New-Item -ItemType Directory -Path "$octantForegroundResources/app/apps/server" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$octantForegroundResources/native" -Force | Out-Null
+          Copy-Item apps/server/dist "$octantForegroundResources/app/apps/server/dist" -Recurse
+          New-Item -ItemType Junction -Path "$octantForegroundResources/app/apps/server/node_modules" -Target "$PWD/node_modules" | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$octantForegroundResources/native/"
+          Copy-Item "$env:RUNNER_TEMP/credential-build/Release/octant-credential-helper.exe" "$octantForegroundResources/native/"
+          bun build scripts/windows-host-owner/foreground.ts --target=bun --outfile "$env:RUNNER_TEMP/foreground-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove the actual Windows foreground owner and journal lifecycle
+        run: |
+          $env:OCTANT_FOREGROUND_FIXTURE_ENTRY = "$env:RUNNER_TEMP/foreground/resources/app/apps/server/dist/main.mjs"
+          bun scripts/windows-host-owner/profile-run.ts --foreground "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/foreground/resources/native/octant-windows-host-owner.node" "$env:RUNNER_TEMP/foreground-smoke.mjs" (Get-Command bun).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:OCTANT_FOREGROUND_FIXTURE_ENTRY
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"

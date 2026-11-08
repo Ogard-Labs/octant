@@ -15,20 +15,21 @@ import {
 import { win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const foregroundMode = process.argv[2] === "--foreground";
 const identityMode = process.argv[2] === "--server-identity";
 const tlsMode = process.argv[2] === "--listener-tls";
 const sqliteMode = process.argv[2] === "--sqlite-store";
 const authorityMode = process.argv[2] === "--authority-state";
 const rosterMode = process.argv[2] === "--roster-key";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
-  identityMode || tlsMode || rosterMode || authorityMode || sqliteMode ? 3 : 2,
+  identityMode || tlsMode || rosterMode || authorityMode || sqliteMode || foregroundMode ? 3 : 2,
 );
 if (
   process.platform !== "win32" ||
   !launcher ||
   !binding ||
   !fixture ||
-  runtimes.length !== (sqliteMode ? 1 : 3)
+  runtimes.length !== (sqliteMode || foregroundMode ? 1 : 3)
 )
   throw new Error("Supply the owned launcher, binding, fixture and required runtimes.");
 const children = new Set<ChildProcess>();
@@ -274,7 +275,12 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  if (sqliteMode) {
+  if (foregroundMode) {
+    for (const profile of profiles) await probe(first, profile);
+    checks.push(
+      "both isolated profiles run the actual foreground entry through ready, authenticated backup and scoped shutdown",
+    );
+  } else if (sqliteMode) {
     for (const profile of profiles) await probe(first, profile);
     console.log(
       JSON.stringify({

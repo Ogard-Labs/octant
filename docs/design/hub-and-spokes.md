@@ -339,6 +339,18 @@ the CLI. The hub depends on that:
     cannot bypass this gate. Provider process preparation refuses Windows before
     its unconfined Full-access branch. Native experiments do not admit foreground
     or desktop startup.
+    The Windows foreground entry resolves the fixed native artifacts from the
+    actual portable resources layout, claims the selected native profile before
+    server/persistence imports, and composes its journal, usage cache, private
+    authority stores, closed credential namespaces, logs and discovery ports.
+    It serves loopback Chat and keeps Work/Code and executable extensions refused.
+    Linked secret-store state remains unavailable until it has native private
+    admission. Ready requires real native journal migration; owned local control
+    mediates verified backup and graceful drain. Shutdown reports unconfirmed
+    projection cleanup and always attempts native owner release even if broker
+    shutdown fails. Foreground admission needs actual entrypoint ready, authority
+    refusal, verified-backup and joined-listener/process cleanup evidence for
+    both profiles; desktop and Nightly bootstrap have their own additional gates.
     Hosted native QA keeps the pinned runtime versions. When GitHub release
     delivery fails, the same Bun version may come from its official npm Windows
     artifact, verified against a pinned SHA-512 before extracting its sole regular
