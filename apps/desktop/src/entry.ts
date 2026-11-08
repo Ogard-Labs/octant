@@ -29,6 +29,7 @@ const identity = app.isPackaged
     )
   : desktopIdentity("stable");
 const launchLinks = createNightlyLaunchLinks(identity.scheme);
+let windowsHostOnlyLaunch = false;
 
 if (
   identity.flavor === "nightly" ||
@@ -52,6 +53,10 @@ if (
         })
       : undefined,
   );
+  if (role.kind === "host-only" && process.platform === "win32") {
+    windowsHostOnlyLaunch = true;
+    process.stderr.write('{"windowsHostOnlyPhase":"entry-admitted"}\n');
+  }
   if (role.kind === "refused") {
     process.stderr.write(`${role.message}\n`);
     app.exit(1);
@@ -159,7 +164,12 @@ async function launchDesktop(): Promise<void> {
       : undefined;
   const outcome = await launchDesktopApplication(
     identity,
-    () => import(new URL("./main.mjs", import.meta.url).href),
+    async () => {
+      const loaded = await import(new URL("./main.mjs", import.meta.url).href);
+      if (windowsHostOnlyLaunch)
+        process.stderr.write('{"windowsHostOnlyPhase":"main-evaluated"}\n');
+      return loaded;
+    },
     async () => {
       if (unsandboxed) return { kind: "refused", reason: "unsandboxed-renderer" };
       if (native === undefined) return { kind: "refused", reason: "native-unavailable" };

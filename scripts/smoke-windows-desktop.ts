@@ -264,6 +264,96 @@ async function hostOnlyControlEnvironment(): Promise<Readonly<Record<string, str
     WINDIR: value.windows,
   };
 }
+async function verifyHostOnlyDiagnosticPipe(environment: Readonly<Record<string, string>>) {
+  const deadline = Math.min(begin + 34000, Date.now() + 2000);
+  const marker = "octant-host-only-diagnostic-pipe\n";
+  let probe: ChildProcess;
+  try {
+    if (Date.now() >= deadline) throw Error("The diagnostic control deadline expired.");
+    probe = spawn(
+      win32.toNamespacedPath(executable),
+      ["-e", "process.stderr.write('octant-host-only-diagnostic-pipe\\n')"],
+      {
+        env: { ...environment, ELECTRON_RUN_AS_NODE: "1" },
+        detached: true,
+        cwd: win32.toNamespacedPath(directory),
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+  } catch {
+    await writeFile(
+      join(output, `${phase}-transport.json`),
+      JSON.stringify({ diagnosticControl: true, status: "diagnostic-transport-unavailable" }),
+    );
+    throw Error("The isolated diagnostic transport is unavailable.");
+  }
+  children.add(probe);
+  let closed = false;
+  let exited = false;
+  let failed = false;
+  let observed = "";
+  probe.stderr?.on("data", (bytes: Buffer) => {
+    observed = (observed + bytes.toString()).slice(0, 128);
+  });
+  probe.once("error", () => {
+    failed = true;
+  });
+  probe.once("exit", () => {
+    exited = true;
+  });
+  const completion = new Promise<void>((resolve) => {
+    probe.once("close", () => {
+      closed = true;
+      children.delete(probe);
+      resolve();
+    });
+  });
+  const waitForClose = async (limit: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        completion,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, Math.max(0, limit - Date.now()));
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  await waitForClose(deadline - 500);
+  if (
+    !closed ||
+    !exited ||
+    failed ||
+    probe.exitCode !== 0 ||
+    probe.signalCode !== null ||
+    observed !== marker ||
+    Date.now() > deadline
+  ) {
+    if (!closed) {
+      try {
+        probe.kill();
+      } catch {
+        // The existing owned job must still join it before profile cleanup.
+      }
+      await waitForClose(deadline);
+    }
+    await writeFile(
+      join(output, `${phase}-transport.json`),
+      JSON.stringify({
+        diagnosticControl: true,
+        status: "diagnostic-transport-unavailable",
+        witnessJoined: closed && exited,
+      }),
+    );
+    throw Error("The isolated diagnostic transport is unavailable.");
+  }
+  await writeFile(
+    join(output, `${phase}-transport.json`),
+    JSON.stringify({ diagnosticControl: true, status: "ready", witnessJoined: true }),
+  );
+}
 function launcherObservation(details: Readonly<Record<string, unknown>> | undefined) {
   return {
     status: details?.status === "recorded" ? "recorded" : "refused",
@@ -501,12 +591,9 @@ try {
     await until("the exact cold-launched Stable process exited", () => coldHostExited(cold), 8000);
     check(true, "the cold-launched Stable process exited before owned job cleanup");
   } else {
-    const control = launch(
-      false,
-      undefined,
-      win32.toNamespacedPath(executable),
-      await hostOnlyControlEnvironment(),
-    );
+    const environment = await hostOnlyControlEnvironment();
+    await verifyHostOnlyDiagnosticPipe(environment);
+    const control = launch(false, undefined, win32.toNamespacedPath(executable), environment);
     await ready(control);
     check(true, "the separate direct host-only diagnostic control reached native readiness");
   }

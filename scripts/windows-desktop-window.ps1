@@ -23,9 +23,27 @@ public static class OctantDesktopWindow {
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
   [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
   [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+  static string ImageWithoutDosNamespace(string image) {
+    if (image.Length >= 7 && image.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+        ((image[4] >= 'A' && image[4] <= 'Z') || (image[4] >= 'a' && image[4] <= 'z')) && image[5] == ':' && image[6] == '\\') return image.Substring(4);
+    return image;
+  }
+  public static bool SameImage(string actual, string expected) {
+    return !String.IsNullOrEmpty(actual) && !String.IsNullOrEmpty(expected) &&
+      String.Equals(ImageWithoutDosNamespace(actual), ImageWithoutDosNamespace(expected), StringComparison.OrdinalIgnoreCase);
+  }
+  public static bool ImageComparisonControl() {
+    const string image = @"C:\Octant\Octant.exe";
+    return SameImage(image, image) && SameImage(@"\\?\C:\Octant\Octant.exe", image) &&
+      SameImage(image, @"\\?\c:\octant\Octant.exe") &&
+      !SameImage(null, null) && !SameImage(@"C:\Other\Octant.exe", image) &&
+      !SameImage(@"\\?\C:\Octant\.\Octant.exe", image) && !SameImage(@"C:\Octant\..\Octant\Octant.exe", image) &&
+      !SameImage(@"C:/Octant/Octant.exe", image) && !SameImage(@"\\.\C:\Octant\Octant.exe", image) &&
+      !SameImage(@"\\?\UNC\server\share\Octant.exe", @"\\server\share\Octant.exe");
+  }
   public static bool Run(int pid, string executable, string expectedBirth, bool close) {
     using (var process = Process.GetProcessById(pid)) {
-      if (process.HasExited || !String.Equals(process.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException();
+      if (process.HasExited || !SameImage(process.MainModule.FileName, executable)) throw new InvalidOperationException();
       Birth = process.StartTime.ToFileTimeUtc().ToString(System.Globalization.CultureInfo.InvariantCulture);
       if (!String.IsNullOrEmpty(expectedBirth) && expectedBirth != Birth) throw new InvalidOperationException();
       if (close && String.IsNullOrEmpty(expectedBirth)) throw new InvalidOperationException();
@@ -56,7 +74,7 @@ public static class OctantDesktopWindow {
     try {
       using (var process = Process.GetProcessById(pid)) {
         if (process.HasExited || process.StartTime.ToFileTimeUtc().ToString(System.Globalization.CultureInfo.InvariantCulture) != expectedBirth) return true;
-        if (!String.Equals(process.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException();
+        if (!SameImage(process.MainModule.FileName, executable)) throw new InvalidOperationException();
         return false;
       }
     } catch (ArgumentException) { return true; }
@@ -71,6 +89,7 @@ public static class OctantDesktopWindow {
 }
 '@
 try {
+  if (-not [OctantDesktopWindow]::ImageComparisonControl()) { throw 'Owned image comparison control failed' }
   if ($Mode -eq 'exited') {
     $octantGone = [OctantDesktopWindow]::OriginalExited($OwnedPid, $Executable, $ExpectedBirth)
     [Console]::WriteLine((@{ originalExited=$octantGone } | ConvertTo-Json -Compress))
@@ -102,7 +121,7 @@ try {
     [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
     $octantChildren = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$OwnedPid" -OperationTimeoutSec 2)
     if ($octantChildren.Count -gt 32) { throw 'Owned child observation exceeded its bound' }
-    $octantMatches = @($octantChildren | Where-Object { [String]::Equals($_.ExecutablePath, $ChildExecutable, [StringComparison]::OrdinalIgnoreCase) })
+    $octantMatches = @($octantChildren | Where-Object { [OctantDesktopWindow]::SameImage($_.ExecutablePath, $ChildExecutable) })
     [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
     if ($octantMatches.Count -eq 0) {
       [Console]::WriteLine('{"childObserved":false}')
