@@ -73,10 +73,10 @@ try {
             $octantOwnedCommand = $true
             break
           }
-          $octantArgumentTokens = @(
-            [regex]::Matches($octantArguments, '"[^"]*"|\S+') |
-              ForEach-Object { $_.Value }
-          )
+          $octantArgumentTokens = @()
+          foreach ($octantArgumentMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
+            $octantArgumentTokens += $octantArgumentMatch.Value
+          }
           if ($octantArgumentTokens.Count -eq 4) {
             $octantArgumentPathOne = [string]$octantArgumentTokens[0]
             $octantArgumentPathTwo = [string]$octantArgumentTokens[2]
@@ -139,10 +139,10 @@ try {
           } else {
             'extra-or-other-argument'
           }
-          $octantDiagnosticTokens = @(
-            [regex]::Matches($octantArguments, '"[^"]*"|\S+') |
-              ForEach-Object { $_.Value }
-          )
+          $octantDiagnosticTokens = @()
+          foreach ($octantDiagnosticMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
+            $octantDiagnosticTokens += $octantDiagnosticMatch.Value
+          }
           $octantArgumentTokenCount = $octantDiagnosticTokens.Count
           if ($octantDiagnosticTokens.Count -eq 4) {
             foreach ($octantPathIndex in @(0, 2)) {
