@@ -13555,6 +13555,24 @@ cards; general Azure CLI credentials remain unavailable by design.
   external writers while userspace inspects metadata. An own-account exception
   retains its initially enrolled lexical/canonical forms; replacing that path
   with a link never transfers the exception to a different sign-in.
+  The disposable candidate's owned session prepares the unchanged shared
+  Bubblewrap builder in a separate trusted worker, carrying the exact protected
+  file configuration and structured policy. Real ABI/status and a policy
+  snapshot precede command creation; a second barrier holds exec until the
+  command's actual PID/birth receipt is durable. Private control descriptors
+  never become command stdio. Input, output and error streams use bounded
+  backpressure, with no normal-output drain timeout shorter than the caller's
+  deadline. Closed input refuses before dispatch; an accepted write that loses
+  its pipe reports uncertainty and is never replayed. Preparation shares the
+  caller's finite deadline, capped at this candidate's existing 180 seconds.
+  Cancellation or owner-channel loss closes admission before owned group
+  cleanup. Cleanup has its own four-second bound and reports uncertainty for
+  unconfirmed identities, groups or pipe retirement; relay exit alone is not
+  proof that every descendant joined. The existing canonical owner-only
+  receipt directory is denied read/write by the actual capsule. This port is
+  not selected by production launchers, the device remains root-only, and
+  complete eligible-host lifecycle, data-route and controller reliability
+  acceptance remains required with production coverage zero.
   Metadata mediation includes a protected symlink's own inode and its followed
   target; a dangling protected link still has link text and metadata. Blocking
   preparation belongs before inode locks, under one paired user-operation
@@ -13587,6 +13605,12 @@ cards; general Azure CLI credentials remain unavailable by design.
   output unchanged, and refusing the protected inode's NODUMP
   change with flags and metadata unchanged while the public file's same toggle,
   readback, restoration and permitted writes succeed.
+  The bounded ordinary ioctl-read correction covers `FIONREAD` and `FIOQSIZE`
+  on regular file descriptors through the native and conditional compat LSM
+  entries before copyout. Protected observations require pre-effect EACCES with
+  output sentinels unchanged; public files, pipes and sockets retain their
+  permitted observations. Actual native and compat acceptance for this added
+  correction remains pending; it is not a generic ioctl framework.
   This is not a global `inode_setattr` or ioctl guard. Other attribute routes,
   internal privilege clearing during writes, other filesystem ioctls, stacked
   filesystems and kernel credential overrides remain unfinished and must be

@@ -200,6 +200,37 @@ entries, not all attribute/ioctl routes, internal calls, stacked filesystems or
 kernel credential overrides; those lifetimes and policy semantics remain
 unproved. Production coverage remains zero.
 
+The regular-file `FIONREAD`/`FIOQSIZE` correction uses the existing READ
+admission from native and conditional compat ioctl hooks before copying size
+or allocation metadata. Its fixture requires a readable baseline before the
+companion, later EACCES with output sentinels unchanged, public observations,
+and pipe/socket positives. Actual native and compat execution of this added
+correction remains pending; other ioctls and credential-override/stacked
+semantics remain outside this bounded correction with production coverage zero.
+
+The candidate `prepareLinuxMediationSession` port owns its trusted policy worker,
+native relay and held command identities. The worker invokes the unchanged
+shared Bubblewrap builder with the host's exact protected-file setup and a
+separately supplied command environment. Device ABI/status and a structured
+policy snapshot precede fork; exec waits for the actual command's durable
+PID/birth receipt. All private control uses FD3, separately from bounded,
+backpressured stdin/stdout/stderr. The existing canonical owner-only receipt
+root is covered through the builder's real additional read/write denials.
+
+Preparation and execution share a caller deadline of at most the candidate's
+existing 180 seconds; normal output drains until EOF or that deadline. Input
+past EOF refuses, and an accepted write that loses its pipe reports uncertainty
+without replay. Caller cancellation or owner-channel EOF closes admission
+before owned process cleanup. The host bounds cleanup to four seconds and
+retains uncertainty for unconfirmed identities/groups rather than treating a
+relay exit or closed pipe as complete descendant proof. The added guest session
+cases require readiness before effects, pre-launch cancellation, real early
+exit, deadline/cancellation, duplex pressure, private receipt masking and actual
+owner death. PID1 separately joins the deliberately orphaned worker. Added
+source is not an executed native pass; this port remains unselected, the device
+is root-only, and complete policy/data routes, eligible-host lifecycle and
+controller reliability remain unfinished with production coverage zero.
+
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
 archive has a fixed SHA-256, and only the original admission files enter its

@@ -827,6 +827,36 @@ static int policy_measure(const char *mode)
   if (joined != child || !WIFEXITED(result)) return 34;
   return WEXITSTATUS(result) == 0 ? 0 : 33;
 }
+static int session_measure(void)
+{
+  pid_t child = fork();
+  if (!child) {
+    if (!bind_core_target("/session-cases", 1)) _exit(63);
+    char *arguments[] = {"/session-cases", NULL};
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
+    execve(arguments[0], arguments, environment);
+    _exit(31);
+  }
+  if (child < 0) return 32;
+  int status = 0;
+  pid_t joined = core_join(child, &status);
+  if (joined != child) return 34;
+  /* This entire guest is task-owned. The deliberately killed session owner
+   * leaves one known worker orphan, whose native child has already joined. */
+  unsigned orphans = 0;
+  pid_t reaped = 0;
+  for (unsigned attempt = 0; attempt < 300; attempt++) {
+    reaped = waitpid(-1, NULL, WNOHANG);
+    if (reaped > 0) orphans++;
+    if (!reaped) { struct timespec delay = {.tv_nsec = 10000000}; nanosleep(&delay, NULL); }
+    if (reaped < 0 && errno != EINTR) break;
+  }
+  bool remaining = reaped != -1 || errno != ECHILD;
+  int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  printf("OCTANT_SESSION_JOIN {\"controllerPid\":%ld,\"controllerJoined\":true,\"controllerCode\":%d,\"orphansJoined\":%u,\"remaining\":%s}\n",
+    (long)child, code, orphans, remaining ? "true" : "false");
+  return code == 0 && orphans == 1 && !remaining ? 0 : 35;
+}
 int main(void)
 {
   signal(SIGPIPE, SIG_IGN);
@@ -877,6 +907,7 @@ int main(void)
     if (!result) result = policy_measure("--runtime-bun");
     if (!result) result = policy_measure("--runtime-node");
     if (!result) result = fileattr_result;
+    if (!result) result = session_measure();
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

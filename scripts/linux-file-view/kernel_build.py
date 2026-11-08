@@ -154,6 +154,7 @@ def main():
     relay = root / "octant-mediation"
     workload = root / "policy-workload"
     policy = root / "policy-broker"
+    session_cases = root / "session-cases"
     core_notes_binary = root / "core-notes"
     core_probe = root / "core-probe"
     fileattr_workload = root / "fileattr-workload"
@@ -169,6 +170,8 @@ def main():
     run(str(core_check), timeout=5, cwd=root)
     run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
         "--outfile", str(policy), timeout=120, cwd=repository)
+    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_session.ts"),
+        "--outfile", str(session_cases), timeout=120, cwd=repository)
     controller_image(policy)
     # Same compiled classifier, default JIT, no device/enrollment on the stock
     # runner. Keep this independent control before any guest mitigation.
@@ -185,12 +188,13 @@ def main():
     with library_log.open("wb") as output:
         run("ldd", str(policy), timeout=10, output=output)
         run("ldd", "/usr/bin/bwrap", timeout=10, output=output)
+        run("ldd", str(session_cases), timeout=10, output=output)
         for runtime_path in runtime_files.values():
             run("ldd", str(runtime_path), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
                    "fileattr-workload": fileattr_workload,
                    "core-notes": core_notes_binary, "core-probe": core_probe,
-                   "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
+                   "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}
     for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
@@ -278,11 +282,20 @@ def main():
             not isinstance(note.get("firstLoad"), int) or note["bytes"] > note["firstLoad"] or
             len(retired) != 1 or retired[0].get("held") is not True or retired[0].get("retired") is not True):
         raise SystemExit("The actual CORE0/PROT_NONE probe, kernel pidfd, executable and prefix notes did not agree.")
+    sessions = [json.loads(line) for line in log.splitlines() if line.startswith('{"status":"measured-owned-mediation-session"')]
+    session_joins = [json.loads(line.split(" ", 1)[1]) for line in log.splitlines() if line.startswith("OCTANT_SESSION_JOIN ")]
+    expected_sessions = {"invalid-deadline-refuses-before-spawn", "close-before-launch-no-command", "early-exit-real-code",
+                         "caller-cancellation-joins", "deadline-joins", "bounded-duplex-pressure-and-private-receipt-mask",
+                         "owner-loss-EOF-admission-and-command-stop"}
+    if (len(sessions) != 1 or set(sessions[0].get("outcomes", [])) != expected_sessions or
+            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("productionReady") is not False or
+            len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
+        raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
     expected_modes = ["--metadata-control", "direct", "--bubblewrap", "--bubblewrap", "--bubblewrap",
                       "--runtime-bun", "--runtime-node", "--fileattr"]
     if (len(processes) != 8 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
-            len(core_targets) != 8 or len(core_retirements) != 9 or
-            {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes)} or
+            len(core_targets) != 9 or len(core_retirements) != 10 or
+            {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes), session_joins[0].get("controllerPid")} or
             any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
             any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True
                 for entry in processes)):

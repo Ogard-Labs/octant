@@ -76,6 +76,11 @@ function serverPatternInForce() {
   return serverPattern;
 }
 
+/** Exact host setup passed only to its owned mediation preparation worker. */
+export function secretGuardConfiguration(): Readonly<SecretGuardState> {
+  return state;
+}
+
 /** The list in force, as the expression a person's server is asked to refuse by. */
 export function currentServerProtectedPattern(): string {
   return serverPatternInForce().text;

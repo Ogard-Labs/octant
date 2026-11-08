@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -127,8 +128,51 @@ static int verify_metadata(void)
   printf("OCTANT_METADATA_OWNER {\"pid\":%ld,\"parent\":%ld,\"unchanged\":%s}\n", (long)getpid(), (long)getppid(), unchanged ? "true" : "false");
   return unchanged ? 0 : 1;
 }
+/* The session proof uses pipes, never a terminal/control descriptor. */
+static int session_case(const char *mode, const char *root, const char *receipts)
+{
+  char path[512];
+  const char *home = getenv("HOME"), *search = getenv("PATH"), *language = getenv("LANG");
+  if (getenv("OCTANT_TEST_SECRET") || getenv("OPENAI_API_KEY") || getenv("BUN_JSC_useFTLJIT") ||
+      !home || strcmp(home, "/tmp") || !search || strcmp(search, "/usr/bin:/bin") ||
+      !language || strcmp(language, "C")) return 80;
+  if (fcntl(3, F_GETFD) != -1 || errno != EBADF) return 71;
+  if (snprintf(path, sizeof(path), "%s/private-marker", receipts) >= (int)sizeof(path)) return 72;
+  int leaked = open(path, O_RDONLY | O_CLOEXEC);
+  if (leaked >= 0) { close(leaked); return 73; }
+  if (snprintf(path, sizeof(path), "%s/must-not-create", receipts) >= (int)sizeof(path)) return 72;
+  leaked = open(path, O_CREAT | O_WRONLY | O_CLOEXEC, 0600);
+  if (leaked >= 0) { close(leaked); return 74; }
+  if (snprintf(path, sizeof(path), "%s/session-stage", root) >= (int)sizeof(path)) return 72;
+  int stage = open(path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  if (stage < 0) return 75;
+  close(stage);
+  if (!strcmp(mode, "--session-exit")) return 7;
+  if (!strcmp(mode, "--session-wait")) { for (;;) pause(); }
+  if (strcmp(mode, "--session-echo")) return 76;
+  char bytes[8192];
+  size_t total = 0;
+  for (;;) {
+    ssize_t count = read(STDIN_FILENO, bytes, sizeof(bytes));
+    if (count < 0 && errno == EINTR) continue;
+    if (count < 0 || total > 1024 * 1024) return 77;
+    if (!count) break;
+    total += (size_t)count;
+    for (int output = STDOUT_FILENO; output <= STDERR_FILENO; output++) {
+      ssize_t offset = 0;
+      while (offset < count) {
+        ssize_t written = write(output, bytes + offset, (size_t)(count - offset));
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return 78;
+        offset += written;
+      }
+    }
+  }
+  return total == 1024 * 1024 ? 0 : 79;
+}
 int main(int argc, char **argv)
 {
+  if (argc == 4 && !strncmp(argv[1], "--session-", 10)) return session_case(argv[1], argv[2], argv[3]);
   alarm(12);
   if (argc == 2 && !strcmp(argv[1], "--verify-metadata")) return verify_metadata();
   if (argc != 1) return 19;
