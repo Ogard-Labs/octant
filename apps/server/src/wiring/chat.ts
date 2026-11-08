@@ -41,7 +41,7 @@ import { WorkTurnService } from "../work/workTurnService";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { JournalNavigatorAssistantBindingStore } from "../navigatorAssistant/navigatorAssistantBindingStore";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../chat/chatAttachmentStore";
-import { createImageAgentTools } from "../image/imageAgentTools";
+import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -107,6 +107,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
+    | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
     | "windowAuthorityStore"
@@ -188,6 +189,7 @@ export function wireChat(deps: ChatDependencies) {
     extensionPackageStore,
     externalContentIngestionStore,
     githubIssueContextService,
+    imageGenerationOffers,
     imageJobService,
     linearIssueContextService,
     liveTurns,
@@ -511,17 +513,16 @@ export function wireChat(deps: ChatDependencies) {
                       targetThreadIds: threadMentionIds ?? [],
                       ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
                     }),
-                    createImageAgentTools({
+                    createThreadImageAgentTools({
+                      windowId,
                       threadKind: "chat-thread",
                       scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                      port: {
-                        listInstances: () => persistence.readProviderInstances(),
-                        readImageGenerationCustomSources: () =>
-                          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                            .imageGeneration.customSources,
-                        enqueue: (input) => imageJobService.enqueue(input),
-                        listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-                      },
+                      offers: imageGenerationOffers,
+                      jobs: imageJobService,
+                      listInstances: () => persistence.readProviderInstances(),
+                      readImageGenerationCustomSources: () =>
+                        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                          .imageGeneration.customSources,
                     }),
                   ),
               }),

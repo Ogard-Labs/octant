@@ -5,15 +5,22 @@ import {
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
   type ImageGenerationCustomSource,
+  type ImageGenerationOffer,
+  type ImageGenerationProfileView,
   type ImageGenerationScopeId,
   type ImageJob,
-  type ImageJobThreadKind,
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderModelId,
+  type WindowId,
 } from "@octant/contracts";
 import { hasEligibleImageProfile, listEligibleImageProfiles } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type {
+  ImageGenerationChoice,
+  ImageGenerationOfferOutcome,
+  ImageGenerationOfferService,
+} from "./imageGenerationOfferService";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 
 export const IMAGE_TOOL_NAME = "octant_create_image";
@@ -48,6 +55,23 @@ export interface ImageAgentToolPort {
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly enqueue: (input: EnqueueImageJobInput) => Promise<ImageJob>;
   readonly listJobs: ImageJobService["listByScope"];
+  /**
+   * Asks the person in the thread whether to generate, and with which profile
+   * and model. Required: every mode asks, because a generation spends money
+   * on the person's image provider.
+   */
+  readonly ask: (input: {
+    readonly offer: Omit<
+      ImageGenerationOffer,
+      "offerId" | "requestedAt" | "threadKind" | "scopeId"
+    >;
+    readonly signal?: AbortSignal;
+  }) => Promise<ImageGenerationOfferOutcome>;
+  /** The choice the person told this thread to keep using without asking. */
+  readonly remembered: () => ImageGenerationChoice | undefined;
+  readonly forget: () => void;
+  /** Why this turn may not generate at all, such as Plan mode; undefined allows it. */
+  readonly refusal?: () => string | undefined;
 }
 
 interface ImageToolInput {
@@ -58,15 +82,19 @@ interface ImageToolInput {
   readonly parentAttachmentId?: string;
 }
 
+const DESCRIPTION =
+  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what the person chose: status generating with a jobId (the image appears in this thread when it finishes; it is not ready yet), agent-draws (they want you to make the visual yourself), or cancelled (do not ask again unless they do). Report queued or running work honestly and never invent an image URL.";
+
 /**
- * App-managed image generation for a thread.
+ * App-managed image generation for a Chat, Work, or Code thread.
  *
- * Present only while Settings has an enabled image profile. The description
- * tells the agent to spend money only on an explicit user request; the tool
- * still refuses credentials, endpoints, and filesystem paths.
+ * Present only while Settings has an enabled image profile. Every call asks
+ * the person, in the thread, before a job is queued, unless they told this
+ * thread not to ask again; the job runs on the profile and model they chose.
+ * The tool still refuses credentials, endpoints, and filesystem paths.
  */
 export function createImageAgentTools(options: {
-  readonly threadKind: ImageJobThreadKind;
+  readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId;
   readonly port: ImageAgentToolPort;
 }): AppManagedToolSet | undefined {
@@ -75,43 +103,23 @@ export function createImageAgentTools(options: {
   if (!hasEligibleImageProfile(instances, customSources)) return undefined;
   return {
     definitions: [
-      {
-        name: IMAGE_TOOL_NAME,
-        description:
-          "Generate or edit an image only when the user explicitly asked to create, generate, draw, or edit an image. Do not call this tool for ambiguous, decorative, or implied visuals. This call spends money. Describe the image in prompt; omit profileInstanceId and modelId to use the first eligible Settings profile and its default model. To edit, pass parentAttachmentId from a completed image on this thread. Use only Settings image profiles; never pass credentials, endpoints, headers, or filesystem paths. The result is a jobId and status, not the finished image. Octant shows the job and completed artifacts in this thread, where the user can open or attach them. Report queued or running work honestly; do not invent an image URL, say an unfinished image is ready, or enqueue a duplicate just to check progress.",
-        inputSchema: imageToolInputSchema,
-      },
+      { name: IMAGE_TOOL_NAME, description: DESCRIPTION, inputSchema: imageToolInputSchema },
     ],
-    execute: async ({ name, inputJson }) => {
+    execute: async ({ name, inputJson, signal }) => {
       if (name !== IMAGE_TOOL_NAME) {
         return { result: { error: "tool-unavailable" }, isError: true };
       }
+      const refusal = options.port.refusal?.();
+      if (refusal !== undefined) return { result: { error: refusal }, isError: true };
       const parsed = parseInput(inputJson);
       if ("error" in parsed) return { result: { error: parsed.error }, isError: true };
 
-      const profiles = listEligibleImageProfiles(
-        options.port.listInstances(),
-        options.port.readImageGenerationCustomSources(),
-      );
+      const profiles = eligibleProfiles(options.port);
       if (profiles.length === 0) {
         return { result: { error: "No enabled image profile is configured." }, isError: true };
       }
-      const selected =
-        parsed.profileInstanceId === undefined
-          ? profiles[0]
-          : profiles.find(
-              (profile) => String(profile.instanceId) === String(parsed.profileInstanceId),
-            );
-      if (selected === undefined) {
-        return { result: { error: "The image profile is not eligible." }, isError: true };
-      }
-      const modelId = parsed.modelId ?? selected.defaultModel;
-      if (!selected.modelAllowlist.some((id) => String(id) === String(modelId))) {
-        return {
-          result: { error: "The selected model is not on this image profile's allowlist." },
-          isError: true,
-        };
-      }
+      const suggested = suggestedChoice(profiles, parsed);
+      if ("error" in suggested) return { result: { error: suggested.error }, isError: true };
 
       let parentArtifactRef: EnqueueImageJobInput["parentArtifactRef"];
       if (parsed.parentAttachmentId !== undefined) {
@@ -128,20 +136,80 @@ export function createImageAgentTools(options: {
         parentArtifactRef = parent;
       }
 
+      // A remembered choice the host can no longer generate with (its profile
+      // was turned off or the model removed) is dropped and the person asked
+      // again, never swapped silently for another model.
+      let choice = options.port.remembered();
+      if (choice !== undefined && !isEligibleChoice(eligibleProfiles(options.port), choice)) {
+        options.port.forget();
+        choice = undefined;
+      }
+      if (choice === undefined) {
+        const outcome = await options.port.ask({
+          offer: {
+            prompt: parsed.prompt,
+            variantCount: parsed.variantCount ?? 1,
+            revision: parentArtifactRef !== undefined,
+            suggested,
+          },
+          ...(signal === undefined ? {} : { signal }),
+        });
+        switch (outcome.status) {
+          case "generate":
+            choice = outcome;
+            break;
+          case "agent-draws":
+            return {
+              result: {
+                status: "agent-draws",
+                message:
+                  "The person chose not to use an image model for this. Make the visual yourself if the request still calls for one.",
+              },
+            };
+          case "cancelled":
+          case "expired":
+            return {
+              result: {
+                status: "cancelled",
+                message:
+                  "The person did not start the image generation. Do not ask again unless they do.",
+              },
+            };
+          case "too-many-waiting":
+            return {
+              result: { error: "Too many image generations are waiting for an answer." },
+              isError: true,
+            };
+        }
+      }
+      // The answer can arrive minutes later, so the turn's standing is read
+      // again: a thread moved to Plan while the card was open must not spend.
+      const refusalNow = options.port.refusal?.();
+      if (refusalNow !== undefined) return { result: { error: refusalNow }, isError: true };
+      // The person's choice is checked again as it runs: a profile turned off
+      // while the card was open must not run.
+      if (!isEligibleChoice(eligibleProfiles(options.port), choice)) {
+        return {
+          result: { error: "The chosen image model is no longer available." },
+          isError: true,
+        };
+      }
+
       try {
         const job = await options.port.enqueue({
           threadKind: options.threadKind,
           scopeId: options.scopeId,
-          profileInstanceId: selected.instanceId,
-          modelId,
+          profileInstanceId: choice.profileInstanceId,
+          modelId: choice.modelId,
           prompt: parsed.prompt,
           ...(parsed.variantCount === undefined ? {} : { variantCount: parsed.variantCount }),
           ...(parentArtifactRef === undefined ? {} : { parentArtifactRef }),
         });
         return {
           result: {
+            status: "generating",
             jobId: job.id,
-            status: job.status,
+            jobStatus: job.status,
             modelId: job.modelId,
             profileInstanceId: job.profileInstanceId,
           },
@@ -156,6 +224,76 @@ export function createImageAgentTools(options: {
       }
     },
   };
+}
+
+/**
+ * The image tool for one thread's turn, asking through the host's offer
+ * service as the window whose turn it is. Chat, Work, and Code compose it the
+ * same way, so every mode asks the same question.
+ */
+export function createThreadImageAgentTools(input: {
+  readonly windowId: WindowId;
+  readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
+  readonly scopeId: ImageGenerationScopeId;
+  readonly offers: Pick<ImageGenerationOfferService, "offer" | "remembered" | "forget">;
+  readonly jobs: Pick<ImageJobService, "enqueue" | "listByScope">;
+  readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
+  readonly refusal?: () => string | undefined;
+}): AppManagedToolSet | undefined {
+  const scope = { threadKind: input.threadKind, scopeId: input.scopeId };
+  return createImageAgentTools({
+    ...scope,
+    port: {
+      listInstances: input.listInstances,
+      readImageGenerationCustomSources: input.readImageGenerationCustomSources,
+      enqueue: (job) => input.jobs.enqueue(job),
+      listJobs: (scopeId) => input.jobs.listByScope(scopeId),
+      ask: ({ offer, signal }) =>
+        input.offers.offer({
+          windowId: input.windowId,
+          offer: { ...offer, ...scope },
+          ...(signal === undefined ? {} : { signal }),
+        }),
+      remembered: () => input.offers.remembered(scope),
+      forget: () => input.offers.forget(scope),
+      ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
+    },
+  });
+}
+
+function eligibleProfiles(port: ImageAgentToolPort): ReadonlyArray<ImageGenerationProfileView> {
+  return listEligibleImageProfiles(port.listInstances(), port.readImageGenerationCustomSources());
+}
+
+function isEligibleChoice(
+  profiles: ReadonlyArray<ImageGenerationProfileView>,
+  choice: ImageGenerationChoice,
+): boolean {
+  return profiles.some(
+    (profile) =>
+      String(profile.instanceId) === String(choice.profileInstanceId) &&
+      profile.modelAllowlist.some((id) => String(id) === String(choice.modelId)),
+  );
+}
+
+/** What the card preselects: the agent's suggestion when the host can run it, else the first profile. */
+function suggestedChoice(
+  profiles: ReadonlyArray<ImageGenerationProfileView>,
+  input: ImageToolInput,
+): ImageGenerationChoice | { readonly error: string } {
+  const profile =
+    input.profileInstanceId === undefined
+      ? profiles[0]
+      : profiles.find(
+          (candidate) => String(candidate.instanceId) === String(input.profileInstanceId),
+        );
+  if (profile === undefined) return { error: "The image profile is not eligible." };
+  const modelId = input.modelId ?? profile.defaultModel;
+  if (!profile.modelAllowlist.some((id) => String(id) === String(modelId))) {
+    return { error: "The selected model is not on this image profile's allowlist." };
+  }
+  return { profileInstanceId: profile.instanceId, modelId };
 }
 
 function findCompletedArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: string) {

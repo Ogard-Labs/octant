@@ -43,6 +43,7 @@ import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/con
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
+import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -2247,6 +2248,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           className="thread-column"
           client={props.automationClient}
           threadId={String(props.threadId)}
+          turnActive={busy}
+        />
+        <ImageGenerationOfferPrompt
+          className="thread-column"
+          client={props.imageGenerationClient}
+          profiles={props.imageGenerationProfiles ?? []}
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="code-thread"
           turnActive={busy}
         />
         {folderDrops.notice}

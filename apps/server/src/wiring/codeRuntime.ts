@@ -14,6 +14,7 @@ import {
   decodeCodeRelativePath,
   decodeCodeThreadId,
   decodeContextSubjectRef,
+  decodeImageGenerationScopeId,
   decodeThreadWorkingDirectory,
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
@@ -34,7 +35,8 @@ import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequ
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
-import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -75,7 +77,11 @@ import {
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
+import {
+  defaultShellSettings,
+  isNativeHarnessDriverKind,
+  projectExtraFolderRoots,
+} from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -263,6 +269,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeActiveTurns"
     | "codeApprovalStore"
     | "codeSessionAuthority"
+    | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
     | "onWindowRevoked"
@@ -319,6 +326,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "configuredDriverOptions"
     | "extensionApiService"
     | "extensionPackageStore"
+    | "imageJobService"
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
@@ -404,6 +412,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     liveTurns,
     machineChangeFeed,
     hostShield,
+    imageGenerationOffers,
+    imageJobService,
     runtimeForgeChanges,
     nativeHarnessComposition,
     nativeHarnessHooks,
@@ -457,6 +467,29 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    // A routine's turn has nobody at a window to answer the image card, so it
+    // is not offered the tool.
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      isRoutineHostScope(windowId)
+        ? undefined
+        : createThreadImageAgentTools({
+            windowId,
+            threadKind: "code-thread",
+            scopeId: decodeImageGenerationScopeId(String(thread.id)),
+            offers: imageGenerationOffers,
+            jobs: imageJobService,
+            listInstances: () => persistence.readProviderInstances(),
+            readImageGenerationCustomSources: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+                .customSources,
+            // Plan changes nothing on the host or outside it, and a generation
+            // calls a paid provider and stores the image.
+            refusal: () =>
+              (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+                ? "Plan mode cannot generate images. Leave Plan mode to generate one."
+                : undefined,
+          }),
+    );
     contributeCodeTools(({ windowId, thread }) =>
       personMemoryAccess.toolsFor({
         mode: "code",

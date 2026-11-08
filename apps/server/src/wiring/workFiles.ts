@@ -52,7 +52,7 @@ import type { WorkWiring } from "./work";
 import type { ContextWiring } from "./context";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "imageGenerationOffers" | "windowAuthorityStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
@@ -64,6 +64,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {
     credentialResolver,
+    imageGenerationOffers,
     imageJobService,
     options,
     persistence,
@@ -160,6 +161,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   const imageRoutes = createImageRouteHandler({
     jobs: imageJobService,
+    offers: imageGenerationOffers,
     listInstances: () => persistence.readProviderInstances(),
     readImageGenerationSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,

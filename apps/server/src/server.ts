@@ -243,6 +243,7 @@ export function startOctantServer(
       protectedFilesRoutes,
       processAuthorityNow,
       routineProposalService,
+      imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       windowAuthorityStore,
@@ -745,6 +746,8 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
       hostShield,
+      imageGenerationOffers,
+      imageJobService,
       runtimeForgeChanges,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
@@ -923,6 +926,7 @@ export function startOctantServer(
       extensionPackageStore,
       externalContentIngestionStore,
       githubIssueContextService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       liveTurns,
@@ -1003,6 +1007,7 @@ export function startOctantServer(
       followUpCreation,
       githubIssueContextService,
       goalService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       terminalSessionImports,
@@ -1122,6 +1127,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       credentialResolver,
+      imageGenerationOffers,
       imageJobService,
       options,
       persistence,
@@ -1957,6 +1963,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           browserToolApprovalService?.close();
+          imageGenerationOffers.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();
