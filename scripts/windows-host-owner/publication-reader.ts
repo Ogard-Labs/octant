@@ -19,13 +19,16 @@ const resolved = resolveWindowsHostProfile({ native, profile, env: {} });
 if (resolved.status !== "ready") throw Error("Native publication profile unavailable.");
 const startup = createWindowsHostStartup(native, resolved.paths);
 if (startup === undefined) throw Error("Native publication ports unavailable.");
-const lifetime = setTimeout(() => process.exit(2), 8000);
+let reads = 0;
+const lifetime = setTimeout(() => {
+  console.error(JSON.stringify({ publicationReaderDeadlineExpired: true, completedReads: reads }));
+  process.exit(2);
+}, 18_000);
 let ended = false;
 process.stdin.on("end", () => {
   ended = true;
 });
 process.stdin.resume();
-let reads = 0;
 try {
   console.log("publication-reader-ready");
   while (!ended) {
