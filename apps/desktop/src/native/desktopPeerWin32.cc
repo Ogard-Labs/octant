@@ -644,7 +644,7 @@ void complete(napi_env env, napi_status status, void* data) {
         napi_release_threadsafe_function(job->state->callback, napi_tsfn_abort); job->state->callback = nullptr;
       }
     }
-    if (status == napi_ok && job->state->closed) {
+    if (status == napi_ok && job->answer.kind == "closed" && job->state->closed) {
       auto replacement = fresh_binding(*job->state);
       std::lock_guard guard(binding_lock);
       if (runtime == job->state && replacement) runtime = std::move(replacement);
