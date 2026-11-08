@@ -637,6 +637,25 @@ cleanup:
   return passed ? 0 : 62;
 }
 
+/* The broker sleeps interruptibly. Only the position mutex on this pinned
+ * lseek path sleeps killably, so D plus the live syscall identifies that wait
+ * even when this tiny guest omits symbolic stack traces. */
+static bool owned_seek_waiting(pid_t child)
+{
+  char path[64], status[512] = {0}, syscall[256] = {0};
+  snprintf(path, sizeof(path), "/proc/%ld/status", (long)child);
+  int descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  ssize_t length = descriptor < 0 ? -1 : read(descriptor, status, sizeof(status) - 1);
+  close_owned(&descriptor);
+  if (length <= 0 || !strstr(status, "\nState:\tD")) return false;
+  snprintf(path, sizeof(path), "/proc/%ld/syscall", (long)child);
+  descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  length = descriptor < 0 ? -1 : read(descriptor, syscall, sizeof(syscall) - 1);
+  close_owned(&descriptor);
+  long number = -1;
+  return length > 0 && sscanf(syscall, "%ld", &number) == 1 && number == SYS_lseek;
+}
+
 /* The second reader receives its allow before waiting on the shared position.
  * A later epoch must still invalidate it after that wait, without another IPC. */
 static int seek_epoch_measure(void)
@@ -692,7 +711,11 @@ static int seek_epoch_measure(void)
   replied[1] = write(brokers[1], &answer, sizeof(answer)) == sizeof(answer);
   if (!replied[1]) goto cleanup;
   struct pollfd ready = {.fd = results[1][0], .events = POLLIN};
-  waiting = poll(&ready, 1, 100) == 0;
+  for (unsigned attempt = 0; attempt < 200; attempt++) {
+    if (poll(&ready, 1, 0) != 0) break;
+    if (owned_seek_waiting(children[1])) { waiting = true; break; }
+    struct timespec pause = {.tv_nsec = 1000000}; nanosleep(&pause, NULL);
+  }
   if (!waiting) goto cleanup;
   int changed = open(marker, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
   marker_created = changed >= 0;
