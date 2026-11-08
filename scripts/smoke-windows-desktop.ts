@@ -115,7 +115,7 @@ async function window(child: ChildProcess, close = false) {
       "-Mode",
       close ? "close" : "observe",
     ],
-    { timeout: 5000, maxBuffer: 8192 },
+    { timeout: 8000, maxBuffer: 8192 },
   );
   const value: unknown = JSON.parse(result.stdout);
   if (
