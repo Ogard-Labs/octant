@@ -129,4 +129,27 @@ describe("moving a Work thread", () => {
     });
     expect(created).toEqual([]);
   });
+
+  it("keeps the history before answering when an earlier try opened the thread but stopped first", async () => {
+    let stopBeforeHistory = true;
+    const histories: string[] = [];
+    const { moveHost, created } = host({
+      journalHistory: (input) => {
+        if (stopBeforeHistory) {
+          stopBeforeHistory = false;
+          throw new Error("The host stopped after opening the thread.");
+        }
+        histories.push(input.threadId);
+      },
+    });
+    const { offer, parts } = await packAndOffer(moveHost);
+    await expect(arriveWith(moveHost, offer, parts)).rejects.toThrow("stopped");
+
+    expect(await arriveWith(moveHost, offer, parts)).toEqual({
+      status: "arrived",
+      thread: { mode: "work", threadId: ARRIVING },
+    });
+    expect(created).toEqual([ARRIVING]);
+    expect(histories).toEqual([ARRIVING]);
+  });
 });

@@ -1451,6 +1451,13 @@ export class WorkTurnService {
       const afterPreparation = this.#agentResultDelivery(command);
       if (afterPreparation !== undefined) return afterPreparation;
 
+      // A move may have frozen the thread while its context was prepared; the
+      // turn is refused here, before anything is accepted, so no message
+      // lands outside the conversation the move carries.
+      if (this.#moveHold?.(String(command.threadId)) === true) {
+        throw this.#failure("stale", THREAD_MOVING_REFUSAL);
+      }
+
       // Context and attachment reads can outlive the host's queue admission.
       if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
         if (markedWhilePreparing) {
@@ -1634,6 +1641,10 @@ export class WorkTurnService {
     }
     const journaled = this.#projection.rewind(String(command.rewindId));
     if (journaled !== undefined) return this.#rewindResult(command, journaled.removedRequestIds);
+    // A rewind changes the conversation a move is carrying.
+    if (this.#moveHold?.(String(command.threadId)) === true) {
+      throw this.#failure("stale", THREAD_MOVING_REFUSAL);
+    }
     if (this.#startingTurns.has(String(command.threadId)) || this.isTurnActive(command.threadId)) {
       throw this.#failure("stale", WORK_REWIND_WHILE_TURN_RUNS);
     }

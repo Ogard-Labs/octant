@@ -152,15 +152,6 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
       if (id === undefined || offer.destinationProjectId === undefined) {
         return { status: "refused", reason: "transfer-failed" };
       }
-      // A thread already opened under the planned id was opened by an earlier
-      // try that stopped before it was recorded: hold it, open no second.
-      if (workThreadOf(planned) !== undefined) {
-        options.holds.hold(planned);
-        return { status: "arrived", thread: planned };
-      }
-      if (!options.activeWorkProject(String(offer.destinationProjectId))) {
-        return { status: "refused", reason: "no-eligible-project" };
-      }
       const bundle = offer.manifest.parts.find((part) => part.kind === "thread-bundle");
       const path = bundle === undefined ? undefined : parts.get(bundle.partId);
       if (path === undefined) return { status: "refused", reason: "transfer-failed" };
@@ -169,6 +160,24 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         moved = decodeMovedWorkThread(JSON.parse(await readFile(path, "utf8")));
       } catch {
         return { status: "refused", reason: "transfer-failed" };
+      }
+      const history = {
+        threadId: planned.threadId,
+        moveId: String(offer.moveId),
+        entries: moved.entries,
+      };
+      // A thread already opened under the planned id was opened by an earlier
+      // try that stopped before it was recorded: hold it and open no second.
+      // That try may have stopped before the history was kept, so it is kept
+      // now (a second import keeps the first), before the source is told it
+      // arrived and erases the only other copy.
+      if (workThreadOf(planned) !== undefined) {
+        options.holds.hold(planned);
+        options.journalHistory(history);
+        return { status: "arrived", thread: planned };
+      }
+      if (!options.activeWorkProject(String(offer.destinationProjectId))) {
+        return { status: "refused", reason: "no-eligible-project" };
       }
       const provider = options.resolveProvider(moved.providerDriverKind, String(moved.modelId));
       if (provider === undefined) return { status: "refused", reason: "no-matching-provider" };
@@ -192,11 +201,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         options.holds.release(planned);
         return { status: "refused", reason: "transfer-failed" };
       }
-      options.journalHistory({
-        threadId: planned.threadId,
-        moveId: String(offer.moveId),
-        entries: moved.entries,
-      });
+      options.journalHistory(history);
       return { status: "arrived", thread: planned };
     },
     activate: async (thread) => options.holds.release(thread),

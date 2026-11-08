@@ -1111,7 +1111,11 @@ export function wireRemote(deps: RemoteDependencies) {
             modelId: String(thread.modelId),
           };
     },
-    isBusy: (threadId) => deps.liveTurns.read(String(threadId)) !== undefined,
+    // A turn still preparing its context has not reached the live registry
+    // yet, but it is a turn all the same.
+    isBusy: (threadId) =>
+      deps.liveTurns.read(String(threadId)) !== undefined ||
+      workTurnService.isTurnStarting(threadId),
     isDelegated: (threadId) =>
       delegationState.load().received.some((received) => received.threadId === String(threadId)),
     providerDriverKind: (providerInstanceId) =>
