@@ -103,9 +103,17 @@ export async function listServerDirectory(
       category: "not-found",
       message: "That folder is not inside this Project on the server.",
     };
+  let records = call.output.subarray(nul + 2);
+  let truncated = call.truncated;
+  // Boundaries are bytes: an output limit can cut a UTF-8 character in half.
+  // Decode only complete NUL-terminated records, retaining earlier names.
+  if (records.length > 0 && records[records.length - 1] !== 0) {
+    truncated = true;
+    records = records.subarray(0, records.lastIndexOf(0) + 1);
+  }
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(call.output.subarray(nul + 2));
+    text = new TextDecoder("utf-8", { fatal: true }).decode(records);
   } catch {
     return {
       status: "failed",
@@ -114,11 +122,6 @@ export async function listServerDirectory(
     };
   }
   const found: ServerDirectoryEntry[] = [];
-  let truncated = call.truncated;
-  if (text !== "" && !text.endsWith("\0")) {
-    truncated = true;
-    text = text.slice(0, text.lastIndexOf("\0") + 1);
-  }
   for (const record of text.split("\0")) {
     if (record === "") continue;
     const kind = record[0];

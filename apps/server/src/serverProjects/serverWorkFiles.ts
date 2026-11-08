@@ -1,7 +1,9 @@
 import {
   MAX_WORK_FILE_LISTING_DEPTH,
   MAX_WORK_FILE_LISTING_ENTRIES,
+  decodeWorkFileListingEntry,
   decodeWorkFileListingResult,
+  type WorkFileListingEntry,
   type WorkFileListingResult,
   type WorkThreadId,
   type WindowId,
@@ -105,6 +107,24 @@ export function createServerWorkFileListing(options: {
           "This server Work folder changed while it was being read. Refresh to try again.",
         );
       if (listed.status === "failed") return failed(listed.message);
+      const entries: WorkFileListingEntry[] = [];
+      let truncated = listed.truncated;
+      for (const entry of listed.entries) {
+        if (entry.path.split("/").some((part) => part.startsWith("."))) continue;
+        try {
+          const decoded = decodeWorkFileListingEntry(
+            entry.kind === "directory" ? entry : { ...entry, origin: "untouched" },
+          );
+          // A remote filename cannot be trimmed or renamed to fit the wire contract.
+          if (decoded.path !== entry.path) {
+            truncated = true;
+            continue;
+          }
+          entries.push(decoded);
+        } catch {
+          truncated = true;
+        }
+      }
       return decodeWorkFileListingResult({
         status: "listed",
         listing: {
@@ -112,12 +132,8 @@ export function createServerWorkFileListing(options: {
           threadId: input.threadId,
           projectId: input.projectId,
           ...(directory === undefined ? {} : { directory }),
-          entries: listed.entries
-            .filter((entry) => !entry.path.split("/").some((part) => part.startsWith(".")))
-            .map((entry) =>
-              entry.kind === "directory" ? entry : { ...entry, origin: "untouched" },
-            ),
-          truncated: listed.truncated,
+          entries,
+          truncated,
           observedAt: options.clock(),
         },
       });

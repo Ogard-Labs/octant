@@ -98,6 +98,24 @@ describe("server Work file listings", () => {
     expect(JSON.stringify(result)).not.toContain("/srv/notes");
   });
 
+  it("keeps normal files visible when a remote name cannot be represented losslessly", async () => {
+    const f = fixture();
+    f.run.mockResolvedValueOnce({
+      status: "ran",
+      exitCode: 0,
+      truncated: false,
+      errorOutput: "",
+      output: Buffer.from("/srv/notes\0df12:normal.md\0f8:report.txt \0"),
+    });
+    const result = await f.reader.list(f.input);
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") throw Error("Expected the representable files.");
+    expect(result.listing.entries).toEqual([
+      { kind: "file", path: "normal.md", byteLength: 12, origin: "untouched" },
+    ]);
+    expect(result.listing.truncated).toBe(true);
+  });
+
   it.each(["remove", "unregister", "archive", "revoke", "rebind"] as const)(
     "refuses before SSH after %s",
     async (change) => {
@@ -179,6 +197,25 @@ describe("server Work file listings", () => {
     const result = await f.reader.list(f.input);
     expect(result.status).toBe("listed");
     if (result.status !== "listed") throw Error("Expected a partial listing.");
+    expect(result.listing.entries.map((entry) => entry.path)).toEqual(["complete.md"]);
+    expect(result.listing.truncated).toBe(true);
+  });
+
+  it("keeps complete names when the output limit cuts through a Unicode filename", async () => {
+    const f = fixture();
+    f.run.mockResolvedValueOnce({
+      status: "ran",
+      exitCode: 0,
+      truncated: true,
+      errorOutput: "",
+      output: Buffer.concat([
+        Buffer.from("/srv/notes\0df12:complete.md\0f99:"),
+        Buffer.from([0xe2, 0x82]),
+      ]),
+    });
+    const result = await f.reader.list(f.input);
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") throw Error("Expected the complete names.");
     expect(result.listing.entries.map((entry) => entry.path)).toEqual(["complete.md"]);
     expect(result.listing.truncated).toBe(true);
   });
