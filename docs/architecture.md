@@ -14652,7 +14652,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   version, platform and architecture through the official GitHub release API,
   verifies its archive against the installed package's checksums, and populates
   the ordinary public Electron download cache, including the checksum manifest.
-  The normal installer then verifies and installs it. Recovery refuses custom
+  The normal installer then verifies and installs it. Its bounded installer
+  process control supports macOS and Linux CI hosts; other hosts refuse before
+  spawning a process. Recovery refuses custom
   targets or mirrors, forwards API authorization to GitHub's API only, and
   changes no runtime trust, packaging or release behavior.
 - Two stalls are logged once per occurrence so the next one is visible: a

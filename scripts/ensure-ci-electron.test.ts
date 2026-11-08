@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import {
   isUpstreamElectronDownloadFailure,
   recoverCiElectron,
   recoveryTargetFromEnvironment,
+  requireCiInstallerHost,
 } from "./ensure-ci-electron";
 
 const version = "43.7.11";
@@ -64,6 +65,43 @@ const responseFixture = (
   });
 
 describe("pinned Electron CI recovery", () => {
+  it("refuses hosts without the process-group cleanup the CI installer requires", () => {
+    expect(() => requireCiInstallerHost("win32")).toThrow(/process group/);
+    expect(() => requireCiInstallerHost("darwin")).not.toThrow();
+    expect(() => requireCiInstallerHost("linux")).not.toThrow();
+  });
+
+  it("cancels refused HTTP bodies and an accepted body whose destination cannot be opened", async () => {
+    const root = await temporary();
+    for (const stage of ["metadata", "asset", "destination"] as const) {
+      const cancel = vi.fn();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(payload);
+        },
+        cancel,
+      });
+      const destination = join(root, stage);
+      if (stage === "destination") await writeFile(destination, "existing fixture");
+      const fetcher = async (url: string): Promise<Response> => {
+        if (url.includes("/releases/tags/") && stage !== "metadata") return Response.json(release);
+        return new Response(stream, { status: stage === "destination" ? 200 : 503 });
+      };
+      await expect(
+        fetchElectronAsset({
+          target,
+          destination,
+          signal: new AbortController().signal,
+          fetch: fetcher,
+        }),
+      ).rejects.toThrow();
+      expect(cancel).toHaveBeenCalledTimes(1);
+      if (stage === "destination")
+        expect(await readFile(destination, "utf8")).toBe("existing fixture");
+      else await expect(stat(destination)).rejects.toThrow();
+    }
+  });
+
   it("recognizes upstream failures without treating checksum, extraction or missing assets as network errors", () => {
     expect(
       isUpstreamElectronDownloadFailure("HTTPError: Response code 504 (Gateway Timeout)"),

@@ -102,6 +102,10 @@ async function boundedBody(
   }
 }
 
+async function cancelBody(response: Response) {
+  await response.body?.cancel().catch(() => undefined);
+}
+
 /** Only the public API request carries authorization; CDN redirects never receive it. */
 export async function fetchElectronAsset(input: {
   readonly target: InstalledElectron;
@@ -127,8 +131,10 @@ export async function fetchElectronAsset(input: {
       signal,
     },
   );
-  if (!metadata.ok)
+  if (!metadata.ok) {
+    await cancelBody(metadata);
     throw Error(`The official Electron release API refused metadata (${metadata.status}).`);
+  }
   const chunks: Buffer[] = [];
   await boundedBody(metadata, 2_000_000, async (bytes) => {
     chunks.push(Buffer.from(bytes));
@@ -169,7 +175,7 @@ export async function fetchElectronAsset(input: {
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get("location");
-    await response.body?.cancel();
+    await cancelBody(response);
     if (location === null) throw Error("The official Electron asset redirect is missing.");
     const next = new URL(location, url);
     if (
@@ -183,9 +189,15 @@ export async function fetchElectronAsset(input: {
       throw Error("The official Electron asset redirected outside its allowed CDN.");
     url = next.href;
   }
-  if (response === undefined || !response.ok)
+  if (response === undefined || !response.ok) {
+    if (response !== undefined) await cancelBody(response);
     throw Error("The official Electron asset could not be downloaded.");
-  const file = await open(input.destination, "wx", 0o600);
+  }
+  const artifactResponse = response;
+  const file = await open(input.destination, "wx", 0o600).catch(async (error: unknown) => {
+    await cancelBody(artifactResponse);
+    throw error;
+  });
   let verified = false;
   try {
     const hash = createHash("sha256");
@@ -273,7 +285,13 @@ export function isUpstreamElectronDownloadFailure(message: string): boolean {
   );
 }
 
+export function requireCiInstallerHost(platform: NodeJS.Platform): void {
+  if (platform !== "darwin" && platform !== "linux")
+    throw Error("The bounded CI installer requires a macOS or Linux process group.");
+}
+
 async function normalInstaller(path: string, signal: AbortSignal): Promise<InstallerResult> {
+  requireCiInstallerHost(process.platform);
   signal.throwIfAborted();
   const env = { ...process.env };
   delete env.GH_TOKEN;
