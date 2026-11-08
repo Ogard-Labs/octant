@@ -262,8 +262,8 @@ bool transfer(HANDLE pipe, void* bytes, DWORD length, bool writing, HANDLE stop,
   HANDLE waits[]{event.value, stop, process};
   DWORD timeout = INFINITE;
   if (deadline != 0) {
-    const ULONGLONG now = GetTickCount64();
-    timeout = static_cast<DWORD>(std::min<ULONGLONG>(operation_bound, deadline > now ? deadline - now : 0));
+    const ULONGLONG waited_at = GetTickCount64();
+    timeout = static_cast<DWORD>(std::min<ULONGLONG>(operation_bound, deadline > waited_at ? deadline - waited_at : 0));
   }
   const DWORD ready = WaitForMultipleObjects(process ? 3 : 2, waits, FALSE, timeout);
   if (ready != WAIT_OBJECT_0) {
