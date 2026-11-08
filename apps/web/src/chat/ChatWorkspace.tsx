@@ -54,7 +54,7 @@ import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { ChatTranscript } from "./ChatTranscript";
-import { canvasCardsForShownRun } from "./chatTranscriptWindow";
+import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
@@ -546,7 +546,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       (turn) => String(turn.id),
       (turn) => turn.createdAt,
     ),
-    threadImages.jobs,
+    shownRun === undefined
+      ? threadImages.jobs
+      : madeInShownRun(
+          threadImages.jobs,
+          (job) => String(job.createdAt),
+          shownRun.view,
+          shownRun.hasLater,
+        ),
     (job) => String(job.createdAt),
     (job) => String(job.id),
   );
