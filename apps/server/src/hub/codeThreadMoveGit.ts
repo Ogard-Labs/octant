@@ -208,3 +208,66 @@ async function holdsSecret(path: string): Promise<boolean> {
   }
   return redactSecrets(text).redacted;
 }
+
+/**
+ * Whether a checkout may be removed after its thread moved: its working tree
+ * is exactly the snapshot the move carried (nothing was refused, and nothing
+ * changed since), and it holds no ignored file. Otherwise it holds the only
+ * copy of something, and the source keeps it.
+ */
+export async function checkoutStillMatchesMove(input: {
+  readonly checkoutRoot: string;
+  readonly moveId: string;
+}): Promise<{ readonly matches: boolean; readonly ignoredFiles: number }> {
+  const root = input.checkoutRoot;
+  const snapshotTree = await git(root, [
+    "rev-parse",
+    `${moveSnapshotRef(input.moveId)}^{tree}`,
+  ]).catch(() => "");
+  const gitDir = await git(root, ["rev-parse", "--absolute-git-dir"]);
+  const scratch = await mkdtemp(join(tmpdir(), "octant-move-check-"));
+  try {
+    const scratchIndex = join(scratch, "index");
+    await copyFile(join(gitDir, "index"), scratchIndex).catch(() => undefined);
+    await git(root, ["add", "-A", "--", "."], { GIT_INDEX_FILE: scratchIndex });
+    const currentTree = await git(root, ["write-tree"], { GIT_INDEX_FILE: scratchIndex });
+    const ignoredFiles = (await git(root, ["status", "--porcelain", "--ignored", "-z"]))
+      .split("\0")
+      .filter((entry) => entry.startsWith("!! ")).length;
+    return { matches: snapshotTree.length > 0 && snapshotTree === currentTree, ignoredFiles };
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Moves a worktree out of the managed folder, so the purge of its thread
+ * leaves it in place. Git keeps tracking it at its new path.
+ */
+export async function relocateWorktree(input: {
+  readonly worktreeRoot: string;
+  readonly target: string;
+}): Promise<void> {
+  await git(input.worktreeRoot, ["worktree", "move", input.worktreeRoot, input.target]);
+}
+
+/** Whether a local branch of that name already exists in a clone. */
+export async function branchExists(repositoryRoot: string, branch: string): Promise<boolean> {
+  return git(repositoryRoot, ["show-ref", "--verify", "-q", `refs/heads/${branch}`]).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** The remote URLs a clone has. */
+export async function repositoryRemotes(repositoryRoot: string): Promise<ReadonlyArray<string>> {
+  const names = (await git(repositoryRoot, ["remote"]).catch(() => ""))
+    .split("\n")
+    .filter((name) => name.length > 0);
+  const urls: string[] = [];
+  for (const name of names) {
+    const url = await git(repositoryRoot, ["remote", "get-url", name]).catch(() => "");
+    if (url.length > 0) urls.push(url);
+  }
+  return urls;
+}

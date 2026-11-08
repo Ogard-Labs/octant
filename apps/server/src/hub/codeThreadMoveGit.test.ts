@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureCheckoutForMove, receiveCheckoutFromMove } from "./codeThreadMoveGit";
+import {
+  captureCheckoutForMove,
+  checkoutStillMatchesMove,
+  receiveCheckoutFromMove,
+} from "./codeThreadMoveGit";
 
 const MOVE = "99999999-9999-4999-8999-999999999999";
 const folders: string[] = [];
@@ -112,6 +116,29 @@ describe("carrying a Code checkout between computers", () => {
     expect(show(desktop, `${received.checkout.worktreeTree}:app.ts`)).toBe(
       "export const version = 2;",
     );
+  });
+
+  it("lets the source remove a checkout only when it holds nothing the move did not carry", async () => {
+    const { laptop } = repositories();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    const bundlePath = join(laptop, "..", "move.bundle");
+    await captureCheckoutForMove({ checkoutRoot: laptop, moveId: MOVE, bundlePath });
+    expect(await checkoutStillMatchesMove({ checkoutRoot: laptop, moveId: MOVE })).toEqual({
+      matches: true,
+      ignoredFiles: 0,
+    });
+
+    // An edit after the snapshot exists only here.
+    writeFileSync(join(laptop, "app.ts"), "export const version = 5;\n");
+    expect((await checkoutStillMatchesMove({ checkoutRoot: laptop, moveId: MOVE })).matches).toBe(
+      false,
+    );
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    writeFileSync(join(laptop, ".env"), "LOCAL_ONLY=1\n");
+    expect(await checkoutStillMatchesMove({ checkoutRoot: laptop, moveId: MOVE })).toEqual({
+      matches: true,
+      ignoredFiles: 1,
+    });
   });
 
   it("refuses a bundle whose base the destination's clone cannot reach", async () => {

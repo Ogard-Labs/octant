@@ -1060,9 +1060,14 @@ member with **Open there**; the purge tombstone itself stays as it is for
 every purge. A managed worktree the thread owned is removed with its
 local branch only when everything in it travelled. When it holds anything that
 stayed behind (a file the Secret guard refused, or any ignored file such as a
-`.env` or a local configuration), the source keeps the worktree folder, no
+`.env` or a local configuration, or an edit made in the folder after the
+snapshot), the source moves the worktree out of the managed folder, beside it
+as `<worktree>-moved-out-<move>`, so the purge leaves it in place; it is no
 longer owned by any thread, and the tombstone lists those files with **Remove
-worktree**, which only a person can choose. The move sheet names the same
+worktree**, which only a person can choose. The source decides this at erase
+time by comparing the folder with the snapshot it sent, because a Code
+thread's freeze stops its turns and commands but not an editor or terminal the
+person has open there. The move sheet names the same
 files before the move starts. Rationale: those files have no other copy, so
 removing the folder would destroy work the move never carried. Nothing is
 pushed or deleted on a remote. A thread that worked
@@ -1095,8 +1100,14 @@ it are refused.
 **Continuing on the destination.** The thread keeps its guardrail level where
 the destination Project allows it; Full access never carries and needs its
 own unlock there. Its provider and model are re-resolved against the
-destination's catalog, as for any handoff, and when the destination has no
-matching instance the composer asks the person to pick one and sends nothing.
+destination's catalog, as for any handoff: a Code thread arrives on the
+destination's own instance of the provider kind it ran on, with the same
+model, and a destination with no provider of that kind refuses the move with
+`no-matching-provider`, because another kind cannot be assumed to know the
+model. A Code thread arrives as a managed thread started from the moved
+commit and the two snapshots, and its earlier conversation arrives as a moved
+transcript the first turn carries once; past operations are not recreated
+one by one.
 The next turn runs on the destination's own sign-in with the ordinary
 disclosed text handoff and original-input checks
 ([Architecture: stop reasons](../architecture.md#stop-reasons)). The
@@ -1222,6 +1233,7 @@ the person dismisses it or the thread moves. The reasons are:
 | `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                    |
 | `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                       |
 | `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                         |
+| `no-matching-provider`    | The destination has no provider of the kind the thread ran on, so it cannot continue it                                                              |
 
 For a Code thread the same error offers **Hand over instead**. A handover that
 cannot finish its push says so as its own error (`push-failed`, or `no-remote`
@@ -2114,10 +2126,21 @@ a numbered slice. Built, with these narrower readings:
     Chat conversation carried as real turns the way a branch carries them,
     the erase through the ordinary purge, the journal events, and recovery at
     startup. A two-host loopback smoke moves a thread with a real owner
-    unlock. What it does not do yet: move Work or Code threads, carry
-    attachments and other bulk parts, accept moves on the hub (which keeps no
-    peer grants and needs its own Accept moved threads setting), offer a
-    window route to start a move, or show any screen.
+    unlock.
+
+    The third part moves Code threads between spokes: the Git bundle with
+    the index and working-tree snapshot commits under a move ref, fetched
+    into a destination clone whose remote names the same repository (a
+    local path or `file://` remote by its path), the managed thread started
+    from them under the host's own scope, the moved transcript as a
+    per-thread history its first turn carries once, the freeze on Code
+    commands and turn starts, the provider of the same kind, and the
+    erase-time check that moves a worktree out of the managed folder when it
+    holds anything the move did not carry. What it does not do yet: move
+    Work threads, carry attachments and other bulk parts, accept moves on
+    the hub (which keeps no peer grants and needs its own Accept moved
+    threads setting), offer a window route to start a move, or show any
+    screen.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

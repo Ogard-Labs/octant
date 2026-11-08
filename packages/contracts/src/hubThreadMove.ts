@@ -47,6 +47,8 @@ export const THREAD_MOVE_FAILURE_REASONS = [
   "no-eligible-project",
   "destination-unreachable",
   "transfer-failed",
+  /** The destination has no provider of the kind the thread ran on, so it cannot continue it. */
+  "no-matching-provider",
 ] as const;
 export const ThreadMoveFailureReason = Schema.Literal(...THREAD_MOVE_FAILURE_REASONS);
 export type ThreadMoveFailureReason = typeof ThreadMoveFailureReason.Type;
@@ -137,7 +139,13 @@ export type ThreadMoveReady = typeof ThreadMoveReady.Type;
 export const ThreadMoveRefused = Schema.Struct({
   status: Schema.Literal("refused"),
   moveId: ThreadMoveId,
-  reason: Schema.Literal("refused", "unlock-required", "no-eligible-project", "transfer-failed"),
+  reason: Schema.Literal(
+    "refused",
+    "unlock-required",
+    "no-eligible-project",
+    "transfer-failed",
+    "no-matching-provider",
+  ),
 }).annotations(strict);
 export type ThreadMoveRefused = typeof ThreadMoveRefused.Type;
 
@@ -269,6 +277,38 @@ export const ThreadHandoverStarted = Schema.Struct({
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type ThreadHandoverStarted = typeof ThreadHandoverStarted.Type;
+
+/**
+ * A moved Work or Code thread's earlier conversation, kept on the thread it
+ * arrived as and erased with it. Its first turn here carries it once, as a
+ * disclosed handoff; it is the person's own conversation, not outside content.
+ */
+export const THREAD_MOVED_HISTORY_AGGREGATE = "thread-moved-history";
+export const THREAD_MOVED_HISTORY_EVENT_NAMES = {
+  imported: "thread.moved-history-imported@1",
+  delivered: "thread.moved-history-delivered@1",
+} as const;
+
+export const MovedHistoryEntry = Schema.Struct({
+  role: Schema.Literal("person", "assistant"),
+  text: Schema.String.pipe(Schema.maxLength(1_000_000)),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type MovedHistoryEntry = typeof MovedHistoryEntry.Type;
+
+export const MovedHistoryImported = Schema.Struct({
+  threadId: Schema.UUID,
+  moveId: ThreadMoveId,
+  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+  importedAt: UtcTimestamp,
+}).annotations(strict);
+export type MovedHistoryImported = typeof MovedHistoryImported.Type;
+
+export const MovedHistoryDelivered = Schema.Struct({
+  threadId: Schema.UUID,
+  deliveredAt: UtcTimestamp,
+}).annotations(strict);
+export type MovedHistoryDelivered = typeof MovedHistoryDelivered.Type;
 
 /**
  * What an owner device asks the destination for after a fresh own-class

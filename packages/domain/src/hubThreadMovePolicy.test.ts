@@ -131,6 +131,15 @@ describe("repository remotes", () => {
     });
   });
 
+  it("names a repository on the same disk by its path", () => {
+    expect(normalizeRepositoryRemote("/srv/git/app.git")).toBe(
+      normalizeRepositoryRemote("file:///srv/git/app"),
+    );
+    expect(normalizeRepositoryRemote("/srv/git/App.git")).not.toBe(
+      normalizeRepositoryRemote("/srv/git/app.git"),
+    );
+  });
+
   it("ignores credentials in a URL and refuses text that names no repository", () => {
     expect(normalizeRepositoryRemote("https://token@github.com/Ogard-Labs/octant.git")).toBe(
       "github.com/ogard-labs/octant",

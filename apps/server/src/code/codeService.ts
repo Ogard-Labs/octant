@@ -644,6 +644,12 @@ export interface CodeServiceExecutionContext {
   readonly inheritedMark?: InheritedExternalContentMark;
   /** Host observer, called before the first worktree or thread-creation mutation. */
   readonly onCreationBoundary?: () => void;
+  /**
+   * The files a thread moved here from another computer starts from: the
+   * index and working-tree snapshots its move carried, already fetched into
+   * this clone. Host-resolved only, like a fork's files; no command carries it.
+   */
+  readonly movedFiles?: CodeForkFiles;
 }
 
 export interface CodeServiceOptions {
@@ -1370,7 +1376,8 @@ export class CodeService {
       }
       // A fork is a managed creation whose start the host resolves itself, so
       // it runs every gate that creation runs, plus laying the files down.
-      let sourceFiles: CodeForkFiles | undefined;
+      let sourceFiles: CodeForkFiles | undefined =
+        command.kind === "create-managed-code-thread" ? executionContext?.movedFiles : undefined;
       if (command.kind === "fork-code-thread") {
         const fork = await this.#forkCreation(authenticatedWindowId, command);
         command = fork.command;

@@ -90,6 +90,12 @@ const DEFAULT_PORTS: Readonly<Record<string, string>> = {
 export function normalizeRepositoryRemote(remote: string): string | undefined {
   const trimmed = remote.trim();
   if (trimmed.length === 0) return undefined;
+  // A clone of a repository on the same disk names it by its path; the path
+  // is the identity there, case and all.
+  if (trimmed.startsWith("/") || trimmed.startsWith("file://")) {
+    const path = trimCharacter(trimmed.replace(/^file:\/\//, ""), "/").replace(/\.git$/i, "");
+    return path.length === 0 ? undefined : `file:/${path}`;
+  }
   const scp = /^[^@/\s]+@([^:/\s]+):(.+)$/.exec(trimmed);
   let host: string;
   let port = "";

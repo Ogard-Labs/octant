@@ -336,6 +336,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       siblingThreadsService,
       terminalSessionImports,
+      movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
@@ -1592,6 +1593,9 @@ export function startOctantServer(
       remoteHost,
     } = wireRemote({
       chatService,
+      liveTurns,
+      managedWorktreeReceipts,
+      movedThreadHistory,
       threadMoveHolds,
       threadMoveState,
       beginGoogleCliChange,
