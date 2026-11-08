@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { redactHostRuntimeText } from "@octant/host-runtime";
 import { createQuitAppleScript } from "./package-desktop";
 import {
   cleanupPackagedProcess,
@@ -36,6 +37,10 @@ set frontmost of candidate to false
 delay 0.2
 set frontmost of candidate to true
 return "activated"
+end if
+if operation is "focus" then
+set frontmost of candidate to true
+return "focused"
 end if
 if operation is "key" then
 set frontmost of candidate to true
@@ -161,26 +166,27 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
-      const sdk = (mode: "diagnostic" | "read" | "press", value?: string) =>
+      const sdk = (mode: "diagnostic" | "read" | "click", value?: string) =>
         runBoundedCommand(
           sdkExecutable,
           [String(pid), bundle, mode, ...(value === undefined ? [] : [value])],
           process.env,
           6000,
         );
-      let pressSequence = 0;
+      let clickSequence = 0;
       const native = async (operation: string, value = ""): Promise<string> => {
-        if (operation !== "snapshot" && operation !== "count" && operation !== "press")
+        if (operation !== "snapshot" && operation !== "count" && operation !== "click")
           return systemEvents(operation, value);
+        if (operation === "click") await systemEvents("focus");
         const raw = await sdk(
-          operation === "press" ? "press" : "read",
-          operation === "press" ? value : undefined,
+          operation === "click" ? "click" : "read",
+          operation === "click" ? value : undefined,
         );
         await writeFile(
           join(
             artifacts,
-            operation === "press"
-              ? `${phase}-sdk-press-${++pressSequence}.json`
+            operation === "click"
+              ? `${phase}-sdk-native-click-${++clickSequence}.json`
               : `${phase}-sdk-last-${operation}.json`,
           ),
           raw,
@@ -206,17 +212,17 @@ const timer = setInterval(() => {
           !Array.isArray(decoded.interactiveControls)
         )
           throw Error("Native SDK control tree is incomplete.");
-        if (operation === "press") {
+        if (operation === "click") {
           if (
             !record(decoded.action) ||
-            decoded.action.status !== "pressed" ||
-            decoded.action.nativeError !== 0 ||
+            decoded.action.status !== "dispatched" ||
+            decoded.action.method !== "native-click" ||
             decoded.action.matches !== 1
           )
             throw Error(
-              `Native SDK refused or could not confirm the single named control: ${value}. No action is retried.`,
+              `Native SDK refused the single enabled owned control: ${value}. No action is retried.`,
             );
-          return "pressed";
+          return "dispatched";
         }
         return decoded.interactiveControls
           .map((control: unknown) => {
@@ -332,7 +338,7 @@ end run`;
       const settings = async () => {
         await native("key", ",");
         await wait("settings", (s) => s.includes("Data & storage"));
-        await native("press", "Data & storage");
+        await native("click", "Data & storage");
         return wait("preference", (s) => s.includes(preference));
       };
       try {
@@ -359,7 +365,7 @@ end run`;
             (s) => s.includes("AXButton") && s.includes("Skip setup"),
             45_000,
           );
-          await native("press", "Skip setup");
+          await native("click", "Skip setup");
           await wait("skip", (s) => s.includes("AXButton") && !s.includes("Skip setup"));
         } else await wait("restarted-window", (s) => s.includes("AXButton"), 45_000);
         let snapshot = await settings();
@@ -368,7 +374,7 @@ end run`;
           throw Error("Native preference value differs from expected persisted value.");
         checks.push(phase === "initial" ? "default-off" : "opt-in-survives-host-restart");
         if (phase === "initial") {
-          await native("press", preference);
+          await native("click", preference);
           snapshot = await wait("opt-in", (s) => switchValue(s, 1));
           await capture("opt-in", snapshot);
           await native("key", "w");
@@ -390,7 +396,7 @@ end run`;
           await capture("reopened", snapshot);
           checks.push("reopened-same-process-preference-retained");
         } else {
-          await native("press", preference);
+          await native("click", preference);
           snapshot = await wait("opt-out", (s) => switchValue(s, 0));
           await capture("opt-out", snapshot);
           checks.push("switch-off-through-native-settings");
@@ -400,42 +406,49 @@ end run`;
           throw Error("Explicit native Quit did not exit the host.");
         checks.push(`${phase}-explicit-quit-exited`);
       } finally {
-        await cleanupPackagedProcess({
-          child: app.child,
-          requestQuit: () =>
-            runBoundedCommand(
-              "/usr/bin/osascript",
-              ["-e", createQuitAppleScript(bundle)],
-              process.env,
-              3000,
-            ).then(() => undefined),
-          waitForExit: (_child, bound) => exited(app.child, bound),
-          signalGroup: (group, signal) => {
-            if (group !== pid) throw Error("Unowned process group.");
-            try {
-              process.kill(-group, signal);
-            } catch (e) {
-              if (!(typeof e === "object" && e !== null && "code" in e && e.code === "ESRCH"))
-                throw e;
-            }
-          },
-          waitForServerCleanup: () =>
-            waitForProcessCleanup(
-              async () => {
-                const response = await fetch(`http://127.0.0.1:${port}/health`, {
-                  signal: AbortSignal.timeout(300),
-                }).catch(() => undefined);
-                if (response !== undefined) throw Error("Owned host listener remains.");
-              },
-              { timeoutMs: 3000 },
-            ),
-          assertNoProcesses: async () => {
-            if (groupProcesses(pid).length !== 0 || !(await exited(watchdog, 2000)))
-              throw Error("Owned app/watchdog cleanup incomplete.");
-          },
-          gracefulTimeoutMs: 3000,
-          forceTimeoutMs: 2000,
-        });
+        try {
+          await writeFile(
+            join(artifacts, `${phase}-app-output.txt`),
+            redactHostRuntimeText(app.outputTail()),
+          );
+        } finally {
+          await cleanupPackagedProcess({
+            child: app.child,
+            requestQuit: () =>
+              runBoundedCommand(
+                "/usr/bin/osascript",
+                ["-e", createQuitAppleScript(bundle)],
+                process.env,
+                3000,
+              ).then(() => undefined),
+            waitForExit: (_child, bound) => exited(app.child, bound),
+            signalGroup: (group, signal) => {
+              if (group !== pid) throw Error("Unowned process group.");
+              try {
+                process.kill(-group, signal);
+              } catch (e) {
+                if (!(typeof e === "object" && e !== null && "code" in e && e.code === "ESRCH"))
+                  throw e;
+              }
+            },
+            waitForServerCleanup: () =>
+              waitForProcessCleanup(
+                async () => {
+                  const response = await fetch(`http://127.0.0.1:${port}/health`, {
+                    signal: AbortSignal.timeout(300),
+                  }).catch(() => undefined);
+                  if (response !== undefined) throw Error("Owned host listener remains.");
+                },
+                { timeoutMs: 3000 },
+              ),
+            assertNoProcesses: async () => {
+              if (groupProcesses(pid).length !== 0 || !(await exited(watchdog, 2000)))
+                throw Error("Owned app/watchdog cleanup incomplete.");
+            },
+            gracefulTimeoutMs: 3000,
+            forceTimeoutMs: 2000,
+          });
+        }
       }
     }
     if (controller.signal.aborted) throw Error("Owned native lifecycle interrupted.");
@@ -445,6 +458,7 @@ end run`;
         {
           checks,
           nativeUi: true,
+          nativeInputMethod: "single native click at fresh owned AX bounds",
           cleanup: "verified",
           activeExecutionLease: "not-run",
           profileCookieContinuity: "not-run",
