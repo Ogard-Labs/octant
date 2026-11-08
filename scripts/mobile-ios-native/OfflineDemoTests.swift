@@ -35,7 +35,15 @@ final class OfflineDemoTests: XCTestCase {
     private func createReply(_ prompt: String) {
         tap(app.buttons["Plan, ask, build"])
         let input = element("mobile-home-composer-input")
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 15))
         tap(input)
+        XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY)
+        XCTAssertLessThanOrEqual(element("mobile-home-composer-submit").frame.maxY, keyboard.frame.minY)
+        let composer = XCTAttachment(screenshot: app.screenshot())
+        composer.name = "Composer above the system keyboard"
+        composer.lifetime = .keepAlways
+        add(composer)
         input.typeText(prompt)
         tap(element("mobile-home-composer-submit"))
         XCTAssertTrue(element("mobile-thread-screen").waitForExistence(timeout: 15))
@@ -43,6 +51,10 @@ final class OfflineDemoTests: XCTestCase {
             NSPredicate(format: "label CONTAINS %@", "Mock reply to: " + prompt)
         ).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 15))
+        let replied = XCTAttachment(screenshot: app.screenshot())
+        replied.name = "Native sample reply"
+        replied.lifetime = .keepAlways
+        add(replied)
     }
 
     @MainActor

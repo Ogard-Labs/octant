@@ -848,7 +848,9 @@ submission keep their own gates; submission remains a separate maintainer action
   check of the host catalogue preserves the usual vault flow for an already
   paired phone; an unavailable catalogue leaves the entry choice available.
   Entering the demo creates a fresh in-memory scenario and appearance store.
-  Its create/reply interactions use only the mock transport. Device recording,
+  Its create/reply interactions use only the mock transport. The shared composer
+  keeps its input and Send control above the onscreen keyboard, including with
+  larger system text. Device recording,
   attachments, pairing, owner recovery and native settings are unavailable.
   Leave demo returns to the entry choice and discards the sample workspace;
   Connect a computer explicitly enters the normal vault and pairing flow.
