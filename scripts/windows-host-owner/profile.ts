@@ -131,7 +131,9 @@ try {
     });
     // Attach rejection handling immediately; a failed spawn must not escape cleanup.
     void readerExit.catch(() => undefined);
-    const readerDeadline = setTimeout(() => reader.kill(), 8000);
+    // The full 128-publication proof reached its former eight-second reader
+    // lifetime; retain its count within the existing outer owned-job deadline.
+    const readerDeadline = setTimeout(() => reader.kill(), 20_000);
     let readerDiagnostic = "";
     reader.stderr.on("data", (bytes: Buffer) => {
       readerDiagnostic = (readerDiagnostic + bytes.toString("utf8")).slice(-4096);
@@ -147,23 +149,30 @@ try {
           reject,
         );
       });
+      const publicationBegan = performance.now();
       for (let publication = 0; publication < 128; publication++) {
         const receipt = await startup.readHostInfo();
         if (receipt === undefined) throw Error("Owned publication record disappeared.");
         await startup.writeHostInfo({ ...receipt, serverVersion: `fixture-${publication}` });
       }
+      console.log(
+        JSON.stringify({
+          publications: 128,
+          publicationElapsedMs: Math.ceil(performance.now() - publicationBegan),
+        }),
+      );
       reader.stdin.end();
       const readerCode = await readerExit;
       if (readerCode !== 0) {
-        const reason = readerDiagnostic.includes(
-          "The native host projection is unsafe or unavailable.",
-        )
-          ? "snapshot-refused"
-          : readerDiagnostic.includes("Published snapshot unavailable.")
-            ? "snapshot-missing"
-            : readerDiagnostic.includes("No publication reads completed.")
-              ? "no-reads"
-              : "reader-failed";
+        const reason = readerDiagnostic.includes('"publicationReaderDeadlineExpired":true')
+          ? "reader-deadline-expired"
+          : readerDiagnostic.includes("The native host projection is unsafe or unavailable.")
+            ? "snapshot-refused"
+            : readerDiagnostic.includes("Published snapshot unavailable.")
+              ? "snapshot-missing"
+              : readerDiagnostic.includes("No publication reads completed.")
+                ? "no-reads"
+                : "reader-failed";
         console.log(JSON.stringify({ publicationReaderFailure: reason, exitCode: readerCode }));
       }
       check(
