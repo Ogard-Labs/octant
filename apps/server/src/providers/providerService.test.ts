@@ -5180,6 +5180,33 @@ describe("ProviderService", () => {
       expect(fixture.catalogs()[0]).toMatchObject({ verifiedToolModelIds: ["model-1"] });
     });
 
+    it("reports task progress for an endpoint once one of its models passes Verify tools", async () => {
+      const fixture = serviceFixture({
+        instances: [httpProvider()],
+        driver: toolDriver("supported") as never,
+      });
+      fixture.runtime.setObservedState(
+        observation({
+          capabilities: { ...observation().capabilities, taskProgress: "unsupported" },
+        }),
+      );
+      const reported = async () =>
+        (await fixture.service.bootstrap(windowId)).observedStates[0]?.capabilities.taskProgress;
+      expect(await reported()).toBe("unsupported");
+
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: decodeProviderModelId("model-1"),
+      });
+
+      expect(await reported()).toBe("supported");
+      // The driver's own observation is unchanged; only the reported card adds it.
+      expect(fixture.runtime.observedState(instanceId)?.capabilities.taskProgress).toBe(
+        "unsupported",
+      );
+    });
+
     it("drops a model whose verification found no tool support", async () => {
       const fixture = serviceFixture({
         instances: [httpProvider()],

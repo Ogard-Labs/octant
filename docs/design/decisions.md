@@ -931,7 +931,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 The agent's plan panel and tool-call groups are projections of journaled state, never renderer-owned plans.
 
 - Providers that report their own task plans emit task events; each restatement names the ids the plan now holds (at most 64), so a dropped step leaves the panel.
-- An Octant Harness lead's `todo-write` list reaches the same panel: the loop reports each list the runner accepted as the same task events, while the endpoint drivers keep `taskProgress` unsupported because the list is Octant's tool, not the endpoint's.
+- An Octant Harness lead's `todo-write` list reaches the same panel: the loop reports each list the runner accepted as the same task events. Settings reports task progress supported for a Harness endpoint once one of its models passes Verify tools; the driver's own probe keeps `taskProgress` unsupported, because conformance requires a claimed capability's events in every scripted turn.
 - Chat and Work record each tool call as id, name, state and a redacted message of at most 2,048 bytes, with at most 64 steps per turn.
 - No tool input and no tool output is captured, except a page a call published outside the host; purging the thread removes the records.
 - Workspace navigation, panes, tabs and dock tools are owned by the workspace specification, with visual treatment in the design system.
