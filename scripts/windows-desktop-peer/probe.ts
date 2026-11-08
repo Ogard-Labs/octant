@@ -146,6 +146,13 @@ if (mode === "refused") {
       closeOwnerContexts: async () => {},
     });
     lines.on("line", (line) => {
+      if (line === "close-status" || line === "start-status") {
+        const operation = line === "close-status" ? native.close() : native.start();
+        void operation.then((result) => {
+          console.log(JSON.stringify({ command: line, statusResult: result }));
+        });
+        return;
+      }
       if (line === "hold-exits") holdExits = true;
       else if (line === "release-exits") {
         holdExits = false;
@@ -291,10 +298,32 @@ if (mode === "refused") {
         (await desktopPeerPreflight(native)).kind === "ready",
         "mutual kernel status authentication succeeds",
       );
+      check(
+        kind(await native.close(), "closed"),
+        "the client closes its transient status preflight",
+      );
       const first = await registerNightlyWindow(native, handle, 1);
       check(
         first.kind === "registered",
-        "actual native registration returns a valid production bootstrap",
+        "actual native registration remains available after closing status preflight",
+      );
+      await command(server, "close-status");
+      check(
+        server.records.some(
+          (value) => value.command === "close-status" && kind(value.statusResult, "closed"),
+        ) && kind(await native.status(), "refused"),
+        "closing the host status endpoint refuses discovery",
+      );
+      check(
+        kind(await native.renewWindow(handle, 1), "renewed"),
+        "closing host status preserves the active production window lease",
+      );
+      await command(server, "start-status");
+      check(
+        server.records.some(
+          (value) => value.command === "start-status" && kind(value.statusResult, "started"),
+        ) && (await desktopPeerPreflight(native)).kind === "ready",
+        "host status can restart while its window protocol remains active",
       );
       checks.push("mutual kernel status and production window registration");
       await command(server, "hold-exits");
