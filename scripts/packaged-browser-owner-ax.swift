@@ -84,6 +84,14 @@ func bundleCensus(_ deadline: Date) -> (complete: Bool, owned: [KernelIdentity])
     return (complete, owned)
 }
 let initialKernelIdentity = kernelIdentity(processId)
+// A command-line controller must connect AppKit to WindowServer before hit-testing.
+let appKitInitialized: Bool = {
+    guard mode == "click" || fillsFixtureField || fixesOwnedFolder,
+          Thread.isMainThread, isTaskStagedBundle,
+          initialKernelIdentity?.executable == expectedBundle + "/Contents/MacOS/Octant" else { return false }
+    _ = NSApplication.shared
+    return true
+}()
 let kernelOnly = mode == "bundle-census" || mode == "bundle-cleanup"
 let application = kernelOnly ? nil : NSRunningApplication(processIdentifier: processId)
 let capturedBundle = application?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path
@@ -139,7 +147,7 @@ var fixedFolderWindowAncestryUsed = false
 var fixedFolderSheetFrameAdmitted = false
 var fixedFolderKeyboardFocusProof: Bool?
 var fixedFolderKeyboardFocusChecks: [String: Any] = [:]
-var fixedFolderGeometry: [String: Any] = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
+var fixedFolderGeometry: [String: Any] = ["appKitInitialized": appKitInitialized, "targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
     "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
 var fixedFolderSheetGeometry: [String: Any] = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
     "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
@@ -167,7 +175,7 @@ func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
 }
 func fixedFolderInputPoint(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil,
     _ expectedFieldSheets: [AXUIElement] = [], _ fieldCurrent: (() -> Bool)? = nil) -> CGPoint? {
-    fixedFolderGeometry = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
+    fixedFolderGeometry = ["appKitInitialized": appKitInitialized, "targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
         "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull(), "primaryScreenCoordinateMatched": NSNull(),
         "mouseDownWindowNumber": NSNull(), "windowSelectionMethod": "public-mouseDown-hit-test"]
     fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
@@ -1387,6 +1395,7 @@ let truncated = depthLimited || labelsLimited || next < pending.count || pending
 var action: [String: Any] = ["status": "not-requested"]
 if mode == "click" || mode == "reveal" || fillsFixtureField {
     action = ["status": "refused", "method": fillsFixtureField ? "fixed-nonsecret-fixture-field" : mode == "click" ? "native-click" : "AXScrollToVisible", "matches": pressTargets.count, "requestedTitle": requestedTitle]
+    if mode == "click" || fillsFixtureField { action["appKitInitialized"] = appKitInitialized }
     let live = NSRunningApplication(processIdentifier: processId)
     let fillBirthMatches = !fillsFixtureField || (isTaskStagedBundle && fixtureBirth.count == 2 &&
         initialKernelIdentity?.birthSeconds == fixtureBirth[0] && initialKernelIdentity?.birthMicroseconds == fixtureBirth[1] &&
