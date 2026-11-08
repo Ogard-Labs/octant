@@ -18,6 +18,8 @@ import {
   type BenchmarkSuite,
   type BenchmarkSuiteDeleteRequest,
   type BenchmarkSuiteSaveRequest,
+  type PermissionMode,
+  type ProjectId,
   type ProviderInstanceId,
   type ProviderModelId,
   type TurnMetricsRecord,
@@ -25,6 +27,7 @@ import {
 } from "@octant/contracts";
 import {
   benchmarkCellCount,
+  benchmarkExecutionLevel,
   benchmarkCellMetrics,
   benchmarkLeaderboard,
   benchmarkOverhead,
@@ -68,7 +71,25 @@ export interface BenchmarkServiceOptions {
     { readonly status: "ready" } | { readonly status: "refused"; readonly message: string }
   >;
   /** Purges one cell thread through the ordinary thread purge path. */
-  readonly purgeThread: (threadId: string) => Promise<"purged" | "absent" | "failed">;
+  readonly purgeThread: (
+    threadId: string,
+    mode: "chat" | "code",
+  ) => Promise<"purged" | "absent" | "failed">;
+  /** What a run with Code cases needs of the host; absent where Code cells cannot run. */
+  readonly codeCases?: {
+    /** The mode a new thread starts in; absent unless it is an active Code Project. */
+    readonly projectMode: (projectId: ProjectId) => PermissionMode | undefined;
+    readonly checkRef: (
+      projectId: ProjectId,
+      ref: string,
+    ) => Promise<
+      { readonly status: "ok" } | { readonly status: "refused"; readonly message: string }
+    >;
+    /** Removes a cell's managed worktree; a missing one is "absent", which counts as done. */
+    readonly removeWorktree: (
+      threadId: string,
+    ) => Promise<"removed" | "absent" | { readonly status: "refused"; readonly message: string }>;
+  };
   readonly clock: () => string;
   readonly uuid: () => string;
 }
@@ -246,6 +267,8 @@ export class BenchmarkService {
         `Contender ${unavailable + 1} is not an enabled provider model on this host.`,
       );
     }
+    const codeRefusal = await this.#checkCodeCases(suite.cases, request.executionLevel);
+    if (codeRefusal !== undefined) return codeRefusal;
     const project = await this.#options.ensureProject(windowId);
     if (project.status === "refused") return refused("unavailable", project.message);
     const run = decodeBenchmarkRun({
@@ -270,6 +293,45 @@ export class BenchmarkService {
     return ok(run);
   }
 
+  /**
+   * Everything a Code case needs, checked before any cell runs: a host that can
+   * run it, a Code Project that exists, a level the Project allows, and a ref
+   * that resolves. The first problem refuses the whole run with a sentence.
+   */
+  async #checkCodeCases(
+    cases: BenchmarkSuite["cases"],
+    executionLevel: BenchmarkRunStartRequest["executionLevel"],
+  ): Promise<BenchmarkRefusal | undefined> {
+    const codeCases = cases.filter((candidate) => candidate.code !== undefined);
+    if (codeCases.length === 0) return undefined;
+    const support = this.#options.codeCases;
+    if (support === undefined) {
+      return refused("unavailable", "Code cases cannot run on this host.");
+    }
+    const checked = new Set<string>();
+    for (const benchmarkCase of codeCases) {
+      const target = benchmarkCase.code;
+      if (target === undefined) continue;
+      const mode = support.projectMode(target.codeProjectId);
+      if (mode === undefined) {
+        return refused(
+          "invalid",
+          `The Code Project for "${benchmarkCase.title}" does not exist or is not a Code Project.`,
+        );
+      }
+      const level = benchmarkExecutionLevel(executionLevel, mode);
+      if (level.status === "refused") return refused("invalid", level.message);
+      const key = `${String(target.codeProjectId)}\0${target.ref}`;
+      if (checked.has(key)) continue;
+      checked.add(key);
+      const ref = await support.checkRef(target.codeProjectId, target.ref);
+      if (ref.status === "refused") {
+        return refused("invalid", `"${benchmarkCase.title}": ${ref.message}`);
+      }
+    }
+    return undefined;
+  }
+
   async cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkOutcome<BenchmarkRun>> {
     const run = await this.#options.runner.cancel(String(request.runId));
     return run === undefined ? refused("not-found", "That run does not exist.") : ok(run);
@@ -287,15 +349,34 @@ export class BenchmarkService {
     // every cell's fixed thread identity is purged. A thread that was never made
     // is "absent", which counts as done.
     for (const cell of run.cells) {
+      const isCode =
+        run.cases.find((candidate) => candidate.caseId === cell.caseId)?.kind === "code";
+      const cellThreadId = cell.threadId ?? benchmarkCellIdentity(String(cell.cellId)).threadId;
+      if (isCode) {
+        // The worktree goes first: once the thread is purged nothing names it.
+        const removal =
+          this.#options.codeCases === undefined
+            ? "absent"
+            : await this.#options.codeCases.removeWorktree(cellThreadId);
+        if (typeof removal === "object") {
+          return refused(
+            "unavailable",
+            `A cell's worktree could not be removed, so the run was kept: ${removal.message}`,
+          );
+        }
+      }
       // The judge's thread is found by its fixed identity too; it is absent when
-      // the suite had no judge or the cell never reached it.
-      const threadIds = new Set([
-        benchmarkCellIdentity(String(cell.cellId)).threadId,
-        benchmarkJudgeIdentity(String(cell.cellId)).threadId,
-      ]);
-      if (cell.threadId !== undefined) threadIds.add(cell.threadId);
-      for (const threadId of threadIds) {
-        if ((await this.#options.purgeThread(threadId)) === "failed") {
+      // the suite had no judge or the cell never reached it. It is a Chat thread.
+      const threads: Array<readonly [string, "chat" | "code"]> = [
+        [benchmarkCellIdentity(String(cell.cellId)).threadId, isCode ? "code" : "chat"],
+        [benchmarkJudgeIdentity(String(cell.cellId)).threadId, "chat"],
+      ];
+      if (cell.threadId !== undefined) threads.push([cell.threadId, isCode ? "code" : "chat"]);
+      const seen = new Set<string>();
+      for (const [threadId, mode] of threads) {
+        if (seen.has(threadId)) continue;
+        seen.add(threadId);
+        if ((await this.#options.purgeThread(threadId, mode)) === "failed") {
           return refused("unavailable", "A cell thread could not be purged, so the run was kept.");
         }
       }

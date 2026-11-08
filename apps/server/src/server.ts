@@ -505,6 +505,7 @@ export function startOctantServer(
       resolveSelectedExtensions,
       pinnedExtensionIds,
       reviewedModelManifest,
+      managedWorktreeService,
       skillDiscoveryService,
     } = yield* wireProviders({
       serverRegistry,
@@ -535,6 +536,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
+      harnessOfflineShell,
       prepareCredentialCommand,
       personMemorySweep,
       runtimeForgeChanges,
@@ -1185,6 +1187,15 @@ export function startOctantServer(
     });
     const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
     const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
+      awaitsPerson: (threadId) =>
+        codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
+        threadAwaitsHarnessApproval(threadId),
+      codeEvidence,
+      harnessOfflineShell,
+      managedWorktreeReceipts,
+      managedWorktreeService,
+      roots,
+      routeCodeService,
       chatService,
       persistence,
       projectService,
@@ -1668,12 +1679,12 @@ export function startOctantServer(
       workTurnService,
       agentRunAdmission,
     });
-    benchmarkThreadPurge.purge = async (threadId) => {
+    benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(
         {
           scope: {
             kind: "thread",
-            mode: "chat",
+            mode,
             threadId: decodeThreadRetentionThreadId(threadId),
           },
           confirm: true,

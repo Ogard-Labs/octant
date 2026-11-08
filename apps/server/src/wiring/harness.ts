@@ -958,6 +958,14 @@ export function wireHarness(deps: HarnessDependencies) {
     beginGoogleCliChange: googleCliCommands.beginChange,
     recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
     credentialCommandProcess: harnessFullAccessProcessPort,
+    // The Seatbelt-confined, network-less shell a Benchmarks check command runs in.
+    harnessOfflineShell: createNativeHarnessShell({
+      process: harnessOfflineProcessPort,
+      scriptDirectory: harnessScriptDirectory,
+      sshAgentSocket,
+      cloudCliEnvironment,
+      googleCliCredentials: googleCliCommands.prepare,
+    }),
     prepareCredentialCommand,
     personMemorySweep,
     runtimeForgeChanges,

@@ -297,7 +297,7 @@ describe("benchmark runner", () => {
 
     const cell = projection.run(benchmarkIds.run)!.cells[0]!;
     expect(cell.state).toBe("failed");
-    expect(cell.failureReason).toBe("Code cases arrive in a later version");
+    expect(cell.failureReason).toBe("Code cases cannot run on this host.");
     expect(chat.starts).toHaveLength(0);
   });
 

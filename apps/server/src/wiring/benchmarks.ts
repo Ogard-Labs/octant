@@ -1,22 +1,40 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import {
   LOCAL_HOST_ID,
   decodeChatThreadId,
+  decodeCodeCheckoutId,
+  decodeCodeRelativePath,
+  decodeCodeThreadId,
   decodeUtcTimestamp,
   type ChatThreadId,
+  type CodeCheckoutIdentity,
+  type CodeThread,
+  type ProjectId,
   type WindowId,
 } from "@octant/contracts";
+import { defaultPermissionModeFor } from "@octant/domain";
 import { BenchmarkEventStore } from "../benchmarks/benchmarkEventStore";
 import {
   BENCHMARKS_PROJECT_ID,
   BENCHMARKS_PROJECT_NAME,
   createBenchmarkChatPort,
 } from "../benchmarks/benchmarkChatPort";
+import { createBenchmarkCheckCommandPort } from "../benchmarks/benchmarkCheckCommand";
+import {
+  createBenchmarkCodePort,
+  type BenchmarkCodeRouteService,
+  type BenchmarkWorktreeRemoval,
+} from "../benchmarks/benchmarkCodePort";
 import { createWorkerPatternMatcher } from "../benchmarks/benchmarkPatternMatcher";
 import { createBenchmarkRouteHandler } from "../benchmarks/benchmarkRoutes";
 import { BenchmarkRunner } from "../benchmarks/benchmarkRunner";
 import { BenchmarkService } from "../benchmarks/benchmarkService";
 import { extractReply } from "../chat/threadDialogueService";
+import type { CodeRouteService } from "../codeRoutes";
+import type { NativeHarnessShellPort } from "../harness/nativeHarnessTools";
+import type { ManagedWorktreeService } from "../code/managedWorktreeService";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -31,7 +49,7 @@ import type { WorkspaceWiring } from "./workspace";
  * is kept.
  */
 export interface BenchmarkThreadPurgeSlot {
-  purge?: (threadId: string) => Promise<"purged" | "absent" | "failed">;
+  purge?: (threadId: string, mode: "chat" | "code") => Promise<"purged" | "absent" | "failed">;
 }
 
 export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
@@ -40,11 +58,43 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<ChatWiring, "chatService"> & {
     readonly threadPurge: BenchmarkThreadPurgeSlot;
+    readonly routeCodeService: CodeRouteService;
+    readonly codeEvidence: {
+      readonly put: (text: string) => import("@octant/contracts").CodeEvidenceReference;
+    };
+    /** Whether a Code thread's running turn waits on an approval or a question. */
+    readonly awaitsPerson: (threadId: string) => boolean;
+    /** The confined, network-less shell Octant's own tools use; check commands run in it. */
+    readonly harnessOfflineShell: NativeHarnessShellPort;
+    readonly managedWorktreeService: Pick<ManagedWorktreeService, "cleanup">;
+    readonly managedWorktreeReceipts: {
+      readonly load: (
+        receiptId: string,
+      ) => Promise<{ readonly state: string; readonly canonicalWorktreePath: string } | undefined>;
+    };
+    readonly roots: {
+      readonly resolve: (
+        windowId: WindowId,
+        thread: CodeThread,
+        checkout: CodeCheckoutIdentity,
+        relativePath: ReturnType<typeof decodeCodeRelativePath>,
+      ) =>
+        | Promise<{ readonly rootPath: string } | undefined>
+        | { readonly rootPath: string }
+        | undefined;
+    };
     readonly allowedRendererHttpOrigin?: string | null;
   };
 
 export function wireBenchmarks(deps: BenchmarksDependencies) {
   const {
+    awaitsPerson,
+    codeEvidence,
+    harnessOfflineShell,
+    managedWorktreeReceipts,
+    managedWorktreeService,
+    roots,
+    routeCodeService,
     chatService,
     persistence,
     projectService,
@@ -69,7 +119,113 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     answer: (threadId, turnId) =>
       extractReply(chatService.read(decodeChatThreadId(threadId)), turnId),
   });
+  // Code cells act under the host's own scope, as routines and goal rounds do.
+  const codeWindowId = ROUTINE_HOST_SCOPE_ID;
+  const projectMode = (projectId: ProjectId) => {
+    const project = persistence.readProject(projectId);
+    if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+    const settings = persistence.readCodeSettings()?.settings;
+    return defaultPermissionModeFor({
+      project,
+      settings: {
+        defaultExecutionPolicy: settings?.defaultExecutionPolicy ?? "approval-gated",
+        defaultAutoApprove: settings?.defaultAutoApprove,
+      },
+    });
+  };
+  const resolveRoot = async (threadId: string): Promise<string | undefined> => {
+    const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+    const checkout =
+      thread === undefined ? undefined : persistence.readCodeCheckout(thread.checkoutId);
+    if (thread === undefined || checkout === undefined) return undefined;
+    const root = await roots.resolve(
+      codeWindowId,
+      thread,
+      checkout,
+      decodeCodeRelativePath("package.json"),
+    );
+    return root !== undefined && existsSync(root.rootPath) ? root.rootPath : undefined;
+  };
+  const removeWorktree = async (threadId: string): Promise<BenchmarkWorktreeRemoval> => {
+    const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+    if (thread === undefined) return "absent";
+    const checkout = persistence.readCodeCheckout(decodeCodeCheckoutId(String(thread.checkoutId)));
+    if (checkout?.kind !== "managed-worktree") return "absent";
+    const receiptId = String(checkout.ownershipReceiptId);
+    const receipt = await managedWorktreeReceipts.load(receiptId);
+    if (receipt === undefined || receipt.state === "removed") return "absent";
+    if (!existsSync(receipt.canonicalWorktreePath)) return "absent";
+    // The thread must not be active for the existing cleanup to run.
+    if (thread.lifecycle === "active") {
+      await routeCodeService.execute(codeWindowId, {
+        kind: "change-code-thread-lifecycle",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        lifecycle: "archived",
+      });
+    }
+    // The existing managed-worktree cleanup: it keeps a worktree that still has
+    // uncommitted changes, and it removes no branch.
+    const result = await managedWorktreeService.cleanup(
+      { receiptId, confirmedByLocalUser: true },
+      new AbortController().signal,
+    );
+    if (result.status === "removed") return "removed";
+    return {
+      status: "refused",
+      message:
+        result.status === "refused" && result.reason === "dirty"
+          ? "it still holds uncommitted changes, which worktree cleanup keeps."
+          : `worktree cleanup answered ${result.status}.`,
+    };
+  };
+  const { executeOperation, conversation, readOperationContent } = routeCodeService;
+  const codePort =
+    executeOperation === undefined ||
+    conversation === undefined ||
+    readOperationContent === undefined
+      ? undefined
+      : createBenchmarkCodePort({
+          code: {
+            execute: (windowId, command) => routeCodeService.execute(windowId, command),
+            executeOperation: (windowId, command) =>
+              executeOperation.call(routeCodeService, windowId, command),
+            conversation: (windowId, threadId, afterCursor, limit) =>
+              conversation.call(routeCodeService, windowId, threadId, afterCursor, limit),
+            readOperationContent: (windowId, threadId, operationId, contentId) =>
+              readOperationContent.call(
+                routeCodeService,
+                windowId,
+                threadId,
+                operationId,
+                contentId,
+              ),
+          } satisfies BenchmarkCodeRouteService,
+          windowId: codeWindowId,
+          readThread: (threadId) => {
+            const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+            return thread === undefined
+              ? undefined
+              : {
+                  version: thread.version,
+                  checkoutId: String(thread.checkoutId),
+                  lifecycle: thread.lifecycle,
+                };
+          },
+          awaitsPerson,
+          evidence: codeEvidence,
+          clock: () => new Date().toISOString(),
+          resolveRoot,
+          removeWorktree,
+        });
   const benchmarkRunner = new BenchmarkRunner({
+    ...(codePort === undefined
+      ? {}
+      : {
+          code: codePort,
+          checkCommand: createBenchmarkCheckCommandPort(harnessOfflineShell),
+          projectMode,
+        }),
     chat,
     projection,
     store,
@@ -114,7 +270,16 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
         };
       }
     },
-    purgeThread: async (threadId) => (await threadPurge.purge?.(threadId)) ?? "failed",
+    ...(codePort === undefined
+      ? {}
+      : {
+          codeCases: {
+            projectMode,
+            checkRef: (projectId, ref) => codePort.checkRef(projectId, ref),
+            removeWorktree: (threadId) => codePort.removeWorktree(threadId),
+          },
+        }),
+    purgeThread: async (threadId, mode) => (await threadPurge.purge?.(threadId, mode)) ?? "failed",
     clock: () => decodeUtcTimestamp(clock()),
     uuid: randomUUID,
   });
