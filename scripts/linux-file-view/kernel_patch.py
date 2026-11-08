@@ -253,6 +253,30 @@ def install_fileattr_reads(kernel: Path) -> None:
     path.write_text(source)
 
 
+def install_seek_reads(kernel: Path) -> None:
+    path = kernel / "fs/read_write.c"
+    source = path.read_text()
+    if "octant_mediation_seek" in source:
+        raise ValueError("Seek read admission already exists")
+    native = "\t\tloff_t res = vfs_llseek(fd_file(f), offset, whence);"
+    wide = ("\toffset = vfs_llseek(fd_file(f), ((loff_t) offset_high << 32) | offset_low,\n"
+            "\t\t\twhence);")
+    if source.count(native) != 1 or source.count(wide) != 1:
+        raise ValueError("Pinned native/compat seek entries differ")
+    # ksys_lseek is shared by native and compat lseek. The separate llseek
+    # entry covers wide-offset callers. Keep fd_pos ownership and validation,
+    # prepare before any filesystem callback, and never wait in vfs_llseek.
+    source = source.replace(native,
+        "\t\tloff_t res;\n"
+        "\t\tretval = octant_mediation_seek(fd_file(f), whence);\n"
+        "\t\tif (retval)\n\t\t\treturn retval;\n"
+        "\t\tres = vfs_llseek(fd_file(f), offset, whence);", 1)
+    source = source.replace(wide,
+        "\tretval = octant_mediation_seek(fd_file(f), whence);\n"
+        "\tif (retval)\n\t\treturn retval;\n\n" + wide, 1)
+    path.write_text(include_bridge(source))
+
+
 def install_metadata(kernel: Path) -> None:
     # Scope the decision to this one actual syscall's pinned native object.
     # Read/write ACL dispatchers are included before any inode lock. Final
@@ -364,3 +388,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_metadata_writes(kernel)
     install_fileattr_writes(kernel)
     install_fileattr_reads(kernel)
+    install_seek_reads(kernel)

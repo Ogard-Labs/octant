@@ -12,6 +12,7 @@
 #include <linux/path.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
+#include <linux/fcntl.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/io_uring.h>
@@ -571,6 +572,18 @@ int octant_namespace_check_rename(const struct renamedata *operation)
 static int admit_file(struct file *file, u32 operation)
 {
 	return admit_inode(file ? file_inode(file) : NULL, operation);
+}
+
+/* Only audited syscall entries call this before filesystem llseek/inode locks.
+ * The retained file fixes identity and the ordinary READ admission orders its
+ * live policy epoch. Position-only seeks and native nonseekable errors remain. */
+int octant_mediation_seek(struct file *file, unsigned int whence)
+{
+	struct inode *inode = file_inode(file);
+	if ((whence == SEEK_END || whence == SEEK_DATA || whence == SEEK_HOLE) &&
+	    (file->f_mode & FMODE_LSEEK) && S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
+		return admit_file(file, OCTANT_MEDIATION_READ);
+	return 0;
 }
 
 static int truncate_file(struct file *file)
