@@ -307,6 +307,14 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
+### Native Windows QA packaging
+
+A matching Windows x64 host may build a portable desktop QA archive and check
+its native dependencies inside packaged Electron. This does not enable native
+host admission, credentials, Work/Code, an installer, or a signed-update channel.
+
+Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+
 ### External user guide and maintainer-owned publication
 
 The VitePress guide lives in `Ogard-Labs/octant-site/docs`, outside the application monorepo, and builds independently for `https://octant.sh/docs/`. Application changes update the guide through companion PRs linked in both descriptions. The site repository runs its docs gates and uploads a static artifact named for the commit. The application repository retains internal specifications and exports semantic theme defaults for the guide; its CI refuses tracked files under the former `apps/docs` path to prevent a second guide source. The maintainer configures and releases that artifact on their VPS; no workflow deploys it or treats an artifact upload as a live publication. Missing pages use the supported VitePress layout slot, and links retain the `/docs/` base.

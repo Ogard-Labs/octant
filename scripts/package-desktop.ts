@@ -93,14 +93,14 @@ const RELEASE_VERSION_PATTERN =
  *
  * `darwin-arm64` is the signed Apple Silicon path. `linux-x64` is the Ubuntu
  * dogfood image: the file is not code-signed, and in-app update replaces it
- * only after the signed feed and its hash verify. Windows and other arches
- * stay refused rather than half-shipped.
+ * only after the signed feed and its hash verify. `win32-x64` emits a portable
+ * QA archive; it does not enable Windows confinement or a signed update channel.
  */
-export type DesktopPackageTargetId = "darwin-arm64" | "linux-x64";
+export type DesktopPackageTargetId = "darwin-arm64" | "linux-x64" | "win32-x64";
 
 export interface DesktopPackageTarget {
   readonly id: DesktopPackageTargetId;
-  readonly platform: "darwin" | "linux";
+  readonly platform: "darwin" | "linux" | "win32";
   readonly arch: "arm64" | "x64";
 }
 
@@ -109,6 +109,7 @@ export const DESKTOP_PACKAGE_TARGETS: Readonly<
 > = {
   "darwin-arm64": { id: "darwin-arm64", platform: "darwin", arch: "arm64" },
   "linux-x64": { id: "linux-x64", platform: "linux", arch: "x64" },
+  "win32-x64": { id: "win32-x64", platform: "win32", arch: "x64" },
 };
 
 /**
@@ -139,6 +140,9 @@ export function resolveDesktopPackageTarget(
   }
   if (host.platform === "linux" && (host.arch === "x64" || host.arch === "x86_64")) {
     return DESKTOP_PACKAGE_TARGETS["linux-x64"];
+  }
+  if (host.platform === "win32" && host.arch === "x64") {
+    return DESKTOP_PACKAGE_TARGETS["win32-x64"];
   }
   throw new Error(
     `Desktop packaging has no default target for ${host.platform}/${host.arch}. Set ${PACKAGE_TARGET_ENVIRONMENT_VARIABLE}.`,
@@ -282,7 +286,10 @@ export function bundledLanguageServerPaths(
   nodeModules: string,
 ): ReadonlyArray<string> {
   const root = `${nodeModules}/${bundledLanguageServerPackage(target)}`;
-  return BUNDLED_LANGUAGE_SERVER_FILES.map((file) => `${root}/${file}`);
+  return BUNDLED_LANGUAGE_SERVER_FILES.map(
+    (file) =>
+      `${root}/${target.platform === "win32" && file === BUNDLED_LANGUAGE_SERVER_BINARY ? `${file}.exe` : file}`,
+  );
 }
 
 /**
@@ -329,6 +336,14 @@ export async function stageBundledLanguageServer(input: {
 /** macOS-only node-pty helper; Linux uses forkpty and does not build this binary. */
 export const REQUIRED_DARWIN_PTY_HELPER_FILE =
   "apps/server/node_modules/node-pty/build/Release/spawn-helper" as const;
+
+/** Both Windows PTY backends and their console helper must survive staging. */
+export const REQUIRED_WINDOWS_PTY_FILES = [
+  "apps/server/node_modules/node-pty/build/Release/conpty.node",
+  "apps/server/node_modules/node-pty/build/Release/conpty_console_list.node",
+  "apps/server/node_modules/node-pty/build/Release/winpty.dll",
+  "apps/server/node_modules/node-pty/build/Release/winpty-agent.exe",
+] as const;
 
 export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
@@ -687,6 +702,7 @@ export async function stripNativeDebugMetadata(
 export function nativePayloadsToStrip(
   platform: DesktopPackageTarget["platform"],
 ): ReadonlyArray<string> {
+  if (platform === "win32") return [];
   // node-pty only builds spawn-helper on macOS; Linux uses forkpty.
   if (platform === "darwin") {
     return [
@@ -724,7 +740,7 @@ async function stripElfDebugMetadata(path: string): Promise<void> {
 }
 
 export function nativeDebugStripForPlatform(
-  platform: DesktopPackageTarget["platform"],
+  platform: "darwin" | "linux",
 ): (path: string) => Promise<void> {
   return platform === "darwin" ? stripMachODebugMetadata : stripElfDebugMetadata;
 }
@@ -833,10 +849,19 @@ export function createPackagerOptions(
           },
         }
       : {}),
-    icon:
-      target.platform === "darwin"
-        ? resolve(dir, flavorIconPath("apps/desktop/resources/icon.icns", identity))
-        : resolve(dir, flavorIconPath("apps/desktop/resources/icon.png", identity)),
+    ...(target.platform === "win32"
+      ? { win32metadata: { CompanyName: "Ogard Labs" } }
+      : {
+          icon: resolve(
+            dir,
+            flavorIconPath(
+              target.platform === "darwin"
+                ? "apps/desktop/resources/icon.icns"
+                : "apps/desktop/resources/icon.png",
+              identity,
+            ),
+          ),
+        }),
     name: identity.productName,
     out,
     overwrite: true,
@@ -996,6 +1021,7 @@ export function validatePackagedPayload(
   const required = [
     ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => flavorIconPath(path, identity)),
     ...(target.platform === "darwin" ? [REQUIRED_DARWIN_PTY_HELPER_FILE] : []),
+    ...(target.platform === "win32" ? REQUIRED_WINDOWS_PTY_FILES : []),
     ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
   ];
   for (const requiredPath of required) {
@@ -1114,6 +1140,9 @@ export async function stageDesktopRuntime(
 
   await writeJson(join(stageRoot, "package.json"), createDesktopRuntimeManifest(version, identity));
   await writeJson(join(stageRoot, "apps/server/package.json"), createServerRuntimeManifest());
+  if (target.platform === "win32") {
+    await cp(join(repositoryRoot, "LICENSE"), join(stageRoot, "LICENSE"));
+  }
 
   await stageExternalRuntimePackages(repositoryRoot, stageRoot);
   await stageBundledLanguageServer({
@@ -1131,11 +1160,13 @@ export async function stageDesktopRuntime(
     );
   await rebuildNativeModules(stageRoot, target);
   await pruneUnusedNativePayloads(stageRoot);
-  await stripNativeDebugMetadata(
-    stageRoot,
-    nativeDebugStripForPlatform(target.platform),
-    nativePayloadsToStrip(target.platform),
-  );
+  if (target.platform !== "win32") {
+    await stripNativeDebugMetadata(
+      stageRoot,
+      nativeDebugStripForPlatform(target.platform),
+      nativePayloadsToStrip(target.platform),
+    );
+  }
 
   validatePackagedPayload(await collectPayloadEntries(stageRoot), target, identity);
   await validatePackagedRuntimeImports(stageRoot);
@@ -1155,9 +1186,15 @@ export async function validatePackagedRuntimeImports(
       ["--input-type=module", "--eval", `await Promise.all([${probe}])`],
       {
         cwd: resolve(stageRoot, runtimePath),
-        env: {
-          PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/exec-daemon",
-        },
+        env:
+          process.platform === "win32"
+            ? {
+                PATH: process.env.PATH ?? "",
+                ...(process.env.SystemRoot === undefined
+                  ? {}
+                  : { SystemRoot: process.env.SystemRoot }),
+              }
+            : { PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/exec-daemon" },
         timeout: 10_000,
       },
       (error) => {
@@ -1238,7 +1275,49 @@ async function packageDesktop(repositoryRoot: string): Promise<{
     const artifactPath = await packageDarwinDesktop(repositoryRoot, target);
     return { target, artifactPath };
   }
+  if (target.platform === "win32") return packageWindowsDesktop(repositoryRoot, target);
   return await packageLinuxDesktop(repositoryRoot, target);
+}
+
+/** Portable Windows QA output; no release feed or confinement capability is granted. */
+async function packageWindowsDesktop(
+  repositoryRoot: string,
+  target: DesktopPackageTarget,
+): Promise<{
+  readonly target: DesktopPackageTarget;
+  readonly artifactPath: string;
+  readonly portableDirectoryPath: string;
+}> {
+  const version = resolveReleaseVersion(process.env);
+  const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
+  const outRoot = resolve(repositoryRoot, "out");
+  const stageRoot = join(outRoot, STAGE_DIRECTORY);
+  const packagerRoot = join(outRoot, PACKAGER_DIRECTORY);
+  const packageName = `${identity.productName}-${target.id}`;
+  const packageDirectory = join(outRoot, packageName);
+  const archivePath = join(outRoot, `${identity.productName}-${version}-${target.id}.zip`);
+  await mkdir(outRoot, { recursive: true });
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version, identity);
+  await rm(packagerRoot, { recursive: true, force: true });
+  const directories = await packager(
+    createPackagerOptions(stageRoot, packagerRoot, version, target, identity),
+  );
+  const directory = directories[0];
+  if (directories.length !== 1 || directory === undefined) {
+    throw new Error("Expected one packaged Windows desktop directory.");
+  }
+  await rm(packageDirectory, { recursive: true, force: true });
+  await rename(directory, packageDirectory);
+  await rm(packagerRoot, { recursive: true, force: true });
+  const payload = join(packageDirectory, "resources", "app");
+  validatePackagedPayload(await collectPayloadEntries(payload), target, identity);
+  await access(join(payload, "LICENSE"));
+  await access(join(packageDirectory, `${identity.productName}.exe`));
+  await rm(archivePath, { force: true });
+  await runCommand(["tar.exe", "-a", "-cf", archivePath, "-C", outRoot, packageName], {
+    cwd: repositoryRoot,
+  });
+  return { target, artifactPath: archivePath, portableDirectoryPath: packageDirectory };
 }
 
 async function packageDarwinDesktop(
@@ -2136,6 +2215,11 @@ if (import.meta.main) {
         `Unsigned because ${outcome.missing.join(", ")} not set; it will not auto-update.`,
       );
     }
+  } else if (packaged.target.platform === "win32") {
+    console.log(`Packaged Windows QA archive: ${packaged.artifactPath}`);
+    console.log(
+      "Windows host admission, credentials, confinement, and self-update remain unavailable.",
+    );
   } else {
     // The image is not code-signed. In-app update still refuses unless the
     // signed feed and its hash verify, and only replaces the file the runtime
