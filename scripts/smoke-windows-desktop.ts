@@ -138,6 +138,47 @@ async function window(child: ChildProcess, close = false, requireRendered = fals
     (!requireRendered || ("renderedWelcome" in value && value.renderedWelcome === true))
   );
 }
+async function observeColdHostWindow(nightly: ChildProcess) {
+  const birth = births.get(nightly);
+  const remaining = Math.min(8000, begin + 34000 - Date.now());
+  if (!nightly.pid || !birth || !nightlyExecutable || remaining <= 0)
+    throw Error("The exact cold-launch parent is unavailable.");
+  const result = await run(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-File",
+      resolve(import.meta.dirname, "windows-desktop-window.ps1"),
+      "-Mode",
+      "child-observe",
+      "-OwnedPid",
+      String(nightly.pid),
+      "-Executable",
+      nightlyExecutable,
+      "-ExpectedBirth",
+      birth,
+      "-ChildExecutable",
+      executable,
+      "-CapturePath",
+      join(output, `${phase}-host-window.png`),
+    ],
+    { timeout: remaining, maxBuffer: 4096 },
+  );
+  const value: unknown = JSON.parse(result.stdout);
+  if (typeof value !== "object" || value === null || !("childObserved" in value))
+    throw Error("The cold host observation was refused.");
+  const observation =
+    value.childObserved === false
+      ? { childObserved: false }
+      : value.childObserved === true &&
+          "visibleOwnedWindow" in value &&
+          typeof value.visibleOwnedWindow === "boolean"
+        ? { childObserved: true, visibleOwnedWindow: value.visibleOwnedWindow }
+        : undefined;
+  if (observation === undefined) throw Error("The cold host observation was refused.");
+  await writeFile(join(output, `${phase}-host-window.json`), JSON.stringify(observation));
+}
 async function joined(child: ChildProcess) {
   await until(
     "owned process exit",
@@ -429,6 +470,16 @@ try {
     if (diagnostics.get(child)?.role !== "desktop") continue;
     try {
       await window(child);
+      if (phase === "nightly-cold" && executables.get(child) === nightlyExecutable) {
+        try {
+          await observeColdHostWindow(child);
+        } catch {
+          await writeFile(
+            join(output, `${phase}-host-window.json`),
+            JSON.stringify({ status: "unavailable" }),
+          );
+        }
+      }
     } catch {
       await writeFile(
         join(output, `${phase}-window-refused.txt`),

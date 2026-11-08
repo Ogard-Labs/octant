@@ -2,8 +2,9 @@ param([Parameter(Mandatory=$true)][int]$OwnedPid,
   [Parameter(Mandatory=$true)][string]$Executable,
   [string]$ExpectedBirth = '',
   [string]$CapturePath = '',
-  [Parameter(Mandatory=$true)][ValidateSet('observe','close','host-only','exited')][string]$Mode,
-  [int]$ParentPid = 0, [string]$ParentExecutable = '', [string]$ParentBirth = '')
+  [Parameter(Mandatory=$true)][ValidateSet('observe','close','host-only','exited','child-observe')][string]$Mode,
+  [int]$ParentPid = 0, [string]$ParentExecutable = '', [string]$ParentBirth = '',
+  [string]$ChildExecutable = '')
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -93,31 +94,60 @@ try {
     [Console]::WriteLine((@{ hostOnly=$true; pid=$octantGuiPid; birth=$octantGuiBirth } | ConvertTo-Json -Compress))
     exit 0
   }
+  $octantObservedPid = $OwnedPid
+  $octantObservedExecutable = $Executable
+  $octantObservedBirth = $ExpectedBirth
+  if ($Mode -eq 'child-observe') {
+    if (-not $ExpectedBirth -or -not $ChildExecutable) { throw 'Supply the exact owned parent and child image' }
+    [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
+    $octantChildren = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$OwnedPid" -OperationTimeoutSec 2)
+    if ($octantChildren.Count -gt 32) { throw 'Owned child observation exceeded its bound' }
+    $octantMatches = @($octantChildren | Where-Object { [String]::Equals($_.ExecutablePath, $ChildExecutable, [StringComparison]::OrdinalIgnoreCase) })
+    [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
+    if ($octantMatches.Count -eq 0) {
+      [Console]::WriteLine('{"childObserved":false}')
+      exit 0
+    }
+    if ($octantMatches.Count -ne 1) { throw 'Owned child observation is ambiguous' }
+    $octantObservedPid = [int]$octantMatches[0].ProcessId
+    $octantObservedExecutable = $ChildExecutable
+    [void][OctantDesktopWindow]::Run($octantObservedPid, $ChildExecutable, '', $false)
+    $octantObservedBirth = [OctantDesktopWindow]::Birth
+    if ([UInt64]$octantObservedBirth -lt [UInt64]$ExpectedBirth) { throw 'Owned child birth precedes its parent' }
+    $octantChildInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$octantObservedPid" -OperationTimeoutSec 2
+    if ($null -eq $octantChildInfo -or $octantChildInfo.ParentProcessId -ne $OwnedPid) { throw 'Owned child ancestry changed' }
+  }
   $renderedWelcome = $false
-  $found = [OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $Mode -eq 'close')
-  if ($found -and $Mode -eq 'observe') {
+  $found = [OctantDesktopWindow]::Run($octantObservedPid, $octantObservedExecutable, $octantObservedBirth, $Mode -eq 'close')
+  if ($found -and ($Mode -eq 'observe' -or $Mode -eq 'child-observe')) {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     $octantWindow = [OctantDesktopWindow]::Window
     $octantRoot = [Windows.Automation.AutomationElement]::FromHandle($octantWindow)
-    if ($null -eq $octantRoot -or $octantRoot.Current.ProcessId -ne $OwnedPid -or $octantRoot.Current.NativeWindowHandle -ne $octantWindow.ToInt32()) { throw 'Owned accessibility root refused' }
+    if ($null -eq $octantRoot -or $octantRoot.Current.ProcessId -ne $octantObservedPid -or $octantRoot.Current.NativeWindowHandle -ne $octantWindow.ToInt32()) { throw 'Owned accessibility root refused' }
     foreach ($octantLabel in @('Welcome to Octant', 'Your first task')) {
       $octantName = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $octantLabel)
       $octantVisible = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::IsOffscreenProperty, $false)
       $octantCondition = [Windows.Automation.AndCondition]::new($octantName, $octantVisible)
       if ($null -ne $octantRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, $octantCondition)) { $renderedWelcome = $true; break }
     }
-    if (-not [OctantDesktopWindow]::Run($OwnedPid, $Executable, [OctantDesktopWindow]::Birth, $false) -or [OctantDesktopWindow]::Window -ne $octantWindow) { throw 'Owned accessibility window changed' }
+    if (-not [OctantDesktopWindow]::Run($octantObservedPid, $octantObservedExecutable, [OctantDesktopWindow]::Birth, $false) -or [OctantDesktopWindow]::Window -ne $octantWindow) { throw 'Owned accessibility window changed' }
     if (-not $CapturePath) { throw 'Supply the owned capture path' }
     Add-Type -AssemblyName System.Drawing
     $octantBitmap = [Drawing.Bitmap]::new([OctantDesktopWindow]::Width, [OctantDesktopWindow]::Height)
     $octantGraphics = [Drawing.Graphics]::FromImage($octantBitmap)
     try {
       $octantDc = $octantGraphics.GetHdc()
-      try { if (-not [OctantDesktopWindow]::Capture($octantDc, $OwnedPid)) { throw 'Owned capture refused' } }
+      try { if (-not [OctantDesktopWindow]::Capture($octantDc, $octantObservedPid)) { throw 'Owned capture refused' } }
       finally { $octantGraphics.ReleaseHdc($octantDc) }
       $octantBitmap.Save($CapturePath, [Drawing.Imaging.ImageFormat]::Png)
     } finally { $octantGraphics.Dispose(); $octantBitmap.Dispose() }
   }
-  [Console]::WriteLine((@{ visibleOwnedWindow=$found; renderedWelcome=$renderedWelcome; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress))
+  if ($Mode -eq 'child-observe') {
+    [void][OctantDesktopWindow]::Run($octantObservedPid, $octantObservedExecutable, $octantObservedBirth, $false)
+    [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
+    [Console]::WriteLine((@{ childObserved=$true; visibleOwnedWindow=$found } | ConvertTo-Json -Compress))
+  } else {
+    [Console]::WriteLine((@{ visibleOwnedWindow=$found; renderedWelcome=$renderedWelcome; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress))
+  }
 } catch { [Console]::WriteLine('{"refused":true}'); exit 1 }
