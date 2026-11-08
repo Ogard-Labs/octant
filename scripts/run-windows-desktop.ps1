@@ -1,8 +1,10 @@
 param([Parameter(Mandatory=$true)][string]$Launcher,
   [Parameter(Mandatory=$true)][string]$PackageDirectory,
   [Parameter(Mandatory=$true)][string]$OutputDirectory,
-  [string]$NightlyPackageDirectory = '')
+  [string]$NightlyPackageDirectory = '',
+  [switch]$HostOnlyControl)
 $ErrorActionPreference = 'Stop'
+if ($HostOnlyControl -and $NightlyPackageDirectory) { throw 'The host-only diagnostic control does not run Nightly' }
 $octantProfile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Octant/hosts/octant'
 $octantProtocols = @{ 'octant' = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'Octant.exe')) }
 $octantAdditionalRoots = @()
@@ -21,17 +23,26 @@ if (Test-Path -LiteralPath $OutputDirectory) { throw 'The owned desktop output d
 [void](New-Item -ItemType Directory -Path $OutputDirectory)
 $octantBun = (Get-Command bun).Source
 $octantJoined = $true
+$octantFailure = $null
+$octantColdFailure = $false
+$octantCleanupConfirmed = $false
 try {
-  $octantPhases = if ($NightlyPackageDirectory) { @('nightly', 'nightly-cold') } else { @('owned', 'attached') }
+  $octantPhases = if ($HostOnlyControl) { @('host-only-control') } elseif ($NightlyPackageDirectory) { @('nightly', 'nightly-cold') } else { @('owned', 'attached') }
   foreach ($octantPhase in $octantPhases) {
     $octantArguments = @('--profile-user-owner', $octantBun, 'scripts/smoke-windows-desktop.ts', $PackageDirectory, $octantPhase, $OutputDirectory)
     if ($NightlyPackageDirectory) { $octantArguments += $NightlyPackageDirectory }
+    $octantJoined = $false
     $octantResult = @(& $Launcher @octantArguments)
     $octantCode = $LASTEXITCODE
     $octantResult | Write-Output
-    if (($octantResult -join "`n") -notmatch '"ownedJobJoined":true') { $octantJoined = $false }
-    if ($octantCode -ne 0 -or -not $octantJoined) { throw 'The owned native desktop phase failed or did not join its job' }
+    $octantJoined = ($octantResult -join "`n") -match '"ownedJobJoined":true'
+    if ($octantCode -ne 0 -or -not $octantJoined) {
+      $octantColdFailure = $octantPhase -eq 'nightly-cold'
+      throw 'The owned native desktop phase failed or did not join its job'
+    }
   }
+} catch {
+  $octantFailure = $_
 } finally {
   if (-not $octantJoined) { throw 'Refusing profile removal before owned processes joined' }
   foreach ($octantScheme in $octantProtocols.Keys) {
@@ -70,7 +81,20 @@ try {
       if (Test-Path -LiteralPath $octantPath) { throw 'Owned desktop path cleanup was not confirmed' }
     }
     Write-Output '{"ownedDesktopJobsJoined":true,"ownedProfileAndRuntimeAbsent":true,"ownedIdentityAbsent":true,"ownedProtocolRegistrationAbsent":true}'
+    $octantCleanupConfirmed = $true
   } elseif (Test-Path -LiteralPath $octantProfile) {
     throw 'Owned profile cleanup could not be authenticated without its scope receipt'
   }
+}
+if ($null -ne $octantFailure) {
+  # A separate fresh-profile comparison can retain early stderr that the
+  # production no-inherited-handle launch cannot. It never clears the failure.
+  if ($octantColdFailure -and $octantJoined -and $octantCleanupConfirmed -and -not $HostOnlyControl) {
+    try {
+      & $PSCommandPath -Launcher $Launcher -PackageDirectory $PackageDirectory -OutputDirectory (Join-Path $OutputDirectory 'host-only-control') -HostOnlyControl
+    } catch {
+      Write-Output '{"hostOnlyDiagnosticControl":"failed"}'
+    }
+  }
+  throw $octantFailure
 }

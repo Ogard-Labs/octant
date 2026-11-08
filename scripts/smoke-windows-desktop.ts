@@ -1,7 +1,7 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { resolve, join, win32 } from "node:path";
 import { promisify } from "node:util";
 import {
   loadWindowsHostProfileNative,
@@ -18,7 +18,11 @@ if (
   process.platform !== "win32" ||
   !packageArgument ||
   !outputArgument ||
-  (phase !== "owned" && phase !== "attached" && phase !== "nightly" && phase !== "nightly-cold") ||
+  (phase !== "owned" &&
+    phase !== "attached" &&
+    phase !== "nightly" &&
+    phase !== "nightly-cold" &&
+    phase !== "host-only-control") ||
   ((phase === "nightly" || phase === "nightly-cold") && !nightlyArgument)
 )
   throw Error("Use the isolated native Windows desktop fixture.");
@@ -53,19 +57,25 @@ async function until(name: string, predicate: () => Promise<boolean>, limit = 12
   } while (Date.now() < end);
   throw Error(`Windows desktop proof timed out: ${name}`);
 }
-function launch(server = false, seed?: string, target = executable) {
-  const env = { ...process.env };
-  for (const key of [
-    "ELECTRON_RUN_AS_NODE",
-    "OCTANT_DATA_DIR",
-    "OCTANT_LOGS_DIR",
-    "OCTANT_CREDENTIAL_BROKER_URL",
-    "OCTANT_CREDENTIAL_BROKER_TOKEN",
-    "OCTANT_DESKTOP_BRIDGE_SECRET",
-    "OCTANT_DESKTOP_PARENT_WATCH",
-    KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
-  ])
-    delete env[key];
+function launch(
+  server = false,
+  seed?: string,
+  target = executable,
+  controlEnvironment?: Readonly<Record<string, string>>,
+) {
+  const env = { ...(controlEnvironment ?? process.env) };
+  if (controlEnvironment === undefined)
+    for (const key of [
+      "ELECTRON_RUN_AS_NODE",
+      "OCTANT_DATA_DIR",
+      "OCTANT_LOGS_DIR",
+      "OCTANT_CREDENTIAL_BROKER_URL",
+      "OCTANT_CREDENTIAL_BROKER_TOKEN",
+      "OCTANT_DESKTOP_BRIDGE_SECRET",
+      "OCTANT_DESKTOP_PARENT_WATCH",
+      KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+    ])
+      delete env[key];
   if (server)
     Object.assign(env, {
       ELECTRON_RUN_AS_NODE: "1",
@@ -76,8 +86,19 @@ function launch(server = false, seed?: string, target = executable) {
     });
   const child = spawn(
     target,
-    server ? [join(directory, "resources/app/apps/server/dist/main.mjs")] : [],
-    { env, stdio: ["ignore", "ignore", "pipe"], windowsHide: server },
+    server
+      ? [join(directory, "resources/app/apps/server/dist/main.mjs")]
+      : controlEnvironment === undefined
+        ? []
+        : ["--octant-host-only"],
+    {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: server,
+      ...(controlEnvironment === undefined
+        ? {}
+        : { detached: true, cwd: win32.toNamespacedPath(directory) }),
+    },
   );
   children.add(child);
   executables.set(child, target);
@@ -187,15 +208,61 @@ async function joined(child: ChildProcess) {
   );
   check(child.exitCode === 0, "the exact owned root exited normally");
 }
-async function ready() {
+async function ready(control?: ChildProcess) {
   await until(
     "native storage-ready projection",
-    async () => (await host.startup.readHostInfo()) !== undefined,
+    async () => {
+      if (control !== undefined && (control.exitCode !== null || control.signalCode !== null))
+        throw Error(`The direct host-only control exited before readiness (${control.exitCode}).`);
+      return (await host.startup.readHostInfo()) !== undefined;
+    },
     18000,
   );
   const attachment = await attachWindowsDesktopHost(host);
   if (attachment === undefined) throw Error("The actual native owner was absent after readiness.");
   return attachment;
+}
+async function hostOnlyControlEnvironment(): Promise<Readonly<Record<string, string>>> {
+  const result = await run(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[Console]::WriteLine((@{ profile=[Environment]::GetFolderPath('UserProfile'); local=[Environment]::GetFolderPath('LocalApplicationData'); roaming=[Environment]::GetFolderPath('ApplicationData'); windows=[Environment]::GetFolderPath('Windows') } | ConvertTo-Json -Compress))",
+    ],
+    { timeout: 4000, maxBuffer: 4096 },
+  );
+  const value: unknown = JSON.parse(result.stdout);
+  const knownFolder = (path: unknown): path is string =>
+    typeof path === "string" &&
+    path.length < 32768 &&
+    !path.includes("\0") &&
+    win32.isAbsolute(path);
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("profile" in value) ||
+    !knownFolder(value.profile) ||
+    !("local" in value) ||
+    !knownFolder(value.local) ||
+    !("roaming" in value) ||
+    !knownFolder(value.roaming) ||
+    !("windows" in value) ||
+    !knownFolder(value.windows)
+  )
+    throw Error("The native known-folder control environment is unavailable.");
+  return {
+    APPDATA: value.roaming,
+    LOCALAPPDATA: value.local,
+    [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: "octant",
+    PATH: `${value.windows}\\System32;${value.windows}`,
+    SystemRoot: value.windows,
+    TEMP: win32.join(value.local, "Temp"),
+    TMP: win32.join(value.local, "Temp"),
+    USERPROFILE: value.profile,
+    WINDIR: value.windows,
+  };
 }
 function launcherObservation(details: Readonly<Record<string, unknown>> | undefined) {
   return {
@@ -413,7 +480,7 @@ try {
     check(await window(stable, true), "Stable closes after its Nightly client exits");
     await joined(stable);
     await stopped(first.probe.url);
-  } else {
+  } else if (phase === "nightly-cold") {
     if (nightlyExecutable === undefined) throw Error("The normal Nightly package is required.");
     const absent = await attachWindowsHostRuntimeOwner({
       native,
@@ -433,9 +500,19 @@ try {
     await stopped(first.probe.url);
     await until("the exact cold-launched Stable process exited", () => coldHostExited(cold), 8000);
     check(true, "the cold-launched Stable process exited before owned job cleanup");
+  } else {
+    const control = launch(
+      false,
+      undefined,
+      win32.toNamespacedPath(executable),
+      await hostOnlyControlEnvironment(),
+    );
+    await ready(control);
+    check(true, "the separate direct host-only diagnostic control reached native readiness");
   }
   const receipt = {
     phase,
+    ...(phase === "host-only-control" ? { diagnosticControl: true } : {}),
     checks,
     normalPackagedDesktop: true,
     nativeMetadataPreparedByFixture: true,
