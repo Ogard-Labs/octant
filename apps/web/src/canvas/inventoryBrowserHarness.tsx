@@ -1,4 +1,6 @@
 import "../styles.css";
+import "../styles/dock.css";
+import { OctantDialog } from "../ui/base/OctantDialog";
 import { decodeCanvasPublicShareList } from "@octant/contracts/canvas-public-share";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -206,6 +208,7 @@ function CanvasInventoryHarness() {
 }
 
 function PairedCanvasHarness() {
+  const [open, setOpen] = useState(true);
   const client = useMemo<CanvasClient>(() => {
     const full = createHarnessCanvasClient();
     return {
@@ -243,7 +246,13 @@ function PairedCanvasHarness() {
   }, []);
   return (
     <main>
-      <CanvasWorkspaceTab tab={tabForEntry(quarterlyInventoryEntry)} client={client} />
+      <OctantDialog
+        label={quarterlyInventoryEntry.title}
+        onClose={() => setOpen(false)}
+        open={open}
+      >
+        <CanvasWorkspaceTab tab={tabForEntry(quarterlyInventoryEntry)} client={client} />
+      </OctantDialog>
     </main>
   );
 }
