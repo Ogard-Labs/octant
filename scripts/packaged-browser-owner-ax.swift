@@ -137,6 +137,8 @@ func ownedFixturePath() -> String? {
 var fixedFolderNativeStatuses: [String: Int32] = [:]
 var fixedFolderWindowAncestryUsed = false
 var fixedFolderSheetFrameAdmitted = false
+var fixedFolderKeyboardFocusProof: Bool?
+var fixedFolderKeyboardFocusChecks: [String: Any] = [:]
 var fixedFolderGeometry: [String: Any] = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
     "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
 var fixedFolderSheetGeometry: [String: Any] = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
@@ -163,13 +165,15 @@ func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
           dimensions.width >= 12, dimensions.height >= 12 else { return nil }
     return CGRect(origin: point, size: dimensions)
 }
-func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil,
+func fixedFolderInputPoint(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil,
     _ expectedFieldSheets: [AXUIElement] = [], _ fieldCurrent: (() -> Bool)? = nil) -> CGPoint? {
     fixedFolderGeometry = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
         "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
     fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
         "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
     fixedFolderSheetFrameAdmitted = false
+    fixedFolderKeyboardFocusProof = nil
+    fixedFolderKeyboardFocusChecks = [:]
     fixedFolderHitChecks = unknownFixedFolderHitChecks
     guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
           kernelIdentity(processId) == initialKernelIdentity,
@@ -234,8 +238,7 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     fixedFolderGeometry["centerOnScreen"] = centerOnScreen
     guard centerOnScreen else { return nil }
     let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first { row in
-        guard (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-              ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0,
+        guard ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0,
               let values = row[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary) else { return false }
         return frame.contains(point)
     }
@@ -312,6 +315,30 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
           let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary),
           (abs(frame.minX - windowFrame.minX) <= 2 && abs(frame.minY - windowFrame.minY) <= 2 &&
            abs(frame.width - windowFrame.width) <= 2 && abs(frame.height - windowFrame.height) <= 2) || fixedFolderSheetFrameAdmitted else { return nil }
+    let usesOwnedLocationKeyboardFocus = (mode == "picker-fill-owned-location" || mode == "picker-go-owned-location") &&
+        expectedFieldRoot != nil && expectedFieldSheets.count == 2 && fieldCurrent != nil
+    if usesOwnedLocationKeyboardFocus {
+        fixedFolderKeyboardFocusProof = false
+        guard fixedFolderSheetFrameAdmitted, let expectedFieldRoot, CFEqual(window, expectedFieldRoot) else { return nil }
+        // These fixed key pairs go to the current field, not the mouse-hit
+        // ancestor. Keep the exact focus/sheet proof separate from mouse hits.
+        func keyboardCheck(_ key: String, _ value: Bool) -> Bool {
+            fixedFolderKeyboardFocusChecks[key] = value
+            return value
+        }
+        let live = NSRunningApplication(processIdentifier: processId)
+        guard keyboardCheck("exactFocusedFieldAndSheets", fieldCurrent?() == true),
+              keyboardCheck("deadline", Date() < deadline),
+              keyboardCheck("fixture", ownedFixturePath() != nil),
+              keyboardCheck("ownerKernel", kernelIdentity(processId) == initialKernelIdentity),
+              keyboardCheck("ownerLive", live?.isTerminated == false),
+              keyboardCheck("ownerBundle", live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle),
+              keyboardCheck("frontmost", NSWorkspace.shared.frontmostApplication?.processIdentifier == processId),
+              keyboardCheck("axTrusted", AXIsProcessTrusted()),
+              keyboardCheck("postPermission", CGPreflightPostEventAccess()) else { return nil }
+        fixedFolderKeyboardFocusProof = true
+        return point
+    }
     var hit: AXUIElement?
     let hitStatus = AXUIElementCopyElementAtPosition(element, Float(point.x), Float(point.y), &hit)
     fixedFolderNativeStatuses["hitTest"] = hitStatus.rawValue
@@ -467,13 +494,13 @@ if mode == "picker-create-owned-project" {
        ownerCurrent(), stillInsideDialog(target, dialog), stillInsideDialog(folder, dialog),
        fixedText(dialog, kAXTitleAttribute as CFString) == "Create Project",
        fixedText(target, kAXTitleAttribute as CFString) == "Create Project", fixedFolderButtonEnabled(target),
-       let point = fixedFolderHit(target, deadline, admit),
+       let point = fixedFolderInputPoint(target, deadline, admit),
        let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
        let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
        ownerCurrent(), stillInsideDialog(target, dialog), stillInsideDialog(folder, dialog),
        fixedText(target, kAXTitleAttribute as CFString) == "Create Project", fixedFolderButtonEnabled(target),
        ["owned-browser-project", "owned-browser-project Change"].contains(fixedText(folder, kAXTitleAttribute as CFString) ?? ""),
-       errors.isEmpty, fixedFolderHit(target, deadline, admit) == point {
+       errors.isEmpty, fixedFolderInputPoint(target, deadline, admit) == point {
         down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
         receipt["projectCreationDispatched"] = true; receipt["status"] = "dispatched"
     }
@@ -913,7 +940,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 guard ownedFixturePath() == fixturePath, associationUnchanged(),
                                       let focus = focusInSheet(), CFEqual(focus.node, field), nestedLocation(focus),
                                       let rootWindows = windows as? [AXUIElement], rootWindows.indices.contains(entry.windowIndex),
-                                      fixedFolderHit(field, deadline, admitMetadataNode, rootWindows[entry.windowIndex],
+                                      fixedFolderInputPoint(field, deadline, admitMetadataNode, rootWindows[entry.windowIndex],
                                         [focus.ancestors[1], focus.ancestors[2]], {
                                             guard ownedFixturePath() == fixturePath, identitiesUnchanged(), associationUnchanged(),
                                                   let fresh = focusInSheet(), CFEqual(fresh.node, field), nestedLocation(fresh),
@@ -922,7 +949,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                             return true
                                         }) != nil,
                                       identitiesUnchanged(), errors == priorErrors else { return false }
-                                fixedFolder["fieldFocusIdentityGeometryHitMatched"] = true
+                                fixedFolder["fieldFocusIdentityGeometryMatched"] = true
                                 return true
                             }
                             func exactOwnedValue(_ field: AXUIElement) -> Bool {
@@ -952,10 +979,10 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                     }
                                 }
                                 if fieldReady(focus.node) {
-                                    selectDown.post(tap: .cghidEventTap); selectUp.post(tap: .cghidEventTap)
+                                    selectDown.postToPid(processId); selectUp.postToPid(processId)
                                     fixedFolder["status"] = "select-all-dispatched-no-text"
                                     if fieldReady(focus.node) {
-                                        textDown.post(tap: .cghidEventTap); textUp.post(tap: .cghidEventTap)
+                                        textDown.postToPid(processId); textUp.postToPid(processId)
                                         fixedFolder["typingDispatched"] = true
                                         fixedFolder["status"] = "typed-value-unconfirmed"
                                         // Allow the ordinary posted key pair to be
@@ -974,7 +1001,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
                                let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) {
                                 if fieldReady(focus.node) {
-                                    down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+                                    down.postToPid(processId); up.postToPid(processId)
                                     fixedFolder["goDispatched"] = true
                                     fixedFolder["status"] = "go-dispatched-shape-unconfirmed"
                                     while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
@@ -994,18 +1021,20 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                enabledChooserTargets.count == 1, let target = enabledChooserTargets.first,
                                let focus = focusInSheet(), onlyOriginalSheet(focus), associationUnchanged(),
                                fixedFolderButtonEnabled(target),
-                               let point = fixedFolderHit(target, deadline, admitMetadataNode),
+                               let point = fixedFolderInputPoint(target, deadline, admitMetadataNode),
                                let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
                                let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
                                ownedFixturePath() == fixturePath, let finalFocus = focusInSheet(), onlyOriginalSheet(finalFocus),
                                associationUnchanged(), errors == priorErrors, fixedFolderButtonEnabled(target),
                                fixedLabel(target, kAXTitleAttribute as CFString, "Open") || fixedLabel(target, kAXTitleAttribute as CFString, "Choose"),
-                               errors == priorErrors, fixedFolderHit(target, deadline, admitMetadataNode) == point,
+                               errors == priorErrors, fixedFolderInputPoint(target, deadline, admitMetadataNode) == point,
                                identitiesUnchanged(), errors == priorErrors {
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
                             }
                             fixedFolder["hitChecks"] = fixedFolderHitChecks
+                            fixedFolder["keyboardFocusProof"] = fixedFolderKeyboardFocusProof.map { $0 as Any } ?? NSNull()
+                            fixedFolder["keyboardFocusChecks"] = fixedFolderKeyboardFocusChecks
                             fixedFolder["fieldSheetFrameAdmitted"] = fixedFolderSheetFrameAdmitted
                             fixedFolder["ownedSheetFrameChecks"] = fixedFolderSheetGeometry
                             fixedFolder["geometryChecks"] = fixedFolderGeometry
@@ -1401,7 +1430,6 @@ if mode == "click" || mode == "reveal" || fillsFixtureField {
                         action["controlInsideWindow"] = windowBounds.contains(targetBounds)
                         action["centerOnScreen"] = onScreen
                         let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first {
-                            ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 &&
                             (($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0 &&
                             cgBounds($0)?.contains(center) == true
                         }
