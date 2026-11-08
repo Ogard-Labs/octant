@@ -13,17 +13,20 @@ import {
   attachWindowsDesktopHost,
 } from "../apps/desktop/src/windowsDesktopHost";
 
-const [packageArgument, phase, outputArgument] = process.argv.slice(2);
+const [packageArgument, phase, outputArgument, nightlyArgument] = process.argv.slice(2);
 if (
   process.platform !== "win32" ||
   !packageArgument ||
   !outputArgument ||
-  (phase !== "owned" && phase !== "attached")
+  (phase !== "owned" && phase !== "attached" && phase !== "nightly") ||
+  (phase === "nightly" && !nightlyArgument)
 )
   throw Error("Use the isolated native Windows desktop fixture.");
 const directory = resolve(packageArgument),
   output = resolve(outputArgument);
 const executable = join(directory, "Octant.exe");
+const nightlyExecutable =
+  nightlyArgument === undefined ? undefined : join(resolve(nightlyArgument), "Octant Nightly.exe");
 const native = loadWindowsHostProfileNative(
   join(directory, "resources/native/octant-windows-host-owner.node"),
 );
@@ -33,6 +36,7 @@ await mkdir(output, { recursive: true });
 await writeFile(join(output, "scope.json"), JSON.stringify({ scope: host.paths.profileId }));
 const children = new Set<ChildProcess>();
 const births = new WeakMap<ChildProcess, string>();
+const executables = new WeakMap<ChildProcess, string>();
 const diagnostics = new Map<ChildProcess, { readonly role: string; readonly read: () => string }>();
 const checks: string[] = [];
 const run = promisify(execFile);
@@ -49,7 +53,7 @@ async function until(name: string, predicate: () => Promise<boolean>, limit = 12
   } while (Date.now() < end);
   throw Error(`Windows desktop proof timed out: ${name}`);
 }
-function launch(server = false, seed?: string) {
+function launch(server = false, seed?: string, target = executable) {
   const env = { ...process.env };
   for (const key of [
     "ELECTRON_RUN_AS_NODE",
@@ -71,11 +75,12 @@ function launch(server = false, seed?: string) {
       [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: "octant",
     });
   const child = spawn(
-    executable,
+    target,
     server ? [join(directory, "resources/app/apps/server/dist/main.mjs")] : [],
     { env, stdio: ["ignore", "ignore", "pipe"], windowsHide: server },
   );
   children.add(child);
+  executables.set(child, target);
   let diagnostic = "";
   diagnostics.set(child, { role: server ? "server" : "desktop", read: () => diagnostic });
   child.stderr?.on("data", (bytes: Buffer) => {
@@ -107,7 +112,7 @@ async function window(child: ChildProcess, close = false, requireRendered = fals
       "-OwnedPid",
       String(child.pid),
       "-Executable",
-      executable,
+      executables.get(child) ?? executable,
       "-ExpectedBirth",
       births.get(child) ?? "",
       "-CapturePath",
@@ -195,7 +200,7 @@ try {
     );
     await joined(app);
     await stopped(first.probe.url);
-  } else {
+  } else if (phase === "attached") {
     const seed = randomBytes(32).toString("base64url");
     const server = launch(true, seed);
     const first = await ready();
@@ -226,6 +231,30 @@ try {
       "authenticated native control accepts an explicit owner stop",
     );
     await joined(server);
+    await stopped(first.probe.url);
+  } else {
+    if (nightlyExecutable === undefined) throw Error("The normal Nightly package is required.");
+    const stable = launch();
+    const first = await ready();
+    await until("Stable rendered welcome window", () => window(stable, false, true));
+    const nightly = launch(false, undefined, nightlyExecutable);
+    await until("Nightly rendered welcome window", () => window(nightly, false, true));
+    check(
+      true,
+      "the normal Nightly package rendered welcome content through its native window lease",
+    );
+    check(
+      (await attachWindowsDesktopHost(host))?.probe.instanceId === first.probe.instanceId,
+      "Nightly shares Stable's exact native host generation",
+    );
+    check(await window(nightly, true), "the actual Nightly native window accepted close");
+    await joined(nightly);
+    check(
+      (await attachWindowsDesktopHost(host))?.probe.instanceId === first.probe.instanceId,
+      "closing Nightly preserves Stable's running native host",
+    );
+    check(await window(stable, true), "Stable closes after its Nightly client exits");
+    await joined(stable);
     await stopped(first.probe.url);
   }
   const receipt = {

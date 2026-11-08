@@ -62,6 +62,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start and attach the normal packaged Windows desktop
         run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"
+      - name: Build the normal Windows Nightly QA package
+        env:
+          OCTANT_PACKAGE_TARGET: win32-x64
+          OCTANT_PACKAGE_FLAVOR: nightly
+        run: |
+          $env:OCTANT_RELEASE_VERSION = bun -e "import { DESKTOP_PACKAGE_IDENTITY } from './scripts/package-desktop'; console.log(DESKTOP_PACKAGE_IDENTITY.version + '-preview.' + new Date().toISOString().slice(0, 10).replaceAll('-', '') + '.1')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run package:desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun scripts/smoke-windows-package.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Connect the normal packaged Windows Nightly to Stable
+        run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -NightlyPackageDirectory "$pwd/out/Octant Nightly-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/nightly-proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: octant-windows-nightly-lifecycle
+          path: ${{ runner.temp }}/nightly-proof
+          if-no-files-found: warn
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:

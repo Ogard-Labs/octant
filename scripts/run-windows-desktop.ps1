@@ -1,18 +1,32 @@
 param([Parameter(Mandatory=$true)][string]$Launcher,
   [Parameter(Mandatory=$true)][string]$PackageDirectory,
-  [Parameter(Mandatory=$true)][string]$OutputDirectory)
+  [Parameter(Mandatory=$true)][string]$OutputDirectory,
+  [string]$NightlyPackageDirectory = '')
 $ErrorActionPreference = 'Stop'
 $octantProfile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Octant/hosts/octant'
-$octantProtocol = 'HKCU:\Software\Classes\octant'
+$octantProtocols = @{ 'octant' = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'Octant.exe')) }
+$octantAdditionalRoots = @()
+if ($NightlyPackageDirectory) {
+  $octantProtocols['octant-nightly'] = [IO.Path]::GetFullPath((Join-Path $NightlyPackageDirectory 'Octant Nightly.exe'))
+  $octantAdditionalRoots += Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Octant Nightly'
+}
+foreach ($octantScheme in $octantProtocols.Keys) {
+  if (Test-Path -LiteralPath "HKCU:\Software\Classes\$octantScheme") { throw 'Refusing a pre-existing desktop protocol registration' }
+}
+foreach ($octantRoot in $octantAdditionalRoots) {
+  if (Test-Path -LiteralPath $octantRoot) { throw 'Refusing a pre-existing client window store' }
+}
 if (Test-Path -LiteralPath $octantProfile) { throw 'Refusing a pre-existing Windows desktop profile' }
-if (Test-Path -LiteralPath $octantProtocol) { throw 'Refusing a pre-existing desktop protocol registration' }
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'The owned desktop output directory already exists' }
 [void](New-Item -ItemType Directory -Path $OutputDirectory)
 $octantBun = (Get-Command bun).Source
 $octantJoined = $true
 try {
-  foreach ($octantPhase in @('owned', 'attached')) {
-    $octantResult = @(& $Launcher --profile-user-owner $octantBun scripts/smoke-windows-desktop.ts $PackageDirectory $octantPhase $OutputDirectory)
+  $octantPhases = if ($NightlyPackageDirectory) { @('nightly') } else { @('owned', 'attached') }
+  foreach ($octantPhase in $octantPhases) {
+    $octantArguments = @('--profile-user-owner', $octantBun, 'scripts/smoke-windows-desktop.ts', $PackageDirectory, $octantPhase, $OutputDirectory)
+    if ($NightlyPackageDirectory) { $octantArguments += $NightlyPackageDirectory }
+    $octantResult = @(& $Launcher @octantArguments)
     $octantCode = $LASTEXITCODE
     $octantResult | Write-Output
     if (($octantResult -join "`n") -notmatch '"ownedJobJoined":true') { $octantJoined = $false }
@@ -20,8 +34,10 @@ try {
   }
 } finally {
   if (-not $octantJoined) { throw 'Refusing profile removal before owned processes joined' }
-  if (Test-Path -LiteralPath $octantProtocol) {
-    $octantExecutable = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'Octant.exe'))
+  foreach ($octantScheme in $octantProtocols.Keys) {
+    $octantProtocol = "HKCU:\Software\Classes\$octantScheme"
+    if (-not (Test-Path -LiteralPath $octantProtocol)) { continue }
+    $octantExecutable = $octantProtocols[$octantScheme]
     $octantCommand = (Get-Item -LiteralPath "$octantProtocol\shell\open\command").GetValue('')
     $octantUnquoted = $octantExecutable + ' "%1"'
     $octantQuoted = '"' + $octantExecutable + '" "%1"'
@@ -40,7 +56,7 @@ try {
       if ($LASTEXITCODE -ne 0 -or ($octantIdentity -join '').Trim() -ne 'true') { throw 'Owned desktop identity cleanup failed' }
     }
     $octantRuntime = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "Octant/runtime/$octantScope"
-    foreach ($octantPath in @($octantProfile, $octantRuntime)) {
+    foreach ($octantPath in (@($octantProfile, $octantRuntime) + $octantAdditionalRoots)) {
       if (Test-Path -LiteralPath $octantPath) {
         $octantRoot = Get-Item -LiteralPath $octantPath -Force
         if (-not $octantRoot.PSIsContainer -or ($octantRoot.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned cleanup root' }
