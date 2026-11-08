@@ -141,6 +141,13 @@ var fixedFolderGeometry: [String: Any] = ["targetInsideResolvedWindow": NSNull()
     "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
 var fixedFolderSheetGeometry: [String: Any] = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
     "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
+let unknownFixedFolderHitChecks: [String: Any] = ["firstPidReadStatus": NSNull(), "firstOwnerMatched": NSNull(),
+    "firstExactTargetMatched": NSNull(), "lastPidReadStatus": NSNull(), "lastOwnerMatched": NSNull(),
+    "lastExactTargetMatched": NSNull(), "parentReadStatus": NSNull(), "visited": NSNull(), "termination": NSNull(),
+    "finalFieldCurrent": NSNull(), "finalDeadline": NSNull(), "finalFixture": NSNull(), "finalOwnerKernel": NSNull(),
+    "finalOwnerLive": NSNull(), "finalOwnerBundle": NSNull(), "finalFrontmost": NSNull(),
+    "finalAxTrusted": NSNull(), "finalPostPermission": NSNull()]
+var fixedFolderHitChecks = unknownFixedFolderHitChecks
 func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
     var position: CFTypeRef?, size: CFTypeRef?
     let positionStatus = AXUIElementCopyAttributeValue(node, kAXPositionAttribute as CFString, &position)
@@ -163,6 +170,7 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
         "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
     fixedFolderSheetFrameAdmitted = false
+    fixedFolderHitChecks = unknownFixedFolderHitChecks
     guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
           kernelIdentity(processId) == initialKernelIdentity,
           NSRunningApplication(processIdentifier: processId)?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
@@ -309,26 +317,55 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     fixedFolderNativeStatuses["hitTest"] = hitStatus.rawValue
     guard hitStatus == .success, let hit else { return nil }
     var cursor = hit, seen = Set<CFHashCode>()
-    for _ in 0..<40 {
+    fixedFolderHitChecks["visited"] = 0
+    func recordedHitCheck(_ key: String, _ value: Bool) -> Bool {
+        fixedFolderHitChecks[key] = value
+        return value
+    }
+    for index in 0..<40 {
         var pid: pid_t = 0
-        guard admit(cursor), Date() < deadline, seen.insert(CFHash(cursor)).inserted,
-              AXUIElementGetPid(cursor, &pid) == .success, pid == processId else { return nil }
-        if CFEqual(cursor, target) {
+        guard admit(cursor), Date() < deadline, seen.insert(CFHash(cursor)).inserted else {
+            fixedFolderHitChecks["termination"] = "admission-time-or-cycle-refused"; return nil
+        }
+        fixedFolderHitChecks["visited"] = index + 1
+        let pidStatus = AXUIElementGetPid(cursor, &pid)
+        fixedFolderHitChecks["lastPidReadStatus"] = pidStatus.rawValue
+        fixedFolderHitChecks["lastOwnerMatched"] = pidStatus == .success ? (pid == processId) as Any : NSNull()
+        if index == 0 {
+            fixedFolderHitChecks["firstPidReadStatus"] = pidStatus.rawValue
+            fixedFolderHitChecks["firstOwnerMatched"] = fixedFolderHitChecks["lastOwnerMatched"]
+        }
+        guard pidStatus == .success, pid == processId else {
+            fixedFolderHitChecks["termination"] = pidStatus == .success ? "owner-mismatch" : "pid-read-failed"; return nil
+        }
+        let exactTarget = CFEqual(cursor, target)
+        fixedFolderHitChecks["lastExactTargetMatched"] = exactTarget
+        if index == 0 { fixedFolderHitChecks["firstExactTargetMatched"] = exactTarget }
+        if exactTarget {
             let live = NSRunningApplication(processIdentifier: processId)
-            guard (!fixedFolderSheetFrameAdmitted || fieldCurrent?() == true),
-                  Date() < deadline, ownedFixturePath() != nil,
-                  kernelIdentity(processId) == initialKernelIdentity,
-                  live?.isTerminated == false,
-                  live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
-                  NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
-                  AXIsProcessTrusted(), CGPreflightPostEventAccess() else { return nil }
+            guard (!fixedFolderSheetFrameAdmitted || recordedHitCheck("finalFieldCurrent", fieldCurrent?() == true)),
+                  recordedHitCheck("finalDeadline", Date() < deadline),
+                  recordedHitCheck("finalFixture", ownedFixturePath() != nil),
+                  recordedHitCheck("finalOwnerKernel", kernelIdentity(processId) == initialKernelIdentity),
+                  recordedHitCheck("finalOwnerLive", live?.isTerminated == false),
+                  recordedHitCheck("finalOwnerBundle", live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle),
+                  recordedHitCheck("finalFrontmost", NSWorkspace.shared.frontmostApplication?.processIdentifier == processId),
+                  recordedHitCheck("finalAxTrusted", AXIsProcessTrusted()),
+                  recordedHitCheck("finalPostPermission", CGPreflightPostEventAccess()) else {
+                fixedFolderHitChecks["termination"] = "final-admission-refused"; return nil
+            }
+            fixedFolderHitChecks["termination"] = "point-proof-complete"
             return point
         }
         var parent: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &parent) == .success,
-              let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+        let parentStatus = AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &parent)
+        fixedFolderHitChecks["parentReadStatus"] = parentStatus.rawValue
+        guard parentStatus == .success, let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else {
+            fixedFolderHitChecks["termination"] = "parent-unavailable"; return nil
+        }
         cursor = unsafeBitCast(parent, to: AXUIElement.self)
     }
+    fixedFolderHitChecks["termination"] = "depth-bound"
     return nil
 }
 func fixedFolderButtonEnabled(_ target: AXUIElement) -> Bool {
@@ -440,6 +477,7 @@ if mode == "picker-create-owned-project" {
         down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
         receipt["projectCreationDispatched"] = true; receipt["status"] = "dispatched"
     }
+    receipt["hitChecks"] = fixedFolderHitChecks
     receipt["geometryChecks"] = fixedFolderGeometry
     receipt["nativeStatuses"] = fixedFolderNativeStatuses
     receipt["capturedPid"] = processId
@@ -965,6 +1003,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
                             }
+                            fixedFolder["hitChecks"] = fixedFolderHitChecks
                             fixedFolder["fieldSheetFrameAdmitted"] = fixedFolderSheetFrameAdmitted
                             fixedFolder["ownedSheetFrameChecks"] = fixedFolderSheetGeometry
                             fixedFolder["geometryChecks"] = fixedFolderGeometry
