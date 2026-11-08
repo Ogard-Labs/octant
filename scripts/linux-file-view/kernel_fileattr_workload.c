@@ -13,6 +13,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
@@ -25,6 +26,7 @@ static const char *private_created[] = {
   ROOT "/home/.ssh/id_created_open", ROOT "/home/.ssh/id_created_node",
   ROOT "/home/.ssh/id_created_directory", ROOT "/home/.ssh/id_created_symlink",
   ROOT "/home/.ssh/id_created_alias", ROOT "/private-source-link",
+  ROOT "/home/.ssh/id_created_socket",
 };
 static const char public_created[] = "permitted creation";
 
@@ -129,13 +131,28 @@ static bool creation_controls(void)
     source.st_dev == alias.st_dev && source.st_ino == alias.st_ino && alias.st_size == 2;
   bool temporary_removed = temporary_linked && !unlink(ROOT "/temporary-alias");
   if (temporary >= 0) close(temporary);
+  errno = 0;
+  int public_socket = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  int public_socket_error = public_socket < 0 ? errno : 0;
+  struct sockaddr_un public_address = { .sun_family = AF_UNIX, .sun_path = ROOT "/permitted.socket" };
+  errno = 0;
+  int public_bound = public_socket >= 0 ? bind(public_socket, (struct sockaddr *)&public_address, sizeof(public_address)) : -1;
+  int public_bind_error = public_bound < 0 ? errno : 0;
+  struct stat socket_identity;
+  bool public_socket_type = public_bound == 0 && !lstat(public_address.sun_path, &socket_identity) && S_ISSOCK(socket_identity.st_mode);
+  bool public_socket_closed = public_socket >= 0 && !close(public_socket);
+  bool public_socket_removed = public_bound == 0 && !unlink(public_address.sun_path);
+  printf("OCTANT_UNIX_BIND_PUBLIC {\"socketCreated\":%s,\"socketErrno\":%d,\"result\":%d,\"errno\":%d,\"socketType\":%s,\"closed\":%s,\"removed\":%s}\n",
+    public_socket >= 0 ? "true" : "false", public_socket_error, public_bound, public_bind_error,
+    public_socket_type ? "true" : "false", public_socket_closed ? "true" : "false", public_socket_removed ? "true" : "false");
   printf("OCTANT_CREATE_PUBLIC {\"existingErrors\":%s,\"regularPersisted\":%s,\"directory\":%s,\"fifo\":%s,\"symlink\":%s,\"hardlinkIdentity\":%s,\"anonymousLinked\":%s}\n",
     existing_open && existing_link && existing_symlink ? "true" : "false",
     published ? "true" : "false", directory_removed ? "true" : "false", pipe_observed && pipe_removed ? "true" : "false",
     symbolic_observed && symbolic_removed ? "true" : "false", same_inode && alias_removed ? "true" : "false",
     temporary_observed && temporary_removed ? "true" : "false");
   bool positives = existing_open && existing_link && existing_symlink && published && directory_removed && pipe_observed && pipe_removed && symbolic_observed &&
-    symbolic_removed && same_inode && alias_removed && temporary_observed && temporary_removed;
+    symbolic_removed && same_inode && alias_removed && temporary_observed && temporary_removed &&
+    public_socket >= 0 && public_bound == 0 && public_socket_type && public_socket_closed && public_socket_removed;
   errno = 0;
   int opened = open(private_created[0], O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
   int error = opened < 0 ? errno : 0;
@@ -151,6 +168,17 @@ static bool creation_controls(void)
   errno = 0;
   result = symlink("synthetic target", private_created[3]); error = result < 0 ? errno : 0;
   denied = refused_creation("symlink", result, error) && denied;
+  errno = 0;
+  int private_socket = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  int private_socket_error = private_socket < 0 ? errno : 0;
+  struct sockaddr_un private_address = { .sun_family = AF_UNIX, .sun_path = ROOT "/home/.ssh/id_created_socket" };
+  errno = 0;
+  result = private_socket >= 0 ? bind(private_socket, (struct sockaddr *)&private_address, sizeof(private_address)) : -1;
+  error = result < 0 ? errno : 0;
+  bool private_socket_closed = private_socket >= 0 && !close(private_socket);
+  printf("OCTANT_UNIX_BIND_PRIVATE {\"socketCreated\":%s,\"socketErrno\":%d,\"closed\":%s}\n",
+    private_socket >= 0 ? "true" : "false", private_socket_error, private_socket_closed ? "true" : "false");
+  denied = refused_creation("unix-socket", result, error) && private_socket >= 0 && private_socket_closed && denied;
   errno = 0;
   result = link(KEY, private_created[5]); error = result < 0 ? errno : 0;
   denied = refused_creation("protected-source-link", result, error) && denied;
