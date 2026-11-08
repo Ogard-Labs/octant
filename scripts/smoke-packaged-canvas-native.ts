@@ -542,9 +542,14 @@ const timer = setInterval(() => {
           (row.text.includes("Approve export") && row.text.trim().endsWith(` ${account}`)),
       );
     };
-    const hasOwnedStaticPayload = (snapshot: typeof Snapshot.Type) =>
-      snapshot.texts.some((row) => /"kind"\s*:\s*"canvas-public-share-document"/.test(row.text)) &&
-      snapshot.texts.some((row) => /^"Weekly signups brief",?$/.test(row.text.trim()));
+    const hasOwnedStaticPayload = (snapshot: typeof Snapshot.Type) => {
+      const rows = snapshot.texts.map((row) => row.text.trim());
+      const titleKey = rows.findIndex((row) => /^["']title["']\s*:\s*$/.test(row));
+      const title =
+        rows.some((row) => /^["']title["']\s*:\s*["']Weekly signups brief["'][,.]?$/.test(row)) ||
+        (titleKey >= 0 && /^["']Weekly signups brief["'][,.]?$/.test(rows[titleKey + 1] ?? ""));
+      return rows.some((row) => /"kind"\s*:\s*"canvas-public-share-document"/.test(row)) && title;
+    };
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
