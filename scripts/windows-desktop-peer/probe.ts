@@ -338,12 +338,24 @@ if (mode === "refused") {
       const began = performance.now();
       const late = await replacement.openWindow(lateWindow, 3);
       check(
-        kind(late, "refused") && performance.now() - began < 3500,
+        record(late) &&
+          late.kind === "refused" &&
+          late.reason === "deadline-exceeded" &&
+          performance.now() - began < 3500,
         "a withheld native response refuses within the actual operation bound",
       );
       await until(
         () => server.records.some((value) => value.lateReplyAccepted === false),
         "an answer after native expiry cannot settle the old request",
+      );
+      check(
+        server.records.some(
+          (value) =>
+            record(value.request) &&
+            value.request.windowId === lateWindow &&
+            value.request.generation === 3,
+        ),
+        "the actual native server observed the exact request before its deadline expired",
       );
       check(
         kind(await replacement.renewWindow(replacementHandle, 2), "renewed"),
