@@ -12,6 +12,7 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderToolImage,
   type WindowId,
 } from "@octant/contracts";
 import { hasEligibleImageProfile, listEligibleImageProfiles } from "@octant/domain";
@@ -72,7 +73,26 @@ export interface ImageAgentToolPort {
   readonly forget: () => void;
   /** Why this turn may not generate at all, such as Plan mode; undefined allows it. */
   readonly refusal?: () => string | undefined;
+  /**
+   * Waits for a queued job to finish so the agent can see what it made. Absent
+   * means the call answers as soon as the job is queued.
+   */
+  readonly whenTerminal?: (jobId: ImageJob["id"]) => Promise<ImageJob>;
+  readonly readArtifact?: ImageJobService["readArtifact"];
+  /** Whether the model driving this turn accepts images in a tool result. */
+  readonly readsImages?: () => boolean;
+  /** How long a call waits for its image before answering that it is still generating. */
+  readonly waitMs?: number;
 }
+
+/**
+ * Most generations finish well inside this; a slower one is reported as still
+ * generating rather than holding the turn open for the provider's full time.
+ */
+export const IMAGE_TOOL_WAIT_MS = 120_000;
+
+/** The provider image channel's own bound on one image's base64 text. */
+const MAX_TOOL_IMAGE_BASE64_LENGTH = 2_097_152;
 
 interface ImageToolInput {
   readonly prompt: string;
@@ -83,7 +103,7 @@ interface ImageToolInput {
 }
 
 const DESCRIPTION =
-  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what the person chose: status generating with a jobId (the image appears in this thread when it finishes; it is not ready yet), agent-draws (they want you to make the visual yourself), or cancelled (do not ask again unless they do). Report queued or running work honestly and never invent an image URL.";
+  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one or to place it in a Canvas design as a generated-image asset), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). Never invent an image URL.";
 
 /**
  * App-managed image generation for a Chat, Work, or Code thread.
@@ -205,15 +225,7 @@ export function createImageAgentTools(options: {
           ...(parsed.variantCount === undefined ? {} : { variantCount: parsed.variantCount }),
           ...(parentArtifactRef === undefined ? {} : { parentArtifactRef }),
         });
-        return {
-          result: {
-            status: "generating",
-            jobId: job.id,
-            jobStatus: job.status,
-            modelId: job.modelId,
-            profileInstanceId: job.profileInstanceId,
-          },
-        };
+        return await settledResult(options.port, job, signal);
       } catch (error) {
         return {
           result: {
@@ -227,6 +239,112 @@ export function createImageAgentTools(options: {
 }
 
 /**
+ * What the call answers once its job is queued: the finished images when the
+ * job ends within the wait, and the job still generating otherwise. A finished
+ * image is handed to the model only when it reads images and the image fits
+ * the provider's image channel; the result says when one was left out.
+ */
+async function settledResult(
+  port: ImageAgentToolPort,
+  queued: ImageJob,
+  signal: AbortSignal | undefined,
+): Promise<{
+  readonly result: unknown;
+  readonly isError?: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage>;
+}> {
+  const generating = {
+    result: {
+      status: "generating",
+      jobId: queued.id,
+      modelId: queued.modelId,
+      profileInstanceId: queued.profileInstanceId,
+      message:
+        "The image is still being generated. It appears in this thread when it finishes; do not start another for the same request.",
+    },
+  };
+  if (port.whenTerminal === undefined) return generating;
+  const job = await waitForTerminal(
+    port.whenTerminal(queued.id),
+    port.waitMs ?? IMAGE_TOOL_WAIT_MS,
+    signal,
+  );
+  if (job === undefined) return generating;
+  if (job.status === "cancelled") {
+    return {
+      result: { status: "cancelled", jobId: job.id, message: "The generation was cancelled." },
+    };
+  }
+  if (job.status !== "completed") {
+    return {
+      result: {
+        status: "failed",
+        jobId: job.id,
+        message: job.safetyRefusal ?? job.failure?.message ?? "The image could not be generated.",
+      },
+      isError: true,
+    };
+  }
+  const images: Array<ProviderToolImage> = [];
+  let withheld = 0;
+  if (port.readsImages?.() === true && port.readArtifact !== undefined) {
+    for (const artifact of job.artifacts) {
+      if (artifact.mime !== "image/png" && artifact.mime !== "image/jpeg") {
+        withheld += 1;
+        continue;
+      }
+      const read = await port.readArtifact(job.id, artifact.attachmentId).catch(() => undefined);
+      const data = read === undefined ? undefined : Buffer.from(read.bytes).toString("base64");
+      if (data === undefined || data.length > MAX_TOOL_IMAGE_BASE64_LENGTH) {
+        withheld += 1;
+        continue;
+      }
+      images.push({ mimeType: artifact.mime, data });
+    }
+  }
+  return {
+    result: {
+      status: "completed",
+      jobId: job.id,
+      modelId: job.modelId,
+      profileInstanceId: job.profileInstanceId,
+      images: job.artifacts.map((artifact) => ({
+        attachmentId: artifact.attachmentId,
+        mime: artifact.mime,
+        size: artifact.size,
+      })),
+      message:
+        images.length > 0
+          ? withheld === 0
+            ? "The images are shown in this thread and attached to this result."
+            : `The images are shown in this thread; ${String(withheld)} could not be attached to this result because of its size or format.`
+          : "The images are shown in this thread. You were not shown them, so do not describe what they look like.",
+    },
+    ...(images.length === 0 ? {} : { images }),
+  };
+}
+
+/** The finished job, or undefined when the wait ran out, the call stopped, or the job could not be read. */
+function waitForTerminal(
+  terminal: Promise<ImageJob>,
+  waitMs: number,
+  signal: AbortSignal | undefined,
+): Promise<ImageJob | undefined> {
+  if (signal?.aborted) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const finish = (job: ImageJob | undefined) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(job);
+    };
+    const onAbort = () => finish(undefined);
+    const timer = setTimeout(() => finish(undefined), waitMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    terminal.then(finish, () => finish(undefined));
+  });
+}
+
+/**
  * The image tool for one thread's turn, asking through the host's offer
  * service as the window whose turn it is. Chat, Work, and Code compose it the
  * same way, so every mode asks the same question.
@@ -236,10 +354,12 @@ export function createThreadImageAgentTools(input: {
   readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId;
   readonly offers: Pick<ImageGenerationOfferService, "offer" | "remembered" | "forget">;
-  readonly jobs: Pick<ImageJobService, "enqueue" | "listByScope">;
+  readonly jobs: Pick<ImageJobService, "enqueue" | "listByScope" | "whenTerminal" | "readArtifact">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly refusal?: () => string | undefined;
+  /** Whether the model driving this turn accepts images in a tool result. */
+  readonly readsImages: () => boolean;
 }): AppManagedToolSet | undefined {
   const scope = { threadKind: input.threadKind, scopeId: input.scopeId };
   return createImageAgentTools({
@@ -257,6 +377,9 @@ export function createThreadImageAgentTools(input: {
         }),
       remembered: () => input.offers.remembered(scope),
       forget: () => input.offers.forget(scope),
+      whenTerminal: (jobId) => input.jobs.whenTerminal(jobId),
+      readArtifact: (jobId, attachmentId) => input.jobs.readArtifact(jobId, attachmentId),
+      readsImages: input.readsImages,
       ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
     },
   });

@@ -482,6 +482,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             readImageGenerationCustomSources: () =>
               (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
                 .customSources,
+            readsImages: () =>
+              providerRuntimeRegistry
+                .observedState(thread.providerInstanceId)
+                ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
+                ?.inputModalities.includes("image") === true,
             // Plan changes nothing on the host or outside it, and a generation
             // calls a paid provider and stores the image.
             refusal: () =>

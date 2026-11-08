@@ -5322,6 +5322,15 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   again rather than swapped. An offer lives at most ten minutes and is given
   up when its turn stops or its window goes away; Plan refuses the call,
   because a generation calls a paid provider and stores the result.
+  After Generate the call waits up to two minutes for the job. A finished job
+  answers with each image's attachment id, and the images themselves through
+  the provider's tool-image channel when the turn's model reads images and an
+  image is a PNG or JPEG within that channel's bound; the result says when one
+  was left out. A job still running when the wait ends answers that it is
+  generating, and a failed one gives the provider's reason. A thread draws
+  each image job after the turn the person opened at or before the job was
+  queued, by the rule its Canvases use, and lists only the jobs it cannot
+  place below the transcript.
   With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in

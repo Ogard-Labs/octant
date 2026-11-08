@@ -92,6 +92,10 @@ function tools(
     ) => ImageGenerationOfferOutcome;
     readonly remembered?: ImageGenerationChoice;
     readonly refusal?: () => string | undefined;
+    readonly finished?: Promise<ImageJob>;
+    readonly bytes?: Uint8Array;
+    readonly readsImages?: boolean;
+    readonly waitMs?: number;
   } = {},
 ) {
   const enqueue = vi.fn(async () => job());
@@ -115,6 +119,17 @@ function tools(
       remembered: () => remembered,
       forget,
       ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
+      ...(options.finished === undefined
+        ? {}
+        : {
+            whenTerminal: () => options.finished as Promise<ImageJob>,
+            readArtifact: async () => ({
+              bytes: options.bytes ?? Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+              mime: "image/png" as const,
+            }),
+            readsImages: () => options.readsImages === true,
+            ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
+          }),
     },
   });
   return { ask, enqueue, forget, set };
@@ -272,5 +287,68 @@ describe("createImageAgentTools", () => {
         parentArtifactRef: expect.objectContaining({ attachmentId: parentAttachmentId }),
       }),
     );
+  });
+
+  describe("after the person chooses Generate", () => {
+    it("waits for the image and shows it to a model that reads images", async () => {
+      const { set } = tools([imageProfile()], [], [], {
+        finished: Promise.resolve(job("completed")),
+        readsImages: true,
+      });
+      const outcome = await call(set, { prompt: "a red cube" });
+      expect(outcome.result).toMatchObject({
+        status: "completed",
+        images: [{ attachmentId: parentAttachmentId, mime: "image/png" }],
+      });
+      expect(outcome.images).toEqual([{ mimeType: "image/png", data: "iVBORw==" }]);
+    });
+
+    it("names the finished image without showing it to a model that cannot read images", async () => {
+      const { set } = tools([imageProfile()], [], [], {
+        finished: Promise.resolve(job("completed")),
+        readsImages: false,
+      });
+      const outcome = await call(set, { prompt: "a red cube" });
+      expect(outcome.images).toBeUndefined();
+      expect(outcome.result).toMatchObject({
+        status: "completed",
+        message: expect.stringMatching(/do not describe what they look like/),
+      });
+    });
+
+    it("leaves out an image too large for the provider's image channel and says so", async () => {
+      const { set } = tools([imageProfile()], [], [], {
+        finished: Promise.resolve(job("completed")),
+        readsImages: true,
+        bytes: new Uint8Array(1_600_000),
+      });
+      const outcome = await call(set, { prompt: "a red cube" });
+      expect(outcome.images).toBeUndefined();
+      expect(outcome.result).toMatchObject({ status: "completed" });
+    });
+
+    it("reports the provider's refusal when the job fails", async () => {
+      const failed: ImageJob = {
+        ...job("queued"),
+        status: "failed",
+        safetyRefusal: "The provider declined this prompt.",
+      };
+      const { set } = tools([imageProfile()], [], [], { finished: Promise.resolve(failed) });
+      const outcome = await call(set, { prompt: "a red cube" });
+      expect(outcome.isError).toBe(true);
+      expect(outcome.result).toMatchObject({
+        status: "failed",
+        message: "The provider declined this prompt.",
+      });
+    });
+
+    it("answers that the image is still generating when it takes longer than the call waits", async () => {
+      const { set } = tools([imageProfile()], [], [], {
+        finished: new Promise<ImageJob>(() => undefined),
+        waitMs: 5,
+      });
+      const outcome = await call(set, { prompt: "a red cube" });
+      expect(outcome.result).toMatchObject({ status: "generating" });
+    });
   });
 });

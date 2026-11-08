@@ -523,6 +523,13 @@ export function wireChat(deps: ChatDependencies) {
                       readImageGenerationCustomSources: () =>
                         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                           .imageGeneration.customSources,
+                      readsImages: () =>
+                        providerRuntimeRegistry
+                          .observedState(thread.providerInstanceId)
+                          ?.models.find(
+                            (candidate) => String(candidate.id) === String(thread.modelId),
+                          )
+                          ?.inputModalities.includes("image") === true,
                     }),
                   ),
               }),

@@ -585,6 +585,13 @@ export function wireWork(deps: WorkDependencies) {
                 readImageGenerationCustomSources: () =>
                   (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                     .imageGeneration.customSources,
+                readsImages: () =>
+                  providerRuntimeRegistry
+                    .observedState(input.thread.providerInstanceId)
+                    ?.models.find(
+                      (candidate) => String(candidate.id) === String(input.thread.modelId),
+                    )
+                    ?.inputModalities.includes("image") === true,
               });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,

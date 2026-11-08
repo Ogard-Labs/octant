@@ -54,7 +54,7 @@ import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { ChatTranscript } from "./ChatTranscript";
-import { canvasCardsForShownRun } from "./chatTranscriptWindow";
+import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
@@ -71,7 +71,7 @@ import { isReviewInParallelReference } from "../linkedThread/parseReviewInParall
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
-import { GeneratedImageList } from "../image/GeneratedImageList";
+import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -83,7 +83,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
-import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { canvasRecipeFillTurn } from "../canvas/canvasRecipeFill";
@@ -475,6 +475,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             props.onCanvasReferencesObserved?.(String(view.thread.id), cards),
         }),
   });
+  // Read before the early return too: the transcript draws each image after
+  // the turn that made it, and the list below the transcript shows the rest.
+  const threadImages = useGeneratedImageJobs({
+    client: props.imageGenerationClient,
+    threadKind: "chat-thread",
+    scopeId: view === undefined ? undefined : decodeImageGenerationScopeId(String(view.thread.id)),
+  });
   // Force stop appears when a Stop pressed on this attempt has not ended it
   // after the grace period, and only for a provider that can kill one turn's
   // process alone; any other provider keeps just Stop. These hooks sit above
@@ -519,6 +526,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const thread = view.thread;
   const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
+  const imageClient = props.imageGenerationClient;
   // A Canvas sits inline after the turn that wrote it, in whichever run the
   // transcript shows: the newest turns, or a run the reader jumped to.
   const shownRun = transcriptWindow?.detached;
@@ -532,6 +540,56 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       ? threadCanvases.cards
       : canvasCardsForShownRun(threadCanvases.cards, shownRun.view, shownRun.hasLater),
   );
+  const imagePlacement = placeByTurn(
+    threadTurnSpans(
+      activeChatTurns((shownRun?.view ?? view).turns),
+      (turn) => String(turn.id),
+      (turn) => turn.createdAt,
+    ),
+    shownRun === undefined
+      ? threadImages.jobs
+      : madeInShownRun(
+          threadImages.jobs,
+          (job) => String(job.createdAt),
+          shownRun.view,
+          shownRun.hasLater,
+        ),
+    (job) => String(job.createdAt),
+    (job) => String(job.id),
+  );
+  const attachGeneratedImage = (file: File) => {
+    const displayName = file.name;
+    const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
+    const threadId = view.thread.id;
+    void (async () => {
+      try {
+        const buffer = await file.arrayBuffer();
+        if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+          return;
+        }
+        await props.controller.upload({
+          threadId,
+          attachmentId,
+          displayName,
+          mediaType: file.type || "image/png",
+          bytes: new Uint8Array(buffer),
+        });
+        if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+          await discardAttachmentRef.current({ threadId, attachmentId }).catch(() => undefined);
+          return;
+        }
+        appendPendingAttachment({ id: attachmentId, displayName });
+      } catch {
+        await discardAttachmentRef.current({ threadId, attachmentId }).catch(() => undefined);
+        if (mountedRef.current && activeThreadIdRef.current === String(threadId)) {
+          setAttachmentStatus({
+            kind: "failed",
+            message: `${displayName} could not be attached. Try again.`,
+          });
+        }
+      }
+    })();
+  };
   const canvasPanelId = `chat-canvas-panel-${thread.id}`;
   const pendingExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
   const removeExtensionSelection = props.onRemoveExtensionSelection ?? extensionDraft.remove;
@@ -1118,45 +1176,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               </section>
             )}
             {props.imageGenerationClient === undefined ? null : (
-              <GeneratedImageList
+              <GeneratedImageJobs
                 client={props.imageGenerationClient}
-                onAttach={(file) => {
-                  const displayName = file.name;
-                  const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
-                  const threadId = view.thread.id;
-                  void (async () => {
-                    try {
-                      const buffer = await file.arrayBuffer();
-                      if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
-                        return;
-                      }
-                      await props.controller.upload({
-                        threadId,
-                        attachmentId,
-                        displayName,
-                        mediaType: file.type || "image/png",
-                        bytes: new Uint8Array(buffer),
-                      });
-                      if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
-                        await discardAttachmentRef
-                          .current({ threadId, attachmentId })
-                          .catch(() => undefined);
-                        return;
-                      }
-                      appendPendingAttachment({ id: attachmentId, displayName });
-                    } catch {
-                      await discardAttachmentRef
-                        .current({ threadId, attachmentId })
-                        .catch(() => undefined);
-                      if (mountedRef.current && activeThreadIdRef.current === String(threadId)) {
-                        setAttachmentStatus({
-                          kind: "failed",
-                          message: `${displayName} could not be attached. Try again.`,
-                        });
-                      }
-                    }
-                  })();
-                }}
+                jobs={threadImages.jobs.filter((job) => !imagePlacement.placed.has(String(job.id)))}
+                onAttach={attachGeneratedImage}
+                onEnqueued={threadImages.refresh}
                 profiles={props.imageGenerationProfiles ?? []}
                 scopeId={decodeImageGenerationScopeId(String(thread.id))}
                 threadKind="chat-thread"
@@ -1178,20 +1202,36 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(props.sideChatReturnPending === undefined
                 ? {}
                 : { sideChatReturnPending: props.sideChatReturnPending })}
-              {...(canvasClient === undefined
+              {...(canvasClient === undefined && imageClient === undefined
                 ? {}
                 : {
                     afterTurn: (turn: ChatThreadView["turns"][number]) => (
-                      <ThreadCanvases
-                        cards={canvasPlacement.byRow.get(String(turn.id))}
-                        client={canvasClient}
-                        // Chat's dock admits only Agents, so a Canvas opens as a content tab
-                        // beside the thread instead.
-                        {...(props.onOpenCanvas === undefined
-                          ? {}
-                          : { onOpen: props.onOpenCanvas })}
-                        openLabel="Open Canvas"
-                      />
+                      <>
+                        {canvasClient === undefined ? null : (
+                          <ThreadCanvases
+                            cards={canvasPlacement.byRow.get(String(turn.id))}
+                            client={canvasClient}
+                            // Chat's dock admits only Agents, so a Canvas opens as a content tab
+                            // beside the thread instead.
+                            {...(props.onOpenCanvas === undefined
+                              ? {}
+                              : { onOpen: props.onOpenCanvas })}
+                            openLabel="Open Canvas"
+                          />
+                        )}
+                        {imageClient === undefined ? null : (
+                          <GeneratedImageJobs
+                            client={imageClient}
+                            jobs={imagePlacement.byRow.get(String(turn.id)) ?? []}
+                            label="Images from this turn"
+                            onAttach={attachGeneratedImage}
+                            onEnqueued={threadImages.refresh}
+                            profiles={props.imageGenerationProfiles ?? []}
+                            scopeId={decodeImageGenerationScopeId(String(thread.id))}
+                            threadKind="chat-thread"
+                          />
+                        )}
+                      </>
                     ),
                   })}
               busy={isSending || branchPending}
