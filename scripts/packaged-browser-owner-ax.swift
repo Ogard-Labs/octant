@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import Darwin
 
 // Owned-runner native UI QA. Never requests a TCC permission or reads text-field
 // values, credentials, or another app's tree. Only one named switch has a value.
@@ -333,6 +334,31 @@ if mode == "dock-read" {
     let live = NSRunningApplication(processIdentifier: processId)
     dockObservation["ownedAppIdentityMatched"] = treeIdentityMatched && matchingIds == [processId] && live?.isTerminated == false
     if treeIdentityMatched, matchingIds == [processId], docks.count == 1, let dock = docks.first {
+        var groupPids = [pid_t](repeating: 0, count: 128)
+        let groupCount = proc_listpgrppids(processId, &groupPids, Int32(groupPids.count * MemoryLayout<pid_t>.stride))
+        var inventory: [[String: Any]] = []
+        for member in groupPids.prefix(max(0, min(Int(groupCount), 128))) where member > 1 {
+            var before = proc_bsdinfo(), after = proc_bsdinfo()
+            var path = [CChar](repeating: 0, count: 4 * Int(PATH_MAX))
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            let first = proc_pidinfo(member, PROC_PIDTBSDINFO, 0, &before, size)
+            let pathRead = proc_pidpath(member, &path, UInt32(path.count))
+            let second = proc_pidinfo(member, PROC_PIDTBSDINFO, 0, &after, size)
+            if first == size, second == size, pathRead > 0,
+               before.pbi_pid == UInt32(member), after.pbi_pid == UInt32(member),
+               before.pbi_pgid == UInt32(processId), after.pbi_pgid == UInt32(processId),
+               before.pbi_start_tvsec == after.pbi_start_tvsec, before.pbi_start_tvusec == after.pbi_start_tvusec {
+                let executable = URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().standardizedFileURL.path
+                inventory.append(["pid": member, "parentPid": before.pbi_ppid, "groupPid": before.pbi_pgid,
+                    "birthSeconds": before.pbi_start_tvsec, "birthMicroseconds": before.pbi_start_tvusec,
+                    "kernelCanonicalExecutable": executable,
+                    "underExactStagedBundle": executable.hasPrefix(expectedBundle + "/")])
+            }
+        }
+        dockObservation["ownedGroupKernelInventory"] = inventory
+        dockObservation["ownedGroupKernelInventoryTruncated"] = groupCount >= 128
+        dockObservation["ownedGroupKernelInventoryIncomplete"] = groupCount <= 0 || inventory.count != Int(groupCount)
+        dockObservation["ownedGroupKernelCount"] = groupCount
         let dockElement = AXUIElementCreateApplication(dock.processIdentifier)
         var queue: [(AXUIElement, Int)] = [(dockElement, 0)]
         var cursor = 0, matches: [AXUIElement] = []
@@ -372,9 +398,29 @@ if mode == "dock-read" {
             // identity, label, URL or values are retained, and no action is sent.
             if iconPid == dock.processIdentifier, let frame = bounds(icon) {
                 dockObservation["iconBounds"] = rectangle(frame)
+                var enabled: CFTypeRef?
+                dockObservation["iconEnabledReadError"] = AXUIElementCopyAttributeValue(icon, kAXEnabledAttribute as CFString, &enabled).rawValue
+                dockObservation["iconEnabled"] = binary(enabled).map { $0 as Any } ?? NSNull()
                 let center = CGPoint(x: frame.midX, y: frame.midY)
                 dockObservation["centerOnScreen"] = CGDisplayBounds(CGMainDisplayID()).contains(center)
-                let top = (nativeWindows ?? []).first {
+                var hit: AXUIElement?
+                let hitRead = AXUIElementCopyElementAtPosition(dockElement, Float(center.x), Float(center.y), &hit)
+                var hitPid: pid_t = 0
+                if let hit { _ = AXUIElementGetPid(hit, &hitPid) }
+                var candidate = hit, belongs = false
+                for _ in 0..<8 {
+                    guard let current = candidate else { break }
+                    if CFEqual(current, icon) { belongs = true; break }
+                    var parent: CFTypeRef?
+                    guard AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parent) == .success,
+                          let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+                    candidate = unsafeBitCast(parent, to: AXUIElement.self)
+                }
+                dockObservation["hitTestReadError"] = hitRead.rawValue
+                dockObservation["hitOwnerPid"] = hitPid
+                dockObservation["hitBelongsToExactIcon"] = belongs
+                let pointWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                let top = pointWindows.first {
                     (($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0 && cgBounds($0)?.contains(center) == true
                 }
                 dockObservation["pointWindowOwnerPid"] = (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0

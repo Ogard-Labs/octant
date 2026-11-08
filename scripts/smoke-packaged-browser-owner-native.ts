@@ -423,7 +423,8 @@ end run`;
         visualStateImages.push(`${phase}-${name}.png`);
       };
       const settings = async () => {
-        await native("key", ",");
+        await wait("app-settings-entry", (s) => s.includes("AXButton |  | Settings |"));
+        await native("click", "Settings");
         await wait("settings", (s) => s.includes("Data & storage"));
         await native("reveal", "Data & storage");
         await native("click", "Data & storage");
@@ -459,7 +460,8 @@ end run`;
           );
           await native("click", "Skip setup");
           await wait("skip", (s) => s.includes("AXButton") && !s.includes("Skip setup"));
-        } else await wait("restarted-window", (s) => s.includes("AXButton"), 45_000);
+        } else
+          await wait("restarted-window", (s) => s.includes("AXButton |  | Settings |"), 45_000);
         let snapshot = await settings();
         await capture("preference", snapshot);
         await recordPersisted(`${phase}-before-toggle`, phase === "restart" ? true : undefined);
