@@ -17,8 +17,10 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import type { ServerProject } from "@octant/contracts/server-projects";
 import {
   type HostPlatform,
+  type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
   type SettingsSectionId,
@@ -275,6 +277,8 @@ export interface SettingsViewProps {
   readonly serverProjectsClient?: ServerProjectsClient;
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
+  readonly codeProjectId?: ProjectId | undefined;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -1396,6 +1400,10 @@ function ActiveSectionContent({
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
           />
           <ServerAccessSettings
+            codeProjectId={props.codeProjectId}
+            {...(props.onOpenServerProject === undefined
+              ? {}
+              : { onOpenServerProject: props.onOpenServerProject })}
             {...(props.projectTerminalClient === undefined
               ? {}
               : { terminalClient: props.projectTerminalClient })}

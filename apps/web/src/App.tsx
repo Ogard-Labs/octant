@@ -7093,6 +7093,10 @@ function LaunchedShell(
         standaloneSurface={
           controller.settingsOpen || usageOpen ? (
             <SettingsContainer
+              onOpenServerProject={(project) => {
+                controller.closeSettings();
+                void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+              }}
               projectTerminalClient={projectTerminalClient}
               projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
               actions={actions}

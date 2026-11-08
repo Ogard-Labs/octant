@@ -28,7 +28,8 @@ import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
-import type { SettingsDeepLink } from "@octant/contracts";
+import type { ProjectId, SettingsDeepLink } from "@octant/contracts";
+import type { ServerProject } from "@octant/contracts/server-projects";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ThemeTypography } from "@octant/contracts/theme";
 import type { ChatController } from "../chat/useChatController";
@@ -96,6 +97,8 @@ export interface ShellSettingsSurfaceProps {
   readonly serverProjectsClient?: ServerProjectsClient;
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
+  readonly codeProjectId?: ProjectId | undefined;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
@@ -210,6 +213,10 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.serverProjectsClient === undefined
               ? {}
               : { serverProjectsClient: props.serverProjectsClient })}
+            codeProjectId={props.codeProjectId}
+            {...(props.onOpenServerProject === undefined
+              ? {}
+              : { onOpenServerProject: props.onOpenServerProject })}
             {...(props.projectTerminalClient === undefined
               ? {}
               : { projectTerminalClient: props.projectTerminalClient })}

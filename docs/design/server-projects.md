@@ -270,7 +270,10 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   are suggestions from the existing bounded remote file reader, never from
   this host. Reading or adding a suggestion does not save or run it.
   The Project header, command palette and Settings open the existing action
-  review. Before launch it shows the exact server login and action profile,
+  review. In Settings, a different or unbound Code Project offers an explicit
+  Open Project transition through the existing server-task draft flow; its
+  action editor stays usable, but reads no suggestions and offers no Run until
+  this window holds that Project. Before launch the review shows the exact server login and action profile,
   canonical folder, branch, current task policy and the absence of OS confinement
   on the server. A Code task defaults to its actual remote checkout; choosing
   the server Project folder is explicit. There is no similarly named local

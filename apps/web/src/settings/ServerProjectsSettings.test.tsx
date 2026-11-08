@@ -5,7 +5,13 @@ import type {
   ServerProjectsView,
 } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
-import { decodeAggregateVersion } from "@octant/contracts";
+import {
+  decodeAggregateVersion,
+  decodeProjectId,
+  decodeProjectActionId,
+  decodeProjectTerminalResult,
+  type ProjectId,
+} from "@octant/contracts";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -27,6 +33,12 @@ const SITE: ServerProject = {
   folder: "/srv/website",
   boundAt: "2026-11-01T12:00:00.000Z" as ServerProject["boundAt"],
 };
+const TEST_ACTION = {
+  id: decodeProjectActionId("93000000-0000-4000-8000-000000000001"),
+  name: "Test",
+  command: "bun run test",
+  directory: ".",
+};
 
 function setup(options: {
   readonly initial?: ServerProjectsView;
@@ -34,6 +46,8 @@ function setup(options: {
   readonly servers?: ReadonlyArray<ShieldServer>;
   readonly answer?: (command: ServerProjectsCommand) => ServerProjectsCommandResult;
   readonly terminalClient?: ProjectTerminalClient;
+  readonly codeProjectId?: ProjectId;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
 }) {
   const initial = options.initial ?? { projects: [SITE] };
   const read = vi.fn(async () => options.read?.() ?? initial);
@@ -53,12 +67,73 @@ function setup(options: {
       client={{ read, command }}
       servers={servers}
       {...(options.terminalClient === undefined ? {} : { terminalClient: options.terminalClient })}
+      {...(options.codeProjectId === undefined ? {} : { codeProjectId: options.codeProjectId })}
+      {...(options.onOpenServerProject === undefined
+        ? {}
+        : { onOpenServerProject: options.onOpenServerProject })}
     />,
   );
   return { command, user };
 }
 
 describe("ServerProjectsSettings", () => {
+  it.each([undefined, decodeProjectId("11111111-1111-4111-8111-222222222222")])(
+    "offers an explicit Project open before requesting actions outside the window binding",
+    async (codeProjectId) => {
+      const execute = vi.fn(async () => {
+        throw Error("This window cannot read that Project's action files.");
+      });
+      const onOpenServerProject = vi.fn();
+      const { user } = setup({
+        initial: {
+          projects: [
+            {
+              ...SITE,
+              actions: [TEST_ACTION],
+            },
+          ],
+        },
+        terminalClient: { execute },
+        ...(codeProjectId === undefined ? {} : { codeProjectId }),
+        onOpenServerProject,
+      });
+      await screen.findByRole("button", { name: "Actions" });
+      expect(screen.queryByRole("button", { name: "Run Test" })).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Actions" }));
+      expect(screen.getByRole("textbox", { name: "Action command" })).toHaveValue("bun run test");
+      expect(execute).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Open Website" }));
+      expect(onOpenServerProject).toHaveBeenCalledWith(expect.objectContaining({ id: SITE.id }));
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+  it("requests review without starting an action in the window's bound Project", async () => {
+    const execute = vi.fn(async () =>
+      decodeProjectTerminalResult({
+        kind: "project-action-preview",
+        projectId: SITE.id,
+        projectVersion: 0,
+        action: {
+          actionId: TEST_ACTION.id,
+          name: TEST_ACTION.name,
+          folder: SITE.folder,
+          branch: "main",
+        },
+      }),
+    );
+    const { user } = setup({
+      initial: { projects: [{ ...SITE, actions: [TEST_ACTION] }] },
+      codeProjectId: SITE.id,
+      terminalClient: { execute },
+    });
+    await user.click(await screen.findByRole("button", { name: "Run Test" }));
+    expect(await screen.findByRole("button", { name: "Run action" })).toBeEnabled();
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "preview-action",
+      projectId: SITE.id,
+      actionId: TEST_ACTION.id,
+    });
+  });
   it("shows a binding refusal after the Project whose action editor was open is removed", async () => {
     const { user } = setup({
       answer: (command) =>
@@ -114,7 +189,7 @@ describe("ServerProjectsSettings", () => {
         { name: "Test", command: "bun run test", directory: ".", source: "package.json" as const },
       ],
     }));
-    const { user, command } = setup({ terminalClient: { execute } });
+    const { user, command } = setup({ terminalClient: { execute }, codeProjectId: SITE.id });
     await user.click(await screen.findByRole("button", { name: "Actions" }));
     const suggestion = await screen.findByRole("button", { name: /bun run test/ });
     expect(command).not.toHaveBeenCalled();
