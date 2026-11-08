@@ -578,7 +578,13 @@ export async function shutdownManagedServer(
   if (hasExited(child)) return;
   const gracePeriodMs = options.gracePeriodMs ?? 5_000;
   const forceKillWaitMs = options.forceKillWaitMs ?? 1_000;
-  if (!(await options.requestStop?.())) deliverSignal(child, "SIGTERM", "sigterm");
+  let requested = false;
+  try {
+    requested = (await options.requestStop?.()) === true;
+  } catch {
+    // A failed native transport must not skip cleanup of the held child.
+  }
+  if (!requested) deliverSignal(child, "SIGTERM", "sigterm");
   const exited = await (options.waitForExit ?? waitForChildExit)(child, gracePeriodMs);
   if (exited || hasExited(child)) return;
   deliverSignal(child, "SIGKILL", "sigkill");

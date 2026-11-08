@@ -1086,6 +1086,19 @@ describe("shutdownManagedServer", () => {
     },
   );
 
+  it("joins its held child through signal fallback when native stop rejects", async () => {
+    const child = { exitCode: null, signalCode: null, kill: vi.fn() };
+    const waitForExit = vi.fn(async () => true);
+    await shutdownManagedServer(child, {
+      requestStop: async () => {
+        throw Error("native transport failed");
+      },
+      waitForExit,
+    });
+    expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+    expect(waitForExit).toHaveBeenCalledOnce();
+  });
+
   it("requests graceful termination and does not force-kill an exited child", async () => {
     const child = {
       exitCode: null as number | null,
