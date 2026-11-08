@@ -13574,11 +13574,20 @@ cards; general Azure CLI credentials remain unavailable by design.
   mount-write access. Its automatic scope ends before mount-write cleanup,
   including on refusal. The common setter only compares the decision after
   the existing security check, immediately before the filesystem effect under
-  the inode lock; it never prepares or waits. Its nested attribute read remains
-  unchanged. Native acceptance requires refusing the protected inode's NODUMP
+  the inode lock; it never prepares or waits. Ordinary attribute reads prepare
+  READ in `ioctl_getflags`, `ioctl_fsgetxattr` and `file_getattr`, using their
+  actual held file or resolved path. Their scopes end before copying the
+  admitted result to userspace. The exported getter consumes only an exact READ
+  decision. Only the setter's private internal getter inspects its exact
+  prepared WRITE without consuming it; the final setter consumes once. Both
+  retain native checks and perform no broker I/O. The private purpose is not
+  caller-selectable, and an ordinary read cannot borrow WRITE authority. Failed
+  inspection exits through unlock and outer cleanup, without retry or reuse.
+  Native acceptance requires refusing a protected held attribute read with its
+  output unchanged, and refusing the protected inode's NODUMP
   change with flags and metadata unchanged while the public file's same toggle,
   readback, restoration and permitted writes succeed.
-  This is not a global `inode_setattr` or ioctl guard. Attribute GET routes,
+  This is not a global `inode_setattr` or ioctl guard. Other attribute routes,
   internal privilege clearing during writes, other filesystem ioctls, stacked
   filesystems and kernel credential overrides remain unfinished and must be
   proved before any production coverage is enabled;

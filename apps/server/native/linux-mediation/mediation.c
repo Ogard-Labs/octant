@@ -364,9 +364,10 @@ void octant_metadata_end(struct octant_metadata_scope *scope)
 		clear_metadata(metadata);
 }
 
-/* These final checks can run with an inode lock held. They consume only
- * this task's paired preflight; they never ask the broker or inspect paths. */
-static int check_metadata(struct dentry *dentry, u32 operation)
+/* These checks can run with an inode lock held. They compare only this task's
+ * paired preflight; ordinary effects consume it and a setter read inspects it.
+ * Neither path asks the broker or inspects paths. */
+static int check_metadata_decision(struct dentry *dentry, u32 operation, bool consume)
 {
 	struct inode *inode = d_inode(dentry);
 	struct octant_context *context;
@@ -386,10 +387,29 @@ static int check_metadata(struct dentry *dentry, u32 operation)
 		metadata->inode == inode->i_ino &&
 		metadata->device_major == MAJOR(inode->i_sb->s_dev) &&
 		metadata->device_minor == MINOR(inode->i_sb->s_dev);
-	metadata->prepared = false;
+	if (consume)
+		metadata->prepared = false;
 	spin_unlock(&namespace_lock);
 	spin_unlock_irqrestore(&context->lock, flags);
 	return valid ? 0 : -EACCES;
+}
+
+static int check_metadata(struct dentry *dentry, u32 operation)
+{
+	return check_metadata_decision(dentry, operation, true);
+}
+
+int octant_metadata_check_read(struct dentry *dentry)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+}
+
+/* Only the setter's private read path inspects its already-prepared WRITE.
+ * A failed inspection returns through unlock and outer scope cleanup; it is
+ * never retried or turned into authority for a later user read or mutation. */
+int octant_metadata_check_write_read(struct dentry *dentry)
+{
+	return check_metadata_decision(dentry, OCTANT_MEDIATION_WRITE, false);
 }
 
 /* Audited ordinary mutation entries call this under the actual inode lock,

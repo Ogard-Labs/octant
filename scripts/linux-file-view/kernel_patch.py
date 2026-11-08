@@ -204,6 +204,55 @@ def install_fileattr_writes(kernel: Path) -> None:
     path.write_text(include_bridge(source))
 
 
+def install_fileattr_reads(kernel: Path) -> None:
+    path = kernel / "fs/file_attr.c"
+    source = path.read_text()
+    if "octant_fileattr_get" in source:
+        raise ValueError("File attribute read preparation already exists")
+    call = "\terr = vfs_fileattr_get(file->f_path.dentry, &fa);"
+    scoped = ("\t{\n\t\tstruct octant_metadata_scope admission\n"
+              "\t\t\t__attribute__((cleanup(octant_metadata_end))) =\n"
+              "\t\t\toctant_metadata_begin(file->f_path.dentry, OCTANT_MEDIATION_READ);\n"
+              "\t\terr = admission.error;\n\t\tif (!err)\n\t\t" + call + "\n\t}")
+    for name in ("ioctl_getflags", "ioctl_fsgetxattr"):
+        source = metadata_write_entry(source, name, {call: scoped})
+    call = "\terror = vfs_fileattr_get(filepath.dentry, &fa);"
+    if source.count(call) != 1:
+        raise ValueError("Pinned file_getattr call differs")
+    scoped = ("\t{\n\t\tstruct octant_metadata_scope admission\n"
+              "\t\t\t__attribute__((cleanup(octant_metadata_end))) =\n"
+              "\t\t\toctant_metadata_begin(filepath.dentry, OCTANT_MEDIATION_READ);\n"
+              "\t\terror = admission.error;\n\t\tif (!error)\n\t\t" + call + "\n\t}")
+    source = source.replace(call, scoped, 1)
+    call = "\treturn inode->i_op->fileattr_get(dentry, fa);"
+    source = metadata_write_entry(source, "vfs_fileattr_get", {
+        call: "\terror = inspecting_write ? octant_metadata_check_write_read(dentry) :\n"
+              "\t\toctant_metadata_check_read(dentry);\n\tif (error)\n\t\treturn error;\n\n" + call,
+    })
+    declaration = "int vfs_fileattr_get(struct dentry *dentry, struct file_kattr *fa)"
+    export = "EXPORT_SYMBOL(vfs_fileattr_get);"
+    call = "\terr = vfs_fileattr_get(dentry, &old_ma);"
+    if any(source.count(anchor) != 1 for anchor in (declaration, export, call)):
+        raise ValueError("Pinned private file attribute getter differs")
+    documentation = "/**\n * vfs_fileattr_get - retrieve miscellaneous file attributes\n"
+    if source.count(documentation) != 1:
+        raise ValueError("Pinned public getter documentation differs")
+    start = source.index(documentation)
+    end = source.index("*/\n", start) + 3
+    if not source.startswith(declaration, end):
+        raise ValueError("Pinned public getter documentation is not adjacent")
+    documentation = source[start:end]
+    source = source[:start] + source[end:]
+    source = source.replace(declaration,
+        "static int octant_fileattr_get(struct dentry *dentry, struct file_kattr *fa,\n"
+        "\t\t\t       bool inspecting_write)", 1)
+    source = source.replace(export, documentation + declaration + "\n{\n\treturn octant_fileattr_get(dentry, fa, false);\n}\n" + export, 1)
+    source = source.replace(call, "\terr = octant_fileattr_get(dentry, &old_ma, true);", 1)
+    # The exported getter always consumes READ. Only the setter's private
+    # call inspects WRITE without consuming its final mutation decision.
+    path.write_text(source)
+
+
 def install_metadata(kernel: Path) -> None:
     # Scope the decision to this one actual syscall's pinned native object.
     # Read/write ACL dispatchers are included before any inode lock. Final
@@ -314,3 +363,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_metadata(kernel)
     install_metadata_writes(kernel)
     install_fileattr_writes(kernel)
+    install_fileattr_reads(kernel)
