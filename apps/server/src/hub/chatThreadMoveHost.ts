@@ -27,6 +27,7 @@ import type {
   ThreadMoveDestinationHost,
   ThreadMoveSourceHost,
 } from "./threadMoveService";
+import type { ThreadMoveHolds } from "./threadMoveHolds";
 
 /** The format the Chat conversation part is written in; a destination refuses any other. */
 export const MOVED_CHAT_CONVERSATION_FORMAT = "octant.thread-move.chat/1" as const;
@@ -60,29 +61,6 @@ type MovedChatConversation = typeof MovedChatConversation.Type;
 const decodeConversation = Schema.decodeUnknownSync(MovedChatConversation);
 const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId);
 const decodeProjectId = Schema.decodeUnknownSync(ProjectId);
-
-/** Which threads a move holds on this host, frozen or arriving. */
-export interface ThreadMoveHolds {
-  readonly hold: (thread: MovedThreadReference) => void;
-  readonly release: (thread: MovedThreadReference) => void;
-  readonly isHeld: (thread: MovedThreadReference) => boolean;
-}
-
-export function createThreadMoveHolds(
-  initial: ReadonlyArray<MovedThreadReference> = [],
-): ThreadMoveHolds {
-  const key = (thread: MovedThreadReference) => `${thread.mode}:${thread.threadId}`;
-  const held = new Set(initial.map(key));
-  return {
-    hold: (thread) => {
-      held.add(key(thread));
-    },
-    release: (thread) => {
-      held.delete(key(thread));
-    },
-    isHeld: (thread) => held.has(key(thread)),
-  };
-}
 
 export interface ChatThreadMoveHostOptions {
   readonly readView: (threadId: ChatThreadId) => ChatThreadView | undefined;

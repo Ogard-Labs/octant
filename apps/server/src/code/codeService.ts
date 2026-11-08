@@ -1,4 +1,5 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
 import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
@@ -778,6 +779,8 @@ export interface CodeServiceOptions {
   }) => Promise<void>;
   readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
+  /** Whether a move holds a thread; a held thread takes no command. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly linearIssueContext?: LinearIssueContextPort;
   readonly terminalSessions?: TerminalSessionImportPort;
   /**
@@ -973,6 +976,7 @@ export class CodeService {
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold?: (threadId: string) => boolean;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -1027,6 +1031,9 @@ export class CodeService {
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
+    }
+    if (options.moveHold !== undefined) {
+      this.#moveHold = options.moveHold;
     }
     this.#terminalSessions = options.terminalSessions;
     if (options.linearIssueContext !== undefined) {
@@ -1357,6 +1364,9 @@ export class CodeService {
         command = decodeCodeCommand(input);
       } catch {
         throw this.#failure("invalid", "Code command is invalid.");
+      }
+      if ("threadId" in command && this.#moveHold?.(String(command.threadId)) === true) {
+        throw this.#failure("conflict", THREAD_MOVING_REFUSAL);
       }
       // A fork is a managed creation whose start the host resolves itself, so
       // it runs every gate that creation runs, plus laying the files down.

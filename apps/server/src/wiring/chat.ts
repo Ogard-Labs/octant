@@ -1,5 +1,5 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
-import type { ThreadMoveHolds } from "../hub/chatThreadMoveHost";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {

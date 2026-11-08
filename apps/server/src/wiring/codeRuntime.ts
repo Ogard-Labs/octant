@@ -1,4 +1,5 @@
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
@@ -356,7 +357,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeEvidence"
     | "providerRuntimeRegistry"
     | "selectCodeConversation"
-  >;
+  > & {
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+  };
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
@@ -582,6 +586,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
           if (checkout?.kind !== "managed-worktree") return undefined;
