@@ -4,6 +4,7 @@ import {
   BENCHMARK_SUITE_AGGREGATE_TYPE,
   BenchmarkCellJudged,
   BenchmarkCellRated,
+  BenchmarkCellRequeued,
   BenchmarkCellSettled,
   BenchmarkCellStarted,
   BenchmarkRunEnded,
@@ -24,6 +25,7 @@ const decodeSuiteSaved = Schema.decodeUnknownSync(BenchmarkSuiteSaved);
 const decodeSuiteDeleted = Schema.decodeUnknownSync(BenchmarkSuiteDeleted);
 const decodeRunStarted = Schema.decodeUnknownSync(BenchmarkRunStarted);
 const decodeCellStarted = Schema.decodeUnknownSync(BenchmarkCellStarted);
+const decodeCellRequeued = Schema.decodeUnknownSync(BenchmarkCellRequeued);
 const decodeCellSettled = Schema.decodeUnknownSync(BenchmarkCellSettled);
 const decodeCellJudged = Schema.decodeUnknownSync(BenchmarkCellJudged);
 const decodeCellRated = Schema.decodeUnknownSync(BenchmarkCellRated);
@@ -147,6 +149,18 @@ export class BenchmarkProjection implements Projection {
               ...(payload.turnId === undefined ? {} : { turnId: payload.turnId }),
               startedAt: payload.startedAt,
             };
+          }),
+        );
+        return;
+      }
+      case BENCHMARK_EVENT_NAMES.cellRequeued: {
+        const payload = decodeCellRequeued(event.payload);
+        this.#set(
+          runId,
+          version,
+          withCell(run, String(payload.cellId), (cell) => {
+            const { startedAt: _startedAt, turnId: _turnId, ...queued } = cell;
+            return { ...queued, state: "queued" };
           }),
         );
         return;

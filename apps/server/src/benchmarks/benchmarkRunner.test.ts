@@ -26,6 +26,7 @@ interface FakeTurn {
   outcome: Extract<BenchmarkTurnReading, { status: "turn" }>["outcome"];
   answer?: string;
   failureMessage?: string;
+  failureCode?: string;
 }
 
 /** A Chat that answers only when the test lets a turn finish. */
@@ -54,6 +55,7 @@ class FakeChat implements BenchmarkChatPort {
       attemptId: "attempt",
       outcome: turn.outcome,
       ...(turn.failureMessage === undefined ? {} : { failureMessage: turn.failureMessage }),
+      ...(turn.failureCode === undefined ? {} : { failureCode: turn.failureCode }),
     };
   }
 
@@ -370,6 +372,67 @@ describe("benchmark runner", () => {
 
     expect(chat.archived).toContain(threadOf(String(run.cells[0]!.cellId)));
     expect(chat.archived).not.toContain(threadOf(String(run.cells[1]!.cellId)));
+  });
+
+  it("counts each cell started in a pass once when it projects the budget", async () => {
+    const { store, chat, runner, projection, metrics } = setup();
+    const run = sampleRun({ repetitions: 2, budget: { maxTokens: 400 } });
+    store.runStarted({ run });
+    await runner.tick();
+    for (const cell of run.cells.slice(0, 2)) {
+      const thread = threadOf(String(cell.cellId));
+      metrics.set(thread, [record(thread, 100)]);
+      chat.finish(thread, "hello");
+    }
+
+    await runner.tick();
+
+    // 200 tokens spent over 2 cells, 100 each: two more cells project to 300 and 400, within 400.
+    const cells = projection.run(benchmarkIds.run)!.cells;
+    expect(cells.slice(2).map((cell) => cell.state)).toEqual(["running", "running"]);
+    expect(chat.starts).toHaveLength(4);
+  });
+
+  it("puts a cell back to queued when Chat had no capacity for its attempt, then retries it on its own turn", async () => {
+    const { store, chat, runner, projection } = setup();
+    const run = sampleRun();
+    store.runStarted({ run });
+    await runner.tick();
+    const thread = threadOf(String(run.cells[0]!.cellId));
+    const turn = chat.turns.get(thread)!;
+    turn.outcome = "interrupted";
+    turn.failureCode = "capacity-unavailable";
+    turn.failureMessage = "Waited for a free request slot.";
+
+    await runner.tick();
+
+    const requeued = projection.run(benchmarkIds.run)!.cells[0]!;
+    expect(requeued.state).toBe("queued");
+    expect(requeued.failureReason).toBeUndefined();
+    expect(chat.starts).toHaveLength(2);
+
+    await runner.tick();
+
+    expect(projection.run(benchmarkIds.run)!.cells[0]?.state).toBe("running");
+    expect(chat.starts).toHaveLength(3);
+  });
+
+  it("still fails a cell Chat interrupted for another reason, such as a spend ceiling", async () => {
+    const { store, chat, runner, projection } = setup();
+    const run = sampleRun();
+    store.runStarted({ run });
+    await runner.tick();
+    const turn = chat.turns.get(threadOf(String(run.cells[0]!.cellId)))!;
+    turn.outcome = "interrupted";
+    turn.failureCode = "spend-ceiling-exhausted";
+    turn.failureMessage = "The Project spend ceiling is reached.";
+
+    await runner.tick();
+
+    expect(projection.run(benchmarkIds.run)!.cells[0]).toMatchObject({
+      state: "failed",
+      failureReason: "The Project spend ceiling is reached.",
+    });
   });
 
   describe("judging", () => {

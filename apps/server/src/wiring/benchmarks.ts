@@ -64,7 +64,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
   const chat = createBenchmarkChatPort({
     chat: {
       read: (threadId: ChatThreadId) => chatService.read(threadId),
-      execute: async (command) => chatService.execute(command),
+      execute: async (command, context) => chatService.execute(command, context),
     },
     answer: (threadId, turnId) =>
       extractReply(chatService.read(decodeChatThreadId(threadId)), turnId),

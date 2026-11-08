@@ -24,7 +24,7 @@ import {
   type BenchmarkPatternMatcher,
 } from "@octant/domain";
 import { deterministicUuid } from "../deterministicUuid";
-import type { BenchmarkChatPort } from "./benchmarkChatPort";
+import { CAPACITY_UNAVAILABLE_FAILURE_CODE, type BenchmarkChatPort } from "./benchmarkChatPort";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 
@@ -39,7 +39,7 @@ export interface BenchmarkRunnerOptions {
   readonly projection: Pick<BenchmarkProjection, "run" | "runs" | "runningRuns">;
   readonly store: Pick<
     BenchmarkEventStore,
-    "cellStarted" | "cellSettled" | "cellJudged" | "runEnded"
+    "cellStarted" | "cellRequeued" | "cellSettled" | "cellJudged" | "runEnded"
   >;
   readonly turnMetrics: {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
@@ -112,6 +112,8 @@ export class BenchmarkRunner {
   readonly #starting = new Set<string>();
   /** When a judge turn was first seen running, for its time limit; a restart starts the clock again. */
   readonly #judgeSeen = new Map<string, number>();
+  /** Cells put back to queued in this pass; they wait for the next tick to try again. */
+  readonly #requeued = new Set<string>();
   #chain: Promise<unknown> = Promise.resolve();
   #tickPending = false;
   #stopped = false;
@@ -190,6 +192,7 @@ export class BenchmarkRunner {
     const runs = this.#options.projection.runningRuns();
     if (runs.length === 0) return;
     const counts = this.#runningCounts(runs);
+    this.#requeued.clear();
     for (const { runId } of runs) {
       if (this.#stopped) return;
       await this.#advance(runId, counts);
@@ -307,6 +310,14 @@ export class BenchmarkRunner {
     const { threadId, submissionId } = benchmarkJudgeIdentity(cellId);
     const reading = chat.readTurn(threadId, submissionId);
     if (reading.status !== "turn") return "not-started";
+    // Chat had no room for the judge's attempt: ask again on the same turn later
+    // rather than recording a failed judgement for a lack of capacity.
+    if (
+      reading.outcome === "interrupted" &&
+      reading.failureCode === CAPACITY_UNAVAILABLE_FAILURE_CODE
+    ) {
+      return "not-started";
+    }
     if (reading.outcome === "completed") {
       const reply = chat.readAnswer(threadId, reading.turnId);
       const parsed = reply === undefined ? undefined : parseBenchmarkJudgeReply(reply);
@@ -463,6 +474,16 @@ export class BenchmarkRunner {
       return true;
     }
     if (
+      reading.outcome === "interrupted" &&
+      reading.failureCode === CAPACITY_UNAVAILABLE_FAILURE_CODE
+    ) {
+      // Chat had no room for the attempt. The cell goes back to queued and is
+      // retried on its existing turn at a later tick, never failed for it.
+      this.#options.store.cellRequeued({ runId: run.runId, cellId: cell.cellId });
+      this.#requeued.add(cellId);
+      return true;
+    }
+    if (
       reading.outcome === "failed" ||
       reading.outcome === "interrupted" ||
       reading.outcome === "cancelled"
@@ -489,13 +510,13 @@ export class BenchmarkRunner {
     const run = this.#options.projection.run(runId);
     if (run === undefined || run.status !== "running") return;
     const candidates = nextBenchmarkCells(run, counts, BENCHMARK_CONCURRENCY_LIMITS);
-    let startedNow = 0;
     for (const candidate of candidates) {
+      if (this.#requeued.has(String(candidate.cellId))) continue;
       const current = this.#options.projection.run(runId);
       if (current === undefined || current.status !== "running") return;
       const spent = this.#spent(current);
-      const runningInRun =
-        current.cells.filter((cell) => cell.state === "running").length + startedNow;
+      // A cell started earlier in this pass is already running in `current`.
+      const runningInRun = current.cells.filter((cell) => cell.state === "running").length;
       const decision = benchmarkBudgetDecision(
         current.budget,
         { tokens: spent.tokens, costUsd: spent.costUsd },
@@ -509,7 +530,6 @@ export class BenchmarkRunner {
       }
       const outcome = await this.#startCell(current, candidate);
       if (outcome === "started") {
-        startedNow += 1;
         const provider = current.contenders[candidate.contenderIndex]?.providerInstanceId;
         if (provider !== undefined) {
           counts.byProvider.set(
