@@ -2,7 +2,15 @@ import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
-import { ProviderInstanceId, ProviderModelId } from "./providers";
+import {
+  ProviderFailureCategory,
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderOutputStopReason,
+  ProviderProcessDiagnostic,
+  ProviderRefusalReason,
+  ProviderUsageLimit,
+} from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
@@ -125,6 +133,104 @@ export const TurnStopReason = Schema.Literal(
 );
 export type TurnStopReason = typeof TurnStopReason.Type;
 
+export const MAX_TURN_DIAGNOSTIC_TOOLS = 32;
+export const MAX_TURN_FAILURE_MESSAGE_LENGTH = 512;
+
+/** A tool name as the runtime reported it, bounded so a frame stays small. */
+const DiagnosticToolName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+
+/**
+ * One tool's calls within a turn. `failed` counts `tool-failure` results and
+ * `unfinished` counts calls that started and never reported a result before
+ * the turn ended. Durations cover only calls that finished, from `tool-start`
+ * to the result.
+ */
+export const TurnToolTally = Schema.Struct({
+  toolName: DiagnosticToolName,
+  calls: PositiveInt,
+  failed: NonNegativeInt,
+  unfinished: NonNegativeInt,
+  /** Calls whose shell result reported a non-zero exit status. */
+  nonZeroExits: Schema.optional(PositiveInt),
+  totalMs: NonNegativeInt,
+  maxMs: NonNegativeInt,
+})
+  .annotations(strict)
+  .pipe(Schema.filter((tally) => tally.failed + tally.unfinished <= tally.calls));
+export type TurnToolTally = typeof TurnToolTally.Type;
+
+/** The retries one reason caused, and how long they made the turn wait. */
+export const TurnRetryTally = Schema.Struct({
+  reason: Schema.Literal("rate-limited", "unavailable", "stream-interrupted", "empty-completion"),
+  count: PositiveInt,
+  waitMs: NonNegativeInt,
+}).annotations(strict);
+export type TurnRetryTally = typeof TurnRetryTally.Type;
+
+/**
+ * The provider's structured reason for failing a turn. Everything but
+ * `message` is a closed value the adapter set. `message` is the provider's own
+ * line, redacted by the diagnostics rules (credentials, URL sign-ins, and home
+ * paths are removed), folded onto one line, and cut to
+ * `MAX_TURN_FAILURE_MESSAGE_LENGTH`; it is what a person investigating the
+ * failure reads first.
+ */
+export const TurnFailureFacts = Schema.Struct({
+  category: ProviderFailureCategory,
+  reason: Schema.optional(ProviderRefusalReason),
+  process: Schema.optional(
+    Schema.Struct({
+      stage: ProviderProcessDiagnostic.fields.stage,
+      kind: ProviderProcessDiagnostic.fields.kind,
+      exitCode: ProviderProcessDiagnostic.fields.exitCode,
+      signal: ProviderProcessDiagnostic.fields.signal,
+    }).annotations(strict),
+  ),
+  usageLimit: Schema.optional(ProviderUsageLimit.fields.kind),
+  retryAfterMs: Schema.optional(PositiveInt),
+  message: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(MAX_TURN_FAILURE_MESSAGE_LENGTH),
+      Schema.pattern(/^[^\n\r]*$/),
+    ),
+  ),
+}).annotations(strict);
+export type TurnFailureFacts = typeof TurnFailureFacts.Type;
+
+/**
+ * What went wrong, or nearly wrong, inside one turn, counted from the same
+ * normalized runtime events its timing is. Counts are absent rather than zero
+ * except the two tool totals, which are always stated so a turn that ran no
+ * tool reads as zero calls. It holds closed values and numbers, plus the one
+ * redacted failure line; tool input, tool output, and tool failure text never
+ * appear, because the transcript already holds them for the person who opens
+ * the turn.
+ */
+export const TurnDiagnostics = Schema.Struct({
+  toolCalls: NonNegativeInt,
+  toolFailures: NonNegativeInt,
+  /** Per-tool tallies, the most-called first, cut to `MAX_TURN_DIAGNOSTIC_TOOLS`. */
+  tools: Schema.optional(
+    Schema.Array(TurnToolTally).pipe(Schema.maxItems(MAX_TURN_DIAGNOSTIC_TOOLS)),
+  ),
+  /** Set when more distinct tools ran than `tools` holds; the totals still count them. */
+  toolsTruncated: Schema.optional(Schema.Literal(true)),
+  retries: Schema.optional(Schema.Array(TurnRetryTally).pipe(Schema.maxItems(4))),
+  approvalRequests: Schema.optional(PositiveInt),
+  inputRequests: Schema.optional(PositiveInt),
+  /** Rolling-window or bucket reports at warning or exhausted while the turn ran. */
+  rateLimitWarnings: Schema.optional(PositiveInt),
+  rateLimitExhausted: Schema.optional(Schema.Literal(true)),
+  compactions: Schema.optional(PositiveInt),
+  /** The runtime's own reason a completed reply stopped, when it gave one. */
+  outputStopReason: Schema.optional(ProviderOutputStopReason),
+  /** Present when the provider ended the turn with a structured failure. */
+  failure: Schema.optional(TurnFailureFacts),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((diagnostics) => diagnostics.toolFailures <= diagnostics.toolCalls));
+export type TurnDiagnostics = typeof TurnDiagnostics.Type;
+
 /**
  * One turn of any thread on any provider, recorded when it ends however it
  * ends. Failed and cancelled turns are recorded too: what they cost and how
@@ -140,6 +246,8 @@ export const TurnMetricsRecord = Schema.Struct({
   /** Absent when the provider reported no usage, which is not the same as zero. */
   usage: Schema.optional(TurnUsage),
   metrics: TurnMetrics,
+  /** Absent on turns recorded before diagnostics were counted. */
+  diagnostics: Schema.optional(TurnDiagnostics),
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
 })
@@ -171,5 +279,6 @@ export const TURN_METRICS_EVENT_NAMES = {
 export const decodeTurnUsage = Schema.decodeUnknownSync(TurnUsage);
 export const decodeTurnMetrics = Schema.decodeUnknownSync(TurnMetrics);
 export const decodeSessionMetrics = Schema.decodeUnknownSync(SessionMetrics);
+export const decodeTurnDiagnostics = Schema.decodeUnknownSync(TurnDiagnostics);
 export const decodeTurnMetricsRecord = Schema.decodeUnknownSync(TurnMetricsRecord);
 export const decodeTurnMetricsSummary = Schema.decodeUnknownSync(TurnMetricsSummary);

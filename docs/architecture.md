@@ -6006,6 +6006,38 @@ cleanup. If cancellation wins that interval, the record carries the final
 interrupted outcome and usage once; it does not also retain a successful record
 for the same turn. Advisor review starts only for a successfully settled turn.
 
+**What went wrong inside a turn, for every provider.** The same fold that
+times a turn also counts its trouble (`turnDiagnosticsPolicy` in
+`@octant/domain`), from the same normalized runtime events, so a tool failure
+on Codex and one on Octant Harness land in the same tally and no driver counts
+anything itself. The turn's `turn-metrics-recorded` frame carries the result as
+`diagnostics`:
+
+- Tool calls and tool failures in total, always stated, and per tool (the
+  most-called 32, with a flag when more ran): calls, `tool-failure` results,
+  calls still open when the turn ended, shell results with a non-zero exit, and
+  the total and longest `tool-start`-to-result time. A result whose start the
+  provider never streamed counts in the totals only.
+- Retries by reason (`rate-limited`, `unavailable`, `stream-interrupted`,
+  `empty-completion`) with the wait each caused; approval and question
+  requests; rate-limit window or bucket reports at warning or exhausted;
+  runtime compactions; and the runtime's own output stop reason
+  (`content-filter` included).
+- When the provider failed the turn, its structured failure: category,
+  refusal reason, process stage, kind, exit code and signal, usage-limit kind,
+  and retry-after. Its message is the one piece of text kept: redacted by the
+  diagnostics rules, with absolute paths outside home folders removed too,
+  folded onto one line, and cut to 512 characters. A message that states a
+  secret in words ("the password is …") or still looks like one after
+  redaction is not kept at all.
+
+Tool input, tool output, and tool failure text are never in the frame; the
+transcript already holds them for the person who opens the turn. A turn that
+fails before the provider streams anything carries no failure facts, which reads
+as "failed, no reason reported" rather than a guessed one. Turns recorded before
+diagnostics were counted have no `diagnostics` field, and a read leaves them
+out of diagnostic totals rather than counting them as clean.
+
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
 refusals and journal events, the per-thread `compaction` answer on the
