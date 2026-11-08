@@ -5,12 +5,18 @@ import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMedi
 import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
 import { secretGuardMediationPolicy } from "../../apps/server/src/process/secretGuard";
 
-const capsule = process.argv[2] === "--bubblewrap";
+const runtime =
+  process.argv[2] === "--runtime-bun"
+    ? "bun"
+    : process.argv[2] === "--runtime-node"
+      ? "node"
+      : undefined;
+const capsule = process.argv[2] === "--bubblewrap" || runtime !== undefined;
 const root = "/tmp/octant-policy-broker";
 const home = `${root}/home`;
 const key = `${home}/.ssh/deployment`;
 const owner = new AbortController();
-const maximum = setTimeout(() => owner.abort(), 15_000);
+const maximum = setTimeout(() => owner.abort(), runtime === undefined ? 15_000 : 25_000);
 let result = false;
 let cleaned = false;
 let ready = false;
@@ -19,14 +25,16 @@ let running: ReturnType<typeof runLinuxMediationBroker> | undefined;
 try {
   await mkdir(`${home}/.ssh`, { recursive: true, mode: 0o700 });
   await mkdir(`${root}/tmp`, { mode: 0o700 });
+  if (runtime !== undefined)
+    await writeFile(`${root}/runtime.mjs`, await readFile("/kernel-runtime.mjs"));
   // The actual production builder is unchanged. Populate every protected file
   // after it prepares startup covers, then change the companion during the run.
   // This measures the absent-file gap rather than an already-present mask.
   process.env.HOME = home;
   const launch = capsule
     ? buildBubblewrapLaunch({
-        executable: "/policy-workload",
-        args: [],
+        executable: runtime === undefined ? "/policy-workload" : `/usr/bin/${runtime}`,
+        args: runtime === undefined ? [] : [`${root}/runtime.mjs`, root],
         boundRoot: root,
         temporaryDirectory: `${root}/tmp`,
         networkEgress: "none",
@@ -56,9 +64,18 @@ try {
     }),
     signal: owner.signal,
   });
-  const deadline = performance.now() + 10_000;
+  const deadline = performance.now() + (runtime === undefined ? 10_000 : 20_000);
+  let outsidePublished = false;
   while (!owner.signal.aborted && performance.now() < deadline) {
     try {
+      if (
+        runtime !== undefined &&
+        !outsidePublished &&
+        (await stat(`${root}/watch-ready`)).isFile()
+      ) {
+        await writeFile(`${root}/runtime-outside`, "outside permitted");
+        outsidePublished = true;
+      }
       ready = (await stat(`${root}/stage`)).isFile();
     } catch {
       // The enrolled synthetic command has not reached its allowed-read step.
@@ -98,6 +115,7 @@ console.log(
     productionReady: false,
     lateCompanion: ready,
     actualBubblewrapBuilder: capsule,
+    runtime: runtime ?? "native",
     ownedCommandJoined: ended?.status === "exited",
     cleaned,
   }),

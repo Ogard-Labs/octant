@@ -49,8 +49,8 @@ actual mutation or content copy and retains no permanent protected-inode floor.
 The kernel still performs the final operation/epoch check. The guest compiles
 this actual broker and checks a late companion against an already-open
 descriptor, hardlink and new mapping, ordinary/public-key contents, refused
-marker/ancestor changes and permitted namespace operations. These increments
-need their exact-head native result. Shared production Bubblewrap integration,
+marker/ancestor changes and permitted namespace operations. The actual policy workload and three ordinary unchanged Bubblewrap-builder
+repetitions have native receipts in the PR. Production lifecycle integration,
 remaining mutation/data routes and the complete matrix below are still missing.
 Account exception forms are captured at enrollment; replacing an account path
 with a symlink never transfers that exception to another sign-in.
@@ -92,22 +92,36 @@ Guest compilation uses the original uninstrumented kernel and broker. Earlier
 exception-only observations remain diagnostic evidence in the PR; they do not
 substitute for this ordinary run.
 
+The next runtime layer runs the actual Bun and Node executables through that
+same broker and unchanged production builder. It checks native async file I/O,
+fsync, held descriptors, hardlink identity, rename, child spawn/join and an
+inotify observation caused by the unconfined guest owner. The owner publishes
+a companion only after the runtime has opened and read the synthetic private
+file; subsequent held/alias reads and protected writes must refuse while public
+content stays readable. Each runtime owns a 20-second deadline, its broker a
+25-second maximum; the QEMU supervisor remains independently bounded. Runtime
+versions and exit/join/cleanup receipts must be read from the actual run; added
+source is not an executed pass. Public runtimes and loader dependencies are
+copied only into the private 512-MiB guest image, never installed on a live host.
+No provider credentials, requests, network services or accounts are involved.
+
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
 archive has a fixed SHA-256, and only the original admission files enter its
 security tree. No kernel is installed, loaded or distributed; the app's MIT
 license is unchanged. The original kernel files are `GPL-2.0 OR MIT`, with
 the syscall-note alternative for UAPI. The job has a twenty-minute bound,
-the guest a ninety-second outer bound, and the synthetic client finite IPC
+the guest a 150-second outer bound, and the synthetic client finite IPC
 and admission deadlines. Commands have independent timeout supervisors; retained
 process groups are stopped on interruption or owner-command failure.
 
 This is an implementation increment, not complete confinement. Its status query
 reports `production_coverage: 0`; the host never calls it. Namespace begin/end
 and final epoch comparison exist, but complete VFS mutation/pre-effect hooks,
-the effective structured-policy broker, all file/alias/process routes, the real
-production Bubblewrap launch and the complete native compatibility matrix are
-still required. The admission guest check adds actual same-policy inherited-FD transfer,
+all file/alias/process routes, shared production lifecycle integration and the
+complete native compatibility matrix are still required. The actual structured
+policy broker and basic unchanged-builder composition have separate native
+receipts; they do not establish the missing routes. The admission guest check adds actual same-policy inherited-FD transfer,
 foreign ordinary/proc-memory FD refusal, and future shared-memory controls to
 the earlier fourteen read/alias/new-mapping, same-policy thread, write/truncate,
 async-fallback and group-loss cases. A separate enrollment control refuses an

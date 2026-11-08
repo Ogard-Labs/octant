@@ -527,11 +527,11 @@ static int ordered_measure(void)
   return passed && cleaned ? 0 : 59;
 }
 
-static int policy_measure(bool capsule)
+static int policy_measure(const char *mode)
 {
   pid_t child = fork();
   if (!child) {
-    char *arguments[] = {"/policy-broker", capsule ? "--bubblewrap" : NULL, NULL};
+    char *arguments[] = {"/policy-broker", (char *)mode, NULL};
     char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     execve(arguments[0], arguments, environment);
     _exit(31);
@@ -563,15 +563,17 @@ int main(void)
     if (!result) result = ordered_measure();
     if (!result) {
       alarm(0);
-      result = policy_measure(false);
+      result = policy_measure(NULL);
     }
     // Reuse the same scenario, not a broader matrix: the earlier UID-map
     // failure was timing-sensitive. Each policy process owns its 15s bound;
-    // the independent QEMU supervisor owns a 90s maximum for the whole guest.
+    // the independent QEMU supervisor owns a 150s maximum for the whole guest.
     for (unsigned attempt = 0; attempt < 3 && !result; attempt++) {
-      result = policy_measure(true);
+      result = policy_measure("--bubblewrap");
       printf("OCTANT_BUBBLEWRAP_ATTEMPT %u result=%d\n", attempt + 1, result);
     }
+    if (!result) result = policy_measure("--runtime-bun");
+    if (!result) result = policy_measure("--runtime-node");
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

@@ -94,12 +94,22 @@ def main():
         "--outfile", str(policy), timeout=120, cwd=repository)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
+    runtime_files = {}
+    for name in ("bun", "node"):
+        executable = shutil.which(name)
+        if not executable:
+            raise SystemExit(f"The owned runtime proof requires {name}.")
+        runtime_files[f"usr/bin/{name}"] = Path(executable).resolve(strict=True)
     library_log = root / "policy-libraries.log"
     with library_log.open("wb") as output:
         run("ldd", str(policy), timeout=10, output=output)
         run("ldd", "/usr/bin/bwrap", timeout=10, output=output)
+        for executable in runtime_files.values():
+            run("ldd", str(executable), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
-                   "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap")}
+                   "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
+                   "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
+                   **runtime_files}
     for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
         library = Path(path)
         if not library.is_file():
@@ -119,33 +129,42 @@ def main():
         destination.chmod(0o755)
     image = root / "root.ext4"
     with image.open("wb") as output:
-        output.truncate(256 * 1024 * 1024)
+        output.truncate(512 * 1024 * 1024)
     run("mke2fs", "-q", "-F", "-t", "ext4", "-d", str(tree), str(image), timeout=30)
     with (root / "guest.log").open("wb") as output:
-        run("timeout", "--kill-after=3s", "90s", "qemu-system-x86_64", "-machine", "accel=tcg",
+        run("timeout", "--kill-after=3s", "150s", "qemu-system-x86_64", "-machine", "accel=tcg",
             "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
             "-no-reboot", "-kernel", str(kernel / "arch/x86/boot/bzImage"),
             "-drive", f"file={image},format=raw,if=virtio",
             "-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/init panic=-1",
-            timeout=95, cwd=root, output=output)
+            timeout=155, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     print(log[-20000:])
     cases = []
     ordered = []
+    runtime_receipts = []
     for line in log.splitlines():
         if line.startswith("{"):
             value = json.loads(line)
             if value.get("status") == "measured-original-policy-broker":
                 cases.append(value)
+            elif value.get("status") == "measured-kernel-runtime":
+                runtime_receipts.append(value)
         elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
             ordered.append(json.loads(line.split(" ", 1)[1]))
-    capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True]
+    capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True and
+                case.get("runtime") == "native"]
     direct = [case for case in cases if case.get("actualBubblewrapBuilder") is False]
-    if len(capsules) != 3 or len(direct) != 1 or any(
+    runtime_cases = [case for case in cases if case.get("runtime") in ("bun", "node")]
+    if len(capsules) != 3 or len(direct) != 1 or len(runtime_cases) != 2 or any(
             case.get("ended") != {"status": "exited", "code": 0} or
             case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
             case.get("lateCompanion") is not True for case in cases):
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
+    expected = {"bun", "node"}
+    if {case.get("runtime") for case in runtime_receipts} != expected or len(runtime_receipts) != 2 or any(
+            case.get("actualBubblewrapBuilder") is not True for case in runtime_cases):
+        raise SystemExit("Both real runtime workloads need their actual capsule receipt.")
     if len(ordered) != 1 or ordered[0].get("status") != "measured-ordered-admissions" or \
             ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True:
         raise SystemExit("The controlled queued-read ordering proof did not pass.")
