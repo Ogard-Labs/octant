@@ -85,49 +85,80 @@ function listing(overrides: Partial<ShutdownListing> = {}): ShutdownListing {
   };
 }
 
-function fakeClient(input: { readonly listing?: ShutdownListing } = {}) {
+function fakeClient(
+  input: {
+    readonly listing?: ShutdownListing;
+    /** How long the start takes to answer after the first moves began. */
+    readonly startAnswersAfterMs?: number;
+    /** While false, every started move is still sending. */
+    readonly arrives?: () => boolean;
+  } = {},
+) {
   const challenged: Array<{
     readonly memberId: string;
     readonly threads: ReadonlyArray<MovedThreadReference>;
   }> = [];
   const started: ShutdownStartRequest[] = [];
+  const listingsRead = { count: 0 };
   let moved = false;
+  let movedAt = new Date().toISOString();
   const client: ThreadMoveClient = {
     destinations: async () => ({ status: "listed", busy: false, destinations: [] }),
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
     status: async (thread): Promise<ThreadMoveThreadStatus> =>
-      moved
+      moved && input.arrives?.() === false
         ? {
             status: "read",
-            departed: {
+            sending: {
               moveId: "66666666-6666-4666-8666-666666666666" as never,
-              thread,
               destinationMemberId: MINI as never,
-              destinationThread: thread,
-              changesRemainInCheckout: false,
-              movedAt: new Date().toISOString() as never,
               destinationName: "Mac mini",
+              state: "offered",
+              bytesSent: 0,
+              bytesTotal: 1,
+              startedAt: new Date().toISOString() as never,
             },
           }
-        : { status: "read" },
+        : moved
+          ? {
+              status: "read",
+              departed: {
+                moveId: "66666666-6666-4666-8666-666666666666" as never,
+                thread,
+                destinationMemberId: MINI as never,
+                destinationThread: thread,
+                changesRemainInCheckout: false,
+                movedAt: movedAt as never,
+                destinationName: "Mac mini",
+              },
+            }
+          : { status: "read" },
     stopWaiting: async () => {},
     cancel: async () => "cancelled",
     takeBack: async () => {},
     activate: async () => true,
     dismiss: async () => {},
-    shutdownListing: async () => input.listing ?? listing(),
+    shutdownListing: async () => {
+      listingsRead.count += 1;
+      return input.listing ?? listing();
+    },
     shutdownChallenge: async (memberId, threads) => {
       challenged.push({ memberId, threads });
       return { status: "challenge", challenge: CHALLENGE as never };
     },
     shutdownStart: async (request) => {
       started.push(request);
+      // The server starts the first moves before it answers.
+      movedAt = new Date().toISOString();
       moved = true;
+      if (input.startAnswersAfterMs !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, input.startAnswersAfterMs));
+      }
       return { status: "started" };
     },
   };
-  return { client, challenged, started };
+  return { client, challenged, started, listingsRead };
 }
 
 describe("Prepare to shut down", () => {
@@ -198,6 +229,94 @@ describe("Prepare to shut down", () => {
       within(row).getByRole("combobox", { name: "Choice for Add dark mode" }),
     ).toHaveTextContent("Leave here");
     expect(screen.getByRole("button", { name: "Move 1 thread with Touch ID" })).toBeEnabled();
+  });
+
+  it("counts a move that finished before the start answered as moved", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient({ startAnswersAfterMs: 1_500 });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    expect(
+      await screen.findByRole("heading", { name: /Safe to shut down/ }, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+  }, 10_000);
+
+  it("shows the running batch again when the dialog is hidden and opened", async () => {
+    const user = userEvent.setup();
+    let arrived = false;
+    const { client, listingsRead } = fakeClient({ arrives: () => arrived });
+    const unlock = {
+      ownerUnlockSign: async () => ({ status: "done" as const, signature: "c2ln" }),
+    };
+    const view = render(
+      <PrepareToShutDownDialog client={client} onClose={() => {}} open unlock={unlock} />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+    expect(await screen.findByRole("button", { name: "Hide" })).toBeInTheDocument();
+
+    view.rerender(
+      <PrepareToShutDownDialog client={client} onClose={() => {}} open={false} unlock={unlock} />,
+    );
+    view.rerender(
+      <PrepareToShutDownDialog client={client} onClose={() => {}} open unlock={unlock} />,
+    );
+
+    expect(await screen.findByRole("progressbar", { name: "Moving threads" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Move to" })).not.toBeInTheDocument();
+    expect(listingsRead.count).toBe(1);
+    arrived = true;
+    expect(
+      await screen.findByRole("heading", { name: /Safe to shut down/ }, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+  }, 10_000);
+
+  it("moves at most one batch per unlock and offers the rest next, without saying it is safe", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 70 }, (_, index) => ({
+      thread: {
+        mode: "chat" as const,
+        threadId: `77777777-7777-4777-8777-${String(index).padStart(12, "0")}`,
+      },
+      title: `Thread ${String(index)}`,
+      busy: false,
+      older: false,
+      placements: [ok(MINI), ok(DESKTOP)],
+    }));
+    const { client, challenged } = fakeClient({ listing: listing({ rows: many }) });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        onQuit={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Thread 0");
+    expect(
+      screen.getByText(
+        "The first 64 move to Mac mini now; the other 6 can move next, with one more Touch ID.",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Move 64 threads with Touch ID" }));
+
+    expect(challenged[0]?.threads).toHaveLength(64);
+    expect(
+      await screen.findByRole("heading", { name: "6 threads stay on this computer" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quit Octant" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move the other 6" })).toBeInTheDocument();
   });
 
   it("asks a computer that is in no hub to join one", async () => {

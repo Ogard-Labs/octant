@@ -2230,9 +2230,15 @@ a numbered slice. Built, with these narrower readings:
     mode and repository which Projects fit. The dialog starts on the
     destination the domain policy picks, puts each row on its starting
     choice, re-reads untouched rows when the destination changes, and moves
-    every chosen row with one Touch ID through the batch ticket. It then
-    follows each row to Moved or Can't move and ends on Safe to shut down,
-    or on how many threads stay here. **Prepare to Shut Down…** sits in the
+    every chosen row with one Touch ID through the batch ticket. One unlock
+    moves at most 64 threads, because the batch's thread list rides inside
+    the destination's owner challenge, whose body the owner routes cap at
+    16 KiB. When more are set to move, the dialog says so before the press,
+    counts the rest as staying here, and offers to move them next with one
+    more Touch ID. It then follows each row to Moved or Can't move and ends
+    on Safe to shut down, or on how many threads stay here. Hiding the
+    dialog leaves its batch moving, and opening it again shows that batch.
+    **Prepare to Shut Down…** sits in the
     application menu above Quit. The quit confirmation gains **Move threads
     first…** while the window last saw this host in a hub with another
     member, and the dialog then ends with Quit Octant through the guarded

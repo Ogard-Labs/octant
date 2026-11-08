@@ -311,6 +311,13 @@ export const MovedHistoryDelivered = Schema.Struct({
 export type MovedHistoryDelivered = typeof MovedHistoryDelivered.Type;
 
 /**
+ * The most threads one unlock moves. The batch's thread list rides inside the
+ * destination's owner challenge, whose body the owner routes cap at 16 KiB, so
+ * a longer list moves in further batches, each with its own unlock.
+ */
+export const SHUTDOWN_BATCH_MAX = 64;
+
+/**
  * What an owner device asks the destination for after a fresh own-class
  * unlock: a one-use ticket letting one named computer move one thread here.
  */
@@ -321,7 +328,10 @@ export const OwnerThreadMoveTicketRequest = Schema.Struct({
    * once. Absent, the ticket opens one move of any thread from that source.
    */
   threads: Schema.optional(
-    Schema.Array(MovedThreadReference).pipe(Schema.minItems(1), Schema.maxItems(64)),
+    Schema.Array(MovedThreadReference).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(SHUTDOWN_BATCH_MAX),
+    ),
   ),
 }).annotations(strict);
 export type OwnerThreadMoveTicketRequest = typeof OwnerThreadMoveTicketRequest.Type;
@@ -562,7 +572,7 @@ export type ShutdownListing = typeof ShutdownListing.Type;
 
 const BatchThreads = Schema.Array(MovedThreadReference).pipe(
   Schema.minItems(1),
-  Schema.maxItems(64),
+  Schema.maxItems(SHUTDOWN_BATCH_MAX),
 );
 
 /** The challenge for one destination's batch: one unlock covers exactly these threads. */
@@ -582,7 +592,10 @@ export type ShutdownBatchRow = typeof ShutdownBatchRow.Type;
 /** One destination's batch, unlocked once; the rows must name exactly the challenged threads. */
 export const ShutdownStartRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
-  rows: Schema.Array(ShutdownBatchRow).pipe(Schema.minItems(1), Schema.maxItems(64)),
+  rows: Schema.Array(ShutdownBatchRow).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(SHUTDOWN_BATCH_MAX),
+  ),
   unlock: Schema.Struct({
     challengeId: Schema.UUID,
     signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),

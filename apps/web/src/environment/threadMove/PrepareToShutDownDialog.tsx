@@ -1,13 +1,14 @@
-import type {
-  MovedThreadReference,
-  ProjectId,
-  ShutdownChoice,
-  ShutdownListedMember,
-  ShutdownListing,
-  ShutdownPlacement,
-  ShutdownThreadRow,
-  ThreadMoveThreadStatus,
-  ThreadMoveUnlockChallenge,
+import {
+  SHUTDOWN_BATCH_MAX,
+  type MovedThreadReference,
+  type ProjectId,
+  type ShutdownChoice,
+  type ShutdownListedMember,
+  type ShutdownListing,
+  type ShutdownPlacement,
+  type ShutdownThreadRow,
+  type ThreadMoveThreadStatus,
+  type ThreadMoveUnlockChallenge,
 } from "@octant/contracts";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import {
@@ -77,6 +78,11 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const [working, setWorking] = useState(false);
   // A notice or record older than this batch belongs to an earlier move.
   const [startedAt, setStartedAt] = useState(0);
+  // Rows set to move that this batch left out because one unlock moves at most SHUTDOWN_BATCH_MAX.
+  const [leftOver, setLeftOver] = useState(0);
+  // A batch keeps moving on the server while the dialog is hidden, so opening
+  // the dialog again shows that batch rather than starting over.
+  const batchUnsettled = useRef(false);
 
   const load = useCallback(() => {
     setLoadFailed(false);
@@ -97,13 +103,19 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     if (listing !== undefined) primary.current?.focus();
   }, [listing]);
 
-  useEffect(() => {
-    if (!props.open) return;
+  const chooseAgain = useCallback(() => {
     setPhase("choosing");
     setProblem(undefined);
     setStatuses(new Map());
+    setChosen([]);
+    setLeftOver(0);
     load();
-  }, [props.open, load]);
+  }, [load]);
+
+  useEffect(() => {
+    if (!props.open || batchUnsettled.current) return;
+    chooseAgain();
+  }, [props.open, chooseAgain]);
 
   // Changing the destination re-reads every row still on its starting choice.
   const changeDestination = (memberId: string) => {
@@ -121,9 +133,9 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     setDestination(memberId);
   };
 
-  // While the batch runs, each chosen thread's state is read until it settles.
+  // While the batch runs and the dialog shows, each chosen thread's state is read until it settles.
   useEffect(() => {
-    if (phase !== "running" || chosen.length === 0) return;
+    if (!props.open || phase !== "running" || chosen.length === 0) return;
     let stopped = false;
     const read = async () => {
       const entries = await Promise.all(
@@ -146,7 +158,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       stopped = true;
       clearInterval(timer);
     };
-  }, [phase, chosen, props.client]);
+  }, [props.open, phase, chosen, props.client]);
 
   const members = listing?.members ?? [];
   const member = members.find((entry) => String(entry.memberId) === destination);
@@ -158,13 +170,14 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     return choice === "move" || choice === "move-after-turn";
   });
   const staying = rows.length - moving.length;
+  const batch = moving.slice(0, SHUTDOWN_BATCH_MAX);
 
   const start = async () => {
-    if (props.unlock === undefined || member === undefined || moving.length === 0) return;
+    if (props.unlock === undefined || member === undefined || batch.length === 0) return;
     setWorking(true);
     setProblem(undefined);
     try {
-      const threads = moving.map((row) => row.thread);
+      const threads = batch.map((row) => row.thread);
       const asked = await props.client.shutdownChallenge(String(member.memberId), threads);
       if (asked.status !== "challenge") {
         setProblem(
@@ -182,9 +195,12 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         setProblem("The move wasn't unlocked. Nothing moved.");
         return;
       }
+      // The server starts the first moves before it answers, so the cutoff
+      // that tells this batch's results from an earlier move's is taken now.
+      const cutoff = Date.now() - 1_000;
       const started = await props.client.shutdownStart({
         destinationMemberId: member.memberId,
-        rows: moving.map((row) => {
+        rows: batch.map((row) => {
           const placement = placementFor(row, String(member.memberId));
           const project = placement === undefined ? undefined : projectFor(row, placement);
           return {
@@ -200,7 +216,9 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         return;
       }
       setChosen(threads);
-      setStartedAt(Date.now() - 1_000);
+      setStartedAt(cutoff);
+      setLeftOver(moving.length - batch.length);
+      batchUnsettled.current = true;
       setPhase("running");
     } catch {
       setProblem("This computer could not start the moves.");
@@ -214,6 +232,11 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const failed = settled.filter((state) => state === "failed").length;
   const done = phase === "running" && chosen.length > 0 && moved + failed === chosen.length;
   const progress = chosen.length === 0 ? 0 : Math.round(((moved + failed) / chosen.length) * 100);
+  useEffect(() => {
+    if (done) batchUnsettled.current = false;
+  }, [done]);
+  // A thread set to move that failed, or that waits for the next batch, still stays here.
+  const staysHere = failed + leftOver;
 
   return (
     <OctantDialog
@@ -225,13 +248,14 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       open={props.open}
     >
       <header className="shutdown-dialog__head">
-        {done && failed === 0 ? (
+        {done && staysHere === 0 ? (
           <h2 className="shutdown-dialog__title" id={titleId}>
             <CircleCheck aria-hidden="true" size={20} /> Safe to shut down
           </h2>
         ) : done ? (
           <h2 className="shutdown-dialog__title shutdown-dialog__title--warning" id={titleId}>
-            {failed === 1 ? "1 thread stays" : `${String(failed)} threads stay`} on this computer
+            {staysHere === 1 ? "1 thread stays" : `${String(staysHere)} threads stay`} on this
+            computer
           </h2>
         ) : (
           <h2 className="shutdown-dialog__title" id={titleId}>
@@ -239,7 +263,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
           </h2>
         )}
         <p className="shutdown-dialog__meta">
-          {done && failed === 0
+          {done
             ? `${String(moved)} moved to ${member?.name ?? "another computer"}.`
             : "Move your threads to another computer before this one goes off."}
         </p>
@@ -343,7 +367,9 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
           <p aria-live="polite" className="shutdown-dialog__summary">
             {moving.length === 0
               ? "Nothing is set to move."
-              : `${String(moving.length)} move to ${member?.name ?? "another computer"} · ${String(staying)} stay here`}
+              : moving.length > batch.length
+                ? `The first ${String(batch.length)} move to ${member?.name ?? "another computer"} now; the other ${String(moving.length - batch.length)} can move next, with one more Touch ID.`
+                : `${String(moving.length)} move to ${member?.name ?? "another computer"} · ${String(staying)} stay here`}
           </p>
         ) : null}
         {problem === undefined ? null : (
@@ -354,20 +380,29 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         <p aria-live="polite" className="visually-hidden">
           {phase === "running"
             ? done
-              ? failed === 0
+              ? staysHere === 0
                 ? "Safe to shut down."
-                : `${String(failed)} threads stay on this computer.`
+                : `${String(staysHere)} threads stay on this computer.`
               : `${String(moved)} of ${String(chosen.length)} moved.`
             : ""}
         </p>
         <div className="shutdown-dialog__buttons">
-          {done && props.onQuit !== undefined ? (
+          {done && leftOver > 0 ? (
+            <>
+              <OctantButton onClick={props.onClose} variant="ghost">
+                Done
+              </OctantButton>
+              <OctantButton onClick={chooseAgain} ref={primary}>
+                {leftOver === 1 ? "Move the last thread" : `Move the other ${String(leftOver)}`}
+              </OctantButton>
+            </>
+          ) : done && props.onQuit !== undefined ? (
             <>
               <OctantButton onClick={props.onClose} variant="ghost">
                 Done
               </OctantButton>
               <OctantButton onClick={props.onQuit} ref={primary}>
-                {failed === 0 ? "Quit Octant" : "Quit anyway"}
+                {staysHere === 0 ? "Quit Octant" : "Quit anyway"}
               </OctantButton>
             </>
           ) : done || rows.length === 0 || members.length === 0 ? (
@@ -384,13 +419,13 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
                 Cancel
               </OctantButton>
               <OctantButton
-                disabled={props.unlock === undefined || moving.length === 0 || working}
+                disabled={props.unlock === undefined || batch.length === 0 || working}
                 onClick={() => void start()}
                 ref={primary}
               >
-                {moving.length === 1
+                {batch.length === 1
                   ? "Move 1 thread with Touch ID"
-                  : `Move ${String(moving.length)} threads with Touch ID`}
+                  : `Move ${String(batch.length)} threads with Touch ID`}
               </OctantButton>
             </>
           )}

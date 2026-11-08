@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "../../shell/hostBridge";
+import { PrepareToShutDownDialog } from "./PrepareToShutDownDialog";
+import { threadMoveClientForBridge } from "./threadMoveClient";
 
 const STATUS_REFRESH_MS = 60_000;
 
@@ -21,9 +24,6 @@ function inHubWithOthers(body: unknown): boolean {
   const hubOn = typeof hub === "object" && hub !== null && Reflect.get(hub, "enabled") === true;
   return (spokeMember && members(spoke) > 1) || (hubOn && members(hub) > 1);
 }
-import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "../../shell/hostBridge";
-import { PrepareToShutDownDialog } from "./PrepareToShutDownDialog";
-import { threadMoveClientForBridge } from "./threadMoveClient";
 
 /**
  * Opens Prepare to shut down when the desktop asks: from Prepare to Shut
@@ -35,12 +35,17 @@ export function PrepareToShutDownHost(props: {
   readonly hostBridge: OctantHostBridge | undefined;
   readonly onOpenHubSettings?: () => void;
 }) {
-  const [request, setRequest] = useState<{ readonly fromQuit: boolean } | undefined>(undefined);
+  // Once opened, the dialog stays mounted while hidden: its batch keeps
+  // moving on the server, and opening it again shows that batch's progress.
+  const [request, setRequest] = useState<
+    { readonly fromQuit: boolean; readonly open: boolean } | undefined
+  >(undefined);
   const subscribe = props.hostBridge?.subscribePrepareToShutDown;
   useEffect(() => {
     if (subscribe === undefined) return;
-    return subscribe((next) => setRequest(next));
+    return subscribe((next) => setRequest({ fromQuit: next.fromQuit, open: true }));
   }, [subscribe]);
+  const hide = () => setRequest((current) => current && { ...current, open: false });
   const hub = hubAdministrationOf(props.hostBridge);
   const report = props.hostBridge?.reportShutdownMovesOffered;
   // Quit offers Move threads first… only while this computer is in a hub with
@@ -70,24 +75,24 @@ export function PrepareToShutDownHost(props: {
   return (
     <PrepareToShutDownDialog
       client={threadMoveClientForBridge(props.hostBridge, hub)}
-      onClose={() => setRequest(undefined)}
+      onClose={hide}
       {...(props.onOpenHubSettings === undefined
         ? {}
         : {
             onOpenHubSettings: () => {
-              setRequest(undefined);
+              hide();
               props.onOpenHubSettings?.();
             },
           })}
       {...(request.fromQuit && requestQuit !== undefined
         ? {
             onQuit: () => {
-              setRequest(undefined);
+              hide();
               requestQuit();
             },
           }
         : {})}
-      open
+      open={request.open}
       {...(unlock === undefined ? {} : { unlock })}
     />
   );
