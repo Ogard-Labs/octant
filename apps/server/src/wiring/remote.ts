@@ -97,7 +97,7 @@ import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdm
 import { ThreadMoveService } from "../hub/threadMoveService";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
-import { ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
+import { hostThreads, ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
 import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
@@ -1230,6 +1230,44 @@ export function wireRemote(deps: RemoteDependencies) {
       return status.membership === "member" ? status.roster.roster.members : [];
     },
     selfMemberId: () => hubService.hubMemberId(),
+    listThreads: async () => {
+      const lastEvent = persistence.connection.prepare(
+        `SELECT e.occurred_at AS occurred_at FROM aggregate_heads h
+         JOIN event_journal e ON e.global_sequence = h.last_sequence
+         WHERE h.aggregate_id = ? ORDER BY h.last_sequence DESC LIMIT 1`,
+      );
+      const lastActivityAt = (threadId: string): number | undefined => {
+        const row = lastEvent.get(threadId) as { readonly occurred_at?: unknown } | undefined;
+        return typeof row?.occurred_at === "string" ? Date.parse(row.occurred_at) : undefined;
+      };
+      const projectNames = new Map(
+        persistence.readProjects().map((project) => [String(project.id), project.name]),
+      );
+      const listed = hostThreads({
+        chat: persistence.readChatThreads(),
+        code: persistence.readCodeThreads(),
+        work: workThreadProjection.list(),
+      });
+      const facts = await Promise.all(
+        listed.map(async (entry) => {
+          const reading = await byMode.source.read(entry.thread);
+          const projectName =
+            entry.projectId === undefined ? undefined : projectNames.get(entry.projectId);
+          return {
+            thread: entry.thread,
+            title: entry.title,
+            ...(projectName === undefined ? {} : { projectName }),
+            busy: reading.status === "found" && reading.busy,
+            delegated: reading.status === "found" && reading.delegated,
+            // A thread its own host cannot read (being deleted) is not offered.
+            open: entry.open && reading.status === "found",
+            lastActivityAt: lastActivityAt(entry.thread.threadId),
+            repositoryRemotes: reading.status === "found" ? reading.repositoryRemotes : [],
+          };
+        }),
+      );
+      return facts;
+    },
     now: Date.now,
   });
   const threadMoveAdministrationRoutes = createThreadMoveAdministrationRouteHandler({
