@@ -129,7 +129,8 @@ def main():
                    "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
                    "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER", "INET", "SYSVIPC",
                    "UNIX98_PTYS", "DEVPTS_FS", "BLK_DEV", "EXT4_FS", "VIRTIO",
-                   "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT"):
+                   "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT",
+                   "COREDUMP", "ELF_CORE", "PROC_SYSCTL"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
     run("scripts/config", "--set-val", "NR_CPUS", "2", cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
@@ -138,22 +139,32 @@ def main():
     for symbol in ("SMP", "BLOCK", "BLK_DEV", "PCI", "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK",
                    "EXT4_FS", "DEVTMPFS", "DEVTMPFS_MOUNT", "USER_NS", "PID_NS", "NET_NS",
                    "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION",
-                   "TMPFS_XATTR", "TMPFS_POSIX_ACL", "EXT4_FS_POSIX_ACL"):
+                   "TMPFS_XATTR", "TMPFS_POSIX_ACL", "EXT4_FS_POSIX_ACL",
+                   "COREDUMP", "ELF_CORE", "PROC_SYSCTL", "SYSCTL"):
         if f"CONFIG_{symbol}=y" not in configured:
             raise SystemExit(f"Required built-in guest prerequisite is unavailable: {symbol}")
     if "CONFIG_NR_CPUS=2" not in configured:
         raise SystemExit("The guest requires exactly two configured CPUs for parallel native proof.")
+    if "CONFIG_STATIC_USERMODEHELPER=y" in configured:
+        raise SystemExit("The owned core collector requires its actual helper executable.")
     run("make", "-j2", "bzImage", cwd=kernel)
     init_binary = root / "init"
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
-        "-DOCTANT_CONTROLLER_DIAGNOSTIC=1",
         str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(init_binary), timeout=30)
     relay = root / "octant-mediation"
     workload = root / "policy-workload"
     policy = root / "policy-broker"
+    core_notes_binary = root / "core-notes"
+    core_probe = root / "core-probe"
     for source, target in ((native / "broker.c", relay),
-                           (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload)):
+                           (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
+                           (repository / "scripts/linux-file-view/kernel_core_notes.c", core_notes_binary),
+                           (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
+    core_check = root / "core-notes-check"
+    run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
+        str(repository / "scripts/linux-file-view/kernel_core_notes.c"), "-o", str(core_check), timeout=30)
+    run(str(core_check), timeout=5, cwd=root)
     run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
         "--outfile", str(policy), timeout=120, cwd=repository)
     controller_image(policy)
@@ -175,6 +186,7 @@ def main():
         for runtime_path in runtime_files.values():
             run("ldd", str(runtime_path), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
+                   "core-notes": core_notes_binary, "core-probe": core_probe,
                    "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}
@@ -212,6 +224,7 @@ def main():
     ordered = []
     runtime_receipts = []
     outside = []
+    probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
     for line in log.splitlines():
         if line.startswith("{"):
             value = json.loads(line)
@@ -223,6 +236,45 @@ def main():
             ordered.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
             outside.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_CORE_PROBE_ADDRESS "):
+            probe_addresses.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_CORE_PROBE "):
+            probe_exits.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_CORE_NOTES "):
+            core_notes.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_CORE_TARGET "):
+            core_targets.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_CORE_RETIRE "):
+            core_retirements.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_POLICY_PROCESS "):
+            processes.append(json.loads(line.split(" ", 1)[1]))
+    probe_notes = [note for note in core_notes if note.get("role") == 2]
+    probe_targets = [target for target in core_targets if target.get("role") == 2]
+    if any(len(items) != 1 for items in (probe_addresses, probe_exits, probe_notes, probe_targets)):
+        raise SystemExit("The genuine owned core probe lacks a single correlated kernel collector receipt.")
+    address, ended, note, target = probe_addresses[0], probe_exits[0], probe_notes[0], probe_targets[0]
+    pid = address.get("pid")
+    retired = [entry for entry in core_retirements if entry.get("pid") == pid]
+    if (address.get("coreSoft") != 0 or ended.get("pid") != pid or target.get("pid") != pid or
+            note.get("pid") != pid or note.get("tid") != pid or note.get("address") != address.get("address") or
+            note.get("device") != target.get("device") or note.get("inode") != target.get("inode") or
+            ended.get("joined") is not True or ended.get("signalExpected") is not True or ended.get("signal") != 11 or
+            note.get("signal") != 11 or note.get("siCode") != 2 or target.get("bound") is not True or
+            not isinstance(note.get("helperPid"), int) or note["helperPid"] <= 0 or note["helperPid"] == pid or
+            any(note.get(field) is not True for field in ("confirmed", "owned", "pidfdValidated", "hardwareFault", "terminationContext", "beforeMemory")) or
+            not isinstance(note.get("bytes"), int) or not 0 < note["bytes"] <= 128 * 1024 or
+            not isinstance(note.get("firstLoad"), int) or note["bytes"] > note["firstLoad"] or
+            len(retired) != 1 or retired[0].get("held") is not True or retired[0].get("retired") is not True):
+        raise SystemExit("The actual CORE0/PROT_NONE probe, kernel pidfd, executable and prefix notes did not agree.")
+    expected_modes = ["--metadata-control", "direct", "--bubblewrap", "--bubblewrap", "--bubblewrap",
+                      "--runtime-bun", "--runtime-node"]
+    if (len(processes) != 7 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
+            len(core_targets) != 7 or len(core_retirements) != 8 or
+            {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes)} or
+            any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
+            any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True or
+                entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes)):
+        raise SystemExit("Every captured PID must stay held until inactive-pipe retirement, with no tracer.")
     expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",
                         "tmpfile", "empty-link", "rename", "bind-mount", "bind-remount"}
     if ("OCTANT_KERNEL_CPUS 2" not in log or len(outside) != len(expected_outside) or
