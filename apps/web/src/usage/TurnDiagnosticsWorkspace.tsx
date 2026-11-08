@@ -126,9 +126,17 @@ const SUBJECT_TYPE: Readonly<Record<OctantMode, string>> = {
   code: "code-thread",
 };
 
+type DiagnosticsRequest = Parameters<UsageClient["diagnostics"]>[0];
+
 type LoadState =
   | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly report: TurnDiagnosticsReport }
+  | {
+      readonly status: "ready";
+      readonly report: TurnDiagnosticsReport;
+      // The request the report was read for, so a changed query can tell the
+      // figures on screen belong to the previous one.
+      readonly request: DiagnosticsRequest;
+    }
   | { readonly status: "failure"; readonly message: string };
 
 /**
@@ -171,7 +179,7 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
     setState((previous) => (previous.status === "ready" ? previous : { status: "loading" }));
     props.client.diagnostics(request).then(
       (report) => {
-        if (current) setState({ status: "ready", report });
+        if (current) setState({ status: "ready", report, request });
       },
       (error: unknown) => {
         if (current) {
@@ -188,6 +196,9 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
   }, [props.client, request]);
 
   const report = state.status === "ready" ? state.report : undefined;
+  // While a changed query loads, the previous report stays on screen so the page
+  // does not jump, but it is marked as old and cannot be copied as the answer.
+  const updating = state.status === "ready" && state.request !== request;
   // A copy result describes the report it copied; asking for another reading
   // replaces it, even when the host answers with the same figures.
   useEffect(() => setCopied("idle"), [request]);
@@ -214,7 +225,7 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       {props.sourceControl}
       <OctantButton
         aria-label="Copy diagnostics report as JSON"
-        disabled={report === undefined}
+        disabled={report === undefined || updating}
         onClick={() => void copyReport()}
         size="icon"
         type="button"
@@ -315,11 +326,13 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
           ? "Loading diagnostics…"
           : state.status === "failure"
             ? "Diagnostics could not be loaded."
-            : copied === "copied"
-              ? "Report copied as JSON."
-              : copied === "failed"
-                ? "The report could not be copied."
-                : `Read at ${formatWhen(state.report.generatedAt, timeZone)}.`}
+            : updating
+              ? "Updating… figures shown are for the previous filters."
+              : copied === "copied"
+                ? "Report copied as JSON."
+                : copied === "failed"
+                  ? "The report could not be copied."
+                  : `Read at ${formatWhen(state.report.generatedAt, timeZone)}.`}
       </p>
 
       {state.status === "failure" ? (
@@ -339,6 +352,7 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       ) : (
         <ReportSections
           report={report}
+          stale={updating}
           {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
         />
       )}
@@ -361,11 +375,12 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
 
 function ReportSections(props: {
   readonly report: TurnDiagnosticsReport;
+  readonly stale?: boolean;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
   const { report } = props;
   return (
-    <>
+    <div aria-busy={props.stale === true} data-stale={props.stale === true ? "true" : undefined}>
       <SummarySection report={report} />
       <TrendSection report={report} />
       <ModelSection report={report} />
@@ -384,7 +399,7 @@ function ReportSections(props: {
           toward tool or retry totals.
         </p>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -610,6 +625,14 @@ function ToolSection({ report }: { readonly report: TurnDiagnosticsReport }) {
         Most failures first. Unfinished calls started and never reported a result before their turn
         ended. Times cover calls that finished.
       </p>
+      {(report.totals.toolTalliesTruncatedTurns ?? 0) > 0 ? (
+        <p className="usage-workspace__note" role="note">
+          Tool figures are partial: {report.totals.toolTalliesTruncatedTurns} turn
+          {report.totals.toolTalliesTruncatedTurns === 1 ? "" : "s"} ran more tools than were kept
+          per turn, so the per-tool rows and unfinished calls leave out the least-called ones. Call
+          and failure totals are complete.
+        </p>
+      ) : null}
       <div className="usage-table-scroll">
         <table aria-label="Tool reliability" className="usage-table">
           <thead>
