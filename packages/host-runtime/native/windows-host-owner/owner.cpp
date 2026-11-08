@@ -224,7 +224,7 @@ Handle open_directory(const std::wstring& path) {
       (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Handle();
   return handle;
 }
-std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, bool create, bool inherit) {
+std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, bool create, bool inherit, bool* missing = nullptr) {
   auto result = std::make_unique<Root>();
   if (!token_sid(GetCurrentProcess(), result->sid_bytes, &result->sid)) return nullptr;
   const std::wstring security = L"O:" + result->sid + L"D:P(A;;FA;;;" + result->sid + L")(A;;FA;;;SY)";
@@ -258,7 +258,10 @@ std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, 
     SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), inherited_directory ? result->directory_security : result->security, FALSE};
     path += L"\\" + component;
     if (create && !CreateDirectoryW(path.c_str(), &attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return nullptr;
+    SetLastError(ERROR_SUCCESS);
     Handle handle = open_directory(path);
+    const DWORD open_error = GetLastError();
+    if (!handle && missing && (open_error == ERROR_FILE_NOT_FOUND || open_error == ERROR_PATH_NOT_FOUND)) *missing = true;
     const BYTE flags = inherited_directory ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
     if (!handle || !private_acl(handle.value, *result, flags)) return nullptr;
     result->ancestors.push_back(std::move(handle));
@@ -274,9 +277,9 @@ std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, 
   result->path.assign(canonical.data(), physical_size);
   return result;
 }
-std::unique_ptr<Root> root_for(const std::string& scope, bool create) {
+std::unique_ptr<Root> root_for(const std::string& scope, bool create, bool* missing = nullptr) {
   if (!uuid(scope)) return nullptr;
-  auto result = private_root({L"runtime", std::wstring(scope.begin(), scope.end())}, create, false);
+  auto result = private_root({L"runtime", std::wstring(scope.begin(), scope.end())}, create, false, missing);
   if (!result) return nullptr;
   std::vector<unsigned char> input(result->sid_bytes);
   input.insert(input.end(), scope.begin(), scope.end());
@@ -854,6 +857,37 @@ bool sqlite_sidecars(const Root& root, const std::wstring& path) {
   }
   return true;
 }
+bool sqlite_label(const std::string& label) {
+  if (label.empty() || label.size() > 32 || !((label[0] >= 'a' && label[0] <= 'z') || (label[0] >= '0' && label[0] <= '9'))) return false;
+  return std::all_of(label.begin(), label.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
+}
+std::wstring sqlite_filename(const std::string& kind) {
+  if (kind == "main") return L"octant.sqlite3";
+  if (kind == "usage-cache") return L"local-usage-cache.sqlite3";
+  if (kind == "restore-stage") return L"octant.sqlite3.restore-" + std::to_wstring(GetCurrentProcessId()) + L".tmp";
+  if (kind.rfind("backup:", 0) == 0 && sqlite_label(kind.substr(7))) {
+    const auto label = kind.substr(7);
+    return L"octant.sqlite3.backup-" + std::wstring(label.begin(), label.end());
+  }
+  return L"";
+}
+napi_value inspect_sqlite_store(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 4; napi_value arguments[4]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
+  if (count != 4) return object(env, "refused");
+  const std::string profile = string_arg(env, arguments[0]), scope = string_arg(env, arguments[1]);
+  const std::string expected_data = string_arg(env, arguments[2]), kind = string_arg(env, arguments[3]);
+  const auto filename = sqlite_filename(kind);
+  if (filename.empty() || !authority_writer(env, scope)) return object(env, "refused");
+  bool missing = false;
+  auto directory = profile_directory(profile, scope, expected_data, ProfileDirectoryKind::Data, false, missing);
+  if (!directory) return object(env, "refused");
+  const auto path = directory->path + L"\\" + filename;
+  if (!sqlite_sidecars(*directory->root, path)) return object(env, "refused");
+  auto file = sqlite_leaf(*directory->root, path, false, missing);
+  if (!file && !missing) return object(env, "refused");
+  napi_value result = object(env, missing ? "missing" : "ready");
+  put(env, result, "databasePath", expected_data + "\\" + utf8(filename)); return result;
+}
 void close_sqlite_admissions(napi_env env) {
   for (auto it = sqlite_admissions.begin(); it != sqlite_admissions.end();) {
     if (it->second->env == env) it = sqlite_admissions.erase(it); else ++it;
@@ -864,17 +898,18 @@ napi_value open_sqlite_store(napi_env env, napi_callback_info info) {
   if (count != 4) return object(env, "refused");
   const std::string profile = string_arg(env, arguments[0]), scope = string_arg(env, arguments[1]);
   const std::string expected_data = string_arg(env, arguments[2]), kind = string_arg(env, arguments[3]);
-  if ((kind != "main" && kind != "usage-cache") || !authority_writer(env, scope) || next_sqlite_admission > safe_integer) return object(env, "refused");
+  const auto filename = sqlite_filename(kind);
+  if (filename.empty() || kind == "restore-stage" || !authority_writer(env, scope) || next_sqlite_admission > safe_integer) return object(env, "refused");
   bool missing = false;
   auto directory = profile_directory(profile, scope, expected_data, ProfileDirectoryKind::Data, false, missing);
   if (!directory) return object(env, "refused");
-  const std::wstring path = directory->path + (kind == "main" ? L"\\octant.sqlite3" : L"\\local-usage-cache.sqlite3");
+  const std::wstring path = directory->path + L"\\" + filename;
   if (!sqlite_sidecars(*directory->root, path)) return object(env, "refused");
   auto admission = std::make_unique<SqliteAdmission>();
   admission->env = env; admission->thread = GetCurrentThreadId(); admission->profile = profile;
   admission->scope = scope; admission->expected_data = expected_data; admission->kind = kind;
-  admission->file = sqlite_leaf(*directory->root, path, true, missing);
-  if (!admission->file) return object(env, "refused");
+  admission->file = sqlite_leaf(*directory->root, path, kind == "main" || kind == "usage-cache", missing);
+  if (!admission->file) return object(env, missing ? "missing" : "refused");
   admission->directory = std::move(directory);
   HMODULE module = nullptr;
   std::array<wchar_t, 32768> module_path{};
@@ -885,7 +920,7 @@ napi_value open_sqlite_store(napi_env env, napi_callback_info info) {
   const ULONGLONG lease = next_sqlite_admission++;
   sqlite_admissions.emplace(lease, std::move(admission));
   napi_value result = object(env, "ready"); put(env, result, "dataDirectory", expected_data);
-  put(env, result, "databasePath", expected_data + (kind == "main" ? "\\octant.sqlite3" : "\\local-usage-cache.sqlite3"));
+  put(env, result, "databasePath", expected_data + "\\" + utf8(filename));
   put(env, result, "extensionPath", utf8(std::wstring(module_path.data(), length)));
   safe_number(env, result, "lease", lease); return result;
 }
@@ -917,7 +952,7 @@ int initialize_sqlite_store(sqlite3* database, const sqlite3_api_routines* api) 
   auto directory = profile_directory(selected->profile, scope, selected->expected_data, ProfileDirectoryKind::Data, false, missing);
   if (!directory || !same_file(directory->directory.value, selected->directory->directory.value)) return SQLITE_AUTH;
   if (!sqlite_regular(selected->file.value, *directory->root) || !sqlite_regular(actual, *directory->root)) return SQLITE_AUTH;
-  const std::wstring path = directory->path + (selected->kind == "main" ? L"\\octant.sqlite3" : L"\\local-usage-cache.sqlite3");
+  const std::wstring path = directory->path + L"\\" + sqlite_filename(selected->kind);
   // Only the unconfined account is a local owner. Admitted untrusted clients
   // cannot mutate the private profile; this is not an anti-owner VFS sandbox.
   // SQLite keeps its ordinary sidecar creation/deletion and WAL sharing.
@@ -989,13 +1024,17 @@ napi_value claim(napi_env env, napi_callback_info info) {
 napi_value lookup(napi_env env, napi_callback_info info) {
   Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
   if (count != 1) return object(env, "refused");
-  auto root = root_for(string_arg(env, arguments[0]), false);
-  if (!root) return object(env, "refused");
+  bool missing = false;
+  auto root = root_for(string_arg(env, arguments[0]), false, &missing);
+  if (!root) return object(env, missing ? "missing" : "refused");
   Record record; const int found = read_record(*root, record);
   if (found != 1) return object(env, found == 0 ? "missing" : "refused");
   const int status = alive(record.identity);
   napi_value result = object(env, status == 1 ? "existing" : status == 0 ? "dead" : "unknown");
-  if (status == 1) record_fields(env, result, record);
+  if (status == 1) {
+    record_fields(env, result, record);
+    put(env, result, "endpoint", utf8(root->endpoint));
+  }
   return result;
 }
 napi_value poll(napi_env env, napi_callback_info) {
@@ -1143,6 +1182,7 @@ NAPI_MODULE_INIT() {
     {"listenerTlsFile", nullptr, listener_tls_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"rosterSigningKeyFile", nullptr, roster_signing_key_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"openSqliteStore", nullptr, open_sqlite_store, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"inspectSqliteStore", nullptr, inspect_sqlite_store, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"closeSqliteStore", nullptr, close_sqlite_store, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"beginAuthorityState", nullptr, begin_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"readAuthorityState", nullptr, read_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},

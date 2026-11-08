@@ -1,3 +1,4 @@
+import { attachWindowsHostRuntimeOwner } from "../../packages/host-runtime/src/windowsHostOwner";
 import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { win32 } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -51,6 +52,18 @@ try {
     if (held.status !== "ready" || held.ownership.kind !== "owner")
       throw new Error("Expected owned persistent fixture.");
     const { paths, ownership } = held;
+    const attached = await attachWindowsHostRuntimeOwner({
+      native,
+      scope: paths.profileId,
+      hostId: paths.profileId,
+      wireVersion: "1",
+    });
+    check(
+      attached.status === "attached" &&
+        attached.attachment.owner.instanceId === ownership.receipt.instanceId,
+      "read-only discovery authenticates the existing actual owner without claiming or releasing it",
+    );
+
     check(
       ownership.receipt.hostId === paths.profileId,
       "runtime receipt uses the persisted control-scope UUID",

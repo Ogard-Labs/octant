@@ -1,3 +1,5 @@
+import type { WindowsSqliteStores } from "@octant/host-runtime";
+import { win32 } from "node:path";
 import { copyFileSync, existsSync, renameSync, rmSync, statSync } from "node:fs";
 import {
   BackupVerificationFailed,
@@ -6,7 +8,7 @@ import {
   StoreRestoreFailed,
 } from "./dataLifecycleErrors";
 import { isPathWithinDirectory } from "./storePath";
-import { openSqlite, type SqliteConnection } from "./sqlitePort";
+import { openAdmittedSqlite, openSqlite, type SqliteConnection } from "./sqlitePort";
 
 // File-level backup and restore for the disposable SQLite store. A backup is a
 // single self-contained SQLite file produced by `VACUUM INTO`, so it carries no
@@ -23,7 +25,8 @@ export interface OpenBackupConnection {
   (path: string): SqliteConnection;
 }
 
-interface BackupCommonInput {
+export interface BackupCommonInput {
+  readonly windowsFiles?: WindowsSqliteStores;
   readonly dataDirectory: string;
   readonly openConnection?: OpenBackupConnection;
 }
@@ -44,11 +47,12 @@ export function createStoreBackup(
     throw new PathOutsideDataDirectory({ purpose: "backup" });
   }
 
-  removeQuietly(input.backupPath);
+  assertNativeFile(input, input.backupPath);
+  removeQuietly(input.backupPath, input.windowsFiles);
   try {
     input.connection.exec(`VACUUM main INTO '${escapeSqlPath(input.backupPath)}'`);
   } catch {
-    removeQuietly(input.backupPath);
+    removeQuietly(input.backupPath, input.windowsFiles);
     throw new StoreBackupFailed({ operation: "create" });
   }
 
@@ -56,6 +60,7 @@ export function createStoreBackup(
     dataDirectory: input.dataDirectory,
     backupPath: input.backupPath,
     ...(input.openConnection === undefined ? {} : { openConnection: input.openConnection }),
+    ...(input.windowsFiles === undefined ? {} : { windowsFiles: input.windowsFiles }),
   });
   return {
     migrationVersion: verification.migrationVersion,
@@ -81,7 +86,22 @@ export function verifyStoreBackup(input: BackupCommonInput & { readonly backupPa
     throw new BackupVerificationFailed({ reason: "unreadable" });
   }
 
-  const open = input.openConnection ?? openSqlite;
+  assertNativeFile(input, input.backupPath);
+  const open =
+    input.windowsFiles === undefined
+      ? (input.openConnection ?? openSqlite)
+      : (path: string) => {
+          const label = /^octant\.sqlite3\.backup-([a-z0-9][a-z0-9-]{0,31})$/.exec(
+            win32.basename(path),
+          )?.[1];
+          if (label === undefined) throw new BackupVerificationFailed({ reason: "unreadable" });
+          const admission = input.windowsFiles?.backup(label);
+          if (admission?.status !== "ready" || admission.databasePath !== path) {
+            if (admission?.status === "ready") admission.close();
+            throw new BackupVerificationFailed({ reason: "unreadable" });
+          }
+          return openAdmittedSqlite(admission);
+        };
   let connection: SqliteConnection | undefined;
   try {
     connection = open(input.backupPath);
@@ -150,6 +170,7 @@ export function restoreStoreBackup(
       dataDirectory: input.dataDirectory,
       backupPath: input.backupPath,
       ...(input.openConnection === undefined ? {} : { openConnection: input.openConnection }),
+      ...(input.windowsFiles === undefined ? {} : { windowsFiles: input.windowsFiles }),
     });
   } catch (error) {
     if (error instanceof BackupVerificationFailed || error instanceof PathOutsideDataDirectory) {
@@ -160,13 +181,24 @@ export function restoreStoreBackup(
 
   const temporaryPath = `${input.databasePath}.restore-${process.pid}.tmp`;
   try {
-    removeQuietly(temporaryPath);
+    assertNativeFile(input, input.databasePath);
+    assertNativeFile(input, temporaryPath);
+    removeQuietly(temporaryPath, input.windowsFiles);
     copyFileSync(input.backupPath, temporaryPath);
+    assertNativeFile(input, temporaryPath);
     renameSync(temporaryPath, input.databasePath);
-    removeQuietly(`${input.databasePath}-wal`);
-    removeQuietly(`${input.databasePath}-shm`);
+    assertNativeFile(input, input.databasePath);
+    if (input.windowsFiles !== undefined) {
+      // Native inspection covers this exact main file and all three sidecars.
+      // Only the trusted owner can mutate its held private profile here.
+      rmSync(`${input.databasePath}-wal`, { force: true });
+      rmSync(`${input.databasePath}-shm`, { force: true });
+    } else {
+      removeQuietly(`${input.databasePath}-wal`);
+      removeQuietly(`${input.databasePath}-shm`);
+    }
   } catch {
-    removeQuietly(temporaryPath);
+    removeQuietly(temporaryPath, input.windowsFiles);
     throw new StoreRestoreFailed({ stage: "swap-store" });
   }
 
@@ -209,8 +241,20 @@ function byteLength(path: string): number {
   }
 }
 
-function removeQuietly(path: string): void {
+function assertNativeFile(input: BackupCommonInput, path: string): void {
+  if (process.platform === "win32" && input.windowsFiles === undefined)
+    throw new StoreBackupFailed({ operation: "create" });
+  if (input.windowsFiles?.inspect(path).status === "refused")
+    throw new StoreBackupFailed({ operation: "create" });
+}
+
+function removeQuietly(path: string, files?: WindowsSqliteStores): void {
   try {
+    if (
+      (process.platform === "win32" && files === undefined) ||
+      files?.inspect(path).status === "refused"
+    )
+      return;
     rmSync(path, { force: true });
   } catch {
     // best effort; a missing file is the desired post-state

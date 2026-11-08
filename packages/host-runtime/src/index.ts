@@ -32,6 +32,7 @@ export {
 } from "./owner";
 export {
   acquireWindowsHostProfileOwner,
+  resolveWindowsHostProfile,
   loadWindowsHostProfileNative,
   type AcquireWindowsHostProfileOptions,
   type WindowsHostProfile,
