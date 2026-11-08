@@ -13561,16 +13561,27 @@ cards; general Azure CLI credentials remain unavailable by design.
   scope. The final LSM check only compares the actual native identity,
   operation, live context and current epoch and consumes that scope's decision.
   Every return clears unused state, and fork, clone and exec inherit none.
-  An unprepared internal path refuses until its compatibility is proved; a
+  An unprepared path in the current restricted context refuses until its compatibility is proved; a
   callback never waits for broker metadata while holding an inode lock.
   The disposable candidate covers ordinary mode, owner, timestamp and truncate
   requests at their four pinned entries: preparation precedes the inode lock,
   and the final write comparison immediately precedes `notify_change`.
   Delegation retries end the consumed scope before waiting and prepare a fresh
   attempt. Early refusal retains mount-write and automatic-scope cleanup.
-  This is not a global `inode_setattr` guard. Internal privilege clearing during
-  writes, filesystem ioctl and stacked-filesystem mutation routes remain
-  unfinished and must be proved before any production coverage is enabled;
+  Ordinary filesystem-attribute writes prepare in the three audited user
+  entry points: `ioctl_setflags`, `ioctl_fssetxattr` and `file_setattr`. Each
+  uses its actual held file or resolved path after copying values and acquiring
+  mount-write access. Its automatic scope ends before mount-write cleanup,
+  including on refusal. The common setter only compares the decision after
+  the existing security check, immediately before the filesystem effect under
+  the inode lock; it never prepares or waits. Its nested attribute read remains
+  unchanged. Native acceptance requires refusing the protected inode's NODUMP
+  change with flags and metadata unchanged while the public file's same toggle,
+  readback, restoration and permitted writes succeed.
+  This is not a global `inode_setattr` or ioctl guard. Attribute GET routes,
+  internal privilege clearing during writes, other filesystem ioctls, stacked
+  filesystems and kernel credential overrides remain unfinished and must be
+  proved before any production coverage is enabled;
   the candidate's production coverage remains zero. A global callback without
   their pre-lock lifetimes would break permitted writes or wait under locks.
   _Rationale._ Otherwise deleting a readable `name.pub` marker could make its

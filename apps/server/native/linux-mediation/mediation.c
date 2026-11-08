@@ -392,9 +392,10 @@ static int check_metadata(struct dentry *dentry, u32 operation)
 	return valid ? 0 : -EACCES;
 }
 
-/* The four audited ordinary mutation entries call this with the actual inode
- * locked, immediately before notify_change. Internal write side effects and
- * filesystem ioctls are separate, unfinished routes, not a global setattr hook. */
+/* Audited ordinary mutation entries call this under the actual inode lock,
+ * immediately before the filesystem effect. File-attribute writes prepare in
+ * their userspace callers, never in the shared/internal setter. Internal and
+ * stacked/overridden-credential paths remain unproved, not global coverage. */
 int octant_metadata_check_write(struct dentry *dentry)
 {
 	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);

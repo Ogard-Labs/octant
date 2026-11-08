@@ -173,6 +173,37 @@ def install_metadata_writes(kernel: Path) -> None:
     path.write_text(include_bridge(source))
 
 
+def install_fileattr_writes(kernel: Path) -> None:
+    path = kernel / "fs/file_attr.c"
+    source = path.read_text()
+    if "octant_metadata_" in source:
+        raise ValueError("File attribute preparation already exists")
+    call = "\t\t\terr = vfs_fileattr_set(idmap, dentry, &fa);"
+    scoped = ("\t\t\t{\n\t\t\t\tstruct octant_metadata_scope admission\n"
+              "\t\t\t\t\t__attribute__((cleanup(octant_metadata_end))) =\n"
+              "\t\t\t\t\toctant_metadata_begin(dentry, OCTANT_MEDIATION_WRITE);\n"
+              "\t\t\t\terr = admission.error;\n\t\t\t\tif (!err)\n\t\t" + call + "\n\t\t\t}")
+    for name in ("ioctl_setflags", "ioctl_fssetxattr"):
+        source = metadata_write_entry(source, name, {call: scoped})
+    call = ("\t\terror = vfs_fileattr_set(mnt_idmap(filepath.mnt),\n"
+            "\t\t\t\t\t filepath.dentry, &fa);")
+    if source.count(call) != 1:
+        raise ValueError("Pinned file_setattr call differs")
+    scoped = ("\t\t{\n\t\t\tstruct octant_metadata_scope admission\n"
+              "\t\t\t\t__attribute__((cleanup(octant_metadata_end))) =\n"
+              "\t\t\t\toctant_metadata_begin(filepath.dentry, OCTANT_MEDIATION_WRITE);\n"
+              "\t\t\terror = admission.error;\n\t\t\tif (!error)\n\t\t" +
+              call.replace("\n", "\n\t\t") + "\n\t\t}")
+    source = source.replace(call, scoped, 1)
+    call = "\t\terr = inode->i_op->fileattr_set(idmap, dentry, fa);"
+    source = metadata_write_entry(source, "vfs_fileattr_set", {
+        call: "\t\terr = octant_metadata_check_write(dentry);\n\t\tif (err)\n\t\t\tgoto out;\n" + call,
+    })
+    # Callers hold the real file/path, but no inode lock. End their scope
+    # before mount-write cleanup. The common/internal helper never waits.
+    path.write_text(include_bridge(source))
+
+
 def install_metadata(kernel: Path) -> None:
     # Scope the decision to this one actual syscall's pinned native object.
     # Read/write ACL dispatchers are included before any inode lock. Final
@@ -282,3 +313,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_scm(kernel)
     install_metadata(kernel)
     install_metadata_writes(kernel)
+    install_fileattr_writes(kernel)
