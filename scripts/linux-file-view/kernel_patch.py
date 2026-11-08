@@ -392,6 +392,114 @@ def install_metadata(kernel: Path) -> None:
     path.write_text(include_bridge(source))
 
 
+def install_creations(kernel: Path) -> None:
+    path = kernel / "fs/namei.c"
+    source = path.read_text()
+    if "octant_creation_" in source:
+        raise ValueError("Creation admission already exists")
+
+    def replace(function: str, changes: dict[str, str]) -> None:
+        nonlocal source
+        declaration = re.search(
+            rf"(?m)^(?:static\s+)?(?:int|struct dentry \*|const char \*)\s*{function}\([^;{{]*?\)\s*\{{", source)
+        if declaration is None:
+            raise ValueError(f"Pinned creation entry {function} differs")
+        start = declaration.start()
+        end = source.index("\n}", declaration.end())
+        body = source[start:end]
+        for anchor, replacement in changes.items():
+            if body.count(anchor) != 1:
+                raise ValueError(f"Pinned creation anchor differs in {function}")
+            body = body.replace(anchor, replacement, 1)
+        source = source[:start] + body + source[end:]
+
+    scope = ("\n\tstruct octant_creation_scope octant_creation_admission\n"
+             "\t\t__attribute__((cleanup(octant_creation_end))) = {};\n")
+    # Keep exported start_creating_* signatures unchanged. Only the four
+    # audited user callers carry a scope through the returned locked path.
+    replace("filename_create", {
+        "struct path *path, unsigned int lookup_flags)":
+            "struct path *path, unsigned int lookup_flags,\n"
+            "\t\t\t\t      const struct path *source_path,\n"
+            "\t\t\t\t      struct octant_creation_scope *admission)",
+        "\terror = filename_parentat(dfd, name, reval_flag, path, &last, &type);":
+            "\tif (admission)\n\t\toctant_creation_end(admission);\n\n"
+            "\terror = filename_parentat(dfd, name, reval_flag, path, &last, &type);",
+        "\tinode_lock_nested(path->dentry->d_inode, I_MUTEX_PARENT);":
+            "\tif (!error && admission) {\n"
+            "\t\t*admission = octant_creation_begin(source_path ? OCTANT_MEDIATION_LINK :\n"
+            "\t\t\tOCTANT_MEDIATION_CREATE, path, &last, source_path);\n"
+            "\t\tif (admission->error) {\n\t\t\tmnt_drop_write(path->mnt);\n"
+            "\t\t\tdentry = ERR_PTR(admission->error);\n\t\t\tgoto out;\n\t\t}\n\t}\n"
+            "\tinode_lock_nested(path->dentry->d_inode, I_MUTEX_PARENT);",
+    })
+    wrapper = "filename_create(dfd, filename, path, lookup_flags);"
+    if source.count(wrapper) != 2:
+        raise ValueError("Pinned exported creation wrappers differ")
+    source = source.replace(wrapper, "filename_create(dfd, filename, path, lookup_flags, NULL, NULL);")
+    for function, call, argument, first in (
+        ("do_mknodat", "filename_create(dfd, name, &path, lookup_flags)", "NULL", "struct mnt_idmap *idmap;"),
+        ("do_mkdirat", "filename_create(dfd, name, &path, lookup_flags)", "NULL", "struct dentry *dentry;"),
+        ("do_symlinkat", "filename_create(newdfd, to, &path, lookup_flags)", "NULL", "int error;"),
+        ("do_linkat", "filename_create(newdfd, new, &new_path,\n\t\t\t\t\t(how & LOOKUP_REVAL))", "&old_path", "struct mnt_idmap *idmap;"),
+    ):
+        ending = "\tend_creating_path(&new_path, new_dentry);" if function == "do_linkat" else "\tend_creating_path(&path, dentry);"
+        replace(function, {
+            "{\n\t" + first: "{" + scope + "\t" + first,
+            call: call[:-1] + ", " + argument + ", &octant_creation_admission)",
+            ending: ending + "\n\toctant_creation_end(&octant_creation_admission);",
+        })
+    # Open's shared parent and copied final name are stable only after unlazy.
+    # The preparation stays before its lock; both actual create paths consume.
+    open_write = "\tif (open_flag & O_CREAT)\n\t\tinode_lock(dir->d_inode);"
+    replace("open_last_lookups", {
+        "{\n\tstruct dentry *dir": "{" + scope + "\tstruct dentry *dir",
+        open_write: "\tif (got_write && (open_flag & O_CREAT)) {\n"
+            "\t\toctant_creation_admission = octant_creation_begin(OCTANT_MEDIATION_CREATE,\n"
+            "\t\t\t&nd->path, &nd->last, NULL);\n"
+            "\t\tif (octant_creation_admission.error) {\n\t\t\tmnt_drop_write(nd->path.mnt);\n"
+            "\t\t\treturn ERR_PTR(octant_creation_admission.error);\n\t\t}\n\t}\n" + open_write,
+    })
+    tmpcall = "\terror = vfs_tmpfile(mnt_idmap(path.mnt), &path, file, op->mode);"
+    replace("do_tmpfile", {
+        "{\n\tstruct path path;": "{" + scope + "\tstruct path path;",
+        tmpcall: "\toctant_creation_admission = octant_creation_begin(OCTANT_MEDIATION_TMPFILE,\n"
+            "\t\t&path, NULL, NULL);\n\terror = octant_creation_admission.error;\n"
+            "\tif (error)\n\t\tgoto out2;\n" + tmpcall,
+    })
+    for function, effect in (
+        ("vfs_create", "\terror = dir->i_op->create(idmap, dir, dentry, mode, want_excl);"),
+        ("vfs_mkobj", "\terror = f(dentry, mode, arg);"),
+        ("vfs_mknod", "\terror = dir->i_op->mknod(idmap, dir, dentry, mode, dev);"),
+        ("vfs_symlink", "\terror = dir->i_op->symlink(idmap, dir, dentry, oldname);"),
+    ):
+        replace(function, {effect:
+            "\terror = octant_creation_check(OCTANT_MEDIATION_CREATE, dir, dentry, NULL);\n"
+            "\tif (error)\n\t\treturn error;\n" + effect})
+    effect = "\tde = dir->i_op->mkdir(idmap, dir, dentry, mode);"
+    replace("vfs_mkdir", {effect:
+        "\terror = octant_creation_check(OCTANT_MEDIATION_CREATE, dir, dentry, NULL);\n"
+        "\tif (error)\n\t\tgoto err;\n" + effect})
+    effect = "\t\tif (!error)\n\t\t\terror = dir->i_op->link(old_dentry, dir, new_dentry);"
+    replace("vfs_link", {effect:
+        "\t\tif (!error)\n\t\t\terror = octant_creation_check(OCTANT_MEDIATION_LINK, dir, new_dentry, inode);\n" + effect})
+    effect = "\terror = dir->i_op->tmpfile(idmap, dir, file, mode);"
+    replace("vfs_tmpfile", {effect:
+        "\terror = octant_creation_check(OCTANT_MEDIATION_TMPFILE, dir, NULL, NULL);\n"
+        "\tif (error) {\n\t\tdput(child);\n\t\treturn error;\n\t}\n" + effect})
+    effect = "\t\terror = dir_inode->i_op->create(idmap, dir_inode, dentry,"
+    replace("lookup_open", {effect:
+        "\t\terror = octant_creation_check(OCTANT_MEDIATION_CREATE, dir_inode, dentry, NULL);\n"
+        "\t\tif (error)\n\t\t\tgoto out_dput;\n" + effect})
+    effect = "\terror = dir->i_op->atomic_open(dir, dentry, file,"
+    replace("atomic_open", {effect:
+        "\tif (open_flag & O_CREAT) {\n"
+        "\t\terror = octant_creation_check(OCTANT_MEDIATION_CREATE, dir, dentry, NULL);\n"
+        "\t\tif (error) {\n\t\t\td_lookup_done(dentry);\n\t\t\tdput(dentry);\n"
+        "\t\t\treturn ERR_PTR(error);\n\t\t}\n\t}\n" + effect})
+    path.write_text(source if "#include <linux/octant_mediation_bridge.h>" in source else include_bridge(source))
+
+
 def install_epochs(kernel: Path, native: Path) -> None:
     # Real unconfined writers use these same VFS entry points. These counters
     # describe in-flight mutations, not delayed filesystem-watch notifications.
@@ -470,3 +578,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_fileattr_reads(kernel)
     install_seek_reads(kernel)
     install_inode_generation_write(kernel)
+    install_creations(kernel)

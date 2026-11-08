@@ -86,10 +86,20 @@ struct octant_metadata {
 	bool prepared;
 };
 
+struct octant_creation {
+	u64 next_scope;
+	u64 scope;
+	struct task_struct *owner;
+	struct octant_context *context;
+	struct octant_mediation_request approved;
+	bool prepared;
+};
+
 /* Per-task rather than per-credential: same-policy threads may propose
  * concurrent namespace operations without replacing each other's token. */
 struct octant_task {
 	struct octant_metadata metadata;
+	struct octant_creation creation;
 	struct octant_mediation_request approved;
 	u64 mutation_base;
 	u64 own_changes;
@@ -208,6 +218,14 @@ static void put_context(struct octant_context *context)
 {
 	if (context)
 		kref_put(&context->references, release_context);
+}
+
+static void clear_creation(struct octant_creation *creation)
+{
+	u64 next = creation->next_scope;
+	struct octant_context *context = creation->context;
+	*creation = (struct octant_creation) { .next_scope = next };
+	put_context(context);
 }
 
 static int copy_cred(struct cred *new, const struct cred *old, gfp_t gfp)
@@ -428,8 +446,14 @@ int octant_metadata_check_write(struct dentry *dentry)
 static int octant_metadata_task_alloc(struct task_struct *task, u64 clone_flags)
 {
 	struct octant_task *state = task->security + octant_blobs.lbs_task;
-	memset(&state->metadata, 0, sizeof(state->metadata));
+	memset(state, 0, sizeof(*state));
 	return 0;
+}
+
+static void octant_creation_task_free(struct task_struct *task)
+{
+	struct octant_task *state = task->security + octant_blobs.lbs_task;
+	clear_creation(&state->creation);
 }
 
 static int octant_metadata_getattr(const struct path *path)
@@ -490,6 +514,122 @@ static int copy_name(struct octant_mediation_name *output, struct inode *parent,
 	output->length = name->len;
 	memcpy(output->bytes, name->name, name->len);
 	return 0;
+}
+
+static int creation_identity(struct octant_mediation_request *request, u32 operation,
+	struct inode *parent, const struct qstr *name, struct inode *source)
+{
+	int result;
+	if (!parent || !S_ISDIR(parent->i_mode) ||
+	    (operation != OCTANT_MEDIATION_CREATE && operation != OCTANT_MEDIATION_LINK &&
+	     operation != OCTANT_MEDIATION_TMPFILE) ||
+	    (operation == OCTANT_MEDIATION_LINK) != (source != NULL))
+		return -EACCES;
+	request->operation = operation;
+	if (operation == OCTANT_MEDIATION_TMPFILE) {
+		if (name)
+			return -EACCES;
+		request->destination.parent_inode = parent->i_ino;
+		request->destination.device_major = MAJOR(parent->i_sb->s_dev);
+		request->destination.device_minor = MINOR(parent->i_sb->s_dev);
+	} else {
+		result = copy_name(&request->destination, parent, name);
+		if (result)
+			return result;
+	}
+	if (source) {
+		request->inode = source->i_ino;
+		request->device_major = MAJOR(source->i_sb->s_dev);
+		request->device_minor = MINOR(source->i_sb->s_dev);
+	}
+	return 0;
+}
+
+/* Only the audited caller prepares, before locks. It owns this scope through
+ * the filesystem call; the temporary-file source needs no invented pathname. */
+struct octant_creation_scope octant_creation_begin(u32 operation, const struct path *parent,
+	const struct qstr *name, const struct path *source)
+{
+	struct octant_creation_scope scope = {};
+	struct octant_creation *creation;
+	struct octant_mediation_request request = {};
+	struct octant_context *context;
+	if (!octant_mediation_restricted())
+		return scope;
+	creation = &octant_task()->creation;
+	if (creation->owner || creation->next_scope == U64_MAX) {
+		scope.error = -EACCES;
+		return scope;
+	}
+	context = octant_cred(current_cred())->context;
+	scope.identity = ++creation->next_scope;
+	creation->scope = scope.identity;
+	creation->owner = current;
+	creation->context = context;
+	kref_get(&context->references);
+	scope.error = creation_identity(&request, operation, d_inode(parent->dentry), name,
+		source ? d_inode(source->dentry) : NULL);
+	if (!scope.error)
+		scope.error = admit_request(&request, NULL, parent);
+	if (!scope.error) {
+		creation->approved = request;
+		creation->prepared = true;
+	}
+	return scope;
+}
+
+void octant_creation_end(struct octant_creation_scope *scope)
+{
+	struct octant_creation *creation;
+	if (!scope->identity || !initialized)
+		return;
+	creation = &octant_task()->creation;
+	if (creation->scope == scope->identity && creation->owner == current)
+		clear_creation(creation);
+	scope->identity = 0;
+}
+
+/* Compare once at the actual effect with native locks already held. No
+ * metadata lookup or broker wait may occur here, including delegation retry. */
+int octant_creation_check(u32 operation, struct inode *parent, struct dentry *name,
+	struct inode *source)
+{
+	struct octant_mediation_request actual = {};
+	struct octant_task *task;
+	struct octant_creation *creation;
+	struct octant_context *context;
+	unsigned long flags;
+	bool valid;
+	int result;
+	if (!octant_mediation_restricted())
+		return 0;
+	task = octant_task();
+	creation = &task->creation;
+	context = octant_cred(current_cred())->context;
+	result = creation_identity(&actual, operation, parent, name ? &name->d_name : NULL, source);
+	if (result) {
+		creation->prepared = false;
+		return result;
+	}
+	spin_lock_irqsave(&context->lock, flags);
+	spin_lock(&namespace_lock);
+	valid = creation->scope && creation->owner == current && creation->context == context &&
+		creation->prepared && !context->dead && broker_alive(context) && !namespace_overflow &&
+		creation->approved.operation == actual.operation &&
+		creation->approved.inode == actual.inode &&
+		creation->approved.device_major == actual.device_major &&
+		creation->approved.device_minor == actual.device_minor &&
+		!memcmp(&creation->approved.destination, &actual.destination, sizeof(actual.destination)) &&
+		active_mutations == task->mutation_depth &&
+		(task->mutation_depth ?
+		 creation->approved.namespace_epoch == task->mutation_base &&
+		 namespace_epoch >= task->mutation_base &&
+		 namespace_epoch - task->mutation_base == task->own_changes :
+		 creation->approved.namespace_epoch == namespace_epoch);
+	creation->prepared = false;
+	spin_unlock(&namespace_lock);
+	spin_unlock_irqrestore(&context->lock, flags);
+	return valid ? 0 : -EACCES;
 }
 
 int octant_namespace_prepare(u32 operation, const struct path *source,
@@ -641,6 +781,7 @@ static int protect_mapping(struct vm_area_struct *vma, unsigned long requested, 
 static int check_exec(struct linux_binprm *bprm)
 {
 	clear_metadata(&octant_task()->metadata);
+	clear_creation(&octant_task()->creation);
 	return admit_file(bprm->file, OCTANT_MEDIATION_EXEC);
 }
 
@@ -988,6 +1129,7 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(file_ioctl_compat, octant_file_ioctl_compat),
 #endif
 	LSM_HOOK_INIT(task_alloc, octant_metadata_task_alloc),
+	LSM_HOOK_INIT(task_free, octant_creation_task_free),
 	LSM_HOOK_INIT(inode_getattr, octant_metadata_getattr),
 	LSM_HOOK_INIT(inode_readlink, octant_metadata_readlink),
 	LSM_HOOK_INIT(inode_getxattr, octant_metadata_getxattr),
