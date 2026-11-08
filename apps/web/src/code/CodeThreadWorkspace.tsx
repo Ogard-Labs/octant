@@ -145,7 +145,7 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { PermissionModePicker } from "./PermissionModePicker";
+import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import type { CodeFileListingClient } from "@octant/client-runtime";
@@ -1372,6 +1372,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         executionPolicy: access.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
         autoApprove: access.autoApprove,
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
+  async function changeFullAccessSandbox(sandboxed: boolean) {
+    props.controller.setAccessNotice(undefined);
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: "full-access",
+        permissionPersistence: thread.permissionPersistence,
+        fullAccessSandbox: sandboxed,
       });
     } finally {
       setAccessChanging(false);
@@ -2620,6 +2637,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}
+                  fullAccessSandbox={thread.fullAccessSandbox === true}
+                  fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
+                    providerGroups,
+                    thread.providerInstanceId,
+                  )}
+                  onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
                 />
               </>
             ),

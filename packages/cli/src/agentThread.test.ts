@@ -153,7 +153,15 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
   const created = () =>
     seen.find(
       (request) => (request.body as { kind?: string } | undefined)?.kind === "create-code-thread",
-    )?.body as { thread: { executionPolicy: string; permissionPersistence: string } } | undefined;
+    )?.body as
+      | {
+          thread: {
+            executionPolicy: string;
+            permissionPersistence: string;
+            fullAccessSandbox?: boolean;
+          };
+        }
+      | undefined;
   const projectCommands = () =>
     seen
       .filter((request) => request.path === "/api/projects/commands")
@@ -334,6 +342,24 @@ describe("starting a Code thread from the terminal", () => {
     });
   });
 
+  it("records the opt-in sandbox on the thread when --access full-access --sandbox is asked", async () => {
+    const fake = host("current-session");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Sandboxed full run",
+      projectName: "Repo",
+      access: "full-access",
+      sandbox: true,
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "full-access",
+      fullAccessSandbox: true,
+    });
+  });
+
   it("starts Auto with the harness reviewer flag when --access auto is asked", async () => {
     const fake = host("current-session");
 
@@ -369,6 +395,24 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
       .workCommands()
       .find((command) => command.kind === "change-work-thread-access");
     expect(change).toMatchObject({ access: "full-access", expectedVersion: 1 });
+  });
+
+  it("carries the sandbox with the Work thread's raise to Full access, so it is not dropped at creation", async () => {
+    const fake = workHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "work",
+      title: "Client work",
+      projectName: "Client",
+      access: "full-access",
+      sandbox: true,
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "work" });
+    const change = fake
+      .workCommands()
+      .find((command) => command.kind === "change-work-thread-access");
+    expect(change).toMatchObject({ access: "full-access", fullAccessSandbox: true });
   });
 
   it("refuses --access plan for a Work thread, which has no Plan overlay", async () => {
