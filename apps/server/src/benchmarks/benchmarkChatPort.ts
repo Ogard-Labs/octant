@@ -11,7 +11,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
 } from "@octant/contracts";
-import { ChatServiceError } from "../chat/chatService";
+import { ChatServiceError, type ChatServiceExecutionContext } from "../chat/chatService";
 import { deterministicUuid } from "../deterministicUuid";
 
 /** Where benchmark threads live: one Chat Project, so its spend ceilings apply. */
@@ -33,7 +33,12 @@ export type BenchmarkTurnReading =
       readonly attemptId?: string;
       readonly outcome: ChatAttemptOutcome;
       readonly failureMessage?: string;
+      /** The closed code the host gave a failed or interrupted attempt. */
+      readonly failureCode?: string;
     };
+
+/** The code Chat gives an attempt it could not admit for lack of capacity. */
+export const CAPACITY_UNAVAILABLE_FAILURE_CODE = "capacity-unavailable";
 
 export type BenchmarkTurnStart =
   | { readonly status: "started"; readonly turnId: string }
@@ -65,6 +70,8 @@ export interface BenchmarkChatPort {
   readAnswer(threadId: string, turnId: string): string | undefined;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   archiveThread(threadId: string): Promise<void>;
+  /** Resolves once every send the port started in the background has ended; for shutdown and tests. */
+  whenIdle?(): Promise<void>;
 }
 
 /** The slice of the Chat service the adapter uses. */
@@ -82,11 +89,16 @@ export interface BenchmarkChatService {
       readonly attempts: ReadonlyArray<{
         readonly id: string;
         readonly outcome: ChatAttemptOutcome;
-        readonly failure?: { readonly message?: string | undefined } | undefined;
+        readonly failure?:
+          | { readonly message?: string | undefined; readonly code?: string | undefined }
+          | undefined;
       }>;
     }>;
   };
-  readonly execute: (command: ChatCommand) => Promise<{ readonly kind: string }>;
+  readonly execute: (
+    command: ChatCommand,
+    context?: ChatServiceExecutionContext,
+  ) => Promise<{ readonly kind: string }>;
 }
 
 export interface CreateBenchmarkChatPortOptions {
@@ -99,6 +111,47 @@ export function createBenchmarkChatPort(
   options: CreateBenchmarkChatPortOptions,
 ): BenchmarkChatPort {
   const { chat } = options;
+  // Chat's send and retry commands do not return until the provider has
+  // answered, so awaiting one would hold the runner for the whole response. A
+  // command runs here in the background, owned by the port: the caller learns
+  // when the turn is durably in, and an error after that point is logged and
+  // swallowed, because the turn's own attempt records how it ended.
+  const background = new Set<Promise<unknown>>();
+  const dispatch = (
+    command: ChatCommand,
+    isAccepted: () => boolean,
+  ): Promise<
+    { readonly status: "accepted" } | { readonly status: "failed"; readonly error: unknown }
+  > =>
+    new Promise((resolve) => {
+      let answered = false;
+      const answer = (outcome: Parameters<typeof resolve>[0]) => {
+        if (answered) return;
+        answered = true;
+        resolve(outcome);
+      };
+      const running = chat
+        .execute(command, { onTurnAccepted: () => answer({ status: "accepted" }) })
+        .then(
+          () => answer({ status: "accepted" }),
+          (error: unknown) => {
+            if (answered) {
+              console.warn("A benchmark turn ended with an error after it was accepted.", error);
+            }
+            answer({ status: "failed", error });
+          },
+        )
+        .finally(() => background.delete(running));
+      background.add(running);
+      // A retry has no acceptance hook; its new attempt is journaled before it
+      // runs, so the port watches for it.
+      void (async () => {
+        while (!answered) {
+          if (isAccepted()) return answer({ status: "accepted" });
+          await new Promise((wake) => setTimeout(wake, 10));
+        }
+      })();
+    });
   const view = (threadId: string) => {
     try {
       return chat.read(decodeChatThreadId(threadId));
@@ -124,7 +177,33 @@ export function createBenchmarkChatPort(
           }
         }
         const existing = current.turns.find((turn) => turn.submissionId === input.submissionId);
-        if (existing !== undefined) return { status: "started", turnId: existing.id };
+        if (existing !== undefined) {
+          const last = existing.attempts.at(-1);
+          if (
+            last === undefined ||
+            last.outcome !== "interrupted" ||
+            last.failure?.code !== CAPACITY_UNAVAILABLE_FAILURE_CODE
+          ) {
+            return { status: "started", turnId: existing.id };
+          }
+          // Chat had no room when the attempt was admitted. The turn exists, so
+          // it is retried rather than sent again.
+          const attemptsBefore = existing.attempts.length;
+          const retried = await dispatch(
+            {
+              kind: "retry-chat-turn",
+              threadId: chatThreadId,
+              expectedVersion: current.thread.version,
+              turnId: decodeChatTurnId(existing.id),
+              attemptId: decodeChatAttemptId(last.id),
+            },
+            () =>
+              (view(input.threadId)?.turns.find((turn) => turn.id === existing.id)?.attempts
+                .length ?? 0) > attemptsBefore,
+          );
+          if (retried.status === "failed") throw retried.error;
+          return { status: "started", turnId: existing.id };
+        }
         if (current.turns.length > 0) {
           return { status: "refused", message: "The benchmark thread already holds another turn." };
         }
@@ -146,20 +225,26 @@ export function createBenchmarkChatPort(
             return { status: "refused", message: "The benchmark thread is gone." };
           }
         }
-        const sent = await chat.execute({
-          kind: "send-chat-turn",
-          threadId: chatThreadId,
-          expectedVersion: current.thread.version,
-          prompt: input.prompt,
-          submissionId: decodeChatSubmissionId(input.submissionId),
-        });
+        const sent = await dispatch(
+          {
+            kind: "send-chat-turn",
+            threadId: chatThreadId,
+            expectedVersion: current.thread.version,
+            prompt: input.prompt,
+            submissionId: decodeChatSubmissionId(input.submissionId),
+          },
+          () =>
+            view(input.threadId)?.turns.some((turn) => turn.submissionId === input.submissionId) ===
+            true,
+        );
+        if (sent.status === "failed") throw sent.error;
         const accepted = view(input.threadId)?.turns.find(
           (turn) => turn.submissionId === input.submissionId,
         );
         if (accepted === undefined) {
           return {
             status: "refused",
-            message: `The turn was not accepted (${sent.kind}).`,
+            message: "The turn was not accepted.",
           };
         }
         return { status: "started", turnId: accepted.id };
@@ -192,9 +277,13 @@ export function createBenchmarkChatPort(
         ...(attempt.failure?.message === undefined
           ? {}
           : { failureMessage: attempt.failure.message }),
+        ...(attempt.failure?.code === undefined ? {} : { failureCode: attempt.failure.code }),
       };
     },
     readAnswer: (threadId, turnId) => options.answer(threadId, turnId),
+    async whenIdle() {
+      while (background.size > 0) await Promise.allSettled([...background]);
+    },
     async interruptTurn(threadId, turnId) {
       const current = view(threadId);
       const attempt = current?.turns.find((turn) => turn.id === turnId)?.attempts.at(-1);

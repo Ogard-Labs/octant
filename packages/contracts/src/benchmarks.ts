@@ -485,6 +485,7 @@ export const BENCHMARK_EVENT_NAMES = {
   suiteDeleted: "benchmark-suite-deleted@1",
   runStarted: "benchmark-run-started@1",
   cellStarted: "benchmark-cell-started@1",
+  cellRequeued: "benchmark-cell-requeued@1",
   cellSettled: "benchmark-cell-settled@1",
   cellJudged: "benchmark-cell-judged@1",
   cellRated: "benchmark-cell-rated@1",
@@ -512,6 +513,16 @@ export const BenchmarkCellStarted = Schema.Struct({
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type BenchmarkCellStarted = typeof BenchmarkCellStarted.Type;
+/**
+ * A cell whose turn Chat could not admit for lack of capacity goes back to
+ * queued. It keeps its thread, so starting it again retries the turn it has
+ * rather than sending a second one.
+ */
+export const BenchmarkCellRequeued = Schema.Struct({
+  runId: BenchmarkRunId,
+  cellId: BenchmarkCellId,
+}).annotations(strict);
+export type BenchmarkCellRequeued = typeof BenchmarkCellRequeued.Type;
 export const BenchmarkCellSettled = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
