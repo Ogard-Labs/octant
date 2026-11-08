@@ -2,16 +2,22 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-// Owned-runner diagnostics only. These APIs never request a TCC permission or
-// read page contents, window titles, credentials, or another app's AX tree.
-guard CommandLine.arguments.count == 3,
+// Owned-runner native UI QA. Never requests a TCC permission or reads text-field
+// values, credentials, or another app's tree. Only one named switch has a value.
+guard (3...5).contains(CommandLine.arguments.count),
       let processId = Int32(CommandLine.arguments[1]), processId > 1 else {
     exit(2)
 }
+let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
+let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
+guard ["diagnostic", "read", "press"].contains(mode),
+      (mode == "press") == !requestedTitle.isEmpty,
+      requestedTitle.count <= 256 else { exit(2) }
+let preferenceTitle = "Keep Browser available without windows"
 let expectedBundle = URL(fileURLWithPath: CommandLine.arguments[2]).resolvingSymlinksInPath().standardizedFileURL.path
 let application = NSRunningApplication(processIdentifier: processId)
 let capturedBundle = application?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path
-let treeIdentityMatched = capturedBundle == expectedBundle
+let treeIdentityMatched = capturedBundle == expectedBundle && application?.isTerminated == false
 let matchingApplications = NSWorkspace.shared.runningApplications.filter {
     $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle
 }
@@ -22,7 +28,7 @@ let attributeResult = AXUIElementCopyAttributeNames(element, &attributes)
 var role: CFTypeRef?
 let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
 var attributeSets: [[String: Any]] = []
-for name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+for name in mode == "diagnostic" ? ["AXManualAccessibility", "AXEnhancedUserInterface"] : [] {
     let result = AXUIElementSetAttributeValue(element, name as CFString, kCFBooleanTrue)
     var value: CFTypeRef?
     let read = AXUIElementCopyAttributeValue(element, name as CFString, &value)
@@ -35,21 +41,24 @@ for name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
 }
 var windows: CFTypeRef?
 let windowResult = AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windows)
-// Read only named controls, never field values or static page text. The owned
+// Read named controls, never text-field values or static page text. The owned
 // process has already been identified above; this is not a system-wide tree.
-let controlRoles = Set(["AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea"])
+let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea"])
 var pending = (treeIdentityMatched ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0) }
 var visited = Set<CFHashCode>()
 var controls: [[String: Any]] = []
+var pressTargets: [AXUIElement] = []
 var readErrors = 0
 var next = 0
 var depthLimited = false
+var labelsLimited = false
 let treeDeadline = Date().addingTimeInterval(3)
 func label(_ node: AXUIElement, _ attribute: CFString) -> String {
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(node, attribute, &value) == .success,
           let text = value as? String else { return "" }
-    return text.count <= 256 ? text : "[label exceeds diagnostic bound]"
+    if text.count > 256 { labelsLimited = true; return "" }
+    return text
 }
 while next < pending.count, next < 512, Date() < treeDeadline {
     let (node, depth) = pending[next]
@@ -60,10 +69,18 @@ while next < pending.count, next < 512, Date() < treeDeadline {
           let nodeRole = roleValue as? String else { readErrors += 1; continue }
     if nodeRole == "AXSecureTextField" || label(node, kAXSubroleAttribute as CFString) == "AXSecureTextField" { continue }
     if controlRoles.contains(nodeRole) {
-        controls.append(["role": nodeRole,
-                         "title": label(node, kAXTitleAttribute as CFString),
-                         "description": label(node, kAXDescriptionAttribute as CFString),
-                         "depth": depth])
+        let title = label(node, kAXTitleAttribute as CFString)
+        let description = label(node, kAXDescriptionAttribute as CFString)
+        var control: [String: Any] = ["role": nodeRole, "title": title, "description": description, "depth": depth]
+        if (nodeRole == "AXCheckBox" || nodeRole == "AXSwitch") && (title == preferenceTitle || description == preferenceTitle) {
+            var state: CFTypeRef?
+            if AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &state) == .success,
+               let number = state as? NSNumber, number.doubleValue == 0 || number.doubleValue == 1 {
+                control["value"] = number.intValue
+            }
+        }
+        controls.append(control)
+        if mode == "press" && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
     }
     if depth >= 20 { depthLimited = true; continue }
     var childrenValue: CFTypeRef?
@@ -82,6 +99,23 @@ let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? 
             "layer": row[kCGWindowLayer as String] ?? NSNull(),
             "matchesStagedBundle": matchingIds.contains(owner.int32Value)]
 }
+let truncated = depthLimited || labelsLimited || next < pending.count || pending.count >= 512
+var action: [String: Any] = ["status": "not-requested"]
+if mode == "press" {
+    action = ["status": "refused", "matches": pressTargets.count, "requestedTitle": requestedTitle]
+    let live = NSRunningApplication(processIdentifier: processId)
+    if treeIdentityMatched, !truncated, readErrors == 0, pressTargets.count == 1,
+       live?.isTerminated == false,
+       live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
+       let target = pressTargets.first {
+        var targetPid: pid_t = 0
+        if AXUIElementGetPid(target, &targetPid) == .success, targetPid == processId {
+            let result = AXUIElementPerformAction(target, kAXPressAction as CFString)
+            action["status"] = result == .success ? "pressed" : "uncertain"
+            action["nativeError"] = result.rawValue
+        }
+    }
+}
 let evidence: [String: Any] = [
     "capturedPid": processId,
     "diagnosticPid": ProcessInfo.processInfo.processIdentifier,
@@ -97,7 +131,7 @@ let evidence: [String: Any] = [
     "windowsError": windowResult.rawValue, "axWindowCount": (windows as? NSArray)?.count ?? -1,
     "interactiveControls": controls, "treeIdentityMatched": treeIdentityMatched,
     "treeVisited": next, "treeReadErrors": readErrors,
-    "treeTruncated": depthLimited || next < pending.count || pending.count >= 512,
+    "treeTruncated": truncated, "action": action,
     "cgMetadataAvailable": nativeWindows != nil, "candidateWindowOwners": candidateWindows,
 ]
 // Optional booleans are represented explicitly, not by reading arbitrary AX values.

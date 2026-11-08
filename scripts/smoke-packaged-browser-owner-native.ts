@@ -31,7 +31,6 @@ end try
 set frontmost of candidate to true
 return "initialized"
 end if
-if operation is "count" then return (count of windows of candidate) as text
 if operation is "activate" then
 set frontmost of candidate to false
 delay 0.2
@@ -43,35 +42,7 @@ set frontmost of candidate to true
 keystroke (item 3 of argv) using command down
 return "sent"
 end if
-if (count of windows of candidate) is 0 then error "No owned native window."
-set snapshotRows to {}
-repeat with uiElement in (entire contents of first window of candidate)
-try
-set rowRole to role of uiElement as text
-set rowName to ""
-set rowDescription to ""
-set rowValue to ""
-try
-set rowName to name of uiElement as text
-end try
-try
-set rowDescription to description of uiElement as text
-end try
-if rowRole is not "AXSecureTextField" then
-try
-set rowValue to value of uiElement as text
-end try
-end if
-if operation is "press" and rowName is (item 3 of argv) then
-perform action "AXPress" of uiElement
-return "pressed"
-end if
-set end of snapshotRows to (rowRole & " | " & rowName & " | " & rowDescription & " | " & rowValue)
-end try
-end repeat
-if operation is "press" then error "Named owned control unavailable."
-set AppleScript's text item delimiters to linefeed
-return snapshotRows as text
+error "Unsupported captured-process operation."
 end tell
 end run`;
 
@@ -142,6 +113,18 @@ async function main(): Promise<void> {
         ? {}
         : { RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID }),
     };
+    const sdkExecutable = join(root, "ax-controller");
+    await runBoundedCommand(
+      "/usr/bin/xcrun",
+      [
+        "swiftc",
+        fileURLToPath(new URL("./packaged-browser-owner-ax.swift", import.meta.url)),
+        "-o",
+        sdkExecutable,
+      ],
+      process.env,
+      30_000,
+    );
     for (const phase of ["initial", "restart"] as const) {
       const app = spawnPackagedApplication({
         executable: join(bundle, "Contents/MacOS/Octant"),
@@ -171,13 +154,75 @@ const timer = setInterval(() => {
           stdio: "ignore",
         },
       );
-      const native = (operation: string, value = "") =>
+      const systemEvents = (operation: string, value = "") =>
         runBoundedCommand(
           "/usr/bin/osascript",
           ["-e", ax, String(pid), operation, value],
           process.env,
           6000,
         );
+      const sdk = (mode: "diagnostic" | "read" | "press", value?: string) =>
+        runBoundedCommand(
+          sdkExecutable,
+          [String(pid), bundle, mode, ...(value === undefined ? [] : [value])],
+          process.env,
+          6000,
+        );
+      const native = async (operation: string, value = ""): Promise<string> => {
+        if (operation !== "snapshot" && operation !== "count" && operation !== "press")
+          return systemEvents(operation, value);
+        const decoded: unknown = JSON.parse(
+          await sdk(
+            operation === "press" ? "press" : "read",
+            operation === "press" ? value : undefined,
+          ),
+        );
+        const record = (item: unknown): item is Readonly<Record<string, unknown>> =>
+          typeof item === "object" && item !== null && !Array.isArray(item);
+        if (
+          !record(decoded) ||
+          decoded.capturedPid !== pid ||
+          decoded.treeIdentityMatched !== true ||
+          decoded.nativeAxTrusted !== true ||
+          decoded.windowsError !== 0 ||
+          typeof decoded.axWindowCount !== "number" ||
+          !Number.isSafeInteger(decoded.axWindowCount) ||
+          decoded.axWindowCount < 0
+        )
+          throw Error("Native SDK refused the captured window identity or read.");
+        if (operation === "count") return String(decoded.axWindowCount);
+        if (
+          decoded.treeTruncated !== false ||
+          decoded.treeReadErrors !== 0 ||
+          !Array.isArray(decoded.interactiveControls)
+        )
+          throw Error("Native SDK control tree is incomplete.");
+        if (operation === "press") {
+          if (
+            !record(decoded.action) ||
+            decoded.action.status !== "pressed" ||
+            decoded.action.nativeError !== 0 ||
+            decoded.action.matches !== 1
+          )
+            throw Error(
+              `Native SDK refused or could not confirm the single named control: ${value}. No action is retried.`,
+            );
+          return "pressed";
+        }
+        return decoded.interactiveControls
+          .map((control: unknown) => {
+            if (
+              !record(control) ||
+              typeof control.role !== "string" ||
+              typeof control.title !== "string" ||
+              typeof control.description !== "string" ||
+              (control.value !== undefined && control.value !== 0 && control.value !== 1)
+            )
+              throw Error("Invalid native SDK control shape.");
+            return `${control.role} | ${control.title} | ${control.description} | ${control.value ?? ""}`;
+          })
+          .join("\n");
+      };
       const diagnose = async (name: string) => {
         const script = String.raw`on run argv
 tell application "System Events"
@@ -221,21 +266,9 @@ end run`;
           );
         }
         try {
-          const executable = join(root, "ax-read-diagnostic");
-          await runBoundedCommand(
-            "/usr/bin/xcrun",
-            [
-              "swiftc",
-              fileURLToPath(new URL("./packaged-browser-owner-ax.swift", import.meta.url)),
-              "-o",
-              executable,
-            ],
-            process.env,
-            30_000,
-          );
           await writeFile(
             join(artifacts, `${phase}-${name}-native-ax.json`),
-            await runBoundedCommand(executable, [String(pid), bundle], process.env, 6000),
+            await sdk("diagnostic"),
           );
         } catch (error) {
           await writeFile(
@@ -314,11 +347,11 @@ end run`;
         if (phase === "initial") {
           await wait(
             "onboarding",
-            (s) => s.includes("Welcome to Octant") && s.includes("Skip setup"),
+            (s) => s.includes("AXButton") && s.includes("Skip setup"),
             45_000,
           );
           await native("press", "Skip setup");
-          await wait("skip", (s) => s.includes("AXButton") && !s.includes("Welcome to Octant"));
+          await wait("skip", (s) => s.includes("AXButton") && !s.includes("Skip setup"));
         } else await wait("restarted-window", (s) => s.includes("AXButton"), 45_000);
         let snapshot = await settings();
         await capture("preference", snapshot);
