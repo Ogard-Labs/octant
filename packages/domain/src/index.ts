@@ -223,6 +223,7 @@ export * from "./harnessRetryStatus";
 export * from "./outsideContentSources";
 export * from "./trimTrailing";
 export * from "./hubAndSpokesPolicy";
+export * from "./hubThreadMovePolicy";
 export * from "./hubProvisionPolicy";
 export * from "./hubSignInPolicy";
 export * from "./hubPushPolicy";

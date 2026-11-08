@@ -1,4 +1,5 @@
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
@@ -20,6 +21,7 @@ import type { AgentRunParentContextSelection } from "../agentRun/agentRunParentC
 import {
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  withHandoverSummary,
   restartHandoffRecord,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
@@ -266,6 +268,8 @@ export interface ServerWorkTurns {
 }
 
 export interface WorkTurnServiceDependencies {
+  /** Whether a move holds a thread; a held thread starts no turn. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -376,6 +380,8 @@ export interface WorkTurnServiceDependencies {
     /** The Project's extra folders, which file tools treat as the root. */
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
+    /** The turn the tools serve. */
+    readonly turnId: StartWorkThreadTurnCommand["turnId"];
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
@@ -572,7 +578,10 @@ export class WorkTurnService {
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
+  readonly #moveHold: ((threadId: string) => boolean) | undefined;
+
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#moveHold = dependencies.moveHold;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
@@ -671,11 +680,15 @@ export class WorkTurnService {
         selection,
         record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
       };
-    return {
-      blocks: selection.blocks,
+    const switched = withHandoverSummary(
       selection,
+      this.#handoverSummary("work-thread", thread.id),
+    );
+    return {
+      blocks: switched.blocks,
+      selection: switched,
       record: providerSwitchHandoffRecord(
-        selection,
+        switched,
         // A handoff that never completed is made again from the provider the
         // conversation came from, not the one that may not have received it.
         previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
@@ -689,6 +702,22 @@ export class WorkTurnService {
             },
       ),
     };
+  }
+
+  /** The limit rule's summary for the thread, if one is waiting for a move. */
+  #handoverSummary(
+    aggregateType: "work-thread",
+    threadId: WorkThreadId,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#contextHarness?.handoverSummary(
+        decodeContextSubjectRef({ aggregateType, aggregateId: String(threadId) }),
+        () => this.sessionCompactionConversation(threadId),
+      );
+    } catch {
+      // A ledger that cannot be read hands over the raw selection, as before.
+      return undefined;
+    }
   }
 
   #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {
@@ -830,6 +859,9 @@ export class WorkTurnService {
       externalData === undefined ? undefined : workExternalInputReceipt(externalData);
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
+    }
+    if (this.#moveHold?.(String(command.threadId)) === true) {
+      throw this.#failure("stale", THREAD_MOVING_REFUSAL);
     }
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
     // The level this turn runs at, fixed at admission: the thread's own,
@@ -1068,6 +1100,7 @@ export class WorkTurnService {
               projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
               windowId: authenticatedWindowId,
+              turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
     const preparedTools =
@@ -1439,6 +1472,13 @@ export class WorkTurnService {
       const afterPreparation = this.#agentResultDelivery(command);
       if (afterPreparation !== undefined) return afterPreparation;
 
+      // A move may have frozen the thread while its context was prepared; the
+      // turn is refused here, before anything is accepted, so no message
+      // lands outside the conversation the move carries.
+      if (this.#moveHold?.(String(command.threadId)) === true) {
+        throw this.#failure("stale", THREAD_MOVING_REFUSAL);
+      }
+
       // Context and attachment reads can outlive the host's queue admission.
       if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
         if (markedWhilePreparing) {
@@ -1622,6 +1662,10 @@ export class WorkTurnService {
     }
     const journaled = this.#projection.rewind(String(command.rewindId));
     if (journaled !== undefined) return this.#rewindResult(command, journaled.removedRequestIds);
+    // A rewind changes the conversation a move is carrying.
+    if (this.#moveHold?.(String(command.threadId)) === true) {
+      throw this.#failure("stale", THREAD_MOVING_REFUSAL);
+    }
     if (this.#startingTurns.has(String(command.threadId)) || this.isTurnActive(command.threadId)) {
       throw this.#failure("stale", WORK_REWIND_WHILE_TURN_RUNS);
     }

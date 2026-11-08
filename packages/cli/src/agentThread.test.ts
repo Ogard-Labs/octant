@@ -122,6 +122,9 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
         return { status: 200, body: { workspaceVersion: 1 } };
       }
       if (request.path === "/api/shell/commands") return { status: 200, body: {} };
+      if (request.path === "/api/projects/commands") {
+        return { status: 200, body: { kind: "code-project-access-changed" } };
+      }
       const body = request.body as { kind: string; thread?: unknown };
       if (body.kind === "prepare-code-project-checkout") {
         return {
@@ -151,7 +154,107 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
     seen.find(
       (request) => (request.body as { kind?: string } | undefined)?.kind === "create-code-thread",
     )?.body as { thread: { executionPolicy: string; permissionPersistence: string } } | undefined;
-  return { session, created };
+  const projectCommands = () =>
+    seen
+      .filter((request) => request.path === "/api/projects/commands")
+      .map((request) => request.body as { kind: string });
+  return { session, created, projectCommands };
+}
+
+function workHost() {
+  const seen: LocalControlRequest[] = [];
+  const session: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "11111111-1111-4111-8111-111111111111",
+    send: async (request) => {
+      seen.push(request);
+      if (request.path === "/api/projects/bootstrap") {
+        return {
+          status: 200,
+          body: {
+            active: [
+              {
+                id: ids.project,
+                name: "Client",
+                type: "work",
+                lifecycle: "active",
+                pinned: false,
+                rank: "1/1",
+                version: 1,
+                createdAt: now,
+                updatedAt: now,
+                binding: { canonicalRoot: "/home/user/client" },
+                bindingRevisionId: ids.binding,
+              },
+            ],
+            archived: [],
+            availability: [],
+            memory: [],
+          },
+        };
+      }
+      if (request.path === "/api/providers/bootstrap") return { status: 200, body: providers };
+      if (request.path === "/api/shell/bootstrap") {
+        return { status: 200, body: { workspaceVersion: 1 } };
+      }
+      if (request.path === "/api/shell/commands") return { status: 200, body: {} };
+      if (request.path === "/api/work/threads/commands") {
+        const body = request.body as { kind: string; access?: string; threadId?: string };
+        if (body.kind === "create-work-thread") {
+          const create = request.body as { threadId: string; title: string };
+          return {
+            status: 200,
+            body: {
+              kind: "thread-created",
+              thread: {
+                id: create.threadId,
+                projectId: ids.project,
+                title: create.title,
+                lifecycle: "active",
+                providerInstanceId: ids.provider,
+                modelId: "loopback-model",
+                hostId: "local",
+                bindingRevisionId: ids.binding,
+                access: "ask-first",
+                version: 1,
+                createdAt: now,
+                updatedAt: now,
+              },
+            },
+          };
+        }
+        if (body.kind === "change-work-thread-access") {
+          return {
+            status: 200,
+            body: {
+              kind: "thread-updated",
+              thread: {
+                id: body.threadId,
+                projectId: ids.project,
+                title: "Client work",
+                lifecycle: "active",
+                providerInstanceId: ids.provider,
+                modelId: "loopback-model",
+                hostId: "local",
+                bindingRevisionId: ids.binding,
+                access: body.access,
+                version: 2,
+                createdAt: now,
+                updatedAt: now,
+              },
+            },
+          };
+        }
+      }
+      return { status: 404, body: { message: `Unexpected ${request.path}` } };
+    },
+    close: async () => undefined,
+  };
+  const workCommands = () =>
+    seen
+      .filter((request) => request.path === "/api/work/threads/commands")
+      .map((request) => request.body as { kind: string; access?: string });
+  return { session, workCommands };
 }
 
 describe("starting a Code thread from the terminal", () => {
@@ -185,6 +288,115 @@ describe("starting a Code thread from the terminal", () => {
       executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
     });
+  });
+
+  it("remembers Full access for the Project first when --access full-access is asked, so the thread starts journaled at Full access", async () => {
+    const fake = host("current-session");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Run the terminal",
+      projectName: "Repo",
+      access: "full-access",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(fake.projectCommands()).toEqual([
+      {
+        kind: "change-code-project-access",
+        projectId: ids.project,
+        expectedVersion: 1,
+        codeAccessPersistence: "project-default",
+      },
+    ]);
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+    });
+    expect(result).toMatchObject({ projectRemembersFullAccess: true });
+  });
+
+  it("starts a narrower asked-for mode without touching the Project's remembered access", async () => {
+    const fake = host("project-default");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Read only",
+      projectName: "Repo",
+      access: "plan",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(fake.projectCommands()).toEqual([]);
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("starts Auto with the harness reviewer flag when --access auto is asked", async () => {
+    const fake = host("current-session");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Auto run",
+      projectName: "Repo",
+      access: "auto",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "approval-gated",
+      autoApprove: true,
+      permissionPersistence: "current-session",
+    });
+  });
+});
+
+describe("starting a Work thread from the terminal with an asked-for access", () => {
+  it("moves a new Work thread to Full access through the composer's access command", async () => {
+    const fake = workHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "work",
+      title: "Client work",
+      projectName: "Client",
+      access: "full-access",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "work", projectName: "Client" });
+    const change = fake
+      .workCommands()
+      .find((command) => command.kind === "change-work-thread-access");
+    expect(change).toMatchObject({ access: "full-access", expectedVersion: 1 });
+  });
+
+  it("refuses --access plan for a Work thread, which has no Plan overlay", async () => {
+    const fake = workHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "work",
+      title: "Client work",
+      projectName: "Client",
+      access: "plan",
+    });
+
+    expect(result).toMatchObject({ kind: "refused" });
+    // Refused before anything is created, so no stray thread is left behind.
+    expect(fake.workCommands()).toEqual([]);
+  });
+
+  it("refuses --access on a Chat thread", async () => {
+    const fake = chatHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "chat",
+      title: "Plain question",
+      access: "full-access",
+    });
+
+    expect(result).toMatchObject({ kind: "refused" });
+    expect(fake.commands).toEqual([]);
   });
 });
 

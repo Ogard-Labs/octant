@@ -1,10 +1,12 @@
-import type {
-  ChatBranchConversationHandoff,
-  RewindConversationHandoff,
-  WorkForkConversationHandoff,
-  ProviderInstanceId,
-  ProviderModelId,
-  ProviderSwitchConversationHandoff,
+import {
+  MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
+  MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
+  type ChatBranchConversationHandoff,
+  type RewindConversationHandoff,
+  type WorkForkConversationHandoff,
+  type ProviderInstanceId,
+  type ProviderModelId,
+  type ProviderSwitchConversationHandoff,
 } from "@octant/contracts";
 import type {
   AgentRunParentContextSelection,
@@ -27,18 +29,70 @@ export function providerSwitchHandoffRecord(
     reason: "provider-switch",
     previousProviderInstanceId: previous.providerInstanceId,
     previousModelId: previous.modelId,
-    messages: selection.blocks.length - 1,
+    messages: conversationMessages(selection),
     omissions: selection.omissions,
     externalContentIngested: selection.source.externalContentIngested,
     nativeSessionTransferred: false,
     hiddenReasoningTransferred: false,
+    ...(selection.blocks.filter((block) => block.kind === "conversation-summary").length > 1
+      ? { handoverSummary: true }
+      : {}),
+  };
+}
+
+/** The blocks that carry a message of the conversation, not a summary of it. */
+function conversationMessages(selection: Available): number {
+  return selection.blocks.filter((block) => block.kind !== "conversation-summary").length;
+}
+
+/** The most blocks a handover summary may take, so most of a handoff stays verbatim. */
+const MAX_HANDOVER_SUMMARY_BLOCKS = 3;
+
+/**
+ * Leads a provider switch's handoff with the summary the limit rule wrote with
+ * the earlier provider, right after the handoff's own framing block. The
+ * summary covers the whole thread, so where its blocks leave no room the
+ * oldest verbatim messages give way and are counted as earlier messages; the
+ * newest are always kept.
+ */
+export function withHandoverSummary(
+  selection: Available,
+  handover: { readonly content: string; readonly completedAt: string } | undefined,
+): Available {
+  const [framing, ...messages] = selection.blocks;
+  if (handover === undefined || framing === undefined || messages.length === 0) return selection;
+  const text =
+    `Summary of this whole thread, written ${handover.completedAt} by the earlier provider ` +
+    "when it neared a usage limit. The messages after it are the newest ones, verbatim.\n\n" +
+    handover.content;
+  const chunks: Array<string> = [];
+  for (
+    let start = 0;
+    start < text.length && chunks.length < MAX_HANDOVER_SUMMARY_BLOCKS;
+    start += MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS
+  ) {
+    chunks.push(text.slice(start, start + MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS));
+  }
+  const room = MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1 - chunks.length;
+  const dropped = Math.max(0, messages.length - room);
+  return {
+    ...selection,
+    omissions: {
+      ...selection.omissions,
+      earlierMessages: selection.omissions.earlierMessages + dropped,
+    },
+    blocks: [
+      framing,
+      ...chunks.map((chunk) => ({ kind: "conversation-summary" as const, text: chunk })),
+      ...messages.slice(dropped),
+    ],
   };
 }
 
 export function branchHandoffRecord(selection: Available): ChatBranchConversationHandoff {
   return {
     reason: "branch",
-    messages: selection.blocks.length - 1,
+    messages: conversationMessages(selection),
     omissions: selection.omissions,
     externalContentIngested: selection.source.externalContentIngested,
     nativeSessionTransferred: false,
@@ -69,7 +123,7 @@ export function restartHandoffRecord(
 ): RewindConversationHandoff | WorkForkConversationHandoff {
   return {
     reason,
-    messages: selection.blocks.length - 1,
+    messages: conversationMessages(selection),
     omissions: selection.omissions,
     externalContentIngested: selection.source.externalContentIngested,
     nativeSessionTransferred: false,

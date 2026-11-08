@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeProviderFailure,
   decodeProviderSessionId,
+  NativeHarnessTodoWriteArguments,
   type CorrelationId,
   type NativeHarnessTranscriptToolCall,
   type NativeHarnessTranscriptToolResult,
@@ -18,10 +20,14 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderSessionCompaction } from "@octant/provider-sdk/driver";
+import type {
+  ProviderCompactionPoint,
+  ProviderConnection,
+  ProviderSessionCompaction,
+} from "@octant/provider-sdk/driver";
 import { estimateTurnCostUsd } from "@octant/domain/turn-metrics-display";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
-import { Effect, PubSub, Stream, type Scope } from "effect";
+import { Effect, Option, PubSub, Schema, Stream, type Scope } from "effect";
 import { isContextOverflowFailure } from "../providers/contextOverflowRefusal";
 import { isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
@@ -199,6 +205,12 @@ interface SessionState {
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
+  /**
+   * The task id of each place in the lead's task list. `todo-write` restates
+   * the whole list with no ids of its own, so a row keeps its id by its place
+   * and the Tasks panel updates it in place instead of adding a new row.
+   */
+  readonly todoTaskIds: Map<number, string>;
   /** The turn in flight, kept so a fallback model can be asked whether it accepts it. */
   turn: ProviderTurnInput | undefined;
   /**
@@ -225,6 +237,10 @@ interface SessionState {
   selfCorrections: number;
   /** Whether this turn sent a request to summarize earlier turns; what it cost is in `usage`. */
   compactedThisTurn: boolean;
+  /** The person's compaction point for this session; earlier turns are summarized once a step passes it. */
+  compactionPoint: ProviderCompactionPoint | undefined;
+  /** What the latest request put in the window: its input, cached input included. */
+  contextTokens: number | undefined;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
   usage: NativeHarnessUsage;
   latestReportedUsage: NativeHarnessUsage | undefined;
@@ -343,6 +359,7 @@ export function createNativeHarnessConnection(
       readonly tools?: ReadonlyArray<ProviderToolDefinition> | undefined;
       readonly compaction?: NativeHarnessTranscriptCompaction | undefined;
       readonly journalOffset?: number;
+      readonly compactionPoint?: ProviderCompactionPoint | undefined;
     }): SessionState => ({
       sessionId: input.sessionId,
       transcriptId: input.transcriptId,
@@ -357,6 +374,7 @@ export function createNativeHarnessConnection(
       tools: input.tools ?? [],
       pending: undefined,
       answered: new Set(),
+      todoTaskIds: new Map(),
       turn: undefined,
       turnMessage: undefined,
       fallback: undefined,
@@ -368,6 +386,8 @@ export function createNativeHarnessConnection(
       steps: 0,
       selfCorrections: 0,
       compactedThisTurn: false,
+      compactionPoint: input.compactionPoint,
+      contextTokens: undefined,
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
       latestReportedUsage: undefined,
       estimatedCostUsd: 0,
@@ -495,6 +515,7 @@ export function createNativeHarnessConnection(
         onEvent: (event: NativeHarnessStreamEvent) => {
           if (event.kind === "retrying") state.pricingBoundariesKnown = false;
           if (event.kind === "usage") {
+            state.contextTokens = requestContextTokens(event);
             state.latestReportedUsage = addNativeHarnessUsage(state.usage, event);
             state.requestEstimateUsd = state.pricingBoundariesKnown
               ? (estimateTurnCostUsd(String(leadTarget(state).modelId), event) ?? null)
@@ -505,6 +526,7 @@ export function createNativeHarnessConnection(
             event.kind === "usage"
               ? {
                   ...event,
+                  contextTokens: requestContextTokens(event),
                   ...(state.requestStartedAt === undefined
                     ? {}
                     : { requestStartedAt: state.requestStartedAt }),
@@ -530,10 +552,11 @@ export function createNativeHarnessConnection(
         current = refit;
       }
       // Summarizing earlier turns is tried at most once per request, before
-      // anything is cut: when fitting already left whole exchanges out, and
-      // when the endpoint refuses the request as too large.
+      // anything is cut: when fitting already left whole exchanges out, when
+      // the request passes the compaction point the person set, and when the
+      // endpoint refuses the request as too large.
       let compactionTried = false;
-      if (leftOutHistory(current)) {
+      if (leftOutHistory(current) || passesCompactionPoint(state.compactionPoint, current)) {
         compactionTried = true;
         current = (await compactToFit(state, signal)) ?? current;
       }
@@ -715,6 +738,7 @@ export function createNativeHarnessConnection(
 
     /** Adds one settled request of this turn to the turn's usage and estimated cost. */
     const chargeRequest = (state: SessionState, usage: NativeHarnessUsage | undefined) => {
+      if (usage !== undefined) state.contextTokens = requestContextTokens(usage);
       const requestCost =
         usage === undefined || !state.pricingBoundariesKnown
           ? undefined
@@ -841,7 +865,14 @@ export function createNativeHarnessConnection(
         (state.steps > 1 || state.compactedThisTurn) &&
         (state.usage.inputTokens > 0 || state.usage.outputTokens > 0)
       ) {
-        emit(state, { kind: "usage", ...state.usage, estimatedCostUsd: state.estimatedCostUsd });
+        emit(state, {
+          kind: "usage",
+          ...state.usage,
+          estimatedCostUsd: state.estimatedCostUsd,
+          // The turn's total is what it cost; what the window holds is the
+          // last request's input, which a rule reads to judge the fill.
+          ...(state.contextTokens === undefined ? {} : { contextTokens: state.contextTokens }),
+        });
       }
       state.acceptingSteering = false;
       emit(state, {
@@ -851,6 +882,32 @@ export function createNativeHarnessConnection(
           ? {}
           : { stopReason: response.outputStopReason }),
       });
+    };
+
+    /**
+     * The lead's task list, as the same `task-progress` and `task-list` events
+     * a runtime's own checklist produces, so Chat, Work, and Code show it in
+     * their Tasks panel. Only a call the runner answered without error counts:
+     * a refused `todo-write` never replaced the session's list.
+     */
+    const emitTaskList = (state: SessionState, call: NativeHarnessTranscriptToolCall) => {
+      const written = decodeTodoWrite(call.argumentsJson);
+      if (written === undefined) return;
+      const taskIds = written.items.map((item, position) => {
+        let taskId = state.todoTaskIds.get(position);
+        if (taskId === undefined) {
+          taskId = randomUUID();
+          state.todoTaskIds.set(position, taskId);
+        }
+        emit(state, {
+          kind: "task-progress",
+          taskId,
+          status: TODO_TASK_STATUS[item.status],
+          summary: item.title,
+        });
+        return taskId;
+      });
+      emit(state, { kind: "task-list", taskIds });
     };
 
     const emitBucket = (state: SessionState, bucket: ObservedRateLimitBucket) =>
@@ -1104,6 +1161,7 @@ export function createNativeHarnessConnection(
               endpoint,
               messages: [],
               tools: input.tools,
+              ...(input.singleUse === true ? {} : { compactionPoint: input.compactionPoint }),
             });
             admit(state);
             return input.singleUse === true
@@ -1167,6 +1225,7 @@ export function createNativeHarnessConnection(
               tools: input.tools,
               compaction: compacted.compaction,
               journalOffset: compacted.journalOffset,
+              compactionPoint: input.compactionPoint,
             });
             admit(state);
             return { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
@@ -1323,6 +1382,10 @@ export function createNativeHarnessConnection(
             }
             pending.answers.set(input.requestId, input);
             state.answered.add(input.requestId);
+            const call = pending.calls.find(
+              (candidate) => candidate.toolCallId === input.requestId,
+            );
+            if (call?.toolName === "todo-write" && !input.isError) emitTaskList(state, call);
             state.transcripts.settle(state.transcriptId, {
               toolCallId: input.requestId,
               resultJson: input.resultJson,
@@ -1466,6 +1529,22 @@ function compactionSummaryMessage(
     role: "user",
     text: `${replaced} no longer shown in full. ${workStillReflected(mode)} Summary:\n\n${compaction.summary}`,
   };
+}
+
+const TODO_TASK_STATUS = {
+  pending: "pending",
+  "in-progress": "in-progress",
+  done: "completed",
+} as const;
+
+function decodeTodoWrite(argumentsJson: string): NativeHarnessTodoWriteArguments | undefined {
+  try {
+    return Option.getOrUndefined(
+      Schema.decodeUnknownOption(NativeHarnessTodoWriteArguments)(JSON.parse(argumentsJson)),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1718,4 +1797,25 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
+}
+
+/**
+ * Whether a step's request passes the person's compaction point, estimated as
+ * the endpoints estimate fit: four characters of the request to a token.
+ */
+export function passesCompactionPoint(
+  point: ProviderCompactionPoint | undefined,
+  request: NativeHarnessRequest,
+): boolean {
+  if (point === undefined) return false;
+  return Math.ceil(JSON.stringify(request).length / 4) >= point.tokens;
+}
+
+/** How much of the window one request filled: its input, cached reads and writes included. */
+function requestContextTokens(usage: {
+  readonly inputTokens: number;
+  readonly cacheReadInputTokens?: number | undefined;
+  readonly cacheWriteInputTokens?: number | undefined;
+}): number {
+  return usage.inputTokens + (usage.cacheReadInputTokens ?? 0) + (usage.cacheWriteInputTokens ?? 0);
 }

@@ -3428,6 +3428,43 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("draws an image after the turn that made it rather than in the list below the thread", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user",
+              text: "Draw a lighthouse",
+              at: "2026-07-27T08:59:00.000Z",
+            },
+            {
+              id: "turn-1:assistant",
+              role: "assistant",
+              text: "Here it is.",
+              status: "completed",
+              at: "2026-07-27T09:01:00.000Z",
+            },
+          ],
+        })}
+        imageGenerationClient={
+          {
+            list: async () => ({ jobs: [completedGeneratedJob()] }),
+            artifact: async () => new Blob([Uint8Array.from([1])], { type: "image/png" }),
+          } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    const inline = await screen.findByRole("region", { name: "Images from this turn" });
+    // Inside the transcript, after the reply, not in the list below it.
+    expect(inline.closest(".code-thread-workspace__transcript")).not.toBeNull();
+    expect(screen.queryByRole("region", { name: "Generated images" })).toBeNull();
+  });
+
   it("confirms where Save to Project put the image", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => ({

@@ -2991,6 +2991,37 @@ describe("CodeService managed thread creation", () => {
     expect(port.prepare).not.toHaveBeenCalled();
     expect(port.commit).not.toHaveBeenCalled();
   });
+  it("opens a moved-in thread it already holds, from the files the move carried", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({
+      threads: [],
+      managedThreadCreation: port as never,
+      moveHold: (threadId) => threadId === String(managedThreadId),
+    });
+
+    const result = await fixture.service.execute(ids.window, managedCommand, undefined, {
+      movedFiles: { worktree: "b".repeat(40), index: "c".repeat(40) },
+    });
+
+    expect(result.kind).toBe("managed-thread-created");
+    expect(port.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceFiles: { worktree: "b".repeat(40), index: "c".repeat(40) } }),
+      expect.anything(),
+    );
+  });
+
+  it("refuses any other command on a thread a move holds", async () => {
+    const fixture = serviceFixture({ moveHold: () => true });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "rename-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed while moving",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "conflict" } });
+  });
+
   it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
     const port = mockCreationPort();
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
@@ -4930,6 +4961,7 @@ describe("CodeService.listTests", () => {
 function serviceFixture(
   options: {
     readonly workingFolderAllowed?: boolean;
+    readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReturnType<typeof thread>[];
     readonly watcher?: {
       readonly watch: (input: { readonly signal?: AbortSignal }) => AsyncIterable<never>;
@@ -5046,6 +5078,7 @@ function serviceFixture(
     ...options.content,
   });
   const service = new CodeService({
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,

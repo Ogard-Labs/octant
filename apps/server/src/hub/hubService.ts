@@ -268,6 +268,31 @@ export class HubService {
     return String(hubMemberId(this.#options.identity()));
   }
 
+  /** Whether this hub takes threads its members move to it. On unless a window turned it off. */
+  acceptsMovedThreads(): boolean {
+    const hub = this.#options.state.load().hub;
+    return hub?.enabled === true && hub.acceptMovedThreads !== false;
+  }
+
+  /** Only a window on the hub turns Accept moved threads on or off. */
+  setAcceptMovedThreads(
+    enabled: boolean,
+    principal: AuditActingPrincipal,
+  ):
+    | { readonly status: "changed"; readonly enabled: boolean }
+    | { readonly status: "refused"; readonly kind: "hub-role-off" } {
+    const state = this.#options.state.load();
+    const hub = state.hub;
+    if (hub?.enabled !== true) return { status: "refused", kind: "hub-role-off" };
+    const { acceptMovedThreads: _previous, ...rest } = hub;
+    this.#options.state.save({
+      ...state,
+      hub: enabled ? rest : { ...rest, acceptMovedThreads: false },
+    });
+    this.#options.record({ change: "accept-moved-threads-changed", actingPrincipal: principal });
+    return { status: "changed", enabled };
+  }
+
   enable(principal: AuditActingPrincipal): HubRoleOutcome {
     const reading = readPrivateListener(this.#options.listener());
     if (reading.status === "refused") return { status: "refused", kind: reading.kind };

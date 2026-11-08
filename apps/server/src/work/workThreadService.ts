@@ -43,6 +43,7 @@ import {
   type UsageResumeRecord,
   type WindowId,
 } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
@@ -139,6 +140,8 @@ const SERVER_THREAD_STAYS_IN_FOLDER =
   "A thread in a Project on a server works in that Project's folder there, so it cannot move to another folder or Project.";
 
 export interface WorkThreadServiceDependencies {
+  /** Whether a move holds a thread; a held thread takes no command. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly persistence: {
     readonly status: () => {
       readonly state: string;
@@ -287,12 +290,14 @@ export class WorkThreadService {
   readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #serverProjects: ServerWorkProjectThreads | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
+    this.#moveHold = dependencies.moveHold;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -428,6 +433,15 @@ export class WorkThreadService {
     this.#assertReady();
     try {
       const command = decodeWorkThreadCommand(input);
+      // A creation names a thread that does not exist yet, except the move's own
+      // arrival, which opens the planned thread it already holds.
+      if (
+        "threadId" in command &&
+        command.kind !== "create-work-thread" &&
+        this.#moveHold?.(String(command.threadId)) === true
+      ) {
+        throw this.#failure("unavailable", THREAD_MOVING_REFUSAL);
+      }
       if (command.kind === "update-work-settings") {
         const current = this.#currentSettings();
         if (current.version !== command.expectedVersion) {

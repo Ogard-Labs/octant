@@ -1,4 +1,7 @@
-import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  DecisionReviewRecorded,
+  PendingQuestionDeferral,
+} from "@octant/contracts/pending-requests";
 import {
   CHILD_WORKTREE_SOURCE_UPDATED,
   ChildWorktreeSourceUpdated,
@@ -381,6 +384,8 @@ import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
+import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
+import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -500,6 +505,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
+    .register("decision-review.recorded@1", 1, DecisionReviewRecorded)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
@@ -747,6 +753,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
+  registerThreadMoveEvents(events);
+  registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);

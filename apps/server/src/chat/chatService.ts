@@ -3,6 +3,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { validateQuestionnaireAnswer } from "@octant/domain";
@@ -203,6 +204,7 @@ import {
   restartHandoffRecord,
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  withHandoverSummary,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
 } from "../agentRun/conversationHandoff";
@@ -698,6 +700,8 @@ export interface ChatServiceOptions {
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
+    /** The turn the tools serve; a retry or resume names the turn it runs again. */
+    readonly turnId?: ChatTurn["id"];
     readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
     readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
@@ -798,6 +802,12 @@ export interface ChatServiceOptions {
    */
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
+  /**
+   * Whether a thread is held by a move: frozen on the computer it is leaving,
+   * or arriving on this one and not yet committed. A held thread takes no
+   * command, so at most one copy of it can change at a time.
+   */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: MultiModelPool;
     readonly mode: OctantMode;
@@ -877,6 +887,36 @@ interface ProviderRuntimeRegistryLike {
     instanceId: ProviderInstanceId,
     modelIds: ReadonlyArray<ProviderModelId>,
   ) => ProviderObservedState | undefined;
+}
+
+/** The thread a command names, read before it is decoded so every dispatch path can check it. */
+function threadIdNamedBy(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || !("threadId" in input)) return undefined;
+  const threadId = (input as { readonly threadId?: unknown }).threadId;
+  return typeof threadId === "string" ? threadId : undefined;
+}
+
+/** A Chat conversation carried by a move, as the destination opens it. */
+export interface MovedChatThreadImport {
+  readonly moveId: string;
+  /** The id the move planned for the thread before it existed. */
+  readonly threadId: ChatThreadId;
+  readonly title: string;
+  readonly projectId?: ChatThread["projectId"];
+  readonly externalContentIngested: boolean;
+  readonly turns: ReadonlyArray<{
+    readonly userText: string;
+    readonly createdAt: ChatTurn["createdAt"];
+    readonly attempts: ReadonlyArray<{
+      readonly providerInstanceId: ChatAttempt["providerInstanceId"];
+      readonly providerSessionId: ChatAttempt["providerSessionId"];
+      readonly modelId: ChatAttempt["modelId"];
+      readonly contextManifestId: ChatAttempt["contextManifestId"];
+      readonly responses: ReadonlyArray<string>;
+      readonly createdAt: ChatAttempt["createdAt"];
+      readonly updatedAt: ChatAttempt["updatedAt"];
+    }>;
+  }>;
 }
 
 export class ChatServiceError extends Error {
@@ -1042,6 +1082,7 @@ export class ChatService {
   >();
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold?: (threadId: string) => boolean;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #reviewedModelManifest?: ReviewedModelManifest;
   readonly #agentRuns?: ChatServiceOptions["agentRuns"];
@@ -1119,6 +1160,9 @@ export class ChatService {
     }
     if (options.linearIssueContext !== undefined) {
       this.#linearIssueContext = options.linearIssueContext;
+    }
+    if (options.moveHold !== undefined) {
+      this.#moveHold = options.moveHold;
     }
     this.#turnRunner = new ChatTurnRunner({
       capacityScheduler: options.capacityScheduler,
@@ -1564,6 +1608,12 @@ export class ChatService {
   ): Promise<ChatCommandResult | ThreadWorkCommandResult> {
     try {
       this.#assertChatEnabled();
+      // Checked before either dispatch path, so a work item or follow-up on a
+      // thread a move holds is refused too; the source would purge it unmoved.
+      const named = threadIdNamedBy(input);
+      if (named !== undefined && this.#moveHold?.(named) === true) {
+        throw new ChatServiceError({ category: "unavailable", message: THREAD_MOVING_REFUSAL });
+      }
       if (this.#isThreadWorkCommand(input)) {
         return await this.#threadWork.execute(input);
       }
@@ -2658,7 +2708,7 @@ export class ChatService {
         command.threadMentionIds,
         command.extensionSelections,
         "send",
-        executionContext,
+        { ...executionContext, turnId },
         resolvedExtensions,
         command.sideChatReturns,
         command.toolCatalogHandoff === true,
@@ -2851,7 +2901,7 @@ export class ChatService {
         undefined,
         undefined,
         "send",
-        executionContext,
+        { ...executionContext, turnId },
         undefined,
       );
       const beforeAdmission = validateAgentResultDelivery({
@@ -3217,6 +3267,106 @@ export class ChatService {
   }
 
   /**
+   * Opens a thread moved here from another of the person's computers, with
+   * the conversation it carried as real turns, the way a branch carries its
+   * source's. The attempts keep the source's provider identifiers, so the next
+   * turn here sees another provider and hands the conversation over in the
+   * ordinary disclosed way; the provider's own session never moves. The
+   * caller holds the thread until the source commits the move.
+   */
+  async importMovedThread(input: MovedChatThreadImport): Promise<ChatThread> {
+    this.#assertReady();
+    if (input.projectId !== undefined) this.#assertActiveChatProject(input.projectId);
+    const threadId = input.threadId;
+    this.#assertThreadIdFree(threadId);
+    const settings = this.#requireChatSettings();
+    const timestamp = decodeTimestamp(this.#clock());
+    const copiedContent: PreparedChatContent[] = [];
+    const turns: ChatTurn[] = [];
+    for (const moved of input.turns) {
+      const turnId = this.#uuid() as ChatTurn["id"];
+      const userMessage = this.#prepareContent(threadId, "user", moved.userText);
+      copiedContent.push(userMessage);
+      const attempts = moved.attempts.map((attempt) => {
+        const responses = attempt.responses.map((text) =>
+          this.#prepareContent(threadId, "assistant", text),
+        );
+        copiedContent.push(...responses);
+        return decodeChatAttempt({
+          id: this.#uuid(),
+          turnId,
+          threadId,
+          providerInstanceId: attempt.providerInstanceId,
+          // The source attempt's real identifiers, kept so the copy points at
+          // what actually happened, as a branch keeps them.
+          providerSessionId: attempt.providerSessionId,
+          modelId: attempt.modelId,
+          contextManifestId: attempt.contextManifestId,
+          outcome: "completed",
+          responseRefs: responses.map((content) => content.reference),
+          citationIds: [],
+          createdAt: attempt.createdAt,
+          updatedAt: attempt.updatedAt,
+        });
+      });
+      turns.push(
+        decodeChatTurn({
+          id: turnId,
+          threadId,
+          sequence: turns.length + 1,
+          userMessageRef: userMessage.reference,
+          attachmentIds: [],
+          attempts,
+          createdAt: moved.createdAt,
+        }),
+      );
+    }
+    const created = createChatThread({
+      id: threadId,
+      title: input.title,
+      ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      providerInstanceId: settings.defaultProviderInstanceId,
+      modelId: settings.defaultModelId,
+      researchEnabled: settings.defaultResearchEnabled,
+      researchRouting: settings.defaultResearchRouting,
+      personalityInstructions: settings.defaultPersonalityInstructions,
+      createdAt: timestamp,
+    });
+    const settled = decodeChatThread({
+      ...created,
+      version: (turns.length + 2) as AggregateVersion,
+      updatedAt: timestamp,
+    });
+    // What the thread read on its source is in its context from the first
+    // turn here, so a marked source makes a marked thread, as a branch does.
+    const inheritedMark: InheritedExternalContentMark | undefined = input.externalContentIngested
+      ? { sourceLabel: "moved-thread", contentReference: `moved-thread-${input.moveId}` }
+      : undefined;
+    await this.#scratchStore.acquire(threadId);
+    this.#journalNewThread(threadId, inheritedMark, () =>
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+          expectedVersion: 0,
+          events: [
+            this.#pending("chat.thread-created@1", { kind: "thread-created", thread: created }),
+            ...turns.map((turn) =>
+              this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+            ),
+            this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: settled }),
+          ],
+        },
+        {
+          beforeEvents: (connection) => {
+            for (const content of copiedContent) this.#writePreparedContent(connection, content);
+          },
+        },
+      ),
+    );
+    return settled;
+  }
+
+  /**
    * Journals a new thread, after the outside-content mark it inherits when it
    * is made from a marked thread, in one journal unit with it
    * (`journalWithInheritedMark`). A mark that cannot be journaled refuses the
@@ -3301,16 +3451,37 @@ export class ChatService {
       projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
+    if (reason === "provider-switch" && source.from !== undefined) {
+      const switched = withHandoverSummary(selection, this.#handoverSummary(thread.id));
+      return {
+        blocks: switched.blocks,
+        selection: switched,
+        record: providerSwitchHandoffRecord(switched, source.from),
+      };
+    }
     return {
       blocks: selection.blocks,
       selection,
       record:
         reason === "rewind"
           ? restartHandoffRecord(selection, "rewind")
-          : reason === "branch" || source.from === undefined
-            ? branchHandoffRecord(selection)
-            : providerSwitchHandoffRecord(selection, source.from),
+          : branchHandoffRecord(selection),
     };
+  }
+
+  /** The limit rule's summary for the thread, if one is waiting for a move. */
+  #handoverSummary(
+    threadId: ChatThreadId,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#contextHarness.handoverSummary(
+        decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: String(threadId) }),
+        () => this.sessionCompactionConversation(threadId),
+      );
+    } catch {
+      // A ledger that cannot be read hands over the raw selection, as before.
+      return undefined;
+    }
   }
 
   async #retryTurn(
@@ -3401,7 +3572,7 @@ export class ChatService {
         undefined,
         turn.extensionSelections,
         "replay",
-        executionContext,
+        { ...executionContext, turnId: command.turnId },
         undefined,
         turn.sideChatReturns,
         false,
@@ -3755,7 +3926,7 @@ export class ChatService {
         undefined,
         turn.extensionSelections,
         "resume",
-        executionContext,
+        { ...executionContext, turnId: command.turnId },
         undefined,
         turn.sideChatReturns,
         false,
@@ -4039,7 +4210,8 @@ export class ChatService {
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
     extensionPhase: "send" | "replay" | "resume" = "send",
-    executionContext?: ChatServiceExecutionContext,
+    /** The caller's context, with the turn being prepared for the tools that name it. */
+    executionContext?: ChatServiceExecutionContext & { readonly turnId?: ChatTurn["id"] },
     preResolvedExtensions?: {
       readonly selections: ReadonlyArray<ExtensionSelection>;
       readonly entries: ReadonlyArray<ResolvedChatExtensionContextEntry>;
@@ -4103,6 +4275,7 @@ export class ChatService {
         ? this.#resolveAppManagedTools({
             windowId: executionContext.windowId,
             thread,
+            ...(executionContext.turnId === undefined ? {} : { turnId: executionContext.turnId }),
             ...(threadMentionIds === undefined ? {} : { threadMentionIds }),
             ...(executionContext.coordinationDepth === undefined
               ? {}

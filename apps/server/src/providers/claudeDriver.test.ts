@@ -186,7 +186,9 @@ class FakeQuery implements ClaudeQueryPort {
       compactAnnounced,
       account,
       ...(models.length === 0 ? {} : { models }),
-      ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
+      ...(autoCompactThreshold === undefined
+        ? {}
+        : { autoCompactThreshold, contextWindow: 200_000 }),
     };
     this.sessionId = announcesSession ? Effect.succeed(sdkSessionId) : Effect.never;
     this.messages =
@@ -2667,7 +2669,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("reports the runtime's compaction point and the window's fill with each turn's usage", async () => {
+  it("reports the runtime's compaction point, its window, and the window's fill with each turn's usage", async () => {
     const f = harness("subscription", "current-session", { autoCompactThreshold: 167_000 });
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -2713,13 +2715,15 @@ describe("Claude execution policy", () => {
 
     expect(
       usage.map((event) =>
-        event.kind === "usage" ? [event.contextTokens, event.autoCompactThreshold] : [],
+        event.kind === "usage"
+          ? [event.contextTokens, event.autoCompactThreshold, event.contextWindow]
+          : [],
       ),
     ).toEqual([
-      [14_000, 167_000],
-      [14_000, 167_000],
-      [20_000, 167_000],
-      [20_000, 167_000],
+      [14_000, 167_000, 200_000],
+      [14_000, 167_000, 200_000],
+      [20_000, 167_000, 200_000],
+      [20_000, 167_000, 200_000],
     ]);
     await Effect.runPromise(Fiber.interrupt(subscription));
     await acquired.close();
