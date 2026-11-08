@@ -156,11 +156,8 @@ async function ready() {
   if (attachment === undefined) throw Error("The actual native owner was absent after readiness.");
   return attachment;
 }
-async function launcherRecord() {
-  const details = (await host.startup.logs.read({ limit: 20 })).entries
-    .filter((entry) => entry.event === "desktop.launcher.record")
-    .at(-1)?.details;
-  const receipt = {
+function launcherObservation(details: Readonly<Record<string, unknown>> | undefined) {
+  return {
     status: details?.status === "recorded" ? "recorded" : "refused",
     ...(typeof details?.reason === "string" && /^[a-z-]{1,64}$/.test(details.reason)
       ? { reason: details.reason }
@@ -176,6 +173,12 @@ async function launcherRecord() {
       ? { scannedEntries: details.scannedEntries }
       : {}),
   };
+}
+async function launcherRecord() {
+  const details = (await host.startup.logs.read({ limit: 20 })).entries
+    .filter((entry) => entry.event === "desktop.launcher.record")
+    .at(-1)?.details;
+  const receipt = launcherObservation(details);
   await writeFile(join(output, `${phase}-launcher.json`), JSON.stringify(receipt));
   console.log(JSON.stringify({ launcherRecord: receipt }));
   check(
@@ -401,6 +404,25 @@ try {
   await writeFile(join(output, `${phase}.json`), JSON.stringify(receipt, null, 2));
   console.log(JSON.stringify(receipt));
 } catch (error) {
+  // Retain only known phase markers and bounded launcher measurements from
+  // this attempt. The profile log itself can contain private host details.
+  try {
+    const events = (await host.startup.logs.read({ limit: 20 })).entries
+      .filter((entry) => Date.parse(entry.timestamp) >= begin)
+      .flatMap((entry) =>
+        entry.event === "server.ready"
+          ? [{ event: "server.ready" }]
+          : entry.event === "desktop.launcher.record"
+            ? [{ event: "desktop.launcher.record", ...launcherObservation(entry.details) }]
+            : [],
+      );
+    await writeFile(join(output, `${phase}-host-phases.json`), JSON.stringify({ events }));
+  } catch {
+    await writeFile(
+      join(output, `${phase}-host-phases.json`),
+      JSON.stringify({ status: "unavailable" }),
+    );
+  }
   // Startup failures can leave a modal native error window before the server
   // publishes discovery. Observe it through the same exact PID/birth guard.
   for (const child of children) {

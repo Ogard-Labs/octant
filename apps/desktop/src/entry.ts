@@ -171,6 +171,15 @@ async function launchDesktop(): Promise<void> {
               launchStableHost: windows.launchStableHost,
             },
       );
+      if (windows !== undefined)
+        process.stderr.write(
+          `${JSON.stringify({
+            windowsNightlyHostPreflight: {
+              status: status.kind,
+              ...(status.kind === "refused" ? { reason: status.reason } : {}),
+            },
+          })}\n`,
+        );
       const closed = await closeDesktopPeerStatus(native);
       return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
     },
@@ -227,6 +236,9 @@ function windowsPeerContext() {
     launchStableHost: async (): Promise<DesktopPeerStart> => {
       if (launcher === undefined) return { kind: "refused", reason: "incompatible-host" };
       const outcome = await launcher.launch();
+      // A later readiness timeout otherwise hides whether native launch refused
+      // or a started host failed before publishing its private projection.
+      process.stderr.write(`${JSON.stringify({ windowsNightlyHostLaunch: outcome })}\n`);
       return outcome.status === "started"
         ? { kind: "started" }
         : {
