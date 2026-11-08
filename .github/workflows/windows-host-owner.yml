@@ -113,6 +113,8 @@ jobs:
           Copy-Item scripts/windows-host-owner/fixtures.ps1 "$env:RUNNER_TEMP/owner-fixtures.ps1"
           bun build scripts/windows-host-owner/profile.ts --target=node --outfile "$env:RUNNER_TEMP/profile-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun build scripts/windows-host-owner/publication-reader.ts --target=node --outfile "$env:RUNNER_TEMP/publication-reader.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Bundle the actual server identity consumer
         run: |
           bun build scripts/windows-host-owner/server-identity.ts --target=node --outfile "$env:RUNNER_TEMP/server-identity-smoke.mjs"

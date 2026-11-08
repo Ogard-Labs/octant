@@ -732,7 +732,10 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   auto admission = profile_directory(name, scope, expected_data, authority_directory(purpose), writing, missing);
   if (!admission) return object(env, missing && !writing ? "missing" : "refused");
   const std::wstring path = admission->path + leaf;
-  Handle existing(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_DELETE,
+  // A fully flushed stage becomes visible before its publishing write handle
+  // closes. Sharing that existing write access lets readers open the complete
+  // snapshot during this interval; the stage itself denies competing writes.
+  Handle existing(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
     nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
   if (!existing && GetLastError() != ERROR_FILE_NOT_FOUND) return object(env, "refused");
   if (!existing && !writing) return object(env, "missing");
@@ -747,7 +750,7 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
     if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&nonce), sizeof(nonce), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return object(env, "refused");
     const std::wstring staging = path + L"." + std::to_wstring(nonce) + L".tmp";
     SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), session->admission->root->security, FALSE};
-    session->file = Handle(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE | READ_CONTROL, 0,
+    session->file = Handle(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE | READ_CONTROL, FILE_SHARE_READ,
       &attributes, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, nullptr));
   } else session->file = std::move(existing);
   if (!session->file || !authority_regular(session->file.value, *session->admission->root) ||

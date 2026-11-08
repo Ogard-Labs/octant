@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createWindowsHostStartup } from "../../packages/host-runtime/src/windowsHostStartup";
 import { attachWindowsHostRuntimeOwner } from "../../packages/host-runtime/src/windowsHostOwner";
 import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -112,6 +114,52 @@ try {
         (await startup.readHostInfo())?.instanceId === ownership.receipt.instanceId,
       "the actual owner publishes native bridge and host discovery projections",
     );
+    // A separate process can read during the native rename/flush/close interval;
+    // a worker shares the binding's process lock and cannot exercise this race.
+    const reader = spawn(
+      process.execPath,
+      [fileURLToPath(new URL("./publication-reader.mjs", import.meta.url)), binding, profile],
+      { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+    );
+    let readerJoined = false;
+    const readerExit = new Promise<number | null>((resolve, reject) => {
+      reader.once("error", reject);
+      reader.once("close", (code) => {
+        readerJoined = true;
+        resolve(code);
+      });
+    });
+    // Attach rejection handling immediately; a failed spawn must not escape cleanup.
+    void readerExit.catch(() => undefined);
+    const readerDeadline = setTimeout(() => reader.kill(), 8000);
+    reader.stderr.resume();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        reader.stdout.once("data", (bytes: Buffer) => {
+          if (bytes.toString("utf8").trim() === "publication-reader-ready") resolve();
+          else reject(Error("Owned publication reader did not become ready."));
+        });
+        void readerExit.then(
+          () => reject(Error("Owned publication reader exited before readiness.")),
+          reject,
+        );
+      });
+      for (let publication = 0; publication < 128; publication++) {
+        const receipt = await startup.readHostInfo();
+        if (receipt === undefined) throw Error("Owned publication record disappeared.");
+        await startup.writeHostInfo({ ...receipt, serverVersion: `fixture-${publication}` });
+      }
+      reader.stdin.end();
+      check(
+        (await readerExit) === 0,
+        "independent native readers observe complete snapshots throughout atomic publication",
+      );
+    } finally {
+      reader.stdin.end();
+      if (!readerJoined) reader.kill();
+      await readerExit.catch(() => undefined);
+      clearTimeout(readerDeadline);
+    }
     await startup.clearProjections({ instanceId: randomUUID() });
     check(
       (await startup.readHostInfo())?.instanceId === ownership.receipt.instanceId,
