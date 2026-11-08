@@ -188,6 +188,18 @@ jobs:
         id: export_worker_bun
         timeout-minutes: 2
         run: bun run --cwd apps/server canvas:export:plugin:smoke
+      - name: Installed example through native export approval
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          export_example_directory=$(mktemp -d "$RUNNER_TEMP/octant-export-example.XXXXXX")
+          trap 'rm -r -- "$export_example_directory"' EXIT
+          # The reference package is an independent first-party change. Pin its
+          # source while validating the loader without duplicating its diff.
+          git fetch --no-tags origin e5693698170efae0fbf399984d72fea90c39835c
+          git archive e5693698170efae0fbf399984d72fea90c39835c packages/plugin-api/examples/docs-md-export | tar -x -C "$export_example_directory"
+          OCTANT_QA_EXPORT_EXAMPLE_ROOT="$export_example_directory/packages/plugin-api/examples/docs-md-export" bun run --cwd apps/server canvas:export:installed:smoke
+          test -z "$(git status --porcelain -- packages/plugin-api)"
       - run: node node_modules/electron/install.js
         id: export_worker_electron_binary
         if: ${{ !cancelled() && (steps.export_worker_bun.outcome == 'success' || steps.export_worker_bun.outcome == 'failure') }}

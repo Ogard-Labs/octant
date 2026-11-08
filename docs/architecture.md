@@ -9216,6 +9216,16 @@ macOS uses the existing deny-default native process boundary; Linux and Windows
 remain host-prohibited until their corresponding boundary is implemented and
 verified. A shared protocol is not evidence of platform confinement.
 
+The reference page-host example includes a local package document naming its
+built `dist/index.mjs`. Bundle the public SDK schemas with the entry before
+installation: an isolated package cannot resolve SDK imports from the host
+checkout. Its endpoint and allowed-origin declaration belong to the reviewed
+package; a worker inherits neither host endpoint environment variables nor
+keys. The installed-example native smoke exercises the real folder loader,
+journal, separate trust and enablement, approval and supervised process with a
+controlled HTTP response. That proves package integration, not a live external
+publication or the packaged window's approval interaction.
+
 Destination descriptions may be synchronous or asynchronous, with a ten-second
 host deadline and an eight-second worker deadline. Inspection/module loading
 and description have no network access. A changed activation or package identity
