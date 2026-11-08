@@ -1397,6 +1397,26 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("writes a handover summary for a Code thread the limit rule compacts", async () => {
+      const world = createRuntimeWorld(
+        { answer: { kind: "compacted" }, handover: "Finish the index next." },
+        "code-thread",
+      );
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "host-policy", windowId, {
+        kind: "limit-near",
+        window: "seven_day",
+        usedPercent: 92,
+        thresholdPercent: 90,
+      });
+      await world.service.settled();
+      expect(world.runtime.handoverPrompts).toHaveLength(1);
+      expect(world.harness.handoverSummary(codeSubject, conversation)).toMatchObject({
+        content: "Finish the index next.",
+      });
+      world.close();
+    });
+
     it("calls an older usage report only an upper bound once a compaction left no figure", async () => {
       const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
       world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
@@ -2158,9 +2178,8 @@ function createRuntimeWorld(
         settled: (threadId: string, compaction: unknown) => {
           announced.push({ threadId, compaction });
         },
-        ...(kind === "chat-thread"
-          ? { conversation: () => conversation, scratchRoot: async () => "/tmp/octant-scratch" }
-          : {}),
+        conversation: () => conversation,
+        scratchRoot: async () => "/tmp/octant-scratch",
         runtimeSessions: {
           exists: () => state.hasSession,
           ...(kind === "code-thread" ? { occupancy: () => state.occupancy } : {}),

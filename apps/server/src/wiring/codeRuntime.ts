@@ -367,6 +367,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeEvidence"
     | "providerRuntimeRegistry"
     | "selectCodeConversation"
+    | "codeSessionConversation"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -447,6 +448,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     roots,
     runtimeOutsideContentMarks,
     selectCodeConversation,
+    codeSessionConversation,
     siblingThreadsService,
     serverConnection,
     serverProjectStore,
@@ -947,6 +949,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               globalSequence,
             ),
         },
+        handoverSummary: (thread) =>
+          contextHarness.handoverSummary(
+            decodeContextSubjectRef({
+              aggregateType: "code-thread",
+              aggregateId: String(thread.id),
+            }),
+            codeSessionConversation(thread.id),
+          ),
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom, purpose }) =>
           selectCodeConversation(thread.id, {
             purpose: purpose ?? "provider-switch",

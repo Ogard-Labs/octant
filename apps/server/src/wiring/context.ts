@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -68,7 +70,10 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkWiring, "workThreadService" | "workTurnService"> &
   Pick<
     FoundationsWiring,
-    "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
+    | "codeSessionConversation"
+    | "providerRuntimeRegistry"
+    | "workThreadProjection"
+    | "workTurnProjection"
   > &
   Pick<FoundationsWiring, "browserAuthority">;
 
@@ -86,6 +91,7 @@ export function wireContext(deps: ContextDependencies) {
     chatService,
     codeOperationRuntime,
     codeSessionAuthority,
+    codeSessionConversation,
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
@@ -418,6 +424,20 @@ export function wireContext(deps: ContextDependencies) {
                 exists: codeCompactionSessions.exists,
                 occupancy: codeCompactionSessions.occupancy,
                 open: codeCompactionSessions.open,
+              },
+              // Read only for a limit rule's handover summary; the runtime keeps
+              // the session itself.
+              conversation: (threadId) => codeSessionConversation(decodeCodeThreadId(threadId)),
+              // The summary is one tool-free request, so it runs in a private
+              // host folder, never in the thread's checkout.
+              scratchRoot: async (threadId) => {
+                const root = join(
+                  persistence.dataDirectory,
+                  "hand-off-scratch",
+                  String(decodeCodeThreadId(threadId)),
+                );
+                await mkdir(root, { recursive: true, mode: 0o700 });
+                return root;
               },
             },
           }),

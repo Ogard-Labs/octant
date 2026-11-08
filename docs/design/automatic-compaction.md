@@ -226,7 +226,7 @@ Choice: (b). It adds no new authority path; the window that just ran a turn on
 the checkout is the one that compacts it. Consequences: the idle rule (slice 2)
 needs a window that can still open the thread, or it skips Code threads.
 
-### D-5: The handover summary covers Chat and Work; Code waits (Accepted, 2026-11-07)
+### D-5: The handover summary covers Chat and Work; Code waits (Superseded by D-6)
 
 Context: the host holds the whole conversation of a Chat or Work thread
 (`sessionCompactionConversation`), so it can ask the thread's own provider for a
@@ -238,6 +238,18 @@ let a Code thread's switch keep today's bounded selection. Choice: (b), so the
 limit rule, its notice and **Switch model** reach every mode now, and a Code
 reader is its own change. Consequences: FR-7 holds for Chat and Work only; a
 Code thread is still compacted and told it is ready to move.
+
+### D-6: Code threads get the handover summary too (Accepted, 2026-11-08)
+
+Context: the maintainer asked for every part not yet built, D-5's Code gap
+included. The host can read a Code thread's public conversation from its
+operation journal and evidence store, the same sources its export and its
+switch handoff read. Options: (a) leave Code on the raw selection; (b) read
+the whole conversation (prompts and finished replies, rewound turns left out)
+for the summary, run the summary in a private host folder rather than the
+checkout, and lead a Code provider switch with it. Choice: (b). Consequences:
+FR-7 holds in every mode; a fork's first turn still hands over as before,
+since its handoff carries the source's turns, which the summary never read.
 
 ## 6. Build plan
 
@@ -351,7 +363,7 @@ spell waits for the thread's next turn.
   window-fill rule, so a limit that stays high never stands in for it.
   `windowFill` also returns the thread's provider instance.
 - **Handover** (`sessionCompaction.ts` `#writeHandover`): for a `limit-near`
-  compaction of a runtime-kept Chat or Work thread, the host first asks the
+  compaction of a runtime-kept thread (Code since D-6), the host first asks the
   thread's own provider, tool-free, for a summary of the conversation it holds
   (newest first, at most 400,000 characters), then asks the runtime to compact.
   The text is stored in the summary content store, committed with the receipt,
@@ -361,7 +373,7 @@ spell waits for the thread's next turn.
   reads is fixed when the rule asks, and the spend ceiling reserves for it (its
   input plus 3,000 tokens of answer) beside the compaction, so a ceiling with
   room for only one refuses the rule.
-- **Switch** (`withHandoverSummary`): a Chat or Work provider switch reads
+- **Switch** (`withHandoverSummary`): a provider switch in any mode (not a Code fork) reads
   `ContextHarnessService.handoverSummary` (the latest compaction, if the limit
   rule made it, and only while the last message it read is still in the
   thread, so a rewind past it never brings removed turns back) and leads the handoff with it in up to three 4,000-character
@@ -380,30 +392,30 @@ cannot be read hands a switch the raw selection, as before.
 
 ## 9. Verification
 
-| Acceptance criterion                                           | Test                                                                                                                                           | Result | Change      |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
-| FR-1 (fill): Settings writes both shares                       | `SettingsView.test.tsx` "compacts Octant threads at 85% by default and leaves runtimes…"                                                       | Pass   | This change |
-| FR-1 (fill): rendered on an isolated host                      | Playwright on a scratch host: defaults shown, 70% survives a reload, no clipping at 1280 and 390 wide, no console errors                       | Pass   | This change |
-| FR-2: compacts past the share, under the turn                  | `windowFillCompaction.test.ts` (7 tests); `contextCompaction.test.ts` window-fill tests                                                        | Pass   | This change |
-| FR-2: host compaction records cause and requester              | `sessionCompaction.test.ts` "records a compaction a rule the person set started…"                                                              | Pass   | This change |
-| FR-9: timeline names the rule and the fill                     | `CompactionDivider.test.tsx` "says which rule compacted the thread…"                                                                           | Pass   | This change |
-| FR-10: refused rule leaves nothing behind                      | `windowFillCompaction.test.ts` "stops after any other refusal…"; `sessionCompaction.test.ts` "refuses a rule on a Code thread with no window…" | Pass   | This change |
-| NFR-1: no repeat after a compaction that freed little          | `windowFillCompaction.test.ts` "does not compact again after a rule's compaction that freed too little"                                        | Pass   | This change |
-| NFR-1: one compaction per turn end                             | `windowFillCompaction.test.ts` "gives the same turn's end announced twice the same compaction id"                                              | Pass   | This change |
-| FR-1 (idle): Settings writes the minutes, off by default       | `SettingsView.test.tsx` "leaves quiet threads alone by default…"                                                                               | Pass   | This change |
-| FR-5: one compaction per quiet spell, above the minimum        | `idleCompaction.test.ts` (8 tests); `contextCompaction.test.ts` "compacting a quiet thread"                                                    | Pass   | This change |
-| FR-5: Code only under an open window                           | `sessionCompaction.test.ts` "refuses a rule on a Code thread with no open window…"                                                             | Pass   | This change |
-| FR-9 (idle): timeline says how long it was quiet               | `CompactionDivider.test.tsx` "says how long the thread was quiet…"                                                                             | Pass   | This change |
-| NFR-2: a pass with nothing due reads nothing                   | `idleCompaction.test.ts` "reads nothing and asks no provider…" (500 threads, under 50 ms, zero reads)                                          | Pass   | This change |
-| FR-1 (limit): Settings writes the share, off by default        | `SettingsView.test.tsx` "leaves the limit rule off by default…"                                                                                | Pass   | This change |
-| FR-1 (idle, limit): all four rows rendered on an isolated host | Playwright on a scratch host: defaults shown, 30 minutes and 90% survive a reload, no clipping at 1280 and 390 wide, no console errors         | Pass   | This change |
-| FR-6: once per limit period, ahead of window fill              | `turnEndCompaction.test.ts` limit tests; `contextCompaction.test.ts` "compacting when an account limit gets close"                             | Pass   | This change |
-| FR-7: handover written first, stored with the receipt          | `sessionCompaction.test.ts` "writes a handover summary with the thread's own provider…", "writes no handover summary…"                         | Pass   | This change |
-| FR-7: a switch leads with the handover                         | `conversationHandoff.test.ts` "handing a thread to another provider after the limit rule"                                                      | Pass   | This change |
-| FR-8: notice, and Switch model opens the picker                | `ComposerModelPicker.test.tsx` "opens from the limit notice under a compaction…"                                                               | Pass   | This change |
-| FR-7 for Code threads                                          | Not built (D-5)                                                                                                                                | Open   | —           |
-| FR-6 to FR-8 on a real runtime                                 | Not run: needs a live provider near its account limit                                                                                          | Open   | —           |
-| FR-2 on a real runtime                                         | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                    | Open   | —           |
+| Acceptance criterion                                           | Test                                                                                                                                                                                                   | Result | Change      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ----------- |
+| FR-1 (fill): Settings writes both shares                       | `SettingsView.test.tsx` "compacts Octant threads at 85% by default and leaves runtimes…"                                                                                                               | Pass   | This change |
+| FR-1 (fill): rendered on an isolated host                      | Playwright on a scratch host: defaults shown, 70% survives a reload, no clipping at 1280 and 390 wide, no console errors                                                                               | Pass   | This change |
+| FR-2: compacts past the share, under the turn                  | `windowFillCompaction.test.ts` (7 tests); `contextCompaction.test.ts` window-fill tests                                                                                                                | Pass   | This change |
+| FR-2: host compaction records cause and requester              | `sessionCompaction.test.ts` "records a compaction a rule the person set started…"                                                                                                                      | Pass   | This change |
+| FR-9: timeline names the rule and the fill                     | `CompactionDivider.test.tsx` "says which rule compacted the thread…"                                                                                                                                   | Pass   | This change |
+| FR-10: refused rule leaves nothing behind                      | `windowFillCompaction.test.ts` "stops after any other refusal…"; `sessionCompaction.test.ts` "refuses a rule on a Code thread with no window…"                                                         | Pass   | This change |
+| NFR-1: no repeat after a compaction that freed little          | `windowFillCompaction.test.ts` "does not compact again after a rule's compaction that freed too little"                                                                                                | Pass   | This change |
+| NFR-1: one compaction per turn end                             | `windowFillCompaction.test.ts` "gives the same turn's end announced twice the same compaction id"                                                                                                      | Pass   | This change |
+| FR-1 (idle): Settings writes the minutes, off by default       | `SettingsView.test.tsx` "leaves quiet threads alone by default…"                                                                                                                                       | Pass   | This change |
+| FR-5: one compaction per quiet spell, above the minimum        | `idleCompaction.test.ts` (8 tests); `contextCompaction.test.ts` "compacting a quiet thread"                                                                                                            | Pass   | This change |
+| FR-5: Code only under an open window                           | `sessionCompaction.test.ts` "refuses a rule on a Code thread with no open window…"                                                                                                                     | Pass   | This change |
+| FR-9 (idle): timeline says how long it was quiet               | `CompactionDivider.test.tsx` "says how long the thread was quiet…"                                                                                                                                     | Pass   | This change |
+| NFR-2: a pass with nothing due reads nothing                   | `idleCompaction.test.ts` "reads nothing and asks no provider…" (500 threads, under 50 ms, zero reads)                                                                                                  | Pass   | This change |
+| FR-1 (limit): Settings writes the share, off by default        | `SettingsView.test.tsx` "leaves the limit rule off by default…"                                                                                                                                        | Pass   | This change |
+| FR-1 (idle, limit): all four rows rendered on an isolated host | Playwright on a scratch host: defaults shown, 30 minutes and 90% survive a reload, no clipping at 1280 and 390 wide, no console errors                                                                 | Pass   | This change |
+| FR-6: once per limit period, ahead of window fill              | `turnEndCompaction.test.ts` limit tests; `contextCompaction.test.ts` "compacting when an account limit gets close"                                                                                     | Pass   | This change |
+| FR-7: handover written first, stored with the receipt          | `sessionCompaction.test.ts` "writes a handover summary with the thread's own provider…", "writes no handover summary…"                                                                                 | Pass   | This change |
+| FR-7: a switch leads with the handover                         | `conversationHandoff.test.ts` "handing a thread to another provider after the limit rule"                                                                                                              | Pass   | This change |
+| FR-8: notice, and Switch model opens the picker                | `ComposerModelPicker.test.tsx` "opens from the limit notice under a compaction…"                                                                                                                       | Pass   | This change |
+| FR-7 for Code threads                                          | `codeSessionConversation.test.ts`; `sessionCompaction.test.ts` "writes a handover summary for a Code thread…"; `codeOperationRuntime.test.ts` "leads a provider switch with the limit rule's summary…" | Pass   | This change |
+| FR-6 to FR-8 on a real runtime                                 | Not run: needs a live provider near its account limit                                                                                                                                                  | Open   | —           |
+| FR-2 on a real runtime                                         | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                                                                            | Open   | —           |
 
 ## 10. Codebase deltas and change log
 
@@ -427,7 +439,8 @@ cannot be read hands a switch the raw selection, as before.
   switch keeps the newest verbatim messages instead, and drops only the oldest
   when the summary needs room: the next model benefits from the exact last
   words, and the overlap is bounded by the handoff's own block limit.
-- FR-7 covers Chat and Work only (D-5).
+- FR-7 covered Chat and Work only (D-5) until D-6 added Code. A Code fork's
+  first turn still hands over without the summary.
 - Slice 1's `WindowFillCompactions` became `TurnEndCompactions`, since it now
   judges the limit rule too.
 - Review found that a limit period already answered still claimed every later
@@ -445,3 +458,4 @@ cannot be read hands a switch the raw selection, as before.
   built with its detailed design and verification.
 - 2026-11-07: Slice 2 (idle rule) built.
 - 2026-11-07: Slice 3 (limit rule, handover summary, notice) built; D-5 added.
+- 2026-11-08: Code handover summary built; D-6 supersedes D-5.
