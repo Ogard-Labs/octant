@@ -27,6 +27,7 @@ static const char *private_created[] = {
   ROOT "/home/.ssh/id_created_directory", ROOT "/home/.ssh/id_created_symlink",
   ROOT "/home/.ssh/id_created_alias", ROOT "/private-source-link",
   ROOT "/home/.ssh/id_created_socket",
+  ROOT "/second-bind.socket",
 };
 static const char public_created[] = "permitted creation";
 
@@ -140,6 +141,15 @@ static bool creation_controls(void)
   int public_bind_error = public_bound < 0 ? errno : 0;
   struct stat socket_identity;
   bool public_socket_type = public_bound == 0 && !lstat(public_address.sun_path, &socket_identity) && S_ISSOCK(socket_identity.st_mode);
+  struct sockaddr_un second_address = { .sun_family = AF_UNIX, .sun_path = ROOT "/second-bind.socket" };
+  errno = 0;
+  int second_bound = public_bound == 0 ? bind(public_socket, (struct sockaddr *)&second_address, sizeof(second_address)) : 0;
+  int second_bind_error = second_bound < 0 ? errno : 0;
+  errno = 0;
+  bool second_absent = lstat(second_address.sun_path, &socket_identity) == -1 && errno == ENOENT;
+  bool second_refused = public_bound == 0 && second_bound == -1 && second_bind_error == EINVAL && second_absent;
+  printf("OCTANT_UNIX_BIND_SECOND {\"result\":%d,\"errno\":%d,\"nameAbsent\":%s}\n",
+    second_bound, second_bind_error, second_absent ? "true" : "false");
   bool public_socket_closed = public_socket >= 0 && !close(public_socket);
   bool public_socket_removed = public_bound == 0 && !unlink(public_address.sun_path);
   printf("OCTANT_UNIX_BIND_PUBLIC {\"socketCreated\":%s,\"socketErrno\":%d,\"result\":%d,\"errno\":%d,\"socketType\":%s,\"closed\":%s,\"removed\":%s}\n",
@@ -152,7 +162,7 @@ static bool creation_controls(void)
     temporary_observed && temporary_removed ? "true" : "false");
   bool positives = existing_open && existing_link && existing_symlink && published && directory_removed && pipe_observed && pipe_removed && symbolic_observed &&
     symbolic_removed && same_inode && alias_removed && temporary_observed && temporary_removed &&
-    public_socket >= 0 && public_bound == 0 && public_socket_type && public_socket_closed && public_socket_removed;
+    public_socket >= 0 && public_bound == 0 && public_socket_type && second_refused && public_socket_closed && public_socket_removed;
   errno = 0;
   int opened = open(private_created[0], O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
   int error = opened < 0 ? errno : 0;

@@ -415,8 +415,8 @@ def install_creations(kernel: Path) -> None:
 
     scope = ("\n\tstruct octant_creation_scope octant_creation_admission\n"
              "\t\t__attribute__((cleanup(octant_creation_end))) = {};\n")
-    # Keep exported start_creating_* signatures unchanged. Only the four
-    # audited user callers carry a scope through the returned locked path.
+    # Keep exported start_creating_* signatures unchanged. Audited callers
+    # carry a scope through the returned locked path.
     replace("filename_create", {
         "struct path *path, unsigned int lookup_flags)":
             "struct path *path, unsigned int lookup_flags,\n"
@@ -500,6 +500,109 @@ def install_creations(kernel: Path) -> None:
     path.write_text(source if "#include <linux/octant_mediation_bridge.h>" in source else include_bridge(source))
 
 
+def install_unix_bind(kernel: Path) -> None:
+    path = kernel / "fs/namei.c"
+    source = path.read_text()
+    anchor = "EXPORT_SYMBOL(end_creating_path);\n"
+    if source.count(anchor) != 1 or "octant_start_creating_path" in source:
+        raise ValueError("Pinned scoped socket creation wrappers differ")
+    wrappers = r'''
+
+struct dentry *octant_start_creating_path(int dfd, const char *pathname,
+	struct path *parent, unsigned int flags, struct octant_creation_scope *scope)
+{
+	struct filename *filename = getname_kernel(pathname);
+	struct dentry *dentry = filename_create(dfd, filename, parent, flags, NULL, scope);
+
+	putname(filename);
+	if (IS_ERR(dentry))
+		octant_creation_end(scope);
+	return dentry;
+}
+EXPORT_SYMBOL_GPL(octant_start_creating_path);
+
+void octant_end_creating_path(const struct path *parent, struct dentry *dentry,
+	struct octant_creation_scope *scope)
+{
+	end_creating_path(parent, dentry);
+	octant_creation_end(scope);
+}
+EXPORT_SYMBOL_GPL(octant_end_creating_path);
+
+/* Called with the parent locked and no socket bind mutex. The original path
+ * keeps its mount write and dentry references until end_creating_path. */
+int octant_unlink_created_socket(const struct path *parent, struct dentry *dentry)
+{
+	struct inode *dir = d_inode(parent->dentry);
+	struct inode *created = d_inode(dentry);
+	struct dentry *found;
+	unsigned char bytes[256];
+	struct qstr name;
+	int error;
+
+	if (!octant_mediation_restricted())
+		return vfs_unlink(mnt_idmap(parent->mnt), dir, dentry, NULL);
+	octant_namespace_discard();
+	if (!created || !S_ISSOCK(created->i_mode) ||
+	    dentry->d_parent != parent->dentry || !dentry->d_name.len ||
+	    dentry->d_name.len >= sizeof(bytes))
+		return -EACCES;
+	name.len = dentry->d_name.len;
+	memcpy(bytes, dentry->d_name.name, name.len);
+	bytes[name.len] = 0;
+	name.name = bytes;
+	name.hash = full_name_hash(parent->dentry, bytes, name.len);
+	ihold(created);
+	inode_unlock(dir);
+	error = octant_namespace_prepare_socket_unlink(parent, &name);
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+	if (error)
+		goto out;
+	/* The unlocked policy wait permits replacement. Never delete that object,
+	 * even when the saved dentry still names the original socket inode. */
+	found = lookup_one_qstr_excl(&name, parent->dentry, LOOKUP_REVAL);
+	if (IS_ERR(found)) {
+		error = PTR_ERR(found);
+		goto out;
+	}
+	error = -EACCES;
+	if (found == dentry && d_inode(found) == created &&
+	    found->d_parent == parent->dentry && found->d_name.len == name.len &&
+	    !memcmp(found->d_name.name, bytes, name.len))
+		error = vfs_unlink(mnt_idmap(parent->mnt), dir, found, NULL);
+	dput(found);
+out:
+	octant_namespace_discard();
+	iput(created);
+	return error;
+}
+EXPORT_SYMBOL_GPL(octant_unlink_created_socket);
+'''
+    path.write_text(source.replace(anchor, anchor + wrappers, 1))
+
+    path = kernel / "net/unix/af_unix.c"
+    source = path.read_text()
+    start = source.index("static int unix_bind_bsd(")
+    end = source.index("\n}\n", start) + 2
+    body = source[start:end]
+    changes = {
+        "\tstruct path parent;": "\tstruct path parent;\n\tstruct octant_creation_scope admission = {};",
+        "start_creating_path(AT_FDCWD, addr->name->sun_path, &parent, 0)":
+            "octant_start_creating_path(AT_FDCWD, addr->name->sun_path, &parent, 0, &admission)",
+        "vfs_unlink(idmap, d_inode(parent.dentry), dentry, NULL);":
+            "octant_unlink_created_socket(&parent, dentry);",
+    }
+    for original, replacement in changes.items():
+        if body.count(original) != 1:
+            raise ValueError("Pinned Unix socket creation entry differs")
+        body = body.replace(original, replacement, 1)
+    ending = "end_creating_path(&parent, dentry);"
+    if body.count(ending) != 2:
+        raise ValueError("Pinned Unix socket creation cleanup differs")
+    body = body.replace(ending, "octant_end_creating_path(&parent, dentry, &admission);")
+    path.write_text(include_bridge(source[:start] + body + source[end:]))
+
+
 def install_epochs(kernel: Path, native: Path) -> None:
     # Real unconfined writers use these same VFS entry points. These counters
     # describe in-flight mutations, not delayed filesystem-watch notifications.
@@ -579,3 +682,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_seek_reads(kernel)
     install_inode_generation_write(kernel)
     install_creations(kernel)
+    install_unix_bind(kernel)

@@ -247,8 +247,8 @@ static void free_cred(struct cred *cred)
 	put_context(octant_cred(cred)->context);
 }
 
-static int admit_request(struct octant_mediation_request *request,
-	const struct path *source, const struct path *destination)
+static int admit_request_wait(struct octant_mediation_request *request,
+	const struct path *source, const struct path *destination, bool socket_cleanup)
 {
 	struct octant_context *context = octant_cred(current_cred())->context;
 	struct octant_pending *pending = NULL;
@@ -296,9 +296,16 @@ static int admit_request(struct octant_mediation_request *request,
 	pending->decision = -EACCES;
 	spin_unlock_irqrestore(&context->lock, flags);
 	wake_up_interruptible(&context->readable);
-	waited = wait_event_interruptible_timeout(pending->changed,
-		READ_ONCE(pending->answered) || READ_ONCE(context->dead),
-		msecs_to_jiffies(OCTANT_MEDIATION_TIMEOUT_MS));
+	/* A signal can cause Unix bind to unwind an already-created node. Its
+	 * fresh unlink decision still has the same finite broker-loss deadline. */
+	if (socket_cleanup)
+		waited = wait_event_timeout(pending->changed,
+			READ_ONCE(pending->answered) || READ_ONCE(context->dead),
+			msecs_to_jiffies(OCTANT_MEDIATION_TIMEOUT_MS));
+	else
+		waited = wait_event_interruptible_timeout(pending->changed,
+			READ_ONCE(pending->answered) || READ_ONCE(context->dead),
+			msecs_to_jiffies(OCTANT_MEDIATION_TIMEOUT_MS));
 	spin_lock_irqsave(&context->lock, flags);
 	result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;
 	if (!result)
@@ -314,6 +321,12 @@ static int admit_request(struct octant_mediation_request *request,
 	if (destination_pin.dentry)
 		path_put(&destination_pin);
 	return result;
+}
+
+static int admit_request(struct octant_mediation_request *request,
+	const struct path *source, const struct path *destination)
+{
+	return admit_request_wait(request, source, destination, false);
 }
 
 static bool guarded_inode(struct inode *inode)
@@ -632,6 +645,31 @@ int octant_creation_check(u32 operation, struct inode *parent, struct dentry *na
 	return valid ? 0 : -EACCES;
 }
 
+void octant_namespace_discard(void)
+{
+	if (octant_mediation_restricted())
+		octant_task()->has_approved = false;
+}
+
+int octant_namespace_prepare_socket_unlink(const struct path *parent, const struct qstr *name)
+{
+	struct octant_mediation_request request = { .operation = OCTANT_MEDIATION_UNLINK };
+	struct octant_task *task;
+	int result;
+	if (!octant_mediation_restricted())
+		return 0;
+	task = octant_task();
+	task->has_approved = false;
+	result = copy_name(&request.source, d_inode(parent->dentry), name);
+	if (!result)
+		result = admit_request_wait(&request, parent, NULL, true);
+	if (!result) {
+		task->approved = request;
+		task->has_approved = true;
+	}
+	return result;
+}
+
 int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags)
@@ -910,7 +948,7 @@ static ssize_t answer_request(struct file *file, const char __user *bytes, size_
 	spin_unlock(&namespace_lock);
 	pending->decision_epoch = answer.namespace_epoch;
 	pending->answered = true;
-	wake_up_interruptible(&pending->changed);
+	wake_up(&pending->changed);
 	spin_unlock_irqrestore(&context->lock, flags);
 	return sizeof(answer);
 }
@@ -934,7 +972,7 @@ static int close_broker(struct inode *inode, struct file *file)
 	spin_lock_irqsave(&context->lock, flags);
 	context->dead = true;
 	for (i = 0; i < OCTANT_MEDIATION_PENDING; i++)
-		wake_up_interruptible(&context->pending[i].changed);
+		wake_up(&context->pending[i].changed);
 	spin_unlock_irqrestore(&context->lock, flags);
 	wake_up_interruptible(&context->readable);
 	put_context(context);
