@@ -22,6 +22,7 @@ import {
   type StoredBrowserProfile,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { browserProfileKey } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
 import { normalizeImportSite } from "./cookieImport/importedCookie";
@@ -78,6 +79,27 @@ export class BrowserProfileService {
 
   constructor(options: BrowserProfileServiceOptions) {
     this.#options = options;
+  }
+
+  async labelOfStoredProfile(profile: StoredBrowserProfile): Promise<string | undefined> {
+    const store = this.#options.runtime.profiles;
+    if (store === undefined) return undefined;
+    try {
+      if ((await this.#options.runtime.nativeAvailable?.()) !== true) return undefined;
+      const stored = await store.list(false);
+      // Settings displays Personal before its store exists. That placeholder
+      // never admits a session permission to a missing native profile.
+      if (!stored.some((entry) => browserProfileKey(entry.profile) === browserProfileKey(profile)))
+        return undefined;
+      const summaries = this.#summaries(stored);
+      return summaries.kind === "browser-profiles"
+        ? summaries.profiles.find(
+            (entry) => browserProfileKey(entry.profile) === browserProfileKey(profile),
+          )?.label
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async execute(
@@ -215,6 +237,12 @@ export class BrowserProfileService {
     } catch {
       return refused("profile-unavailable", "The Browser profiles could not be read.");
     }
+    return this.#summaries(stored);
+  }
+
+  #summaries(
+    stored: Awaited<ReturnType<NonNullable<BrowserRuntimePort["profiles"]>["list"]>>,
+  ): BrowserProfilesResult {
     const summaries: BrowserProfileSummary[] = [];
     // The Personal profile is always listed, so a person can see it exists
     // before they have signed in to anything.

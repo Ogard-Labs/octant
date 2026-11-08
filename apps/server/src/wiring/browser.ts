@@ -44,12 +44,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
-import {
-  browserProfileKey,
-  defaultShellSettings,
-  enabledModes,
-  isBrowserProfileSiteRemembered,
-} from "@octant/domain";
+import { defaultShellSettings, enabledModes, isBrowserProfileSiteRemembered } from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
 import type { ServerStart } from "./serverShape";
@@ -277,10 +272,7 @@ export function wireBrowser(deps: BrowserDependencies) {
             return target === undefined ? [] : [target];
           }),
       current: currentSessionTarget,
-      profileLabel: async (profile) =>
-        (await browserRuntime.profiles?.list(false).catch(() => undefined))?.find(
-          (row) => browserProfileKey(row.profile) === browserProfileKey(profile),
-        )?.label,
+      profileLabel: (profile) => browserProfileService.labelOfStoredProfile(profile),
       record: browserSessionGrantJournal({
         journal: persistence.journal,
         connection: persistence.connection,
