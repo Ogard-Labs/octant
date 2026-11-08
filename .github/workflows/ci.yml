@@ -221,8 +221,8 @@ jobs:
           src/code/codeDebugServiceProcess.test.ts
       # The packaged app runs outside provider drivers on Electron's Node, so
       # the escape tests below also run a driver on the Electron the desktop
-      # app pins. Electron's package downloads its binary only on demand, not
-      # at install, so it is fetched here; without it that case would skip.
+      # app pins. The earlier install step makes that binary mandatory rather
+      # than letting a native case skip when the release download fails.
       # The ordinary Nightly client, in this Electron, against a development
       # host on a throwaway folder and port that a synthetic Stable owns with
       # Stable's own lease owner and client lifetime: the renderer, a Chat
