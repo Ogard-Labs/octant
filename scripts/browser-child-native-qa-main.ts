@@ -128,7 +128,8 @@ async function main() {
     "data:text/html,<title>Owned native Browser fixture</title><p>Native owner</p>",
   );
   const views = new Map<BrowserSurfaceViewPort, WebContentsView>();
-  const nativeContexts = new Map<string, WebContentsView>();
+  const nativeContexts = new Map<string, Electron.WebContents>();
+  const ownedContents = new Set<Electron.WebContents>();
   let creates = 0;
   let nativeActions = 0;
   const sessions = new Set<Electron.Session>();
@@ -163,6 +164,7 @@ async function main() {
       });
       const port = view as BrowserSurfaceViewPort;
       views.set(port, view);
+      ownedContents.add(view.webContents);
       return port;
     },
   });
@@ -194,7 +196,7 @@ async function main() {
       creates++;
       host.attach(args[0], args[3], shell, { x: 0, y: 60, width: 900, height: 600 });
       const newest = [...views.values()].at(-1);
-      if (newest !== undefined) nativeContexts.set(String(args[0]), newest);
+      if (newest !== undefined) nativeContexts.set(String(args[0]), newest.webContents);
       return result;
     }
     override async act(...args: Parameters<DesktopBrowserRuntime["act"]>) {
@@ -406,8 +408,7 @@ async function main() {
     const childEntry = [...nativeContexts.entries()].find(([id]) => id !== String(parentId));
     if (childEntry === undefined) throw Error("No native child view was created.");
     check(
-      !childEntry[1].webContents.isDestroyed() &&
-        !nativeContexts.get(String(parentId))?.webContents.isDestroyed(),
+      !childEntry[1].isDestroyed() && !nativeContexts.get(String(parentId))?.isDestroyed(),
       "both actual native views are alive independently",
     );
     await writeFile(join(output, "native-child.png"), (await window.capturePage()).toPNG());
@@ -459,11 +460,11 @@ async function main() {
       "revocation during a real native request withholds the entire observation",
     );
     await until(
-      () => childEntry[1].webContents.isDestroyed(),
+      () => childEntry[1].isDestroyed(),
       "revocation closes the actual child native page",
     );
     check(
-      !nativeContexts.get(String(parentId))?.webContents.isDestroyed(),
+      !nativeContexts.get(String(parentId))?.isDestroyed(),
       "child revocation leaves the actual parent page alive",
     );
     check(
@@ -487,7 +488,7 @@ async function main() {
     );
     await runtime.closeContext(parentId);
     await until(
-      () => [...views.values()].every((view) => view.webContents.isDestroyed()),
+      () => [...ownedContents].every((contents) => contents.isDestroyed()),
       "every owned native view is destroyed",
     );
   } finally {
