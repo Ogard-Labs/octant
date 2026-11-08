@@ -1,9 +1,12 @@
 import { Schema } from "effect";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
+import { startShareService } from "../apps/share/src/server";
+import { readShareConfig } from "../apps/share/src/config";
+import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
 import { createQuitAppleScript } from "./package-desktop";
 import {
   cleanupPackagedProcess,
@@ -61,6 +64,7 @@ async function main(): Promise<void> {
   let bundle: string | undefined;
   let app: ReturnType<typeof spawnPackagedApplication> | undefined;
   let watchdog: ChildProcess | undefined;
+  let shareService: ReturnType<typeof startShareService> | undefined;
   const controller = new AbortController();
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
@@ -100,6 +104,24 @@ async function main(): Promise<void> {
       30_000,
     );
     await writeFile(join(artifacts, "seeded-canvas.txt"), seed);
+    const shareConfig = readShareConfig({
+      OCTANT_SHARE_HOST: "127.0.0.1",
+      OCTANT_SHARE_PORT: "0",
+      OCTANT_SHARE_USERCONTENT_PORT: "0",
+      OCTANT_SHARE_DATA_DIR: join(root, "share"),
+    });
+    if (shareConfig.status !== "ok") throw Error("The owned share fixture configuration refused.");
+    shareService = startShareService(shareConfig.config);
+    const ownService = shareService;
+    if (!(await fetch(`${ownService.publicUrl}/healthz`)).ok)
+      throw Error("The owned share fixture is unavailable.");
+    await writeFile(
+      join(artifacts, "service-origins.json"),
+      JSON.stringify({
+        public: ownService.publicUrl,
+        content: ownService.usercontentUrl,
+      }),
+    );
     app = spawnPackagedApplication({ executable, env });
     pid = app.child.pid;
     if (pid === undefined) throw Error("No owned packaged application process.");
@@ -245,12 +267,76 @@ const timer = setInterval(() => {
         hasText(snapshot, "Service address") &&
         hasText(snapshot, "Where public links are published"),
     );
+    const SettingsRow = Schema.Struct({ payload_json: Schema.String });
+    const Settings = Schema.Struct({ enabled: Schema.Boolean, serviceUrl: Schema.String });
+    const waitForSettings = (enabled: boolean) =>
+      waitForProcessCleanup(
+        async () => {
+          const connection = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
+          try {
+            const row = connection.all(
+              "SELECT payload_json FROM event_journal WHERE event_name = 'canvas.public-link-settings-changed@1' ORDER BY global_sequence DESC LIMIT 1",
+            )[0];
+            if (row === undefined)
+              throw Error("Native settings input has not reached the journal.");
+            const payload = Schema.decodeUnknownSync(SettingsRow)(row).payload_json;
+            const settings = Schema.decodeUnknownSync(Settings)(JSON.parse(payload));
+            if (settings.enabled !== enabled || settings.serviceUrl !== ownService.publicUrl)
+              throw Error("The journal has not confirmed the exact owned share settings.");
+          } finally {
+            connection.close();
+          }
+        },
+        { timeoutMs: 5000 },
+      );
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "fill",
+        String(ownPid),
+        join(artifacts, "service-address-target.png"),
+        "Service address",
+        ownService.publicUrl,
+      ],
+      process.env,
+      8000,
+    );
+    await observeUntil("service-address-entered", (snapshot) =>
+      hasText(snapshot, ownService.publicUrl),
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "save-address-target.png"), "Save address"],
+      process.env,
+      8000,
+    );
+    await waitForSettings(false);
+    // The label focuses its associated input. Shift+Tab reaches the immediately
+    // preceding Public links switch; the journal, not the key event, proves it.
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "toggle-before-field",
+        String(ownPid),
+        join(artifacts, "public-links-toggle-target.png"),
+        "Service address",
+      ],
+      process.env,
+      8000,
+    );
+    await waitForSettings(true);
+    await observeUntil("public-links-configured", (snapshot) =>
+      hasText(snapshot, ownService.publicUrl),
+    );
+    if ((await readdir(join(root, "share", "shares"))).length !== 0)
+      throw Error("Configuring the service unexpectedly published content.");
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
     clearTimeout(timer);
     process.removeListener("SIGTERM", interrupted);
     process.removeListener("SIGINT", interrupted);
+    if (shareService !== undefined) shareService.stop();
     if (app !== undefined && pid !== undefined && bundle !== undefined) {
       const ownPid = pid;
       const ownedApp = app;
@@ -304,6 +390,21 @@ const timer = setInterval(() => {
       });
       cleanupVerified = true;
     }
+    if (shareService !== undefined) {
+      const ownService = shareService;
+      await waitForProcessCleanup(
+        async () => {
+          for (const origin of [ownService.publicUrl, ownService.usercontentUrl]) {
+            const response = await fetch(origin, { signal: AbortSignal.timeout(300) }).catch(
+              () => undefined,
+            );
+            if (response !== undefined)
+              throw Error("An owned share fixture listener remains available.");
+          }
+        },
+        { timeoutMs: 3000 },
+      );
+    }
     await rm(root, { recursive: true, force: true });
     if (bundle !== undefined && bundle.startsWith(join(tmpdir(), "octant-packaged-app.")))
       await rm(dirname(bundle), { recursive: true, force: true });
@@ -324,6 +425,8 @@ const timer = setInterval(() => {
         nativeSettings: true,
         seededCanvasRendered: true,
         publicLinkSettingsObserved: true,
+        nativeServiceConfiguration: "journal-confirmed",
+        configurationPublishedNothing: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
         publishAcceptance: "not-run",
