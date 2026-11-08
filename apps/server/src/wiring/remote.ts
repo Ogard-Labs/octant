@@ -459,7 +459,10 @@ export function wireRemote(deps: RemoteDependencies) {
     });
     return hostIdentity;
   };
-  const hubStateStore = createHubStateStore(providerDataDirectory);
+  const hubStateStore = createHubStateStore(
+    providerDataDirectory,
+    options.authorityStateFiles?.hub,
+  );
   const hubTransport = createPinnedHubTransport();
   let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
@@ -718,7 +721,10 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   setInterval(() => void spokeSignInService.tick().catch(() => undefined), SIGN_IN_LOOK_MS).unref();
   const tailscaleCertificate = new TailscaleCertificateService({
-    setting: createTailscaleCertificateSetting(providerDataDirectory),
+    setting: createTailscaleCertificateSetting(
+      providerDataDirectory,
+      options.authorityStateFiles?.certificate,
+    ),
     daemon: createTailscaleCliDaemon({
       dataDirectory: providerDataDirectory,
       exec: execTailscale,
@@ -784,7 +790,10 @@ export function wireRemote(deps: RemoteDependencies) {
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's
   // rules for the parent thread before it asks another member.
-  const delegationState = createDelegationStateStore(providerDataDirectory);
+  const delegationState = createDelegationStateStore(
+    providerDataDirectory,
+    options.authorityStateFiles?.delegations,
+  );
   const recordDelegation = createDelegationJournal({
     journal: persistence.journal,
     connection: persistence.connection,

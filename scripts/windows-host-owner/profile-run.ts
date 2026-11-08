@@ -17,9 +17,10 @@ import { fileURLToPath } from "node:url";
 
 const identityMode = process.argv[2] === "--server-identity";
 const tlsMode = process.argv[2] === "--listener-tls";
+const authorityMode = process.argv[2] === "--authority-state";
 const rosterMode = process.argv[2] === "--roster-key";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
-  identityMode || tlsMode || rosterMode ? 3 : 2,
+  identityMode || tlsMode || rosterMode || authorityMode ? 3 : 2,
 );
 if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
   throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
@@ -266,7 +267,60 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  if (rosterMode) {
+  if (authorityMode) {
+    for (const profile of profiles) await probe(first, profile, "missing");
+    checks.push("missing reads create nothing and prepare-only processes cannot write");
+    for (const runtime of runtimes)
+      for (const profile of profiles) {
+        await probe(runtime, profile);
+        await acl(profile, "authority-inspect");
+      }
+    checks.push("all three runtime consumers retain private schema-valid authority records");
+    const selected = roots[0];
+    if (selected === undefined) throw Error("Missing owned state root.");
+    const hub = win32.join(selected, "data", "hub");
+    const file = win32.join(hub, "hub-state.json");
+    const original = await readFile(file);
+    try {
+      for (const malformed of [
+        Buffer.alloc(0),
+        Buffer.from("{"),
+        Buffer.from([0xff]),
+        Buffer.from('{"unexpected":true}'),
+      ]) {
+        await writeFile(file, malformed);
+        await probe(first, "octant", "refuse");
+        if (!(await readFile(file)).equals(malformed))
+          throw Error("Corrupt authority record was overwritten.");
+      }
+    } finally {
+      await writeFile(file, original);
+    }
+    checks.push("empty, malformed, invalid UTF-8 and invalid schema records refuse without reset");
+    const alias = file + ".alias";
+    try {
+      await link(file, alias);
+      await probe(first, "octant", "refuse");
+    } finally {
+      await unlink(alias);
+    }
+    checks.push("hardlinked state refuses");
+    await acl("octant", "authority-unsafe");
+    try {
+      await probe(first, "octant", "refuse");
+    } finally {
+      await acl("octant", "authority-restore");
+    }
+    checks.push("exposed state refuses without DACL repair");
+    await probe(first, "octant");
+    console.log(
+      JSON.stringify({
+        authorityStateLifecycleChecks: checks,
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else if (rosterMode) {
     const selected = roots[0];
     if (selected === undefined) throw Error("Missing owned roster root.");
     for (const profile of profiles) await probe(first, profile, "missing");

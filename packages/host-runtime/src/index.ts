@@ -313,3 +313,10 @@ export {
   type ServerIdentityFile,
   type ServerIdentityFileRead,
 } from "./windowsServerIdentity";
+
+export {
+  createWindowsAuthorityStateFiles,
+  type WindowsAuthorityStateFile,
+  type WindowsAuthorityStateFiles,
+  type WindowsAuthorityStateNative,
+} from "./windowsAuthorityState";
