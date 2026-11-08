@@ -837,7 +837,8 @@ static int policy_measure(const char *mode)
 {
   bool diagnostic = false;
 #ifdef OCTANT_CONTROLLER_DIAGNOSTIC
-  diagnostic = mode && !strcmp(mode, "--runtime-node");
+  diagnostic = !mode || !strcmp(mode, "--bubblewrap") ||
+    !strcmp(mode, "--runtime-bun") || !strcmp(mode, "--runtime-node");
 #endif
   pid_t child = fork();
   if (!child) {
