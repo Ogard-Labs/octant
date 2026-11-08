@@ -74,8 +74,10 @@ function world(overrides: Partial<HandoverExchangeOptions> = {}) {
     acceptsProject: (placement) => placement.repositoryRemotes?.[0] === REMOTE,
     resolveProvider: (driverKind, modelId) =>
       driverKind === "claude" ? { providerInstanceId: "provider-b", modelId } : undefined,
-    readNote: async ({ handoverId }) =>
-      `Hand over: Fix the flaky test\n\nOctant-Handover: ${handoverId}`,
+    readNote: async ({ handoverId }) => ({
+      note: `Hand over: Fix the flaky test\n\nOctant-Handover: ${handoverId}`,
+      commit: "c".repeat(40),
+    }),
     branchTaken: async () => false,
     createThread: async (input) => {
       created.push(String(input.threadId));
@@ -110,11 +112,19 @@ function world(overrides: Partial<HandoverExchangeOptions> = {}) {
 
 describe("continuing a handover on another computer", () => {
   it("starts the thread on a suffixed branch when the destination already has one of that name", async () => {
-    const opened: Array<{ readonly branch: string; readonly threadBranch: string }> = [];
+    const opened: Array<{
+      readonly branch: string;
+      readonly threadBranch: string;
+      readonly commit: string;
+    }> = [];
     const { desktop, signed } = world({
       branchTaken: async ({ branch }) => branch === "feature/flaky",
       createThread: async (input) => {
-        opened.push({ branch: input.branch, threadBranch: input.threadBranch });
+        opened.push({
+          branch: input.branch,
+          threadBranch: input.threadBranch,
+          commit: input.commit,
+        });
       },
     });
     await desktop.receiveNotice(signed(notice));
@@ -125,9 +135,13 @@ describe("continuing a handover on another computer", () => {
         projectId: PROJECT as never,
       }),
     ).toEqual({ status: "continued", thread: { mode: "code", threadId: NEW_THREAD } });
-    // It still starts from the fetched handover branch.
+    // It still starts from the fetched handover branch, at the commit whose note was checked.
     expect(opened).toEqual([
-      { branch: "feature/flaky", threadBranch: "feature/flaky-handover-88888888" },
+      {
+        branch: "feature/flaky",
+        threadBranch: "feature/flaky-handover-88888888",
+        commit: "c".repeat(40),
+      },
     ]);
   });
 

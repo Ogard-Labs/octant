@@ -8,6 +8,13 @@ import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 
 export const HANDOVERS_CARD_ID = "handovers";
 
+/**
+ * A notice only changes the host's state, and nothing tells an open start
+ * screen, so the card reads again now and then and whenever the window comes
+ * back to the front.
+ */
+export const HANDOVERS_REFRESH_MS = 30_000;
+
 export interface HandoversCardSource {
   /** The move routes; absent outside a local desktop window, which hides the card. */
   readonly client: ThreadMoveClient | undefined;
@@ -46,7 +53,15 @@ function useHandoversContent(source: HandoversCardSource): HomeCardContent {
       .then((listed) => setHandovers(listed.handovers))
       .catch(() => setHandovers([]));
   }, [client]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, HANDOVERS_REFRESH_MS);
+    window.addEventListener("focus", load);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", load);
+    };
+  }, [load]);
   if (handovers === undefined) return { status: "loading" };
   return {
     status: "ready",

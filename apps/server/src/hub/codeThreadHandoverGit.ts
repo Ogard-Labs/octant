@@ -79,8 +79,12 @@ export async function readHandoverCheckout(root: string): Promise<HandoverChecko
   const ignoredFiles = (await git(root, ["status", "--porcelain", "--ignored", "-z"]))
     .split("\0")
     .filter((entry) => entry.startsWith("!! ")).length;
+  // The repository the branch is pushed to, which a separate `pushurl` makes
+  // different from the one fetched from; the notice must name where it went.
   const remoteUrl =
-    remote === undefined ? "" : await git(root, ["remote", "get-url", remote]).catch(() => "");
+    remote === undefined
+      ? ""
+      : await git(root, ["remote", "get-url", "--push", remote]).catch(() => "");
   return {
     head,
     ...(branch.length > 0 ? { branch } : {}),
@@ -229,7 +233,7 @@ export async function readHandoverNote(input: {
   readonly remote: string;
   readonly branch: string;
   readonly handoverId: string;
-}): Promise<string | undefined> {
+}): Promise<{ readonly note: string; readonly commit: string } | undefined> {
   const root = input.repositoryRoot;
   try {
     await git(root, [
@@ -238,13 +242,18 @@ export async function readHandoverNote(input: {
       input.remote,
       `refs/heads/${input.branch}:refs/remotes/${input.remote}/${input.branch}`,
     ]);
-    const message = await git(root, [
-      "log",
-      "-1",
-      "--format=%B",
-      `refs/remotes/${input.remote}/${input.branch}`,
+    // The commit is read once and named by its id from here on, so the thread
+    // starts from the very commit whose note was checked, even if the branch
+    // moves before the thread is made.
+    const commit = await git(root, [
+      "rev-parse",
+      "--verify",
+      `refs/remotes/${input.remote}/${input.branch}^{commit}`,
     ]);
-    return message.includes(`Octant-Handover: ${input.handoverId}`) ? message : undefined;
+    const message = await git(root, ["log", "-1", "--format=%B", commit]);
+    return message.includes(`Octant-Handover: ${input.handoverId}`)
+      ? { note: message, commit }
+      : undefined;
   } catch {
     return undefined;
   }

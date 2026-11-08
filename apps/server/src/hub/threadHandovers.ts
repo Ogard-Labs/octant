@@ -53,7 +53,7 @@ export interface HandoverCodeHost {
 }
 
 export interface ThreadHandoversOptions {
-  readonly source: Pick<ThreadMoveSourceHost, "read" | "freeze" | "unfreeze">;
+  readonly source: Pick<ThreadMoveSourceHost, "read" | "freeze" | "unfreeze" | "isFrozen">;
   readonly code: HandoverCodeHost;
   readonly record: ThreadHandoverRecorder;
   readonly state: ThreadMoveStatePort;
@@ -67,6 +67,10 @@ export interface ThreadHandoversOptions {
 
 export class ThreadHandovers {
   readonly #options: ThreadHandoversOptions;
+  // Threads a handover has claimed, from before its planning awaits anything
+  // until it ends, so two windows handing over one thread cannot both plan
+  // and then have the loser's unfreeze release the winner's hold.
+  readonly #claimed = new Set<string>();
 
   constructor(options: ThreadHandoversOptions) {
     this.#options = options;
@@ -94,6 +98,24 @@ export class ThreadHandovers {
   async handOver(
     thread: MovedThreadReference,
     destinationMemberId?: string,
+  ): Promise<HandoverOutcome> {
+    const claim = `${thread.mode}:${thread.threadId}`;
+    // A thread another handover claimed, or one a move or handover already
+    // holds, is busy: this attempt never freezes or unfreezes it.
+    if (this.#claimed.has(claim) || this.#options.source.isFrozen(thread)) {
+      return { status: "refused", reason: "busy" };
+    }
+    this.#claimed.add(claim);
+    try {
+      return await this.#handOverClaimed(thread, destinationMemberId);
+    } finally {
+      this.#claimed.delete(claim);
+    }
+  }
+
+  async #handOverClaimed(
+    thread: MovedThreadReference,
+    destinationMemberId: string | undefined,
   ): Promise<HandoverOutcome> {
     const planned = await this.#plan(thread);
     if (planned.status === "refused") return planned;

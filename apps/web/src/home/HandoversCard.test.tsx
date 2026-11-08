@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadMoveClient } from "../environment/threadMove/threadMoveClient";
@@ -21,6 +21,43 @@ function Card(props: {
 }
 
 describe("the Handovers card", () => {
+  it("shows a handover that arrives while the start screen is already open", async () => {
+    let arrived = false;
+    render(
+      <Card
+        client={{
+          handoversList: async () => ({
+            status: "listed",
+            handovers: arrived
+              ? [
+                  {
+                    handoverId: HANDOVER as never,
+                    title: "Fix the flaky test",
+                    branch: "feature/flaky",
+                    repositoryRemote: "git@github.com:person/octant.git",
+                    originMemberId: "33333333-3333-4333-8333-333333333333" as never,
+                    originName: "Laptop",
+                    projects: [{ projectId: PROJECT as never, title: "octant" }],
+                    receivedAt: "2026-11-08T12:00:00.000Z" as never,
+                  },
+                ]
+              : [],
+          }),
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByText("Loading")).not.toBeInTheDocument());
+    expect(screen.queryByText("Fix the flaky test")).not.toBeInTheDocument();
+
+    arrived = true;
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText("Fix the flaky test")).toBeInTheDocument();
+  });
+
   it("continues a handover in the one fitting Project and opens the thread it became", async () => {
     const user = userEvent.setup();
     const continued: Array<{ handoverId: string; projectId: string }> = [];

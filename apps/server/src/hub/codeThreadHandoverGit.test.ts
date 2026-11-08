@@ -171,6 +171,14 @@ describe("which remote and default branch a handover uses", () => {
     ).toEqual({ status: "not-pushed", shortfall: "push-failed" });
   });
 
+  it("names the repository the branch is pushed to when the remote pushes somewhere else", async () => {
+    const { laptop } = repository();
+    const pushedTo = join(laptop, "..", "push-only.git");
+    git(laptop, "remote", "set-url", "--push", "origin", pushedTo);
+
+    expect((await readHandoverCheckout(laptop)).remoteUrl).toBe(pushedTo);
+  });
+
   it("fetches the note through whichever remote the destination clone names the repository by", async () => {
     const { origin, laptop } = repository();
     git(laptop, "checkout", "-q", "-b", "feature/flaky");
@@ -187,14 +195,15 @@ describe("which remote and default branch a handover uses", () => {
 
     const remote = await remoteNamedFor(desktop, origin);
     expect(remote).toBe("upstream");
-    expect(
-      await readHandoverNote({
-        repositoryRoot: desktop,
-        remote: remote ?? "",
-        branch: "feature/flaky",
-        handoverId: "1234",
-      }),
-    ).toContain("Octant-Handover: 1234");
+    const verified = await readHandoverNote({
+      repositoryRoot: desktop,
+      remote: remote ?? "",
+      branch: "feature/flaky",
+      handoverId: "1234",
+    });
+    expect(verified?.note).toContain("Octant-Handover: 1234");
+    // The commit whose note was checked, named by id for the thread to start from.
+    expect(verified?.commit).toBe(git(origin, "rev-parse", "feature/flaky"));
     expect(await remoteNamedFor(desktop, "git@github.com:someone/else.git")).toBeUndefined();
   });
 });

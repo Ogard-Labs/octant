@@ -67,7 +67,7 @@ export interface HandoverExchangeOptions {
     readonly repositoryRemote: string;
     readonly branch: string;
     readonly handoverId: string;
-  }) => Promise<string | undefined>;
+  }) => Promise<{ readonly note: string; readonly commit: string } | undefined>;
   /** Whether the Project's clone already has a local branch of this name. */
   readonly branchTaken: (input: {
     readonly projectId: string;
@@ -86,6 +86,8 @@ export interface HandoverExchangeOptions {
     readonly branch: string;
     /** The thread's own branch: the handover's name, or a suffixed one when that name is taken. */
     readonly threadBranch: string;
+    /** The commit whose note was checked; the thread starts there, never at the branch's later tip. */
+    readonly commit: string;
     readonly provider: { readonly providerInstanceId: string; readonly modelId: string };
     readonly handoverId: string;
   }) => Promise<void>;
@@ -190,7 +192,7 @@ export class HandoverExchange {
         ? undefined
         : this.#options.resolveProvider(notice.providerDriverKind, notice.modelId);
     if (provider === undefined) return { status: "refused", reason: "no-matching-provider" };
-    const note = await this.#options
+    const verified = await this.#options
       .readNote({
         projectId: String(request.projectId),
         repositoryRemote: notice.repositoryRemote,
@@ -198,7 +200,7 @@ export class HandoverExchange {
         handoverId: String(notice.handoverId),
       })
       .catch(() => undefined);
-    if (note === undefined) return { status: "refused", reason: "transfer-failed" };
+    if (verified === undefined) return { status: "refused", reason: "transfer-failed" };
     const threadId = decodeCodeThreadId((this.#options.uuid ?? randomUUID)());
     // A managed thread refuses a branch name its clone already has, even one
     // at the same tip, so a taken name gets a suffix, as a moved thread's does.
@@ -216,6 +218,7 @@ export class HandoverExchange {
         repositoryRemote: notice.repositoryRemote,
         branch: notice.branch,
         threadBranch,
+        commit: verified.commit,
         provider,
         handoverId: String(notice.handoverId),
       });
@@ -225,7 +228,7 @@ export class HandoverExchange {
     this.#options.journalNote({
       threadId: String(threadId),
       handoverId: String(notice.handoverId),
-      note,
+      note: verified.note,
     });
     const thread: MovedThreadReference = { mode: "code", threadId: String(threadId) };
     const state = this.#options.state.load();

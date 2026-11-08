@@ -47,6 +47,7 @@ function world(options: { readonly busy?: boolean } = {}) {
       }),
       freeze: (thread) => frozen.add(thread.threadId),
       unfreeze: (thread) => frozen.delete(thread.threadId),
+      isFrozen: (thread) => frozen.has(thread.threadId),
     },
     code: {
       checkoutRoot: async () => laptop,
@@ -163,6 +164,24 @@ describe("where a handover's work goes", () => {
 });
 
 describe("a handover that is retried or interrupted", () => {
+  it("lets only one of two concurrent handovers of a thread proceed, and keeps its hold", async () => {
+    const { laptop, frozen, state, handovers } = world();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+
+    const outcomes = await Promise.all([handovers.handOver(THREAD), handovers.handOver(THREAD)]);
+
+    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["handed-over", "refused"]);
+    expect(outcomes.find((outcome) => outcome.status === "refused")).toEqual({
+      status: "refused",
+      reason: "busy",
+    });
+    expect(frozen.has(THREAD.threadId)).toBe(true);
+    expect(heldThreadsOf(state.load())).toEqual([THREAD]);
+    // A thread already held stays out of reach of another handover too.
+    expect(await handovers.handOver(THREAD)).toEqual({ status: "refused", reason: "busy" });
+    expect(frozen.has(THREAD.threadId)).toBe(true);
+  });
+
   it("takes the next free branch name for a second handover after Take back here", async () => {
     const { laptop, handovers } = world();
     writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");

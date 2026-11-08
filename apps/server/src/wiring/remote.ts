@@ -1345,7 +1345,11 @@ export function wireRemote(deps: RemoteDependencies) {
           confirmedAt: new Date().toISOString(),
         },
         sourceBranch: input.branch,
-        startFromOrigin: true,
+        // The commit whose note was checked, already fetched: a revision
+        // source never fetches again, so the thread cannot start from a tip
+        // pushed after the check.
+        startFromOrigin: false,
+        sourceRevision: input.commit,
         remoteName,
       });
       // The note came through a branch others may push to: the thread starts marked.
