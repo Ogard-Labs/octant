@@ -4,6 +4,7 @@
  * Production coverage deliberately stays zero: a compiled hook is not proof
  * that create/truncate, namespace, alias and all data routes are complete.
  */
+#include <asm/ioctls.h>
 #include <linux/anon_inodes.h>
 #include <linux/binfmts.h>
 #include <linux/cred.h>
@@ -587,6 +588,18 @@ static int octant_file_permission(struct file *file, int mask)
 	return admit_file(file, mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
 }
 
+/* The pinned native and compat syscall entries call these hooks before
+ * do_vfs_ioctl copies regular-file size/allocation data, without inode locks.
+ * Descriptor flags and pipe/socket queries retain their native behavior. */
+static int octant_file_ioctl(struct file *file, unsigned int command, unsigned long argument)
+{
+	struct inode *inode = file_inode(file);
+	if ((command == FIONREAD || command == FIOQSIZE) &&
+	    S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
+		return admit_file(file, OCTANT_MEDIATION_READ);
+	return 0;
+}
+
 static int mmap_file(struct file *file, unsigned long requested, unsigned long prot,
 		     unsigned long flags)
 {
@@ -943,6 +956,10 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(cred_transfer, transfer_cred),
 	LSM_HOOK_INIT(cred_free, free_cred),
 	LSM_HOOK_INIT(file_permission, octant_file_permission),
+	LSM_HOOK_INIT(file_ioctl, octant_file_ioctl),
+#ifdef CONFIG_COMPAT
+	LSM_HOOK_INIT(file_ioctl_compat, octant_file_ioctl),
+#endif
 	LSM_HOOK_INIT(task_alloc, octant_metadata_task_alloc),
 	LSM_HOOK_INIT(inode_getattr, octant_metadata_getattr),
 	LSM_HOOK_INIT(inode_readlink, octant_metadata_readlink),
