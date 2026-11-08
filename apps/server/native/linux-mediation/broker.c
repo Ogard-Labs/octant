@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -24,6 +25,14 @@ _Static_assert(offsetof(struct octant_mediation_request, operation) == 32, "oper
 _Static_assert(offsetof(struct octant_mediation_request, source) == 48, "name ABI layout differs");
 _Static_assert(sizeof(struct octant_mediation_status) == 24, "status ABI layout differs");
 _Static_assert(sizeof(struct octant_mediation_answer) == 24, "answer ABI layout differs");
+#ifndef STATX_MNT_ID_UNIQUE
+#define STATX_MNT_ID_UNIQUE 0x00004000U
+#endif
+struct parent_pin {
+  uint64_t request_id, mount_id, inode;
+  uint32_t device_major, device_minor, descriptor, side;
+};
+_Static_assert(sizeof(struct parent_pin) == 40, "parent control layout differs");
 #define CONTROL 3
 #define MAXIMUM_SECONDS 180
 static volatile sig_atomic_t stopped;
@@ -108,6 +117,10 @@ int main(int argc, char **argv)
   if (setpgid(child, child) && errno != EACCES && errno != ESRCH) stopped = SIGTERM;
   bool joined = false, pending = false, healthy = true;
   int child_status = 0;
+  uint64_t pending_id = 0;
+  int parents[2] = {-1, -1};
+  uint64_t mounts[2] = {0, 0};
+  struct octant_mediation_request pending_request = {0};
   while (!stopped && healthy) {
     siginfo_t information = {0};
     int ended = waitid(P_PID, (id_t)child, &information, WEXITED | WNOHANG | WNOWAIT);
@@ -126,6 +139,33 @@ int main(int argc, char **argv)
       if (!healthy) break;
       if (tag == 'S') {
         healthy = !ioctl(broker, OCTANT_MEDIATION_STATUS, &status) && send('S', &status, sizeof(status));
+      } else if (tag == 'P' && pending) {
+        struct octant_mediation_parent query = {0};
+        struct parent_pin pin = {0};
+        healthy = transfer(&query.request_id, sizeof(query.request_id), false) &&
+          transfer(&query.side, sizeof(query.side), false) &&
+          query.request_id == pending_id && query.side < 2;
+        if (healthy) {
+          if (parents[query.side] < 0)
+            parents[query.side] = ioctl(broker, OCTANT_MEDIATION_PARENT_FD, &query);
+          int descriptor = parents[query.side];
+          struct statx identity = {0};
+          healthy = descriptor >= 0 &&
+            !statx(descriptor, "", AT_EMPTY_PATH, STATX_INO | STATX_MNT_ID_UNIQUE, &identity) &&
+            (identity.stx_mask & STATX_MNT_ID_UNIQUE);
+          const struct octant_mediation_name *expected = query.side ?
+            &pending_request.destination : &pending_request.source;
+          healthy = healthy && identity.stx_ino == expected->parent_inode &&
+            identity.stx_dev_major == expected->device_major && identity.stx_dev_minor == expected->device_minor &&
+            (!mounts[query.side] || mounts[query.side] == identity.stx_mnt_id);
+          if (healthy) {
+            mounts[query.side] = identity.stx_mnt_id;
+            pin = (struct parent_pin) {.request_id = pending_id, .mount_id = identity.stx_mnt_id,
+              .inode = identity.stx_ino, .device_major = identity.stx_dev_major,
+              .device_minor = identity.stx_dev_minor, .descriptor = (uint32_t)descriptor, .side = query.side};
+            healthy = send('P', &pin, sizeof(pin));
+          }
+        }
       } else if (tag == 'A' && pending) {
         struct octant_mediation_answer answer;
         healthy = transfer(&answer, sizeof(answer), false);
@@ -134,6 +174,11 @@ int main(int argc, char **argv)
           /* A request can expire during metadata inspection. It is never
            * replayed, re-issued or converted to permission by this relay. */
           healthy = length == sizeof(answer) || (length < 0 && errno == ENOENT);
+          for (unsigned side = 0; side < 2; side++) {
+            if (parents[side] >= 0) close(parents[side]);
+            parents[side] = -1;
+            mounts[side] = 0;
+          }
           pending = false;
         }
       } else healthy = false;
@@ -143,10 +188,13 @@ int main(int argc, char **argv)
       ssize_t length = read(broker, &request, sizeof(request));
       healthy = length == sizeof(request) && send('R', &request, sizeof(request));
       pending = healthy;
+      pending_id = request.request_id;
+      pending_request = request;
     }
   }
   /* Closing the context refuses admissions before any bounded child cleanup. */
   close(broker);
+  for (unsigned side = 0; side < 2; side++) if (parents[side] >= 0) close(parents[side]);
   end_child(child, &joined, &child_status);
   if (healthy && !stopped && joined) {
     uint32_t exit = WIFEXITED(child_status) ? (uint32_t)WEXITSTATUS(child_status) : 128u;

@@ -44,6 +44,22 @@ int main(void)
   int public = open(KEY ".pub", O_RDWR | O_CLOEXEC);
   if (public < 0 || read(public, bytes, sizeof(bytes)) <= 0 || pwrite(public, "P", 1, 0) != 1) return 9;
   close(public); close(alias); close(held);
+  errno = 0;
+  if (unlink(KEY ".pub") != -1 || errno != EACCES) return 10;
+  errno = 0;
+  if (rename(ROOT "/home/.ssh", ROOT "/home/moved") != -1 || errno != EACCES) return 11;
+  if (unlink(ROOT "/unrelated.pub") ||
+      unlink(ROOT "/home/.ssh/id_independent.pub") ||
+      rename(ROOT "/ordinary", ROOT "/renamed") ||
+      rename(ROOT "/renamed", ROOT "/ordinary") || rmdir(ROOT "/empty")) return 12;
+  int created = open(ROOT "/home/.ssh/new.pub", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  if (created < 0 || write(created, "new public", 10) != 10) return 13;
+  close(created);
+  int private = open(ROOT "/home/.ssh/id_independent", O_RDONLY | O_CLOEXEC);
+  if (private < 0) return 14;
+  errno = 0;
+  if (read(private, bytes, sizeof(bytes)) != -1 || errno != EACCES) return 15;
+  close(private);
   puts("OCTANT_ORIGINAL_POLICY_WORKLOAD passed");
   return 0;
 }

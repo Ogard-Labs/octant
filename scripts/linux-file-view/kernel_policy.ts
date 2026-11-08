@@ -16,6 +16,11 @@ try {
   await writeFile(key, "synthetic original-policy bytes", { mode: 0o600 });
   await link(key, `${root}/alias`);
   await writeFile(`${root}/ordinary`, "permitted before", { mode: 0o600 });
+  await mkdir(`${root}/empty`, { mode: 0o700 });
+  await writeFile(`${home}/.ssh/id_independent`, "synthetic independently protected", {
+    mode: 0o600,
+  });
+  await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
     command: "/policy-workload",
@@ -38,8 +43,12 @@ try {
     if (ready) break;
     await pause(10);
   }
-  if (ready) await writeFile(`${key}.pub`, "synthetic public companion", { mode: 0o600 });
-  else owner.abort();
+  if (ready) {
+    await writeFile(`${root}/unrelated.pub`, "synthetic public companion", { mode: 0o600 });
+    // Publish the companion last so the client sees both names atomically
+    // with respect to its synchronization condition.
+    await link(`${root}/unrelated.pub`, `${key}.pub`);
+  } else owner.abort();
   const ended = await running;
   result =
     ready &&

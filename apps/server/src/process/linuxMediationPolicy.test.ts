@@ -17,6 +17,8 @@ import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { applyProtectedFilesChoice, secretGuardMediationPolicy } from "./secretGuard";
 import { linuxMediationObjectKey, readLinuxMediationPolicy } from "./linuxMediationPolicy";
 
+import { classifyLinuxMediationMutation } from "./linuxMediationNamespace";
+
 const owned: string[] = [];
 afterEach(async () => {
   applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
@@ -144,4 +146,126 @@ it("does not transfer an enrolled account exception when its path is replaced by
   const snapshot = await readLinuxMediationPolicy(policy, f.readNamespace);
   if (snapshot.status !== "ready") throw Error("Missing current policy snapshot");
   expect(snapshot.protectedObjects.has(await f.key(credentials))).toBe(true);
+});
+
+it("refuses only destructive companion or ancestor changes that would declassify existing protected content", async () => {
+  const f = await fixture();
+  const ssh = join(f.home, ".ssh");
+  const custom = join(ssh, "deployment");
+  await writeFile(custom, "synthetic private bytes");
+  await writeFile(`${custom}.pub`, "public bytes");
+  const classify = (name: string, destination?: string) =>
+    classifyLinuxMediationMutation(
+      f.policy(),
+      {
+        operation: destination === undefined ? "unlink" : "rename",
+        source: { parent: ssh, name: Buffer.from(name) },
+        ...(destination === undefined
+          ? {}
+          : { destination: { parent: ssh, name: Buffer.from(destination) } }),
+        flags: 0,
+      },
+      f.readNamespace,
+    );
+  expect((await classify("deployment.pub")).status).toBe("refused");
+  expect((await classify("deployment.pub", "retired.pub")).status).toBe("refused");
+  expect(
+    (
+      await classifyLinuxMediationMutation(
+        f.policy(),
+        {
+          operation: "rename",
+          source: { parent: f.home, name: Buffer.from(".ssh") },
+          destination: { parent: f.home, name: Buffer.from("moved") },
+          flags: 0,
+        },
+        f.readNamespace,
+      )
+    ).status,
+  ).toBe("refused");
+  await link(`${custom}.pub`, join(f.home, "unrelated.pub"));
+  expect(
+    (
+      await classifyLinuxMediationMutation(
+        f.policy(),
+        {
+          operation: "unlink",
+          source: { parent: f.home, name: Buffer.from("unrelated.pub") },
+          flags: 0,
+        },
+        f.readNamespace,
+      )
+    ).status,
+  ).toBe("allowed");
+  await writeFile(join(ssh, "id_independent"), "independently protected");
+  await writeFile(join(ssh, "id_independent.pub"), "public bytes");
+  expect((await classify("id_independent.pub")).status).toBe("allowed");
+  await mkdir(join(ssh, "ordinary"));
+  await writeFile(join(ssh, "ordinary", "note"), "permitted bytes");
+  expect((await classify("ordinary", "renamed")).status).toBe("allowed");
+  expect(await readFile(`${custom}.pub`, "utf8")).toBe("public bytes");
+  expect(await readFile(join(ssh, "ordinary", "note"), "utf8")).toBe("permitted bytes");
+});
+
+it("keeps symlink protection across permitted renames and refuses moving away its actual target ancestor", async () => {
+  const f = await fixture();
+  const target = join(f.directory, "outside");
+  await mkdir(target);
+  await writeFile(join(target, "key"), "synthetic linked bytes");
+  const ssh = join(f.home, ".ssh");
+  await symlink(join(target, "key"), join(ssh, "id_link"));
+  expect(
+    (
+      await classifyLinuxMediationMutation(
+        f.policy(),
+        {
+          operation: "rename",
+          source: { parent: ssh, name: Buffer.from("id_link") },
+          destination: { parent: ssh, name: Buffer.from("id_renamed") },
+          flags: 0,
+        },
+        f.readNamespace,
+      )
+    ).status,
+  ).toBe("allowed");
+  expect(
+    (
+      await classifyLinuxMediationMutation(
+        f.policy(),
+        {
+          operation: "rename",
+          source: { parent: f.directory, name: Buffer.from("outside") },
+          destination: { parent: f.directory, name: Buffer.from("moved") },
+          flags: 0,
+        },
+        f.readNamespace,
+      )
+    ).status,
+  ).toBe("refused");
+});
+
+it("allows exchanging a public companion while its protecting name remains and never treats a changing epoch as approval", async () => {
+  const f = await fixture();
+  const ssh = join(f.home, ".ssh");
+  await writeFile(join(ssh, "deployment"), "synthetic private bytes");
+  await writeFile(join(ssh, "deployment.pub"), "public bytes");
+  await writeFile(join(f.home, "ordinary"), "ordinary bytes");
+  const mutation = {
+    operation: "rename" as const,
+    source: { parent: ssh, name: Buffer.from("deployment.pub") },
+    destination: { parent: f.home, name: Buffer.from("ordinary") },
+    flags: 2,
+  };
+  expect((await classifyLinuxMediationMutation(f.policy(), mutation, f.readNamespace)).status).toBe(
+    "allowed",
+  );
+  let reads = 0;
+  expect(
+    (
+      await classifyLinuxMediationMutation(f.policy(), mutation, async () => ({
+        epoch: ++reads < 3 ? 1n : 2n,
+        activeMutations: 0,
+      }))
+    ).status,
+  ).toBe("unavailable");
 });

@@ -1,4 +1,5 @@
 import { protectedEntryFor } from "@octant/domain/secret-guard-policy";
+import type { BigIntStats } from "node:fs";
 import { opendir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
@@ -28,6 +29,20 @@ export function linuxMediationObjectKey(identity: {
   return `${major}:${minor}:${identity.ino}`;
 }
 
+export interface LinuxMediationMetadata {
+  readonly stat: (path: Buffer) => Promise<BigIntStats>;
+  readonly realpath: (path: Buffer) => Promise<Buffer>;
+  readonly names: (path: Buffer) => AsyncIterable<string>;
+}
+const HOST_METADATA: LinuxMediationMetadata = {
+  stat: (path) => stat(path, { bigint: true }),
+  realpath: (path) => realpath(path, { encoding: "buffer" }),
+  async *names(path) {
+    const directory = await opendir(path, { encoding: "latin1" });
+    for await (const entry of directory) yield entry.name;
+  },
+};
+
 const MAX_METADATA_OPERATIONS = 65_536;
 const MAX_DIRECTORY_DEPTH = 64;
 const SNAPSHOT_BUDGET_MS = 1_000;
@@ -41,6 +56,7 @@ const SNAPSHOT_BUDGET_MS = 1_000;
 export async function readLinuxMediationPolicy(
   policy: SecretGuardMediationPolicy,
   readNamespace: () => Promise<LinuxMediationNamespace>,
+  metadata: LinuxMediationMetadata = HOST_METADATA,
 ): Promise<LinuxMediationPolicySnapshot> {
   try {
     const before = await readNamespace();
@@ -76,11 +92,9 @@ export async function readLinuxMediationPolicy(
     const inspect = async (path: string, forced = false) => {
       if (!checkBudget()) return undefined;
       try {
-        const identity = await stat(nativePath(path), { bigint: true });
+        const identity = await metadata.stat(nativePath(path));
         if (!checkBudget()) return undefined;
-        const actual = (await realpath(nativePath(path), { encoding: "buffer" })).toString(
-          "latin1",
-        );
+        const actual = (await metadata.realpath(nativePath(path))).toString("latin1");
         if (forced || protectedEntryFor([path, actual], entries, own) !== undefined)
           objects.add(linuxMediationObjectKey(identity));
         return identity;
@@ -92,13 +106,12 @@ export async function readLinuxMediationPolicy(
     const namesIn = async (path: string): Promise<ReadonlyArray<string> | undefined> => {
       if (!checkBudget()) return undefined;
       try {
-        const directory = await opendir(nativePath(path), { encoding: "latin1" });
         const names: string[] = [];
         // Stream entries: a hostile large directory must not allocate an
         // unbounded readdir result before its metadata budget is checked.
-        for await (const entry of directory) {
+        for await (const name of metadata.names(nativePath(path))) {
           if (!checkBudget()) return undefined;
-          names.push(entry.name);
+          names.push(name);
         }
         return names;
       } catch (error) {

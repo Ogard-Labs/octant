@@ -25,12 +25,25 @@ and closes all private descriptors before executing the owned command. Its
 inherited FD 3 is a dedicated duplex control channel; provider stdio is never
 used for policy. The separately owned TypeScript broker reads the original
 structured policy and answers the kernel using the actual metadata epoch. It
-bounds control buffers, pending work and lifetimes, and refuses every namespace
-proposal until that classifier is complete. The guest compiles this actual
-broker and checks a late companion against an already-open descriptor, hardlink
-and new mapping while retaining allowed writes and public-key contents. This
-new check still needs its exact-head native result. The shared production
-Bubblewrap launch integration and complete policy below remain missing.
+bounds control buffers, pending work and lifetimes. A broker-principal-only
+ioctl pins the actual proposed parent with `O_PATH`; at most two such FDs stay
+private to the relay until answer/cleanup. The relay checks device/inode and
+`STATX_MNT_ID_UNIQUE`; the owned policy process verifies the retained directory
+and repeats the mount/identity query around classification. Guest strings are
+never translated into host paths.
+
+For unlink/rmdir/rename, the classifier re-runs the original structured policy
+against a metadata-only proposed namespace, using actual parent identity and
+copied byte names. It refuses loss of protection for still-existing objects,
+including companion/ancestor and symlink-target changes; it preserves unrelated
+public aliases, independent name rules and permitted moves. It performs no
+actual mutation or content copy and retains no permanent protected-inode floor.
+The kernel still performs the final operation/epoch check. The guest compiles
+this actual broker and checks a late companion against an already-open
+descriptor, hardlink and new mapping, ordinary/public-key contents, refused
+marker/ancestor changes and permitted namespace operations. These increments
+need their exact-head native result. Shared production Bubblewrap integration,
+remaining mutation/data routes and the complete matrix below are still missing.
 Account exception forms are captured at enrollment; replacing an account path
 with a symlink never transfers that exception to another sign-in.
 
@@ -40,11 +53,10 @@ bounded decision before parent inode locks. Their final LSM hook compares the
 actual operation with a per-task token and the current epoch without waiting or
 looking up paths under those locks. Same-policy threads have separate tokens;
 foreign mutations invalidate a proposal rather than freezing outside writers.
-The namespace guest cases use synthetic allow/deny decisions to check this
-transport and token boundary. They do not implement or prove the full policy:
-that broker must refuse only destructive companion/ancestor operations which
-would declassify still-existing protected content, preserving ordinary public
-keys and unrelated aliases.
+The namespace-token guest cases use synthetic allow/deny decisions to check
+this transport boundary. They remain distinct from the actual original-policy
+broker guest cases above and cannot substitute for them. Neither suite proves
+all namespace, filesystem, alias, syscall or runtime routes.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

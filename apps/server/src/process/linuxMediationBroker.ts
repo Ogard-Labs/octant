@@ -1,8 +1,14 @@
+import { stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { endianness } from "node:os";
 import { Duplex } from "node:stream";
+import { classifyLinuxMediationMutation } from "./linuxMediationNamespace";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
-import { readLinuxMediationPolicy, type LinuxMediationNamespace } from "./linuxMediationPolicy";
+import {
+  linuxMediationObjectKey,
+  readLinuxMediationPolicy,
+  type LinuxMediationNamespace,
+} from "./linuxMediationPolicy";
 
 const REQUEST_BYTES = 608;
 const STATUS_BYTES = 24;
@@ -59,6 +65,17 @@ export async function runLinuxMediationBroker(input: {
           readonly timer: ReturnType<typeof setTimeout>;
         }
       | undefined;
+    let parentWait:
+      | {
+          readonly requestId: bigint;
+          readonly side: number;
+          readonly accept: (
+            value:
+              | { readonly path: string; readonly mount: bigint; readonly object: string }
+              | undefined,
+          ) => void;
+        }
+      | undefined;
     let policyTimer: ReturnType<typeof setTimeout> | undefined;
     let stopTimer: ReturnType<typeof setTimeout> | undefined;
     const maximum = setTimeout(() => refuse("deadline"), MAXIMUM_MS);
@@ -72,6 +89,7 @@ export async function runLinuxMediationBroker(input: {
     const refuse = (reason: BrokerRefusal) => {
       refusal ??= reason;
       statusWait?.accept(undefined);
+      parentWait?.accept(undefined);
       stop();
     };
     const abort = () => refuse("cancelled");
@@ -82,6 +100,7 @@ export async function runLinuxMediationBroker(input: {
       clearTimeout(policyTimer);
       clearTimeout(stopTimer);
       statusWait?.accept(undefined);
+      parentWait?.accept(undefined);
       input.signal.removeEventListener("abort", abort);
       control?.removeAllListeners("data");
       control?.destroy();
@@ -134,6 +153,60 @@ export async function runLinuxMediationBroker(input: {
         };
         if (!write(Buffer.from("S"))) statusWait?.accept(undefined);
       });
+    const readParent = (request: Buffer, side: number) =>
+      new Promise<
+        { readonly path: string; readonly mount: bigint; readonly object: string } | undefined
+      >((accept) => {
+        if (
+          settled ||
+          refusal !== undefined ||
+          parentWait !== undefined ||
+          child.pid === undefined
+        ) {
+          accept(undefined);
+          return;
+        }
+        const timer = setTimeout(() => {
+          parentWait = undefined;
+          accept(undefined);
+          refuse("broker-protocol");
+        }, CONTROL_DEADLINE_MS);
+        const requestId = request.readBigUInt64LE(0);
+        parentWait = {
+          requestId,
+          side,
+          accept: (value) => {
+            clearTimeout(timer);
+            parentWait = undefined;
+            accept(value);
+          },
+        };
+        const frame = Buffer.alloc(13);
+        frame[0] = 80;
+        frame.writeBigUInt64LE(requestId, 1);
+        frame.writeUInt32LE(side, 9);
+        if (!write(frame)) parentWait?.accept(undefined);
+      });
+    const verifyParent = async (request: Buffer, side: number) => {
+      const before = await readParent(request, side);
+      if (before === undefined) return undefined;
+      const offset = 48 + side * 280;
+      const expected = `${request.readUInt32LE(offset + 8)}:${request.readUInt32LE(offset + 12)}:${request.readBigUInt64LE(offset)}`;
+      const identity = await stat(before.path, { bigint: true });
+      if (
+        !identity.isDirectory() ||
+        linuxMediationObjectKey(identity) !== expected ||
+        before.object !== expected
+      )
+        return undefined;
+      const after = await readParent(request, side);
+      return after !== undefined &&
+        after.mount === before.mount &&
+        after.path === before.path &&
+        after.object === expected
+        ? before
+        : undefined;
+    };
     const answer = async (request: Buffer) => {
       if (working) {
         refuse("broker-protocol");
@@ -142,25 +215,77 @@ export async function runLinuxMediationBroker(input: {
       working = true;
       policyTimer = setTimeout(() => refuse("policy-unavailable"), POLICY_DEADLINE_MS);
       try {
-        const snapshot = await readLinuxMediationPolicy(input.policy, async () => {
-          const namespace = await readNamespace();
-          return namespace ?? { epoch: 0n, activeMutations: 1 };
-        });
-        if (settled || refusal !== undefined) return;
         const operation = request.readUInt32LE(32);
-        const object = `${request.readUInt32LE(24)}:${request.readUInt32LE(28)}:${request.readBigUInt64LE(16)}`;
+        const namespace = async () => (await readNamespace()) ?? { epoch: 0n, activeMutations: 1 };
+        let allow = false;
+        let epoch = 0n;
+        if (operation >= 5 && operation <= 7) {
+          const source = await verifyParent(request, 0);
+          const destination = operation === 7 ? await verifyParent(request, 1) : undefined;
+          if (source === undefined || (operation === 7 && destination === undefined)) {
+            refuse("broker-protocol");
+            return;
+          }
+          const sourceLength = request.readUInt32LE(64);
+          const destinationLength = request.readUInt32LE(344);
+          if (
+            sourceLength < 1 ||
+            sourceLength > 255 ||
+            (destination !== undefined && (destinationLength < 1 || destinationLength > 255))
+          ) {
+            refuse("broker-protocol");
+            return;
+          }
+          const decision = await classifyLinuxMediationMutation(
+            input.policy,
+            {
+              operation: operation === 5 ? "unlink" : operation === 6 ? "rmdir" : "rename",
+              source: {
+                parent: source.path,
+                name: Buffer.from(request.subarray(72, 72 + sourceLength)),
+              },
+              ...(destination === undefined
+                ? {}
+                : {
+                    destination: {
+                      parent: destination.path,
+                      name: Buffer.from(request.subarray(352, 352 + destinationLength)),
+                    },
+                  }),
+              flags: request.readUInt32LE(40),
+            },
+            namespace,
+          );
+          const currentSource = await verifyParent(request, 0);
+          const currentDestination =
+            destination === undefined ? undefined : await verifyParent(request, 1);
+          if (
+            currentSource?.mount !== source.mount ||
+            currentSource.path !== source.path ||
+            (destination !== undefined &&
+              (currentDestination?.mount !== destination.mount ||
+                currentDestination.path !== destination.path))
+          ) {
+            refuse("broker-protocol");
+            return;
+          }
+          allow = decision.status === "allowed";
+          epoch = decision.epoch;
+        } else {
+          const snapshot = await readLinuxMediationPolicy(input.policy, namespace);
+          const object = `${request.readUInt32LE(24)}:${request.readUInt32LE(28)}:${request.readBigUInt64LE(16)}`;
+          allow =
+            snapshot.status === "ready" &&
+            operation >= 1 &&
+            operation <= 4 &&
+            !snapshot.protectedObjects.has(object);
+          epoch = snapshot.status === "ready" ? snapshot.epoch : 0n;
+        }
+        if (settled || refusal !== undefined) return;
         const response = Buffer.alloc(25);
         response[0] = "A".charCodeAt(0);
         response.writeBigUInt64LE(request.readBigUInt64LE(0), 1);
-        response.writeBigUInt64LE(snapshot.status === "ready" ? snapshot.epoch : 0n, 9);
-        // Namespace operations are explicitly refused until their original
-        // policy classifier is integrated. Synthetic guest token tests do not
-        // authorize a default allow in the actual broker.
-        const allow =
-          snapshot.status === "ready" &&
-          operation >= 1 &&
-          operation <= 4 &&
-          !snapshot.protectedObjects.has(object);
+        response.writeBigUInt64LE(epoch, 9);
         response.writeUInt32LE(allow ? 1 : 0, 17);
         write(response);
       } finally {
@@ -179,7 +304,16 @@ export async function runLinuxMediationBroker(input: {
       bytes = Buffer.concat([bytes, chunk]);
       while (bytes.length > 0 && refusal === undefined) {
         const tag = bytes[0];
-        const length = tag === 82 ? REQUEST_BYTES : tag === 83 ? STATUS_BYTES : tag === 88 ? 4 : -1;
+        const length =
+          tag === 82
+            ? REQUEST_BYTES
+            : tag === 83
+              ? STATUS_BYTES
+              : tag === 80
+                ? 40
+                : tag === 88
+                  ? 4
+                  : -1;
         if (length < 0) {
           refuse("broker-protocol");
           return;
@@ -211,6 +345,26 @@ export async function runLinuxMediationBroker(input: {
           statusWait.accept({
             epoch: frame.readBigUInt64LE(0),
             activeMutations: frame.readUInt32LE(8),
+          });
+        } else if (tag === 80) {
+          const descriptor = frame.readUInt32LE(32);
+          const mount = frame.readBigUInt64LE(8);
+          if (
+            parentWait === undefined ||
+            child.pid === undefined ||
+            frame.readBigUInt64LE(0) !== parentWait.requestId ||
+            frame.readUInt32LE(36) !== parentWait.side ||
+            descriptor < 3 ||
+            descriptor > 1_024 ||
+            mount === 0n
+          ) {
+            refuse("broker-protocol");
+            return;
+          }
+          parentWait.accept({
+            path: `/proc/${child.pid}/fd/${descriptor}`,
+            mount,
+            object: `${frame.readUInt32LE(24)}:${frame.readUInt32LE(28)}:${frame.readBigUInt64LE(16)}`,
           });
         } else {
           if (working || commandExit !== undefined) {

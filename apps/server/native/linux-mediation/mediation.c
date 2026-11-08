@@ -39,6 +39,8 @@ struct octant_pending {
 	bool answered;
 	int decision;
 	u64 decision_epoch;
+	struct path source;
+	struct path destination;
 	wait_queue_head_t changed;
 };
 
@@ -206,7 +208,8 @@ static void free_cred(struct cred *cred)
 	put_context(octant_cred(cred)->context);
 }
 
-static int admit_request(struct octant_mediation_request *request)
+static int admit_request(struct octant_mediation_request *request,
+	const struct path *source, const struct path *destination)
 {
 	struct octant_context *context = octant_cred(current_cred())->context;
 	struct octant_pending *pending = NULL;
@@ -214,6 +217,7 @@ static int admit_request(struct octant_mediation_request *request)
 	long waited;
 	int result, i;
 	u64 epoch;
+	struct path source_pin = {}, destination_pin = {};
 	if (!context)
 		return 0;
 	spin_lock_irqsave(&namespace_lock, flags);
@@ -236,6 +240,14 @@ static int admit_request(struct octant_mediation_request *request)
 		spin_unlock_irqrestore(&context->lock, flags);
 		return -EAGAIN;
 	}
+	if (source) {
+		pending->source = *source;
+		path_get(&pending->source);
+	}
+	if (destination) {
+		pending->destination = *destination;
+		path_get(&pending->destination);
+	}
 	pending->request = *request;
 	pending->request.request_id = ++context->next_id;
 	pending->request.namespace_epoch = epoch;
@@ -252,8 +264,16 @@ static int admit_request(struct octant_mediation_request *request)
 	result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;
 	if (!result)
 		request->namespace_epoch = pending->decision_epoch;
+	source_pin = pending->source;
+	destination_pin = pending->destination;
+	pending->source = (struct path) {};
+	pending->destination = (struct path) {};
 	pending->occupied = false;
 	spin_unlock_irqrestore(&context->lock, flags);
+	if (source_pin.dentry)
+		path_put(&source_pin);
+	if (destination_pin.dentry)
+		path_put(&destination_pin);
 	return result;
 }
 
@@ -265,7 +285,7 @@ static int admit_inode(struct inode *inode, u32 operation)
 	request.inode = inode->i_ino;
 	request.device_major = MAJOR(inode->i_sb->s_dev);
 	request.device_minor = MINOR(inode->i_sb->s_dev);
-	return admit_request(&request);
+	return admit_request(&request, NULL, NULL);
 }
 
 static int copy_name(struct octant_mediation_name *output, struct inode *parent,
@@ -296,7 +316,7 @@ int octant_namespace_prepare(u32 operation, const struct path *source,
 	if (!result && destination)
 		result = copy_name(&request.destination, d_inode(destination->dentry), new_name);
 	if (!result)
-		result = admit_request(&request);
+		result = admit_request(&request, source, destination);
 	if (!result) {
 		task->approved = request;
 		task->has_approved = true;
@@ -587,6 +607,45 @@ static const struct file_operations enrollment_operations = {
 	.llseek = noop_llseek,
 };
 
+static long parent_descriptor(struct octant_context *context, unsigned long argument)
+{
+	struct octant_mediation_parent input;
+	struct path parent = {};
+	struct file *file;
+	unsigned long flags;
+	int descriptor, i;
+	if (copy_from_user(&input, (void __user *)argument, sizeof(input)))
+		return -EFAULT;
+	if (input.reserved || input.side > 1)
+		return -EINVAL;
+	spin_lock_irqsave(&context->lock, flags);
+	for (i = 0; i < OCTANT_MEDIATION_PENDING; i++) {
+		struct octant_pending *pending = &context->pending[i];
+		if (pending->occupied && pending->delivered && !pending->answered &&
+		    pending->request.request_id == input.request_id && !context->dead) {
+			parent = input.side ? pending->destination : pending->source;
+			if (parent.dentry)
+				path_get(&parent);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&context->lock, flags);
+	if (!parent.dentry)
+		return -ENOENT;
+	/* The pin is the actual proposal's path/mount, including bind roots. No
+	 * guest string is translated into a host pathname or a different mount. */
+	file = dentry_open(&parent, O_PATH | O_CLOEXEC, current_cred());
+	path_put(&parent);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+	descriptor = get_unused_fd_flags(O_CLOEXEC);
+	if (descriptor < 0)
+		fput(file);
+	else
+		fd_install(descriptor, file);
+	return descriptor;
+}
+
 static long broker_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
 	struct octant_context *context = file->private_data;
@@ -596,6 +655,8 @@ static long broker_ioctl(struct file *file, unsigned int command, unsigned long 
 	int descriptor;
 	if (!broker_authorized(context))
 		return -EPERM;
+	if (command == OCTANT_MEDIATION_PARENT_FD)
+		return parent_descriptor(context, argument);
 	if (command == OCTANT_MEDIATION_STATUS) {
 		spin_lock_irqsave(&namespace_lock, flags);
 		status.namespace_epoch = namespace_epoch;

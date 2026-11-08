@@ -122,6 +122,9 @@ static int measure(void)
     if (write(broker, &answer, sizeof(answer)) != -1 || errno != EPERM) _exit(42);
     errno = 0;
     if (ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0) != -1 || errno != EPERM) _exit(43);
+    struct octant_mediation_parent parent = {0};
+    errno = 0;
+    if (ioctl(broker, OCTANT_MEDIATION_PARENT_FD, &parent) != -1 || errno != EPERM) _exit(44);
     close(broker); close(commands[1]); close(answers[0]);
     workload(enrollment, commands[0], answers[1]);
   }

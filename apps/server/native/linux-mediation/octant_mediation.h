@@ -41,6 +41,12 @@ struct octant_mediation_answer {
 	__u32 reserved;
 };
 
+struct octant_mediation_parent {
+	__u64 request_id;
+	__u32 side;
+	__u32 reserved;
+};
+
 struct octant_mediation_status {
 	__u64 namespace_epoch;
 	__u32 active_mutations;
@@ -61,5 +67,7 @@ struct octant_mediation_status {
 #define OCTANT_MEDIATION_ENROLL_FD _IO('O', 0x71)
 #define OCTANT_MEDIATION_ENROLL _IO('O', 0x72)
 #define OCTANT_MEDIATION_STATUS _IOR('O', 0x73, struct octant_mediation_status)
+/* Broker-principal-only O_PATH pin, valid only for an outstanding proposal. */
+#define OCTANT_MEDIATION_PARENT_FD _IOW('O', 0x74, struct octant_mediation_parent)
 
 #endif
