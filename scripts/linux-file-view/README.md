@@ -268,6 +268,19 @@ cases require readiness before effects, pre-launch cancellation, real early
 exit, deadline/cancellation, duplex pressure, private receipt masking and actual
 owner death. PID1 separately joins the deliberately orphaned worker.
 
+The native relay becomes a subreaper before forking and retains its direct
+leader without reaping until the original process-group signals are sent.
+After closing admission, cleanup uses the existing 300-ms grace and reaps its
+own children and adopted descendants within two seconds. Only `ECHILD` plus
+the direct leader's status proves that join; expiry or an escaped live child
+returns a distinct private failure. No unrelated process is signalled.
+The worker reports cleanup certainty separately from the command result.
+Even during cancellation, the session requires that validated terminal
+acknowledgement, actual worker exit, IPC disconnect and owned retirement before
+reporting confirmed cleanup. Missing acknowledgements remain uncertain, and
+late messages cannot admit a new command or release execution. Integrated native
+acceptance of this correction remains pending.
+
 The runtime-expiry case uses the existing ten-second scenario budget so the
 owned worker can finish preparation and prove the command has launched before
 expiry. Preparation still counts toward that same caller deadline.

@@ -41,7 +41,11 @@ const input = (signal: AbortSignal, maximumMs = 1_000) => ({
   policy: { entries: [], ownAccountPaths: [], sshCompanionDirectory: undefined },
 });
 
-function worker(write: (callback: (error?: Error | null) => void) => void, joinsOnCancel = true) {
+function worker(
+  write: (callback: (error?: Error | null) => void) => void,
+  joinsOnCancel = true,
+  cleanup: "confirmed" | "uncertain" | "missing" = "confirmed",
+) {
   const events = new EventEmitter();
   const stdout = new PassThrough(),
     stderr = new PassThrough();
@@ -71,6 +75,12 @@ function worker(write: (callback: (error?: Error | null) => void) => void, joins
       else if (value === "X") {
         if (joinsOnCancel)
           queueMicrotask(() => {
+            if (cleanup !== "missing")
+              child.emit("message", {
+                status: "result",
+                result: { status: "unavailable", reason: "cancelled" },
+                cleanup,
+              });
             child.disconnect();
             child.exitCode = 0;
             child.emit("exit", 0);
@@ -230,6 +240,18 @@ describe("owned mediation session admission and input", () => {
       reason: "native-unavailable",
     });
   });
+  it.each(["uncertain", "missing"] as const)(
+    "keeps cleanup uncertain after cancellation when native cleanup acknowledgement is %s",
+    async (cleanup) => {
+      fixture.spawn.mockReturnValue(worker((done) => done(), true, cleanup));
+      const prepared = await prepareLinuxMediationSession(input(new AbortController().signal));
+      if (prepared.status !== "ready") throw new Error("Session unavailable");
+      expect(await prepared.session.close()).toEqual({
+        result: { status: "unavailable", reason: "cancelled" },
+        cleanup: "uncertain",
+      });
+    },
+  );
   it("never releases execution when the owner cancels during command ownership acquisition", async () => {
     const owner = new AbortController();
     let release = () => {},

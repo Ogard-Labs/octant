@@ -46,6 +46,7 @@ export async function runLinuxMediationBroker(input: {
     readonly command: (pid: number) => Promise<boolean>;
     readonly stdio: readonly [Readable, Writable, Writable];
     readonly environment: Readonly<Record<string, string>>;
+    readonly cleanup: (certainty: "confirmed" | "uncertain") => void;
   };
 }): Promise<LinuxMediationBrokerResult> {
   if (process.platform !== "linux" || endianness() !== "LE")
@@ -68,6 +69,7 @@ export async function runLinuxMediationBroker(input: {
     let settled = false;
     let working = false;
     let commandExit: number | undefined;
+    let nativeExit: number | null | undefined;
     let previousRequest = 0n;
     let phase: "hello" | "policy" | "command" | "running" = "hello";
     let bytes = Buffer.alloc(0);
@@ -122,6 +124,13 @@ export async function runLinuxMediationBroker(input: {
       input.signal.removeEventListener("abort", abort);
       control?.removeAllListeners("data");
       control?.destroy();
+      // Only these actual parent exits attest either no fork or a bounded
+      // ECHILD join. Forced stop, signal loss and exit72 never prove cleanup.
+      input.lifecycle?.cleanup(
+        code !== null && code === nativeExit && [0, 64, 65, 66, 67, 70, 71].includes(code)
+          ? "confirmed"
+          : "uncertain",
+      );
       resolve(
         refusal !== undefined
           ? { status: "unavailable", reason: refusal }
@@ -132,6 +141,12 @@ export async function runLinuxMediationBroker(input: {
     };
     child.once("error", () => {
       refusal ??= "native-unavailable";
+    });
+    child.once("exit", (code, signal) => {
+      nativeExit = signal === null ? code : null;
+      // A failed tree join may leave inherited output pipes open. Bound that
+      // failure through the existing stop path; healthy output still drains.
+      if (nativeExit === 72) refuse("native-unavailable");
     });
     child.once("close", complete);
     child.once("error", () => complete(null));

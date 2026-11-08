@@ -168,6 +168,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
   process.once("disconnect", stop);
   const maximum = setTimeout(stop, 180_000);
   const run = async (value: unknown) => {
+    let cleanup: "confirmed" | "uncertain" = "confirmed";
     try {
       const config = Schema.decodeUnknownSync(LinuxMediationWorkerConfig)(value, {
         onExcessProperty: "error",
@@ -194,6 +195,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
         ],
       });
       if (owner.signal.aborted) return;
+      cleanup = "uncertain";
       const result = await runLinuxMediationBroker({
         nativeExecutable: config.nativeExecutable,
         ...prepared,
@@ -202,6 +204,9 @@ export async function runLinuxMediationWorker(): Promise<void> {
         lifecycle: {
           stdio: [process.stdin, process.stdout, process.stderr],
           environment: config.environment,
+          cleanup: (certainty) => {
+            cleanup = certainty;
+          },
           ready: async (relayPid) => {
             const accepted = wait("L");
             if (!(await send({ status: "ready", relayPid }))) return false;
@@ -214,11 +219,12 @@ export async function runLinuxMediationWorker(): Promise<void> {
           },
         },
       });
-      await send({ status: "result", result });
+      await send({ status: "result", result, cleanup });
     } catch {
       await send({
         status: "result",
         result: { status: "unavailable", reason: "broker-protocol" },
+        cleanup,
       });
     } finally {
       clearTimeout(maximum);

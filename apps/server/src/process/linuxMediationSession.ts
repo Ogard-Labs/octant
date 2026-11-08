@@ -44,6 +44,7 @@ const Message = Schema.Union(
   Schema.Struct({ status: Schema.Literal("command"), pid: Schema.Int.pipe(Schema.positive()) }),
   Schema.Struct({
     status: Schema.Literal("result"),
+    cleanup: Schema.Literal("confirmed", "uncertain"),
     result: Schema.Union(
       Schema.Struct({
         status: Schema.Literal("exited"),
@@ -197,6 +198,8 @@ export async function prepareLinuxMediationSession(input: {
   let workerExited = false;
   const acquisitions = new Set<Promise<void>>();
   let ownershipUncertain = false;
+  let nativeCleanup: Cleanup = "uncertain";
+  let cleanupAcknowledged = false;
   let ipcDisconnected = false;
   let stdoutEnded = false;
   let stderrEnded = false;
@@ -218,6 +221,7 @@ export async function prepareLinuxMediationSession(input: {
     settleExited = resolve;
   });
   let finishing: Promise<void> | undefined;
+  let sequence = Promise.resolve();
   const options = {
     receiptDirectory: input.receiptDirectory,
     supervisor: "linux-mediation-session",
@@ -278,9 +282,15 @@ export async function prepareLinuxMediationSession(input: {
       // command first. All waits have a host deadline; held stdio is not a join.
       const cleanupDeadline = Date.now() + CLEANUP_MS;
       const cooperativeDeadline = Date.now() + 2_000;
-      while (!workerExited && Date.now() < cooperativeDeadline)
+      while ((!workerExited || !ipcDisconnected) && Date.now() < cooperativeDeadline)
         await new Promise((resolve) => setTimeout(resolve, 10));
-      let cleanup: Cleanup = ownershipUncertain ? "uncertain" : "confirmed";
+      // IPC disconnect follows queued terminal messages, not their asynchronous
+      // validation. Admit that acknowledgement within the same cleanup budget.
+      const terminalSettled = await within(sequence, cooperativeDeadline - Date.now());
+      let cleanup: Cleanup =
+        ownershipUncertain || nativeCleanup !== "confirmed" || !terminalSettled || !ipcDisconnected
+          ? "uncertain"
+          : "confirmed";
       const acquired = await within(Promise.allSettled(acquisitions), 500);
       if (!acquired || ownershipUncertain) cleanup = "uncertain";
       if (receipts.length === 0 && !workerExited) {
@@ -301,7 +311,8 @@ export async function prepareLinuxMediationSession(input: {
         );
         if (!removed) cleanup = "uncertain";
       }
-      if (!workerExited) cleanup = "uncertain";
+      if (!workerExited || !ipcDisconnected || nativeCleanup !== "confirmed" || ownershipUncertain)
+        cleanup = "uncertain";
       try {
         if (child.connected) child.disconnect();
       } catch {
@@ -332,7 +343,6 @@ export async function prepareLinuxMediationSession(input: {
     },
     Math.max(0, deadline - Date.now()),
   );
-  let sequence = Promise.resolve();
   const naturalExit = () => {
     if (workerExited && stdoutEnded && stderrEnded && ipcDisconnected) void sequence.then(finish);
   };
@@ -371,13 +381,15 @@ export async function prepareLinuxMediationSession(input: {
     abort();
   } else {
     child.on("message", (value: unknown) => {
-      if (phase === "stopping" || phase === "exited") return;
+      if (phase === "exited") return;
       try {
         if (++queued > 3 || Buffer.byteLength(JSON.stringify(value)) > 4_096) {
+          ownershipUncertain = true;
           abort();
           return;
         }
       } catch {
+        ownershipUncertain = true;
         abort();
         return;
       }
@@ -386,7 +398,21 @@ export async function prepareLinuxMediationSession(input: {
           const message = Schema.decodeUnknownSync(Message)(value, {
             onExcessProperty: "error",
           });
-          if (phase === "stopping" || phase === "exited") return;
+          if (phase === "exited") return;
+          if (message.status === "result") {
+            if (cleanupAcknowledged) {
+              ownershipUncertain = true;
+              abort();
+              return;
+            }
+            cleanupAcknowledged = true;
+            nativeCleanup = message.cleanup;
+            result ??= message.result;
+            return;
+          }
+          // Cancellation can still receive the terminal cleanup proof, but
+          // never admits a late command identity or releases execution.
+          if (phase === "stopping") return;
           if (message.status === "ready" && phase === "preparing") {
             await own(message.relayPid);
             if (phase !== "preparing") return;
@@ -398,11 +424,12 @@ export async function prepareLinuxMediationSession(input: {
             phase = "running";
             if (!send("E")) abort();
             else releaseCommand(true);
-          } else if (message.status === "result" && result === undefined) {
-            result = message.result;
           } else abort();
         })
-        .catch(abort);
+        .catch(() => {
+          ownershipUncertain = true;
+          abort();
+        });
     });
     try {
       const owned = await Promise.race([own(child.pid).then(() => true), exited.then(() => false)]);

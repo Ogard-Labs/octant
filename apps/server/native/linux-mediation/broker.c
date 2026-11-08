@@ -86,12 +86,16 @@ static bool wait_start(char expected, int broker)
   return false;
 }
 
-static void end_child(pid_t child, bool *joined, int *status)
+static bool end_child(pid_t child, bool *joined, int *status)
 {
   /* Only the process group created for this one enrolled command is touched. */
   kill(-child, SIGTERM);
-  int64_t deadline = milliseconds() + 300;
-  while (milliseconds() < deadline) {
+  int64_t start = milliseconds();
+  bool clock_ready = start >= 0 && start <= INT64_MAX - 2000;
+  while (clock_ready) {
+    int64_t now = milliseconds();
+    if (now < 0) { clock_ready = false; break; }
+    if (now >= start + 300) break;
     siginfo_t information = {0};
     int result = waitid(P_PID, (id_t)child, &information, WEXITED | WNOHANG | WNOWAIT);
     if (!result && information.si_pid == child) break;
@@ -100,10 +104,24 @@ static void end_child(pid_t child, bool *joined, int *status)
   }
   /* A direct child may have exited while its own descendants still remain. */
   kill(-child, SIGKILL);
-  if (!*joined) {
-    pid_t result;
-    do { result = waitpid(child, status, 0); } while (result < 0 && errno == EINTR);
-    *joined = result == child;
+  if (!clock_ready) return false;
+  /* Subreaping keeps capsule descendants here, including those that changed
+   * process group. Reap only our children; ECHILD is the complete-tree proof.
+   * A still-running escaped child makes cleanup uncertain, never a guessed kill. */
+  for (;;) {
+    int64_t now = milliseconds();
+    if (now < 0 || now >= start + 2000) return false;
+    int ended_status = 0;
+    pid_t result = waitpid(-1, &ended_status, WNOHANG);
+    if (result > 0) {
+      if (result == child) { *joined = true; *status = ended_status; }
+      continue;
+    }
+    if (result < 0) {
+      if (errno == EINTR) continue;
+      return errno == ECHILD && *joined;
+    }
+    struct timespec pause = {.tv_nsec = 10000000}; nanosleep(&pause, NULL);
   }
 }
 
@@ -114,6 +132,7 @@ int main(int argc, char **argv)
   alarm(MAXIMUM_SECONDS);
   int flags = fcntl(CONTROL, F_GETFL);
   if (flags < 0 || fcntl(CONTROL, F_SETFL, flags | O_NONBLOCK)) return 65;
+  if (prctl(PR_SET_CHILD_SUBREAPER, 1)) return 65;
   int broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
   struct octant_mediation_status status;
   if (broker < 0 || ioctl(broker, OCTANT_MEDIATION_STATUS, &status) ||
@@ -230,7 +249,8 @@ int main(int argc, char **argv)
   /* Closing the context refuses admissions before any bounded child cleanup. */
   close(broker);
   for (unsigned side = 0; side < 2; side++) if (parents[side] >= 0) close(parents[side]);
-  end_child(child, &joined, &child_status);
+  bool cleaned = end_child(child, &joined, &child_status);
+  if (!cleaned) { close(CONTROL); return 72; }
   if (healthy && !stopped && joined) {
     uint32_t exit = WIFEXITED(child_status) ? (uint32_t)WEXITSTATUS(child_status) : 128u;
     healthy = send('X', &exit, sizeof(exit));
