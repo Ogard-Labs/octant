@@ -55,7 +55,18 @@ const contenders = [
   { providerInstanceId: PROVIDER, modelId: "model-deep" },
 ];
 
-export function run(status: BenchmarkRun["status"] = "running"): BenchmarkRun {
+export interface FixtureExtras {
+  /** Stars already given to the deep model's answer. */
+  readonly rating?: { readonly stars: number; readonly note?: string };
+  readonly overhead?: { readonly turns: number; readonly tokens: number; readonly costUsd: number };
+  /** The judge failed on the deep model's answer. */
+  readonly judgeFailed?: boolean;
+}
+
+export function run(
+  status: BenchmarkRun["status"] = "running",
+  extras: FixtureExtras = {},
+): BenchmarkRun {
   const ended = status !== "running";
   return decodeBenchmarkRun({
     runId: RUN_ID,
@@ -99,6 +110,10 @@ export function run(status: BenchmarkRun["status"] = "running"): BenchmarkRun {
         startedAt: NOW,
         settledAt: NOW,
         checks: [{ index: 0, passed: false, detail: "Oslo was not in the answer." }],
+        ...(extras.rating === undefined ? {} : { rating: { ...extras.rating, ratedAt: NOW } }),
+        ...(extras.judgeFailed === true
+          ? { judge: { status: "failed", reason: "The judge answered out of range." } }
+          : {}),
       },
       {
         cellId: CELL(3),
@@ -122,9 +137,13 @@ export function run(status: BenchmarkRun["status"] = "running"): BenchmarkRun {
   });
 }
 
-export function readResponse(status: BenchmarkRun["status"] = "running"): BenchmarkRunReadResponse {
+export function readResponse(
+  status: BenchmarkRun["status"] = "running",
+  extras: FixtureExtras = {},
+): BenchmarkRunReadResponse {
   return decodeBenchmarkRunReadResponse({
-    run: run(status),
+    run: run(status, extras),
+    ...(extras.overhead === undefined ? {} : { overhead: extras.overhead }),
     leaderboard: [
       {
         contenderIndex: 0,

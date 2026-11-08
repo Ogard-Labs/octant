@@ -1,4 +1,4 @@
-import { CircleCheck, CircleX } from "lucide-react";
+import { CircleCheck, CircleX, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   decodeChatThreadId,
@@ -8,7 +8,10 @@ import {
   type BenchmarkRun,
 } from "@octant/contracts";
 import type { ChatClient } from "@octant/client-runtime";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantInput } from "../../ui/base/OctantInput";
+import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { SurfaceSection } from "../../surface/SurfaceHeader";
 import { turnReplyText } from "../../chat/chatReply";
@@ -37,6 +40,12 @@ export interface BenchmarkCaseCompareProps {
   /** Reads a Chat thread; without it the answers cannot be shown here. */
   readonly chatClient?: Pick<ChatClient, "thread">;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
+  /** Saves stars for a cell; resolves to the sentence to show when it was refused. */
+  readonly onRate?: (
+    cellId: string,
+    stars: number,
+    note: string | undefined,
+  ) => Promise<string | undefined>;
 }
 
 /**
@@ -92,6 +101,7 @@ export function BenchmarkCaseCompare(props: BenchmarkCaseCompareProps) {
                   benchmarkCase={benchmarkCase}
                   cell={cell}
                   chatAvailable={props.chatClient !== undefined}
+                  {...(props.onRate === undefined ? {} : { onRate: props.onRate })}
                   key={String(cell.cellId)}
                   metrics={props.metricsByCell.get(String(cell.cellId))}
                   {...(props.onOpenSubject === undefined
@@ -115,6 +125,7 @@ function CompareCell(props: {
   readonly answer: Answer | undefined;
   readonly chatAvailable: boolean;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
+  readonly onRate?: BenchmarkCaseCompareProps["onRate"];
 }) {
   const { cell, metrics } = props;
   const subjectType = props.benchmarkCase.kind === "code" ? "code-thread" : "chat-thread";
@@ -180,13 +191,16 @@ function CompareCell(props: {
           Judge: {cell.judge.score} of 10. {cell.judge.reason}
         </p>
       ) : (
-        <p className="benchmark-judge">The judge could not score this. {cell.judge.reason}</p>
+        <p className="benchmark-judge">Judge did not score. {cell.judge.reason}</p>
       )}
       {cell.rating === undefined ? null : (
         <p className="benchmark-judge">
           Rated {cell.rating.stars} of 5.
           {cell.rating.note === undefined ? "" : ` ${cell.rating.note}`}
         </p>
+      )}
+      {cell.state !== "answered" || props.onRate === undefined ? null : (
+        <StarControl cell={cell} onRate={props.onRate} />
       )}
     </article>
   );
@@ -274,4 +288,89 @@ function useCellAnswers(
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [chatClient, wantedKey]);
   return answers;
+}
+
+/**
+ * Your stars for one answer, with an optional note. The radios are native, so
+ * the arrow keys move between them, and each is named "3 of 5 stars". Saving
+ * again replaces the earlier rating.
+ */
+function StarControl(props: {
+  readonly cell: BenchmarkCell;
+  readonly onRate: NonNullable<BenchmarkCaseCompareProps["onRate"]>;
+}) {
+  const id = String(props.cell.cellId);
+  const [stars, setStars] = useState<number | undefined>(props.cell.rating?.stars);
+  const [note, setNote] = useState(props.cell.rating?.note ?? "");
+  const [message, setMessage] = useState<string | undefined>(undefined);
+  const [pending, setPending] = useState(false);
+  // A newer rating from a refreshed run replaces what the control holds.
+  const savedStars = props.cell.rating?.stars;
+  const savedNote = props.cell.rating?.note;
+  useEffect(() => {
+    setStars(savedStars);
+    setNote(savedNote ?? "");
+  }, [savedStars, savedNote]);
+
+  const save = async () => {
+    if (stars === undefined) return;
+    setPending(true);
+    setMessage(undefined);
+    const refusal = await props.onRate(id, stars, note.trim() === "" ? undefined : note.trim());
+    setPending(false);
+    if (refusal !== undefined) setMessage(refusal);
+  };
+
+  return (
+    <div className="benchmark-stars">
+      <div
+        aria-label="Your rating"
+        className="benchmark-stars__group"
+        onKeyDown={moveWithinRadioGroup}
+        role="radiogroup"
+      >
+        {[1, 2, 3, 4, 5].map((value) => (
+          <OctantButton
+            aria-checked={stars === value}
+            aria-label={`${value} of 5 stars`}
+            className="benchmark-stars__star"
+            key={value}
+            onClick={() => setStars(value)}
+            role="radio"
+            size="icon-sm"
+            tabIndex={stars === value || (stars === undefined && value === 1) ? 0 : -1}
+            type="button"
+            variant="ghost"
+          >
+            <Star
+              aria-hidden="true"
+              fill={stars !== undefined && value <= stars ? "currentColor" : "none"}
+              size={16}
+            />
+          </OctantButton>
+        ))}
+      </div>
+      <OctantInput
+        aria-label="Note on this answer"
+        maxLength={512}
+        onChange={(event) => setNote(event.currentTarget.value)}
+        placeholder="Optional note"
+        value={note}
+      />
+      <OctantButton
+        disabled={stars === undefined || pending}
+        onClick={() => void save()}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        {props.cell.rating === undefined ? "Save rating" : "Replace rating"}
+      </OctantButton>
+      {message === undefined ? null : (
+        <OctantAlert tone="warning">
+          <p>{message}</p>
+        </OctantAlert>
+      )}
+    </div>
+  );
 }

@@ -183,6 +183,16 @@ function GridCell(props: {
       <span className="benchmark-cell__figures">
         {formatDuration(time)} · {tokens === undefined ? "—" : `${formatTokens(tokens)} tokens`}
       </span>
+      {props.cell.judge === undefined ? null : (
+        <span className="benchmark-cell__figures">
+          {props.cell.judge.status === "scored"
+            ? `Judge ${props.cell.judge.score} of 10`
+            : `Judge did not score: ${props.cell.judge.reason}`}
+        </span>
+      )}
+      {props.cell.rating === undefined ? null : (
+        <span className="benchmark-cell__figures">Rated {props.cell.rating.stars} of 5</span>
+      )}
     </div>
   );
 }

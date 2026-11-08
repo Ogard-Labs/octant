@@ -1,7 +1,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { TurnDiagnosticsReport, TurnMetricsRecord } from "@octant/contracts";
+import {
+  decodeBenchmarkCellRateResponse,
+  type TurnDiagnosticsReport,
+  type TurnMetricsRecord,
+} from "@octant/contracts";
 import { BenchmarksClientError, type BenchmarksClient } from "@octant/client-runtime";
 import { buildTurnDiagnosticsReport } from "@octant/domain";
 import { UsageWorkspace } from "../UsageWorkspace";
@@ -43,6 +47,17 @@ function makeClient(overrides: Partial<BenchmarksClient> = {}) {
     })),
     cancelRun: vi.fn(async () => ({ run: run("cancelled") })),
     purgeRun: vi.fn(async () => ({ runId: run().runId })),
+    rateCell: vi.fn(async (request: Parameters<BenchmarksClient["rateCell"]>[0]) =>
+      decodeBenchmarkCellRateResponse({
+        runId: request.runId,
+        cellId: request.cellId,
+        rating: {
+          stars: request.stars,
+          ...(request.note === undefined ? {} : { note: request.note }),
+          ratedAt: NOW,
+        },
+      }),
+    ),
   } satisfies BenchmarksClient;
   // Overrides replace calls the test asserts on; the mock handles stay typed.
   return { ...base, ...overrides } as typeof base;
@@ -658,5 +673,115 @@ describe("the runs list", () => {
     );
 
     expect(await screen.findByText("Only this Mac's window can edit benchmarks.")).toBeVisible();
+  });
+});
+
+describe("rating an answer", () => {
+  const deepCell = "77000000-0000-4000-8000-00000000f002";
+
+  async function deepColumn(actor: ReturnType<typeof user>, client = makeClient()) {
+    mount(client, {
+      chatClient: { thread: vi.fn(async () => new Promise<never>(() => undefined)) },
+    });
+    await openRun(actor);
+    return {
+      client,
+      column: await screen.findByRole("region", { name: "Answers from Provider A · Deep model" }),
+    };
+  }
+
+  it("posts the stars and note for the answer, then reads the run again", async () => {
+    const actor = user();
+    const { client, column } = await deepColumn(actor);
+    const readsBefore = client.readRun.mock.calls.length;
+
+    await actor.click(within(column).getByRole("radio", { name: "3 of 5 stars" }));
+    await actor.type(within(column).getByRole("textbox", { name: "Note on this answer" }), "Close");
+    await actor.click(within(column).getByRole("button", { name: "Save rating" }));
+
+    await waitFor(() =>
+      expect(client.rateCell).toHaveBeenCalledWith({
+        runId: RUN_ID,
+        cellId: deepCell,
+        stars: 3,
+        note: "Close",
+      }),
+    );
+    await waitFor(() => expect(client.readRun.mock.calls.length).toBeGreaterThan(readsBefore));
+  });
+
+  it("shows the rating already given and replaces it when rated again", async () => {
+    const actor = user();
+    const client = makeClient({
+      readRun: vi.fn(async () => readResponse("finished", { rating: { stars: 4, note: "Good" } })),
+    });
+    const { column } = await deepColumn(actor, client);
+
+    expect(within(column).getByRole("radio", { name: "4 of 5 stars" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(column).getByRole("textbox", { name: "Note on this answer" })).toHaveValue(
+      "Good",
+    );
+    expect(within(column).getByText(/Rated 4 of 5/)).toBeInTheDocument();
+
+    await actor.click(within(column).getByRole("radio", { name: "2 of 5 stars" }));
+    await actor.click(within(column).getByRole("button", { name: "Replace rating" }));
+    await waitFor(() =>
+      expect(client.rateCell).toHaveBeenCalledWith(
+        expect.objectContaining({ cellId: deepCell, stars: 2, note: "Good" }),
+      ),
+    );
+  });
+
+  it("states the host's refusal as a sentence", async () => {
+    const actor = user();
+    const client = makeClient({
+      rateCell: vi.fn(async () => {
+        throw new BenchmarksClientError("Only an answered cell can be rated.", 409);
+      }),
+    });
+    const { column } = await deepColumn(actor, client);
+
+    await actor.click(within(column).getByRole("radio", { name: "5 of 5 stars" }));
+    await actor.click(within(column).getByRole("button", { name: "Save rating" }));
+
+    expect(await within(column).findByText("Only an answered cell can be rated.")).toBeVisible();
+  });
+});
+
+describe("judge results and overhead", () => {
+  it("shows what the judge cost under the headline, and leaves it out when nothing was judged", async () => {
+    const actor = user();
+    const withOverhead = makeClient({
+      readRun: vi.fn(async () =>
+        readResponse("finished", { overhead: { turns: 12, tokens: 34_000, costUsd: 0.21 } }),
+      ),
+    });
+    const { unmount } = mount(withOverhead);
+    await openRun(actor);
+    expect(await screen.findByText("Judge: 12 turns · 34K tokens · $0.21")).toBeInTheDocument();
+    unmount();
+
+    mount(makeClient());
+    await openRun(actor);
+    await screen.findByRole("table", { name: "Leaderboard" });
+    expect(screen.queryByTestId("benchmark-overhead")).toBeNull();
+  });
+
+  it("says why a judgement failed, in the grid and in the cells", async () => {
+    const actor = user();
+    mount(
+      makeClient({ readRun: vi.fn(async () => readResponse("finished", { judgeFailed: true })) }),
+    );
+
+    await openRun(actor);
+
+    const grid = await screen.findByRole("table", { name: "Cases by contender" });
+    expect(
+      within(grid).getByText("Judge did not score: The judge answered out of range."),
+    ).toBeInTheDocument();
+    expect(within(grid).getByText("Judge 9 of 10")).toBeInTheDocument();
   });
 });

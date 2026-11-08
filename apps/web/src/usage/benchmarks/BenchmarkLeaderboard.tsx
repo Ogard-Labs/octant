@@ -12,6 +12,7 @@ import {
   comparisonBlocks,
   contenderLabel,
   formatDuration,
+  formatOverhead,
   formatRatio,
   formatScore,
   formatSpeed,
@@ -85,6 +86,8 @@ const COLUMNS: ReadonlyArray<ColumnSpec> = [
 export interface BenchmarkLeaderboardProps {
   readonly run: BenchmarkRun;
   readonly rows: ReadonlyArray<BenchmarkLeaderboardRow>;
+  /** What the judge turns cost; absent or empty when nothing was judged. */
+  readonly overhead?: { readonly turns: number; readonly tokens: number; readonly costUsd: number };
   readonly metricsByCell: ReadonlyMap<string, BenchmarkCellMetrics>;
   readonly names: ContenderNames;
   readonly onSelectCase: (caseId: string) => void;
@@ -146,6 +149,11 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
             </li>
           ))}
         </ul>
+      )}
+      {props.overhead === undefined || props.overhead.turns === 0 ? null : (
+        <p className="usage-workspace__note" data-testid="benchmark-overhead">
+          {formatOverhead(props.overhead)}
+        </p>
       )}
       <div className="usage-table-scroll">
         <table aria-label="Leaderboard" className="usage-table">
@@ -232,7 +240,11 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
                           {cell.checks.length === 0 ? "—" : `${passed} of ${cell.checks.length}`}
                         </td>
                         <td>
-                          {cell.judge?.status === "scored" ? `${cell.judge.score} of 10` : "—"}
+                          {cell.judge === undefined
+                            ? "—"
+                            : cell.judge.status === "scored"
+                              ? `${cell.judge.score} of 10`
+                              : `Judge did not score: ${cell.judge.reason}`}
                         </td>
                       </tr>
                     );

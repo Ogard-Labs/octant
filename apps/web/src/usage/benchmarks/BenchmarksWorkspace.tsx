@@ -1,6 +1,7 @@
 import { Download, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  decodeBenchmarkCellId,
   decodeBenchmarkRunId,
   type BenchmarkRunReadResponse,
   type BenchmarkRunStartRequest,
@@ -275,6 +276,26 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
       return undefined;
     } catch (error) {
       return refusalSentence(error, "The run could not be started.");
+    }
+  };
+
+  const rateCell = async (
+    cellId: string,
+    stars: number,
+    note: string | undefined,
+  ): Promise<string | undefined> => {
+    if (runRead === undefined) return undefined;
+    try {
+      await client.rateCell({
+        runId: runRead.run.runId,
+        cellId: decodeBenchmarkCellId(cellId),
+        stars,
+        ...(note === undefined ? {} : { note }),
+      });
+      await readRun(String(runRead.run.runId));
+      return undefined;
+    } catch (error) {
+      return refusalSentence(error, "The rating could not be saved.");
     }
   };
 
@@ -655,10 +676,12 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
             metricsByCell={metricsByCell}
             names={names}
             onSelectCase={setSelectedCaseId}
+            {...(runRead.overhead === undefined ? {} : { overhead: runRead.overhead })}
             rows={runRead.leaderboard}
             run={runRead.run}
           />
           <BenchmarkCaseCompare
+            onRate={rateCell}
             {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
             metricsByCell={metricsByCell}
             names={names}
