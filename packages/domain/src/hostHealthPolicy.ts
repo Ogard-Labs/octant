@@ -15,23 +15,42 @@ import {
  * longest stall, the highest p95 and maximum latency), because a health view
  * exists to show the bad minute, and averaging would hide it. A host restart
  * inside an hour keeps the newest process start.
+ *
+ * A restart is a process start that replaced an earlier process the reader can
+ * see: the first sample's process counts only when `baselineProcessStartedAt`,
+ * the process in effect just before the span, differs from it. Without a
+ * baseline the first process is "already running", not a restart.
  */
 export function hostHealthPoints(
   samples: ReadonlyArray<HostHealthSample>,
   requested: HostHealthResolution | undefined,
+  baselineProcessStartedAt?: UtcTimestamp,
 ): {
   readonly resolution: HostHealthResolution;
   readonly samples: HostHealthSample[];
-  readonly processStarts: UtcTimestamp[];
+  readonly restarts: UtcTimestamp[];
 } {
   const sorted = [...samples].sort((left, right) => left.sampledAt.localeCompare(right.sampledAt));
   const resolution = requested ?? (sorted.length > MAX_HOST_HEALTH_POINTS ? "hour" : "minute");
   const points = resolution === "minute" ? sorted : rollUpToHours(sorted);
   // Read from the minutes, before an hour keeps only its newest start.
-  const processStarts = [...new Set(sorted.map((sample) => sample.processStartedAt))]
-    .sort()
-    .slice(-MAX_HOST_HEALTH_POINTS);
-  return { resolution, samples: points.slice(-MAX_HOST_HEALTH_POINTS), processStarts };
+  const restarts: UtcTimestamp[] = [];
+  let previous = baselineProcessStartedAt;
+  for (const sample of sorted) {
+    if (
+      previous !== undefined &&
+      sample.processStartedAt !== previous &&
+      !restarts.includes(sample.processStartedAt)
+    ) {
+      restarts.push(sample.processStartedAt);
+    }
+    previous = sample.processStartedAt;
+  }
+  return {
+    resolution,
+    samples: points.slice(-MAX_HOST_HEALTH_POINTS),
+    restarts: restarts.slice(-MAX_HOST_HEALTH_POINTS),
+  };
 }
 
 function rollUpToHours(sorted: ReadonlyArray<HostHealthSample>): HostHealthSample[] {
