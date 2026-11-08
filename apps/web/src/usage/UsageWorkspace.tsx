@@ -13,12 +13,16 @@ import type {
   ProviderInstance,
 } from "@octant/contracts";
 import type { UsageDashboardClient } from "@octant/client-runtime";
+import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
+import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { TurnMetricsSummary } from "@octant/contracts";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import { ProviderUsageHistoryWorkspace } from "./ProviderUsageHistoryWorkspace";
 import { TurnDiagnosticsWorkspace } from "./TurnDiagnosticsWorkspace";
+import { BenchmarksWorkspace } from "./benchmarks/BenchmarksWorkspace";
+import type { CodeProjectChoice } from "./benchmarks/BenchmarkSuiteEditor";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderUsageLimitsPanel } from "./ProviderUsageLimitsPanel";
 import { RefreshCw } from "lucide-react";
@@ -43,6 +47,14 @@ export interface UsageWorkspaceProps {
   /** Reads how turns went; without it the Diagnostics view is not offered. */
   readonly diagnosticsClient?: Pick<UsageClient, "diagnostics"> &
     Partial<Pick<UsageClient, "hostHealth">>;
+  /** Runs and reads model benchmarks; without it the Benchmarks view is not offered. */
+  readonly benchmarksClient?: BenchmarksClient;
+  /** Reads each benchmark answer from its cell's thread. */
+  readonly chatClient?: Pick<ChatClient, "thread">;
+  /** The accounts and models a benchmark can pick from. */
+  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
+  /** The Code Projects a Code case may name. */
+  readonly codeProjects?: ReadonlyArray<CodeProjectChoice>;
   readonly providerLimitsClient?: ProviderUsageLimitsClient;
   readonly historyClient?: LocalUsageHistoryClient;
   readonly providers?: ReadonlyArray<ProviderInstance>;
@@ -108,12 +120,14 @@ const SOURCE_STATUS_WORDS = {
  * as unavailable rather than shown as zero.
  */
 export function UsageWorkspace(props: UsageWorkspaceProps) {
-  const [source, setSource] = useState<"provider" | "octant" | "diagnostics">(
+  const [source, setSource] = useState<"provider" | "octant" | "diagnostics" | "benchmarks">(
     props.initialFilter === undefined && props.historyClient !== undefined ? "provider" : "octant",
   );
   const sourceControl =
-    props.historyClient === undefined && props.diagnosticsClient === undefined ? undefined : (
-      <OctantToggleGroup<"provider" | "octant" | "diagnostics">
+    props.historyClient === undefined &&
+    props.diagnosticsClient === undefined &&
+    props.benchmarksClient === undefined ? undefined : (
+      <OctantToggleGroup<"provider" | "octant" | "diagnostics" | "benchmarks">
         aria-label="Usage source"
         value={[source]}
         onValueChange={(values) => {
@@ -128,6 +142,9 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
         {props.diagnosticsClient === undefined ? null : (
           <OctantToggleGroupItem value="diagnostics">Diagnostics</OctantToggleGroupItem>
         )}
+        {props.benchmarksClient === undefined ? null : (
+          <OctantToggleGroupItem value="benchmarks">Benchmarks</OctantToggleGroupItem>
+        )}
       </OctantToggleGroup>
     );
   if (source === "diagnostics" && props.diagnosticsClient !== undefined) {
@@ -136,6 +153,25 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
         client={props.diagnosticsClient}
         sourceControl={sourceControl}
         {...(props.providers === undefined ? {} : { providers: props.providers })}
+        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+        {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+      />
+    );
+  }
+  if (source === "benchmarks" && props.benchmarksClient !== undefined) {
+    return (
+      <BenchmarksWorkspace
+        client={props.benchmarksClient}
+        sourceControl={sourceControl}
+        {...(props.diagnosticsClient === undefined
+          ? {}
+          : { diagnosticsClient: props.diagnosticsClient })}
+        {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
+        {...(props.providers === undefined ? {} : { providers: props.providers })}
+        {...(props.providerSnapshot === undefined
+          ? {}
+          : { providerSnapshot: props.providerSnapshot })}
+        {...(props.codeProjects === undefined ? {} : { codeProjects: props.codeProjects })}
         {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
         {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
       />
