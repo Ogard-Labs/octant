@@ -15,6 +15,8 @@
 #include <sys/prctl.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
+#include <linux/magic.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -416,9 +418,18 @@ static int policy_measure(bool capsule)
 int main(void)
 {
   mkdir("/dev", 0755); mkdir("/proc", 0755); mkdir("/tmp", 0700);
-  if (mount("devtmpfs", "/dev", "devtmpfs", 0, NULL) || mount("proc", "/proc", "proc", 0, NULL) ||
-      mount("tmpfs", "/tmp", "tmpfs", 0, "size=1m")) {
-    puts("OCTANT_KERNEL_FAILURE guest mounts unavailable");
+  struct statfs device_filesystem;
+  struct stat console, null;
+  if (statfs("/dev", &device_filesystem) || device_filesystem.f_type != TMPFS_MAGIC ||
+      stat("/dev/console", &console) || !S_ISCHR(console.st_mode) ||
+      major(console.st_rdev) != 5 || minor(console.st_rdev) != 1 ||
+      stat("/dev/null", &null) || !S_ISCHR(null.st_mode) ||
+      major(null.st_rdev) != 1 || minor(null.st_rdev) != 3) {
+    printf("OCTANT_KERNEL_FAILURE automatic devtmpfs validation errno=%d\n", errno);
+  } else if (mount("proc", "/proc", "proc", 0, NULL)) {
+    printf("OCTANT_KERNEL_FAILURE guest proc mount errno=%d\n", errno);
+  } else if (mount("tmpfs", "/tmp", "tmpfs", 0, "size=1m")) {
+    printf("OCTANT_KERNEL_FAILURE private guest tmpfs mount errno=%d\n", errno);
   } else {
     int result = measure();
     if (!result) result = namespace_measure();
