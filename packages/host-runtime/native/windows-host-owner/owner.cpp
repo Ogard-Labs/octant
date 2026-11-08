@@ -815,18 +815,18 @@ napi_value close_authority_state(napi_env env, napi_callback_info info) {
   return object(env, "closed");
 }
 
-// SQLite keeps its ordinary Win32 VFS. Native guards pin its closed file
-// family before the runtime opens it; the SQLite entry point verifies the
-// actual main handle and selects the single-owner WAL lifecycle.
+// SQLite keeps its ordinary Win32 VFS and sidecar lifecycle. Each connection
+// holds a guarded main leaf; private sidecars are admitted at open under the
+// existing local-owner trust boundary, not an arbitrary same-user actor boundary.
 struct SqliteAdmission {
   napi_env env = nullptr;
   DWORD thread = 0;
   std::string profile, scope, expected_data, kind;
   std::unique_ptr<ProfileDirectory> directory;
-  std::array<Handle, 3> files;
-  Handle old_shm;
+  Handle file;
 };
-std::map<std::string, std::unique_ptr<SqliteAdmission>> sqlite_admissions;
+std::map<ULONGLONG, std::unique_ptr<SqliteAdmission>> sqlite_admissions;
+ULONGLONG next_sqlite_admission = 1;
 bool sqlite_regular(HANDLE file, const Root& root) {
   BY_HANDLE_FILE_INFORMATION metadata{};
   return (private_acl(file, root) || private_acl(file, root, INHERITED_ACE, false)) &&
@@ -846,47 +846,59 @@ Handle sqlite_leaf(const Root& root, const std::wstring& path, bool create, bool
   }
   return file && sqlite_regular(file.value, root) ? std::move(file) : Handle();
 }
+bool sqlite_sidecars(const Root& root, const std::wstring& path) {
+  for (const wchar_t* suffix : {L"-wal", L"-shm", L"-journal"}) {
+    bool missing = false;
+    auto file = sqlite_leaf(root, path + suffix, false, missing);
+    if (!file && !missing) return false;
+  }
+  return true;
+}
+void close_sqlite_admissions(napi_env env) {
+  for (auto it = sqlite_admissions.begin(); it != sqlite_admissions.end();) {
+    if (it->second->env == env) it = sqlite_admissions.erase(it); else ++it;
+  }
+}
 napi_value open_sqlite_store(napi_env env, napi_callback_info info) {
   Guard guard; size_t count = 4; napi_value arguments[4]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
   if (count != 4) return object(env, "refused");
   const std::string profile = string_arg(env, arguments[0]), scope = string_arg(env, arguments[1]);
   const std::string expected_data = string_arg(env, arguments[2]), kind = string_arg(env, arguments[3]);
-  if ((kind != "main" && kind != "usage-cache") || !authority_writer(env, scope)) return object(env, "refused");
+  if ((kind != "main" && kind != "usage-cache") || !authority_writer(env, scope) || next_sqlite_admission > safe_integer) return object(env, "refused");
   bool missing = false;
   auto directory = profile_directory(profile, scope, expected_data, ProfileDirectoryKind::Data, false, missing);
   if (!directory) return object(env, "refused");
   const std::wstring path = directory->path + (kind == "main" ? L"\\octant.sqlite3" : L"\\local-usage-cache.sqlite3");
-  const std::string key = scope + ":" + kind;
-  const auto existing = sqlite_admissions.find(key);
-  if (existing == sqlite_admissions.end()) {
-    auto admission = std::make_unique<SqliteAdmission>();
-    admission->env = env; admission->thread = GetCurrentThreadId(); admission->profile = profile;
-    admission->scope = scope; admission->expected_data = expected_data; admission->kind = kind;
-    admission->directory = std::move(directory);
-    const std::array<std::wstring, 3> names{path, path + L"-wal", path + L"-journal"};
-    for (size_t i = 0; i < names.size(); ++i) {
-      admission->files[i] = sqlite_leaf(*admission->directory->root, names[i], true, missing);
-      if (!admission->files[i]) return object(env, "refused");
-    }
-    admission->old_shm = sqlite_leaf(*admission->directory->root, path + L"-shm", false, missing);
-    if (!admission->old_shm && !missing) return object(env, "refused");
-    sqlite_admissions.emplace(key, std::move(admission));
-  } else {
-    const auto& admission = *existing->second;
-    if (admission.env != env || admission.thread != GetCurrentThreadId() || admission.profile != profile ||
-        !same_file(admission.directory->directory.value, directory->directory.value)) return object(env, "refused");
-    for (const auto& file : admission.files)
-      if (!sqlite_regular(file.value, *directory->root)) return object(env, "refused");
-  }
+  if (!sqlite_sidecars(*directory->root, path)) return object(env, "refused");
+  auto admission = std::make_unique<SqliteAdmission>();
+  admission->env = env; admission->thread = GetCurrentThreadId(); admission->profile = profile;
+  admission->scope = scope; admission->expected_data = expected_data; admission->kind = kind;
+  admission->file = sqlite_leaf(*directory->root, path, true, missing);
+  if (!admission->file) return object(env, "refused");
+  admission->directory = std::move(directory);
   HMODULE module = nullptr;
   std::array<wchar_t, 32768> module_path{};
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
       reinterpret_cast<LPCWSTR>(&module_identity), &module)) return object(env, "refused");
   const DWORD length = GetModuleFileNameW(module, module_path.data(), static_cast<DWORD>(module_path.size()));
   if (length == 0 || length >= module_path.size()) return object(env, "refused");
+  const ULONGLONG lease = next_sqlite_admission++;
+  sqlite_admissions.emplace(lease, std::move(admission));
   napi_value result = object(env, "ready"); put(env, result, "dataDirectory", expected_data);
   put(env, result, "databasePath", expected_data + (kind == "main" ? "\\octant.sqlite3" : "\\local-usage-cache.sqlite3"));
-  put(env, result, "extensionPath", utf8(std::wstring(module_path.data(), length))); return result;
+  put(env, result, "extensionPath", utf8(std::wstring(module_path.data(), length)));
+  safe_number(env, result, "lease", lease); return result;
+}
+napi_value close_sqlite_store(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
+  ULONGLONG lease = 0;
+  if (count != 1 || !integer_arg(env, arguments[0], lease)) return object(env, "refused");
+  const auto found = sqlite_admissions.find(lease);
+  if (found != sqlite_admissions.end()) {
+    if (found->second->env != env) return object(env, "refused");
+    sqlite_admissions.erase(found);
+  }
+  return object(env, "closed");
 }
 int initialize_sqlite_store(sqlite3* database, const sqlite3_api_routines* api) {
   Guard guard;
@@ -898,20 +910,18 @@ int initialize_sqlite_store(sqlite3* database, const sqlite3_api_routines* api) 
   for (const auto& entry : sqlite_admissions) {
     auto& admission = *entry.second;
     if (admission.scope == scope && admission.env == owner->env && admission.thread == GetCurrentThreadId() &&
-        same_file(admission.files[0].value, actual)) { selected = &admission; break; }
+        same_file(admission.file.value, actual)) { selected = &admission; break; }
   }
   if (!selected || !authority_writer(selected->env, scope)) return SQLITE_AUTH;
   bool missing = false;
   auto directory = profile_directory(selected->profile, scope, selected->expected_data, ProfileDirectoryKind::Data, false, missing);
   if (!directory || !same_file(directory->directory.value, selected->directory->directory.value)) return SQLITE_AUTH;
-  for (const auto& file : selected->files) if (!sqlite_regular(file.value, *directory->root)) return SQLITE_AUTH;
-  // This pragma does not read schema. It precedes the first WAL access so
-  // SQLite uses a heap wal-index instead of opening a mutable SHM pathname.
-  if (api->exec(database, "PRAGMA locking_mode=EXCLUSIVE", nullptr, nullptr, nullptr) != SQLITE_OK) return SQLITE_ERROR;
-  int persist = 1;
-  if (api->file_control(database, "main", SQLITE_FCNTL_PERSIST_WAL, &persist) != SQLITE_OK) return SQLITE_ERROR;
-  persist = -1;
-  if (api->file_control(database, "main", SQLITE_FCNTL_PERSIST_WAL, &persist) != SQLITE_OK || persist != 1) return SQLITE_ERROR;
+  if (!sqlite_regular(selected->file.value, *directory->root) || !sqlite_regular(actual, *directory->root)) return SQLITE_AUTH;
+  const std::wstring path = directory->path + (selected->kind == "main" ? L"\\octant.sqlite3" : L"\\local-usage-cache.sqlite3");
+  // Only the unconfined account is a local owner. Admitted untrusted clients
+  // cannot mutate the private profile; this is not an anti-owner VFS sandbox.
+  // SQLite keeps its ordinary sidecar creation/deletion and WAL sharing.
+  if (!sqlite_sidecars(*directory->root, path)) return SQLITE_AUTH;
   return SQLITE_OK;
 }
 
@@ -928,6 +938,7 @@ void reset_connection(Owner& state) {
 void cleanup_env(void* input) {
   const auto env = static_cast<napi_env>(input); Guard guard;
   abort_authority_sessions(env, false);
+  close_sqlite_admissions(env);
   if (owner && owner->env == env) retire_owner();
   for (auto it = clients.begin(); it != clients.end();) { if (it->second->env == env) it = clients.erase(it); else ++it; }
   // The native-computed PID/birth record intentionally survives handle or
@@ -1132,6 +1143,7 @@ NAPI_MODULE_INIT() {
     {"listenerTlsFile", nullptr, listener_tls_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"rosterSigningKeyFile", nullptr, roster_signing_key_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"openSqliteStore", nullptr, open_sqlite_store, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"closeSqliteStore", nullptr, close_sqlite_store, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"beginAuthorityState", nullptr, begin_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"readAuthorityState", nullptr, read_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"writeAuthorityState", nullptr, write_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},

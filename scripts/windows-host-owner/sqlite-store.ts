@@ -1,12 +1,15 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { win32 } from "node:path";
 import {
   acquireWindowsHostProfileOwner,
   loadWindowsHostProfileNative,
 } from "../../packages/host-runtime/src/windowsHostProfile";
-import { createWindowsSqliteStores } from "../../packages/host-runtime/src/windowsSqliteStore";
+import {
+  createWindowsSqliteStores,
+  type WindowsSqliteStoreAdmission,
+} from "../../packages/host-runtime/src/windowsSqliteStore";
 import { openReadOnlySqlite } from "../../apps/server/src/persistence/sqlitePort";
 
 const [binding, profile] = process.argv.slice(2);
@@ -39,9 +42,11 @@ function check(value: boolean, name: string) {
 const stores = createWindowsSqliteStores(native, held.paths);
 if (stores === undefined) throw Error("Owned SQLite native API unavailable.");
 let database: Database | undefined;
+let active: Extract<WindowsSqliteStoreAdmission, { status: "ready" }> | undefined;
 try {
-  const admitted = stores.main();
+  let admitted = stores.main();
   if (admitted.status !== "ready") throw Error("Owned SQLite family refused.");
+  active = admitted;
   const started = performance.now();
   database = new Database(admitted.databasePath);
   check(
@@ -50,8 +55,8 @@ try {
   );
   check(
     database.query<{ locking_mode: string }, []>("PRAGMA locking_mode").get()?.locking_mode ===
-      "exclusive",
-    "exclusive mode precedes the first WAL access",
+      "normal",
+    "native admission preserves SQLite normal coordination",
   );
   check(
     database.query<{ journal_mode: string }, []>("PRAGMA journal_mode=WAL").get()?.journal_mode ===
@@ -69,20 +74,35 @@ try {
     "the guarded runtime commits and reads the journal",
   );
   database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  check(
-    !existsSync(admitted.databasePath + "-shm"),
-    "exclusive WAL creates no shared-memory pathname",
-  );
+  const concurrent = openReadOnlySqlite(admitted.databasePath);
+  try {
+    check(
+      concurrent.all("SELECT value FROM proof").length === count,
+      "an existing read-only consumer can read the live WAL store",
+    );
+  } finally {
+    concurrent.close();
+  }
   database.close();
   database = undefined;
   check(
-    existsSync(admitted.databasePath + "-wal"),
-    "the persistent WAL remains after a clean checkpoint and close",
+    !existsSync(admitted.databasePath + "-wal"),
+    "SQLite retains its ordinary clean-close sidecar cleanup",
   );
+  check(
+    admitted.close().status === "closed",
+    "the native admission ends after the actual connection closes",
+  );
+  const originalPath = admitted.databasePath;
+  renameSync(originalPath, originalPath + ".moved");
+  renameSync(originalPath + ".moved", originalPath);
+  admitted = stores.main();
+  if (admitted.status !== "ready") throw Error("Reopened native store unavailable.");
+  active = admitted;
   database = new Database(admitted.databasePath);
   check(
     admitted.initialize(database).status === "ready",
-    "the same native admission initializes a reopened connection",
+    "a new native admission initializes a reopened connection",
   );
   check(
     database.query<{ count: number }, []>("SELECT count(*) AS count FROM proof").get()?.count ===
@@ -97,7 +117,7 @@ try {
   try {
     check(
       reading.all("SELECT value FROM proof").length === count,
-      "the existing foreign read-only adapter remains usable beside the exclusive main connection",
+      "the existing foreign read-only adapter remains usable beside the live main connection",
     );
   } finally {
     reading.close();
@@ -119,6 +139,7 @@ try {
   );
 } finally {
   database?.close();
+  active?.close();
   await held.ownership.release();
   native.close();
   clearTimeout(timeout);

@@ -145,7 +145,10 @@ jobs:
         run: |
           bun scripts/windows-host-owner/profile-run.ts --sqlite-store "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/sqlite-store-smoke.mjs" (Get-Command bun).Source
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - run: node node_modules/electron/install.js
+      - name: Install the pinned Electron runtime with shared verified recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ensure-ci-electron.ts
       - name: Prove the shipped Electron runtime without a window
         env:
           ELECTRON_RUN_AS_NODE: "1"
