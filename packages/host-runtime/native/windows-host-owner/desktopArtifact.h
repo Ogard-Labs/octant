@@ -71,6 +71,21 @@ bool desktop_artifact_file(HANDLE file, const DesktopArtifactTrust& trust) {
   return GetFileType(file) == FILE_TYPE_DISK && GetFileInformationByHandle(file, &facts) && facts.nNumberOfLinks == 1 &&
     (facts.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 && desktop_artifact_acl(file, trust, false, false);
 }
+bool desktop_artifact_component(const std::wstring& name) {
+  if (name.empty() || name.size() > 255 || name.back() == L'.' || name.back() == L' ') return false;
+  for (wchar_t character : name)
+    if (character < 32 || std::wcschr(L"<>:\"/\\|?*", character)) return false;
+  if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, name.data(), static_cast<int>(name.size()), nullptr, 0, nullptr, nullptr) <= 0) return false;
+  std::wstring base = name.substr(0, name.find(L'.'));
+  while (!base.empty() && base.back() == L' ') base.pop_back();
+  for (const wchar_t* reserved : {L"CON", L"PRN", L"AUX", L"NUL", L"CONIN$", L"CONOUT$", L"CLOCK$"})
+    if (_wcsicmp(base.c_str(), reserved) == 0) return false;
+  if (base.size() == 4 && (_wcsnicmp(base.c_str(), L"COM", 3) == 0 || _wcsnicmp(base.c_str(), L"LPT", 3) == 0)) {
+    const wchar_t digit = base[3];
+    if ((digit >= L'1' && digit <= L'9') || digit == 0x00b9 || digit == 0x00b2 || digit == 0x00b3) return false;
+  }
+  return true;
+}
 bool desktop_artifact_tree(DesktopArtifact& admitted, const DesktopArtifactTrust& trust,
     const std::wstring& directory, size_t depth, ULONGLONG deadline, const std::atomic<bool>& cancelled) {
   if (depth > 32 || ++admitted.entries > 100000 || !desktop_artifact_current(deadline, cancelled)) return false;
@@ -84,7 +99,7 @@ bool desktop_artifact_tree(DesktopArtifact& admitted, const DesktopArtifactTrust
   struct FindCleanup { HANDLE value; ~FindCleanup() { FindClose(value); } } cleanup{search};
   for (;;) {
     if (std::wcscmp(item.cFileName, L".") != 0 && std::wcscmp(item.cFileName, L"..") != 0) {
-      if ((item.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 || !desktop_artifact_current(deadline, cancelled)) return false;
+      if (!desktop_artifact_component(item.cFileName) || (item.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 || !desktop_artifact_current(deadline, cancelled)) return false;
       const std::wstring path = directory + L"\\" + item.cFileName;
       if (path.size() >= 32768) return false;
       if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
@@ -130,7 +145,7 @@ std::unique_ptr<DesktopArtifact> admit_desktop_artifact(const std::wstring& imag
     const size_t next = ordinary.find(L'\\', start);
     if (next == std::wstring::npos || next > leaf || next == start) return nullptr;
     const std::wstring component = ordinary.substr(start, next - start);
-    if (component == L"." || component == L"..") return nullptr;
+    if (!desktop_artifact_component(component)) return nullptr;
     if (current.back() != L'\\') current += L'\\'; current += component;
     if (next == leaf) break;
     Handle directory = open_directory(current);
