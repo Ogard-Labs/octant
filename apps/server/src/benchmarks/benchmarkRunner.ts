@@ -170,7 +170,10 @@ export class BenchmarkRunner {
         if (this.#stopped) return;
         if (cell.state === "queued" || cell.state === "running") continue;
         await this.#options.chat.archiveThread(benchmarkCellIdentity(String(cell.cellId)).threadId);
-        if (run.judge !== undefined && cell.state === "answered") {
+        // A judge still owed (for instance waiting to retry for capacity) stays
+        // active: Chat refuses to retry on an archived thread.
+        const judgeSettled = run.status !== "running" || cell.judge !== undefined;
+        if (run.judge !== undefined && cell.state === "answered" && judgeSettled) {
           await this.#options.chat.archiveThread(
             benchmarkJudgeIdentity(String(cell.cellId)).threadId,
           );

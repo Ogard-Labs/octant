@@ -608,6 +608,32 @@ describe("benchmark runner", () => {
       expect(projection.runningRuns()).toEqual([]);
     });
 
+    it("leaves a judge waiting to retry for capacity active across a restart, then retries it and records the judgement", async () => {
+      const { chat, runner, projection, run } = await answeredWithJudge();
+      const cellId = String(run.cells[0]!.cellId);
+      const waiting = chat.turns.get(judgeThread(cellId))!;
+      waiting.outcome = "interrupted";
+      waiting.failureCode = "capacity-unavailable";
+      waiting.failureMessage = "Waited for a free request slot.";
+      chat.archived.length = 0;
+
+      const stop = runner.start();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(chat.archived).not.toContain(judgeThread(cellId));
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.judge).toBeUndefined();
+
+      await runner.tick();
+      chat.finish(judgeThread(cellId), '{"score": 9, "reason": "Good"}');
+      await runner.tick();
+      stop();
+
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.judge).toMatchObject({
+        status: "scored",
+        score: 9,
+      });
+    });
+
     it("starts no judge turn for a suite without a judge", async () => {
       const { store, chat, runner, projection } = setup();
       const run = sampleRun();
@@ -621,13 +647,17 @@ describe("benchmark runner", () => {
       expect(projection.run(benchmarkIds.run)?.status).toBe("finished");
     });
 
-    it("archives the judge threads of answered cells again when the host starts", async () => {
+    it("archives the judge threads of settled judgements again when the host starts", async () => {
       const { chat, runner, run } = await answeredWithJudge();
+      const first = judgeThread(String(run.cells[0]!.cellId));
+      chat.finish(first, '{"score": 4, "reason": "ok"}');
+      await runner.tick();
       chat.archived.length = 0;
       const stop = runner.start();
       await new Promise((resolve) => setTimeout(resolve, 50));
       stop();
-      expect(chat.archived).toContain(judgeThread(String(run.cells[0]!.cellId)));
+      expect(chat.archived).toContain(first);
+      expect(chat.archived).not.toContain(judgeThread(String(run.cells[1]!.cellId)));
     });
   });
 });
