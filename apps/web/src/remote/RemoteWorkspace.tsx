@@ -5,17 +5,21 @@ import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
 import type { CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { decodeWorkspaceTabId } from "@octant/contracts/shell";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { WorkThread } from "@octant/contracts/work-threads";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
 import { useEffect, useMemo, useState } from "react";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
+import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { useChatController } from "../chat/useChatController";
 import { CodeThreadWorkspace } from "../code/CodeThreadWorkspace";
 import { useCodeController } from "../code/useCodeController";
 import { useProviderController } from "../providers/useProviderController";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialog } from "../ui/base/OctantDialog";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
@@ -100,41 +104,89 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
       props.mode,
     ],
   );
+  const [canvas, setCanvas] = useState<{
+    readonly card: CanvasThreadReferenceCard;
+    readonly client: RemoteProductClients["canvas"];
+    readonly tabId: ReturnType<typeof decodeWorkspaceTabId>;
+  }>();
+  const onNavigate = () => setCanvas(undefined);
+  const onOpenCanvas = (card: CanvasThreadReferenceCard) =>
+    setCanvas({
+      card,
+      client: props.clients.canvas,
+      tabId: decodeWorkspaceTabId(crypto.randomUUID()),
+    });
+  useEffect(() => setCanvas(undefined), [props.mode, props.clients.canvas]);
+  let surface;
   switch (props.mode) {
     case "chat":
-      return (
+      surface = (
         <RemoteChatSurface
           clients={props.clients}
           connected={props.connected}
+          onNavigate={onNavigate}
+          onOpenCanvas={onOpenCanvas}
           providerGroups={providerGroups}
           {...(providerController.snapshot === undefined
             ? {}
             : { providerSnapshot: providerController.snapshot })}
         />
       );
+      break;
     case "work":
-      return (
+      surface = (
         <RemoteWorkSurface
           clients={props.clients}
           connected={props.connected}
+          onNavigate={onNavigate}
+          onOpenCanvas={onOpenCanvas}
           providerGroups={providerGroups}
         />
       );
+      break;
     case "code":
-      return (
+      surface = (
         <RemoteCodeSurface
           clients={props.clients}
           connected={props.connected}
+          onNavigate={onNavigate}
+          onOpenCanvas={onOpenCanvas}
           providerGroups={providerGroups}
         />
       );
+      break;
   }
+  return (
+    <>
+      {surface}
+      {canvas === undefined ||
+      canvas.client !== props.clients.canvas ||
+      canvas.card.scope.mode !== props.mode ? null : (
+        <OctantDialog label={canvas.card.title} onClose={() => setCanvas(undefined)} open>
+          <CanvasWorkspaceTab
+            key={String(canvas.card.canvasId)}
+            client={canvas.client}
+            tab={{
+              kind: "canvas",
+              id: canvas.tabId,
+              mode: canvas.card.scope.mode,
+              title: canvas.card.title,
+              canvasId: canvas.card.canvasId,
+              projectId: canvas.card.scope.workspace.projectId,
+            }}
+          />
+        </OctantDialog>
+      )}
+    </>
+  );
 }
 
 interface RemoteSurfaceProps {
   readonly clients: RemoteProductClients;
   readonly connected: boolean;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
+  readonly onNavigate: () => void;
+  readonly onOpenCanvas: (card: CanvasThreadReferenceCard) => void;
 }
 
 function RemoteChatSurface(
@@ -190,7 +242,10 @@ function RemoteChatSurface(
       mode="chat"
       threads={threads}
       activeThreadId={activeThreadId}
-      onSelect={(thread) => setActiveThreadId(thread.id)}
+      onSelect={(thread) => {
+        props.onNavigate();
+        setActiveThreadId(thread.id);
+      }}
       status={controller.status === "disconnected" ? "disconnected" : "ready"}
       errorMessage={createError ?? controller.errorMessage}
       action={
@@ -207,8 +262,10 @@ function RemoteChatSurface(
     >
       {activeThreadId === undefined ? null : (
         <ChatWorkspace
+          canvasClient={props.clients.canvas}
           controller={controller}
           narrow
+          onOpenCanvas={props.onOpenCanvas}
           providerGroups={props.providerGroups}
           {...(props.providerSnapshot === undefined
             ? {}
@@ -243,7 +300,10 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
       mode="work"
       threads={threads}
       activeThreadId={activeThreadId}
-      onSelect={(thread) => setActiveThreadId(thread.id)}
+      onSelect={(thread) => {
+        props.onNavigate();
+        setActiveThreadId(thread.id);
+      }}
       status={status}
       errorMessage={workNavigation.errorMessage}
       emptyMessage="No Work threads on this host yet. Start one from the host; it will appear here."
@@ -254,6 +314,10 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
           title={activeThread.title}
           threadId={activeThread.id}
           initialThread={activeThread}
+          canvasClient={props.clients.canvas}
+          onOpenCanvas={props.onOpenCanvas}
+          onOpenCanvasInSidebar={props.onOpenCanvas}
+          canvasOpenLabel="Open Canvas"
           threadClient={props.clients.workThread}
           turnClient={props.clients.workTurn}
           mutationClient={props.clients.workMutation}
@@ -284,13 +348,20 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       mode="code"
       threads={threads}
       activeThreadId={activeThreadId}
-      onSelect={(thread) => setActiveThreadId(thread.id)}
+      onSelect={(thread) => {
+        props.onNavigate();
+        setActiveThreadId(thread.id);
+      }}
       status={controller.status === "disconnected" ? "disconnected" : "ready"}
       errorMessage={controller.errorMessage}
       emptyMessage="No Code threads on this host yet. Start one from the host; it will appear here."
     >
       {activeThreadId === undefined ? null : (
         <CodeThreadWorkspace
+          canvasClient={props.clients.canvas}
+          onOpenCanvas={props.onOpenCanvas}
+          onOpenCanvasInSidebar={props.onOpenCanvas}
+          canvasOpenLabel="Open Canvas"
           controller={controller}
           pairedDevice
           threadId={activeThreadId}

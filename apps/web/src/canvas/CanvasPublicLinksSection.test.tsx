@@ -79,6 +79,22 @@ describe("CanvasPublicLinksSection", () => {
     expect(await screen.findByText("Link copied.")).toBeVisible();
   });
 
+  it("lets a paired reader copy links without offering owner actions", async () => {
+    const user = userEvent.setup();
+    const copyText = vi.fn(async () => undefined);
+    render(
+      <CanvasPublicLinksSection
+        canvasId={canvasId}
+        copyText={copyText}
+        onList={async () => list([record()])}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Copy link" }));
+    expect(copyText).toHaveBeenCalledWith(record().url);
+    expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+  });
+
   it("opens the export dialog when the person chooses Update", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();
