@@ -131,10 +131,10 @@ const timer = setInterval(() => {
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
 set frontmost of candidate to true
-if (count of windows of candidate) is 0 then error "Packaged window is not ready."
 try
-set value of attribute "AXEnhancedUserInterface" of candidate to true
+set value of attribute "AXManualAccessibility" of candidate to true
 end try
+if (count of windows of candidate) is 0 then error "Packaged window is not ready."
 set snapshotRows to {}
 repeat with uiElement in (entire contents of first window of candidate)
 try
