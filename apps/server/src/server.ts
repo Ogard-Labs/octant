@@ -1716,7 +1716,7 @@ export function startOctantServer(
     // runtime alive on its idle lease with nothing left to close it.
     let warmingProviders: Promise<void> = Promise.resolve();
     let stopArtifactSync: () => void = () => undefined;
-    let stopBenchmarkRunner: () => void = () => undefined;
+    let stopBenchmarkRunner: () => Promise<void> = () => Promise.resolve();
     let stopPublicShareSweep: () => void = () => undefined;
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
@@ -1925,7 +1925,12 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
-          stopBenchmarkRunner();
+          // Aborts any check command still running, which ends its process group.
+          try {
+            await stopBenchmarkRunner();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
           completedThreadArchiveSweep.stop();
           personMemorySweep.stop();
           personMemory.close();

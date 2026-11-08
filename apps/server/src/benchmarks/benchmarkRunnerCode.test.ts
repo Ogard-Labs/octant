@@ -5,7 +5,7 @@ import {
   type PermissionMode,
 } from "@octant/contracts";
 import type { BenchmarkCommandOutcome } from "@octant/domain";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BenchmarkChatPort, BenchmarkTurnInput } from "./benchmarkChatPort";
 import { BENCHMARKS_PROJECT_ID } from "./benchmarkChatPort";
 import type { BenchmarkCheckCommandPort } from "./benchmarkCheckCommand";
@@ -93,10 +93,25 @@ class FakeCode implements BenchmarkCodePort {
 
 class FakeCommand implements BenchmarkCheckCommandPort {
   readonly runs: Array<{ command: string; cwd: string; timeoutMs: number }> = [];
+  readonly signals: AbortSignal[] = [];
   outcome: BenchmarkCommandOutcome = { status: "exited", exitCode: 0, output: "" };
-  async run(input: { command: string; cwd: string; timeoutMs: number }) {
+  /** A command that runs until it is aborted, as a hung test would. */
+  hang = false;
+  async run(input: {
+    command: string;
+    cwd: string;
+    timeoutMs: number;
+    signal?: AbortSignal;
+  }): Promise<BenchmarkCommandOutcome> {
     this.runs.push({ command: input.command, cwd: input.cwd, timeoutMs: input.timeoutMs });
-    return this.outcome;
+    if (input.signal !== undefined) this.signals.push(input.signal);
+    if (!this.hang || input.signal === undefined) return this.outcome;
+    const signal = input.signal;
+    return new Promise((resolve) => {
+      const end = () => resolve({ status: "unavailable", message: "The check was cancelled." });
+      if (signal.aborted) end();
+      else signal.addEventListener("abort", end, { once: true });
+    });
   }
 }
 
@@ -426,6 +441,28 @@ describe("benchmark Code cells", () => {
     expect(prompt).toContain("passed: at most 5 files changed");
     expect(prompt).not.toContain("SECRET CLOSING TEXT");
     expect(prompt).not.toMatch(/model-a/);
+  });
+
+  it("aborts a running check when the runner stops, starts no later command, and resolves", async () => {
+    const { runner, code, command, cell } = setup({
+      checks: [
+        { kind: "command-exits-zero", command: "bun test one", timeoutSeconds: 60 },
+        { kind: "command-exits-zero", command: "bun test two", timeoutSeconds: 60 },
+      ],
+    });
+    await runner.tick();
+    code.turn = { ...code.turn, state: "completed" };
+    command.hang = true;
+    const stop = runner.start();
+    await vi.waitFor(() => expect(command.runs).toHaveLength(1));
+
+    await expect(stop()).resolves.toBeUndefined();
+
+    expect(command.signals[0]?.aborted).toBe(true);
+    // The second command of the sequence never started, and nothing settled the cell.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(command.runs.map((run) => run.command)).toEqual(["bun test one"]);
+    expect(cell().state).toBe("running");
   });
 
   it("interrupts a Code turn and stops its checks when the run is cancelled", async () => {

@@ -1,4 +1,5 @@
 import {
+  decodeBenchmarkRun,
   decodeBenchmarkRunId,
   decodeBenchmarkRunStartRequest,
   decodeBenchmarkSuite,
@@ -6,6 +7,7 @@ import {
   type PermissionMode,
 } from "@octant/contracts";
 import { benchmarkCodeBranch } from "@octant/domain";
+import { rebuildProjection } from "../persistence/projection";
 import { afterEach, describe, expect, it } from "vitest";
 import { benchmarkCellIdentity } from "./benchmarkRunner";
 import { BenchmarkService } from "./benchmarkService";
@@ -14,6 +16,7 @@ import {
   benchmarkIds,
   openBenchmarkTestStore,
   removeBenchmarkTestStores,
+  sampleRun,
 } from "./benchmarkTestSupport";
 
 afterEach(removeBenchmarkTestStores);
@@ -175,6 +178,58 @@ describe("starting a run with Code cases", () => {
       status: "refused",
       reason: "unavailable",
     });
+  });
+});
+
+describe("a run journaled with an upper-case id", () => {
+  it("is read, rated and purged by either case, also after the projection is rebuilt from the journal", async () => {
+    const ctx = setup();
+    const base = sampleRun({ suite: suite() });
+    const upper = benchmarkIds.run.toUpperCase();
+    const run = decodeBenchmarkRun({ ...base, runId: upper });
+    ctx.store.runStarted({ run });
+    const cell = run.cells[0]!;
+    ctx.store.cellStarted({
+      runId: run.runId,
+      cellId: cell.cellId,
+      threadId: benchmarkCellIdentity(String(cell.cellId)).threadId,
+      turnId: benchmarkCellIdentity(String(cell.cellId)).submissionId,
+      startedAt: BENCHMARK_TEST_NOW as never,
+    });
+    ctx.store.cellSettled({
+      runId: run.runId,
+      cellId: cell.cellId,
+      state: "answered",
+      checks: [],
+      settledAt: BENCHMARK_TEST_NOW as never,
+    });
+    ctx.store.runEnded({
+      runId: run.runId,
+      status: "finished",
+      endedAt: BENCHMARK_TEST_NOW as never,
+    });
+    rebuildProjection({
+      connection: ctx.connection,
+      journal: ctx.journal,
+      projection: ctx.projection,
+      clock: () => BENCHMARK_TEST_NOW,
+    });
+
+    for (const id of [upper, upper.toLowerCase()]) {
+      expect(ctx.service.readRun({ runId: decodeBenchmarkRunId(id) }).status).toBe("ok");
+    }
+    for (const id of [upper, upper.toLowerCase()]) {
+      const rated = ctx.service.rateCell({
+        runId: decodeBenchmarkRunId(id),
+        cellId: cell.cellId,
+        stars: 4,
+      });
+      expect(rated.status).toBe("ok");
+    }
+    expect(
+      (await ctx.service.purgeRun({ runId: decodeBenchmarkRunId(upper.toLowerCase()) })).status,
+    ).toBe("ok");
+    expect(ctx.service.readRun({ runId: decodeBenchmarkRunId(upper) }).status).toBe("refused");
   });
 });
 
