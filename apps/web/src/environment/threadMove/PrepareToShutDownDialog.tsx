@@ -227,7 +227,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       <header className="shutdown-dialog__head">
         {done && failed === 0 ? (
           <h2 className="shutdown-dialog__title" id={titleId}>
-            <CircleCheck aria-hidden="true" size={18} /> Safe to shut down
+            <CircleCheck aria-hidden="true" size={20} /> Safe to shut down
           </h2>
         ) : done ? (
           <h2 className="shutdown-dialog__title shutdown-dialog__title--warning" id={titleId}>
