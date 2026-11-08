@@ -67,7 +67,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "enter" || mode == "end" || mode == "settings" {
+if mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -97,7 +97,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 }
 var clicked = false
 var pointerProof: String?
-if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" {
+if mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let partialMatches = (request.results ?? []).flatMap { result -> [TextTarget] in
         guard let value = result.topCandidates(1).first else { return [] }
@@ -177,9 +177,9 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
     usleep(50_000)
     up.post(tap: .cghidEventTap)
     clicked = true
-    if mode == "scroll-top" {
+    if mode == "scroll-top" || mode == "scroll-bottom" {
         for _ in 0..<3 {
-            guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 200, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
+            guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: mode == "scroll-top" ? 200 : -200, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
             scroll.location = point
             scroll.post(tap: .cghidEventTap)
             usleep(100_000)
@@ -199,9 +199,14 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
             spaceDown.postToPid(pid)
             spaceUp.postToPid(pid)
         }
-    } else if mode == "fill" {
+    } else if mode == "fill" || mode == "fill-private" {
         guard CommandLine.arguments.count == 6 else { refuse("Supply the fixture field value.") }
-        let value = CommandLine.arguments[5]
+        let value: String
+        if mode == "fill-private" {
+            guard let data = FileManager.default.contents(atPath: CommandLine.arguments[5]), data.count <= 2048,
+                  let text = String(data: data, encoding: .utf8) else { refuse("The private fixture input is unavailable.") }
+            value = text
+        } else { value = CommandLine.arguments[5] }
         guard !value.isEmpty, value.utf16.count <= 2048 else { refuse("The fixture field value is empty or too long.") }
         guard let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false),
@@ -220,11 +225,11 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
         textDown.postToPid(pid)
         textUp.postToPid(pid)
     }
-} else if mode == "enter" || mode == "end" {
+} else if mode == "enter" || mode == "end" || mode == "escape" {
     guard targets.contains(where: { $0.text.localizedCaseInsensitiveContains(expected) }) else {
         refuse("The expected keyboard context is absent from the current owned image.")
     }
-    let key: CGKeyCode = mode == "end" ? 119 : 36
+    let key: CGKeyCode = mode == "end" ? 119 : mode == "escape" ? 53 : 36
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
     down.postToPid(pid)

@@ -4,6 +4,15 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
+import { randomBytes } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import {
+  CanvasPublicSharePublished,
+  CanvasPublicShareRecordUpdated,
+} from "@octant/contracts/canvas-public-share";
+import { CanvasExportRecorded } from "@octant/contracts/canvas-export";
+import { deriveHostRuntimeHostId } from "../packages/host-runtime/src/paths";
+import { makeKeychainCredentialStore } from "../apps/desktop/src/keychainCredentialStore";
 import { startShareService } from "../apps/share/src/server";
 import { readShareConfig } from "../apps/share/src/config";
 import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
@@ -78,11 +87,15 @@ async function main(): Promise<void> {
   let watchdog: ChildProcess | undefined;
   let shareService: ReturnType<typeof startShareService> | undefined;
   let packageProvenance: typeof PackageProvenance.Type | undefined;
+  let ownerSecretStore: ReturnType<typeof makeKeychainCredentialStore> | undefined;
+  let publishedCredentialRef: string | undefined;
+  let ownerSecretCleanupFailed = false;
+  let ownerSecretCleanupVerified = false;
   const controller = new AbortController();
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
-  const timer = setTimeout(interrupted, 150_000);
+  const timer = setTimeout(interrupted, 300_000);
   let verified = false;
   let cleanupVerified = false;
   let pid: number | undefined;
@@ -165,7 +178,7 @@ async function main(): Promise<void> {
         String.raw`
 const owner = Number(process.env.OCTANT_SMOKE_OWNER_PID);
 const group = Number(process.env.OCTANT_SMOKE_APP_PID);
-const deadline = Date.now() + 180000;
+const deadline = Date.now() + 330000;
 if (!Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== "ESRCH"; } };
 const signal = value => { try { process.kill(-group, value); } catch {} };
@@ -188,6 +201,19 @@ const timer = setInterval(() => {
         stdio: "ignore",
       },
     );
+    const nativeInput = (stage: string, mode: string, label: string, value?: string) =>
+      runBoundedCommand(
+        nativeControllerPath,
+        [
+          mode,
+          String(ownPid),
+          join(artifacts, `${stage}.png`),
+          label,
+          ...(value === undefined ? [] : [value]),
+        ],
+        process.env,
+        8000,
+      );
     const Snapshot = Schema.Struct({
       pid: Schema.Number,
       windowId: Schema.Number,
@@ -483,6 +509,199 @@ const timer = setInterval(() => {
     );
     if ((await readdir(join(root, "share", "shares"))).length !== 0)
       throw Error("Preparing the native approval card unexpectedly published content.");
+    const journalPayload = (event: "published" | "updated" | "export" | "settled") => {
+      const name = {
+        published: "canvas.public-share-published@1",
+        updated: "canvas.public-share-updated@1",
+        export: "canvas.export@1",
+        settled: "canvas.public-share-revocation-settled@1",
+      }[event];
+      const connection = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
+      try {
+        const row = connection.all(
+          `SELECT payload_json FROM event_journal WHERE event_name = '${name}' ORDER BY global_sequence DESC LIMIT 1`,
+        )[0];
+        if (row === undefined) throw Error(`The native ${event} result was not journaled.`);
+        return JSON.parse(Schema.decodeUnknownSync(SettingsRow)(row).payload_json);
+      } finally {
+        connection.close();
+      }
+    };
+    ownerSecretStore = makeKeychainCredentialStore(
+      join(bundle, "Contents/Resources/native/octant-keychain-helper"),
+      {
+        storeScope: deriveHostRuntimeHostId(await realpath(join(root, "data"))),
+        namespace: "canvas-public-share-secret",
+        serviceFamily: "octant",
+        timeoutMs: 5000,
+      },
+    );
+    await nativeInput("approve-owned-export", "click", "Approve export");
+    await observeUntil("native-published", (snapshot) => hasText(snapshot, "Exported."));
+    const published = Schema.decodeUnknownSync(CanvasPublicSharePublished)(
+      journalPayload("published"),
+    );
+    publishedCredentialRef = published.credentialRef;
+    const publishedUrl = published.record.url;
+    if (
+      new URL(publishedUrl).origin !== ownService.publicUrl ||
+      published.record.serviceUrl !== ownService.publicUrl
+    )
+      throw Error("The native export did not name the exact owned service.");
+    const exportRecord = Schema.decodeUnknownSync(CanvasExportRecorded)(journalPayload("export"));
+    if (
+      exportRecord.targetId !== "public-link" ||
+      exportRecord.format !== "share-document" ||
+      String(exportRecord.canvasId) !== String(published.record.canvasId) ||
+      exportRecord.outcome.kind !== "receipt" ||
+      exportRecord.outcome.receipt.kind !== "link" ||
+      exportRecord.outcome.receipt.href !== publishedUrl
+    )
+      throw Error("The native export receipt does not match the approved public-link target.");
+    if (!(await ownerSecretStore.has(publishedCredentialRef)))
+      throw Error(
+        "The native link owner credential was not present in its scoped Keychain namespace.",
+      );
+    const viewer = await fetch(publishedUrl);
+    const html = await viewer.text();
+    if (
+      !viewer.ok ||
+      !html.includes("Signups this week") ||
+      !html.includes("Referral page") ||
+      viewer.headers.get("referrer-policy") !== "no-referrer" ||
+      !viewer.headers.get("x-robots-tag")?.includes("noindex") ||
+      !viewer.headers.get("content-security-policy")?.includes("script-src 'none'")
+    )
+      throw Error(
+        "The actual native publication did not produce the expected private viewer response.",
+      );
+    const showPublicLinks = async (stage: string) => {
+      await nativeInput(`${stage}-close-export`, "escape", "Export canvas");
+      await observeUntil(
+        `${stage}-canvas-tab`,
+        (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
+      );
+      await nativeInput(`${stage}-focus-actions`, "focus-before-text", "Signups this week");
+      await nativeInput(`${stage}-open-actions`, "enter", "Signups this week");
+      await observeUntil(`${stage}-actions`, (snapshot) => hasText(snapshot, "Share"));
+      await nativeInput(`${stage}-share`, "click", "Share");
+      await observeUntil(`${stage}-share-dialog`, (snapshot) => hasText(snapshot, "Share canvas"));
+      await nativeInput(`${stage}-public-links-scroll`, "scroll-bottom", "Share canvas");
+      await observeUntil(
+        `${stage}-public-links`,
+        (snapshot) => hasText(snapshot, "Copy link") && hasText(snapshot, "Revoke"),
+      );
+    };
+    await showPublicLinks("published");
+    await nativeInput("native-copy-link", "click", "Copy link");
+    await observeUntil("native-copy-confirmed", (snapshot) => hasText(snapshot, "Link copied."));
+    await nativeInput("native-update-link", "click", "Update");
+    await observeUntil("update-export", (snapshot) => hasText(snapshot, "Review export"));
+    await nativeInput("review-update", "click", "Review export");
+    await observeUntil(
+      "update-owned-card",
+      (snapshot) =>
+        hasText(snapshot, "Export to Public link") &&
+        hasExactText(snapshot, `Posts as ${new URL(ownService.publicUrl).host}`) &&
+        hasText(snapshot, "Updates") &&
+        hasText(snapshot, publishedUrl),
+    );
+    const password = randomBytes(24).toString("base64url");
+    const passwordFile = join(root, "private-viewer-input");
+    await writeFile(passwordFile, password, { mode: 0o600, flag: "wx" });
+    await nativeInput("native-link-password", "fill-private", "Password (optional)", passwordFile);
+    await nativeInput("approve-update", "click", "Approve export");
+    await observeUntil("native-updated", (snapshot) => hasText(snapshot, "Exported."));
+    const updated = Schema.decodeUnknownSync(CanvasPublicShareRecordUpdated)(
+      journalPayload("updated"),
+    );
+    if (
+      updated.record.url !== publishedUrl ||
+      updated.record.publicShareId !== published.record.publicShareId ||
+      !updated.record.passwordProtected
+    )
+      throw Error("The native password update did not retain the same link.");
+    const locked = await fetch(publishedUrl);
+    if (locked.status !== 401 || !(await locked.text()).includes("Password-protected Canvas"))
+      throw Error("The updated public link did not require its password.");
+    const unlock = await fetch(publishedUrl, {
+      method: "POST",
+      redirect: "manual",
+      body: new URLSearchParams({ password }),
+    });
+    const grant = unlock.headers.get("set-cookie");
+    if (
+      unlock.status !== 303 ||
+      grant === null ||
+      !grant.includes("HttpOnly") ||
+      !grant.includes("SameSite=Strict")
+    )
+      throw Error("The actual viewer did not issue a bounded private view grant.");
+    const cookie = grant.split(";")[0];
+    if (cookie === undefined) throw Error("The private viewer grant was absent.");
+    const unlocked = await fetch(publishedUrl, { headers: { cookie } });
+    if (!unlocked.ok || !(await unlocked.text()).includes("Signups this week"))
+      throw Error("The password view grant did not open the native publication.");
+    const report = await fetch(`${publishedUrl}/report`, {
+      method: "POST",
+      body: new URLSearchParams({ reason: "privacy", detail: "Owned native publication fixture" }),
+    });
+    if (!report.ok) throw Error("The actual native publication report was not accepted.");
+    const reports = await readdir(join(root, "share", "reports"));
+    if (reports.length !== 1 || reports[0] === undefined)
+      throw Error("The owned report was not stored once.");
+    const storedReport: unknown = JSON.parse(
+      await readFile(join(root, "share", "reports", reports[0]), "utf8"),
+    );
+    if (
+      typeof storedReport !== "object" ||
+      storedReport === null ||
+      Object.keys(storedReport).sort().join(",") !== "createdAt,detail,reason,shareId"
+    )
+      throw Error("The stored report carried unexpected reporter fields.");
+    await showPublicLinks("updated");
+    await nativeInput("native-revoke", "click", "Revoke");
+    await observeUntil(
+      "native-revoke-card",
+      (snapshot) =>
+        hasText(snapshot, "Revoke this public link?") && hasText(snapshot, publishedUrl),
+    );
+    await nativeInput("native-confirm-revoke", "click", "Revoke link");
+    await observeUntil("native-revoked", (snapshot) =>
+      hasText(snapshot, "Link revoked. It no longer opens."),
+    );
+    const gone = await fetch(publishedUrl, { headers: { cookie } });
+    if (gone.status !== 410) throw Error("The natively revoked publication did not return 410.");
+    journalPayload("settled");
+    if (await ownerSecretStore.has(publishedCredentialRef))
+      throw Error("The native revocation left its scoped owner credential behind.");
+    ownerSecretCleanupVerified = true;
+    await writeFile(
+      join(artifacts, "native-publication-evidence.json"),
+      JSON.stringify(
+        {
+          source: "normal packaged window",
+          publicService: ownService.publicUrl,
+          canvasId: String(published.record.canvasId),
+          publicShareId: String(published.record.publicShareId),
+          targetId: String(exportRecord.targetId),
+          format: exportRecord.format,
+          approvedExport: true,
+          viewerHTTP: true,
+          freshViewerBrowser: false,
+          sameUrlUpdate: true,
+          passwordViewGrant: true,
+          reportPrivacy: true,
+          nativeCopy: true,
+          nativeRevoke410: true,
+          scopedOwnerCredentialRemoved: true,
+          pairedClient: "not-run",
+          offlineRetry: "not-run",
+        },
+        null,
+        2,
+      ),
+    );
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -490,6 +709,20 @@ const timer = setInterval(() => {
     process.removeListener("SIGTERM", interrupted);
     process.removeListener("SIGINT", interrupted);
     if (shareService !== undefined) shareService.stop();
+    if (ownerSecretStore !== undefined && publishedCredentialRef !== undefined) {
+      try {
+        await ownerSecretStore.delete(publishedCredentialRef);
+        if (await ownerSecretStore.has(publishedCredentialRef))
+          throw Error("Owned credential remains.");
+        ownerSecretCleanupVerified = true;
+      } catch {
+        ownerSecretCleanupFailed = true;
+        await writeFile(
+          join(artifacts, "owner-secret-cleanup.json"),
+          JSON.stringify({ result: "unverified" }),
+        );
+      }
+    }
     if (app !== undefined && pid !== undefined && bundle !== undefined) {
       const ownPid = pid;
       const ownedApp = app;
@@ -564,6 +797,11 @@ const timer = setInterval(() => {
   }
   if (controller.signal.aborted || !verified || !cleanupVerified)
     throw Error("Native window proof or cleanup is incomplete.");
+  if (
+    ownerSecretCleanupFailed ||
+    (publishedCredentialRef !== undefined && !ownerSecretCleanupVerified)
+  )
+    throw Error("The owned publication credential cleanup could not be verified.");
   await writeFile(
     join(artifacts, "native-window-evidence.json"),
     JSON.stringify(
@@ -587,7 +825,7 @@ const timer = setInterval(() => {
         nativeOwnedPublishCard: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
-        publishAcceptance: "not-run",
+        publishAcceptance: "native-publish-update-revoke-passed",
         pairedAcceptance: "not-run",
         personalAccount: false,
       },

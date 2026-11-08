@@ -132,10 +132,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for attempt in 1 2; do
-            if node node_modules/electron/install.js; then exit 0; fi
-            sleep 2
-          done
           # The regular release URL has returned repeated upstream 504s.
           # Use the same first-party release asset through its API, verifying
           # the lockfile-installed Electron package's own expected checksum.
@@ -162,7 +158,9 @@ jobs:
             const types = path.join(dist, 'electron.d.ts');
             if (fs.existsSync(types)) fs.renameSync(types, path.resolve('node_modules/electron/electron.d.ts'));
             fs.writeFileSync('node_modules/electron/path.txt', 'Electron.app/Contents/MacOS/Electron');
-            fs.unlinkSync(archive);
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "SHASUMS256.txt"),
+              Object.entries(require("./node_modules/electron/checksums.json"))
+                .map(([name, checksum]) => `${checksum} *${name}`).join("\n") + "\n");
           })().catch(() => { console.error('The verified first-party Electron fallback failed.'); process.exitCode = 1; });
           JS
           node node_modules/electron/install.js
@@ -193,7 +191,50 @@ jobs:
       - name: Package current source without signing or publication
         if: steps.package-cache-proof.outputs.verified != 'true'
         timeout-minutes: 25
-        run: bun run package:desktop
+        run: |
+          cat > "$RUNNER_TEMP/native-electron-build.mjs" <<'JS'
+          import { readFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const version = JSON.parse(await readFile('node_modules/electron/package.json', 'utf8')).version;
+          if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Invalid installed Electron version.');
+          const asset = `electron-v${version}-darwin-arm64.zip`;
+          const files = new Map([
+            [`/v${version}/${asset}`, join(process.env.RUNNER_TEMP, asset)],
+            [`/v${version}/SHASUMS256.txt`, join(process.env.RUNNER_TEMP, 'SHASUMS256.txt')],
+          ]);
+          const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+            const path = files.get(new URL(request.url).pathname);
+            if (!path || !['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 404 });
+            return new Response(request.method === 'HEAD' ? null : Bun.file(path));
+          }});
+          let child;
+          let stopping = false;
+          const stop = () => {
+            if (stopping) return;
+            stopping = true;
+            server.stop(true);
+            if (child) {
+              try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+              const force = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 3000);
+              force.unref();
+            }
+          };
+          process.on('SIGTERM', stop);
+          process.on('SIGINT', stop);
+          process.on('exit', stop);
+          const deadline = setTimeout(stop, 20 * 60 * 1000);
+          try {
+            child = Bun.spawn(['bun', 'run', 'package:desktop'], {
+              env: { ...process.env, ELECTRON_MIRROR: `http://127.0.0.1:${server.port}/` },
+              stdout: 'inherit', stderr: 'inherit', detached: true,
+            });
+            process.exitCode = await child.exited;
+          } finally {
+            clearTimeout(deadline);
+            stop();
+          }
+          JS
+          bun "$RUNNER_TEMP/native-electron-build.mjs"
       - name: Record the fresh package provenance and checksum
         if: steps.package-cache-proof.outputs.verified != 'true'
         run: bun "$RUNNER_TEMP/native-package-cache.mjs" record
@@ -206,7 +247,7 @@ jobs:
             out/native-package-provenance.json
           key: ${{ steps.package-source.outputs.key }}
       - name: Observe the real packaged primary window
-        timeout-minutes: 4
+        timeout-minutes: 7
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
           OCTANT_QA_NATIVE_CONTROLLER: ${{ runner.temp }}/octant-canvas-native-control
