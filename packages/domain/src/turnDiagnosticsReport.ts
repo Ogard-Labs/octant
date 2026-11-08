@@ -86,6 +86,7 @@ interface ToolAccumulator {
 
 interface BucketAccumulator {
   turns: number;
+  finished: number;
   failed: number;
   cancelled: number;
   toolCalls: number;
@@ -180,6 +181,9 @@ export function buildTurnDiagnosticsReport(
     const bucket = buckets.get(bucketKey) ?? newBucket();
     buckets.set(bucketKey, bucket);
     bucket.turns += 1;
+    if (record.stopReason === "end-of-turn" || record.stopReason === "max-tokens") {
+      bucket.finished += 1;
+    }
     if (record.stopReason === "failed") bucket.failed += 1;
     if (record.stopReason === "cancelled") bucket.cancelled += 1;
     if (ttft !== undefined) bucket.ttft.push(ttft);
@@ -301,6 +305,7 @@ export function buildTurnDiagnosticsReport(
       return {
         key,
         turns: bucket.turns,
+        finished: bucket.finished,
         failed: bucket.failed,
         cancelled: bucket.cancelled,
         toolCalls: bucket.toolCalls,
@@ -497,6 +502,7 @@ function newTool(): ToolAccumulator {
 function newBucket(): BucketAccumulator {
   return {
     turns: 0,
+    finished: 0,
     failed: 0,
     cancelled: 0,
     toolCalls: 0,

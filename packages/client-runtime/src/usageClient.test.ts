@@ -175,6 +175,7 @@ describe("UsageClient.diagnostics", () => {
       {
         key: "2026-11-07",
         turns: 1,
+        finished: 1,
         failed: 0,
         cancelled: 0,
         toolCalls: 0,

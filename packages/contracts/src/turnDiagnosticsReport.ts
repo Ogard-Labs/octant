@@ -167,6 +167,8 @@ export const TurnDiagnosticsBucket = Schema.Struct({
   /** The bucket's start: an ISO hour in UTC, or a calendar date in the request's time zone. */
   key: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32)),
   turns: PositiveInt,
+  /** Turns that ended normally or at the output limit: the same definition as the headline. */
+  finished: NonNegativeInt,
   failed: NonNegativeInt,
   cancelled: NonNegativeInt,
   toolCalls: NonNegativeInt,

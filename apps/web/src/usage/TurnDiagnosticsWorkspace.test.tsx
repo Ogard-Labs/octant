@@ -211,16 +211,14 @@ describe("the Diagnostics report copy", () => {
 
   it("marks the previous figures as old and refuses to copy them while a changed filter loads", async () => {
     const copyText = vi.fn(async (_text: string) => undefined);
-    let release: (value: TurnDiagnosticsReport) => void = () => undefined;
-    let first = true;
+    // The dashboard may ask for more than one span per query, so hold them all.
+    let hold = false;
+    const held: Array<(value: TurnDiagnosticsReport) => void> = [];
     const client = {
       diagnostics: vi.fn(() => {
-        if (first) {
-          first = false;
-          return Promise.resolve(troubledReport);
-        }
+        if (!hold) return Promise.resolve(troubledReport);
         return new Promise<TurnDiagnosticsReport>((resolve) => {
-          release = resolve;
+          held.push(resolve);
         });
       }),
     };
@@ -232,9 +230,10 @@ describe("the Diagnostics report copy", () => {
         timeZone="UTC"
       />,
     );
-    await screen.findByRole("region", { name: "Summary" });
+    await screen.findByRole("region", { name: "Headline figures" });
     const copy = screen.getByRole("button", { name: "Copy diagnostics report as JSON" });
     expect(copy).toBeEnabled();
+    hold = true;
 
     await userEvent.click(screen.getByRole("combobox", { name: "Filter diagnostics by mode" }));
     await userEvent.click(await screen.findByRole("option", { name: "Work" }));
@@ -244,7 +243,7 @@ describe("the Diagnostics report copy", () => {
     ).toBeInTheDocument();
     expect(copy).toBeDisabled();
 
-    release(report([]));
+    for (const release of held) release(report([]));
     expect(await screen.findByText("No turns in this range")).toBeInTheDocument();
     expect(screen.queryByText(/Updating…/)).toBeNull();
     expect(copy).toBeEnabled();
