@@ -827,7 +827,9 @@ export function createPackagerOptions(
   resolveDesktopPackageFlavor({ OCTANT_PACKAGE_FLAVOR: identity.flavor }, version);
   return {
     appBundleId: identity.bundleId,
-    appVersion: version,
+    // Windows PE resources require numeric components; the staged manifest
+    // retains the full preview/candidate version used by the application.
+    appVersion: target.platform === "win32" ? version.replace(/-.*/, "") : version,
     arch: target.arch,
     asar:
       target.platform === "darwin" ? { unpack: `**/{${desktopUnpackedFiles().join(",")}}` } : false,

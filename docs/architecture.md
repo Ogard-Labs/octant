@@ -14993,7 +14993,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64|win32-x64` on a matching host only;
-  Windows emits only the QA archive described above.
+  Windows emits only the QA archive described above. Windows PE resource versions
+  use the numeric core; the staged application manifest and archive retain
+  the full preview/candidate version and flavor.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package
