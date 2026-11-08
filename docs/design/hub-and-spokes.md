@@ -344,6 +344,9 @@ the CLI. The hub depends on that:
     server/persistence imports, and composes its journal, usage cache, private
     authority stores, closed credential namespaces, logs and discovery ports.
     It serves loopback Chat and keeps Work/Code and executable extensions refused.
+    CLI-backed provider construction is unavailable before catalog or session
+    work; only existing in-process API providers are composed. This also keeps
+    catalog/version discovery from launching a third-party executable at boot.
     Linked secret-store state remains unavailable until it has native private
     admission. Ready requires real native journal migration; owned local control
     mediates verified backup and graceful drain. Shutdown reports unconfirmed
@@ -356,7 +359,7 @@ the CLI. The hub depends on that:
     artifact, verified against a pinned SHA-512 before extracting its sole regular
     executable into the isolated runner's temporary directory. Version and platform
     are checked before use; this changes test setup only.
-    These internal prerequisites do not admit Windows desktop/server startup;
+    Native storage mechanisms alone do not admit Windows desktop/server startup;
     encrypted-disk setup checks and the boot service
     remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a

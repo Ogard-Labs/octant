@@ -133,6 +133,10 @@ jobs:
         run: |
           bun build scripts/windows-host-owner/sqlite-store.ts --target=bun --outfile "$env:RUNNER_TEMP/sqlite-store-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove native startup storage and generation-safe cleanup in Bun
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --startup-files "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Stage the actual Windows foreground server layout
         run: |
           cmake -S apps/desktop/native/windows-credential-helper -B "$env:RUNNER_TEMP/credential-build" -A x64

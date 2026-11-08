@@ -19,7 +19,7 @@ if (
   (profile !== "octant" && profile !== "nightly-test-data")
 )
   throw Error("Supply the isolated foreground fixture artifacts.");
-const native = loadWindowsHostProfileNative(binding);
+const native = loadWindowsHostProfileNative(win32.resolve(binding));
 if (native === undefined) throw Error("Native foreground fixture unavailable.");
 const resolved = resolveWindowsHostProfile({ native, profile, env: {} });
 if (resolved.status !== "ready") throw Error("Native foreground profile unavailable.");
