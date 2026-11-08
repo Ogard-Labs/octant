@@ -756,7 +756,7 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
     session->file = Handle(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE | READ_CONTROL, FILE_SHARE_READ,
       &attributes, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, nullptr));
   } else session->file = std::move(existing);
-  if (!session->file || !authority_regular(session->file.value, *session->admission->root) ||
+  if (!session->file || !authority_regular(session->file.value, *session->admission->root, nullptr, !writing) ||
       !GetFileInformationByHandleEx(session->file.value, FileIdInfo, &session->identity, sizeof(session->identity)) || next_authority_session > safe_integer) return object(env, "refused");
   // Keep each physical private directory bound across read/write sessions.
   auto& retained = profiles.find(name)->second->identity_guards["authority-directory-" + std::to_string(static_cast<int>(authority_directory(purpose)))];
