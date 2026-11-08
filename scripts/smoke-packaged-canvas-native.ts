@@ -404,7 +404,10 @@ const timer = setInterval(() => {
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
           lastNativeError = "";
-          if (accept(snapshot)) return snapshot;
+          if (accept(snapshot)) {
+            console.log(`Observed native stage: ${stage}`);
+            return snapshot;
+          }
         } catch (error) {
           lastNativeError =
             error instanceof Error ? error.message.slice(-1200) : "Native observation failed.";
@@ -615,7 +618,13 @@ const timer = setInterval(() => {
     await observeUntil("canvas-actions", (snapshot) => hasText(snapshot, "Export"));
     await runBoundedCommand(
       nativeControllerPath,
-      ["click", String(ownPid), join(artifacts, "canvas-export-target.png"), "Export"],
+      [
+        "choose-native-menu-item",
+        String(ownPid),
+        join(artifacts, "canvas-export-target.png"),
+        "Export",
+        "Export…",
+      ],
       process.env,
       8000,
     );
@@ -771,7 +780,7 @@ const timer = setInterval(() => {
       await nativeInput(`${stage}-focus-actions`, "focus-before-text", "Signups this week");
       await nativeInput(`${stage}-open-actions`, "enter", "Signups this week");
       await observeUntil(`${stage}-actions`, (snapshot) => hasText(snapshot, "Share"));
-      await nativeInput(`${stage}-share`, "click", "Share");
+      await nativeInput(`${stage}-share`, "choose-native-menu-item", "Share", "Share…");
       await observeUntil(`${stage}-share-dialog`, (snapshot) => hasText(snapshot, "Share canvas"));
       await nativeInput(`${stage}-public-links-scroll`, "scroll-bottom", "Share canvas");
       await observeUntil(
@@ -931,6 +940,31 @@ const timer = setInterval(() => {
     process.removeListener("SIGINT", interrupted);
     pairedFixture?.connection.disconnect();
     if (shareService !== undefined) shareService.stop();
+    if (ownerSecretStore !== undefined && publishedCredentialRef === undefined) {
+      // An upload can finish before its success notice is observed. Recover
+      // only this fixture's journaled reference so a later UI failure cannot
+      // strand an owned Keychain item when its scratch directory is removed.
+      try {
+        const connection = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
+        try {
+          const row = connection.all(
+            "SELECT payload_json FROM event_journal WHERE event_name = 'canvas.public-share-published@1' ORDER BY global_sequence DESC LIMIT 1",
+          )[0];
+          if (row !== undefined) {
+            const payload = Schema.decodeUnknownSync(
+              Schema.Struct({ payload_json: Schema.String }),
+            )(row);
+            publishedCredentialRef = Schema.decodeUnknownSync(CanvasPublicSharePublished)(
+              JSON.parse(payload.payload_json),
+            ).credentialRef;
+          }
+        } finally {
+          connection.close();
+        }
+      } catch {
+        ownerSecretCleanupFailed = true;
+      }
+    }
     if (ownerSecretStore !== undefined && publishedCredentialRef !== undefined) {
       try {
         await ownerSecretStore.delete(publishedCredentialRef);
