@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 import Darwin
+import Security
 
 // Owned-runner native UI QA. Never requests a TCC permission or reads text-field
 // values or credentials. Dock reads retain only the exact staged bundle icon.
@@ -132,15 +133,24 @@ if mode == "picker-metadata" {
     var seen = Set<CFHashCode>(), processes = Set<pid_t>()
     var ownedWindowRoots = Set<Int>(), ownedSheets = Set<Int>()
     var rows: [[String: Any]] = [], processRows: [[String: Any]] = []
+    var retainedNodes: [AXUIElement] = [], parentRows: [Int?] = []
+    var serviceSubtree: [String: Any] = ["status": "not-observed", "roles": [],
+        "interactionDispatched": false, "labelsOrValuesRead": false]
     var serviceNode: [String: Any] = ["status": "not-observed", "childrenTraversed": false,
         "codeSigningVerified": false, "interactionDispatched": false]
     var index = 0, errors = 0
+    var pickerNativeErrors: [[String: Any]] = []
+    func recordPickerError(_ stage: String, _ error: AXError) {
+        if pickerNativeErrors.count < 512 { pickerNativeErrors.append(["stage": stage, "status": error.rawValue]) }
+    }
     var depthCut = false, nodeCut = queue.count > 512, foreignPid = false, dialogSeen = false
     queue = Array(queue.prefix(512))
     func roleOnly(_ node: AXUIElement, _ attribute: CFString) -> String {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(node, attribute, &value)
-        if result != .success && result != .noValue && result != .attributeUnsupported { errors += 1 }
+        if result != .success && result != .noValue && result != .attributeUnsupported {
+            errors += 1; recordPickerError("role-or-subrole", result)
+        }
         guard result == .success, let text = value as? String,
               text.hasPrefix("AX"), text.count <= 64,
               text.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) }) else { return "" }
@@ -170,8 +180,8 @@ if mode == "picker-metadata" {
             foreignPid = true
             serviceNode["status"] = "unconfirmed"
             serviceNode["reason"] = "requires-owned-sheet-and-exact-observed-service"
-            // Read one node reached through this owned sheet's AXChildren only.
-            // Never create a service application root or traverse its children.
+            // The only possible service subtree starts at this node reached
+            // through the captured app's sheet; never create a service AX root.
             if let sheetRow = entry.sheetRow, ownedSheets.contains(sheetRow),
                ownedWindowRoots.contains(entry.windowIndex), entry.parentRow != nil,
                let identity = kernelIdentity(nodePid),
@@ -182,36 +192,154 @@ if mode == "picker-metadata" {
                bundlePath.hasPrefix("/"), !bundlePath.contains("\0"), bundlePath.utf8.count <= 4096,
                identity.executable.hasPrefix("/"), !identity.executable.contains("\0"), identity.executable.utf8.count <= 4096,
                kernelIdentity(processId) == initialKernelIdentity, Date() < deadline {
+                let fixedBundle = "/System/Library/Frameworks/AppKit.framework/Versions/C/XPCServices/com.apple.appkit.xpc.openAndSavePanelService.xpc"
+                let fixedExecutable = fixedBundle + "/Contents/MacOS/com.apple.appkit.xpc.openAndSavePanelService"
+                var signatureSteps: [[String: Any]] = []
+                serviceSubtree["status"] = "blocked"
+                serviceSubtree["reason"] = "signature-or-association-unconfirmed"
+                func signatureStep(_ stage: String, _ status: OSStatus) -> Bool {
+                    signatureSteps.append(["stage": stage, "status": status])
+                    return status == errSecSuccess && Date() < deadline
+                }
+                func signaturesValid() -> Bool {
+                    guard bundlePath == fixedBundle, identity.executable == fixedExecutable,
+                          Date() < deadline else { return false }
+                    var requirement: SecRequirement?
+                    guard signatureStep("requirement", SecRequirementCreateWithString(
+                        #"anchor apple and identifier "com.apple.appkit.xpc.openAndSavePanelService""# as CFString,
+                        [], &requirement)), let requirement else { return false }
+                    for (stage, path) in [("bundle", fixedBundle), ("executable", fixedExecutable)] {
+                        var code: SecStaticCode?
+                        guard Date() < deadline,
+                              signatureStep(stage + "-create", SecStaticCodeCreateWithPath(
+                                URL(fileURLWithPath: path) as CFURL, [], &code)), let code,
+                              signatureStep(stage + "-validate", SecStaticCodeCheckValidity(code,
+                                SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode),
+                                requirement)) else { return false }
+                    }
+                    var runningCode: SecCode?
+                    guard Date() < deadline,
+                          signatureStep("process-create", SecCodeCopyGuestWithAttributes(nil,
+                            [kSecGuestAttributePid: NSNumber(value: nodePid)] as CFDictionary, [], &runningCode)),
+                          let runningCode,
+                          signatureStep("process-validate", SecCodeCheckValidity(runningCode, [], requirement)) else { return false }
+                    var runningStatic: SecStaticCode?, runningPath: CFURL?
+                    guard signatureStep("process-static", SecCodeCopyStaticCode(runningCode, [], &runningStatic)),
+                          let runningStatic,
+                          signatureStep("process-path", SecCodeCopyPath(runningStatic, [], &runningPath)),
+                          let runningPath else { return false }
+                    return (runningPath as URL).resolvingSymlinksInPath().standardizedFileURL.path == fixedBundle
+                }
+                func identitiesUnchanged() -> Bool {
+                    let currentService = NSRunningApplication(processIdentifier: nodePid)
+                    let currentOwner = NSRunningApplication(processIdentifier: processId)
+                    return Date() < deadline && kernelIdentity(nodePid) == identity &&
+                        kernelIdentity(processId) == initialKernelIdentity && currentService?.isTerminated == false &&
+                        currentService?.bundleIdentifier == service.bundleIdentifier &&
+                        currentService?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == fixedBundle &&
+                        currentOwner?.isTerminated == false &&
+                        currentOwner?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle
+                }
+                func associationUnchanged() -> Bool {
+                    guard identitiesUnchanged(), let element else { return false }
+                    var child = node, cursor = entry.parentRow, chain: [Int] = []
+                    while let row = cursor {
+                        guard Date() < deadline, chain.count < 40, retainedNodes.indices.contains(row),
+                              !chain.contains(row) else { return false }
+                        let parent = retainedNodes[row]
+                        var parentPid: pid_t = 0, childPid: pid_t = 0
+                        var children: CFTypeRef?
+                        let pidStatus = AXUIElementGetPid(parent, &parentPid)
+                        let childStatus = AXUIElementGetPid(child, &childPid)
+                        let childrenStatus = AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &children)
+                        if pidStatus != .success || childStatus != .success || childrenStatus != .success {
+                            if pidStatus != .success { recordPickerError("ancestor-pid", pidStatus) }
+                            if childStatus != .success { recordPickerError("associated-child-pid", childStatus) }
+                            if childrenStatus != .success { recordPickerError("ancestor-children", childrenStatus) }
+                            errors += 1; return false
+                        }
+                        guard parentPid == processId, childPid == (chain.isEmpty ? nodePid : processId),
+                              let children = children as? [AXUIElement], children.count <= 512,
+                              children.contains(where: { CFEqual($0, child) }) else { return false }
+                        chain.append(row); child = parent; cursor = parentRows[row]
+                    }
+                    guard chain.contains(sheetRow), let root = chain.last,
+                          parentRows[root] == nil, roleOnly(retainedNodes[sheetRow], kAXRoleAttribute as CFString) == "AXSheet",
+                          roleOnly(retainedNodes[root], kAXRoleAttribute as CFString) == "AXWindow" else { return false }
+                    var currentWindows: CFTypeRef?
+                    let status = AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &currentWindows)
+                    if status != .success { errors += 1; recordPickerError("owner-windows", status); return false }
+                    return (currentWindows as? [AXUIElement])?.contains(where: { CFEqual($0, retainedNodes[root]) }) == true && identitiesUnchanged()
+                }
                 let priorErrors = errors
-                let serviceRole = roleOnly(node, kAXRoleAttribute as CFString)
-                let serviceSubrole = roleOnly(node, kAXSubroleAttribute as CFString)
-                var freshPid: pid_t = 0
-                let nodeRead = AXUIElementGetPid(node, &freshPid)
-                let freshService = NSRunningApplication(processIdentifier: nodePid)
-                let freshOwner = NSRunningApplication(processIdentifier: processId)
-                if nodeRead == .success, freshPid == nodePid, !serviceRole.isEmpty, errors == priorErrors,
-                   kernelIdentity(nodePid) == identity, kernelIdentity(processId) == initialKernelIdentity,
-                   freshService?.isTerminated == false,
-                   freshService?.bundleIdentifier == service.bundleIdentifier,
-                   freshService?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == bundlePath,
-                   freshOwner?.isTerminated == false,
-                   freshOwner?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
-                   Date() < deadline {
-                    serviceNode = ["status": "observed", "pid": nodePid,
-                        // Both kernel UID observations are required to equal
-                        // this UID by kernelIdentity; no username is queried.
-                        "uid": geteuid(), "birthSeconds": identity.birthSeconds,
-                        "birthMicroseconds": identity.birthMicroseconds,
-                        "kernelCanonicalExecutable": identity.executable,
-                        "canonicalBundlePath": bundlePath,
+                let signatureVerified = signaturesValid()
+                serviceSubtree["signatureSteps"] = signatureSteps
+                serviceSubtree["codeSigningVerified"] = signatureVerified
+                if signatureVerified, associationUnchanged(), errors == priorErrors {
+                    let serviceRole = roleOnly(node, kAXRoleAttribute as CFString)
+                    let serviceSubrole = roleOnly(node, kAXSubroleAttribute as CFString)
+                    let roleConfirmed = !serviceRole.isEmpty && errors == priorErrors
+                    serviceNode = ["status": roleConfirmed ? "observed" : "unconfirmed", "pid": nodePid, "uid": geteuid(),
+                        "birthSeconds": identity.birthSeconds, "birthMicroseconds": identity.birthMicroseconds,
+                        "kernelCanonicalExecutable": identity.executable, "canonicalBundlePath": bundlePath,
                         "serviceBundleIdentifier": service.bundleIdentifier ?? "unavailable",
                         "role": serviceRole, "subrole": serviceSubrole,
                         "parentRow": entry.parentRow.map { $0 as Any } ?? NSNull(),
                         "rootWindowIndex": entry.windowIndex, "ownedSheetRow": sheetRow,
                         "sheetOwnerPid": processId, "identityRechecked": true,
-                        "childrenTraversed": false, "codeSigningVerified": false,
-                        "interactionDispatched": false]
-                } else { serviceNode["reason"] = "identity-or-role-read-unconfirmed" }
+                        "childrenTraversed": false, "codeSigningVerified": true, "interactionDispatched": false]
+                    var subtreeRows: [[String: Any]] = []
+                    var subtree = [(node: node, depth: entry.depth, parent: Optional<Int>.none)]
+                    var subtreeIndex = 0, complete = !serviceRole.isEmpty && errors == priorErrors
+                    // Reuse the original shared node/depth/deadline allowance,
+                    // including nodes already queued in the captured app.
+                    seen.remove(CFHash(node))
+                    while complete && subtreeIndex < subtree.count && Date() < deadline {
+                        let current = subtree[subtreeIndex]; subtreeIndex += 1
+                        guard identitiesUnchanged() else { complete = false; break }
+                        var currentPid: pid_t = 0
+                        let pidStatus = AXUIElementGetPid(current.node, &currentPid)
+                        if pidStatus != .success { errors += 1; recordPickerError("descendant-pid", pidStatus); complete = false; break }
+                        guard currentPid == nodePid else { complete = false; break }
+                        guard seen.insert(CFHash(current.node)).inserted else { continue }
+                        let role = roleOnly(current.node, kAXRoleAttribute as CFString)
+                        let subrole = roleOnly(current.node, kAXSubroleAttribute as CFString)
+                        guard !role.isEmpty, errors == priorErrors, identitiesUnchanged() else { complete = false; break }
+                        let row = subtreeRows.count
+                        subtreeRows.append(["role": role, "subrole": subrole, "depth": current.depth,
+                            "parentRow": current.parent.map { $0 as Any } ?? NSNull()])
+                        if role == "AXSecureTextField" || subrole == "AXSecureTextField" { continue }
+                        if current.depth >= 40 { depthCut = true; complete = false; break }
+                        var children: CFTypeRef?
+                        let status = AXUIElementCopyAttributeValue(current.node, kAXChildrenAttribute as CFString, &children)
+                        serviceNode["childrenTraversed"] = true
+                        if status == .success {
+                            guard let children = children as? [AXUIElement] else { errors += 1; complete = false; break }
+                            let remaining = max(0, 512 - queue.count - subtree.count + 1)
+                            if children.count > remaining { nodeCut = true; complete = false; break }
+                            subtree.append(contentsOf: children.map { (node: $0, depth: current.depth + 1, parent: Optional(row)) })
+                        } else if status != .noValue && status != .attributeUnsupported {
+                            errors += 1; recordPickerError("descendant-children", status); complete = false; break
+                        }
+                    }
+                    let finalAssociation = associationUnchanged() && errors == priorErrors
+                    complete = complete && subtreeIndex == subtree.count && Date() < deadline && finalAssociation
+                    serviceSubtree["status"] = complete ? "observed" : "blocked"
+                    serviceSubtree["reason"] = complete ? "role-only-subtree-observed" : "identity-association-read-or-limit-unconfirmed"
+                    // Never retain a subtree whose association drifted.
+                    serviceSubtree["roles"] = finalAssociation ? subtreeRows : []
+                    serviceSubtree["identityAndAssociationRechecked"] = finalAssociation
+                    serviceSubtree["complete"] = complete
+                    serviceSubtree["depthLimitReached"] = depthCut
+                    serviceSubtree["nodeLimitReached"] = nodeCut
+                    serviceSubtree["timeLimitReached"] = Date() >= deadline
+                    serviceSubtree["sharedQueuedNodes"] = queue.count + subtree.count - 1
+                    if !finalAssociation {
+                        serviceNode["status"] = "unconfirmed"
+                        serviceNode["identityRechecked"] = false
+                        serviceNode.removeValue(forKey: "role"); serviceNode.removeValue(forKey: "subrole")
+                    }
+                }
             }
             break
         }
@@ -223,6 +351,7 @@ if mode == "picker-metadata" {
             ownedWindowRoots.insert(entry.windowIndex)
         }
         let rowIndex = rows.count
+        retainedNodes.append(node); parentRows.append(entry.parentRow)
         rows.append(["pid": nodePid, "role": nodeRole, "subrole": subrole, "depth": depth,
             "parentRow": entry.parentRow.map { $0 as Any } ?? NSNull(), "rootWindowIndex": entry.windowIndex])
         let sheetRow = nodeRole == "AXSheet" ? rowIndex : entry.sheetRow
@@ -256,7 +385,7 @@ if mode == "picker-metadata" {
         "nativeAxTrusted": AXIsProcessTrusted(), "windowsError": windowResult.rawValue,
         "windowOwnership": Array(ownedWindows.prefix(64)), "windowOwnershipTruncated": ownedWindows.count > 64,
         "processes": processRows, "roles": rows, "readErrors": errors,
-        "associatedServiceNode": serviceNode,
+        "associatedServiceNode": serviceNode, "serviceSubtree": serviceSubtree, "nativeErrors": pickerNativeErrors,
         "dialogOrSheetObserved": dialogSeen, "foreignPidBoundaryObserved": foreignPid,
         "truncated": depthCut || nodeCut || foreignPid || index < queue.count,
         "depthLimitReached": depthCut, "nodeLimitReached": nodeCut,
