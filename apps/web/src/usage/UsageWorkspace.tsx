@@ -18,6 +18,7 @@ import type { TurnMetricsSummary } from "@octant/contracts";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import { ProviderUsageHistoryWorkspace } from "./ProviderUsageHistoryWorkspace";
+import { TurnDiagnosticsWorkspace } from "./TurnDiagnosticsWorkspace";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderUsageLimitsPanel } from "./ProviderUsageLimitsPanel";
 import { RefreshCw } from "lucide-react";
@@ -39,6 +40,8 @@ export interface UsageWorkspaceProps {
    * `turnMetrics`; the ledger projection is not asked to grow a second copy.
    */
   readonly usageQuery?: Pick<UsageClient, "query">;
+  /** Reads how turns went; without it the Diagnostics view is not offered. */
+  readonly diagnosticsClient?: Pick<UsageClient, "diagnostics">;
   readonly providerLimitsClient?: ProviderUsageLimitsClient;
   readonly historyClient?: LocalUsageHistoryClient;
   readonly providers?: ReadonlyArray<ProviderInstance>;
@@ -104,12 +107,12 @@ const SOURCE_STATUS_WORDS = {
  * as unavailable rather than shown as zero.
  */
 export function UsageWorkspace(props: UsageWorkspaceProps) {
-  const [source, setSource] = useState<"provider" | "octant">(
-    props.initialFilter === undefined ? "provider" : "octant",
+  const [source, setSource] = useState<"provider" | "octant" | "diagnostics">(
+    props.initialFilter === undefined && props.historyClient !== undefined ? "provider" : "octant",
   );
   const sourceControl =
-    props.historyClient === undefined ? undefined : (
-      <OctantToggleGroup<"provider" | "octant">
+    props.historyClient === undefined && props.diagnosticsClient === undefined ? undefined : (
+      <OctantToggleGroup<"provider" | "octant" | "diagnostics">
         aria-label="Usage source"
         value={[source]}
         onValueChange={(values) => {
@@ -117,10 +120,26 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
           if (next !== undefined) setSource(next);
         }}
       >
-        <OctantToggleGroupItem value="provider">Local provider history</OctantToggleGroupItem>
+        {props.historyClient === undefined ? null : (
+          <OctantToggleGroupItem value="provider">Local provider history</OctantToggleGroupItem>
+        )}
         <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
+        {props.diagnosticsClient === undefined ? null : (
+          <OctantToggleGroupItem value="diagnostics">Diagnostics</OctantToggleGroupItem>
+        )}
       </OctantToggleGroup>
     );
+  if (source === "diagnostics" && props.diagnosticsClient !== undefined) {
+    return (
+      <TurnDiagnosticsWorkspace
+        client={props.diagnosticsClient}
+        sourceControl={sourceControl}
+        {...(props.providers === undefined ? {} : { providers: props.providers })}
+        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+        {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+      />
+    );
+  }
   if (source === "provider" && props.historyClient !== undefined) {
     return (
       <ProviderUsageHistoryWorkspace

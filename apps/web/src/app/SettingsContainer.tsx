@@ -25,7 +25,10 @@ type HostFederationLifecycle = NonNullable<
 >["lifecycle"];
 
 export interface SettingsContainerProps {
-  readonly actions: Pick<ShellActions, "setUsageOpen">;
+  readonly actions: Pick<
+    ShellActions,
+    "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
+  >;
   readonly allProjects: ReturnType<typeof useProjectController>["allProjects"];
   readonly availableFonts?: ReadonlyArray<string>;
   readonly backgroundImageLibrary: ReturnType<typeof useBackgroundImageLibrary>;
@@ -148,6 +151,22 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     return names;
   }, [allProjects, chatThreads, codeThreads, providerController.instances, workThreads]);
 
+  // Only threads can be opened from Usage; any other subject stays put.
+  const openUsageSubject = (subjectType: string, subjectId: string) => {
+    const select =
+      subjectType === "chat-thread"
+        ? actions.selectChatThread
+        : subjectType === "work-thread"
+          ? actions.selectWorkThread
+          : subjectType === "code-thread"
+            ? actions.selectCodeThread
+            : undefined;
+    if (select === undefined) return;
+    actions.setUsageOpen(false);
+    if (props.surface === "settings") controller.closeSettings();
+    select(subjectId);
+  };
+
   const usageSurface = (
     <Suspense
       fallback={
@@ -167,8 +186,10 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
           : { providerLimitsClient: providerUsageLimitsClient })}
         isNarrow={isNarrow}
         onBack={() => actions.setUsageOpen(false)}
+        onOpenSubject={openUsageSubject}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
         usageQuery={usageClient}
+        diagnosticsClient={usageClient}
       />
     </Suspense>
   );
@@ -243,6 +264,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       githubClient={githubClient}
       integrationClient={linearClient}
       usageClient={usageClient}
+      onOpenUsageSubject={openUsageSubject}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}
       backgroundImageLibrary={backgroundImageLibrary}

@@ -89,6 +89,7 @@ describe("usage thread rows", () => {
       query: vi.fn(async () => queryResponse(summary)),
       export: vi.fn(),
       reset: vi.fn(),
+      diagnostics: vi.fn(),
       retain: vi.fn(),
     };
     render(<UsageDashboard client={client} />);

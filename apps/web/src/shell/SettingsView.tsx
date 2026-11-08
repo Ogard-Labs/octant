@@ -76,6 +76,8 @@ import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
 import { ProviderUsageHistoryWorkspace } from "../usage/ProviderUsageHistoryWorkspace";
+import { TurnDiagnosticsWorkspace } from "../usage/TurnDiagnosticsWorkspace";
+import type { ProviderInstance } from "@octant/contracts";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
@@ -236,6 +238,8 @@ export interface SettingsViewProps {
   readonly usageClient?: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
+  /** Leaves Settings for a thread a Usage or Diagnostics row names. */
+  readonly onOpenUsageSubject?: (subjectType: string, subjectId: string) => void;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
@@ -1259,6 +1263,10 @@ function ActiveSectionContent({
           {...(props.localUsageHistoryClient === undefined
             ? {}
             : { historyClient: props.localUsageHistoryClient })}
+          providers={props.providerController?.instances ?? []}
+          {...(props.onOpenUsageSubject === undefined
+            ? {}
+            : { onOpenSubject: props.onOpenUsageSubject })}
           {...(props.providerUsageLimitsClient === undefined
             ? {}
             : {
@@ -2894,27 +2902,40 @@ function UsageSettingsSection(props: {
   readonly historyClient?: LocalUsageHistoryClient;
   readonly isNarrow?: boolean;
   readonly limits?: ReactNode;
+  readonly providers?: ReadonlyArray<ProviderInstance>;
+  readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
-  const [source, setSource] = useState<"provider" | "octant">(
+  const [source, setSource] = useState<"provider" | "octant" | "diagnostics">(
     props.historyClient === undefined ? "octant" : "provider",
   );
-  const sourceControl =
-    props.historyClient === undefined ? undefined : (
-      <OctantToggleGroup<"provider" | "octant">
-        aria-label="Usage source"
-        value={[source]}
-        onValueChange={(values) => {
-          const next = values[0];
-          if (next !== undefined) setSource(next);
-        }}
-      >
+  // Diagnostics reads the same host as Octant records, so it is always offered.
+  const sourceControl = (
+    <OctantToggleGroup<"provider" | "octant" | "diagnostics">
+      aria-label="Usage source"
+      value={[source]}
+      onValueChange={(values) => {
+        const next = values[0];
+        if (next !== undefined) setSource(next);
+      }}
+    >
+      {props.historyClient === undefined ? null : (
         <OctantToggleGroupItem value="provider">Provider history</OctantToggleGroupItem>
-        <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
-      </OctantToggleGroup>
-    );
+      )}
+      <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="diagnostics">Diagnostics</OctantToggleGroupItem>
+    </OctantToggleGroup>
+  );
   return (
     <div className="settings-usage-stack" id="settings-usage">
-      {source === "provider" && props.historyClient !== undefined ? (
+      {source === "diagnostics" ? (
+        <TurnDiagnosticsWorkspace
+          client={props.client}
+          embedded
+          sourceControl={sourceControl}
+          {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      ) : source === "provider" && props.historyClient !== undefined ? (
         <ProviderUsageHistoryWorkspace
           client={props.historyClient}
           embedded
