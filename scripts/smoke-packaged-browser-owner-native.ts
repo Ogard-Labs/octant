@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactHostRuntimeText } from "@octant/host-runtime";
+import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
 import { createQuitAppleScript } from "./package-desktop";
 import {
   cleanupPackagedProcess,
@@ -104,6 +105,63 @@ async function main(): Promise<void> {
   process.once("SIGINT", interrupted);
   const lifetime = setTimeout(interrupted, 180_000);
   const checks: string[] = [];
+  const visualStateImages: string[] = [];
+  const persistedReadings: Array<{
+    readonly checkpoint: string;
+    readonly value: boolean | null;
+    readonly globalSequence: number | null;
+  }> = [];
+  const persistedPreference = () => {
+    const database = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
+    try {
+      // Read only this preference from the authoritative UI-generated event.
+      // No journal payload, other settings or private data leave this query.
+      const rows = database.all(`SELECT
+        json_type(payload_json, '$.settings.persistentBrowserOwner') AS preference_type,
+        json_extract(payload_json, '$.settings.persistentBrowserOwner') AS preference_value,
+        global_sequence FROM event_journal
+        WHERE event_name = 'shell.settings-replaced' AND aggregate_type = 'shell-settings'
+          AND aggregate_id = '00000000-0000-4000-8000-000000000001'
+        ORDER BY global_sequence DESC LIMIT 1`);
+      const row = rows[0];
+      if (row === undefined) return { value: null, globalSequence: null };
+      if (
+        typeof row !== "object" ||
+        row === null ||
+        !("preference_type" in row) ||
+        !("preference_value" in row) ||
+        !("global_sequence" in row) ||
+        typeof row.global_sequence !== "number" ||
+        !Number.isSafeInteger(row.global_sequence) ||
+        row.global_sequence <= 0
+      )
+        throw Error("Owned preference journal read has an unexpected shape.");
+      if (row.preference_type === "true" && row.preference_value === 1)
+        return { value: true, globalSequence: row.global_sequence };
+      if (row.preference_type === "false" && row.preference_value === 0)
+        return { value: false, globalSequence: row.global_sequence };
+      throw Error("Owned preference journal does not contain a strict boolean.");
+    } finally {
+      database.close();
+    }
+  };
+  const recordPersisted = async (checkpoint: string, expected?: boolean) => {
+    const deadline = Date.now() + 3000;
+    while (!controller.signal.aborted) {
+      const reading = persistedPreference();
+      if (expected === undefined || reading.value === expected) {
+        persistedReadings.push({ checkpoint, ...reading });
+        await writeFile(
+          join(artifacts, "preference-read-only-evidence.json"),
+          JSON.stringify(persistedReadings, null, 2),
+        );
+        return;
+      }
+      if (Date.now() >= deadline) break;
+      await pause(100);
+    }
+    throw Error(`Owned UI preference did not persist at ${checkpoint}.`);
+  };
   try {
     await mkdir(artifacts, { recursive: true });
     await mkdir(join(root, "home"));
@@ -342,6 +400,7 @@ end run`;
         throw Error(`Native ${name} did not settle. ${lastError}`);
       };
       const capture = async (name: string, snapshot: string) => {
+        await pause(200);
         await writeFile(join(artifacts, `${phase}-${name}-ax.txt`), snapshot);
         await runBoundedCommand(
           "/usr/sbin/screencapture",
@@ -349,11 +408,8 @@ end run`;
           process.env,
           5000,
         );
+        visualStateImages.push(`${phase}-${name}.png`);
       };
-      const switchValue = (snapshot: string, value: number) =>
-        snapshot
-          .split("\n")
-          .some((line) => line.includes(preference) && line.trim().endsWith(`| ${value}`));
       const settings = async () => {
         await native("key", ",");
         await wait("settings", (s) => s.includes("Data & storage"));
@@ -361,7 +417,9 @@ end run`;
         await native("click", "Data & storage");
         await wait("preference", (s) => s.includes(preference));
         await native("reveal", preference);
-        return wait("preference-state", (s) => switchValue(s, 0) || switchValue(s, 1));
+        // This method records rendered state for independent visual review.
+        // An empty native AXValue never becomes a checked bit.
+        return wait("visible-preference", (s) => s.includes(preference));
       };
       try {
         // Accessibility initialization can rebuild Electron's AX tree. Do it
@@ -392,13 +450,14 @@ end run`;
         } else await wait("restarted-window", (s) => s.includes("AXButton"), 45_000);
         let snapshot = await settings();
         await capture("preference", snapshot);
-        if (!switchValue(snapshot, phase === "initial" ? 0 : 1))
-          throw Error("Native preference value differs from expected persisted value.");
-        checks.push(phase === "initial" ? "default-off" : "opt-in-survives-host-restart");
+        await recordPersisted(`${phase}-before-toggle`, phase === "restart" ? true : undefined);
+        checks.push(`${phase}-preference-captured-for-independent-visual-review`);
         if (phase === "initial") {
           await native("click", preference);
-          snapshot = await wait("opt-in", (s) => switchValue(s, 1));
+          await recordPersisted("initial-after-opt-in", true);
+          snapshot = await native("snapshot");
           await capture("opt-in", snapshot);
+          checks.push("single-ui-opt-in-persisted-in-owned-journal");
           await native("key", "w");
           const deadline = Date.now() + 5000;
           while (Date.now() < deadline && (await native("count")).trim() !== "0") await pause(100);
@@ -414,14 +473,15 @@ end run`;
           await native("activate");
           await wait("reopen", (s) => s.includes("AXButton"));
           snapshot = await settings();
-          if (!switchValue(snapshot, 1)) throw Error("Reopened window lost opt-in.");
+          await recordPersisted("initial-reopened", true);
           await capture("reopened", snapshot);
-          checks.push("reopened-same-process-preference-retained");
+          checks.push("reopened-same-process-persisted-preference-retained");
         } else {
           await native("click", preference);
-          snapshot = await wait("opt-out", (s) => switchValue(s, 0));
+          await recordPersisted("restart-after-opt-out", false);
+          snapshot = await native("snapshot");
           await capture("opt-out", snapshot);
-          checks.push("switch-off-through-native-settings");
+          checks.push("single-ui-opt-out-persisted-in-owned-journal");
         }
         await native("key", "q");
         if (!(await exited(app.child, 8000)))
@@ -481,6 +541,12 @@ end run`;
           checks,
           nativeUi: true,
           nativeInputMethod: "single native click at fresh owned AX bounds",
+          stateVerificationMethod:
+            "rendered screenshots with read-only preference journal corroboration",
+          nativeAxCheckedState: "unavailable-empty-CFString",
+          stateChecks: "pending independent visual review",
+          visualStateImages,
+          persistedReadings,
           cleanup: "verified",
           activeExecutionLease: "not-run",
           profileCookieContinuity: "not-run",
