@@ -466,6 +466,9 @@ cannot be read hands a switch the raw selection, as before.
 - 2026-11-07: Slice 2 (idle rule) built.
 - 2026-11-07: Slice 3 (limit rule, handover summary, notice) built; D-5 added.
 - 2026-11-08: Code handover summary built; D-6 supersedes D-5.
+- 2026-11-08: The one-request scratch folder (`hand-off-scratch/<thread>`), used by
+  the Code handover summary and Work's thread hand-off, was never removed, and
+  no thread purge reached it. Each request now removes it when it ends.
 - 2026-11-08: Review of the Code handover: a conversation read that failed
   (the event store's scan bound on a long thread) threw out the whole limit
   compaction, a thread past 4,000 turns read its oldest part, identical texts

@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
@@ -430,7 +430,7 @@ export function wireContext(deps: ContextDependencies) {
               conversation: (threadId) =>
                 codeSessionConversation(decodeCodeThreadId(threadId)) ?? [],
               // The summary is one tool-free request, so it runs in a private
-              // host folder, never in the thread's checkout.
+              // host folder, never in the thread's checkout, removed once it ends.
               scratchRoot: async (threadId) => {
                 const root = join(
                   persistence.dataDirectory,
@@ -439,6 +439,16 @@ export function wireContext(deps: ContextDependencies) {
                 );
                 await mkdir(root, { recursive: true, mode: 0o700 });
                 return root;
+              },
+              releaseScratchRoot: async (threadId) => {
+                await rm(
+                  join(
+                    persistence.dataDirectory,
+                    "hand-off-scratch",
+                    String(decodeCodeThreadId(threadId)),
+                  ),
+                  { recursive: true, force: true },
+                );
               },
             },
           }),
