@@ -53,6 +53,8 @@ try {
     $octantPathSpellings = @($octantExecutable)
     if ($octantExecutable -match '^[A-Za-z]:\\') { $octantPathSpellings += '\\?\' + $octantExecutable }
     $octantExpected = @()
+    $octantExpectedImageArgument = @()
+    $octantQuotedUrlPattern = [regex]::Escape('"%1"')
     foreach ($octantPath in $octantPathSpellings) {
       foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
         $octantExpected += $octantImage + ' "%1"'
@@ -60,15 +62,23 @@ try {
         # Electron may repeat its staged image as one explicit argument.
         foreach ($octantArgumentPath in $octantPathSpellings) {
           foreach ($octantArgumentImage in @($octantArgumentPath, '"' + $octantArgumentPath + '"')) {
-            $octantExpected += $octantImage + ' ' + $octantArgumentImage + ' "%1"'
-            $octantExpected += $octantImage + ' ' + $octantArgumentImage + ' -- "%1"'
+            $octantExpectedImageArgument += '\A' + [regex]::Escape($octantImage) + '[ \t]+' + [regex]::Escape($octantArgumentImage) + '(?:[ \t]+--)?[ \t]+' + $octantQuotedUrlPattern + '\z'
           }
         }
       }
     }
-    $octantOwnedCommand = $octantExpected -icontains $octantCommand
+    $octantTrimmedCommand = $octantCommand.Trim()
+    $octantOwnedCommand = $octantExpected -icontains $octantTrimmedCommand
     if (-not $octantOwnedCommand) {
-      $octantTrimmedCommand = $octantCommand.Trim()
+      $octantRegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+      foreach ($octantPattern in $octantExpectedImageArgument) {
+        if ([regex]::IsMatch($octantTrimmedCommand, $octantPattern, $octantRegexOptions)) {
+          $octantOwnedCommand = $true
+          break
+        }
+      }
+    }
+    if (-not $octantOwnedCommand) {
       foreach ($octantPath in $octantPathSpellings) {
         foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
           if (-not $octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { continue }
@@ -126,7 +136,7 @@ try {
       $octantArgumentPathKinds = @()
       $octantArgumentQuotedUrlMatches = @()
       $octantArgumentTokenCount = 0
-      $octantExactRepeatedImageUrlSequence = $false
+      $octantExactStagedImageUrlSequence = $false
       $octantTrimmedCommand = $octantCommand.Trim()
       $octantPackageAppRoot = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'resources/app'))
       $octantPackageAppEntry = [IO.Path]::GetFullPath((Join-Path $octantPackageAppRoot 'apps/desktop/dist/entry.mjs'))
@@ -151,6 +161,9 @@ try {
             [void]$octantDiagnosticTokens.Add([string]$octantDiagnosticMatch.Value)
           }
           $octantArgumentTokenCount = $octantDiagnosticTokens.Count
+          $octantArgumentQuotedUrlMatches = @($octantDiagnosticTokens | ForEach-Object {
+            [string]::Equals([string]$_, '"%1"', [StringComparison]::Ordinal)
+          })
           foreach ($octantToken in $octantDiagnosticTokens) {
             $octantUnquotedToken = $octantToken.Trim('"')
             $octantTokenShape = if ($octantToken -ceq '"%1"') {
@@ -181,46 +194,26 @@ try {
               'other-argument'
             }
             if ($octantArgumentTokenShapes.Count -lt 8) { $octantArgumentTokenShapes += $octantTokenShape }
-          }
-          $octantArgumentTokenCount = $octantArgumentTokenShapes.Count
-          if ($octantDiagnosticTokens.Count -eq 4) {
-            foreach ($octantPathIndex in @(0, 2)) {
-              $octantPathToken = [string]$octantDiagnosticTokens[$octantPathIndex]
-              $octantPathWasQuoted = $octantPathToken.StartsWith('"') -and $octantPathToken.EndsWith('"')
-              if ($octantPathWasQuoted) { $octantPathToken = $octantPathToken.Substring(1, $octantPathToken.Length - 2) }
-              $octantPathKind = 'outside-staged-package'
+            if ($octantTokenShape -eq 'path-argument' -and $octantArgumentPathKinds.Count -lt 8) {
+              $octantPathIsExactStagedImage = $false
               foreach ($octantPathSpelling in $octantPathSpellings) {
-                if ([string]::Equals($octantPathSpelling, $octantPathToken, [StringComparison]::OrdinalIgnoreCase)) {
-                  $octantPathKind = if ($octantPathSpelling.StartsWith('\\?\')) { 'staged-executable-namespaced' } else { 'staged-executable-ordinary' }
+                if ([string]::Equals($octantPathSpelling, $octantUnquotedToken, [StringComparison]::OrdinalIgnoreCase)) {
+                  $octantPathIsExactStagedImage = $true
                   break
                 }
               }
-              if ($octantPathKind -eq 'outside-staged-package' -and
-                  ($octantPathToken -match '^[A-Za-z]:\\' -or $octantPathToken.StartsWith('\\?\'))) {
-                $octantNormalizedPath = $octantPathToken
-                if ($octantNormalizedPath.StartsWith('\\?\')) { $octantNormalizedPath = $octantNormalizedPath.Substring(4) }
-                $octantNormalizedPath = [IO.Path]::GetFullPath($octantNormalizedPath)
-                if ($octantNormalizedPath.StartsWith($octantPackageRoot, [StringComparison]::OrdinalIgnoreCase)) {
-                  $octantPathKind = 'other-path-in-staged-package'
-                }
-              }
-              if ($octantPathWasQuoted) {
-                $octantPathKind += '-quoted'
-              } else {
-                $octantPathKind += '-unquoted'
-              }
+              $octantPathKind = if ($octantPathIsExactStagedImage) { 'staged-executable' } else { 'other-path' }
               $octantArgumentPathKinds += $octantPathKind
             }
-            $octantArgumentQuotedUrlMatches = @(
-              ($octantDiagnosticTokens[1] -ceq '"%1"'),
-              ($octantDiagnosticTokens[3] -ceq '"%1"')
-            )
-            $octantExactRepeatedImageUrlSequence =
-              $octantArgumentPathKinds[0] -match '^staged-executable-' -and
-              $octantArgumentQuotedUrlMatches[0] -and
-              $octantArgumentPathKinds[1] -match '^staged-executable-' -and
-              $octantArgumentQuotedUrlMatches[1]
           }
+          $octantArgumentTokenCount = $octantArgumentTokenShapes.Count
+          $octantExactStagedImageUrlSequence =
+            $octantArgumentPathKinds.Count -eq 1 -and
+            $octantArgumentPathKinds[0] -eq 'staged-executable' -and
+            (
+              ($octantDiagnosticTokens.Count -eq 2 -and $octantDiagnosticTokens[1] -ceq '"%1"') -or
+              ($octantDiagnosticTokens.Count -eq 3 -and $octantDiagnosticTokens[1] -ceq '--' -and $octantDiagnosticTokens[2] -ceq '"%1"')
+            )
           break
         }
         if ($octantImageAtStart) { break }
@@ -237,7 +230,7 @@ try {
         argumentPathKinds = $octantArgumentPathKinds
         argumentQuotedUrlMatches = $octantArgumentQuotedUrlMatches
         argumentTokenCount = $octantArgumentTokenCount
-        exactRepeatedImageUrlSequence = $octantExactRepeatedImageUrlSequence
+        exactStagedImageUrlSequence = $octantExactStagedImageUrlSequence
         argument = $octantArgumentShape
         electronSeparator = $octantSeparator
       } | ConvertTo-Json -Compress)
