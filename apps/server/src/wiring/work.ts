@@ -1,4 +1,5 @@
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -218,7 +219,10 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
-  >;
+  > & {
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+  };
 
 export function wireWork(deps: WorkDependencies) {
   const {
@@ -348,6 +352,7 @@ export function wireWork(deps: WorkDependencies) {
       });
     };
     const workThreadService = new WorkThreadService({
+      moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,
@@ -399,6 +404,7 @@ export function wireWork(deps: WorkDependencies) {
       projectLabel: (projectId) => persistence.readProject(projectId as ProjectId)?.name,
     });
     const workTurnService = new WorkTurnService({
+      moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
