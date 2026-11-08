@@ -1,7 +1,6 @@
 /** Private, separately owned policy worker. This is not a provider entry point. */
 import { Schema } from "effect";
 import { BuiltInProtectedFilesId, ProtectedFilesChannel } from "@octant/contracts/protected-files";
-import { Socket } from "node:net";
 import { buildBubblewrapLaunch } from "./linuxConfinement";
 import type { ProcessConfinementPrepareInput } from "./seatbeltProfile";
 import { applyProtectedFilesChoice, configureSecretGuardLocations } from "./secretGuard";
@@ -98,37 +97,63 @@ export const LinuxMediationWorkerConfig = Schema.Struct({
 export type LinuxMediationWorkerConfig = typeof LinuxMediationWorkerConfig.Type;
 
 export async function runLinuxMediationWorker(): Promise<void> {
-  const control = new Socket({ fd: 3, readable: true, writable: true });
+  if (process.send === undefined || !process.connected) return;
   const owner = new AbortController();
-  let buffer = Buffer.alloc(0);
   let configured = false;
+  let received = 0;
+  let queuedBytes = 0;
   let pending:
     | { readonly expected: string; readonly resolve: (accepted: boolean) => void }
     | undefined;
+  const disconnect = () => {
+    try {
+      if (process.connected) process.disconnect?.();
+    } catch {
+      owner.abort();
+    }
+  };
   const stop = () => {
     owner.abort();
     pending?.resolve(false);
     pending = undefined;
     if (!configured) {
       clearTimeout(maximum);
-      control.destroy();
+      disconnect();
       process.stdin.destroy();
       process.removeListener("SIGTERM", stop);
       process.removeListener("SIGINT", stop);
     }
   };
-  const send = (value: object) => {
-    const frame = Buffer.from(`${JSON.stringify(value)}\n`);
+  const send = async (value: object): Promise<boolean> => {
+    const bytes = Buffer.byteLength(JSON.stringify(value));
     if (
-      frame.length > 1_024 ||
-      control.destroyed ||
-      control.writableLength + frame.length > 4_096
+      bytes > 1_024 ||
+      queuedBytes + bytes > 4_096 ||
+      process.send === undefined ||
+      !process.connected
     ) {
       stop();
       return false;
     }
-    control.write(frame);
-    return true;
+    queuedBytes += bytes;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const sent = await new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 1_000);
+        try {
+          // false means accepted backpressure. Only the callback observes loss;
+          // a message is never replayed in either case.
+          process.send?.(value, (error: Error | null) => resolve(!error));
+        } catch {
+          resolve(false);
+        }
+      });
+      if (!sent) stop();
+      return sent;
+    } finally {
+      clearTimeout(timer);
+      queuedBytes -= bytes;
+    }
   };
   const wait = (expected: string) =>
     new Promise<boolean>((resolve) => {
@@ -140,9 +165,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
     });
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
-  control.once("error", stop);
-  control.once("end", stop);
-  control.once("close", stop);
+  process.once("disconnect", stop);
   const maximum = setTimeout(stop, 180_000);
   const run = async (value: unknown) => {
     try {
@@ -181,68 +204,66 @@ export async function runLinuxMediationWorker(): Promise<void> {
           environment: config.environment,
           ready: async (relayPid) => {
             const accepted = wait("L");
-            if (!send({ status: "ready", relayPid })) return false;
+            if (!(await send({ status: "ready", relayPid }))) return false;
             return accepted;
           },
           command: async (pid) => {
             const accepted = wait("E");
-            if (!send({ status: "command", pid })) return false;
+            if (!(await send({ status: "command", pid }))) return false;
             return accepted;
           },
         },
       });
-      send({ status: "result", result });
+      await send({ status: "result", result });
     } catch {
-      send({ status: "result", result: { status: "unavailable", reason: "broker-protocol" } });
+      await send({
+        status: "result",
+        result: { status: "unavailable", reason: "broker-protocol" },
+      });
     } finally {
       clearTimeout(maximum);
       stop();
       process.removeListener("SIGTERM", stop);
       process.removeListener("SIGINT", stop);
-      control.end(() => control.destroy());
+      process.removeListener("message", receive);
+      process.removeListener("disconnect", stop);
+      disconnect();
       process.stdin.destroy();
     }
   };
-  control.on("data", (chunk: Buffer) => {
-    if (owner.signal.aborted || buffer.length + chunk.length > MEDIATION_CONFIG_BYTES + 4) {
+  const receive = (value: unknown) => {
+    if (owner.signal.aborted) return;
+    try {
+      if (++received > 4 || Buffer.byteLength(JSON.stringify(value)) > MEDIATION_CONFIG_BYTES) {
+        stop();
+        return;
+      }
+    } catch {
       stop();
       return;
     }
-    buffer = Buffer.concat([buffer, chunk]);
     if (!configured) {
-      if (buffer.length < 4) return;
-      const size = buffer.readUInt32LE(0);
-      if (size < 2 || size > MEDIATION_CONFIG_BYTES) {
+      if (value === "X") {
         stop();
         return;
       }
-      if (buffer.length < size + 4) return;
-      const encoded = buffer.subarray(4, size + 4);
-      buffer = buffer.subarray(size + 4);
       configured = true;
-      try {
-        void run(JSON.parse(encoded.toString("utf8")));
-      } catch {
-        configured = false;
-        stop();
-      }
+      void run(value);
+      return;
     }
-    while (buffer.length > 0 && !owner.signal.aborted) {
-      const tag = String.fromCharCode(buffer[0] ?? 0);
-      buffer = buffer.subarray(1);
-      if (tag === "X") {
-        stop();
-        return;
-      }
-      if (pending === undefined || tag !== pending.expected) {
-        stop();
-        return;
-      }
-      const accept = pending.resolve;
-      pending = undefined;
-      accept(true);
+    if (value === "X") {
+      stop();
+      return;
     }
-  });
+    if (pending === undefined || value !== pending.expected) {
+      stop();
+      return;
+    }
+    const accept = pending.resolve;
+    pending = undefined;
+    accept(true);
+  };
+  process.on("message", receive);
 }
 
 if (import.meta.main) await runLinuxMediationWorker();

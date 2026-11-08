@@ -217,6 +217,17 @@ PID/birth receipt. All private control uses FD3, separately from bounded,
 backpressured stdin/stdout/stderr. The existing canonical owner-only receipt
 root is covered through the builder's real additional read/write denials.
 
+The worker's private channel uses standard child-process JSON IPC: one typed
+configuration, `L` to request launch, `E` to release the held command and `X`
+to cancel, with bounded ready/command/result replies. A send returning false
+means accepted backpressure; callbacks report transport failure, and no message
+is replayed. Owner disconnect retires admission. The native relay retains its
+separate binary FD3 channel; neither control channel becomes command stdio.
+Healthy completion requires actual child EXIT plus payload EOF and IPC
+disconnect; a channel or kill error never counts as EXIT. Existing caller and
+cleanup deadlines remain in force. Native Linux acceptance of this transport
+correction is pending; the working host IPC check is not capsule proof.
+
 Preparation and execution share a caller deadline of at most the candidate's
 existing 180 seconds; normal output drains until EOF or that deadline. Input
 past EOF refuses, and an accepted write that loses its pipe reports uncertainty

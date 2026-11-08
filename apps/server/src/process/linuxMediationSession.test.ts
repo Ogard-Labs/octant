@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { Duplex, PassThrough, Writable } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareLinuxMediationSession } from "./linuxMediationSession";
 
@@ -41,8 +41,8 @@ const input = (signal: AbortSignal, maximumMs = 1_000) => ({
   policy: { entries: [], ownAccountPaths: [], sshCompanionDirectory: undefined },
 });
 
-function worker(write: (callback: (error?: Error | null) => void) => void) {
-  const child = new EventEmitter();
+function worker(write: (callback: (error?: Error | null) => void) => void, joinsOnCancel = true) {
+  const events = new EventEmitter();
   const stdout = new PassThrough(),
     stderr = new PassThrough();
   const stdin = new Writable({
@@ -50,31 +50,39 @@ function worker(write: (callback: (error?: Error | null) => void) => void) {
       write(callback);
     },
   });
-  const control = new Duplex({
-    read() {},
-    write(bytes, _encoding, callback) {
-      const tag = bytes.toString();
-      if (tag === "L") this.push('{"status":"command","pid":1003}\n');
-      else if (tag === "X") {
-        queueMicrotask(() => {
-          this.push(null);
-          stdout.end();
-          stderr.end();
-          child.emit("exit", 0);
-          child.emit("close", 0);
-        });
-      } else if (tag !== "E") this.push('{"status":"ready","relayPid":1002}\n');
-      callback();
-    },
-  });
-  return Object.assign(child, {
+  const child = Object.assign(events, {
     pid: 1001,
     stdin,
     stdout,
     stderr,
-    stdio: [stdin, stdout, stderr, control],
+    connected: true,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    stdio: [stdin, stdout, stderr, null],
     kill: vi.fn(),
+    disconnect: () => {
+      child.connected = false;
+      child.emit("disconnect");
+      stdout.end();
+      stderr.end();
+    },
+    send: (value: unknown, callback: (error: Error | null) => void) => {
+      if (value === "L") child.emit("message", { status: "command", pid: 1003 });
+      else if (value === "X") {
+        if (joinsOnCancel)
+          queueMicrotask(() => {
+            child.disconnect();
+            child.exitCode = 0;
+            child.emit("exit", 0);
+            child.emit("close", 0);
+          });
+      } else if (value !== "E") child.emit("message", { status: "ready", relayPid: 1002 });
+      callback(null);
+      // Deliberately exercise accepted IPC backpressure in every public case.
+      return false;
+    },
   });
+  return child;
 }
 
 beforeEach(() => {
@@ -203,5 +211,22 @@ describe("owned mediation session admission and input", () => {
       reason: "cancelled",
       cleanup: "uncertain",
     });
+  });
+  it("keeps cleanup uncertain when an IPC error has no observed process exit", async () => {
+    const child = worker((done) => done(), false);
+    fixture.spawn.mockReturnValue(child);
+    const prepared = await prepareLinuxMediationSession(input(new AbortController().signal));
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    child.emit("error", new Error("synthetic live-channel error"));
+    expect(await prepared.session.exited).toEqual({
+      result: { status: "unavailable", reason: "native-unavailable" },
+      cleanup: "uncertain",
+    });
+    expect(fixture.terminate).toHaveBeenCalledWith(
+      1001,
+      "fixture-birth",
+      300,
+      expect.any(Function),
+    );
   });
 });

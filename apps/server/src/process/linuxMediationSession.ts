@@ -1,6 +1,6 @@
 /** Owned lifecycle for the disposable Linux mediation candidate, not production selection. */
 import { spawn } from "node:child_process";
-import { PassThrough, Duplex, type Readable } from "node:stream";
+import { PassThrough, type Readable } from "node:stream";
 import { isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { lstat, realpath } from "node:fs/promises";
@@ -139,11 +139,12 @@ export async function prepareLinuxMediationSession(input: {
           environment: input.environment,
           secretGuard,
         };
-        Schema.decodeUnknownSync(LinuxMediationWorkerConfig)(config, { onExcessProperty: "error" });
-        const encoded = Buffer.from(JSON.stringify(config));
-        if (encoded.length > MEDIATION_CONFIG_BYTES)
+        const decoded = Schema.decodeUnknownSync(LinuxMediationWorkerConfig)(config, {
+          onExcessProperty: "error",
+        });
+        if (Buffer.byteLength(JSON.stringify(decoded)) > MEDIATION_CONFIG_BYTES)
           throw new Error("Configuration bound exceeded.");
-        return { status: "configured" as const, encoded };
+        return { status: "configured" as const, config: decoded };
       } catch {
         return { status: "invalid-configuration" as const };
       }
@@ -170,10 +171,11 @@ export async function prepareLinuxMediationSession(input: {
           : prepared.status,
       cleanup: "confirmed",
     };
-  const encoded = prepared.encoded;
+  const config = prepared.config;
   const child = spawn(input.brokerExecutable, ["--linux-mediation-worker"], {
     detached: true,
-    stdio: ["pipe", "pipe", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe", "ipc"],
+    serialization: "json",
     env: {
       PATH: "/usr/bin:/bin",
       HOME: homedir(),
@@ -181,7 +183,6 @@ export async function prepareLinuxMediationSession(input: {
       TMPDIR: input.launch.temporaryDirectory,
     },
   });
-  const control = child.stdio[3];
   const stdout = new PassThrough({ highWaterMark: IO_BYTES });
   const stderr = new PassThrough({ highWaterMark: IO_BYTES });
   child.stdout?.pipe(stdout);
@@ -194,10 +195,12 @@ export async function prepareLinuxMediationSession(input: {
   let phase: "preparing" | "ready" | "launching" | "running" | "stopping" | "exited" = "preparing";
   let result: LinuxMediationBrokerResult | undefined;
   let workerExited = false;
-  let workerClosed = false;
   const acquisitions = new Set<Promise<void>>();
   let ownershipUncertain = false;
-  let buffer = Buffer.alloc(0);
+  let ipcDisconnected = false;
+  let stdoutEnded = false;
+  let stderrEnded = false;
+  let pendingControl = 0;
   let queued = 0;
   let pendingInput = 0;
   let inputEnded = false;
@@ -245,11 +248,20 @@ export async function prepareLinuxMediationSession(input: {
       });
     return acquisition;
   };
-  const send = (tag: string) => {
-    if (!(control instanceof Duplex) || control.destroyed || control.writableLength > 4_096)
+  const send = (tag: "L" | "E" | "X") => {
+    if (!child.connected || pendingControl >= 4) return false;
+    pendingControl++;
+    try {
+      // A false return is an accepted queued message, never a retry signal.
+      child.send(tag, (error) => {
+        pendingControl--;
+        if (error) abort();
+      });
+      return true;
+    } catch {
+      pendingControl--;
       return false;
-    control.write(tag);
-    return true;
+    }
   };
   const finish = () => {
     finishing ??= (async () => {
@@ -290,10 +302,16 @@ export async function prepareLinuxMediationSession(input: {
         if (!removed) cleanup = "uncertain";
       }
       if (!workerExited) cleanup = "uncertain";
-      control?.destroy();
+      try {
+        if (child.connected) child.disconnect();
+      } catch {
+        cleanup = "uncertain";
+      }
+      child.removeAllListeners("message");
+      child.removeAllListeners("disconnect");
       child.stdout?.destroy();
       child.stderr?.destroy();
-      if (!workerClosed) {
+      if (!stdoutEnded || !stderrEnded) {
         stdout.destroy();
         stderr.destroy();
       }
@@ -314,15 +332,34 @@ export async function prepareLinuxMediationSession(input: {
     },
     Math.max(0, deadline - Date.now()),
   );
+  let sequence = Promise.resolve();
+  const naturalExit = () => {
+    if (workerExited && stdoutEnded && stderrEnded && ipcDisconnected) void sequence.then(finish);
+  };
+  child.stdout?.once("end", () => {
+    stdoutEnded = true;
+    naturalExit();
+  });
+  child.stderr?.once("end", () => {
+    stderrEnded = true;
+    naturalExit();
+  });
   child.once("exit", () => {
     workerExited = true;
+    naturalExit();
   });
-  child.once("close", () => {
-    workerClosed = true;
-    void sequence.then(finish);
+  child.once("close", naturalExit);
+  child.once("disconnect", () => {
+    ipcDisconnected = true;
+    void sequence.then(() => {
+      if (result === undefined) abort();
+      else naturalExit();
+    });
   });
-  child.once("error", () => {
-    workerExited = true;
+  child.on("error", () => {
+    // IPC/send/kill failures do not prove that the owned process has exited.
+    if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null)
+      workerExited = true;
     result ??= { status: "unavailable", reason: "native-unavailable" };
     void finish();
   });
@@ -330,62 +367,49 @@ export async function prepareLinuxMediationSession(input: {
   child.stdout?.on("error", abort);
   child.stderr?.on("error", abort);
   input.signal.addEventListener("abort", abort, { once: true });
-  let sequence = Promise.resolve();
-  if (!(control instanceof Duplex) || child.pid === undefined) {
+  if (!child.connected || child.pid === undefined) {
     abort();
   } else {
-    control.on("error", abort);
-    control.on("end", () => {
-      void sequence.then(() => {
-        if (result === undefined) abort();
-      });
-    });
-    control.on("data", (chunk: Buffer) => {
+    child.on("message", (value: unknown) => {
       if (phase === "stopping" || phase === "exited") return;
-      if (buffer.length + chunk.length > 4_096) {
-        abort();
-        return;
-      }
-      buffer = Buffer.concat([buffer, chunk]);
-      let index: number;
-      while ((index = buffer.indexOf(10)) >= 0) {
-        if (++queued > 3) {
+      try {
+        if (++queued > 3 || Buffer.byteLength(JSON.stringify(value)) > 4_096) {
           abort();
           return;
         }
-        const line = buffer.subarray(0, index);
-        buffer = buffer.subarray(index + 1);
-        sequence = sequence
-          .then(async () => {
-            const message = Schema.decodeUnknownSync(Message)(JSON.parse(line.toString("utf8")), {
-              onExcessProperty: "error",
-            });
-            if (phase === "stopping" || phase === "exited") return;
-            if (message.status === "ready" && phase === "preparing") {
-              await own(message.relayPid);
-              if (phase !== "preparing") return;
-              phase = "ready";
-              settleReady(true);
-            } else if (message.status === "command" && phase === "launching") {
-              await own(message.pid);
-              if (phase !== "launching") return;
-              phase = "running";
-              if (!send("E")) abort();
-              else releaseCommand(true);
-            } else if (message.status === "result" && result === undefined) {
-              result = message.result;
-            } else abort();
-          })
-          .catch(abort);
+      } catch {
+        abort();
+        return;
       }
+      sequence = sequence
+        .then(async () => {
+          const message = Schema.decodeUnknownSync(Message)(value, {
+            onExcessProperty: "error",
+          });
+          if (phase === "stopping" || phase === "exited") return;
+          if (message.status === "ready" && phase === "preparing") {
+            await own(message.relayPid);
+            if (phase !== "preparing") return;
+            phase = "ready";
+            settleReady(true);
+          } else if (message.status === "command" && phase === "launching") {
+            await own(message.pid);
+            if (phase !== "launching") return;
+            phase = "running";
+            if (!send("E")) abort();
+            else releaseCommand(true);
+          } else if (message.status === "result" && result === undefined) {
+            result = message.result;
+          } else abort();
+        })
+        .catch(abort);
     });
     try {
       const owned = await Promise.race([own(child.pid).then(() => true), exited.then(() => false)]);
       if (owned && phase === "preparing" && !input.signal.aborted) {
-        const frame = Buffer.alloc(encoded.length + 4);
-        frame.writeUInt32LE(encoded.length);
-        encoded.copy(frame, 4);
-        control.write(frame);
+        child.send(config, (error) => {
+          if (error) abort();
+        });
       } else abort();
     } catch {
       abort();
