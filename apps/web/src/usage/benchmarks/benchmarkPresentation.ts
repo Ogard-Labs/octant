@@ -782,16 +782,28 @@ export function historyContenderKey(contender: ContenderRef): string {
   return `${contenderKey(String(contender.providerInstanceId), String(contender.modelId))}\u0000${contender.effort ?? ""}`;
 }
 
-export interface HistoryCharts {
-  readonly checkPassRate: CanvasChartBlock | undefined;
-  readonly judgeScore: CanvasChartBlock | undefined;
+export interface HistoryChart {
+  readonly block: CanvasChartBlock | undefined;
+  /** Some contender has no reading in every run, so the chart leaves it out. */
+  readonly leftOut: boolean;
 }
+
+export interface HistoryCharts {
+  readonly checkPassRate: HistoryChart;
+  readonly judgeScore: HistoryChart;
+}
+
+export const HISTORY_LEFT_OUT_NOTE =
+  "Shown only where a model ran in every run; see the table for all.";
 
 /**
  * Check pass rate and mean judge score per contender over the suite's runs,
- * oldest on the left. A contender absent from a run, or unscored in it, simply
- * has no point there. Each block passes the Canvas schema, so one that does
- * not fit is dropped rather than breaking the page.
+ * oldest on the left. The Canvas chart places points by position and has no
+ * gap, so a contender is drawn only when it has a reading in every run;
+ * drawing it over fewer points would put it at another run's position. The
+ * others are reported as left out, and the table still lists them. Each block
+ * passes the Canvas schema, so one that does not fit is dropped rather than
+ * breaking the page.
  */
 export function historyCharts(
   runs: ReadonlyArray<HistoryRunLike>,
@@ -816,7 +828,7 @@ export function historyCharts(
     title: string,
     format: "percent" | "number",
     pick: (row: HistoryRunLike["rows"][number]) => number | undefined,
-  ): CanvasChartBlock | undefined => {
+  ): HistoryChart => {
     const byContender = new Map<
       string,
       { label: string; points: Array<{ x: string; y: number }> }
@@ -834,7 +846,11 @@ export function historyCharts(
         byContender.set(key, entry);
       }
     });
-    if (byContender.size === 0) return undefined;
+    const complete = [...byContender.values()].filter(
+      (entry) => entry.points.length === oldestFirst.length,
+    );
+    const leftOut = complete.length < byContender.size;
+    if (complete.length === 0) return { block: undefined, leftOut };
     try {
       const block = decodeCanvasBlock({
         blockId: `benchmarks-history-${id}`,
@@ -843,15 +859,15 @@ export function historyCharts(
         chartType: "line",
         title,
         format,
-        series: [...byContender.values()].map((entry, index) => ({
+        series: complete.map((entry, index) => ({
           seriesId: `contender-${index + 1}`,
           label: entry.label,
           points: entry.points,
         })),
       });
-      return block.kind === "chart" ? block : undefined;
+      return { block: block.kind === "chart" ? block : undefined, leftOut };
     } catch {
-      return undefined;
+      return { block: undefined, leftOut };
     }
   };
   return {

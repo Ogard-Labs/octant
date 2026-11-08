@@ -406,6 +406,8 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
         ...(note === undefined ? {} : { note }),
       });
       await readRun(String(runRead.run.runId));
+      // The history's mean stars move with the rating.
+      if (mounted.current) setHistoryRefresh((tick) => tick + 1);
       return undefined;
     } catch (error) {
       return refusalSentence(error, "The rating could not be saved.");

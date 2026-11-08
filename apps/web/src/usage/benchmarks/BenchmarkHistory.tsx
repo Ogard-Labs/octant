@@ -2,6 +2,7 @@ import type { BenchmarkHistoryRun } from "@octant/contracts";
 import { ChartBlock } from "../../canvas/blocks/ChartBlock";
 import { SurfaceSection } from "../../surface/SurfaceHeader";
 import {
+  HISTORY_LEFT_OUT_NOTE,
   RUN_STATUS_WORDS,
   contenderLabel,
   formatDuration,
@@ -12,12 +13,23 @@ import {
   formatUsd,
   historyCharts,
   type ContenderNames,
+  type HistoryChart,
 } from "./benchmarkPresentation";
 import { useMemo } from "react";
 
 export interface BenchmarkHistoryProps {
   readonly runs: ReadonlyArray<BenchmarkHistoryRun>;
   readonly names: ContenderNames;
+}
+
+function HistoryChartPanel({ chart }: { readonly chart: HistoryChart }) {
+  if (chart.block === undefined && !chart.leftOut) return null;
+  return (
+    <div className="diagnostics-dashboard__panel">
+      {chart.block === undefined ? null : <ChartBlock block={chart.block} />}
+      {chart.leftOut ? <p className="usage-workspace__note">{HISTORY_LEFT_OUT_NOTE}</p> : null}
+    </div>
+  );
 }
 
 /** One suite across its runs, newest first in the table and oldest first in the lines. */
@@ -30,16 +42,8 @@ export function BenchmarkHistory({ runs, names }: BenchmarkHistoryProps) {
       ) : (
         <>
           <div className="benchmark-history__charts">
-            {charts.checkPassRate === undefined ? null : (
-              <div className="diagnostics-dashboard__panel">
-                <ChartBlock block={charts.checkPassRate} />
-              </div>
-            )}
-            {charts.judgeScore === undefined ? null : (
-              <div className="diagnostics-dashboard__panel">
-                <ChartBlock block={charts.judgeScore} />
-              </div>
-            )}
+            <HistoryChartPanel chart={charts.checkPassRate} />
+            <HistoryChartPanel chart={charts.judgeScore} />
           </div>
           <div className="usage-table-scroll">
             <table aria-label="Runs by contender" className="usage-table">

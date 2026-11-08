@@ -28,7 +28,9 @@ import {
   summary,
 } from "./benchmarksFixtures";
 
-function historyRun(runId: string, startedAt: string, passRate: number) {
+type HistoryRunFixture = Awaited<ReturnType<BenchmarksClient["history"]>>["runs"][number];
+
+function historyRun(runId: string, startedAt: string, passRate: number): HistoryRunFixture {
   return {
     runId,
     startedAt,
@@ -825,6 +827,17 @@ describe("rating an answer", () => {
     await waitFor(() => expect(client.readRun.mock.calls.length).toBeGreaterThan(readsBefore));
   });
 
+  it("reads the suite's history again after a rating, so its mean stars are current", async () => {
+    const actor = user();
+    const { client, column } = await deepColumn(actor);
+    await waitFor(() => expect(client.history).toHaveBeenCalledTimes(1));
+
+    await actor.click(within(column).getByRole("radio", { name: "3 of 5 stars" }));
+    await actor.click(within(column).getByRole("button", { name: "Save rating" }));
+
+    await waitFor(() => expect(client.history).toHaveBeenCalledTimes(2));
+  });
+
   it("shows the rating already given and replaces it when rated again", async () => {
     const actor = user();
     const client = makeClient({
@@ -995,5 +1008,47 @@ describe("history and export", () => {
 
     await waitFor(() => expect(client.history).toHaveBeenCalledTimes(2));
     expect(reads).toBeGreaterThanOrEqual(4);
+  });
+
+  it("charts only the models that ran in every run, says so, and keeps them all in the table", async () => {
+    const actor = user();
+    const joiner = { providerInstanceId: PROVIDER, modelId: "model-b" };
+    const first = historyRun(
+      "77000000-0000-4000-8000-0000000000c1",
+      "2026-11-05T12:00:00.000Z",
+      0.5,
+    );
+    const second = historyRun(
+      "77000000-0000-4000-8000-0000000000c2",
+      "2026-11-07T12:00:00.000Z",
+      0.9,
+    );
+    const secondWithJoiner: HistoryRunFixture = {
+      ...second,
+      rows: [
+        ...second.rows,
+        { ...second.rows[0]!, contender: joiner as never, checkPassRate: 0.2, meanJudgeScore: 3 },
+      ],
+    };
+    const client = makeClient({
+      history: vi.fn(async () => ({
+        suiteId: suite().suiteId,
+        runs: [secondWithJoiner, first],
+      })),
+    });
+    mount(client);
+
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+
+    const table = await screen.findByRole("table", { name: "Runs by contender" });
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    expect(within(table).getByText("20%")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Shown only where a model ran in every run; see the table for all."),
+    ).toHaveLength(2);
+    const charts = screen.getAllByRole("region", { name: "Chart data" });
+    for (const data of charts) {
+      expect(within(data).queryByText(/model-b/)).toBeNull();
+    }
   });
 });
