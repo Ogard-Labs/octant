@@ -253,6 +253,75 @@ def install_fileattr_reads(kernel: Path) -> None:
     path.write_text(source)
 
 
+def install_seek_reads(kernel: Path) -> None:
+    path = kernel / "fs/read_write.c"
+    source = path.read_text()
+    files_path = kernel / "fs/file.c"
+    files = files_path.read_text()
+    if "octant_seek_lock" in source or "octant_seek_lock" in files:
+        raise ValueError("Seek read admission already exists")
+    entry = "\tCLASS(fd_pos, f)(fd);"
+    include = "#include <asm/unistd.h>\n"
+    unlock = "void __f_unlock_pos(struct file *f)"
+    entries = ("static off_t ksys_lseek(unsigned int fd, off_t offset, unsigned int whence)",
+               "SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned long, offset_high,")
+    if any(source.count(anchor) != 1 for anchor in entries) or source.count(include) != 1 or files.count(unlock) != 1:
+        raise ValueError("Pinned native/compat seek or position entry differs")
+    # Only the two seek syscalls use this cleanup class. fdget pins once;
+    # their later lock stage retains the original fdput_pos semantics.
+    source = source.replace(include, include + "\nDEFINE_CLASS(octant_seek, struct fd, fdput_pos(_T), fdget(fd), int fd)\n", 1)
+    checked = "\tif (fd_empty(f))\n\t\treturn -EBADF;"
+    preparation = """
+	struct octant_metadata_scope admission
+		__attribute__((cleanup(octant_metadata_end))) =
+			octant_seek_begin(fd_file(f), whence);
+	if (admission.error)
+		return admission.error;
+	int admission_error = octant_seek_lock(&f, admission.identity != 0);
+	if (admission_error)
+		return admission_error;
+	if (admission.identity) {
+		admission_error = octant_metadata_check_read(fd_file(f)->f_path.dentry);
+		if (admission_error)
+			return admission_error;
+	}
+"""
+    for anchor in entries:
+        start = source.index(anchor)
+        end = source.index("\n}", start) + 2
+        function = source[start:end]
+        if function.count(entry) != 1 or function.count(checked) != 1:
+            raise ValueError("Pinned seek reference/validation differs")
+        function = function.replace(entry, "\tCLASS(octant_seek, f)(fd);", 1)
+        function = function.replace(checked, checked + preparation, 1)
+        source = source[:start] + function + source[end:]
+    helper = """/* The seek syscall owns the READ scope through its filesystem effect.
+ * Preparation happens before this lock; final comparison never performs IPC. */
+int octant_seek_lock(struct fd *f, bool mediated)
+{
+	struct file *file = fd_file(*f);
+	int error;
+	if (!file)
+		return -EBADF;
+	if (!file_needs_f_pos_lock(file))
+		return 0;
+	if (mediated) {
+		error = mutex_lock_killable(&file->f_pos_lock);
+		if (error)
+			return error;
+	} else {
+		mutex_lock(&file->f_pos_lock);
+	}
+	f->word |= FDPUT_POS_UNLOCK;
+	return 0;
+}
+
+"""
+    files = files.replace(unlock, helper + unlock, 1)
+    path.write_text(include_bridge(source))
+    files_path.write_text(include_bridge(files))
+
+
 def install_metadata(kernel: Path) -> None:
     # Scope the decision to this one actual syscall's pinned native object.
     # Read/write ACL dispatchers are included before any inode lock. Final
@@ -364,3 +433,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_metadata_writes(kernel)
     install_fileattr_writes(kernel)
     install_fileattr_reads(kernel)
+    install_seek_reads(kernel)

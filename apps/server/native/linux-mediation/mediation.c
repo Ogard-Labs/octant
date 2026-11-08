@@ -12,6 +12,8 @@
 #include <linux/path.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
+#include <linux/fcntl.h>
+#include <linux/fiemap.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/io_uring.h>
@@ -573,6 +575,17 @@ static int admit_file(struct file *file, u32 operation)
 	return admit_inode(file ? file_inode(file) : NULL, operation);
 }
 
+/* The private seek fd constructor prepares before position/inode locks and
+ * consumes this exact READ scope after acquiring the original position lock. */
+struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int whence)
+{
+	struct inode *inode = file_inode(file);
+	if ((whence == SEEK_END || whence == SEEK_DATA || whence == SEEK_HOLE) &&
+	    (file->f_mode & FMODE_LSEEK) && S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
+		return octant_metadata_begin(file->f_path.dentry, OCTANT_MEDIATION_READ);
+	return (struct octant_metadata_scope) {};
+}
+
 static int truncate_file(struct file *file)
 {
 	return admit_file(file, OCTANT_MEDIATION_WRITE);
@@ -589,12 +602,12 @@ static int octant_file_permission(struct file *file, int mask)
 }
 
 /* The pinned native and compat syscall entries call these hooks before
- * do_vfs_ioctl copies regular-file size/allocation data, without inode locks.
- * Descriptor flags and pipe/socket queries retain their native behavior. */
+ * do_vfs_ioctl copies regular-file size/allocation or extent data, without
+ * inode locks. Descriptor flags and pipe/socket queries keep their behavior. */
 static int octant_file_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
 	struct inode *inode = file_inode(file);
-	if ((command == FIONREAD || command == FIOQSIZE) &&
+	if ((command == FIONREAD || command == FIOQSIZE || command == FS_IOC_FIEMAP) &&
 	    S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
 		return admit_file(file, OCTANT_MEDIATION_READ);
 	return 0;

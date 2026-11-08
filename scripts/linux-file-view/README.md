@@ -217,9 +217,25 @@ The regular-file `FIONREAD`/`FIOQSIZE` correction uses the existing READ
 admission from native and conditional compat ioctl hooks before copying size
 or allocation metadata. Its fixture requires a readable baseline before the
 companion, later EACCES with output sentinels unchanged, public observations,
-and pipe/socket positives. Actual native and compat execution of this added
-correction remains pending; other ioctls and credential-override/stacked
+and pipe/socket positives. Scoped native controls pass; compat execution remains
+unproved. Other ioctls and credential-override/stacked
 semantics remain outside this bounded correction with production coverage zero.
+
+The regular-file `FS_IOC_FIEMAP` entry also prepares READ admission before its
+filesystem callback or output. Its controls require a permitted baseline,
+late-protected refusal with unchanged output, and a public positive. For
+`SEEK_END`, `SEEK_DATA` and `SEEK_HOLE`, the two seek syscall entries pin the
+original descriptor and prepare before the position lock. They preserve the
+original lock/release behavior and perform only a current-epoch comparison
+after acquiring the lock; no broker IPC occurs there. A held-reply control
+requires another process to move the same file position before reply release.
+A stale-epoch waiter must refuse without changing that position.
+
+A scoped disposable native run passed these FIEMAP, public/output and seek
+pre-lock/stale-epoch controls. Full integrated execution remains unproved.
+Compat execution, complete namespace authority through the filesystem effect,
+other ioctl routes and stacked filesystems remain outside that evidence;
+production coverage stays zero.
 
 The candidate `prepareLinuxMediationSession` port owns its trusted policy worker,
 native relay and held command identities. The worker invokes the unchanged

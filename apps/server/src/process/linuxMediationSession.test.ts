@@ -165,10 +165,12 @@ describe("owned mediation session admission and input", () => {
       await prepared.session.close();
     }
   });
-  it("refuses input above the undrained byte limit and admits it again after a write drains", async () => {
+  it("bounds undrained input, admits it after draining, and settles pending owner loss without replay", async () => {
+    const owner = new AbortController();
     const callbacks: Array<(error?: Error | null) => void> = [];
-    fixture.spawn.mockReturnValue(worker((done) => callbacks.push(done)));
-    const prepared = await prepareLinuxMediationSession(input(new AbortController().signal));
+    const write = vi.fn((done: (error?: Error | null) => void) => callbacks.push(done));
+    fixture.spawn.mockReturnValue(worker(write));
+    const prepared = await prepareLinuxMediationSession(input(owner.signal));
     if (prepared.status !== "ready") throw new Error("Session unavailable");
     try {
       expect(await prepared.session.launch()).toEqual({ status: "released" });
@@ -188,7 +190,28 @@ describe("owned mediation session admission and input", () => {
         throw new Error("Accepted write callback unavailable");
       complete();
       expect(await first.drained).toEqual({ status: "drained" });
-      expect(prepared.session.writeInput(Buffer.alloc(65_536)).status).toBe("accepted");
+      const additional = prepared.session.writeInput(Buffer.alloc(65_536));
+      expect(additional.status).toBe("accepted");
+      const writesAtAbort = write.mock.calls.length;
+      owner.abort();
+      const drains = [...writes, additional].map((accepted) => {
+        if (accepted.status !== "accepted") throw new Error("Input was not accepted");
+        return accepted.drained;
+      });
+      expect(await Promise.all(drains)).toEqual([
+        { status: "drained" },
+        ...Array.from({ length: 4 }, () => ({ status: "uncertain" })),
+      ]);
+      expect((await prepared.session.exited).result).toEqual({
+        status: "unavailable",
+        reason: "cancelled",
+      });
+      expect(prepared.session.writeInput(Buffer.from("after owner loss"))).toEqual({
+        status: "refused",
+      });
+      for (const callback of callbacks) callback();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(write).toHaveBeenCalledTimes(writesAtAbort);
     } finally {
       await prepared.session.close();
     }
@@ -206,6 +229,43 @@ describe("owned mediation session admission and input", () => {
       status: "unavailable",
       reason: "native-unavailable",
     });
+  });
+  it("never releases execution when the owner cancels during command ownership acquisition", async () => {
+    const owner = new AbortController();
+    let release = () => {},
+      entered = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const commandRequested = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    fixture.receipt.mockImplementation(async (_options: unknown, _owner: string, pid: number) => {
+      if (pid === 1003) entered();
+      return { ready: pid === 1003 ? gate : Promise.resolve(), remove: async () => undefined };
+    });
+    const child = worker((done) => done());
+    const sent = vi.spyOn(child, "send");
+    fixture.spawn.mockReturnValue(child);
+    const prepared = await prepareLinuxMediationSession(input(owner.signal));
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    try {
+      const launching = prepared.session.launch();
+      await commandRequested;
+      expect(sent.mock.calls.some(([frame]) => frame === "E")).toBe(false);
+      owner.abort();
+      expect(await launching).toEqual({ status: "refused" });
+      release();
+      expect(await prepared.session.exited).toEqual({
+        result: { status: "unavailable", reason: "cancelled" },
+        cleanup: "confirmed",
+      });
+      expect(sent.mock.calls.some(([frame]) => frame === "E")).toBe(false);
+      expect(fixture.dead.has(1003)).toBe(true);
+    } finally {
+      release();
+      await prepared.session.close();
+    }
   });
   it("retains cleanup uncertainty when a pending identity acquisition fails during shutdown", async () => {
     const owner = new AbortController();
