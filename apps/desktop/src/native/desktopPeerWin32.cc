@@ -499,10 +499,44 @@ void close_runtime(const std::shared_ptr<Runtime>& state) {
   { std::lock_guard guard(state->lifecycle); if (state->acceptor.joinable()) state->acceptor.join(); state->admission.reset(); }
   { std::lock_guard guard(state->client_lock); state->client_pipe.reset(); state->client_peer.reset(); }
 }
+Answer close_status(const std::shared_ptr<Runtime>& state) {
+  bool release = false;
+  { std::lock_guard guard(state->lock); state->status_enabled = false; release = !state->windows_enabled; }
+  if (release) close_runtime(state);
+  return {"closed", {}, {}, {}};
+}
+Answer stop_windows(const std::shared_ptr<Runtime>& state) {
+  bool release = false;
+  {
+    std::lock_guard guard(state->lock); state->windows_enabled = false;
+    for (const auto& item : state->pending) item.second->changed.notify_all();
+    release = !state->status_enabled;
+  }
+  if (release) close_runtime(state);
+  return {"closed", {}, {}, {}};
+}
+// Retire old queued work permanently. A later operation uses a fresh binding,
+// never a cleared stop event on the runtime whose connections just joined.
+std::shared_ptr<Runtime> fresh_binding(const Runtime& previous) noexcept {
+  try {
+    auto state = std::make_shared<Runtime>(); HANDLE raw = nullptr;
+    if (!state->stopping || !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw)) return {};
+    Handle token(raw);
+    if (!token_principal(token.value, state->principal) || !same_principal(state->principal, previous.principal)) return {};
+    const DWORD length = GetSecurityDescriptorLength(previous.security);
+    if (length == 0 || length > 65536) return {};
+    state->security = static_cast<PSECURITY_DESCRIPTOR>(LocalAlloc(LMEM_FIXED, length));
+    if (!state->security) return {};
+    std::memcpy(state->security, previous.security, length);
+    state->profile = previous.profile; state->version = previous.version;
+    state->endpoint = previous.endpoint; state->env = previous.env; state->thread = previous.thread;
+    return state;
+  } catch (...) { return {}; }
+}
 void cleanup(void* data) {
   const auto env = static_cast<napi_env>(data);
   std::shared_ptr<Runtime> state;
-  { std::lock_guard guard(binding_lock); if (runtime && runtime->env == env) state = runtime; }
+  { std::lock_guard guard(binding_lock); if (runtime && runtime->env == env) state = std::move(runtime); }
   if (!state) return;
   close_runtime(state);
   { std::lock_guard guard(state->lock); if (state->callback) { napi_release_threadsafe_function(state->callback, napi_tsfn_abort); state->callback = nullptr; } }
@@ -572,12 +606,9 @@ void execute(napi_env, void* data) {
       { std::lock_guard guard(state.lock); state.status_enabled = true; }
       job.answer = ensure_server(job.state);
     } else if (job.name == "listenWindows") job.answer = ensure_server(job.state);
-    else if (job.name == "close") { close_runtime(job.state); job.answer = {"closed", {}, {}, {}}; }
-    else if (job.name == "stopWindows") {
-      std::lock_guard guard(state.lock); state.windows_enabled = false;
-      for (const auto& item : state.pending) item.second->changed.notify_all();
-      job.answer = {"closed", {}, {}, {}};
-    } else if (job.name == "launchStableHost") job.answer = {"refused", "no-launcher-record", {}, {}};
+    else if (job.name == "close") job.answer = close_status(job.state);
+    else if (job.name == "stopWindows") job.answer = stop_windows(job.state);
+    else if (job.name == "launchStableHost") job.answer = {"refused", "no-launcher-record", {}, {}};
     else if (job.name == "status") {
       Handle pipe; std::unique_ptr<Peer> peer; Wire request;
       job.answer = exchange(state, pipe, peer, request, job.deadline);
@@ -607,8 +638,17 @@ void complete(napi_env env, napi_status status, void* data) {
     if (job->answer.kind == "ready") { number(env, value, "protocol", 1); put(env, value, "version", job->answer.version); }
   }
   if (job->name == "close" || job->name == "stopWindows") {
-    std::lock_guard guard(job->state->lock);
-    if (job->state->callback) { napi_release_threadsafe_function(job->state->callback, napi_tsfn_abort); job->state->callback = nullptr; }
+    {
+      std::lock_guard guard(job->state->lock);
+      if (!job->state->windows_enabled && job->state->callback) {
+        napi_release_threadsafe_function(job->state->callback, napi_tsfn_abort); job->state->callback = nullptr;
+      }
+    }
+    if (status == napi_ok && job->state->closed) {
+      auto replacement = fresh_binding(*job->state);
+      std::lock_guard guard(binding_lock);
+      if (runtime == job->state && replacement) runtime = std::move(replacement);
+    }
   }
   if (job->busy) *job->busy = false;
   napi_resolve_deferred(env, job->deferred, value); napi_delete_async_work(env, job->work);
