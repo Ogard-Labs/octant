@@ -25,6 +25,14 @@ bool missing(const std::wstring& path) {
   if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
   const DWORD error = GetLastError(); return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
 }
+bool ascii(const std::wstring& input, std::string& output) {
+  output.clear(); output.reserve(input.size());
+  for (wchar_t character : input) {
+    if (character > 0x7f) return false;
+    output.push_back(static_cast<char>(character));
+  }
+  return true;
+}
 bool token_data(HANDLE token, TOKEN_INFORMATION_CLASS kind, std::vector<unsigned char>& output) {
   DWORD size = 0; GetTokenInformation(token, kind, nullptr, 0, &size);
   if (size == 0 || size > 65536) return false;
@@ -160,7 +168,7 @@ int wmain(int argc, wchar_t** argv) {
       !GetTokenInformation(token.value, TokenSessionId, &session, sizeof(session), &size) ||
       !GetTokenInformation(token.value, TokenStatistics, &statistics, sizeof(statistics), &size)) return refuse("owner-facts");
   const PSID user_sid = reinterpret_cast<const TOKEN_USER*>(user.data())->User.Sid;
-  const std::string profile(scope.begin(), scope.end());
+  std::string profile; if (!ascii(scope, profile)) return refuse("scope-ascii");
   const std::string identity = sha256(profile + ":" + std::to_string(session) + ":" + std::to_string(statistics.AuthenticationId.HighPart) + ":" +
     std::to_string(statistics.AuthenticationId.LowPart) + ":" + std::string(static_cast<const char*>(user_sid), GetLengthSid(user_sid)));
   if (identity.size() != 64) return refuse("endpoint-digest");
@@ -176,7 +184,7 @@ int wmain(int argc, wchar_t** argv) {
   HRESULT created = CreateAppContainerProfile(fixture.name.c_str(), L"Octant peer QA", L"Disposable native peer refusal", nullptr, 0, &fixture.app_sid);
   if (FAILED(created)) { SetLastError(HRESULT_CODE(created)); return refuse("unique-owned-profile"); }
   fixture.profile_created = true;
-  const std::string owned_name(fixture.name.begin(), fixture.name.end());
+  std::string owned_name; if (!ascii(fixture.name, owned_name)) return refuse("owned-name-ascii");
   std::printf("{\"ownedAppContainerProfileCreated\":true,\"ownedAppContainerProfileName\":\"%s\"}\n", owned_name.c_str());
   LPWSTR user_text = nullptr, app_text = nullptr, folder = nullptr;
   if (!ConvertSidToStringSidW(user_sid, &user_text) || !ConvertSidToStringSidW(fixture.app_sid, &app_text)) {
