@@ -168,15 +168,24 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
+      let pressSequence = 0;
       const native = async (operation: string, value = ""): Promise<string> => {
         if (operation !== "snapshot" && operation !== "count" && operation !== "press")
           return systemEvents(operation, value);
-        const decoded: unknown = JSON.parse(
-          await sdk(
-            operation === "press" ? "press" : "read",
-            operation === "press" ? value : undefined,
-          ),
+        const raw = await sdk(
+          operation === "press" ? "press" : "read",
+          operation === "press" ? value : undefined,
         );
+        await writeFile(
+          join(
+            artifacts,
+            operation === "press"
+              ? `${phase}-sdk-press-${++pressSequence}.json`
+              : `${phase}-sdk-last-${operation}.json`,
+          ),
+          raw,
+        );
+        const decoded: unknown = JSON.parse(raw);
         const record = (item: unknown): item is Readonly<Record<string, unknown>> =>
           typeof item === "object" && item !== null && !Array.isArray(item);
         if (

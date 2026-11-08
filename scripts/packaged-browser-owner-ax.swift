@@ -49,14 +49,19 @@ var visited = Set<CFHashCode>()
 var controls: [[String: Any]] = []
 var pressTargets: [AXUIElement] = []
 var readErrors = 0
+var nativeReadErrors = Set<Int32>()
 var next = 0
 var depthLimited = false
 var labelsLimited = false
 let treeDeadline = Date().addingTimeInterval(3)
 func label(_ node: AXUIElement, _ attribute: CFString) -> String {
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(node, attribute, &value) == .success,
-          let text = value as? String else { return "" }
+    let result = AXUIElementCopyAttributeValue(node, attribute, &value)
+    if result != .success && result != .attributeUnsupported && result != .noValue {
+        readErrors += 1
+        nativeReadErrors.insert(result.rawValue)
+    }
+    guard result == .success, let text = value as? String else { return "" }
     if text.count > 256 { labelsLimited = true; return "" }
     return text
 }
@@ -65,8 +70,13 @@ while next < pending.count, next < 512, Date() < treeDeadline {
     next += 1
     guard visited.insert(CFHash(node)).inserted else { continue }
     var roleValue: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue) == .success,
-          let nodeRole = roleValue as? String else { readErrors += 1; continue }
+    let roleRead = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
+    guard roleRead == .success,
+          let nodeRole = roleValue as? String else {
+        readErrors += 1
+        if roleRead != .success { nativeReadErrors.insert(roleRead.rawValue) }
+        continue
+    }
     if nodeRole == "AXSecureTextField" || label(node, kAXSubroleAttribute as CFString) == "AXSecureTextField" { continue }
     if controlRoles.contains(nodeRole) {
         let title = label(node, kAXTitleAttribute as CFString)
@@ -74,9 +84,13 @@ while next < pending.count, next < 512, Date() < treeDeadline {
         var control: [String: Any] = ["role": nodeRole, "title": title, "description": description, "depth": depth]
         if (nodeRole == "AXCheckBox" || nodeRole == "AXSwitch") && (title == preferenceTitle || description == preferenceTitle) {
             var state: CFTypeRef?
-            if AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &state) == .success,
+            let stateRead = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &state)
+            if stateRead == .success,
                let number = state as? NSNumber, number.doubleValue == 0 || number.doubleValue == 1 {
                 control["value"] = number.intValue
+            } else {
+                readErrors += 1
+                if stateRead != .success { nativeReadErrors.insert(stateRead.rawValue) }
             }
         }
         controls.append(control)
@@ -84,9 +98,14 @@ while next < pending.count, next < 512, Date() < treeDeadline {
     }
     if depth >= 20 { depthLimited = true; continue }
     var childrenValue: CFTypeRef?
-    if AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &childrenValue) == .success,
-       let children = childrenValue as? [AXUIElement] {
-        pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1) })
+    let childrenRead = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &childrenValue)
+    if childrenRead == .success {
+        if let children = childrenValue as? [AXUIElement] {
+            pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1) })
+        } else { readErrors += 1 }
+    } else if childrenRead != .attributeUnsupported && childrenRead != .noValue {
+        readErrors += 1
+        nativeReadErrors.insert(childrenRead.rawValue)
     }
 }
 let nativeWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
@@ -109,11 +128,12 @@ if mode == "press" {
        live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
        let target = pressTargets.first {
         var targetPid: pid_t = 0
-        if AXUIElementGetPid(target, &targetPid) == .success, targetPid == processId {
+        let targetIdentityRead = AXUIElementGetPid(target, &targetPid)
+        if targetIdentityRead == .success, targetPid == processId {
             let result = AXUIElementPerformAction(target, kAXPressAction as CFString)
             action["status"] = result == .success ? "pressed" : "uncertain"
             action["nativeError"] = result.rawValue
-        }
+        } else { action["identityReadError"] = targetIdentityRead.rawValue }
     }
 }
 let evidence: [String: Any] = [
@@ -130,7 +150,7 @@ let evidence: [String: Any] = [
     "attributeSets": attributeSets,
     "windowsError": windowResult.rawValue, "axWindowCount": (windows as? NSArray)?.count ?? -1,
     "interactiveControls": controls, "treeIdentityMatched": treeIdentityMatched,
-    "treeVisited": next, "treeReadErrors": readErrors,
+    "treeVisited": next, "treeReadErrors": readErrors, "treeNativeErrors": nativeReadErrors.sorted(),
     "treeTruncated": truncated, "action": action,
     "cgMetadataAvailable": nativeWindows != nil, "candidateWindowOwners": candidateWindows,
 ]
