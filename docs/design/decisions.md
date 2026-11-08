@@ -63,10 +63,10 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 6       | 2            | 0                   |
-| [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
+| [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 6         | 3       | 1            | 2                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **226**   | **192** | **31**       | **3**               |
+| **All areas**                                                                         | **227**   | **192** | **31**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2836,6 +2836,21 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 - The hub's wake service and push sender are each off until turned on; the hub forwards sealed notifications unchanged.
 
 Status: Built. Since: 2026-10-28. Detail: [Hub and spokes: shared sign-ins](hub-and-spokes.md#shared-sign-ins), [delegation](hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation) and [wake service](hub-and-spokes.md#wake-service).
+
+### Moving a thread between members
+
+Before shutting down or restarting a computer, a person can move a Chat, Work or Code thread to another of their computers and carry on there; a Code thread that cannot move hands over through its branch (maintainer request, 2026-11-07).
+
+- Only planned moves: a computer that dies without warning hands nothing over.
+- Only a person starts a move. The destination accepts it only with an owner device's own fresh unlock and its Move in peer-grant item, and the moved thread is the person's own thread there.
+- The source freezes the thread before anything is sent and erases its copy through the ordinary purge only after the destination commits, so one copy takes turns at a time unless the person chooses otherwise.
+- History, attachments, original inputs, captures, owned Canvases and a Code thread's branch and uncommitted work travel with no size limit; credentials, the provider's session, Full access, grants, processes and ignored files never do.
+- A Code thread that cannot move is committed to its branch with a generated note, pushed when it has a remote (never forced, never to the default branch), and continued elsewhere with the note as outside content. There is no file export.
+- A thread's move starts only in its Environment tool, whose Computer card lists the person's other computers with each one's eligibility and opens a move sheet stating what moves, what stays and that the source is erased; Prepare to shut down is the one host-wide entry (maintainer request, 2026-11-08).
+- Prepare to shut down asks before anything moves: each thread starts on Move when the destination can take it (Move after this turn when busy) and on Leave here with its reason otherwise; a handover or Stop and move is never preselected, so the usual case is one press and one unlock per destination. The quit confirmation offers Move threads first when another member can take a thread (maintainer request, 2026-11-08).
+- A move that cannot finish always ends in an explicit This thread can't move error with one journaled reason; the thread unfreezes and stays on the source, and Prepare to shut down never says Safe to shut down while a chosen thread failed (maintainer request, 2026-11-08).
+
+Status: Designed, not built. Since: 2026-11-07. Detail: [Hub and spokes: moving a thread to another member](hub-and-spokes.md#moving-a-thread-to-another-member) and [Design system: shell and layout](../../DESIGN.md#shell-and-layout).
 
 ### Hosted relay
 
