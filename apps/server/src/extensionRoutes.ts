@@ -15,7 +15,10 @@ import {
   decodeDiscoveredAgentToolingRequest,
   decodeExtensionProjectPinRequest,
   decodeMcpServerSignInRequest,
+  decodeMcpServerConnectionRequest,
   decodeUserAddedMcpServerRequest,
+  type McpServerConnectionListing,
+  type McpServerReconnectResult,
   type DiscoveredAgentToolingListing,
   type ExtensionProjectPinListing,
   type McpServerSignInView,
@@ -101,6 +104,14 @@ export function createExtensionRouteHandler(options: {
       componentId: string,
       principalKind: "local-window" | "remote-device",
     ): Promise<McpServerSignInView>;
+  };
+  /**
+   * How each installed MCP server is connecting, read from retained facts.
+   * A paired device may read it; only a local window may reconnect.
+   */
+  readonly mcpServerConnections?: {
+    list(): Promise<McpServerConnectionListing>;
+    reconnect(extensionId: string, componentId: string): Promise<McpServerReconnectResult>;
   };
   /** Lists what other agent tools on this computer know, for the person to add. */
   readonly agentToolingDiscovery?: {
@@ -601,6 +612,51 @@ export function createExtensionRouteHandler(options: {
         return response(failure("failed", "The sign-in could not be read."), 500, origin);
       }
     }
+    if (url.pathname === "/api/extensions/connections") {
+      if (options.mcpServerConnections === undefined) {
+        return response(failure("unavailable", "Server connections are unavailable."), 503, origin);
+      }
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let connection;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        connection = decodeMcpServerConnectionRequest(body.value);
+      } catch {
+        return response(failure("invalid", "The connection request is invalid."), 400, origin);
+      }
+      const principalKind =
+        principalContext.principal.kind === "local-window" ? "local-window" : "remote-device";
+      // Reconnect drops a live session on this host, so it is a person's act
+      // at this machine; a paired device reads the state only.
+      if (connection.kind === "reconnect" && principalKind !== "local-window") {
+        return response(
+          failure("unauthorized", "Reconnect a server from the Octant window on this host."),
+          401,
+          origin,
+        );
+      }
+      try {
+        return response(
+          connection.kind === "list"
+            ? await options.mcpServerConnections.list()
+            : await options.mcpServerConnections.reconnect(
+                String(connection.extensionId),
+                String(connection.componentId),
+              ),
+          200,
+          origin,
+        );
+      } catch {
+        return response(
+          failure("failed", "The server connections could not be read."),
+          500,
+          origin,
+        );
+      }
+    }
     if (url.pathname === "/api/extensions/discovered") {
       // What another tool on this computer knows is read for a local window
       // only, like the folder import it leads to; a paired device sees none
@@ -873,6 +929,8 @@ function response(
     | { readonly revoked: boolean }
     | DiscoveredAgentToolingListing
     | McpServerSignInView
+    | McpServerConnectionListing
+    | McpServerReconnectResult
     | ExtensionProjectPinListing,
   status: number,
   origin: string | null,

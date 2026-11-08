@@ -58,6 +58,7 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
   createNativeHarnessSessionRouteHandler,
   type NativeHarnessSessionRouteDependencies,
@@ -411,15 +412,11 @@ export function wireHarness(deps: HarnessDependencies) {
     store: threadFollowUpSuggestions,
     createFollowUp: createFollowUpOnHost,
   };
-  // Bound once the Chat, Work, and Code turn services exist, like the creator.
-  const sideTaskFirstMessage: {
+  // Bound once the Chat, Work, and Code turn services and the message queue
+  // exist, like the creator.
+  const sideTaskHost: {
     current:
-      | ((input: {
-          readonly windowId: string;
-          readonly mode: OctantMode;
-          readonly threadId: string;
-          readonly prompt: string;
-        }) => Promise<boolean>)
+      | Pick<SideTaskStartDependencies, "fork" | "offeringTurn" | "sendTurn" | "continueHere">
       | undefined;
   } = { current: undefined };
   const authorizeFollowUpThread = ({
@@ -450,7 +447,14 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     authorizeThread: authorizeFollowUpThread,
     create: createFollowUpOnHost,
-    sendFirstMessage: (input) => sideTaskFirstMessage.current?.(input) ?? Promise.resolve(false),
+    fork: (input) =>
+      sideTaskHost.current?.fork(input) ??
+      Promise.resolve({ kind: "refused", message: "Forking is unavailable on this host." }),
+    offeringTurn: (input) => sideTaskHost.current?.offeringTurn(input) ?? "not-found",
+    sendTurn: (input) => sideTaskHost.current?.sendTurn(input) ?? Promise.resolve(false),
+    continueHere: (input) =>
+      sideTaskHost.current?.continueHere(input) ??
+      Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     clock: () => new Date().toISOString(),
   });
   const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
@@ -969,7 +973,7 @@ export function wireHarness(deps: HarnessDependencies) {
     onHarnessPausedByPerson,
     onHarnessRecoveryLifted,
     researchRouter,
-    sideTaskFirstMessage,
+    sideTaskHost,
     sideTaskRoutes,
     hostShield,
     threadWork,

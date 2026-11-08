@@ -4339,6 +4339,14 @@ describe("WorkTurnService", () => {
     expect(
       (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
     ).toMatchObject({ reason: "fork", messages: 2 });
+    // The handoff is journaled with the turn's acceptance, before the
+    // provider is sent anything.
+    const append = fixture.persistence.journal.append.mock;
+    const accepted = append.calls.findIndex((call) =>
+      JSON.stringify(call[0]).includes('"handoff":{"reason":"fork"'),
+    );
+    expect(accepted).not.toBe(-1);
+    expect(append.invocationCallOrder[accepted]).toBeLessThan(run.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("refuses a changed tool catalogue before acceptance and preserves the conversation on explicit continuation", async () => {

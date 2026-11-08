@@ -273,6 +273,15 @@ export interface DesktopLeaseReconciliation {
 }
 
 export interface DesktopLeaseService {
+  /** Host-only preview admission. It conveys no caller-controlled socket or process access. */
+  readonly previewTarget: (caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId }) =>
+    | {
+        readonly lease: DesktopLease;
+        readonly handle: DesktopHandle;
+        readonly provider: DesktopProvider;
+        readonly authority: string;
+      }
+    | undefined;
   /** Reconciles restart state. Every acquire waits for it. */
   readonly start: () => Promise<DesktopLeaseReconciliation>;
   readonly destination: () => ComputerUseDestinationReport;
@@ -2173,6 +2182,22 @@ export function createDesktopLeaseService(
 
   return {
     start,
+    previewTarget: (caller) => {
+      if (caller.actor.kind !== "local-user" || caller.owner.mode !== "code") return undefined;
+      const current = admitOperating(caller);
+      if (
+        current.status === "refused" ||
+        current.thread.executionPolicy === "plan" ||
+        current.record.lease.locality !== "host-local"
+      )
+        return undefined;
+      return {
+        lease: current.record.lease,
+        handle: current.handle,
+        provider: current.provider,
+        authority: current.thread.executionPolicy,
+      };
+    },
     destination,
     acquire,
     spend,

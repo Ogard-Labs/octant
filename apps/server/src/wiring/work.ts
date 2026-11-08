@@ -17,11 +17,14 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
+  type OctantMode,
   type ProjectId,
+  type WindowId,
   type WorkThreadId,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { codeThreadTurns } from "../code/codeForkPoint";
 import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
@@ -66,6 +69,11 @@ import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
 import { ThreadHandOffService } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  continueInThread,
+  forkThroughOfferingTurn,
+  offeringTurnStanding,
+} from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
@@ -193,7 +201,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
     | "shieldServerStore"
-    | "sideTaskFirstMessage"
+    | "sideTaskHost"
   > &
   Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
@@ -201,6 +209,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     FoundationsWiring,
     | "conversationInputTransfer"
     | "browserAuthority"
+    | "codeBoardEventStore"
     | "providerRuntimeRegistry"
     | "workArtifactProjection"
     | "workThreadProjection"
@@ -227,6 +236,7 @@ export function wireWork(deps: WorkDependencies) {
     chatService,
     guardChatAttachmentPurge,
     codeAttachments,
+    codeBoardEventStore,
     codeService,
     codeSessionAuthority,
     codeWorkingDirectoryProbePath,
@@ -267,7 +277,7 @@ export function wireWork(deps: WorkDependencies) {
     runningWorkTurns,
     runtimeOutsideContentMarks,
     runtimeForgeChanges,
-    sideTaskFirstMessage,
+    sideTaskHost,
     routineProposalService,
     sideTasks,
     siblingThreadsService,
@@ -481,6 +491,7 @@ export function wireWork(deps: WorkDependencies) {
               threadId: String(input.thread.id),
               mode: "work",
               projectId: input.thread.projectId,
+              turnId: String(input.turnId),
               suggestedBy: input.thread,
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
@@ -1117,10 +1128,34 @@ export function wireWork(deps: WorkDependencies) {
       threads: workThreadService,
       workflows: workflowService,
     });
-    sideTaskFirstMessage.current = async ({ windowId, mode, threadId, prompt }) => {
+    // A side task's prompt as a thread's next message, through the mode's
+    // ordinary turn command on the confirming window: the first message of a
+    // thread a start created, or the next turn of the thread that offered it.
+    // A Chat command is checked against the thread's journal head version.
+    // The projection row's own version lags it once a turn has run, so a
+    // "do it here" built from that row was refused as stale on a thread with
+    // a reply; the service's read stamps the head version, as the queue does.
+    const readChatThreadHead = (threadId: string) => {
+      try {
+        return chatService.read(decodeChatThreadId(threadId)).thread;
+      } catch {
+        return undefined;
+      }
+    };
+    const sendSideTaskTurn = async ({
+      windowId,
+      mode,
+      threadId,
+      prompt,
+    }: {
+      readonly windowId: string;
+      readonly mode: OctantMode;
+      readonly threadId: string;
+      readonly prompt: string;
+    }): Promise<boolean> => {
       const window = decodeWindowId(windowId);
       if (mode === "chat") {
-        const thread = persistence.readChatThread(threadId as never);
+        const thread = readChatThreadHead(threadId);
         if (thread === undefined) return false;
         // A Chat send settles when the reply ends; the side task is started
         // the moment the message is in, so the new thread opens right away.
@@ -1150,11 +1185,16 @@ export function wireWork(deps: WorkDependencies) {
           threadId: thread.id,
           turnId: decodeWorkTurnId(randomUUID()),
           prompt,
+          // The thread's own folder, as the composer and the message queue send
+          // it: a fork and a thread with turns may work below the root.
           authority: {
             hostId: LOCAL_HOST_ID,
             projectId: thread.projectId,
             bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: ".",
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
             confinementPosture: "project-root-confined",
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
@@ -1283,6 +1323,35 @@ export function wireWork(deps: WorkDependencies) {
       }),
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
+    const sideTaskForkPorts = {
+      chatTurns: (threadId: string) =>
+        persistence.readChatThreadView(decodeChatThreadId(threadId))?.turns,
+      workTurns: (threadId: string) =>
+        workTurnProjection.listForThread(decodeWorkThreadId(threadId)),
+      codeTurns: (threadId: string) =>
+        codeThreadTurns(
+          (page) => codeBoardEventStore.conversation(page),
+          decodeCodeThreadId(threadId),
+        ),
+      chat: {
+        readThread: readChatThreadHead,
+        execute: (command: unknown, context: { readonly windowId: WindowId }) =>
+          chatService.execute(command, context),
+      },
+      work: workThreadServiceWithWorkflows,
+      code: codeService,
+      uuid: randomUUID,
+    };
+    sideTaskHost.current = {
+      fork: (input) => forkThroughOfferingTurn(sideTaskForkPorts, input),
+      offeringTurn: (input) => offeringTurnStanding(sideTaskForkPorts, input),
+      sendTurn: sendSideTaskTurn,
+      continueHere: (input) =>
+        continueInThread(
+          { queue: threadMessageQueue, sendTurn: sendSideTaskTurn, uuid: randomUUID },
+          input,
+        ),
+    };
     restartContinuation.current = async ({ threadId, windowId, mode }) => {
       if (mode === "chat") chatService.settleCutOffTurns(decodeChatThreadId(threadId));
       const recoveryIdentity = nativeHarnessSessions.recoveryIdentity(threadId);

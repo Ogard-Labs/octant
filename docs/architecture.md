@@ -3585,11 +3585,19 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   send journals `agent.message-sent@1` on the `agent-message` aggregate, one
   message per recipient, and keeps the body in the host's store under an
   opaque reference; bodies never enter the journal. The sender is told `sent`
-  and nothing more: sending starts no turn, grants no authority, and returns
-  no reply. Bounds are four recipients per send, a 64 KiB body, and eight
+  and nothing more: sending grants no authority and returns no reply, and it
+  starts a turn only as the bounded wake below. Bounds are four recipients per send, a 64 KiB body, and eight
   messages per sender that no turn has carried yet; a waiting message whose
   recipient closed or left the Project is refused at the sender's next send,
   so it stops holding a slot.
+- **Across a person's computers.** A tagged Code thread may also message a
+  tagged Code thread on another member of its hub, under that member's peer
+  grant. Each host applies the rules above to its own end, and the receiver
+  keeps the final say; the extra rules (the Reachable tag, the Message item,
+  remote references, waiting on the sender while the receiver is unreachable,
+  a bounded wake turn for an idle recipient, receipts back) are in
+  [Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members).
+  Designed, not built.
 - **Delivery.** Admission is not delivery. When the recipient's next Code turn
   assembles its context, the host rechecks that the sender is still active,
   that both threads still share a Project, and that the recipient is active,
@@ -3607,6 +3615,47 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   into the next turn too; a host stop never drops a message unread. The block
   reaches every Code provider the way a `#thread` mention does and is part of
   that turn only.
+- **Waking an idle recipient.** Every Code thread has a **Wake when a message
+  arrives** switch in its header menu and its row's context menu. It is off by
+  default, only a person sets it (a window on the host, or an owner device
+  after a fresh unlock; never an agent, a routine, or a peer), and each change
+  is journaled as `thread.message-wake-set@1` with its principal. When a
+  message is admitted for a thread with the switch on and the thread is idle,
+  the host starts one turn to carry it, so agents can coordinate without a
+  person starting each turn.
+  - **Idle** means the thread is active Code outside Plan, has no turn running
+    or queued, and is not waiting for a person (an approval, a question, or a
+    usage-limit pause). A thread that is not idle carries the message in its
+    next turn as before; a running turn is never interrupted.
+  - **The wake turn** is a host-run turn with the `agent` initiator, the way a
+    routine's Code turn starts, so every approval waits for a person. It runs
+    under the thread's own posture, provider profile, and model and takes the
+    ordinary turn admission: capacity gating, the Done lock, and usage limits
+    apply, and a turn refused there starts nothing and leaves the messages
+    waiting. Its prompt is a host sentence naming the sender thread that woke
+    it; the messages arrive as the ordinary delivery block after the ordinary
+    delivery checks, and when every waiting message is refused there, no turn
+    starts. It is journaled with the initiator kind `agent-message` and the
+    message ids, and the thread's row and transcript say which thread woke it.
+  - **Bounds.** One wake turn at a time per thread and at most six per thread
+    in any hour; a message past either bound waits for the next turn. Each
+    message carries a hop count: zero from a turn a person or a routine
+    started, and one more than the message that woke the sender's turn
+    otherwise. A message whose hop count is three or more is delivered but
+    wakes nothing, so two agents answering each other stop waking each other
+    after three rounds and continue only when a person runs a turn.
+  - Turning the switch off stops new wake turns; one already running finishes
+    like any turn, and cancelling it is the ordinary cancel.
+
+  Rationale: a wake turn starts nothing a person could not have started on
+  that thread, under the posture the person chose, with approvals still waiting
+  for a person, so a message can spend provider usage but cannot widen what the
+  recipient's agent may do. It is off by default on one host because a thread's
+  siblings were never asked whether they may start its turns; the hop count and
+  hourly bound keep two agents from turning one message into unbounded turns.
+  Waking across a person's computers adds the rules in
+  [Hub and spokes: waking an idle thread](design/hub-and-spokes.md#waking-an-idle-thread).
+
 - **Bodies.** A body lives only while its message waits: delivery and refusal
   delete it, purging either thread deletes it with the message, and at start
   the host keeps only the bodies of waiting messages. A message an earlier
@@ -4617,7 +4666,7 @@ or .zip>` write the same files, built by one host command
   capabilities — and why. User-facing
   drafts of the privacy notice, sub-processor position, data-residency
   statement, DPA template, SCC position, and EULA governing-law placeholders
-  live in `apps/docs/advanced/` and are marked pending legal review; they
+  live in `octant-site/docs/advanced/` and are marked pending legal review; they
   describe this behavior rather than changing it. The draft shared-host
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and covers sharing a host the people
@@ -7851,25 +7900,83 @@ the top of the composer of each local thread pane.
 
 Side tasks are the mid-turn counterpart (`apps/server/src/sideTasks`). On any
 provider that runs app-managed tools, every Chat, Work, and Code turn's tool
-set includes `octant_offer_side_task` (a Side Chat's excepted; see
-[Side Chat reads](#security-and-authority)); Work and Code turns also carry browser
-and computer use. The
-model offers out-of-scope work it noticed (title, one-sentence reason,
-standalone prompt, and in a Code thread in a Project a worktree or the current
-checkout). The call only journals the offer (`thread-side-tasks`, at most five
-open per thread) and returns at once; it grants nothing. In a Code Project's
-designated planner thread it also takes target `board`, which records a
-pending planner proposal for the person to confirm in the Project planner
-instead of a card (see the planner's agent tools above). `/api/side-tasks/:threadId`
-lists offers and starts or dismisses one. Starting is the person's
-confirmation: the host creates the thread through `createFollowUp` on the
-offering model, marks the offer started, and sends the prompt as the first
-message through the mode's ordinary turn command on the confirming window
-(`send-chat-turn`, `start-work-thread-turn`, or staged evidence plus
-`start-provider-turn`); a Code thread still starts approval-gated. This is the
-one place a prompt is sent for the person, and only on their click. If the
-message does not go out, the thread stays and the prompt waits in its
-composer. The web shows open offers as cards above the chips.
+set includes `octant_offer_side_task`; Work and Code turns also carry browser
+and computer use. The model offers work that should run as a task of its own:
+out-of-scope work it noticed, a piece the person asked to split off or run
+separately, or a real next step its reply recommends. An offer carries a
+title, a one-sentence reason, a standalone prompt, a suggested context
+(`fresh`, the prompt alone, or `fork`, this conversation through the offering
+turn and then the prompt), and in a Code thread in a Project a worktree or the
+current checkout. The host stamps the offering turn's own identity (`turnId`:
+a Chat turn, a Work turn, or a Code operation). The call only journals the
+offer (`thread-side-tasks`, at most five open per thread) and returns at once;
+it grants nothing, and the model is told not to wait for the answer or do the
+work itself. In a Code thread a `fork` offer always targets a worktree.
+`GET /api/side-tasks/:threadId` lists offers; `POST` to its `start`,
+`continue`, and `dismiss` actions answers one, each refused before anything
+is created or sent unless the window may act on the offering thread.
+
+The web renders each offer inline in the transcript, after the reply of the
+turn that made it (offers without a `turnId` sit after the last reply), as a
+card that asks one question: start this in a new thread, or do it here. The
+card shows the title, the reason, and the exact prompt behind a disclosure,
+and a settled offer shrinks to a one-line receipt (started, with a link to the
+thread; done here; dismissed). Three answers are possible, and each is the
+person's confirmation:
+
+- **New thread.** The host creates the thread on the offering model and sends
+  the prompt as its first message through the mode's ordinary turn command on
+  the confirming window (`send-chat-turn`, `start-work-thread-turn`, or staged
+  evidence plus `start-provider-turn`); a Code thread still starts
+  approval-gated. A `fresh` start goes through `createFollowUp`. A `fork`
+  start goes through the mode's own fork: `branch-chat-thread` through the
+  offering Chat turn, `fork-code-thread` through the offering Code operation
+  (always its own worktree, carrying the checkout as that turn left it), and
+  `fork-work-thread` through the offering Work turn. The person may switch
+  the context on the card; a fork whose offering turn has not finished is
+  refused `turn-running` before anything is created, by the rule the mode's
+  fork applies (a Chat branch waits for every reply in the thread, a Work fork
+  for every turn it carries, a Code fork for the named operation), and the
+  card holds the fork choice until the reply ends. An offer without a `turnId`
+  can only start fresh. The fork's own rules apply unchanged: its handoff,
+  marks, and refusals, and the prompt is sent only while the fork runs on the
+  model that made the offer.
+- **Do it here.** The prompt goes to the offering thread itself: as its next
+  turn through the same ordinary turn command when the thread is idle, or into
+  its message queue behind the running turn, with the queue's usual holds.
+  The queue answers where the thread stands for the window and holds its
+  ordering while an idle thread is sent the prompt; a thread whose last
+  message may not have gone out is sent nothing. Before dispatch the offer
+  journals `side-task-continued-here` with delivery `unconfirmed`, a claim
+  that prevents a second send or queue even after a restart. A confirmed
+  result refines that delivery to `sent` or `queued`. An explicit no-effect
+  refusal journals `side-task-continuation-refused` and reopens the offer.
+  An exception, uncertain send, or failed receipt write retains the claim:
+  the card says delivery is unconfirmed and asks the person to inspect the
+  thread and its queued messages before sending the prompt themselves.
+  It offers no retry and the host never replays that uncertain action. A lost
+  action response or unavailable post-action read holds the card's actions
+  until a fresh authoritative read confirms its state.
+- **Dismiss.** The offer closes and nothing is sent.
+
+These are the only places a prompt is sent for the person, and only on their
+click. If a new thread's first message does not go out, the thread stays and
+the prompt waits in its composer.
+
+**Work fork.** `fork-work-thread` creates a Work thread in the source's
+Project on the source's provider and model, with a `forkedFrom` origin naming
+the source thread and a finished Work turn, and copies the source's turns
+through that point as carried turns in one journal unit with its creation.
+The host checks, as for a Code fork, that the source's Project is readable by
+the confirming window and that every carried turn exists and has settled. The
+fork's first own turn on a provider that keeps its own session starts a new
+one with the carried conversation as a text handoff (the turn's `handoff`,
+reason `fork`), built by the same selector and bounds as a provider switch's
+Work handoff and journaled with the turn's acceptance, before the provider is
+sent anything; a handoff that cannot be built refuses the turn with its
+reason. A Work fork shares the Project root, so it inherits no session grant,
+running turn, or Done mark, and starts at Ask first. A thread forked from a
+marked source starts marked (label `work-fork`).
 
 ### Harness tool egress rules
 
@@ -9238,7 +9345,7 @@ atomic: a temporary file is renamed into place, so a reader never sees a
 half-written export. The folder is stored by its real path, and a write whose
 folder no longer resolves to that path — because it or a folder above it was
 replaced by a link after it was chosen — is refused rather than followed. The
-user guide's exporting page (`apps/docs/guide/export.md`) states the same rules
+user guide's exporting page (`octant-site/docs/guide/export.md`) states the same rules
 for a person.
 
 The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
@@ -9466,9 +9573,12 @@ the person decided to.
 
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
-`@octant/domain`), each with a name, one line, a category, the vendor's own
-address and how it is reached: sign-in through the MCP authorization flow,
-a key the vendor issues sent in one header, or nothing. Nothing is fetched
+`@octant/domain`), each with a name, one line, a category, search keywords,
+the vendor's own address and setup page, and how it is reached: sign-in
+through the MCP authorization flow, a key the vendor issues sent in one
+header, or nothing. An entry whose address stops behaving as its auth says is fixed or
+removed; `bun run connectors:probe` checks every address and setup page
+and runs weekly in CI, never in the app. Nothing is fetched
 to show the list, so it adds no request and no marketplace disclosure; the
 catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. A remote browser's disabled
@@ -9736,6 +9846,39 @@ adopted as current authenticated content. Unrelated components stay usable.
 Only later authoritative task reconciliation initializes and lists again with
 the current broker grant; Settings does not probe tools.
 
+Settings › Skills & Extensions › Installed opens with **Server connections**:
+every installed MCP server and connector with its package, transport, state,
+last error sentence and when the host last saw it connect or fail. The
+listing (`/api/extensions/connections`, `list`) is composed on the host from
+retained facts only: the lifecycle snapshot's switches and blocks, the stored
+sign-in record's status read as a reader (a pending attempt reports its last
+view and is never polled, so a listing cannot finish a sign-in), the session
+manager's memory of open sessions, in-flight connects, failures and the last
+successful connect (kept after an idle close), and the installed `mcp.json`
+read from disk for the transport. Reading it never connects, signs in,
+discovers endpoints or lists tools, so a server no task has used yet reads
+Ready rather than Connected. States, most decisive first: Off (package or
+server switched off), Needs sign-in (sign-in-again, consent pending, client
+setup required for a registered-client connector, or a
+catalog connector that signs in and has no sign-in while not connected;
+signed out alone is only an offer, since a hosted server that takes a key or
+nothing reports it too), Connecting, Not connecting (the newest fact is a
+failed attempt or closed transport, with its reason), Connected, Blocked (a
+lifecycle block such as quarantine, or a sign-in connector on a host whose
+sign-in is refused, such as one without the credential broker), Ready. A server with sessions in several
+task scopes shows its newest fact. The Connectors row and the Library
+card and detail flag a connected server that needs attention with the same
+state and reason. A row that needs sign-in offers the existing sign-in
+control; a failed row offers **Reconnect** (`reconnect`), which retires that
+component's authentication generation, sessions, desired state and failures
+in every task scope through the same path a sign-in change uses, so the next
+authoritative task reconciliation connects fresh; a task using it elsewhere
+connects again on its next turn. Reconnect connects nothing itself and never
+replays a failed call; it is a local-window act, and the route refuses it to a
+paired device, which may read the listing only. Rationale: connecting from
+Settings would discover tools outside a task's authority, so the person's
+action only clears what blocks the next authorized connect.
+
 For an existing host-owned HTTP OAuth session, an approved explicit invocation
 checks the exact retained grant owner again before dispatch. Credential access
 and refresh each have a ten-second stage bound. A known expired token or a
@@ -9997,7 +10140,7 @@ reconciled with Octant's external-content and approval protections before that
 distribution gate is lifted. See the [Workspace setup guide](https://developers.google.com/workspace/guides/configure-mcp-servers),
 [native client rules](https://developers.google.com/identity/protocols/oauth2/native-app),
 [preview terms](https://developers.google.com/workspace/preview), and the
-[user setup and workflow guide](../apps/docs/advanced/google-workspace.md).
+[user setup and workflow guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/google-workspace.md).
 
 **Computer use plugin.** The bundled Computer component supplies
 `octant_computer` through the provider's existing app-managed tool transport on
@@ -13092,7 +13235,7 @@ access` agree); a thread's own change is journaled as
   plaintext endpoint is refused, and store credentials are not sent on it.
   The storage provider can read the synced content: the artifact versions and
   tombstones are plain files. Settings and the user guide
-  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  (`octant-site/docs/guide/sync-artifacts.md`) say so before sync is turned on.
   Opt-in encryption of replicas is not this rule. A replica import appends
   versions to this journal and adopts nothing else. Membership accepts an
   entry signed by an admitted instance's device signing key, within its cut
@@ -13115,7 +13258,10 @@ access` agree); a thread's own change is journaled as
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another. An all-hosts list keeps every registered host;
+  into authority on another. An agent message to a thread on another hub
+  member is not offline work: it carries no authority and the receiver admits
+  it afresh, so it waits on the sender until that member answers
+  ([Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members)). An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
@@ -14610,7 +14756,7 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   administrator-reviewed profile for the installed executable and a real
   sandboxed launch. An existing isolated environment that already supports
   Chromium's sandbox may be used without relaxing host policy; the
-  [Linux host guide](../apps/docs/guide/linux-host.md#isolated-desktop-installation)
+  [Linux host guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/guide/linux-host.md#isolated-desktop-installation)
   records the tested rootless Space installation and its evidence boundary.
   The Linux ADE remains available while desktop prerequisites are unmet.
   An AppImage launch checks

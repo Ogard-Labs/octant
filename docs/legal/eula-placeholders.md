@@ -22,7 +22,7 @@ fields below as explicit blanks rather than inventing a forum.
 Local-first architecture does not pick a court. The journal still sits on
 the customer's host; these placeholders only matter for disputes about the
 software license and any Octant-operated hosted component that later falls
-under the [DPA template](../apps/docs/advanced/dpa-template.md).
+under the [DPA template](https://github.com/Ogard-Labs/octant/blob/main/docs/legal/dpa-template.md).
 
 ## Placeholders
 
@@ -64,17 +64,17 @@ protections.
 ## Interaction with privacy drafts
 
 - Controllership of the on-device journal is described in the
-  [privacy notice](../apps/docs/advanced/privacy-notice.md) and
-  [DPA template](../apps/docs/advanced/dpa-template.md). Choice of law in the EULA does not
+  [privacy notice](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) and
+  [DPA template](https://github.com/Ogard-Labs/octant/blob/main/docs/legal/dpa-template.md). Choice of law in the EULA does not
   move that journal into an Octant data center.
 - Transfer tools for any future hosted processing sit in the
-  [SCC position](../apps/docs/advanced/scc-position.md), not in these placeholders.
+  [SCC position](https://github.com/Ogard-Labs/octant/blob/main/docs/legal/scc-position.md), not in these placeholders.
 - BYO providers remain under the customer's contracts with those providers
-  ([Sub-processors](../apps/docs/advanced/sub-processors.md)).
+  ([Sub-processors](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md)).
 
 ## Next steps
 
-- [DPA template](../apps/docs/advanced/dpa-template.md)
-- [SCC position](../apps/docs/advanced/scc-position.md)
-- [Privacy notice](../apps/docs/advanced/privacy-notice.md)
-- [Data residency](../apps/docs/advanced/data-residency.md)
+- [DPA template](https://github.com/Ogard-Labs/octant/blob/main/docs/legal/dpa-template.md)
+- [SCC position](https://github.com/Ogard-Labs/octant/blob/main/docs/legal/scc-position.md)
+- [Privacy notice](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md)
+- [Data residency](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md)

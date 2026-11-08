@@ -1605,6 +1605,51 @@ describe("signing in to a hosted server from Settings", () => {
   });
 });
 
+describe("server connection status in Settings", () => {
+  const target = { extensionId, componentId: "mcp-docs" };
+
+  it("lists connections for a local window and a paired device, and lets only the window reconnect", async () => {
+    const connections = {
+      list: vi.fn(async () => ({ servers: [] })),
+      reconnect: vi.fn(async () => ({ kind: "reconnecting" as const })),
+    };
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerConnections: connections,
+      now: () => now,
+    });
+    const listed = await handler(request("/api/extensions/connections", { kind: "list" }));
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual({ servers: [] });
+    expect(
+      (await handler(pairedDeviceRequest("/api/extensions/connections", { kind: "list" })))?.status,
+    ).toBe(200);
+    expect(connections.list).toHaveBeenCalledTimes(2);
+
+    const remote = await handler(
+      pairedDeviceRequest("/api/extensions/connections", { kind: "reconnect", ...target }),
+    );
+    expect(remote?.status).toBe(401);
+    const anonymous = await handler(
+      request(
+        "/api/extensions/connections",
+        { kind: "reconnect", ...target },
+        { "x-octant-window-capability": "wrong" },
+      ),
+    );
+    expect(anonymous?.status).toBe(401);
+    expect(connections.reconnect).not.toHaveBeenCalled();
+
+    const local = await handler(
+      request("/api/extensions/connections", { kind: "reconnect", ...target }),
+    );
+    expect(local?.status).toBe(200);
+    expect(await local?.json()).toEqual({ kind: "reconnecting" });
+    expect(connections.reconnect).toHaveBeenCalledWith(extensionId, "mcp-docs");
+  });
+});
+
 describe("plugins pinned to a Project", () => {
   const projectId = "72000000-0000-4000-8000-00000000000a";
   const listing = {

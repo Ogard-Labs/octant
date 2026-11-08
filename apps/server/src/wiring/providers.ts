@@ -190,6 +190,7 @@ import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegist
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
+import { listMcpServerConnections } from "../extensions/mcpServerConnections";
 import { githubRoutineEventSources } from "../extensions/githubRoutineEventSources";
 import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
 import { BundledPluginSwitchStore } from "../extensions/bundledPluginSwitchStore";
@@ -1185,6 +1186,50 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.signOut(extensionId, componentId, principalKind),
           ),
+      },
+      mcpServerConnections: {
+        list: () =>
+          listMcpServerConnections({
+            snapshot: () => extensionLifecycleService.snapshot(),
+            observations: () => agentPluginMcpSessionManager.connectionObservations(),
+            // Asked as a reader: a local window's status read polls a pending
+            // sign-in and may finish it, which a listing must never do.
+            signInStatus: (extensionId, componentId) =>
+              signInOrUnavailable(extensionId, componentId, (signIn) =>
+                signIn.status(extensionId, componentId, "remote-device"),
+              ),
+            readConfiguration: (packageState, componentId) =>
+              extensionPackageStore.readVerifiedConfiguration(
+                {
+                  extensionId: packageState.extensionId,
+                  packageId: packageState.packageId,
+                  version: packageState.version,
+                  digest: packageState.digest,
+                },
+                componentId,
+              ),
+          }),
+        reconnect: async (extensionId, componentId) => {
+          const installed = extensionLifecycleService
+            .snapshot()
+            .packages.some(
+              (packageState) =>
+                String(packageState.extensionId) === extensionId &&
+                packageState.components.some(
+                  (component) =>
+                    String(component.component.id) === componentId &&
+                    component.component.kind === "mcp-server",
+                ),
+            );
+          if (!installed)
+            return {
+              kind: "refused",
+              reason: "not-found",
+              message: "That server is not installed.",
+            };
+          await agentPluginMcpSessionManager.reconnect(extensionId, componentId);
+          return { kind: "reconnecting" };
+        },
       },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,

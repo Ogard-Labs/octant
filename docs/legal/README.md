@@ -5,13 +5,13 @@ published notices, signed agreements, or certifications of GDPR compliance.
 
 ## User-facing privacy drafts (published in the guide, with draft banners)
 
-These live with the product docs at `apps/docs/advanced/` because they describe
+These live with the product docs at `octant-site/docs/advanced/` because they describe
 current product behavior for operators:
 
-- [`privacy-notice.md`](../../apps/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
-- [`privacy-and-security.md`](../../apps/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
-- [`sub-processors.md`](../../apps/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
-- [`data-residency.md`](../../apps/docs/advanced/data-residency.md) — the host is the region
+- [`privacy-notice.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
+- [`privacy-and-security.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
+- [`sub-processors.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
+- [`data-residency.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md) — the host is the region
 
 ## Drafts in this directory (not published until counsel signs off)
 

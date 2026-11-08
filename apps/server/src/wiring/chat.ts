@@ -478,7 +478,13 @@ export function wireChat(deps: ChatDependencies) {
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
-      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) => {
+      resolveAppManagedTools: ({
+        windowId,
+        thread,
+        turnId,
+        threadMentionIds,
+        coordinationDepth,
+      }) => {
         const sideChat = sideChatSidecars.findBySidecarThread(thread.id) !== undefined;
         return combineAppManagedToolSets(
           taintAppManagedToolResults({
@@ -512,15 +518,6 @@ export function wireChat(deps: ChatDependencies) {
                         enqueue: (input) => imageJobService.enqueue(input),
                         listJobs: (scopeId) => imageJobService.listByScope(scopeId),
                       },
-                    }),
-                    createSideTaskTools({
-                      store: sideTasks,
-                      threadId: String(thread.id),
-                      mode: "chat",
-                      projectId: thread.projectId,
-                      suggestedBy: thread,
-                      uuid: randomUUID,
-                      clock: () => new Date().toISOString(),
                     }),
                   ),
               }),
@@ -560,6 +557,20 @@ export function wireChat(deps: ChatDependencies) {
                   parentThreadId: String(thread.id),
                   mode: "chat",
                   ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                }),
+                // Outside the taint wrapper, as in Work and Code: an offer's
+                // answer is Octant's own receipt of what the model wrote, and
+                // inside the wrapper offering one card marked a Chat thread as
+                // having read outside content.
+                createSideTaskTools({
+                  store: sideTasks,
+                  threadId: String(thread.id),
+                  mode: "chat",
+                  projectId: thread.projectId,
+                  turnId: turnId === undefined ? undefined : String(turnId),
+                  suggestedBy: thread,
+                  uuid: randomUUID,
+                  clock: () => new Date().toISOString(),
                 }),
               ),
           }),
