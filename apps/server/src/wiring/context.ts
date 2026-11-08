@@ -427,7 +427,8 @@ export function wireContext(deps: ContextDependencies) {
               },
               // Read only for a limit rule's handover summary; the runtime keeps
               // the session itself.
-              conversation: (threadId) => codeSessionConversation(decodeCodeThreadId(threadId)),
+              conversation: (threadId) =>
+                codeSessionConversation(decodeCodeThreadId(threadId)) ?? [],
               // The summary is one tool-free request, so it runs in a private
               // host folder, never in the thread's checkout.
               scratchRoot: async (threadId) => {

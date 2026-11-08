@@ -800,13 +800,15 @@ export class ContextHarnessService {
    */
   handoverSummary(
     subject: ContextSubjectRef,
-    conversation: ReadonlyArray<SessionConversationMessage>,
+    /** Read only once a limit-rule summary is found, since it reads the whole thread. */
+    readConversation: () => ReadonlyArray<SessionConversationMessage>,
   ): { readonly content: string; readonly completedAt: string } | undefined {
     this.#assertReady();
     const latest = this.latestCompaction(subject);
     if (latest?.status !== "completed") return undefined;
     const { receipt } = latest;
     if (receipt.cause?.kind !== "limit-near") return undefined;
+    const conversation = readConversation();
     let summaryId: ContextSummaryId | undefined;
     if (receipt.summary.visibility === "stored") {
       const { throughTurnId } = receipt.summary;

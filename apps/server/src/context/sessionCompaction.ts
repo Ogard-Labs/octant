@@ -388,7 +388,7 @@ export class SessionCompactionService {
     // when the rule asked.
     const handover =
       cause?.kind === "limit-near" && run.owner === "runtime"
-        ? this.#handoverBasis(run, String(subject.aggregateId))
+        ? this.#tryHandoverBasis(run, String(subject.aggregateId))
         : undefined;
     const reservation = this.#reserve(subject, thread, planned, handover?.reservedTokens ?? 0);
     if (reservation.kind === "refused") return reservation.refusal;
@@ -785,6 +785,16 @@ export class SessionCompactionService {
    * spend; undefined where none can be written (a thread whose conversation
    * the host does not hold).
    */
+  #tryHandoverBasis(run: AdmittedRun, threadId: string): HandoverBasis | undefined {
+    try {
+      return this.#handoverBasis(run, threadId);
+    } catch {
+      // A conversation the host cannot read costs the handover, never the
+      // compaction the rule asked for.
+      return undefined;
+    }
+  }
+
   #handoverBasis(run: AdmittedRun, threadId: string): HandoverBasis | undefined {
     const { threads } = run;
     if (threads.conversation === undefined || threads.scratchRoot === undefined) return undefined;

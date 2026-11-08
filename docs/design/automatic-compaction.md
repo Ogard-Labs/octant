@@ -459,3 +459,9 @@ cannot be read hands a switch the raw selection, as before.
 - 2026-11-07: Slice 2 (idle rule) built.
 - 2026-11-07: Slice 3 (limit rule, handover summary, notice) built; D-5 added.
 - 2026-11-08: Code handover summary built; D-6 supersedes D-5.
+- 2026-11-08: Review of the Code handover: a conversation read that failed
+  (the event store's scan bound on a long thread) threw out the whole limit
+  compaction, a thread past 4,000 turns read its oldest part, identical texts
+  shared one source, and every switch read the whole thread. Now a failed read
+  costs only the handover, a thread too long reads nothing, each source names
+  its turn, and the conversation is read only once a limit summary is found.

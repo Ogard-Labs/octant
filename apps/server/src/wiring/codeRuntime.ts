@@ -955,7 +955,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               aggregateType: "code-thread",
               aggregateId: String(thread.id),
             }),
-            codeSessionConversation(thread.id),
+            () => codeSessionConversation(thread.id) ?? [],
           ),
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom, purpose }) =>
           selectCodeConversation(thread.id, {
