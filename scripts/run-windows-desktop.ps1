@@ -137,6 +137,8 @@ try {
       $octantArgumentQuotedUrlMatches = @()
       $octantArgumentTokenCount = 0
       $octantExactStagedImageUrlSequence = $false
+      $octantLeadingSeparatorKind = 'image-not-leading'
+      $octantInternalSeparatorKinds = @()
       $octantTrimmedCommand = $octantCommand.Trim()
       $octantPackageAppRoot = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'resources/app'))
       $octantPackageAppEntry = [IO.Path]::GetFullPath((Join-Path $octantPackageAppRoot 'apps/desktop/dist/entry.mjs'))
@@ -148,7 +150,21 @@ try {
         foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
           if (-not $octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { continue }
           $octantImageAtStart = $true
-          $octantArguments = $octantTrimmedCommand.Substring($octantImage.Length).Trim()
+          $octantArgumentTail = $octantTrimmedCommand.Substring($octantImage.Length)
+          $octantLeadingSeparatorLength = $octantArgumentTail.Length - $octantArgumentTail.TrimStart().Length
+          $octantLeadingSeparatorText = $octantArgumentTail.Substring(0, $octantLeadingSeparatorLength)
+          $octantLeadingSeparatorKind = if ($octantLeadingSeparatorText.Length -eq 0) {
+            'none'
+          } elseif ($octantLeadingSeparatorText -match '^ +$') {
+            'space'
+          } elseif ($octantLeadingSeparatorText -match '^\t+$') {
+            'tab'
+          } elseif ($octantLeadingSeparatorText -match '^\s+$') {
+            'other-whitespace'
+          } else {
+            'non-whitespace'
+          }
+          $octantArguments = $octantArgumentTail.Trim()
           $octantArgumentLayout = if ($octantArguments -eq '"%1"') {
             'url-only'
           } elseif ($octantArguments -match '^--\s+"%1"$') {
@@ -157,10 +173,30 @@ try {
             'extra-or-other-argument'
           }
           $octantDiagnosticTokens = [System.Collections.Generic.List[string]]::new()
-          foreach ($octantDiagnosticMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
+          $octantDiagnosticMatches = [regex]::Matches($octantArguments, '"[^"]*"|\S+')
+          foreach ($octantDiagnosticMatch in $octantDiagnosticMatches) {
             [void]$octantDiagnosticTokens.Add([string]$octantDiagnosticMatch.Value)
           }
           $octantArgumentTokenCount = $octantDiagnosticTokens.Count
+          $octantInternalSeparatorKinds = @()
+          for ($octantSeparatorIndex = 1; $octantSeparatorIndex -lt $octantDiagnosticMatches.Count; $octantSeparatorIndex++) {
+            $octantPreviousMatch = $octantDiagnosticMatches[$octantSeparatorIndex - 1]
+            $octantCurrentMatch = $octantDiagnosticMatches[$octantSeparatorIndex]
+            $octantSeparatorStart = $octantPreviousMatch.Index + $octantPreviousMatch.Length
+            $octantSeparatorText = $octantArguments.Substring($octantSeparatorStart, $octantCurrentMatch.Index - $octantSeparatorStart)
+            $octantInternalSeparatorKind = if ($octantSeparatorText.Length -eq 0) {
+              'none'
+            } elseif ($octantSeparatorText -match '^ +$') {
+              'space'
+            } elseif ($octantSeparatorText -match '^\t+$') {
+              'tab'
+            } elseif ($octantSeparatorText -match '^\s+$') {
+              'other-whitespace'
+            } else {
+              'non-whitespace'
+            }
+            $octantInternalSeparatorKinds += $octantInternalSeparatorKind
+          }
           $octantArgumentQuotedUrlMatches = @($octantDiagnosticTokens | ForEach-Object {
             [string]::Equals([string]$_, '"%1"', [StringComparison]::Ordinal)
           })
@@ -231,6 +267,10 @@ try {
         argumentQuotedUrlMatches = $octantArgumentQuotedUrlMatches
         argumentTokenCount = $octantArgumentTokenCount
         exactStagedImageUrlSequence = $octantExactStagedImageUrlSequence
+        imageQuoted = $octantImage.StartsWith('"') -and $octantImage.EndsWith('"')
+        imageToArgumentsSeparator = $octantLeadingSeparatorKind
+        argumentInternalSeparators = $octantInternalSeparatorKinds
+        commandHadOuterWhitespace = $octantCommand -cne $octantCommand.Trim()
         argument = $octantArgumentShape
         electronSeparator = $octantSeparator
       } | ConvertTo-Json -Compress)
