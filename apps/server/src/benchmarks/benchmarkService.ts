@@ -81,6 +81,8 @@ export interface BenchmarkServiceOptions {
   readonly codeCases?: {
     /** The mode a new thread starts in; absent unless it is an active Code Project. */
     readonly projectMode: (projectId: ProjectId) => PermissionMode | undefined;
+    /** Whether the starting window can reach the Project. A run acts under the host's own scope later, so this is checked once, here. */
+    readonly canAccess: (windowId: WindowId, projectId: ProjectId) => Promise<boolean>;
     /** Resolves the ref to the commit every cell of the case will start from. */
     readonly checkRef: (
       projectId: ProjectId,
@@ -254,14 +256,16 @@ export class BenchmarkService {
     // A suite can come from someone else's file; its commands run on this host,
     // so a person must have read them before the run starts.
     if (
-      request.confirmedCommands !== true &&
+      request.confirmedSuiteRevision !== suite.revision &&
       suite.cases.some((candidate) =>
         candidate.checks.some((check) => check.kind === "command-exits-zero"),
       )
     ) {
       return refused(
         "invalid",
-        "This suite runs commands on this Mac. Read them and confirm before starting the run.",
+        request.confirmedSuiteRevision === undefined
+          ? "This suite runs commands on this Mac. Read them and confirm before starting the run."
+          : "The suite changed after its commands were read. Read them again and confirm before starting the run.",
       );
     }
     const cells = benchmarkCellCount(
@@ -285,7 +289,7 @@ export class BenchmarkService {
         `Contender ${unavailable + 1} is not an enabled provider model on this host.`,
       );
     }
-    const codeChecked = await this.#checkCodeCases(suite.cases, request.executionLevel);
+    const codeChecked = await this.#checkCodeCases(windowId, suite.cases, request.executionLevel);
     if (codeChecked.status === "refused") return codeChecked;
     const project = await this.#options.ensureProject(windowId);
     if (project.status === "refused") return refused("unavailable", project.message);
@@ -318,6 +322,7 @@ export class BenchmarkService {
    * that resolves. The first problem refuses the whole run with a sentence.
    */
   async #checkCodeCases(
+    windowId: WindowId,
     cases: BenchmarkSuite["cases"],
     executionLevel: BenchmarkRunStartRequest["executionLevel"],
   ): Promise<
@@ -346,6 +351,12 @@ export class BenchmarkService {
     for (const benchmarkCase of codeCases) {
       const target = benchmarkCase.code;
       if (target === undefined) continue;
+      if (!(await support.canAccess(windowId, target.codeProjectId))) {
+        return refused(
+          "invalid",
+          `This window cannot use the Code Project for "${benchmarkCase.title}".`,
+        );
+      }
       const mode = support.projectMode(target.codeProjectId);
       if (mode === undefined) {
         return refused(

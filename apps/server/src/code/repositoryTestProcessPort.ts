@@ -112,6 +112,12 @@ interface RepositoryTestProcessPortOptions {
    * launch may write, so no command can rewrite a script waiting to run.
    */
   readonly harnessShellScriptDirectory?: string;
+  /**
+   * Refuses `setsid()` in every launch of this port (macOS), so a descendant
+   * stays in the process group a timeout or an abort ends. `posix_spawn` with
+   * `POSIX_SPAWN_SETSID` is a separate call this does not stop.
+   */
+  readonly refuseNewSession?: boolean;
 }
 
 /**
@@ -304,6 +310,7 @@ export class RepositoryTestProcessPort {
   readonly #additionalWritePaths: ReadonlyArray<string>;
   readonly #allowSimulatorControl: boolean;
   readonly #harnessShellScriptDirectory: string | undefined;
+  readonly #refuseNewSession: boolean;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
     this.#platform = options.platform ?? process.platform;
@@ -325,6 +332,7 @@ export class RepositoryTestProcessPort {
     this.#additionalWritePaths = options.additionalWritePaths ?? [];
     this.#allowSimulatorControl = options.allowSimulatorControl === true;
     this.#harnessShellScriptDirectory = options.harnessShellScriptDirectory;
+    this.#refuseNewSession = options.refuseNewSession === true;
     this.#confinement =
       options.confinement ??
       makeProcessConfinementLive({
@@ -654,6 +662,7 @@ export class RepositoryTestProcessPort {
           input.networkAccess === "none" ? "none" : (proxied?.networkEgress ?? this.#networkEgress),
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
+        ...(this.#refuseNewSession ? { refuseNewSession: true } : {}),
         readRoots: [
           input.cwd,
           this.#temporaryDirectory,

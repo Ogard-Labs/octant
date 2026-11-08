@@ -537,7 +537,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
-      benchmarkCheckShell,
+      benchmarkCheckCommands,
       prepareCredentialCommand,
       personMemorySweep,
       runtimeForgeChanges,
@@ -1188,6 +1188,7 @@ export function startOctantServer(
     });
     const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
     const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
+      canAccessCodeProject,
       awaitsPerson: (threadId) =>
         codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
         threadAwaitsHarnessApproval(threadId),
@@ -1202,7 +1203,7 @@ export function startOctantServer(
         return asked[0];
       },
       codeEvidence,
-      benchmarkCheckShell,
+      benchmarkCheckCommands,
       managedWorktreeReceipts,
       managedWorktreeService,
       roots,
