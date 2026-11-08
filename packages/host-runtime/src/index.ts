@@ -300,6 +300,12 @@ export {
   type ListenerTlsFileRead,
 } from "./windowsListenerTls";
 export {
+  createWindowsRosterSigningKeyFile,
+  type WindowsRosterSigningKeyFile,
+  type WindowsRosterSigningKeyNative,
+  type RosterSigningKeyRead,
+} from "./windowsRosterSigningKey";
+export {
   createWindowsServerIdentityFiles,
   type WindowsServerIdentityFiles,
   type WindowsServerIdentityNative,

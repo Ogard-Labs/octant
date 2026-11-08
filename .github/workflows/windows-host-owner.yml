@@ -9,8 +9,10 @@ on:
       - packages/host-runtime/src/windowsHostProfile*
       - packages/host-runtime/src/windowsServerIdentity*
       - packages/host-runtime/src/windowsListenerTls*
+      - packages/host-runtime/src/windowsRosterSigningKey*
       - apps/server/src/remote/privateListenerHostIdentity*
       - apps/server/src/remote/selfMadeListenerCertificate*
+      - apps/server/src/hub/rosterSigningKey*
       - packages/host-runtime/src/ownerControlProtocol.ts
       - packages/host-runtime/src/owner.ts
       - packages/host-runtime/src/ownerReceipt.ts
@@ -75,6 +77,10 @@ jobs:
         run: |
           bun build scripts/windows-host-owner/listener-tls.ts --target=node --outfile "$env:RUNNER_TEMP/listener-tls-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual roster signing consumer
+        run: |
+          bun build scripts/windows-host-owner/roster-key.ts --target=node --outfile "$env:RUNNER_TEMP/roster-key-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
@@ -118,6 +124,10 @@ jobs:
       - name: Prove native listener TLS persistence and renewal in all three runtimes
         run: |
           bun scripts/windows-host-owner/profile-run.ts --listener-tls "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/listener-tls-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove immutable native roster signing in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --roster-key "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/roster-key-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

@@ -278,8 +278,18 @@ the CLI. The hub depends on that:
     Windows file operations. Certificate reads release their file handles so
     renewal can replace the public certificate; the key and directory guards
     remain held until process exit.
+    The roster signer has a separate fixed native operation for
+    `hub/roster-signing-key.pem` under that same profile boundary. Its P-256
+    PKCS#8 key is at most 4 KiB, exclusively created and held with its hub
+    directory until process exit. Reads and creation revalidate native
+    profile/physical-directory identity, ownership and private DACLs.
+    Empty, corrupt, wrong-curve, exposed or aliased keys refuse without
+    replacement or permission repair. The public port retains base64url SPKI
+    and SHA-256/P1363 signatures; transfer buffers are erased after import.
+    Restarts and concurrent first-use preserve the existing key. Missing native
+    roster storage refuses on Windows before ordinary-file operations.
     These internal prerequisites do not admit Windows desktop/server startup;
-    roster/other hub storage, encrypted-disk setup checks and the boot service
+    other hub storage, encrypted-disk setup checks and the boot service
     remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a
     power failure where the platform allows it, and explains what full-disk

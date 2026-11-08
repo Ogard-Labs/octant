@@ -1,4 +1,8 @@
-import type { WindowsListenerTlsFiles, WindowsServerIdentityFiles } from "@octant/host-runtime";
+import type {
+  WindowsListenerTlsFiles,
+  WindowsRosterSigningKeyFile,
+  WindowsServerIdentityFiles,
+} from "@octant/host-runtime";
 import type { DesktopComputerUsePort } from "../computerUse/desktopComputerUsePort";
 import type { ProviderInstance } from "@octant/contracts";
 import { Data, Effect } from "effect";
@@ -122,6 +126,7 @@ export interface StartOctantServerOptions {
   /** Internal native-profile storage; absent until Windows host composition supplies it. */
   readonly serverIdentityFiles?: WindowsServerIdentityFiles;
   readonly listenerTlsFiles?: WindowsListenerTlsFiles;
+  readonly rosterSigningKeyFile?: WindowsRosterSigningKeyFile;
   readonly instanceId?: string;
   readonly hostId?: string;
   readonly controlEndpoint?: string;

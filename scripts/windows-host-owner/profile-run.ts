@@ -17,8 +17,9 @@ import { fileURLToPath } from "node:url";
 
 const identityMode = process.argv[2] === "--server-identity";
 const tlsMode = process.argv[2] === "--listener-tls";
+const rosterMode = process.argv[2] === "--roster-key";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
-  identityMode || tlsMode ? 3 : 2,
+  identityMode || tlsMode || rosterMode ? 3 : 2,
 );
 if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
   throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
@@ -80,6 +81,7 @@ const identities = new Map<string, string>();
 const signingIdentities = new Map<string, string>();
 const tlsPins = new Map<string, string>();
 const tlsCertificates = new Map<string, string>();
+const rosterFingerprints = new Map<string, string>();
 let concurrentReady = 0;
 const checks: string[] = [];
 let allJobsJoined = true;
@@ -129,6 +131,20 @@ async function run(
       return;
     }
     if (record(value) && value.ownedJobJoined === true) joined = true;
+    if (
+      rosterMode &&
+      record(value) &&
+      typeof value.profile === "string" &&
+      typeof value.rosterFingerprint === "string"
+    ) {
+      const prior = rosterFingerprints.get(value.profile);
+      if (prior !== undefined && prior !== value.rosterFingerprint) {
+        invalidOutput = true;
+        child.kill();
+        return;
+      }
+      rosterFingerprints.set(value.profile, value.rosterFingerprint);
+    }
     if (
       tlsMode &&
       record(value) &&
@@ -249,7 +265,93 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  if (tlsMode) {
+  if (rosterMode) {
+    const selected = roots[0];
+    if (selected === undefined) throw Error("Missing owned roster root.");
+    for (const profile of profiles) await probe(first, profile, "missing");
+    checks.push("read-only access creates no hub directory or roster key");
+    await Promise.all(Array.from({ length: 8 }, () => probe(first, "octant", "concurrent")));
+    if (!rosterFingerprints.has("octant"))
+      throw Error("Concurrent roster first-use had no successful winner.");
+    checks.push("concurrent creation refuses competing writes or retains one roster key");
+    for (const runtime of runtimes)
+      for (const profile of profiles) {
+        await probe(runtime, profile);
+        await acl(profile, "roster-inspect");
+      }
+    if (rosterFingerprints.size !== 2 || new Set(rosterFingerprints.values()).size !== 2)
+      throw Error("Roster keys are not profile isolated.");
+    checks.push("Bun, Node and Electron retain distinct profile keys across process restarts");
+    const hub = win32.join(selected, "data", "hub");
+    const key = win32.join(hub, "roster-signing-key.pem");
+    const original = await readFile(key);
+    try {
+      const wrongCurve = generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({
+        format: "pem",
+        type: "pkcs8",
+      });
+      for (const invalid of [
+        Buffer.alloc(0),
+        Buffer.from("malformed-owned-roster-key"),
+        Buffer.alloc(4097, 120),
+        Buffer.from(wrongCurve),
+      ]) {
+        await writeFile(key, invalid);
+        await probe(first, "octant", "refuse");
+        if (!(await readFile(key)).equals(invalid))
+          throw Error("Invalid owned roster key was replaced.");
+      }
+      await writeFile(key, original);
+      checks.push(
+        "empty, malformed, oversized and wrong-curve roster keys refuse without replacement",
+      );
+      const alias = key + ".alias";
+      await link(key, alias);
+      try {
+        await probe(first, "octant", "refuse");
+      } finally {
+        await unlink(alias);
+      }
+      checks.push("a hardlinked roster key refuses");
+      await rename(key, key + ".original");
+      try {
+        await mkdir(key);
+        await probe(first, "octant", "refuse");
+      } finally {
+        await rm(key, { recursive: true, force: true });
+        await rename(key + ".original", key);
+      }
+      checks.push("a nonregular roster key refuses");
+      await rename(hub, hub + ".original");
+      try {
+        await symlink(hub + ".original", hub, "junction");
+        await probe(first, "octant", "refuse");
+      } finally {
+        await unlink(hub);
+        await rename(hub + ".original", hub);
+      }
+      checks.push("a reparse replacement for the hub directory refuses");
+      await acl("octant", "roster-unsafe");
+      try {
+        await probe(first, "octant", "refuse");
+      } finally {
+        await acl("octant", "roster-restore");
+      }
+      checks.push("an exposed roster key refuses without rewriting its DACL");
+      await probe(first, "octant");
+      await acl("octant", "roster-inspect");
+      checks.push("restored original roster storage remains usable and private");
+    } finally {
+      original.fill(0);
+    }
+    console.log(
+      JSON.stringify({
+        rosterKeyLifecycleChecks: checks,
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else if (tlsMode) {
     const selected = roots[0];
     if (selected === undefined) throw Error("Missing owned TLS root.");
     for (const profile of profiles) await probe(first, profile, "missing");
