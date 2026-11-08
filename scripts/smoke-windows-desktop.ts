@@ -184,6 +184,7 @@ try {
       (await host.startup.readHostInfo())?.instanceId === first.probe.instanceId,
       "a second launch retains one actual native server generation",
     );
+    check(await window(app), "the settled owned desktop window was freshly captured");
     check(
       await window(app, true),
       "normal owned window close was posted without focus or input injection",
