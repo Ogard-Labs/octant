@@ -4,6 +4,7 @@
 #include <cwchar>
 #include <cstdlib>
 #include <exception>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -54,10 +55,18 @@ int wmain(int argc, wchar_t** argv) {
   std::vector<unsigned char> user, before, after;
   if (!information(original.value, TokenUser, user) || !information(original.value, TokenIntegrityLevel, before)) return refuse("original-facts");
   if (restricting) {
-    // A restriction to this user's own SID still passes its pipe DACL. The
-    // production native predicate, rather than a missing ACL, must refuse it.
-    SID_AND_ATTRIBUTES restricted{reinterpret_cast<const TOKEN_USER*>(user.data())->User.Sid, 0};
-    if (!CreateRestrictedToken(original.value, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr, 1, &restricted, &child.value)) return refuse("restricting-token");
+    // Keep ordinary runtime/DLL reads possible under their Users or
+    // Authenticated Users grants. This user's SID also passes the private
+    // pipe DACL; the native principal predicate must refuse the restricted list.
+    std::array<unsigned char, SECURITY_MAX_SID_SIZE> users{}, authenticated{};
+    DWORD users_size = static_cast<DWORD>(users.size()), authenticated_size = static_cast<DWORD>(authenticated.size());
+    if (!CreateWellKnownSid(WinBuiltinUsersSid, nullptr, users.data(), &users_size) ||
+        !CreateWellKnownSid(WinAuthenticatedUserSid, nullptr, authenticated.data(), &authenticated_size)) return refuse("runtime-restricting-sids");
+    SID_AND_ATTRIBUTES restricted[]{
+      {reinterpret_cast<const TOKEN_USER*>(user.data())->User.Sid, 0},
+      {users.data(), 0}, {authenticated.data(), 0}
+    };
+    if (!CreateRestrictedToken(original.value, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr, 3, restricted, &child.value)) return refuse("restricting-token");
   } else {
     Handle filtered;
     if (!CreateRestrictedToken(original.value, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr, 0, nullptr, &filtered.value)) return refuse("low-filtered-copy");
