@@ -133,7 +133,7 @@ while next < pending.count, next < 512, Date() < treeDeadline {
         controls.append(control)
         if (mode == "press" || mode == "click") && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
     }
-    if depth >= 20 { depthLimited = true; continue }
+    if depth >= 40 { depthLimited = true; continue }
     var childrenValue: CFTypeRef?
     let childrenRead = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &childrenValue)
     if childrenRead == .success {
@@ -262,6 +262,9 @@ let evidence: [String: Any] = [
     "interactiveControls": controls, "treeIdentityMatched": treeIdentityMatched,
     "treeVisited": next, "treeReadErrors": readErrors, "treeNativeErrors": nativeReadErrors.sorted(),
     "treeTruncated": truncated, "action": action,
+    "treeDepthLimited": depthLimited, "treeLabelsLimited": labelsLimited,
+    "treeNodeLimited": pending.count >= 512,
+    "treeTimeLimited": next < pending.count && Date() >= treeDeadline,
     "cgMetadataAvailable": nativeWindows != nil, "candidateWindowOwners": candidateWindows,
 ]
 // Optional booleans are represented explicitly, not by reading arbitrary AX values.
