@@ -47,6 +47,12 @@ export function workTurnDecision(
     ...(decision.why === undefined ? {} : { why: decision.why }),
     ...(decision.urgent === true ? { urgent: true } : {}),
     options: decision.options,
+    // The model that wrote the ask, not the thread's current one: the thread
+    // may have moved to another model since.
+    askedBy: {
+      providerInstanceId: latest.authority.providerInstanceId,
+      modelId: latest.authority.modelId,
+    },
     answer: {
       threadId: thread.id,
       turnId: latest.turnId,

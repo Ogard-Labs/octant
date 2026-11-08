@@ -90,6 +90,96 @@ function richDecision(extra: object = {}) {
   });
 }
 
+const REVIEWER = "00000000-0000-4000-8000-0000000000b1";
+const ASKER = "00000000-0000-4000-8000-0000000000b2";
+const askedBy = { providerInstanceId: ASKER, modelId: "claude-sonnet" };
+const review = (backs: string) => ({
+  status: "reviewed",
+  providerInstanceId: REVIEWER,
+  modelId: "gpt-5",
+  providerName: "Reviewer account",
+  driverKind: "codex",
+  backs,
+  reason: "Review is not finished.",
+  reviewedAt: "2026-10-06T08:06:00.000Z",
+});
+
+describe("a decision's second opinion", () => {
+  it("names the asking model under the recommended option and the reviewer under the option it backs", () => {
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={richDecision({ askedBy, review: review("Wait for review") })}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Open it/ })).toHaveTextContent(
+      "claude-sonnet · asking thread",
+    );
+    expect(screen.getByRole("button", { name: /Wait for review/ })).toHaveTextContent(
+      "gpt-5 · Second opinion: Review is not finished.",
+    );
+    expect(screen.getByText("Second opinion differs")).toBeInTheDocument();
+  });
+
+  it("puts both lines under one option and shows no tag when the reviewer backs the recommendation", () => {
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={richDecision({ askedBy, review: review("Open it") })}
+      />,
+    );
+    const lines = screen.getAllByText(/ · (asking thread|Second opinion: )/);
+    expect(lines).toHaveLength(2);
+    const recommended = screen.getByRole("button", { name: /Open it/ });
+    expect(lines.every((line) => recommended.contains(line))).toBe(true);
+    expect(screen.queryByText("Second opinion differs")).not.toBeInTheDocument();
+  });
+
+  it("says a second opinion is on its way, and why none came, in one muted line each", () => {
+    const view = render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={richDecision({ review: { status: "pending" } })}
+      />,
+    );
+    expect(screen.getByText("Getting a second opinion…")).toBeInTheDocument();
+    const reasons = {
+      failed: "The reviewer's answer could not be read",
+      withheld: "The reviewer read outside content, so its answer was not used",
+      "not-allowed": "This Project doesn't allow the chosen provider",
+    } as const;
+    for (const [status, reason] of Object.entries(reasons)) {
+      view.rerender(
+        <PendingRequestRow
+          now={NOW}
+          onAnswer={vi.fn()}
+          onOpenThread={vi.fn()}
+          request={richDecision({ review: { status } })}
+        />,
+      );
+      expect(screen.getByText("No second opinion")).toHaveAttribute("title", reason);
+    }
+  });
+
+  it("shows nothing about a second opinion when there is none", () => {
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={richDecision()}
+      />,
+    );
+    expect(screen.queryByText(/second opinion/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("a decision card", () => {
   it("shows the why, each option's detail and an Urgent tag", () => {
     render(

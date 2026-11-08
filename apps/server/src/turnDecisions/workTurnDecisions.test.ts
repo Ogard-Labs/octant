@@ -31,6 +31,10 @@ describe("Work turn decisions", () => {
         { label: "Revenue", recommended: true },
         { label: "Headcount", recommended: false },
       ],
+      askedBy: {
+        providerInstanceId: "00000000-0000-4000-8000-000000000b04",
+        modelId: "model-a",
+      },
       answer: {
         threadId,
         turnId: "00000000-0000-4000-8000-000000000201",
