@@ -1186,6 +1186,7 @@ export function startOctantServer(
     const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
     const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
       chatService,
+      personMemory,
       persistence,
       projectService,
       threadPurge: benchmarkThreadPurge,

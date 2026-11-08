@@ -560,6 +560,54 @@ describe("benchmark runner", () => {
       ).toEqual(["queued", "queued"]);
     });
 
+    it("frees a place only for a judge turn that was counted, so a judge that ends in the same pass does not let a third turn start", async () => {
+      const { store, chat, runner, projection } = setup();
+      const run = sampleRun({
+        judge: { providerInstanceId: benchmarkIds.providerA, modelId: "judge-model" },
+        repetitions: 2,
+      });
+      store.runStarted({ run });
+      await runner.tick();
+      chat.finish(threadOf(String(run.cells[0]!.cellId)), "hello");
+      await runner.tick();
+      // One cell running and one judge turn in flight fill the provider's two places.
+      expect(chat.starts.map((start) => String(start.modelId))).toEqual([
+        "model-a",
+        "model-a",
+        "judge-model",
+      ]);
+      chat.finish(judgeThread(String(run.cells[0]!.cellId)), '{"score": 5, "reason": "ok"}');
+
+      await runner.tick();
+
+      const modelAStarts = chat.starts.filter((start) => String(start.modelId) === "model-a");
+      expect(modelAStarts).toHaveLength(3);
+      expect(
+        projection
+          .run(benchmarkIds.run)!
+          .cells.slice(2)
+          .map((cell) => cell.state),
+      ).toEqual(["running", "queued"]);
+    });
+
+    it("interrupts and archives a judge turn in flight when the run is cancelled, and starts no more", async () => {
+      const { chat, runner, projection, run } = await answeredWithJudge(2);
+      const judgeThreads = run.cells.slice(0, 2).map((cell) => judgeThread(String(cell.cellId)));
+      const startsBefore = chat.starts.length;
+      chat.archived.length = 0;
+
+      const cancelled = await runner.cancel(benchmarkIds.run);
+
+      expect(cancelled?.status).toBe("cancelled");
+      for (const thread of judgeThreads) {
+        expect(chat.interrupted).toContain(thread);
+        expect(chat.archived).toContain(thread);
+      }
+      await runner.tick();
+      expect(chat.starts).toHaveLength(startsBefore);
+      expect(projection.runningRuns()).toEqual([]);
+    });
+
     it("starts no judge turn for a suite without a judge", async () => {
       const { store, chat, runner, projection } = setup();
       const run = sampleRun();
