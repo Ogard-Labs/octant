@@ -49,11 +49,34 @@ try {
     $octantProtocol = "HKCU:\Software\Classes\$octantScheme"
     if (-not (Test-Path -LiteralPath $octantProtocol)) { continue }
     $octantExecutable = $octantProtocols[$octantScheme]
-    $octantCommand = (Get-Item -LiteralPath "$octantProtocol\shell\open\command").GetValue('')
-    $octantUnquoted = $octantExecutable + ' "%1"'
-    $octantQuoted = '"' + $octantExecutable + '" "%1"'
-    $octantExpected = @($octantUnquoted, $octantQuoted)
-    if ($octantExpected -inotcontains $octantCommand) { throw 'Refusing removal of another protocol command' }
+    $octantCommand = [string](Get-Item -LiteralPath "$octantProtocol\shell\open\command").GetValue('')
+    $octantPathSpellings = @($octantExecutable)
+    if ($octantExecutable -match '^[A-Za-z]:\\') { $octantPathSpellings += '\\?\' + $octantExecutable }
+    $octantExpected = @()
+    foreach ($octantPath in $octantPathSpellings) {
+      foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
+        $octantExpected += $octantImage + ' "%1"'
+        $octantExpected += $octantImage + ' -- "%1"'
+      }
+    }
+    if ($octantExpected -inotcontains $octantCommand) {
+      $octantImageShape = 'other'
+      foreach ($octantPath in $octantPathSpellings) {
+        if ($octantCommand.IndexOf($octantPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+          $octantImageShape = if ($octantPath.StartsWith('\\?\')) { 'staged-namespaced' } else { 'staged-ordinary' }
+          break
+        }
+      }
+      $octantArgumentShape = if ($octantCommand.EndsWith('"%1"', [StringComparison]::OrdinalIgnoreCase)) { 'quoted-url' } else { 'other' }
+      $octantSeparator = $octantCommand.Contains(' -- ')
+      Write-Output (@{
+        protocolCleanup = 'refused'
+        executable = $octantImageShape
+        argument = $octantArgumentShape
+        electronSeparator = $octantSeparator
+      } | ConvertTo-Json -Compress)
+      throw 'Refusing removal of another protocol command'
+    }
     Remove-Item -LiteralPath $octantProtocol -Recurse -Force
     if (Test-Path -LiteralPath $octantProtocol) { throw 'Owned protocol cleanup was not confirmed' }
   }

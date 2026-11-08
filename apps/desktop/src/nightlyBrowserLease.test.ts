@@ -53,7 +53,7 @@ function fixture(onCount?: (count: number) => void, nativeMain = true, peerKey =
       return () => {};
     },
     closeOwnerContexts: closeContexts,
-    ...(onCount === undefined ? {} : { onActiveWindowCountChanged: onCount }),
+    ...(onCount === undefined ? {} : { onClientLifetimeCountChanged: onCount }),
     fetch,
   });
   const send = (requestId: number, operation: "register" | "renew" | "revoke") =>
@@ -330,6 +330,48 @@ it("counts only acknowledged current-host leases and not pending registration", 
   await f.send(2, "renew");
   expect(counts).toEqual([1, 0]);
   await f.owner.close();
+});
+
+it("keeps the host alive until a revoked Nightly lease receives its native reply", async () => {
+  const counts: number[] = [];
+  const order: string[] = [];
+  const f = fixture((count) => {
+    counts.push(count);
+    order.push(`count:${count}`);
+  });
+  const originalReply = f.replies.getMockImplementation();
+  if (originalReply === undefined) throw new Error("Fixture reply is missing");
+  f.replies.mockImplementation((requestId, reply) => {
+    if (reply.kind === "revoked") order.push("reply:revoked");
+    return originalReply(requestId, reply);
+  });
+  let finishDelete = (_response: Response) => {};
+  try {
+    const registered = await f.send(1, "register");
+    if (registered.kind !== "registered") throw new Error("Fixture registration failed");
+    order.length = 0;
+    const deleteResponse = new Promise<Response>((resolve) => {
+      finishDelete = resolve;
+    });
+    f.fetch.mockImplementationOnce(() => deleteResponse);
+    const revoking = f.send(2, "revoke");
+    await vi.waitFor(() => expect(f.fetch).toHaveBeenCalledTimes(2));
+    expect(f.fetch.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    expect(order).toEqual([]);
+    expect(f.owner.activeWindowCount()).toBe(0);
+    expect(f.owner.lifetimeWindowCount()).toBe(1);
+    expect(await f.send(3, "register")).toEqual({ kind: "refused", reason: "invalid-request" });
+    expect(f.owner.lifetimeWindowCount()).toBe(1);
+    finishDelete(new Response(null, { status: 204 }));
+    expect(await revoking).toEqual({ kind: "revoked" });
+    expect(counts).toEqual([1, 0]);
+    expect(order).toEqual(["reply:revoked", "count:0"]);
+    expect(f.owner.activeWindowCount()).toBe(0);
+    expect(f.owner.lifetimeWindowCount()).toBe(0);
+  } finally {
+    finishDelete(new Response(null, { status: 204 }));
+    await f.owner.close();
+  }
 });
 
 it("revokes state before a failing count observer without skipping lease cleanup", async () => {

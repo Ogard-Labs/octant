@@ -4448,13 +4448,13 @@ function forceExitAfterStalledQuit(): () => void {
 let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
 let nightlyWindowLeases: ReturnType<typeof ownNightlyWindowLeases> | undefined;
 const desktopClientLifetime = createDesktopClientLifetime({
-  currentNightlyWindows: () => nightlyWindowLeases?.activeWindowCount() ?? 0,
+  currentNightlyWindows: () => nightlyWindowLeases?.lifetimeWindowCount() ?? 0,
   closeLocalWindows: closeLocalWindowsForRetainedHost,
   quitHost: quitHostAfterLastClient,
 });
 
 async function quitHostAfterLastClient(
-  stillRequested: () => boolean = () => (nightlyWindowLeases?.activeWindowCount() ?? 0) === 0,
+  stillRequested: () => boolean = () => (nightlyWindowLeases?.lifetimeWindowCount() ?? 0) === 0,
 ): Promise<"accepted" | "cancelled"> {
   if (quitPrepared) return "accepted";
   if (preparingQuit) return "cancelled";
@@ -4763,7 +4763,7 @@ function startDesktopInstance(): void {
                       instanceId: serverInstanceId,
                       desktopBridgeSecret,
                     },
-              onActiveWindowCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
+              onClientLifetimeCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
               closeOwnerContexts: async (windowId) => {
                 await browserSurfaceHost?.closeOwnerContexts(windowId);
               },
