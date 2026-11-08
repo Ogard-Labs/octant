@@ -964,7 +964,7 @@ const timer = setInterval(() => {
       await nativeInput(`${stage}-share`, "choose-native-menu-item", "Share", "Share…");
       await observeUntil(`${stage}-share-dialog`, (snapshot) => hasExactText(snapshot, "Share"));
       await nativeInput(`${stage}-public-links-scroll`, "scroll-bottom", "Share");
-      await observeUntil(
+      return await observeUntil(
         `${stage}-public-links`,
         (snapshot) => !active || (hasText(snapshot, "Copy link") && hasText(snapshot, "Revoke")),
       );
@@ -1082,12 +1082,53 @@ const timer = setInterval(() => {
       Object.keys(storedReport).sort().join(",") !== "createdAt,detail,reason,shareId"
     )
       throw Error("The stored report carried unexpected reporter fields.");
-    await showPublicLinks("updated");
-    await nativeInput("native-revoke", "click", "Revoke");
+    await writeFile(
+      join(artifacts, "native-update-checkpoint.json"),
+      JSON.stringify(
+        {
+          sameIDAndURL: true,
+          nativePasswordUpdate: true,
+          actualPassword401AndViewGrant: true,
+          privateViewGrantHTTPOnlySameSite: true,
+          reportStoredWithoutReporterAddress: true,
+          revokeAcceptance: "not yet proven",
+        },
+        null,
+        2,
+      ),
+    );
+    const updatedLinks = await showPublicLinks("updated");
+    const actionRows = updatedLinks.texts.filter(
+      (row) =>
+        row.text.includes("Copy link") &&
+        row.text.includes("Update") &&
+        row.text.endsWith("Revoke"),
+    );
+    if (actionRows.length !== 1 || actionRows[0] === undefined)
+      throw Error("The single owned public-link action row is unavailable.");
+    await nativeInput("native-revoke", "click", "Revoke", actionRows[0].text);
     await observeUntil(
       "native-revoke-card",
       (snapshot) =>
-        hasText(snapshot, "Revoke this public link?") && hasText(snapshot, publishedUrl),
+        hasText(snapshot, "Revoke this public link?") &&
+        hasText(snapshot, `${ownService.publicUrl}/s/`),
+    );
+    const revokeFiles = await readdir(join(root, "share", "shares"));
+    if (revokeFiles.length !== 1 || revokeFiles[0] !== `${published.record.publicShareId}.json`)
+      throw Error("The revoke scope does not contain exactly its single owned publication.");
+    await writeFile(
+      join(artifacts, "revoke-card-identity.json"),
+      JSON.stringify(
+        {
+          exactRenderedURLPreRead:
+            "unverified; scope guarded by the single independently inventoried owned publication",
+          singleOwnedPublicationInventoried: true,
+          visibleOwnedOrigin: true,
+          exactPendingJournalAndHTTP410Required: true,
+        },
+        null,
+        2,
+      ),
     );
     // Only the owned fixture goes offline. The native owner must journal the
     // owed revoke before the service returns, retaining its secret for retry.
@@ -1096,7 +1137,19 @@ const timer = setInterval(() => {
     await observeUntil("native-offline-revoke", (snapshot) =>
       hasText(snapshot, "This Mac keeps trying to revoke the link."),
     );
-    journalPayload("pending");
+    const pendingRevoke = Schema.decodeUnknownSync(
+      Schema.Struct({
+        publicShareId: Schema.String,
+        serviceUrl: Schema.String,
+        credentialRef: Schema.String,
+      }),
+    )(journalPayload("pending"));
+    if (
+      pendingRevoke.publicShareId !== String(published.record.publicShareId) ||
+      pendingRevoke.serviceUrl !== ownService.publicUrl ||
+      pendingRevoke.credentialRef !== publishedCredentialRef
+    )
+      throw Error("The offline revoke intent does not bind the exact owned publication.");
     if (!(await ownerSecretStore.has(publishedCredentialRef)))
       throw Error("The offline revoke discarded the credential needed to retry.");
     const restored = startShareService({

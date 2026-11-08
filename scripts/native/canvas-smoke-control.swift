@@ -112,7 +112,12 @@ var pointerProof: String?
 var nativeText: String?
 if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
-    let partialMatches = (request.results ?? []).flatMap { result -> [TextTarget] in
+    let rowContext = mode == "click" && CommandLine.arguments.count == 6 ? CommandLine.arguments[5] : nil
+    let observedRows = (request.results ?? []).filter { result in
+        rowContext == nil || result.topCandidates(1).first?.string == rowContext
+    }
+    if rowContext != nil && observedRows.count != 1 { refuse("The current owned image has no unique exact contextual row.") }
+    let partialMatches = observedRows.flatMap { result -> [TextTarget] in
         guard let value = result.topCandidates(1).first else { return [] }
         var matches: [TextTarget] = []
         var remaining = value.string.startIndex..<value.string.endIndex
@@ -125,7 +130,7 @@ if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" |
         }
         return matches
     }
-    let exactMatches = targets.filter { $0.text.caseInsensitiveCompare(expected) == .orderedSame }
+    let exactMatches = targets.filter { $0.text.caseInsensitiveCompare(expected) == .orderedSame && (rowContext == nil || $0.text == rowContext) }
     let matches = exactMatches.isEmpty ? partialMatches : exactMatches
     guard matches.count == 1, let match = matches.first else { refuse("The current owned image has no unique exact text target: " + expected) }
     let current = window(pid)
