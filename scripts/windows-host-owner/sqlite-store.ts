@@ -10,7 +10,10 @@ import {
   createWindowsSqliteStores,
   type WindowsSqliteStoreAdmission,
 } from "../../packages/host-runtime/src/windowsSqliteStore";
-import { openReadOnlySqlite } from "../../apps/server/src/persistence/sqlitePort";
+import {
+  openAdmittedSqlite,
+  openReadOnlySqlite,
+} from "../../apps/server/src/persistence/sqlitePort";
 
 const [binding, profile] = process.argv.slice(2);
 if (
@@ -126,6 +129,28 @@ try {
     before.equals(readFileSync(backup)),
     "the read-only adapter leaves its foreign snapshot bytes unchanged",
   );
+  database.close();
+  database = undefined;
+  active.close();
+  active = undefined;
+  const portAdmission = stores.main();
+  if (portAdmission.status !== "ready") throw Error("Server connection admission unavailable.");
+  const connection = openAdmittedSqlite(portAdmission);
+  try {
+    check(
+      connection.prepare("SELECT value FROM proof").all().length === count,
+      "the production server adapter initializes and reads the admitted database",
+    );
+    connection.transaction(() =>
+      connection.prepare("INSERT INTO proof VALUES (?)").run("server"),
+    )();
+  } finally {
+    connection.close();
+    connection.close();
+  }
+  renameSync(originalPath, originalPath + ".moved");
+  renameSync(originalPath + ".moved", originalPath);
+  checks.push("the production server adapter joins SQLite before releasing its native guard");
   console.log(
     JSON.stringify({
       profile,

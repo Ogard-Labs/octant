@@ -312,8 +312,12 @@ the CLI. The hub depends on that:
     This boundary does not protect from other unconfined programs running as
     the same owner. Admitted remote clients, provider replies and plugins must
     have no store-path mutation route. Work and Code stay refused until their
-    native confinement also denies the entire private profile. Native
-    experiments do not admit foreground or desktop startup.
+    native confinement also denies the entire private profile. The authoritative
+    Work-turn and Code-command/operation entry points refuse Windows before
+    launch or journal mutation, including background routine calls; Full access
+    cannot bypass this gate. Provider process preparation refuses Windows before
+    its unconfined Full-access branch. Native experiments do not admit foreground
+    or desktop startup.
     Hosted native QA keeps the pinned runtime versions. When GitHub release
     delivery fails, the same Bun version may come from its official npm Windows
     artifact, verified against a pinned SHA-512 before extracting its sole regular

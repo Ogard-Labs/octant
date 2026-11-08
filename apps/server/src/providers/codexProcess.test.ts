@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Exit, Fiber, Scope } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   codexAccountProcessEnvironment,
@@ -803,6 +803,27 @@ describe("Codex launch confinement", () => {
       platform: process.platform,
     });
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
+  });
+
+  it("refuses Windows Full access before an unconfined process can be prepared", () => {
+    const prepare = vi.fn(() => {
+      throw Error("No process may be prepared.");
+    });
+    const result = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\provider.exe",
+      args: [],
+      authority: {
+        kind: "thread",
+        root: "C:\\fixture",
+        mode: "code",
+        executionPolicy: "full-access",
+      },
+      environment: {},
+      confinement: { prepare },
+      platform: "win32",
+    });
+    expect(result.status).toBe("refused");
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(

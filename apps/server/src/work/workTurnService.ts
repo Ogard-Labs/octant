@@ -740,6 +740,8 @@ export class WorkTurnService {
     input: unknown,
     options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
+    if (process.platform === "win32")
+      throw this.#failure("unavailable", "Work execution requires Windows host confinement.");
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);

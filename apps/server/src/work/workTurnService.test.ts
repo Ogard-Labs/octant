@@ -124,6 +124,25 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it.each(["ask-first", "auto-accept-edits", "auto", "full-access"] as const)(
+    "refuses a Windows Work turn at %s before acquiring a provider or appending the journal",
+    async (threadAccess) => {
+      const fixture = serviceFixture({ threadAccess });
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+      try {
+        await expect(
+          fixture.service.startFirstTurn(ids.window, startCommand()),
+        ).rejects.toMatchObject({
+          failure: { category: "unavailable" },
+        });
+        expect(fixture.acquireInputs).toHaveLength(0);
+        expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("launches in the selected approved folder and refuses revocation without falling back", async () => {
     const base = workProject();
     const project = workProject({

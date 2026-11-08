@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assertSqliteConformance } from "./sqlitePort.conformance";
 import {
   cacheStatements,
   openSqlite,
+  openAdmittedSqlite,
   runtimeSqliteKind,
   type SqliteConnection,
   type SqliteStatement,
@@ -60,5 +64,54 @@ describe("cacheStatements", () => {
     cached.prepare("SELECT 1");
     cached.prepare("SELECT 2");
     expect(prepared).toEqual(["SELECT 1", "SELECT 2", "SELECT 3", "SELECT 2"]);
+  });
+});
+
+describe("admitted SQLite connections", () => {
+  it("releases the native admission after the actual connection closes", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-admitted-sqlite-"));
+    const events: string[] = [];
+    try {
+      const connection = openAdmittedSqlite({
+        status: "ready",
+        databasePath: join(directory, "octant.sqlite3"),
+        initialize: () => {
+          events.push("initialized");
+          return { status: "ready" };
+        },
+        close: () => {
+          events.push("released");
+          return { status: "closed" };
+        },
+      });
+      connection.exec("CREATE TABLE proof(value TEXT)");
+      expect(events).toEqual(["initialized"]);
+      connection.close();
+      connection.close();
+      expect(events).toEqual(["initialized", "released"]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("releases the admission when validation of the actual database handle refuses", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-admitted-sqlite-"));
+    let released = 0;
+    try {
+      expect(() =>
+        openAdmittedSqlite({
+          status: "ready",
+          databasePath: join(directory, "octant.sqlite3"),
+          initialize: () => ({ status: "refused" }),
+          close: () => {
+            released++;
+            return { status: "closed" };
+          },
+        }),
+      ).toThrow(/admission/i);
+      expect(released).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
