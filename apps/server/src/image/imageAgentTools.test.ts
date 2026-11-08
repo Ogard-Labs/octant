@@ -96,6 +96,8 @@ function tools(
     readonly bytes?: Uint8Array;
     readonly readsImages?: boolean;
     readonly waitMs?: number;
+    /** Runs while the image is read, as a level change arriving meanwhile would. */
+    readonly whileReading?: () => void;
     readonly save?: {
       readonly posture: () => "refuse" | "ask" | "allow";
       readonly write: (
@@ -136,10 +138,13 @@ function tools(
         ? {}
         : {
             save: options.save,
-            readArtifact: async () => ({
-              bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
-              mime: "image/png" as const,
-            }),
+            readArtifact: async () => {
+              options.whileReading?.();
+              return {
+                bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+                mime: "image/png" as const,
+              };
+            },
           }),
       ...(options.finished === undefined
         ? {}
@@ -440,6 +445,27 @@ describe("createImageAgentTools", () => {
       const outcome = await call(planned.set, save);
       expect(outcome.isError).toBe(true);
       expect(moved.write).not.toHaveBeenCalled();
+    });
+
+    it("follows a level lowered while the image was being read", async () => {
+      const toPlan = saving("allow");
+      const planned = tools([imageProfile()], [job("completed")], [], {
+        save: toPlan.save,
+        whileReading: () => toPlan.setLevel("refuse"),
+      });
+      expect((await call(planned.set, save)).isError).toBe(true);
+      expect(toPlan.write).not.toHaveBeenCalled();
+
+      const toAsk = saving("allow");
+      const asked = tools([imageProfile()], [job("completed")], [], {
+        save: toAsk.save,
+        whileReading: () => toAsk.setLevel("ask"),
+        answer: () => ({ status: "cancelled" }),
+      });
+      const outcome = await call(asked.set, save);
+      expect(asked.ask).toHaveBeenCalledOnce();
+      expect(outcome.result).toMatchObject({ status: "not-saved" });
+      expect(toAsk.write).not.toHaveBeenCalled();
     });
 
     it("refuses in Plan, in a thread with no folder, and for an image the thread did not make", async () => {

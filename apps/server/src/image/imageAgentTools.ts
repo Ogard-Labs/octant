@@ -298,11 +298,27 @@ async function saveImage(
       isError: true,
     };
   }
-  const posture = save.posture();
-  if (posture === "refuse") {
+  // Plan refuses before anything is read or asked.
+  if (save.posture() === "refuse") {
     return { result: { error: "Plan mode cannot save files." }, isError: true };
   }
-  if (posture === "ask") {
+  const read = await options.port
+    .readArtifact(found.job.id, found.artifact.attachmentId)
+    .catch(() => undefined);
+  if (read === undefined) {
+    return { result: { error: "The generated image is unavailable." }, isError: true };
+  }
+  // The level is read again after every wait, and once more right before the
+  // write starts with nothing awaited in between: a thread lowered to Plan or
+  // Ask first while the image was read or the card was open is refused or
+  // asked, never written on the level it had when the call began.
+  let confirmed = false;
+  for (;;) {
+    const posture = save.posture();
+    if (posture === "refuse") {
+      return { result: { error: "Plan mode cannot save files." }, isError: true };
+    }
+    if (posture === "allow" || confirmed) break;
     const outcome = await options.port.ask({
       offer: {
         kind: "save",
@@ -320,16 +336,7 @@ async function saveImage(
         },
       };
     }
-    // The level can change while the card is open; a move to Plan wins.
-    if (save.posture() === "refuse") {
-      return { result: { error: "Plan mode cannot save files." }, isError: true };
-    }
-  }
-  const read = await options.port
-    .readArtifact(found.job.id, found.artifact.attachmentId)
-    .catch(() => undefined);
-  if (read === undefined) {
-    return { result: { error: "The generated image is unavailable." }, isError: true };
+    confirmed = true;
   }
   const saved = await save.write(input.relativePath, read.bytes);
   return saved.status === "saved"
