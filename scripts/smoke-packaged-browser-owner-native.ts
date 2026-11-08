@@ -19,6 +19,12 @@ const ax = String.raw`on run argv
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
 set frontmost of candidate to true
+try
+set value of attribute "AXManualAccessibility" of candidate to true
+end try
+try
+set value of attribute "AXEnhancedUserInterface" of candidate to true
+end try
 set operation to item 2 of argv
 if operation is "count" then return (count of windows of candidate) as text
 if operation is "key" then
@@ -26,9 +32,6 @@ keystroke (item 3 of argv) using command down
 return "sent"
 end if
 if (count of windows of candidate) is 0 then error "No owned native window."
-try
-set value of attribute "AXEnhancedUserInterface" of candidate to true
-end try
 set snapshotRows to {}
 repeat with uiElement in (entire contents of first window of candidate)
 try
