@@ -1672,10 +1672,13 @@ export const ProviderTurnInput = Schema.Struct({
 }).annotations(strict);
 export type ProviderTurnInput = typeof ProviderTurnInput.Type;
 
+/** The longest base64 payload one tool image may carry. */
+export const MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH = 2_097_152;
+
 export const ProviderToolImage = Schema.Struct({
-  mimeType: Schema.Literal("image/png", "image/jpeg"),
+  mimeType: Schema.Literal("image/png", "image/jpeg", "image/gif", "image/webp"),
   data: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(2_097_152),
+    Schema.maxLength(MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH),
     Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
   ),
 }).annotations(strict);

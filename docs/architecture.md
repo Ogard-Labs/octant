@@ -7453,7 +7453,16 @@ the model at another size.
   every call refuses as `tool-authority-stale` with a message the model
   relays to the person; nothing renews it except the thread becoming usable
   again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
-  resolved, edits require a prior read); `bash` writes the command to a
+  resolved, edits require a prior read). `read` recognizes a PNG, JPEG, GIF,
+  or WebP image and a PDF by its first bytes, whatever the file is named. An
+  image of at most 1,572,864 bytes (the most one tool image carries once
+  base64-encoded) goes to the model beside a result that names only its path,
+  type, and size, and only when the provider reports that the session's model
+  takes image input; otherwise the read refuses as `image-input-unsupported`,
+  and a larger image as `file-too-large` naming the limit. Like the text a read
+  returns, the image is local and does not taint the thread, and its pixels are
+  never journaled. A PDF refuses as `document-input-unsupported`: no harness
+  endpoint carries a document in a tool result yet. `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
   macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the

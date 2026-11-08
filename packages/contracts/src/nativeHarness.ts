@@ -392,7 +392,8 @@ export const WEB_SEARCH_TOOL_DEFINITION: ProviderToolDefinition = {
 export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   {
     name: "read",
-    description: "Read a file as numbered lines. Page with offset and limit; results are capped.",
+    description:
+      "Read a file as numbered lines. Page with offset and limit; results are capped. A PNG, JPEG, GIF, or WebP image is returned as an image when the model takes images.",
     inputSchema: {
       type: "object",
       properties: {

@@ -185,6 +185,35 @@ describe("native harness file system", () => {
     ]);
   });
 
+  it("reads an image or a PDF by its content, whatever the file is named", async () => {
+    const { root, fs } = await fixture();
+    const gif = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;", "latin1");
+    await writeFile(join(root, "pixel.dat"), gif);
+    await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n%\xe2\xe3\n");
+    expect(await fs.read({ path: "pixel.dat" })).toEqual({
+      kind: "image",
+      path: "pixel.dat",
+      mimeType: "image/gif",
+      bytes: gif.length,
+      data: gif.toString("base64"),
+    });
+    expect(await fs.read({ path: "paper.pdf" })).toMatchObject({
+      kind: "document",
+      path: "paper.pdf",
+      mimeType: "application/pdf",
+    });
+  });
+
+  it("refuses an image larger than one tool image may carry and names the limit", async () => {
+    const { root, fs } = await fixture();
+    const png = Buffer.alloc(2 * 1024 * 1024);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
+    await writeFile(join(root, "large.png"), png);
+    const outcome = await fs.read({ path: "large.png" });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "file-too-large" });
+    expect(outcome.kind === "refused" && outcome.message).toContain("1572864 bytes");
+  });
+
   it("caps grep results and says so", async () => {
     const { fs } = await fixture();
     const matches = await fs.grep({ pattern: "const", maxMatches: 1 });

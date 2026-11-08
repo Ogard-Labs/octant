@@ -887,6 +887,11 @@ export function wireHarness(deps: HarnessDependencies) {
       return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
     },
     tasks: nativeHarnessSessions,
+    readsImages: ({ providerInstanceId, modelId }) =>
+      providerRuntimeRegistry
+        .observedState(providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === modelId)
+        ?.inputModalities.includes("image") === true,
     shell: createNativeHarnessShell({
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
