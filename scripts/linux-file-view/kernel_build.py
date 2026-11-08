@@ -284,8 +284,8 @@ def main():
             len(core_targets) != 8 or len(core_retirements) != 9 or
             {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes)} or
             any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
-            any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True or
-                entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes)):
+            any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True
+                for entry in processes)):
         raise SystemExit("Every captured PID must stay held until inactive-pipe retirement, with no tracer.")
     if (len(fileattr_cases) != 1 or len(fileattr_owners) != 1 or len(fileattr_filesystems) != 1 or
             len(fileattr_brokers) != 1 or fileattr_filesystems[0] != {"ext4": True, "baselineRead": True} or
@@ -299,6 +299,8 @@ def main():
             fileattr_brokers[0].get("ownedCommandJoined") is not True or
             fileattr_brokers[0].get("cleaned") is not True):
         raise SystemExit("The ext4 flag mutation needs a private refusal, unchanged owner state and public positive controls.")
+    if any(entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes):
+        raise SystemExit("Every untraced policy process must also exit normally with code zero.")
     expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",
                         "tmpfile", "empty-link", "rename", "bind-mount", "bind-remount"}
     if ("OCTANT_KERNEL_CPUS 2" not in log or len(outside) != len(expected_outside) or
