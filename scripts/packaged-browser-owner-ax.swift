@@ -356,10 +356,14 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                         var directChildren: CFTypeRef?, defaultRaw: CFTypeRef?
                         let childrenStatus = AXUIElementCopyAttributeValue(sheet, kAXChildrenAttribute as CFString, &directChildren)
                         let defaultStatus = AXUIElementCopyAttributeValue(sheet, kAXDefaultButtonAttribute as CFString, &defaultRaw)
-                        var cancelButtons = 0, defaultButtons = 0, controlsComplete = true
-                        if childrenStatus == .success, defaultStatus == .success,
-                           let children = directChildren as? [AXUIElement], children.count <= 512,
-                           let defaultButton = axNode(defaultRaw) {
+                        var cancelButtons = 0, chooserButtons = 0, defaultButtons = 0, controlsComplete = true
+                        let defaultButton = defaultStatus == .success ? axNode(defaultRaw) : nil
+                        if defaultStatus != .success && defaultStatus != .noValue {
+                            errors += 1; recordPickerError("picker-default-button", defaultStatus)
+                        }
+                        if defaultStatus == .success && defaultButton == nil { controlsComplete = false }
+                        if childrenStatus == .success,
+                           let children = directChildren as? [AXUIElement], children.count <= 512 {
                             for child in children {
                                 guard admitMetadataNode(child) else { controlsComplete = false; break }
                                 var pid: pid_t = 0
@@ -372,25 +376,38 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                 guard roleOnly(child, kAXRoleAttribute as CFString) == "AXButton" else { continue }
                                 var enabled: CFTypeRef?
                                 let enabledStatus = AXUIElementCopyAttributeValue(child, kAXEnabledAttribute as CFString, &enabled)
-                                let isEnabled = enabledStatus == .success && enabled.map { CFGetTypeID($0) == CFBooleanGetTypeID() && CFEqual($0, kCFBooleanTrue) } == true
-                                if fixedLabel(child, kAXTitleAttribute as CFString, "Cancel"), isEnabled { cancelButtons += 1 }
-                                if CFEqual(child, defaultButton),
-                                   fixedLabel(child, kAXTitleAttribute as CFString, "Open") || fixedLabel(child, kAXTitleAttribute as CFString, "Choose") {
-                                    defaultButtons += 1
-                                    locationPrompt["defaultButtonEnabled"] = isEnabled
+                                let enabledValue: Bool? = enabledStatus == .success ? enabled.flatMap {
+                                    CFGetTypeID($0) == CFBooleanGetTypeID() ? CFEqual($0, kCFBooleanTrue) : nil
+                                } : nil
+                                if enabledStatus != .success && enabledStatus != .noValue && enabledStatus != .attributeUnsupported {
+                                    errors += 1; recordPickerError("sheet-control-enabled", enabledStatus)
+                                }
+                                if fixedLabel(child, kAXTitleAttribute as CFString, "Cancel"), enabledValue == true { cancelButtons += 1 }
+                                if fixedLabel(child, kAXTitleAttribute as CFString, "Open") || fixedLabel(child, kAXTitleAttribute as CFString, "Choose") {
+                                    chooserButtons += 1
+                                    locationPrompt["chooserButtonEnabled"] = enabledValue.map { $0 as Any } ?? NSNull()
+                                    locationPrompt["chooserButtonEnabledStatus"] = enabledStatus.rawValue
+                                    if let defaultButton, CFEqual(child, defaultButton) {
+                                        defaultButtons += 1
+                                        locationPrompt["defaultButtonEnabled"] = enabledValue.map { $0 as Any } ?? NSNull()
+                                    }
                                 }
                             }
                         }
                         locationPrompt["directControlsComplete"] = controlsComplete
                         locationPrompt["cancelButtonUniqueAndEnabled"] = cancelButtons == 1
+                        locationPrompt["fixedChooserButtonUnique"] = chooserButtons == 1
                         locationPrompt["fixedDefaultButtonUnique"] = defaultButtons == 1
+                        locationPrompt["defaultIdentity"] = defaultButtons == 1 ? "observed" : "unknown"
                         locationPrompt["childrenStatus"] = childrenStatus.rawValue
                         locationPrompt["defaultStatus"] = defaultStatus.rawValue
                         let beforeFocus = focusInSheet()
                         locationPrompt["beforeFocusRole"] = beforeFocus?.role ?? ""
                         locationPrompt["beforeFocusSubrole"] = beforeFocus?.subrole ?? ""
                         locationPrompt["frontmostOwned"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == processId
-                        if roleConfirmed, errors == priorErrors, controlsComplete, cancelButtons == 1, defaultButtons == 1,
+                        // The fixed chord opens a location prompt; it does not press
+                        // the chooser/default button or confirm any selection.
+                        if roleConfirmed, errors == priorErrors, controlsComplete, cancelButtons == 1, chooserButtons == 1,
                            let beforeFocus, associationUnchanged(), AXIsProcessTrusted(), CGPreflightPostEventAccess(),
                            NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
                            let freshFocus = focusInSheet(), CFEqual(freshFocus.node, beforeFocus.node),
