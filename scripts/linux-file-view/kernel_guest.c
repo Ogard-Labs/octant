@@ -21,6 +21,7 @@
 #include <linux/magic.h>
 #include <linux/mount.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <sys/wait.h>
@@ -308,6 +309,121 @@ static bool named(const struct octant_mediation_name *name, const struct stat *p
     name->length == strlen(leaf) && !name->reserved && !memcmp(name->bytes, leaf, name->length);
 }
 
+static volatile sig_atomic_t socket_signal;
+static void socket_signalled(int number) { socket_signal = number; }
+static bool socket_cleanup_waiting(pid_t child, bool pending)
+{
+  char path[80];
+  snprintf(path, sizeof(path), pending ? "/proc/%d/status" : "/proc/%d/stat", child);
+  for (unsigned attempt = 0; attempt < 500; attempt++) {
+    FILE *file = fopen(path, "re");
+    if (!file) return false;
+    char bytes[512];
+    bool observed = false;
+    while (fgets(bytes, sizeof(bytes), file)) {
+      if (pending) {
+        unsigned long long signals = 0;
+        if ((sscanf(bytes, "SigPnd: %llx", &signals) == 1 ||
+             sscanf(bytes, "ShdPnd: %llx", &signals) == 1) &&
+            (signals & (1ULL << (SIGUSR1 - 1)))) observed = true;
+      } else {
+        char *end = strrchr(bytes, ')');
+        observed = end && end[1] == ' ' && end[2] == 'D';
+        break;
+      }
+    }
+    fclose(file);
+    if (observed) return true;
+    struct timespec pause = {.tv_nsec = 1000000}; nanosleep(&pause, NULL);
+  }
+  return false;
+}
+static bool socket_rollback_measure(void)
+{
+  const char *first_path = "/tmp/ns/first.socket", *second_path = "/tmp/ns/second.socket";
+  struct stat parent;
+  if (stat("/tmp/ns", &parent)) return false;
+  int broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+  int enrollment = broker < 0 ? -1 : ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
+  int results[2];
+  if (enrollment < 0 || pipe2(results, O_CLOEXEC)) {
+    if (enrollment >= 0) close(enrollment);
+    if (broker >= 0) close(broker);
+    return false;
+  }
+  pid_t child = fork();
+  if (!child) {
+    close(broker); close(results[0]);
+    struct sigaction action = {.sa_handler = socket_signalled};
+    sigemptyset(&action.sa_mask);
+    sigset_t signals; sigemptyset(&signals); sigaddset(&signals, SIGUSR1);
+    if (sigaction(SIGUSR1, &action, NULL) || sigprocmask(SIG_UNBLOCK, &signals, NULL)) _exit(64);
+    alarm(8);
+    int socket_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (socket_fd < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
+        ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(65);
+    close(enrollment);
+    struct sockaddr_un address = {.sun_family = AF_UNIX, .sun_path = "/tmp/ns/first.socket"};
+    bool first = bind(socket_fd, (struct sockaddr *)&address, sizeof(address)) == 0;
+    memcpy(address.sun_path, second_path, strlen(second_path) + 1);
+    errno = 0;
+    int result = first ? bind(socket_fd, (struct sockaddr *)&address, sizeof(address)) : 0;
+    int error = result < 0 ? errno : 0;
+    struct stat entry;
+    bool first_intact = !lstat(first_path, &entry) && S_ISSOCK(entry.st_mode);
+    errno = 0;
+    bool second_absent = lstat(second_path, &entry) == -1 && errno == ENOENT;
+    int passed = first && result == -1 && error == EINVAL && socket_signal == SIGUSR1 &&
+      first_intact && second_absent && !close(socket_fd);
+    if (!transfer(results[1], &passed, sizeof(passed), true)) _exit(66);
+    _exit(passed ? 0 : 67);
+  }
+  close(enrollment); close(results[1]);
+  bool passed = child > 0, signal_pending = false;
+  for (unsigned step = 0; step < 3 && passed; step++) {
+    struct octant_mediation_request request;
+    struct octant_mediation_name empty = {0};
+    passed = transfer(broker, &request, sizeof(request), false) && request.request_id &&
+      !request.inode && !request.device_major && !request.device_minor &&
+      !request.reserved && !request.flags && !request.padding;
+    if (passed && step < 2)
+      passed = request.operation == OCTANT_MEDIATION_CREATE &&
+        !memcmp(&request.source, &empty, sizeof(empty)) &&
+        named(&request.destination, &parent, step ? "second.socket" : "first.socket");
+    if (passed && step == 2) {
+      passed = request.operation == OCTANT_MEDIATION_UNLINK &&
+        !memcmp(&request.destination, &empty, sizeof(empty)) &&
+        named(&request.source, &parent, "second.socket") && socket_cleanup_waiting(child, false) &&
+        !kill(child, SIGUSR1) && socket_cleanup_waiting(child, true);
+      signal_pending = passed;
+    }
+    if (passed) {
+      struct octant_mediation_answer answer = {.request_id = request.request_id,
+        .namespace_epoch = request.namespace_epoch, .allow = 1};
+      passed = write(broker, &answer, sizeof(answer)) == sizeof(answer);
+    }
+  }
+  int child_passed = 0;
+  passed = passed && transfer(results[0], &child_passed, sizeof(child_passed), false) && child_passed == 1;
+  close(broker); close(results[0]);
+  if (!passed && child > 0) kill(child, SIGKILL);
+  int status = 0; pid_t joined = -1;
+  if (child > 0) do { joined = waitpid(child, &status, 0); } while (joined < 0 && errno == EINTR);
+  bool reaped = child > 0 && joined == child;
+  struct stat entry;
+  bool first_intact = reaped && !lstat(first_path, &entry) && S_ISSOCK(entry.st_mode);
+  errno = 0;
+  bool second_absent = reaped && lstat(second_path, &entry) == -1 && errno == ENOENT;
+  bool cleaned = !unlink(first_path);
+  if (!second_absent) unlink(second_path);
+  passed = passed && reaped && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+    first_intact && second_absent && cleaned;
+  printf("OCTANT_UNIX_ROLLBACK_SIGNAL {\"passed\":%s,\"signalPending\":%s,\"firstIntact\":%s,\"secondAbsent\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+    passed ? "true" : "false", signal_pending ? "true" : "false", first_intact ? "true" : "false",
+    second_absent ? "true" : "false", reaped ? "true" : "false", cleaned ? "true" : "false");
+  return passed;
+}
+
 /* Synthetic decisions below test the real pre-lock transport and final token,
  * not the still-unintegrated structured-policy broker. */
 static int namespace_measure(void)
@@ -397,6 +513,8 @@ static int namespace_measure(void)
   }
   unlink("/tmp/ns/live-moved"); unlink("/tmp/ns/alias.pub");
   rmdir("/tmp/ns/folder"); rmdir("/tmp/ns/unrelated"); rmdir("/tmp/ns/moved-unrelated"); rmdir("/tmp/ns/empty");
+  bool socket_rollback = passed && controls && socket_rollback_measure();
+  passed = passed && socket_rollback;
   bool cleaned = rmdir("/tmp/ns") == 0;
   printf("OCTANT_KERNEL_NAMESPACE {\"status\":\"%s\",\"measurements\":%u,\"productionReady\":false,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && controls && cleaned ? "measured-namespace-token" : "failed", measured, reaped ? "true" : "false", cleaned ? "true" : "false");
