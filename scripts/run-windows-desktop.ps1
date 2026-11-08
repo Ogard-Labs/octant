@@ -53,29 +53,20 @@ try {
     $octantPathSpellings = @($octantExecutable)
     if ($octantExecutable -match '^[A-Za-z]:\\') { $octantPathSpellings += '\\?\' + $octantExecutable }
     $octantExpected = @()
-    $octantExpectedRepeated = @()
-    $octantQuotedUrlPattern = [regex]::Escape('"%1"')
     foreach ($octantPath in $octantPathSpellings) {
       foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
         $octantExpected += $octantImage + ' "%1"'
         $octantExpected += $octantImage + ' -- "%1"'
+        # Electron may repeat its staged image as one explicit argument.
         foreach ($octantArgumentPath in $octantPathSpellings) {
           foreach ($octantArgumentImage in @($octantArgumentPath, '"' + $octantArgumentPath + '"')) {
-            $octantExpectedRepeated += '\A' + [regex]::Escape($octantImage) + '[ \t]+' + $octantQuotedUrlPattern + '[ \t]+' + [regex]::Escape($octantArgumentImage) + '[ \t]+' + $octantQuotedUrlPattern + '\z'
+            $octantExpected += $octantImage + ' ' + $octantArgumentImage + ' "%1"'
+            $octantExpected += $octantImage + ' ' + $octantArgumentImage + ' -- "%1"'
           }
         }
       }
     }
     $octantOwnedCommand = $octantExpected -icontains $octantCommand
-    if (-not $octantOwnedCommand) {
-      $octantRegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
-      foreach ($octantRepeatedPattern in $octantExpectedRepeated) {
-        if ([regex]::IsMatch($octantCommand.Trim(), $octantRepeatedPattern, $octantRegexOptions)) {
-          $octantOwnedCommand = $true
-          break
-        }
-      }
-    }
     if (-not $octantOwnedCommand) {
       $octantTrimmedCommand = $octantCommand.Trim()
       foreach ($octantPath in $octantPathSpellings) {
