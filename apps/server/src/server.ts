@@ -416,6 +416,7 @@ export function startOctantServer(
       managedCloneService,
       planRoutes,
       projectBindingRoutes,
+      projectMemoryAccess,
       projectRootPort,
       projectService,
       replyDetailRoutes,
@@ -427,6 +428,8 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
+      isPairedDeviceScope,
+      machineChangeFeed,
       onWindowRevoked,
       serverProjectStore,
       bindingReceiptStore,
@@ -611,6 +614,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      projectMemoryAccess,
       threadMoveHolds,
       serverConnection,
       serverProjectStore,
@@ -908,6 +912,7 @@ export function startOctantServer(
       threadMoveHolds,
       conversationInputTransfer,
       personMemoryAccess,
+      projectMemoryAccess,
       workRequestRuntime,
       threadAwaitsHarnessApproval,
       agentMessageProjection,
@@ -976,6 +981,7 @@ export function startOctantServer(
       conversationInputTransfer,
       codeBoardEventStore,
       personMemoryAccess,
+      projectMemoryAccess,
       runtimeForgeChanges,
       nativeHarnessSessions,
       restartContinuation,
@@ -1324,6 +1330,20 @@ export function startOctantServer(
         : { resolveLinked: commandBroker.requestCardRead },
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    yield* Effect.addFinalizer(() => Effect.sync(() => projectMemoryAccess.proposals.close()));
+    // Plan reads Project memory and refuses every write to it.
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      projectMemoryAccess.toolsFor({
+        windowId,
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        writeRefusal: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+            ? "Plan mode cannot change Project memory. Leave Plan mode to propose the change."
+            : undefined,
+      }),
+    );
     const credentialRequestRoutes = createCredentialRequestRoutes(
       credentialRequests,
       windowAuthorityStore,

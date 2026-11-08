@@ -167,6 +167,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "authorizeWorkThreadForWindow"
     | "contextHarness"
     | "goalService"
+    | "projectMemoryAccess"
     | "projectService"
     | "workProjectStatusFiles"
     | "workProjectStatusReader"
@@ -306,6 +307,7 @@ export function wireWork(deps: WorkDependencies) {
     workThreadProjection,
     workTurnProjection,
     personMemoryAccess,
+    projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     const workTurnUsageStore = new WorkTurnUsageStore();
@@ -632,8 +634,19 @@ export function wireWork(deps: WorkDependencies) {
               createdAt: input.thread.createdAt,
               windowId: input.windowId,
             });
+        // Work has no Plan posture, so nothing refuses its writes but the
+        // person's answer.
+        const projectMemoryTools = !browserSupported
+          ? undefined
+          : projectMemoryAccess.toolsFor({
+              windowId: input.windowId,
+              mode: "work",
+              threadId: String(input.thread.id),
+              projectId: String(input.thread.projectId),
+            });
         if (
           pastThreads === undefined &&
+          projectMemoryTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -656,6 +669,7 @@ export function wireWork(deps: WorkDependencies) {
           canvasTools,
           imageTools,
           pastThreads,
+          projectMemoryTools,
         );
       },
       nativeHarness: nativeHarnessHooks,

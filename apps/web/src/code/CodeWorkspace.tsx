@@ -1,3 +1,4 @@
+import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -138,6 +139,7 @@ export interface CodeWorkspaceProps {
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
@@ -232,6 +234,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           ? {}
           : { holdAccessNotice: props.holdAccessNotice })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.memoryProposalClient === undefined
+          ? {}
+          : { memoryProposalClient: props.memoryProposalClient })}
         {...(props.automationClient === undefined
           ? {}
           : { automationClient: props.automationClient })}

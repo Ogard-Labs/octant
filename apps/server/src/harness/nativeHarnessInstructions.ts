@@ -58,6 +58,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
   octant_github:
     "read the repository's issues, pull requests, and projects, one issue in full, or search them",
+  octant_memory:
+    "read this Project's memory and propose an entry to add, replace, or retract; the user confirms each change",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",

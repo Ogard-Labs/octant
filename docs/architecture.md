@@ -1370,6 +1370,48 @@ sandbox's readable roots, and Claude runs with no setting sources. Octant keeps
 two memories of its own instead: Project memory, scoped to one Project, and
 person memory below.
 
+### Project memory
+
+Project memory is the short list of decisions, facts, preferences, summaries,
+and outcomes that belongs to one Project. The person adds, replaces, retracts,
+and transfers entries in Project Overview; each entry keeps its kind, author,
+timestamps, supersession, and provenance, and the journal
+(`memory.entry-*@1` events on the `project-memory` aggregate) is
+authoritative.
+
+- **Where it goes.** Every turn of a thread in the Project, in Chat, Work, and
+  Code and on every provider, carries the Project's active entries through
+  Octant's own context assembly, one `project-memory` block per entry, after
+  person memory. Chat and Work plan them as Project memory entries; a Code
+  window, counted by part, counts them with Octant's instructions. A thread
+  with no Project carries none.
+- **Agents read and propose (decided 2026-11-08).** Memory is an app-managed,
+  provider-neutral capability, so `octant_memory` is offered beside the other
+  Octant tools to every thread in a Project (not a Side Chat) on every
+  provider that takes them, Octant Harness included. Its operations are
+  `list`, `create`, `supersede`, `retract`, and `help`. `list` reads the
+  active entries and is open to the turn. Every write is a proposal: the
+  thread shows the person a card with the exact change, and only their
+  confirmation writes it, through the same memory command path and checks
+  (archived Project, mode switched off, memory version) as the person's own
+  edit. The proposal carries the memory version the agent saw, so a change
+  made against memory that moved while the card waited is not applied.
+  Declined, expired (ten minutes), and cancelled proposals change nothing
+  and tell the agent so. Plan mode refuses every write before asking; a turn
+  with nobody at a window on this computer (a routine's run, a resumed turn,
+  a paired device's turn) is refused writes, because no card can reach the
+  person. Rationale: memory reaches every later turn in the Project, so an
+  unreviewed write would be a lasting prompt-injection path. No answer is
+  ever remembered: a write on a thread that read outside content asks like
+  any other, and its card names what the thread read.
+- **Agent-written provenance.** A confirmed agent write is authored by the
+  person who confirmed it and marked `agent-authored` with the thread's mode
+  and id; Project Overview shows "Written by an agent in a … thread" with the
+  thread, and data export carries the provenance with the entry. The
+  person retracts such an entry like any other. A thread purge removes the
+  thread id from the entry and keeps the entry. Older events decode unchanged:
+  the new provenance is one more variant, not a changed shape.
+
 ### Person memory
 
 Decided 2026-11-01: Octant should know what other work the person has done
