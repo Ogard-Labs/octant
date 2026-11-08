@@ -24,6 +24,7 @@ type Native = NativeDesktopPeerStatus &
 const [binding, scope, mode] = process.argv.slice(2);
 const launcher = process.env.OCTANT_WINDOWS_PEER_QA_LAUNCHER;
 const copy = process.env.OCTANT_WINDOWS_PEER_QA_COPY_BINDING;
+const appcontainer = process.env.OCTANT_WINDOWS_PEER_QA_APPCONTAINER;
 if (process.platform !== "win32" || !binding || !scope || !mode)
   throw Error("Supply owned native peer artifacts.");
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -50,6 +51,7 @@ function check(value: boolean, message: string) {
 }
 const native = load(binding);
 const version = mode === "server-new" ? "1.2.4" : "1.2.3";
+const lateWindow = "55555555-5555-4555-8555-555555555555";
 if (mode === "refused") {
   check(
     native.bindEndpoint(scope, version) === false,
@@ -83,6 +85,7 @@ if (mode === "refused") {
     const status = ownDesktopPeerStatus(native);
     let holdExits = false;
     const heldExits: unknown[] = [];
+    const timers = new Set<ReturnType<typeof setTimeout>>();
     let forward: ((event: unknown) => void) | undefined;
     const broker: NativeWindowBroker = {
       listenWindows: (callback) => {
@@ -96,6 +99,24 @@ if (mode === "refused") {
             }
           } else if (record(event) && record(event.request)) {
             console.log(JSON.stringify({ request: event.request }));
+            if (
+              event.request.windowId === lateWindow &&
+              typeof event.request.requestId === "number"
+            ) {
+              const requestId = event.request.requestId;
+              // Controlled late native reply exercises the real operation bound,
+              // not a production delay or a new native test entry point.
+              const timer = setTimeout(() => {
+                timers.delete(timer);
+                const accepted = native.replyWindow(requestId, {
+                  kind: "refused",
+                  reason: "unavailable",
+                });
+                console.log(JSON.stringify({ lateReplyAccepted: accepted }));
+              }, 2700);
+              timers.add(timer);
+              return;
+            }
           }
           callback(event);
         });
@@ -140,6 +161,7 @@ if (mode === "refused") {
       console.log(JSON.stringify({ serverReady: true }));
       await stop;
     } finally {
+      for (const timer of timers) clearTimeout(timer);
       check((await leases.close()).kind === "closed", "production lease cleanup confirms closure");
       check((await status.close()).kind === "closed", "native status cleanup joins its workers");
       clearTimeout(lifetime);
@@ -162,7 +184,8 @@ if (mode === "refused") {
       lines.close();
     }
   } else if (mode === "controller") {
-    if (!launcher || !copy) throw Error("Supply the owned launcher and copied public binding.");
+    if (!launcher || !copy || !appcontainer)
+      throw Error("Supply the owned launcher, AppContainer probe and copied public binding.");
     const children: {
       readonly child: ChildProcessWithoutNullStreams;
       readonly exit: Promise<number | null>;
@@ -312,6 +335,23 @@ if (mode === "refused") {
       checks.push(
         "same-process reconnect survives delayed old EOF with production lease enforcement",
       );
+      const began = performance.now();
+      const late = await replacement.openWindow(lateWindow, 3);
+      check(
+        kind(late, "refused") && performance.now() - began < 3500,
+        "a withheld native response refuses within the actual operation bound",
+      );
+      await until(
+        () => server.records.some((value) => value.lateReplyAccepted === false),
+        "an answer after native expiry cannot settle the old request",
+      );
+      check(
+        kind(await replacement.renewWindow(replacementHandle, 2), "renewed"),
+        "a late answer neither settles a following renewal nor revokes another live lease",
+      );
+      checks.push(
+        "actual withheld-response deadline and late-answer correlation preserve other windows",
+      );
       const client = start(process.execPath, [entry, binding, scope, "client-exit"]);
       await until(
         () => client.records.some((value) => value.clientReady === true),
@@ -357,6 +397,28 @@ if (mode === "refused") {
       }
       checks.push(
         "real restricting-SID and low-integrity normal API refusals without changing original tokens",
+      );
+      const container = start(appcontainer, [scope, String(process.pid)]);
+      container.child.stdin.end();
+      check(
+        (await container.exit) === 0 &&
+          container.records.some(
+            (value) =>
+              value.actualAppContainer === true &&
+              value.appContainerPeerRefused === true &&
+              value.appContainerCannotStealParentHandles === true,
+          ) &&
+          container.records.some(
+            (value) =>
+              value.ownedAppContainerJobJoined === true &&
+              value.ownedAppContainerProfileRemoved === true &&
+              value.ownedAppContainerStorageAbsent === true &&
+              value.ownedAppContainerPathsAbsent === true,
+          ),
+        "an actual AppContainer cannot use the peer or steal its handles, and its unique profile/job/public fixture are removed",
+      );
+      checks.push(
+        "actual AppContainer peer and parent-handle refusal with owned profile/storage/path cleanup",
       );
       check(
         kind(await replacement.revokeWindow(replacementHandle, 2), "revoked"),

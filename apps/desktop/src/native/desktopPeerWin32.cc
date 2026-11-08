@@ -5,6 +5,7 @@
 #include <bcrypt.h>
 #include <delayimp.h>
 #include <node_api.h>
+#include "desktopPeerWin32Wire.h"
 #include <algorithm>
 #include <atomic>
 #include <array>
@@ -47,17 +48,7 @@ struct Handle {
   void reset() { if (value != INVALID_HANDLE_VALUE && value != nullptr) CloseHandle(value); value = INVALID_HANDLE_VALUE; }
   explicit operator bool() const { return value != INVALID_HANDLE_VALUE && value != nullptr; }
 };
-struct Wire {
-  uint32_t magic, protocol, operation, status;
-  uint64_t generation, sequence;
-  char window[37], version[64], payload[4096];
-  // Fixed frames include ABI padding. Initialize/copy the complete byte range,
-  // not just the members, so no stack bytes can enter the local transport.
-  Wire() { std::memset(this, 0, sizeof(*this)); magic = 0x4f435450; protocol = 1; }
-  Wire(const Wire& source) { std::memcpy(this, &source, sizeof(*this)); }
-  Wire& operator=(const Wire& source) { if (this != &source) std::memcpy(this, &source, sizeof(*this)); return *this; }
-  ~Wire() { SecureZeroMemory(this, sizeof(*this)); }
-};
+using Wire = octant::desktop_peer_win32::Wire;
 struct Principal {
   std::vector<unsigned char> sid, logon_sid;
   DWORD session = 0;
@@ -257,6 +248,14 @@ bool transfer(HANDLE pipe, void* bytes, DWORD length, bool writing, HANDLE stop,
   if (!event) return false;
   OVERLAPPED operation{}; operation.hEvent = event.value;
   DWORD done = 0;
+  // A queued native job can already be expired when its first I/O starts.
+  // Immediate completions need the same admission as overlapped waits.
+  const ULONGLONG now = GetTickCount64();
+  if ((deadline != 0 && now >= deadline) || WaitForSingleObject(stop, 0) != WAIT_TIMEOUT ||
+      (process && WaitForSingleObject(process, 0) != WAIT_TIMEOUT)) {
+    SetLastError(deadline != 0 && now >= deadline ? ERROR_TIMEOUT : ERROR_BROKEN_PIPE);
+    return false;
+  }
   const BOOL immediate = writing ? WriteFile(pipe, bytes, length, &done, &operation) : ReadFile(pipe, bytes, length, &done, &operation);
   if (immediate) { if (done != length) SetLastError(ERROR_INVALID_DATA); return done == length; }
   if (GetLastError() != ERROR_IO_PENDING) return false;
