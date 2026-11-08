@@ -139,11 +139,13 @@ async function startWorld(options: { readonly laptopIsOwner?: boolean } = {}) {
   const network = new HubTestNetwork();
   const leaving = leavingThreads("laptop");
   const arriving = arrivingThreads();
+  const atHub = arrivingThreads();
   const hub = await startHubTestHost({
     name: "Mac mini",
     address: "100.101.102.103",
     network,
     cleanups,
+    threadMoveHosts: atHub.hosts,
   });
   const laptop = await startHubTestHost({
     name: "Laptop",
@@ -195,7 +197,7 @@ async function startWorld(options: { readonly laptopIsOwner?: boolean } = {}) {
       body: { sourceMemberId: laptop.hostId },
       ...(withUnlock ? { unlock } : {}),
     });
-  return { laptop, desktop, leaving, arriving, ticket, laptopUnlock };
+  return { hub, laptop, desktop, leaving, arriving, atHub, ticket, laptopUnlock };
 }
 
 /** What this Mac's Touch ID prompt signs: exactly the destination's challenge. */
@@ -320,5 +322,53 @@ describe("moving a thread between two of the person's computers", () => {
     expect(leaving.frozen.size).toBe(0);
     laptop.threadMovesFromWindow.dismiss(THREAD);
     expect(laptop.threadMovesFromWindow.status(THREAD).failure).toBeUndefined();
+  }, 60_000);
+
+  it("moves a thread to the hub, which takes it while Accept moved threads is on", async () => {
+    const { hub, laptop, leaving, atHub, laptopUnlock } = await startWorld();
+    const listed = await laptop.threadMovesFromWindow.destinations(THREAD);
+    expect(listed.destinations.find((entry) => entry.name === "Mac mini")).toMatchObject({
+      role: "hub",
+      reachable: true,
+      noProjectAllowed: true,
+    });
+
+    const started = await laptop.threadMovesFromWindow.start({
+      thread: THREAD,
+      destinationMemberId: decodeMemberId(hub.hostId),
+      timing: "now",
+      unlock: await unlockAtWindow(laptop, hub, laptopUnlock),
+    });
+
+    expect(started).toEqual({ status: "started" });
+    await vi.waitFor(() => expect(leaving.erased).toEqual([THREAD.threadId]));
+    expect(atHub.opened).toEqual([CONVERSATION]);
+    expect(atHub.active).toEqual([ARRIVED.threadId]);
+    expect(hub.threadMoveRecords).toEqual(["moved-in", "move-committed"]);
+  }, 60_000);
+
+  it("refuses every move once a window on the hub turns Accept moved threads off", async () => {
+    const { hub, laptop, leaving, atHub, laptopUnlock } = await startWorld();
+    expect(hub.hub.setAcceptMovedThreads(false, window)).toEqual({
+      status: "changed",
+      enabled: false,
+    });
+    const listed = await laptop.threadMovesFromWindow.destinations(THREAD);
+    expect(listed.destinations.find((entry) => entry.name === "Mac mini")?.refusal).toBe("refused");
+
+    const started = await laptop.threadMovesFromWindow.start({
+      thread: THREAD,
+      destinationMemberId: decodeMemberId(hub.hostId),
+      timing: "now",
+      unlock: await unlockAtWindow(laptop, hub, laptopUnlock),
+    });
+
+    expect(started).toEqual({ status: "started" });
+    await vi.waitFor(() =>
+      expect(laptop.threadMovesFromWindow.status(THREAD).failure?.reason).toBe("refused"),
+    );
+    expect(atHub.opened).toEqual([]);
+    expect(leaving.erased).toEqual([]);
+    expect(leaving.frozen.size).toBe(0);
   }, 60_000);
 });

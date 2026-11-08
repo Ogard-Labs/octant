@@ -964,6 +964,16 @@ as off once the person narrowed it, so existing hubs take moves without
 re-joining. Rationale: a member joining now gets Move in, and the owner
 unlock, not the item, is what authorizes a move.
 
+**The hub as a destination.** The hub keeps no peer grants, so its own
+**Accept moved threads** setting stands where a spoke's Move in item does. It
+is on by default, only a window on the hub turns it on or off (Settings ›
+Hub › Moved threads), and each change is journaled. The hub checks a move's
+sender against the identity key that member joined with, takes moves only
+from a spoke or a standby (never a guest), and still requires the fresh
+own-class unlock from an owner device on the hub's own owner list. Off, it
+answers every move with the same `refused` as a spoke without Move in. The
+hub moves no thread away: no spoke grants it Move in.
+
 On a Mac source, the window asks its own host for the destination's owner
 challenge, which the source fetches signed with its member identity and which
 names the ticket route and that exact request body; the desktop's unlock key
@@ -2200,6 +2210,13 @@ a numbered slice. Built, with these narrower readings:
     sizes and an estimate in the sheet, Stop and move, Hand over instead,
     an unlock other than this Mac's Touch ID, carry bulk parts, accept
     moves on the hub, or Prepare to shut down.
+
+    The sixth part lets the hub take moved threads: its Accept moved
+    threads setting (on by default, a window on the hub only, journaled),
+    the hub checking a move's sender against the key that member joined
+    with, the hub's own owner list for the unlock, and the hub listed in the
+    Computer card like any member. What it does not do yet: carry bulk
+    parts or Prepare to shut down.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

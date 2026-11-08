@@ -70,8 +70,8 @@ import { SpokePushService } from "./spokePushService";
 import { SpokeSignInService, type SignInAccountState } from "./spokeSignInService";
 import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
 import { WakeService } from "./wakeService";
-import { peerGrantAllowsMoveIn } from "@octant/domain";
 import { createThreadMoveRouteHandler } from "./threadMoveRoutes";
+import { createThreadMoveSenders } from "./threadMoveSenders";
 import { createThreadMoveTicketClient } from "./threadMoveTicketClient";
 import { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 import {
@@ -727,6 +727,7 @@ export async function startHubTestHost(input: {
   };
   const moveHosts = input.threadMoveHosts ?? noThreads;
   const threadMoveState = createThreadMoveStateStore(directory);
+  const threadMoveSenders = createThreadMoveSenders({ spoke, hub, now: Date.now });
   const threadMoves = new ThreadMoveService({
     state: threadMoveState,
     source: moveHosts.source,
@@ -739,27 +740,10 @@ export async function startHubTestHost(input: {
       moveFailed: recordStep("move-failed"),
     },
     identity: () => identity,
-    target: (memberId) => spoke.memberTarget(memberId),
+    target: threadMoveSenders.target,
     transport,
-    authenticate: (request) => {
-      const peer = spoke.authenticatePeer(request);
-      if (peer.status === "refused" || peer.peer.member.role === "guest") {
-        return { status: "refused" };
-      }
-      return {
-        status: "member",
-        memberId: String(peer.peer.member.memberId),
-        moveIn: peerGrantAllowsMoveIn(peer.peer.grant),
-      };
-    },
-    ownerIsCurrent: (ownerMemberId) => {
-      const context = spoke.ownerContext();
-      return (
-        context !== undefined &&
-        context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
-        !context.inactiveDeviceMemberIds.includes(ownerMemberId)
-      );
-    },
+    authenticate: threadMoveSenders.authenticate,
+    ownerIsCurrent: threadMoveSenders.ownerIsCurrent,
     projects: input.threadMoveHosts?.projects ?? (() => []),
     now: Date.now,
   });
@@ -769,7 +753,7 @@ export async function startHubTestHost(input: {
     state: threadMoveState,
     tickets: createThreadMoveTicketClient({
       identity: () => identity,
-      target: (memberId) => spoke.memberTarget(memberId),
+      target: threadMoveSenders.target,
       transport,
       now: Date.now,
     }),

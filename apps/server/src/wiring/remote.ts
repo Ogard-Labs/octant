@@ -47,12 +47,7 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import {
-  defaultShellSettings,
-  enabledModes,
-  peerGrantAllowsMoveIn,
-  rosterMemberWebOrigin,
-} from "@octant/domain";
+import { defaultShellSettings, enabledModes, rosterMemberWebOrigin } from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -100,6 +95,7 @@ import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
+import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
 import { ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
 import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
@@ -952,16 +948,7 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
-  const ownerIsCurrentOnSpoke = (ownerMemberId: string): boolean => {
-    const context = spokeLinkService.ownerContext();
-    return (
-      context !== undefined &&
-      context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
-      !context.inactiveDeviceMemberIds.includes(ownerMemberId)
-    );
-  };
-  // Moving a thread between the person's computers. Only Chat threads move in
-  // this part; a thread of another mode reads as one that cannot move.
+  // Moving a thread between the person's computers.
   const chatThreadMoveHost = createChatThreadMoveHost({
     readView: (threadId) => persistence.readChatThreadView(threadId),
     isBusy: (view) =>
@@ -1197,6 +1184,12 @@ export function wireRemote(deps: RemoteDependencies) {
     code: codeThreadMoveHost,
     work: workThreadMoveHost,
   });
+  // A spoke and the hub each judge a move's sender and target by their own role.
+  const threadMoveSenders = createThreadMoveSenders({
+    spoke: spokeLinkService,
+    hub: hubService,
+    now: Date.now,
+  });
   const threadMoves = new ThreadMoveService({
     state: deps.threadMoveState,
     source: byMode.source,
@@ -1209,20 +1202,10 @@ export function wireRemote(deps: RemoteDependencies) {
       clock: () => new Date().toISOString(),
     }),
     identity: resolveHubIdentity,
-    target: (memberId) => spokeLinkService.memberTarget(memberId),
+    target: threadMoveSenders.target,
     transport: hubTransport,
-    authenticate: (request) => {
-      const peer = spokeLinkService.authenticatePeer(request);
-      if (peer.status === "refused" || peer.peer.member.role === "guest") {
-        return { status: "refused" };
-      }
-      return {
-        status: "member",
-        memberId: String(peer.peer.member.memberId),
-        moveIn: peerGrantAllowsMoveIn(peer.peer.grant),
-      };
-    },
-    ownerIsCurrent: ownerIsCurrentOnSpoke,
+    authenticate: threadMoveSenders.authenticate,
+    ownerIsCurrent: threadMoveSenders.ownerIsCurrent,
     projects: (mode) =>
       persistence
         .readProjects()
@@ -1237,7 +1220,7 @@ export function wireRemote(deps: RemoteDependencies) {
     state: deps.threadMoveState,
     tickets: createThreadMoveTicketClient({
       identity: resolveHubIdentity,
-      target: (memberId) => spokeLinkService.memberTarget(memberId),
+      target: threadMoveSenders.target,
       transport: hubTransport,
       now: Date.now,
     }),
