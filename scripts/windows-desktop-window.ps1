@@ -59,8 +59,21 @@ public static class OctantDesktopWindow {
 }
 '@
 try {
+  $renderedWelcome = $false
   $found = [OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $Mode -eq 'close')
   if ($found -and $Mode -eq 'observe') {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $octantWindow = [OctantDesktopWindow]::Window
+    $octantRoot = [Windows.Automation.AutomationElement]::FromHandle($octantWindow)
+    if ($null -eq $octantRoot -or $octantRoot.Current.ProcessId -ne $OwnedPid -or $octantRoot.Current.NativeWindowHandle -ne $octantWindow.ToInt32()) { throw 'Owned accessibility root refused' }
+    foreach ($octantLabel in @('Welcome to Octant', 'Your first task')) {
+      $octantName = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $octantLabel)
+      $octantVisible = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::IsOffscreenProperty, $false)
+      $octantCondition = [Windows.Automation.AndCondition]::new($octantName, $octantVisible)
+      if ($null -ne $octantRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, $octantCondition)) { $renderedWelcome = $true; break }
+    }
+    if (-not [OctantDesktopWindow]::Run($OwnedPid, $Executable, [OctantDesktopWindow]::Birth, $false) -or [OctantDesktopWindow]::Window -ne $octantWindow) { throw 'Owned accessibility window changed' }
     if (-not $CapturePath) { throw 'Supply the owned capture path' }
     Add-Type -AssemblyName System.Drawing
     $octantBitmap = [Drawing.Bitmap]::new([OctantDesktopWindow]::Width, [OctantDesktopWindow]::Height)
@@ -72,5 +85,5 @@ try {
       $octantBitmap.Save($CapturePath, [Drawing.Imaging.ImageFormat]::Png)
     } finally { $octantGraphics.Dispose(); $octantBitmap.Dispose() }
   }
-  [Console]::WriteLine((@{ visibleOwnedWindow=$found; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress))
+  [Console]::WriteLine((@{ visibleOwnedWindow=$found; renderedWelcome=$renderedWelcome; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress))
 } catch { [Console]::WriteLine('{"refused":true}'); exit 1 }
