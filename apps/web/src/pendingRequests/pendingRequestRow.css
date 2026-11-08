@@ -9,11 +9,14 @@
   color: var(--oct-fg);
 }
 
+/* On a narrow card the tags and the wait drop to a second line rather than
+   squeezing the thread title to a few letters (seen at 390px with Urgent). */
 .pending-request__head {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--oct-space-2);
+  gap: 2px var(--oct-space-2);
 }
 
 .pending-request__mark {
@@ -23,7 +26,7 @@
 
 .pending-request__title.pending-request__title {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 10rem;
   justify-content: flex-start;
   overflow: hidden;
   text-align: start;
