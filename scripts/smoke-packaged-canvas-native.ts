@@ -166,11 +166,11 @@ const timer = setInterval(() => {
     const decodeSnapshot = Schema.decodeUnknownSync(Snapshot);
     const hasText = (snapshot: typeof Snapshot.Type, value: string) =>
       snapshot.texts.some((row) => row.text.toLowerCase().includes(value.toLowerCase()));
-    let lastNativeError = "";
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
     ) => {
+      let lastNativeError = "";
       const deadline = Date.now() + 20_000;
       while (!controller.signal.aborted && Date.now() < deadline) {
         try {
@@ -183,6 +183,7 @@ const timer = setInterval(() => {
           await writeFile(join(artifacts, `${stage}.json`), raw);
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
+          lastNativeError = "";
           if (accept(snapshot)) return snapshot;
         } catch (error) {
           lastNativeError =
@@ -190,7 +191,10 @@ const timer = setInterval(() => {
         }
         await pause(150);
       }
-      await writeFile(join(artifacts, "native-controller-diagnostic.txt"), lastNativeError);
+      await writeFile(
+        join(artifacts, "native-controller-diagnostic.txt"),
+        lastNativeError || `The latest owned image did not contain the expected ${stage} state.`,
+      );
       throw Error(`The real packaged ${stage} state was not observed.`);
     };
     await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
@@ -355,22 +359,97 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
-    await observeUntil("canvas-open-control", (snapshot) => hasText(snapshot, "Open in sidebar"));
+    await observeUntil("canvas-open-control", (snapshot) => hasText(snapshot, "Open Canvas"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["enter", String(ownPid), join(artifacts, "canvas-open-tab-target.png"), "Open Canvas"],
+      process.env,
+      8000,
+    );
+    await observeUntil(
+      "canvas-tab",
+      (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "focus-before-text",
+        String(ownPid),
+        join(artifacts, "canvas-actions-focus-target.png"),
+        "Signups this week",
+      ],
+      process.env,
+      8000,
+    );
     await runBoundedCommand(
       nativeControllerPath,
       [
         "enter",
         String(ownPid),
-        join(artifacts, "canvas-open-sidebar-target.png"),
-        "Open in sidebar",
+        join(artifacts, "canvas-actions-menu-target.png"),
+        "Signups this week",
       ],
       process.env,
       8000,
     );
-    await observeUntil(
-      "canvas-sidebar",
-      (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
+    await observeUntil("canvas-actions", (snapshot) => hasText(snapshot, "Export"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "canvas-export-target.png"), "Export"],
+      process.env,
+      8000,
     );
+    await observeUntil(
+      "canvas-export",
+      (snapshot) => hasText(snapshot, "Review export") && hasText(snapshot, "Public link"),
+    );
+    // The noninteractive destination-status list follows the destination
+    // select. Public link is the final in-tree destination. The resulting
+    // card must independently name this exact owned host before approval.
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "focus-before-text",
+        String(ownPid),
+        join(artifacts, "destination-focus-target.png"),
+        "Public link",
+      ],
+      process.env,
+      8000,
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["enter", String(ownPid), join(artifacts, "destination-menu-target.png"), "Public link"],
+      process.env,
+      8000,
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["end", String(ownPid), join(artifacts, "destination-last-option.png"), "Public link"],
+      process.env,
+      8000,
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["enter", String(ownPid), join(artifacts, "destination-select-target.png"), "Public link"],
+      process.env,
+      8000,
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "review-export-target.png"), "Review export"],
+      process.env,
+      8000,
+    );
+    await observeUntil(
+      "owned-publish-card",
+      (snapshot) =>
+        hasText(snapshot, "Export to Public link") &&
+        hasText(snapshot, new URL(ownService.publicUrl).host) &&
+        hasText(snapshot, "Anyone with the link can open it"),
+    );
+    if ((await readdir(join(root, "share", "shares"))).length !== 0)
+      throw Error("Preparing the native approval card unexpectedly published content.");
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -468,7 +547,9 @@ const timer = setInterval(() => {
         publicLinkSettingsObserved: true,
         nativeServiceConfiguration: "journal-confirmed",
         configurationPublishedNothing: true,
-        nativeCanvasSidebar: true,
+        nativeCanvasTab: true,
+        nativeExportPanel: true,
+        nativeOwnedPublishCard: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
         publishAcceptance: "not-run",

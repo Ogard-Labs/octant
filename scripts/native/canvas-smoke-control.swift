@@ -64,14 +64,19 @@ let expected = CommandLine.arguments[4]
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "enter" || mode == "settings" {
+if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "enter" || mode == "end" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
 let owned = window(pid)
+guard owned.bounds.integral == owned.bounds else { refuse("The owned window does not have integral capture bounds.") }
 let capture = Process()
 capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-capture.arguments = ["-x", "-o", "-l", String(owned.id), imagePath]
+// A native menu is a separate WindowServer surface. Capture only the owned
+// primary window's current rectangle so its menu is visible too; clicks still
+// revalidate the primary window and the actual frontmost owner at the target.
+let rectangle = [owned.bounds.minX, owned.bounds.minY, owned.bounds.width, owned.bounds.height].map { String(Int($0)) }.joined(separator: ",")
+capture.arguments = ["-x", "-R", rectangle, imagePath]
 do { try capture.run(); capture.waitUntilExit() }
 catch { refuse("The owned-window capture could not start.") }
 guard capture.terminationStatus == 0 else { refuse("The owned-window capture failed.") }
@@ -90,7 +95,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 var clicked = false
 if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
-    let matches = (request.results ?? []).flatMap { result -> [TextTarget] in
+    let partialMatches = (request.results ?? []).flatMap { result -> [TextTarget] in
         guard let value = result.topCandidates(1).first else { return [] }
         var matches: [TextTarget] = []
         var remaining = value.string.startIndex..<value.string.endIndex
@@ -103,19 +108,21 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
         }
         return matches
     }
+    let exactMatches = targets.filter { $0.text.caseInsensitiveCompare(expected) == .orderedSame }
+    let matches = exactMatches.isEmpty ? partialMatches : exactMatches
     guard matches.count == 1, let match = matches.first else { refuse("The current owned image has no unique exact text target: " + expected) }
     let current = window(pid)
     guard current.id == owned.id, current.bounds == owned.bounds else { refuse("The owned window moved after its capture.") }
     let point = CGPoint(x: match.x, y: match.y)
     let covering = windows().first { row in
-        guard (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+        guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.intValue, layer >= 0,
+              ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,
               let data = row[kCGWindowBounds as String] as? [String: Any],
               let rect = CGRect(dictionaryRepresentation: data as CFDictionary) else { return false }
         return rect.contains(point)
     }
     guard let covering,
-          (covering[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
-          (covering[kCGWindowNumber as String] as? NSNumber)?.uint32Value == owned.id else {
+          (covering[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid else {
         refuse("Another native window covers the exact observed target.")
     }
     guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
@@ -167,12 +174,13 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
         textDown.postToPid(pid)
         textUp.postToPid(pid)
     }
-} else if mode == "enter" {
+} else if mode == "enter" || mode == "end" {
     guard targets.contains(where: { $0.text.localizedCaseInsensitiveContains(expected) }) else {
         refuse("The expected keyboard context is absent from the current owned image.")
     }
-    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
-          let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
+    let key: CGKeyCode = mode == "end" ? 119 : 36
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
     down.postToPid(pid)
     up.postToPid(pid)
 } else if mode == "settings" {
