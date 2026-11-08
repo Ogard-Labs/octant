@@ -105,6 +105,8 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { createThreadMoveHolds } from "./hub/threadMoveHolds";
+import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -241,6 +243,7 @@ export function startOctantServer(
       protectedFilesRoutes,
       processAuthorityNow,
       routineProposalService,
+      imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       windowAuthorityStore,
@@ -334,6 +337,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       siblingThreadsService,
       terminalSessionImports,
+      movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
@@ -375,6 +379,8 @@ export function startOctantServer(
       computerUseTools,
       threadDesktopDestination,
       desktopPaneRoutes,
+      desktopLeases,
+      installDesktopPreviewRequest,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -510,6 +516,10 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // Which threads a move holds is shared by every mode's service and the
+    // move routes, and rebuilt from the saved moves so a restart keeps them held.
+    const threadMoveState = createThreadMoveStateStore(providerDataDirectory);
+    const threadMoveHolds = createThreadMoveHolds(heldThreadsOf(threadMoveState.load()));
     const {
       readHarnessProcessReceipts,
       beginGoogleCliChange,
@@ -600,6 +610,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      threadMoveHolds,
       serverConnection,
       serverProjectStore,
       codeBoardEventStore,
@@ -730,6 +741,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      threadMoveHolds,
       worktreePreparation,
       conversationInputTransfer,
       browserModelBindings,
@@ -738,6 +750,8 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
       hostShield,
+      imageGenerationOffers,
+      imageJobService,
       runtimeForgeChanges,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
@@ -845,6 +859,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      desktopLeases,
+      installDesktopPreviewRequest,
       workThreadProjection,
       agentRunPersistence,
       worktreePreparation,
@@ -888,6 +904,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadMoveHolds,
       conversationInputTransfer,
       personMemoryAccess,
       workRequestRuntime,
@@ -913,6 +930,7 @@ export function startOctantServer(
       extensionPackageStore,
       externalContentIngestionStore,
       githubIssueContextService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       liveTurns,
@@ -993,6 +1011,7 @@ export function startOctantServer(
       followUpCreation,
       githubIssueContextService,
       goalService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       terminalSessionImports,
@@ -1119,6 +1138,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       credentialResolver,
+      imageGenerationOffers,
       imageJobService,
       options,
       persistence,
@@ -1586,6 +1606,12 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      chatService,
+      liveTurns,
+      managedWorktreeReceipts,
+      movedThreadHistory,
+      threadMoveHolds,
+      threadMoveState,
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserAutomationService,
@@ -1953,6 +1979,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           browserToolApprovalService?.close();
+          imageGenerationOffers.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();

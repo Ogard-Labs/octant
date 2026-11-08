@@ -119,6 +119,7 @@ describe("a spoke accepting the guests a verified roster lists", () => {
       {
         memberId: id("5"),
         readStatus: true,
+        moveIn: true,
         delegation: {
           projects: "all",
           modes: ["work", "code"],
