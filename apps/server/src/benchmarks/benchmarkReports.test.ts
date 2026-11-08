@@ -149,7 +149,9 @@ describe("benchmark export", () => {
     expect(result.value.fileName).toBe("benchmark-smoke-66400000.json");
     expect(result.value.content).not.toContain(SECRET_ANSWER);
     const body = JSON.parse(result.value.content) as Record<string, any>;
-    expect(body.answers).toBe("not included; read them in each cell's thread");
+    expect(body.answers).toBe(
+      "Answers are not included; read them in each cell's thread. Judge reasons, check details and star notes are included and may quote an answer.",
+    );
     expect(Object.keys(body.cells[0]).filter((key) => /answer|text|reply/i.test(key))).toEqual([]);
     expect(body.cells[0]).toMatchObject({
       state: "answered",

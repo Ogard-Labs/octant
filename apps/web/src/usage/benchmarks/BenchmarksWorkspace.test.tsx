@@ -896,4 +896,48 @@ describe("history and export", () => {
     );
     expect(await screen.findByText("That run does not exist.")).toBeVisible();
   });
+
+  it("never shows another suite's history while its own is being read", async () => {
+    const actor = user();
+    const other = suite({
+      suiteId: "77000000-0000-4000-8000-0000000000a2",
+      name: "Other suite",
+    });
+    const history = vi.fn(
+      (request: Parameters<BenchmarksClient["history"]>[0]) =>
+        new Promise<Awaited<ReturnType<BenchmarksClient["history"]>>>((resolve) => {
+          if (String(request.suiteId) === SUITE_ID) {
+            resolve({
+              suiteId: request.suiteId,
+              runs: [historyRun("77000000-0000-4000-8000-0000000000c1", NOW, 0.5)],
+            });
+          }
+        }),
+    );
+    mount(makeClient({ listSuites: vi.fn(async () => ({ suites: [suite(), other] })), history }));
+
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+    expect(await screen.findByRole("table", { name: "Runs by contender" })).toBeInTheDocument();
+
+    await actor.click(screen.getByRole("button", { name: "Other suite" }));
+    await waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("table", { name: "Runs by contender" })).toBeNull();
+  });
+
+  it("reads history when a run ends and not while its cells settle", async () => {
+    const actor = user();
+    let reads = 0;
+    const client = makeClient({
+      listRuns: vi.fn(async () => ({ runs: [summary(reads >= 4 ? "finished" : "running")] })),
+      readRun: vi.fn(async () => readResponse(++reads >= 4 ? "finished" : "running")),
+    });
+    mount(client);
+
+    await openRun(actor);
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(3));
+    expect(client.history).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(client.history).toHaveBeenCalledTimes(2));
+    expect(reads).toBeGreaterThanOrEqual(4);
+  });
 });

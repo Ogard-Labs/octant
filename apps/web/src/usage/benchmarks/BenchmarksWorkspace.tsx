@@ -137,7 +137,11 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const [pasted, setPasted] = useState("");
   const [importError, setImportError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState<Pending | undefined>(undefined);
-  const [history, setHistory] = useState<BenchmarkHistoryResponse | undefined>(undefined);
+  // Keyed by suite, so a suite never shows another suite's runs while its own read is out.
+  const [history, setHistory] = useState<
+    { readonly suiteId: string; readonly read: BenchmarkHistoryResponse } | undefined
+  >(undefined);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const [working, setWorking] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -253,19 +257,20 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const suiteRuns = runs.filter((run) => String(run.suiteId) === selectedSuiteId);
   const knownSuites = new Set(suites.map((suite) => String(suite.suiteId)));
   const orphanRuns = runs.filter((run) => !knownSuites.has(String(run.suiteId)));
-  // The suite's history is read when it is chosen and again when its runs change.
-  const historySignature = suiteRuns
-    .map((run) => `${String(run.runId)}:${run.status}:${run.settledCount}`)
-    .join("|");
+  // History is read when the suite is chosen, when a run starts or ends, and on
+  // an explicit refresh. A cell settling mid-run does not read it again: each
+  // read joins every cell's metrics on the host.
+  const historySignature = suiteRuns.map((run) => `${String(run.runId)}:${run.status}`).join("|");
   useEffect(() => {
     if (selectedSuiteId === undefined) {
       setHistory(undefined);
       return;
     }
+    const suiteId = selectedSuiteId;
     let current = true;
-    client.history({ suiteId: decodeBenchmarkSuiteId(selectedSuiteId) }).then(
+    client.history({ suiteId: decodeBenchmarkSuiteId(suiteId) }).then(
       (read) => {
-        if (current) setHistory(read);
+        if (current) setHistory({ suiteId, read });
       },
       () => {
         if (current) setHistory(undefined);
@@ -274,7 +279,7 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
     return () => {
       current = false;
     };
-  }, [client, selectedSuiteId, historySignature]);
+  }, [client, selectedSuiteId, historySignature, historyRefresh]);
 
   const metricsByCell = useMemo(
     () =>
@@ -484,6 +489,7 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
         aria-label="Refresh benchmarks"
         onClick={() => {
           void reload();
+          setHistoryRefresh((tick) => tick + 1);
           if (selectedRunId !== undefined) void readRun(selectedRunId);
         }}
         size="icon"
@@ -721,8 +727,10 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
               runsTable(suiteRuns, "Runs of this suite")
             )}
           </SurfaceSection>
-          {history === undefined || history.runs.length === 0 ? null : (
-            <BenchmarkHistory names={names} runs={history.runs} />
+          {history === undefined ||
+          history.suiteId !== selectedSuiteId ||
+          history.read.runs.length === 0 ? null : (
+            <BenchmarkHistory names={names} runs={history.read.runs} />
           )}
         </>
       )}

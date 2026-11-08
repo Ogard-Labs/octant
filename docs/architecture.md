@@ -6094,9 +6094,11 @@ run (cases snapshot, contenders, budget, status), every cell with its state,
 check results, judge result, rating and turn figures, plus the leaderboard and
 overhead. The CSV has one row per cell, quoted as RFC 4180, and a field that
 begins with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading
-apostrophe so a spreadsheet reads it as text. **An export never carries answer
-text**: answers stay in the cell threads, and the JSON says so in an `answers`
-note. Both routes have the reads' authority, a local window and a paired remote
+apostrophe so a spreadsheet reads it as text. **An export never carries a cell's
+answer**: answers stay in the cell threads. The JSON says so in an `answers`
+note, which also says that judge reasons, check details and star notes are
+included and may quote an answer, as may the case prompts and reference answers
+of the run's cases snapshot. Both routes have the reads' authority, a local window and a paired remote
 device, and are on the remote forward list as non-secret reads. They live in
 `BenchmarkReports`, beside the service.
 

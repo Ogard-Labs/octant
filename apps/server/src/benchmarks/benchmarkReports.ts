@@ -13,7 +13,8 @@ import { benchmarkCellMetrics, benchmarkHistory } from "@octant/domain";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 import type { BenchmarkOutcome } from "./benchmarkService";
 
-export const BENCHMARK_EXPORT_ANSWERS_NOTE = "not included; read them in each cell's thread";
+export const BENCHMARK_EXPORT_ANSWERS_NOTE =
+  "Answers are not included; read them in each cell's thread. Judge reasons, check details and star notes are included and may quote an answer.";
 
 export interface BenchmarkReportsOptions {
   readonly projection: Pick<BenchmarkProjection, "runs" | "run">;
