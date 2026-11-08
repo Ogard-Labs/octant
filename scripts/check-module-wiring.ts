@@ -97,6 +97,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Delivered ahead of its first caller by a staged design ──
   [
+    "packages/domain/src/hubThreadMovePolicy.ts",
+    "Thread-move eligibility, the destination's Move in check, Prepare to shut down's starting choices, recovery, and the handover branch, delivered as the contracts-and-policy part of slice 12 in docs/design/hub-and-spokes.md before the server move transport that calls it. Remove once the server's move routes decide with it.",
+  ],
+  [
+    "packages/contracts/src/hubThreadMove.ts",
+    "Thread-move offer, manifest, answers, destination state, handover notice, events, and failure reasons, delivered as the contracts-and-policy part of slice 12 in docs/design/hub-and-spokes.md before the server move routes that decode them. Remove once those routes decode the offer.",
+  ],
+  [
     "packages/domain/src/hostedRelayProtocol.ts",
     "Hosted relay route id derivation, registration message, and frame reader, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the relay service and host connector that call it. Remove once the relay service reads frames with it.",
   ],

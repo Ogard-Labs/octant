@@ -993,11 +993,16 @@ and questions.
   their versions.
 - For a Code thread, a Git bundle of its checkout: the commits on the thread's
   branch that the source's remote-tracking refs do not hold, and the
-  uncommitted work (staged, unstaged, and untracked files Git does not ignore)
-  as one work-in-progress commit, which the destination unpacks back into the
-  working tree and index. The Secret guard checks every file that travels; a
-  file it refuses stays behind and is listed. Ignored files (build output,
-  installed dependencies, `.env` files) never travel.
+  uncommitted work as two snapshot commits that never join the branch: an
+  index commit whose tree is the staged state, on the branch's head, and a
+  working-tree commit on top of it whose tree is the working tree, including
+  untracked files Git does not ignore. The destination restores the index from
+  the first and the working tree from the second, so a file with both staged
+  and unstaged edits arrives with both. Rationale: one commit holds one tree,
+  and a file staged at one version and edited again holds two. The Secret
+  guard checks every file that travels; a file it refuses stays behind and is
+  listed. Ignored files (build output, installed dependencies, `.env` files)
+  never travel.
 - There is no size limit ([decision H22](#decisions)). A large thread or
   worktree takes longer; the move sheet shows the size and an estimate.
 - Never: credentials and sign-ins, the provider's own session, remembered Full
@@ -1032,7 +1037,8 @@ and questions.
    reference, and the move id, and holds the thread as **arriving**: listed,
    read-only, and unable to start a turn. For Code it makes a managed
    worktree, checks out the branch (keeping its name when that is free there,
-   otherwise adding a suffix), and restores the uncommitted work. It answers
+   otherwise adding a suffix), and restores the index and the working tree
+   from their two snapshots. It answers
    `arrived` with the new thread's reference.
 5. **Commit.** The source sends
    `POST /api/hub/peer/thread-moves/:moveId/commit`. The destination journals
@@ -1051,7 +1057,14 @@ token and cost aggregates stay for host accounting, as for any purge. The
 purge tombstone keeps the move id and the destination reference, so an old
 link, a notification, or a search on the source shows "Moved to" the member
 with **Open there**. A managed worktree the thread owned is removed with its
-local branch; nothing is pushed or deleted on a remote. A thread that worked
+local branch only when everything in it travelled. When it holds anything that
+stayed behind (a file the Secret guard refused, or any ignored file such as a
+`.env` or a local configuration), the source keeps the worktree folder, no
+longer owned by any thread, and the tombstone lists those files with **Remove
+worktree**, which only a person can choose. The move sheet names the same
+files before the move starts. Rationale: those files have no other copy, so
+removing the folder would destroy work the move never carried. Nothing is
+pushed or deleted on a remote. A thread that worked
 in the Project's current checkout leaves that folder as it is, because Octant
 never resets the person's own checkout, and the receipt says the changes also
 remain there. The purge also starts the existing withdrawals: messages the
@@ -2058,9 +2071,11 @@ a numbered slice. Built, with these narrower readings:
     or Activate anyway; a transfer cut at any chunk resumes and arrives once; a
     lost commit answer neither duplicates nor loses the thread; the source
     erases only after `committed`, and its tombstone opens the destination; a
-    Code thread arrives with its branch, its commits, and its uncommitted and
+    Code thread arrives with its branch, its commits, its staged and unstaged
+    versions of a file edited both ways, and its uncommitted and
     untracked work identical to the source, and with no ignored file; a file
-    the Secret guard refuses stays behind and is listed; no credential,
+    the Secret guard refuses stays behind and is listed, and the source keeps
+    a worktree that still holds a refused or ignored file; no credential,
     provider session, grant, or Full access arrives; a Code thread whose
     destination lacks its repository falls back to a handover whose commit
     holds every change and whose message is the note; a handover never forces
@@ -2079,6 +2094,16 @@ a numbered slice. Built, with these narrower readings:
     fake providers covering a large worktree and a cut transfer; a move between
     two real computers with a real Touch ID unlock before a real shutdown is a
     maintainer gate. **Linux container: yes, except that gate.**
+
+    Slice 12 lands in parts. The first part is the contracts (the move offer,
+    manifest, answers and destination state, the handover notice, the move
+    events, the failure reasons, and the Move in item on the peer grant, in
+    the full-member grant for new members) and the pure policy (eligibility,
+    the destination's Move in check, Prepare to shut down's starting choices
+    and destination, recovery, Activate anyway, keeping a worktree that holds
+    unmoved files, and the handover branch). Nothing reaches them from the
+    product yet. A grant stored before Move in existed reads as off until the
+    server part upgrades full members.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
