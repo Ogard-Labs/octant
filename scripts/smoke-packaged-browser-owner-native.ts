@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -84,8 +84,28 @@ function groupProcesses(group: number): ReadonlyArray<number> {
     });
 }
 
+async function recordOwnedPickerDirectoryCleanup(root: string, artifacts: string): Promise<void> {
+  const status = await lstat(root).then(
+    () => "present",
+    (error: unknown) =>
+      typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+        ? "absent"
+        : "unknown",
+  );
+  await writeFile(
+    join(artifacts, "project-picker-fixture-cleanup.json"),
+    JSON.stringify({
+      ownedFixtureDirectoryAbsent: status === "absent",
+      inspection: status,
+    }),
+  );
+  if (status !== "absent") throw Error("Owned picker fixture directory cleanup is unconfirmed.");
+}
+
 async function main(): Promise<void> {
-  const providerSetup = process.argv.slice(2).join(" ") === "--provider-setup";
+  const projectPickerDiscovery = process.argv.slice(2).join(" ") === "--project-picker-discovery";
+  const providerSetup =
+    projectPickerDiscovery || process.argv.slice(2).join(" ") === "--provider-setup";
   if (process.argv.length > 2 && !providerSetup) throw Error("Unknown owned native scenario.");
   if (process.platform !== "darwin" || process.arch !== "arm64")
     throw Error("The owned native Browser lifecycle fixture requires Apple Silicon macOS.");
@@ -178,6 +198,7 @@ async function main(): Promise<void> {
     await mkdir(artifacts, { recursive: true });
     await mkdir(join(root, "home"));
     await mkdir(join(root, "tmp"));
+    if (projectPickerDiscovery) await mkdir(join(root, "home", "owned-browser-project"));
     const env = {
       ...sanitizedPackagedEnvironment(
         { HOME: join(root, "home"), TMPDIR: join(root, "tmp") },
@@ -400,7 +421,8 @@ process.once("SIGINT", () => finish(false));`,
           | "bundle-census"
           | "bundle-cleanup"
           | "fill-name"
-          | "fill-address",
+          | "fill-address"
+          | "picker-metadata",
         value?: string,
         pinnedBirth?: string,
       ) =>
@@ -458,7 +480,11 @@ process.once("SIGINT", () => finish(false));`,
       };
       let clickSequence = 0;
       let revealSequence = 0;
+      let pickerAttempted = false;
+      let pickerBoundaryEntered = false;
       const native = async (operation: string, value = ""): Promise<string> => {
+        if (pickerBoundaryEntered)
+          throw Error("Picker discovery permits no further named reads or input.");
         if (
           operation !== "snapshot" &&
           operation !== "count" &&
@@ -847,6 +873,126 @@ end run`;
             "endpoint-dialog-closed",
             (s) => !s.includes("Check and add") && !s.includes("AXButton | Continue |"),
           );
+          if (projectPickerDiscovery) {
+            await wait("back-to-app", (s) => s.includes("Back to app"));
+            await native("reveal", "Back to app");
+            await native("click", "Back to app");
+            await wait("work-mode-entry", (s) => s.includes(" | Work |"));
+            await native("reveal", "Work");
+            await native("click", "Work");
+            await wait("work-add-folder", (s) => s.includes("Add folder"));
+            await native("reveal", "Add folder");
+            await native("click", "Add folder");
+            await wait("project-choose-folder", (s) => s.includes("Choose a folder"));
+            await native("reveal", "Choose a folder");
+            if (ownerBirth === undefined)
+              throw Error("No original process birth for picker discovery.");
+            const birth = `${ownerBirth.seconds}:${ownerBirth.microseconds}`;
+            const metadata = async (name: string) => {
+              const raw = await sdk("picker-metadata", birth);
+              await writeFile(join(artifacts, `${name}.json`), raw);
+              const value: unknown = JSON.parse(raw);
+              if (
+                typeof value !== "object" ||
+                value === null ||
+                !("capturedPid" in value) ||
+                value.capturedPid !== pid ||
+                !("capturedIdentityMatched" in value) ||
+                value.capturedIdentityMatched !== true ||
+                !("nativeAxTrusted" in value) ||
+                value.nativeAxTrusted !== true ||
+                !("interactionDispatched" in value) ||
+                value.interactionDispatched !== false ||
+                !("labelsOrValuesRead" in value) ||
+                value.labelsOrValuesRead !== false ||
+                !("windowOwnership" in value) ||
+                !Array.isArray(value.windowOwnership) ||
+                !("roles" in value) ||
+                !Array.isArray(value.roles) ||
+                value.roles.length > 512 ||
+                !("windowsError" in value) ||
+                typeof value.windowsError !== "number" ||
+                !("readErrors" in value) ||
+                typeof value.readErrors !== "number" ||
+                !Number.isSafeInteger(value.readErrors) ||
+                value.readErrors < 0 ||
+                !("truncated" in value) ||
+                typeof value.truncated !== "boolean" ||
+                !("windowOwnershipTruncated" in value) ||
+                typeof value.windowOwnershipTruncated !== "boolean" ||
+                !("foreignPidBoundaryObserved" in value) ||
+                typeof value.foreignPidBoundaryObserved !== "boolean"
+              )
+                throw Error(
+                  "Owned picker metadata did not preserve its read-only identity boundary.",
+                );
+              return value;
+            };
+            const before = await metadata("project-picker-before");
+            if (
+              before.foreignPidBoundaryObserved ||
+              before.windowsError !== 0 ||
+              before.readErrors !== 0 ||
+              before.truncated ||
+              before.windowOwnershipTruncated
+            )
+              throw Error("Incomplete or unknown process metadata before opening the picker.");
+            pickerAttempted = true;
+            try {
+              await native("click", "Choose a folder");
+            } finally {
+              // Even an uncertain dispatch may have opened a filesystem picker.
+              // Never run the ordinary label-reading controller beyond here.
+              pickerBoundaryEntered = true;
+            }
+            const deadline = Date.now() + 8_000;
+            let observation = before;
+            let sample = 0;
+            do {
+              await pause(250);
+              observation = await metadata(`project-picker-after-${++sample}`);
+              const nativeDialog = observation.roles.some(
+                (node: unknown) =>
+                  typeof node === "object" &&
+                  node !== null &&
+                  (("role" in node && ["AXSheet", "AXDialog"].includes(String(node.role))) ||
+                    ("subrole" in node &&
+                      ["AXDialog", "AXSystemDialog"].includes(String(node.subrole)))),
+              );
+              if (
+                observation.foreignPidBoundaryObserved ||
+                nativeDialog ||
+                JSON.stringify(observation.windowOwnership) !==
+                  JSON.stringify(before.windowOwnership)
+              )
+                break;
+            } while (!controller.signal.aborted && Date.now() < deadline && sample < 4);
+            await writeFile(
+              join(artifacts, "project-picker-discovery.json"),
+              JSON.stringify(
+                {
+                  metadataSamples: sample,
+                  foreignPidBoundaryObserved: observation.foreignPidBoundaryObserved,
+                  readErrors: observation.readErrors,
+                  truncated: observation.truncated,
+                  windowsError: observation.windowsError,
+                  windowOwnershipTruncated: observation.windowOwnershipTruncated,
+                  namedReadsAfterPickerAttempt: false,
+                  subsequentInteractionDispatched: false,
+                  emptyOwnedFolderCreated: true,
+                  projectBinding: "not-attempted",
+                  pickerSelection: "not-attempted",
+                  result: "metadata retained for independent source and observed-control review",
+                },
+                null,
+                2,
+              ),
+            );
+            checks.push(
+              "normal-work-folder-picker-requested-and-read-only-metadata-retained-without-selection",
+            );
+            continue;
+          }
         } else {
           let snapshot = await settings();
           await capture("preference", snapshot);
@@ -962,19 +1108,23 @@ end run`;
         try {
           await writeFile(
             join(artifacts, `${phase}-app-output.txt`),
-            redactHostRuntimeText(app.outputTail()),
+            pickerAttempted
+              ? "App output after the picker request is intentionally not retained."
+              : redactHostRuntimeText(app.outputTail()),
           );
         } finally {
           try {
             await cleanupPackagedProcess({
               child: app.child,
               requestQuit: () =>
-                runBoundedCommand(
-                  "/usr/bin/osascript",
-                  ["-e", createQuitAppleScript(bundle)],
-                  process.env,
-                  3000,
-                ).then(() => undefined),
+                projectPickerDiscovery
+                  ? Promise.resolve()
+                  : runBoundedCommand(
+                      "/usr/bin/osascript",
+                      ["-e", createQuitAppleScript(bundle)],
+                      process.env,
+                      3000,
+                    ).then(() => undefined),
               waitForExit: (_child, bound) => exited(app.child, bound),
               signalGroup: (group, signal) => {
                 if (group !== pid) throw Error("Unowned process group.");
@@ -1016,7 +1166,14 @@ end run`;
     await provider?.close();
     if (provider !== undefined) checks.push("owned-loopback-provider-listener-and-sockets-joined");
     await writeFile(
-      join(artifacts, providerSetup ? "provider-setup-evidence.json" : "lifecycle-evidence.json"),
+      join(
+        artifacts,
+        projectPickerDiscovery
+          ? "project-picker-gate-evidence.json"
+          : providerSetup
+            ? "provider-setup-evidence.json"
+            : "lifecycle-evidence.json",
+      ),
       JSON.stringify(
         providerSetup
           ? {
@@ -1026,11 +1183,20 @@ end run`;
               fixture: provider?.evidence(),
               protocol: "Automatic: Responses404 to Chat Completions",
               visualStateImages,
-              cleanup: "verified",
+              cleanup: projectPickerDiscovery
+                ? "app/provider joined; fixture directory cleanup recorded separately"
+                : "verified",
               reusedWindowLifecycleHead: "4139726ac11dce5affa3c6744be732fa17509e7b",
               activeExecutionLease: "not-run",
               profileCookieContinuity: "not-run",
               personalAccount: false,
+              ...(projectPickerDiscovery
+                ? {
+                    projectBinding: "not-attempted",
+                    pickerSelection: "not-attempted",
+                    subsequentInteractionDispatched: false,
+                  }
+                : {}),
             }
           : {
               checks,
@@ -1081,6 +1247,9 @@ end run`;
         await rm(root, { recursive: true, force: true });
         if (bundle.startsWith(join(tmpdir(), "octant-packaged-app.")))
           await rm(dirname(bundle), { recursive: true, force: true });
+        if (projectPickerDiscovery) {
+          await recordOwnedPickerDirectoryCleanup(root, artifacts);
+        }
       }
     }
   }

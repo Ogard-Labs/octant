@@ -23,8 +23,8 @@ if fillsFixtureField {
     guard CommandLine.arguments.count == 6, fixtureBirthParts.count == 2, fixtureBirth.count == 2,
           !fixtureText.isEmpty, fixtureText.utf16.count <= 64, allowedFixtureText else { exit(2) }
 } else { guard CommandLine.arguments.count <= 5 else { exit(2) } }
-guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address"].contains(mode),
-      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField) == !requestedTitle.isEmpty,
+guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address", "picker-metadata"].contains(mode),
+      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField || mode == "picker-metadata") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
 // Leave time for the matching mouse-up before the owned six-second command bound.
@@ -109,6 +109,92 @@ for name in mode == "diagnostic" ? ["AXManualAccessibility", "AXEnhancedUserInte
 }
 var windows: CFTypeRef?
 let windowResult = element.map { AXUIElementCopyAttributeValue($0, kAXWindowsAttribute as CFString, &windows) } ?? AXError.attributeUnsupported
+if mode == "picker-metadata" {
+    // The native chooser may expose filesystem names through ordinary labels.
+    // This separate read path never requests titles, descriptions or values.
+    let parts = requestedTitle.split(separator: ":", omittingEmptySubsequences: false)
+    let birth = parts.compactMap { UInt64($0) }
+    let admitted = isTaskStagedBundle && treeIdentityMatched && matchingIds == [processId] &&
+        parts.count == 2 && birth.count == 2 &&
+        initialKernelIdentity?.birthSeconds == birth[0] && initialKernelIdentity?.birthMicroseconds == birth[1] &&
+        initialKernelIdentity?.executable == expectedBundle + "/Contents/MacOS/Octant"
+    let deadline = Date().addingTimeInterval(3)
+    var queue = (admitted && windowResult == .success ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0) }
+    var seen = Set<CFHashCode>(), processes = Set<pid_t>()
+    var rows: [[String: Any]] = [], processRows: [[String: Any]] = []
+    var index = 0, errors = 0
+    var depthCut = false, nodeCut = queue.count > 512, foreignPid = false, dialogSeen = false
+    queue = Array(queue.prefix(512))
+    func roleOnly(_ node: AXUIElement, _ attribute: CFString) -> String {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(node, attribute, &value)
+        if result != .success && result != .noValue && result != .attributeUnsupported { errors += 1 }
+        guard result == .success, let text = value as? String,
+              text.hasPrefix("AX"), text.count <= 64,
+              text.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) }) else { return "" }
+        return text
+    }
+    while index < queue.count && index < 512 && Date() < deadline {
+        let (node, depth) = queue[index]; index += 1
+        guard seen.insert(CFHash(node)).inserted else { continue }
+        var nodePid: pid_t = 0
+        let pidRead = AXUIElementGetPid(node, &nodePid)
+        if pidRead != .success || nodePid <= 1 { errors += 1; break }
+        if processes.insert(nodePid).inserted {
+            let identity = kernelIdentity(nodePid)
+            let running = NSRunningApplication(processIdentifier: nodePid)
+            let bundleId = running?.bundleIdentifier ?? ""
+            let safeBundleId = bundleId.count <= 256 && !bundleId.isEmpty && bundleId.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-"
+            } ? bundleId : "unavailable"
+            processRows.append(["pid": nodePid,
+                "birthSeconds": identity.map { $0.birthSeconds as Any } ?? NSNull(),
+                "birthMicroseconds": identity.map { $0.birthMicroseconds as Any } ?? NSNull(),
+                "serviceBundleIdentifier": safeBundleId,
+                "capturedApp": nodePid == processId])
+        }
+        if nodePid != processId { foreignPid = true; break }
+        let nodeRole = roleOnly(node, kAXRoleAttribute as CFString)
+        let subrole = roleOnly(node, kAXSubroleAttribute as CFString)
+        if nodeRole.isEmpty { errors += 1; break }
+        rows.append(["pid": nodePid, "role": nodeRole, "subrole": subrole, "depth": depth])
+        if nodeRole == "AXSheet" || nodeRole == "AXDialog" ||
+            ["AXDialog", "AXSystemDialog", "AXApplicationDialog"].contains(subrole) { dialogSeen = true }
+        if nodeRole == "AXSecureTextField" || subrole == "AXSecureTextField" { continue }
+        if depth >= 40 { depthCut = true; continue }
+        var children: CFTypeRef?
+        let read = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children)
+        if read == .success {
+            if let children = children as? [AXUIElement] {
+                let remaining = max(0, 512 - queue.count)
+                if children.count > remaining { nodeCut = true }
+                queue.append(contentsOf: children.prefix(remaining).map { ($0, depth + 1) })
+            } else { errors += 1 }
+        } else if read != .noValue && read != .attributeUnsupported { errors += 1 }
+    }
+    let live = NSRunningApplication(processIdentifier: processId)
+    let unchanged = admitted && kernelIdentity(processId) == initialKernelIdentity && live?.isTerminated == false &&
+        live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle
+    let ownedWindows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { row -> [String: Any]? in
+        guard let pid = row[kCGWindowOwnerPID as String] as? NSNumber,
+              pid.int32Value == processId || processes.contains(pid.int32Value) else { return nil }
+        return ["ownerPid": pid, "windowId": row[kCGWindowNumber as String] ?? NSNull(),
+            "layer": row[kCGWindowLayer as String] ?? NSNull()]
+    }
+    let output: [String: Any] = ["capturedPid": processId, "capturedIdentityMatched": unchanged,
+        "nativeAxTrusted": AXIsProcessTrusted(), "windowsError": windowResult.rawValue,
+        "windowOwnership": Array(ownedWindows.prefix(64)), "windowOwnershipTruncated": ownedWindows.count > 64,
+        "processes": processRows, "roles": rows, "readErrors": errors,
+        "dialogOrSheetObserved": dialogSeen, "foreignPidBoundaryObserved": foreignPid,
+        "truncated": depthCut || nodeCut || foreignPid || index < queue.count,
+        "depthLimitReached": depthCut, "nodeLimitReached": nodeCut,
+        "timeLimitReached": Date() >= deadline && index < queue.count,
+        "interactionDispatched": false, "labelsOrValuesRead": false]
+    if let encoded = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]),
+       let text = String(data: encoded, encoding: .utf8) { print(text) }
+    else { exit(2) }
+    exit(0)
+}
 // Read named controls, never text-field values or static page text. The owned
 // process has already been identified above; this is not a system-wide tree.
 let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea", "AXDisclosureTriangle", "AXComboBox", "AXMenuItem"])
@@ -318,7 +404,7 @@ if mode == "click" || mode == "reveal" || fillsFixtureField {
         action["availableActions"] = availableActions.prefix(32).map { String($0.prefix(256)) }
         action["actionNamesTruncated"] = actionNamesTruncated
         if targetIdentityRead == .success, targetPid == processId {
-            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Add endpoint", "OpenAI-compatible", "OpenAI-compatible Any service that speaks the OpenAI API: a gateway, a router, or a local server.", "Advanced", "It takes no key", "It takes no key Only for a server on this computer, such as one at 127.0.0.1.", "Check and add", "Continue and verify tools (1 request)"].contains(requestedTitle),
+            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Add endpoint", "OpenAI-compatible", "OpenAI-compatible Any service that speaks the OpenAI API: a gateway, a router, or a local server.", "Advanced", "It takes no key", "It takes no key Only for a server on this computer, such as one at 127.0.0.1.", "Check and add", "Continue and verify tools (1 request)", "Back to app", "Work", "Add folder", "Choose a folder"].contains(requestedTitle),
                enabledRead == .success, binary(enabledValue) == true,
                namesRead == .success, !actionNamesTruncated,
                availableActions.contains("AXScrollToVisible"), live?.isActive == true,

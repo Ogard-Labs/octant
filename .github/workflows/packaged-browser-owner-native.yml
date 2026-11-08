@@ -38,11 +38,11 @@ jobs:
       - name: Package source without signing or publication
         timeout-minutes: 25
         run: bun run package:desktop
-      - name: Register owned no-key endpoint and verify tools through normal UI
+      - name: Discover normal Work folder picker ownership without selection
         timeout-minutes: 5
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-browser-owner-native
-        run: bun scripts/smoke-packaged-browser-owner-native.ts --provider-setup
+        run: bun scripts/smoke-packaged-browser-owner-native.ts --project-picker-discovery
       - uses: actions/upload-artifact@v4
         if: always()
         with:
