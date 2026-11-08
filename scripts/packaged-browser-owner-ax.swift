@@ -122,6 +122,13 @@ while next < pending.count, next < 512, Date() < treeDeadline {
         if (nodeRole == "AXCheckBox" || nodeRole == "AXSwitch") && (title == preferenceTitle || description == preferenceTitle) {
             var state: CFTypeRef?
             let stateRead = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &state)
+            control["stateReadError"] = stateRead.rawValue
+            control["stateType"] = state.map { CFCopyTypeIDDescription(CFGetTypeID($0)) as String } ?? "nil"
+            // Expose only recognized binary representations of this exact switch.
+            // Unsupported values remain private and still make the tree refuse.
+            if let text = state as? String {
+                control["stateBinaryString"] = ["0", "1", "false", "true"].contains(text) ? text : "unsupported"
+            }
             if stateRead == .success,
                let number = state as? NSNumber, number.doubleValue == 0 || number.doubleValue == 1 {
                 control["value"] = number.intValue
