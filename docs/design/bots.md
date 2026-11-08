@@ -25,6 +25,7 @@ slice moves its rules into them and into
 | S4  | Current code and specifications on `main`                | Navigator is a hidden Chat thread whose only command is `send-message` (`apps/server/src/navigatorAssistant/navigatorAssistantService.ts`); [Disposable desktops](disposable-desktops.md); [Browser for agents](browser-agent-tool.md) sign-in hand-off and 1Password fill; [Browser profiles](browser-profiles.md); the client-side host federation (`packages/client-runtime/src/hostFederationRegistry.ts`); Project-bound routines ([Architecture](../architecture.md)); the icon rail (DESIGN.md); the remote shell and the mobile client. |
 | S5  | [AGENTS.md](../../AGENTS.md) and Architecture principles | Server-enforced modes and authority; no fourth authority mode; a thread never changes kind; plugin-shaped providers; no Octant-operated cloud; detect binaries, never install them; honest capability reporting.                                                                                                                                                                                                                                                                                                                                |
 | S6  | Maintainer, 2026-11-08 (answers to Q-1 to Q-7)           | Q-1: yes, bots are in the phone app too and cards can be answered there. Q-2: yes, unattended sign-in. Q-3: yes, the public web minus private ranges. Q-4: "ask first or auto-accept if available from provider like claude or codex". Q-5: yes, add Apple's container tool. Q-6: "payments and sending messages must have a confirmation". Q-7: yes, a paired device can create a bot.                                                                                                                                                         |
+| S7  | Maintainer, 2026-11-08 (plan review)                     | Keep the review suggestions, but "we must have a product that matches other bots without unnecessary friction"; "we might still have too strict rules"; Octant must be able to edit AGENTS.md when the person asks.                                                                                                                                                                                                                                                                                                                             |
 
 ### Requirements
 
@@ -47,15 +48,19 @@ slice moves its rules into them and into
 | FR-15  | A bot can have its own sandboxed desktop with a browser. It persists between turns and host restarts (files and browser profile), and the person can watch it live and take over.                                                                                          | Must     | Files and a site sign-in made on day 1 are still there on day 2 after a host restart; the Desktop tab shows the bot's screen and the person's input reaches it.                                                                                                       | S2, S3     |
 | FR-16  | A bot desktop can run in a local container engine (Docker-compatible) on this machine, or with the existing E2B and Cua providers.                                                                                                                                         | Must     | With a Docker-compatible engine running, a bot desktop starts locally; with no engine the host reports why and offers the other providers.                                                                                                                            | S2, S4     |
 | FR-17  | A bot's Browser tool and Computer tool act inside its own desktop, not on the person's computer.                                                                                                                                                                           | Must     | A bot's Browser `navigate` opens the page in its desktop browser (visible in the Desktop tab); nothing opens on the host.                                                                                                                                             | S2         |
-| FR-18  | A bot can act on websites on the person's behalf (forms, posts, purchases) under its access level and the Browser's site approvals.                                                                                                                                        | Must     | At Ask first, submitting a form on an approved site asks first; on an unapproved site the action is refused before it runs.                                                                                                                                           | S2         |
+| FR-18  | A bot can act on websites on the person's behalf (forms, posts, purchases) under its access level. In its own desktop no per-site approval is needed (D-16).                                                                                                               | Must     | At Ask first, submitting a form asks first; at Auto or Full access the bot's own browser acts on a new site with no site approval; a payment or a send still asks (FR-24).                                                                                            | S2, S7     |
 | FR-19  | A person can give a bot logins: a login Octant keeps in the system credential store, or a 1Password item. Each is limited to its own sites. The bot signs in without ever reading the password.                                                                            | Must     | The bot signs in to the login's site; the model's input, the journal and the renderer never contain the password; the same login on another site is refused.                                                                                                          | S2, S4     |
-| FR-20  | A person can let a bot use a login while nobody is watching (in routines), per login, revocably. Every use is journaled and shown in the bot's activity.                                                                                                                   | Must     | With unattended use allowed, a routine run signs in and the use shows in the bot's activity; with it off, the run stops with a Sign in needed card.                                                                                                                   | S2         |
+| FR-20  | A login given to a bot is used on its own sites whenever the bot needs it, while the person watches or in routines, without asking. Per login, the person may choose Ask me each time. Every use is journaled and shown in the bot's activity.                             | Must     | With a login given, a routine run signs in with no card and the use shows in the bot's activity; with Ask me each time on, an attended turn shows a card and a routine run waits with Sign in needed.                                                                 | S2, S6, S7 |
 | FR-21  | Without a usable login, the bot asks with a Sign in needed card; the person signs in through the Desktop tab and the session stays in the bot's browser profile.                                                                                                           | Must     | The card's Open goes to the bot's desktop; after Done the bot continues signed in; the next day the session is still valid.                                                                                                                                           | S3, S4     |
 | FR-22  | Removing a login from a bot stops its use at once; deleting a bot or clearing its browser profile removes stored sessions.                                                                                                                                                 | Must     | After removal a fill is refused even in a running turn; after Clear browser data the next visit is signed out.                                                                                                                                                        | S2         |
 | FR-23  | Quick ask: a shortcut opens a small composer to message any bot without leaving the current view, sharing that bot's conversation.                                                                                                                                         | Should   | A message sent from Quick ask appears in the bot's conversation tab.                                                                                                                                                                                                  | S3         |
 | FR-24  | Paying, buying, or sending a message as the person (email, chat, social post, a form that sends a message) always asks the person first, at every access level and in routines; an unattended run waits for the answer.                                                    | Must     | At Full access, submitting a checkout or a send form shows a confirmation card and nothing is sent until it is approved; a routine run reaching one waits with a needs-you badge.                                                                                     | S6         |
 | FR-25  | A paired device and the phone can answer a bot's cards (approvals, questions, sign-in hand-offs) except billed desktop starts and login grants, which stay with a window on the host.                                                                                      | Must     | An approval answered on the phone lets the turn continue; a billed start or a login grant shown on the phone says to answer it on the host.                                                                                                                           | S6         |
 | FR-26  | On macOS 26 with Apple silicon, a bot desktop can run in Apple's container tool, one lightweight VM per desktop.                                                                                                                                                           | Should   | With the tool running, a bot desktop starts in it and passes the same isolation and network checks as a Docker-compatible one.                                                                                                                                        | S6         |
+| FR-27  | Bots can ask each other for help by name and work together in shared rooms where one bot owns the task at a time and hands it on in a message.                                                                                                                             | Must     | A bot asks another bot by name and gets its answer in its own conversation; in a room with two bots and the person, a hand-off message moves ownership and the person sees who owns the task.                                                                         | S3, S7     |
+| FR-28  | The person can talk to a bot by voice from the bot's conversation; the lead bot speaks first with what needs the person.                                                                                                                                                   | Should   | A voice call with Navigator opens with what is waiting for the person; a spoken request becomes an ordinary message in the bot's conversation.                                                                                                                        | S3, S7     |
+| FR-29  | When a bot's provider runs out of usage or fails, the bot can carry on with a fallback model the person chose, and says so in the conversation.                                                                                                                            | Should   | With a fallback set, a usage-limit failure on the first model continues the turn on the fallback and the transcript names both.                                                                                                                                       | S3, S7     |
+| FR-30  | Each bot has a details panel with Profile (name, avatar, role, instructions), Model and access, Tools, Routines, Memory, Computer, Logins and Projects; changes save as the person edits.                                                                                  | Must     | Renaming a bot in its Profile changes its name on the rail, the list, its tab and notifications; each tab reads and writes through the server.                                                                                                                        | S3, S7     |
 | NFR-1  | Authority is checked on the bot's host before every side effect. A bot never gets more than its access level; a routine never gets more than its captured snapshot.                                                                                                        | Must     | Route and service tests: a paired device, another window, and a routine each get the refusals a Work thread gives them.                                                                                                                                               | S5         |
 | NFR-2  | A bot desktop holds no host credential, checkout, home directory, SSH agent, or session bus, cannot reach the host's loopback or the Octant server, and runs unprivileged with all capabilities dropped.                                                                   | Must     | A conformance test inside the desktop fails to read the host home, to reach `127.0.0.1` on the host and the host's LAN address, and to gain a capability.                                                                                                             | S2, S4     |
 | NFR-3  | A login's password, one-time code and session cookie values never reach a model, a provider runtime, the journal, a renderer, logs, or a file outside the bot's desktop.                                                                                                   | Must     | A test fills a canary password, then scans the turn's provider input, the journal, the host log and the transcript for it: none contain it.                                                                                                                           | S2         |
@@ -73,41 +78,43 @@ slice moves its rules into them and into
 | ASM-1  | The host can create a Work Project bound to a folder it manages (a bot's home) without a person picking the folder.                                                                                                                                                        |          | Checked in slice 1.                                                                                                                                                                                                                                                   | S4         |
 | ASM-2  | Docker Desktop, OrbStack, Colima and Podman expose a Docker Engine API socket; a desktop with a virtual display and Chromium runs in about 1.5 GB of memory.                                                                                                               |          | Checked in slice 4.                                                                                                                                                                                                                                                   | S2         |
 | ASM-3  | The host can drive the desktop's Chromium over the DevTools protocol through a host-only channel, with nothing listening beyond the host.                                                                                                                                  |          | Checked in slice 5.                                                                                                                                                                                                                                                   | S4         |
-| ASM-5  | Apple's container tool runs the same Linux desktop image in one lightweight VM per container, with a virtual display and VNC inside and no GPU; the host reaches it on its own address.                                                                                    |          | Checked in slice 10.                                                                                                                                                                                                                                                  | S6         |
+| ASM-5  | Apple's container tool runs the same Linux desktop image in one lightweight VM per container, with a virtual display and Octant's stdio screen program inside (no VNC port) and no GPU; the host reaches it on its own address.                                            |          | Checked in slice 10.                                                                                                                                                                                                                                                  | S6         |
 | ASM-4  | The phone client can render bot conversations with its existing transcript screens.                                                                                                                                                                                        |          | Checked in slice 8.                                                                                                                                                                                                                                                   | S4         |
 
 ### Traceability
 
-| Source statement                                                  | Disposition                          |
-| ----------------------------------------------------------------- | ------------------------------------ |
-| S1 "Navigator should be the main and default bot"                 | FR-2                                 |
-| S1 "allow users to make additional ones"                          | FR-3, FR-4                           |
-| S1 "a good UI/UX for bots"                                        | FR-5, FR-11, FR-12, FR-23, NFR-8     |
-| S2 bots are app-wide like Navigator                               | CON-1, D-1                           |
-| S2 persistent assistants that own automations and scheduled tasks | FR-7, D-3                            |
-| S2 "Threads/Tasks stay as they are"                               | CON-2, FR-9                          |
-| S2 "Navigator can act on its own if instructed"                   | FR-10                                |
-| S2 "the same capabilities as threads"                             | FR-6, FR-9                           |
-| S2 "ideally" reachable from all devices in the same interface     | FR-14 (Must since S6 Q-1)            |
-| S2 unified view of all bots across hosts                          | FR-13, NFR-7                         |
-| S2 pinned bots on the outer-edge rail, view all bots like threads | FR-11, FR-12                         |
-| S2 Docker sandboxing, each bot its own desktop with a browser     | CON-3, FR-15, FR-16, FR-17, NFR-2    |
-| S2 act on the person's behalf                                     | FR-18, FR-24                         |
-| S6 Q-1 bots in the phone app, cards answered there                | FR-14, FR-25, D-13                   |
-| S6 Q-2 unattended sign-in                                         | FR-20, D-9                           |
-| S6 Q-3 public web minus private ranges                            | NFR-4, D-7                           |
-| S6 Q-4 Ask first, or Auto with the provider's own reviewer        | FR-1, D-11                           |
-| S6 Q-5 Apple's container tool                                     | FR-26, D-14                          |
-| S6 Q-6 payments and sending messages always confirm               | FR-24, D-12                          |
-| S6 Q-7 a paired device can create a bot                           | FR-3, D-13                           |
-| S2 pass credentials safely                                        | FR-19, FR-20, FR-21, FR-22, NFR-3    |
-| S3 per-bot memory                                                 | FR-8                                 |
-| S3 quick access from anywhere                                     | FR-23                                |
-| S3 bots asking each other, group rooms, voice calls               | Later                                |
-| S3 a bot managing other bots, off by default                      | Later                                |
-| S3 fallback providers when usage runs out                         | Later                                |
-| S3 anti-pattern: full access by default                           | FR-1, D-11 (never Full access)       |
-| S3 anti-pattern: shared folder or credential pool                 | D-1 (own home), D-8 (per-bot grants) |
+| Source statement                                                  | Disposition                                                                         |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| S1 "Navigator should be the main and default bot"                 | FR-2                                                                                |
+| S1 "allow users to make additional ones"                          | FR-3, FR-4                                                                          |
+| S1 "a good UI/UX for bots"                                        | FR-5, FR-11, FR-12, FR-23, NFR-8                                                    |
+| S2 bots are app-wide like Navigator                               | CON-1, D-1                                                                          |
+| S2 persistent assistants that own automations and scheduled tasks | FR-7, D-3                                                                           |
+| S2 "Threads/Tasks stay as they are"                               | CON-2, FR-9                                                                         |
+| S2 "Navigator can act on its own if instructed"                   | FR-10                                                                               |
+| S2 "the same capabilities as threads"                             | FR-6, FR-9                                                                          |
+| S2 "ideally" reachable from all devices in the same interface     | FR-14 (Must since S6 Q-1)                                                           |
+| S2 unified view of all bots across hosts                          | FR-13, NFR-7                                                                        |
+| S2 pinned bots on the outer-edge rail, view all bots like threads | FR-11, FR-12                                                                        |
+| S2 Docker sandboxing, each bot its own desktop with a browser     | CON-3, FR-15, FR-16, FR-17, NFR-2                                                   |
+| S2 act on the person's behalf                                     | FR-18, FR-24                                                                        |
+| S6 Q-1 bots in the phone app, cards answered there                | FR-14, FR-25, D-13                                                                  |
+| S6 Q-2 unattended sign-in                                         | FR-20, D-9                                                                          |
+| S6 Q-3 public web minus private ranges                            | NFR-4, D-7                                                                          |
+| S6 Q-4 Ask first, or Auto with the provider's own reviewer        | FR-1, D-11                                                                          |
+| S6 Q-5 Apple's container tool                                     | FR-26, D-14                                                                         |
+| S6 Q-6 payments and sending messages always confirm               | FR-24, D-12                                                                         |
+| S6 Q-7 a paired device can create a bot                           | FR-3, D-13                                                                          |
+| S7 match other bots without unnecessary friction                  | FR-18, FR-20, FR-27, FR-28, FR-29, FR-30, D-15 to D-23                              |
+| S7 Octant can edit AGENTS.md when asked                           | Outside this design (Lessons from review and the Architecture rule on agent briefs) |
+| S2 pass credentials safely                                        | FR-19, FR-20, FR-21, FR-22, NFR-3                                                   |
+| S3 per-bot memory                                                 | FR-8                                                                                |
+| S3 quick access from anywhere                                     | FR-23                                                                               |
+| S3 bots asking each other, group rooms, voice calls               | FR-27, FR-28                                                                        |
+| S3 a bot managing other bots, off by default                      | Later                                                                               |
+| S3 fallback providers when usage runs out                         | FR-29                                                                               |
+| S3 anti-pattern: full access by default                           | FR-1, D-11 (never Full access)                                                      |
+| S3 anti-pattern: shared folder or credential pool                 | D-1 (own home), D-8 (per-bot grants)                                                |
 
 ### Dependencies and conflicts
 
@@ -130,15 +137,28 @@ slice moves its rules into them and into
   answered there; D-13 opens approvals to paired devices for bot
   conversations only, and the Mobile section is updated in slice 8.
 
+- **Conflict: Full access never prompts.** Architecture says no class
+  still prompts at Full access. FR-24 (S6) makes paying and sending ask at
+  every level; D-20 records the exception, and slice 5 updates the rule.
+- **Conflict: Browser and Computer first asks.** Site approvals and the
+  first-action ask per app apply at every level today. In a bot's own
+  desktop, which holds nothing of the host's, D-16 waives both (S7).
+- **Conflict: routine targets and levels.** File-arrival and
+  integration-event routines accept only `new-thread`, and Full access
+  routines need an opt-in. D-18 lets bot routines use every Work trigger and
+  run at the bot's level.
+- **Work has no Plan.** Bot conversations are Work threads, so bots have no
+  Plan level; Plan rules in other specifications do not apply to them.
+- **Work can be turned off.** Bots run whether or not the Work mode is shown
+  (D-19).
+
 ## 2. Scope
 
-- **In:** FR-1 to FR-26, NFR-1 to NFR-10, CON-1 to CON-4.
+- **In:** FR-1 to FR-30, NFR-1 to NFR-10, CON-1 to CON-4.
 - **Out:** turning threads into bots or bots into threads (CON-2; maintainer,
   2026-11-08). An Octant-hosted cloud for bots (CON-4).
-- **Later:** bots asking each other by name and shared rooms with one task
-  owner at a time (after FR-9 proves the hand-off; Q-8); a bot that creates or
-  changes other bots; fallback providers when a plan's usage runs out; a voice
-  call with the lead bot; a desktop-edge dock outside the main window.
+- **Later:** a bot that creates or changes other bots; a desktop-edge dock
+  outside the main window.
 
 ## 3. Conceptual design
 
@@ -201,15 +221,15 @@ flowchart LR
 
 ### Components
 
-| Component        | Responsibility                                                                                                | Requirement IDs                                     |
-| ---------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Bot registry     | Owns bot definitions, the lead bot, defaults for new bots, pins and sections; creates and removes bots.       | FR-1–FR-4, FR-11, FR-12, NFR-9                      |
-| Bot conversation | Runs a bot's turns as an ordinary Work conversation in the bot's home, with the bot's tools turned on or off. | FR-5, FR-6, FR-8, FR-10, FR-23, FR-24, FR-25, NFR-1 |
-| Bot routines     | Routines owned by a bot whose runs post into its conversation.                                                | FR-7                                                |
-| Project grants   | Records which of the person's Projects a bot may start threads in; checked by the thread-starting tools.      | FR-9                                                |
-| Bot roster       | Client-side merged list of bots from every connected host, with status; rail, list and phone tab.             | FR-11–FR-14, NFR-7, NFR-8                           |
-| Bot computers    | Persistent desktops per bot through the desktop-provider seam, including the new container provider.          | FR-15–FR-17, FR-26, NFR-2, NFR-4–NFR-6, NFR-10      |
-| Login grants     | Which logins a bot may use, where, and whether unattended; performs fills through the credential broker.      | FR-18–FR-22, NFR-3                                  |
+| Component        | Responsibility                                                                                                | Requirement IDs                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Bot registry     | Owns bot definitions, the lead bot, defaults for new bots, pins and sections; creates and removes bots.       | FR-1–FR-4, FR-11, FR-12, FR-30, NFR-9                                    |
+| Bot conversation | Runs a bot's turns as an ordinary Work conversation in the bot's home, with the bot's tools turned on or off. | FR-5, FR-6, FR-8, FR-10, FR-23, FR-24, FR-25, FR-27, FR-28, FR-29, NFR-1 |
+| Bot routines     | Routines owned by a bot whose runs post into its conversation.                                                | FR-7                                                                     |
+| Project grants   | Records which of the person's Projects a bot may start threads in; checked by the thread-starting tools.      | FR-9                                                                     |
+| Bot roster       | Client-side merged list of bots from every connected host, with status; rail, list and phone tab.             | FR-11–FR-14, NFR-7, NFR-8                                                |
+| Bot computers    | Persistent desktops per bot through the desktop-provider seam, including the new container provider.          | FR-15–FR-17, FR-26, NFR-2, NFR-4–NFR-6, NFR-10                           |
+| Login grants     | Which logins a bot may use, where, and whether unattended; performs fills through the credential broker.      | FR-18–FR-22, NFR-3                                                       |
 
 ### Domain concepts
 
@@ -321,7 +341,7 @@ FR-20, NFR-2–NFR-5)
 4. The Browser tool reaches the desktop's browser through the host-only
    channel and loads the site through the egress proxy (NFR-4).
 5. The page asks for a sign-in. The turn calls the Browser sign-in operation.
-   Login grants find a grant for this bot and site with unattended use on,
+   Login grants find a grant for this bot and site (not set to Ask me each time),
    check the top-frame origin, read the secret through the broker, and fill
    it through the channel. The value never enters the turn (NFR-3). The fill
    is journaled as `login.used`.
@@ -374,16 +394,16 @@ FR-20, NFR-2–NFR-5)
 
 ### Risk register
 
-| Risk                                                                                                                                      | Response                                                                                                                                           |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A container shares the kernel of the engine's VM (macOS) or the host (Linux); an escape reaches more than a VM escape would.              | The hardening list in NFR-2; VM-backed providers (Cua, E2B, later Apple `container`) are offered as the stronger choice and said so in the picker. |
-| ASM-1 fails: Work needs a person-picked binding.                                                                                          | Slice 1 adds a host-managed binding kind for bot homes only.                                                                                       |
-| A site's own scripts read a filled password from the page.                                                                                | Stated in the grant dialog, as the Browser spec already states for 1Password fills.                                                                |
-| Unattended sign-in turns a prompt-injected page into account use.                                                                         | Unattended use is per login and off by default; the bot's access level still governs actions after sign-in; every use is journaled and shown.      |
-| Engine variety (Docker Desktop, OrbStack, Colima, Podman) behaves differently on networking.                                              | The conformance test runs per engine; an engine that fails NFR-2 or NFR-4 is refused with the reason.                                              |
-| Migrating Navigator from a Chat thread loses context.                                                                                     | D-2: the old conversation stays readable and is summarized into the new one's memory.                                                              |
-| A browsing bot loses its provider's reviewer after its first web page (injection gate), so Auto asks the person more often than expected. | Phone and paired-device answers (FR-25); Q-9 on Octant Shield as an opt-in.                                                                        |
-| The pay-or-send classifier misses a send button.                                                                                          | It asks whenever it cannot tell on a site the bot has not used before (D-12); its misses are reviewed as bugs.                                     |
+| Risk                                                                                                                         | Response                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A container shares the kernel of the engine's VM (macOS) or the host (Linux); an escape reaches more than a VM escape would. | The hardening list in NFR-2; VM-backed providers (Cua, E2B, later Apple `container`) are offered as the stronger choice and said so in the picker.                                                                                            |
+| ASM-1 fails: Work needs a person-picked binding.                                                                             | Slice 1 adds a host-managed binding kind for bot homes only.                                                                                                                                                                                  |
+| A site's own scripts read a filled password from the page.                                                                   | Stated in the grant dialog, as the Browser spec already states for 1Password fills.                                                                                                                                                           |
+| Unattended sign-in turns a prompt-injected page into account use.                                                            | A login works only on its own sites; the bot's access level still governs actions after sign-in; paying and sending always ask; every use is journaled and shown; Ask me each time is one switch away; removal takes effect at the next fill. |
+| Engine variety (Docker Desktop, OrbStack, Colima, Podman) behaves differently on networking.                                 | The conformance test runs per engine; an engine that fails NFR-2 or NFR-4 is refused with the reason.                                                                                                                                         |
+| Migrating Navigator from a Chat thread loses context.                                                                        | D-2: the old conversation stays readable and is summarized into the new one's memory.                                                                                                                                                         |
+| A browsing bot loses its provider's reviewer after its first web page (injection gate).                                      | Octant Shield takes over at Auto (D-17); Shield still escalates irreversible, publish and new-egress actions to the person.                                                                                                                   |
+| The pay-or-send classifier misses a send button, or asks too often.                                                          | Fixtures in English and Norwegian, misses reviewed as bugs; it asks only for actions it classifies (D-20).                                                                                                                                    |
 
 ## 5. Decisions
 
@@ -485,7 +505,7 @@ Consequences: logins may be kept in the system credential store as well as
 1Password; the agent's own typing into credential fields stays refused; a
 one-time code from 1Password is filled the same way.
 
-### D-9: Unattended sign-in only through a per-login, per-bot grant (Accepted, 2026-11-08)
+### D-9: Unattended sign-in only through a per-login, per-bot grant (Superseded by D-15)
 
 Context: routine turns refuse sign-in today; bots own routines (FR-7,
 FR-20).
@@ -507,7 +527,7 @@ Consequences: creating a bot asks which host it runs on when more than one is
 connected; a paired device may create one on any host it is paired with
 (D-13).
 
-### D-11: A new bot starts at Auto with its provider's own reviewer, otherwise Ask first (Accepted, 2026-11-08)
+### D-11: A new bot starts at Auto with its provider's own reviewer, otherwise Ask first (Superseded by D-17)
 
 Context: S6 Q-4. Auto (Reviewed) lets the provider's own reviewer answer
 approvals where the provider reports `harnessAutoReview` (Claude Code, Codex).
@@ -520,7 +540,7 @@ provider's reviewer is withdrawn and approvals go to the person, which FR-25
 lets them answer from the phone. Q-9 asks whether Octant Shield should cover
 that case.
 
-### D-12: Payments and sending messages always ask (Accepted, 2026-11-08)
+### D-12: Payments and sending messages always ask (Superseded by D-20)
 
 Context: S6 Q-6; FR-24. A bot acting on websites can pay, buy, or send as the
 person.
@@ -548,7 +568,7 @@ Consequences: remote route policy gains the bot create and card-answer routes
 with the device's grant; the Mobile section of Architecture is updated in
 slice 8; threads keep today's phone rules (CON-2).
 
-### D-14: Apple's container tool is the second local engine (Accepted, 2026-11-08)
+### D-14: Apple's container tool is the second local engine (Superseded by D-24)
 
 Context: S6 Q-5. On macOS 26 with Apple silicon, Apple's container tool runs
 each Linux container in its own lightweight VM, a stronger boundary than
@@ -563,6 +583,116 @@ per bot.
 Consequences: the picker lists it first on Macs where it runs, as the
 stronger boundary; the egress proxy and the conformance checks apply
 unchanged; image builds may need the engine's build network settings (ASM-5).
+
+### D-15: A login given to a bot is used without asking on its own sites (Accepted, 2026-11-08)
+
+Context: S7 asks for no unnecessary friction. D-9 kept unattended use off by
+default, and a review suggestion had every attended fill ask.
+Options: (a) ask on every fill; (b) unattended use as a separate switch, off
+by default; (c) giving the login is the permission: the bot uses it on that
+login's sites, attended or in routines, with Ask me each time per login.
+Choice: (c). Giving one login to one bot for named sites is a deliberate act,
+and the value never reaches the model either way.
+Consequences: the Browser's per-use Login permission, Review login form and
+Fill steps do not apply to a bot's own browser; routine turns may sign in
+with a given login; adding and giving logins stays local-window only (D-13).
+
+### D-16: No site approval and no first-action ask in a bot's own desktop (Accepted, 2026-11-08)
+
+Context: S7. Site approvals and the per-app first-action ask protect the
+person's own browser profiles and computer. A bot desktop holds no host
+credential, checkout or profile of the person's.
+Options: (a) keep both; (b) waive both inside a bot's own desktop.
+Choice: (b). The bot's access level, the egress proxy, the outside-content
+mark, and paying and sending (D-20) still apply. The person's own computer
+and browser profiles keep every current rule.
+Consequences: Browser for agents and Architecture's first-action rule gain
+this scope; a bot that uses the person's Mac through `octant_computer` still
+asks per app.
+
+### D-17: Bots at Auto use their provider's reviewer, then Octant Shield (Accepted, 2026-11-08)
+
+Context: S6 Q-4 chose Auto where the provider has its own reviewer and Ask
+first elsewhere; Q-9 asked about the injection gate withdrawing that reviewer.
+Options: (a) the person answers once the reviewer is withdrawn; (b) Octant
+Shield takes over.
+Choice: (b). A new bot starts at Auto when its provider has its own reviewer
+(Claude Code, Codex), else at Ask first, and the person can pick Auto with
+Octant Shield for any bot. When the provider's reviewer is withdrawn on a
+marked conversation, Shield answers; it still escalates irreversible, publish
+and new-egress actions to the person. Never Full access by default.
+Consequences: this matches Architecture's Reviewed level, where Shield may
+answer on a marked thread within its limits.
+
+### D-18: Bot routines run at the bot's level with every Work trigger (Accepted, 2026-11-08)
+
+Context: S7. The routine contract limits file-arrival and integration-event
+triggers to `new-thread` and needs an opt-in for Full access.
+Choice: a routine whose target is `bot-conversation` accepts every Work
+trigger and runs at the bot's access level, captured when the routine is
+saved and never wider than the bot's level at run time. Setting a bot to
+Full access is the person's opt-in for its routines.
+Consequences: the automation contract and Architecture's routine authority
+section change in slice 3.
+
+### D-19: Bots do not depend on the Work mode being shown (Accepted, 2026-11-08)
+
+Context: the Work mode can be turned off; bots run as Work conversations
+(D-1).
+Choice: bot homes and conversations work whether or not the Work mode is
+shown, and bot conversations notify like any thread (Needs you, finished),
+while staying out of Project and thread lists.
+Consequences: the Work-off checks exempt bot homes; notifications include
+bot conversations.
+
+### D-20: Paying and sending ask, at every level, only when classified (Accepted, 2026-11-08)
+
+Context: S6 Q-6 and S7. D-12 also asked whenever the classifier could not
+place a submit on a site the bot had not used, which adds friction.
+Choice: paying, buying, or sending a message as the person asks at every
+level, Full access and routines included, when the Browser or Computer
+classifies the action as such. Other actions follow the access level. The
+card can be answered from the phone in one tap (D-13).
+Consequences: Architecture's "no class still prompts at Full access" gains
+this one exception in slice 5.
+
+### D-21: A local bot desktop starts without a card (Accepted, 2026-11-08)
+
+Context: S7. Starting a container on this machine costs nothing and holds
+nothing of the person's.
+Choice: a bot's first Browser or Computer call starts its local desktop and
+notes it in the conversation. A billed or off-machine desktop still asks
+every time (NFR-10).
+
+### D-22: Bots ask each other and share rooms under the existing messaging limits (Accepted, 2026-11-08)
+
+Context: S3 and S7 ask for parity; Q-8 asked whether bot-to-bot requests need
+the person.
+Choice: a bot may message another bot on its host by name without asking the
+person, under the existing agent messaging and wake limits (at most six
+agent-started turns an hour per recipient, at most three rounds of agents
+answering each other). A room is a shared conversation with one owner at a
+time; a hand-off is a message. Each bot keeps its own level and tools.
+Consequences: a bot's request never grants the recipient more than its own
+level; the person sees every bot-to-bot message.
+
+### D-23: Bot desktops get their own engine port (Accepted, 2026-11-08)
+
+Context: the existing daemon port speaks gRPC-Web to one socket with small
+bounds; the Docker Engine API needs long attach streams, image builds and
+system sockets.
+Choice: a new capability port for container engines, added to the
+`desktop-provider` seam as its own step in slice 4, reaching only declared
+sockets and API paths.
+Consequences: container work for Code threads reuses it.
+
+### D-24: Apple's container tool runs the same desktop with no VNC port (Accepted, 2026-11-08)
+
+Context: D-14 said the desktop runs VNC inside the VM; the host-local desktop
+already carries frames and input over stdio.
+Choice: as D-14, except that the screen and input travel over the same stdio
+program as the other local desktops, and no VNC port is opened.
+Consequences: one screen protocol for every local engine.
 
 ## 6. Coverage
 
@@ -579,35 +709,39 @@ unchanged; image builds may need the engine's build network settings (ASM-5).
 | FR-13, FR-14 (web), FR-25 (web), NFR-7           | Show every bot           | Bot roster, Bot conversation    | 7     |
 | FR-14 (phone), FR-25 (phone)                     | Show every bot           | Bot roster, Bot conversation    | 8     |
 | FR-26                                            | Own computer             | Bot computers                   | 10    |
+| FR-30                                            | Define bots              | Bot registry                    | 2     |
+| FR-27                                            | Converse                 | Bot conversation                | 11    |
+| FR-28                                            | Converse                 | Bot conversation                | 12    |
+| FR-29                                            | Converse                 | Bot conversation                | 13    |
 | FR-9                                             | Delegate                 | Project grants                  | 9     |
 | NFR-1                                            | Cross-cutting            | All                             | every |
 
 ## 7. Build plan
 
-Slices 1 and 4 can run in parallel: they share no contract.
+Each slice may land as a short native stack of PRs. Maintainer checks are
+named where a slice needs a person, a device or an account.
 
-| Slice | What it delivers                                                                                                                                                                                                                              | Requirement IDs                                     | Status  |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------- |
-| 1     | Bot registry and home Projects; Navigator migrated to a Work conversation as the lead bot; the bot conversation as a content tab with the full transcript (streaming, Stop, cards, composer). This also fixes today's Navigator popover gaps. | FR-1, FR-2, FR-5, FR-6, FR-10, NFR-1, NFR-9         | Planned |
-| 2     | Rail bots group (pinned avatars with status, Navigator first, All bots), the bot list view, create (one sentence, template, form, defaults), delete, Quick ask.                                                                               | FR-3, FR-4, FR-11, FR-12, FR-23, NFR-8              | Planned |
-| 3     | Bot routines into the conversation; Memory tab.                                                                                                                                                                                               | FR-7, FR-8                                          | Planned |
-| 4     | Docker-compatible container provider with kept desktops, the Octant desktop image, egress proxy, caps and idle stop; a bot's Computer tab and Desktop tab. Starts with a measured prototype that fills in NFR-6.                              | FR-15, FR-16, NFR-2, NFR-4, NFR-5, NFR-6, NFR-10    | Planned |
-| 5     | A bot's Browser and Computer tools bound to its desktop through the host-only browser channel; a Bot browser profile in the volume.                                                                                                           | FR-17, FR-18, FR-24 (always-ask paying and sending) | Planned |
-| 6     | Logins (system store and 1Password), grants per bot and site, fill, Sign in needed with take-over, unattended use, revoke and clear browser data.                                                                                             | FR-19, FR-20, FR-21, FR-22, NFR-3                   | Planned |
-| 7     | Unified roster across hosts; the remote web shell serves the rail bots, the list and conversations.                                                                                                                                           | FR-13, FR-14 (web), FR-25 (web), NFR-7              | Planned |
-| 8     | Phone Bots tab with the same list and conversation. Bot cards answered on the phone; bot creation from the phone.                                                                                                                             | FR-3 (phone), FR-14 (phone), FR-25 (phone)          | Planned |
-| 9     | Project grants and starting or following threads in granted Projects.                                                                                                                                                                         | FR-9                                                | Planned |
-| 10    | Apple's container tool as a second local engine for bot desktops, with the same conformance checks.                                                                                                                                           | FR-26, ASM-5                                        | Planned |
+| Slice | What it delivers                                                                                                                                                                                                                                                                           | Requirement IDs                                  | Depends on                        | Status  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ | --------------------------------- | ------- |
+| 1     | Stack: (a) bot registry, home Projects, hiding, Navigator migration; (b) the bot conversation tab, the always-present Navigator entry, and `octant_app`.                                                                                                                                   | FR-1, FR-2, FR-5, FR-6, FR-10, NFR-1, NFR-9      | —                                 | Planned |
+| 2     | Stack: (a) delete with a teardown-step registry; (b) the bot details panel (Profile, Model and access, Tools); (c) rail bots and All bots; (d) New bot (describe, templates, form, defaults); (e) Quick ask.                                                                               | FR-3, FR-4, FR-11, FR-12, FR-23, FR-30, NFR-8    | 1                                 | Planned |
+| 3     | Bot routines into the conversation (every Work trigger, the bot's level); Routines and Memory tabs.                                                                                                                                                                                        | FR-7, FR-8                                       | 1, 2                              | Planned |
+| 4     | Stack: (a) measured prototype; (b) the kept capability in the seam, with its fake; (c) the container engine port; (d) the Docker-compatible driver, the desktop image shipped with the app, and the egress proxy; (e) the bot computer record, caps, idle stop, Computer and Desktop tabs. | FR-15, FR-16, NFR-2, NFR-4, NFR-5, NFR-6, NFR-10 | 1, 2                              | Planned |
+| 5     | A bot's Browser and Computer in its desktop, the Bot profile, no site approval or first-action ask there, paying and sending always ask.                                                                                                                                                   | FR-17, FR-18, FR-24                              | 3, 4                              | Planned |
+| 6     | Logins and grants, fill without asking on the login's sites, Ask me each time, Sign in needed with take-over, Logins tab.                                                                                                                                                                  | FR-19, FR-20, FR-21, FR-22, NFR-3                | 5                                 | Planned |
+| 7     | Every host's bots in one view; the paired browser; paired devices create and delete bots and answer bot cards.                                                                                                                                                                             | FR-13, FR-14 (web), FR-25 (web), NFR-7           | 2; 6 for the login-card criterion | Planned |
+| 8     | Phone Bots tab, bot cards, bot creation, pushes. Maintainer check: pushes on a real phone.                                                                                                                                                                                                 | FR-3 (phone), FR-14 (phone), FR-25 (phone)       | 7                                 | Planned |
+| 9     | Projects tab, and starting or following threads in granted Projects at the lower of the bot's level and the Project's default.                                                                                                                                                             | FR-9                                             | 2                                 | Planned |
+| 10    | Apple's container tool driver. Maintainer check: a macOS 26 Apple silicon Mac.                                                                                                                                                                                                             | FR-26, ASM-5                                     | 4                                 | Planned |
+| 11    | Bots ask each other by name; shared rooms with one task owner.                                                                                                                                                                                                                             | FR-27                                            | 2                                 | Planned |
+| 12    | Voice call with a bot; the lead bot speaks first.                                                                                                                                                                                                                                          | FR-28                                            | 2                                 | Planned |
+| 13    | Fallback model per bot when usage runs out or the provider fails.                                                                                                                                                                                                                          | FR-29                                            | 2                                 | Planned |
 
 ## 8. Open questions
 
-Q-1 to Q-7 were answered on 2026-11-08 (S6) and are written into FR-1, FR-3,
-FR-14, FR-20, FR-24 to FR-26, NFR-4 and D-7, D-9, D-11 to D-14.
-
-| ID  | Question                                                                                                                                                                                                                                                                                                                                     | Blocks                         | Asked of   |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------- |
-| Q-9 | When a bot's conversation is marked by web content, its provider's reviewer is withdrawn and approvals go to the person. Should Octant Shield answer them instead when the person picks it for that bot? Recommendation: offer it as an opt-in on the bot's Access tab; Shield already refuses irreversible, publish and new-egress actions. | Nothing in slices 1–3; slice 5 | Maintainer |
-| Q-8 | When bots can ask each other, should a bot's request to another bot need the person's approval? (Later.)                                                                                                                                                                                                                                     | Later                          | Maintainer |
+Every question is answered. Q-1 to Q-7 were answered on 2026-11-08 (S6) and
+are written into FR-1, FR-3, FR-14, FR-20, FR-24 to FR-26, NFR-4 and D-7,
+D-9, D-11 to D-14. Q-8 is answered by D-22 and Q-9 by D-17 (S7).
 
 ## 11. Codebase deltas and change log
 
@@ -624,8 +758,18 @@ FR-14, FR-20, FR-24 to FR-26, NFR-4 and D-7, D-9, D-11 to D-14.
 | Routine and subagent turns refuse sign-in (`sign-in-needs-a-person`); 1Password fill needs a person per use.                        | Slice 6 adds per-login grants (D-8, D-9).                                             |
 | The remote web shell does not serve the desktop sidebar or rail.                                                                    | Slice 7 serves the rail bots and the list.                                            |
 | The phone cannot answer approvals.                                                                                                  | Slices 7 and 8 let paired devices answer bot cards (D-13); threads keep today's rule. |
+| Full access never prompts (Architecture, Guardrail levels).                                                                         | Slice 5 adds the paying-and-sending exception (D-20).                                 |
+| Browser site approvals and the per-app first-action ask apply at every level.                                                       | Slice 5 waives both inside a bot's own desktop (D-16).                                |
+| The Browser's attended login fill asks per use.                                                                                     | Slice 6: a bot's given login fills without asking on its sites (D-15).                |
+| Routine targets limit file-arrival and integration-event triggers; Full access routines need an opt-in.                             | Slice 3 (D-18).                                                                       |
+| The Work mode can be turned off, which hides Work.                                                                                  | Slice 1 exempts bot homes (D-19).                                                     |
+| `DesktopDaemonPort` speaks gRPC-Web to one socket with small bounds.                                                                | Slice 4 adds an engine port (D-23).                                                   |
 
 ### Change log
+
+- 2026-11-08: plan review (S7): less friction and parity. D-15 to D-24;
+  D-9, D-11, D-12 and D-14 superseded; FR-27 to FR-30 and slices 11 to 13
+  added; slice dependencies corrected and stacks named; Q-8 and Q-9 answered.
 
 - 2026-11-08: approved with the maintainer's answers to Q-1 to Q-7 (S6):
   FR-24 to FR-26, D-11 to D-14, slice 10; FR-14 and FR-20 became Must;

@@ -2971,10 +2971,11 @@ A bot is a lasting, app-wide assistant on one host: a name, avatar, role, instru
 
 - A bot is not a fourth mode: its conversation is a Work thread in its own home Project, so it has a Work thread's tools and authority, and routines a bot owns post into that conversation.
 - Navigator moves to a Work conversation as the lead bot; it cannot be deleted, and it acts on its own within its access level.
-- A new bot starts at Auto where its provider has its own reviewer (Claude Code, Codex) and at Ask first otherwise; never at Full access.
-- Paying, buying, or sending a message as the person always asks, at every level and in routines.
+- A new bot starts at Auto where its provider has its own reviewer (Claude Code, Codex) and at Ask first otherwise; never at Full access. At Auto, Octant Shield answers once a web page withdraws the provider's reviewer.
+- Paying, buying, or sending a message as the person always asks, at every level and in routines, when the action is classified as such; inside a bot's own desktop there is no site approval and no first-action ask.
 - The sidebar rail shows pinned bots with their status; All bots lists every bot from every connected host; the paired browser and the phone show the same bots, may create bots and may answer bot cards, except billed desktop starts and login grants.
 - A bot desktop is kept between uses and runs in a Docker-compatible engine or Apple's container tool on this machine, or with E2B or Cua; it reaches the web only through a host proxy that refuses private and host addresses, and holds no host credential or checkout.
-- A bot signs in with logins the person gave it for their own sites; the host fills them into the bot's browser and the model never reads them. Unattended use is a per-login switch, off by default.
+- A bot signs in with logins the person gave it, only on those logins' sites and without asking, also in routines; the host fills them into the bot's browser and the model never reads them. Ask me each time is a per-login choice.
+- Bots ask each other by name and share rooms under the existing agent messaging limits; a person can call a bot by voice; a bot can carry on with a fallback model.
 
 Status: Designed, not built. Since: 2026-11-08. Detail: [Bots](bots.md).
