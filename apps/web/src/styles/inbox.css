@@ -59,8 +59,10 @@
   margin-bottom: var(--oct-space-4);
 }
 
-/* The agent's claim that waiting costs more soon, in the warning role. */
-.inbox-view__urgent {
+/* The agent's claim that waiting costs more soon, in the warning role. The
+   group head's count also carries .oct-meta, which would otherwise paint it grey. */
+.inbox-view__urgent,
+.inbox-view__urgent.oct-meta {
   color: var(--oct-warn-fg);
 }
 
