@@ -1013,6 +1013,17 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     return undefined;
   }
   if (
+    input.command.access !== undefined &&
+    (input.command.threadId !== undefined || input.command.last)
+  ) {
+    // An existing thread keeps its own level; running this prompt at another
+    // one than asked would be worse than refusing.
+    input.stderr.write(
+      "--access sets a new thread's level. To change an existing thread's level, use its mode picker.\n",
+    );
+    return undefined;
+  }
+  if (
     (input.command.threadId !== undefined || input.command.last) &&
     input.command.mode !== "chat"
   ) {

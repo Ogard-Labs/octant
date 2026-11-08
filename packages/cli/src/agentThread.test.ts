@@ -382,9 +382,8 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "refused" });
-    expect(
-      fake.workCommands().some((command) => command.kind === "change-work-thread-access"),
-    ).toBe(false);
+    // Refused before anything is created, so no stray thread is left behind.
+    expect(fake.workCommands()).toEqual([]);
   });
 
   it("refuses --access on a Chat thread", async () => {

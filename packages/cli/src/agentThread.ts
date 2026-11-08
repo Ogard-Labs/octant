@@ -724,6 +724,16 @@ export async function createAgentThread(
   });
   if (projectOpened.kind === "refused") return projectOpened;
   if (mode === "work") {
+    // Checked before anything is created, so a refused request leaves no
+    // thread behind.
+    const workAccess =
+      input.access === undefined ? undefined : workAccessOfPermissionMode(input.access);
+    if (input.access !== undefined && workAccess === undefined) {
+      return {
+        kind: "refused",
+        message: "--access plan is not a Work mode; Work has no Plan overlay.",
+      };
+    }
     const threadId = randomUUID();
     const response = await session.send({
       path: "/api/work/threads/commands",
@@ -749,14 +759,7 @@ export async function createAgentThread(
     if (!("kind" in created) || created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create the Work thread." };
     }
-    if (input.access !== undefined) {
-      const workAccess = workAccessOfPermissionMode(input.access);
-      if (workAccess === undefined) {
-        return {
-          kind: "refused",
-          message: "--access plan is not a Work mode; Work has no Plan overlay.",
-        };
-      }
+    if (workAccess !== undefined) {
       const changed = await session.send({
         path: "/api/work/threads/commands",
         method: "POST",
