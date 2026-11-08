@@ -156,10 +156,12 @@ def main():
     policy = root / "policy-broker"
     core_notes_binary = root / "core-notes"
     core_probe = root / "core-probe"
+    fileattr_workload = root / "fileattr-workload"
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
                            (repository / "scripts/linux-file-view/kernel_core_notes.c", core_notes_binary),
-                           (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe)):
+                           (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe),
+                           (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
     core_check = root / "core-notes-check"
     run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
@@ -186,6 +188,7 @@ def main():
         for runtime_path in runtime_files.values():
             run("ldd", str(runtime_path), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
+                   "fileattr-workload": fileattr_workload,
                    "core-notes": core_notes_binary, "core-probe": core_probe,
                    "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
@@ -224,6 +227,7 @@ def main():
     ordered = []
     runtime_receipts = []
     outside = []
+    fileattr_cases, fileattr_owners, fileattr_filesystems, fileattr_brokers = [], [], [], []
     probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
     for line in log.splitlines():
         if line.startswith("{"):
@@ -232,6 +236,14 @@ def main():
                 cases.append(value)
             elif value.get("status") == "measured-kernel-runtime":
                 runtime_receipts.append(value)
+            elif value.get("status") in ("measured-fileattr-broker", "failed-fileattr-broker"):
+                fileattr_brokers.append(value)
+        elif line.startswith("OCTANT_FILEATTR_CASE "):
+            fileattr_cases.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_FILEATTR_OWNER "):
+            fileattr_owners.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_FILEATTR_FILESYSTEM "):
+            fileattr_filesystems.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
             ordered.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
@@ -267,14 +279,26 @@ def main():
             len(retired) != 1 or retired[0].get("held") is not True or retired[0].get("retired") is not True):
         raise SystemExit("The actual CORE0/PROT_NONE probe, kernel pidfd, executable and prefix notes did not agree.")
     expected_modes = ["--metadata-control", "direct", "--bubblewrap", "--bubblewrap", "--bubblewrap",
-                      "--runtime-bun", "--runtime-node"]
-    if (len(processes) != 7 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
-            len(core_targets) != 7 or len(core_retirements) != 8 or
+                      "--runtime-bun", "--runtime-node", "--fileattr"]
+    if (len(processes) != 8 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
+            len(core_targets) != 8 or len(core_retirements) != 9 or
             {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes)} or
             any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
             any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True or
                 entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes)):
         raise SystemExit("Every captured PID must stay held until inactive-pipe retirement, with no tracer.")
+    if (len(fileattr_cases) != 1 or len(fileattr_owners) != 1 or len(fileattr_filesystems) != 1 or
+            len(fileattr_brokers) != 1 or fileattr_filesystems[0] != {"ext4": True, "baselineRead": True} or
+            any(fileattr_cases[0].get(field) is not True for field in
+                ("privateRefused", "publicChanged", "publicRestored", "permittedWrite")) or
+            fileattr_cases[0].get("privateErrno") != 13 or fileattr_cases[0].get("privateResult") != -1 or
+            any(fileattr_owners[0].get(field) is not True for field in
+                ("measured", "flagsUnchanged", "statUnchanged", "unchanged")) or
+            fileattr_brokers[0].get("status") != "measured-fileattr-broker" or
+            fileattr_brokers[0].get("actualBubblewrapBuilder") is not True or
+            fileattr_brokers[0].get("ownedCommandJoined") is not True or
+            fileattr_brokers[0].get("cleaned") is not True):
+        raise SystemExit("The ext4 flag mutation needs a private refusal, unchanged owner state and public positive controls.")
     expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",
                         "tmpfile", "empty-link", "rename", "bind-mount", "bind-remount"}
     if ("OCTANT_KERNEL_CPUS 2" not in log or len(outside) != len(expected_outside) or

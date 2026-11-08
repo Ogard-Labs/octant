@@ -800,7 +800,7 @@ static int core_probe_measure(void)
 static int policy_measure(const char *mode)
 {
   bool capture = !mode || !strcmp(mode, "--bubblewrap") ||
-    !strcmp(mode, "--runtime-bun") || !strcmp(mode, "--runtime-node");
+    !strcmp(mode, "--runtime-bun") || !strcmp(mode, "--runtime-node") || !strcmp(mode, "--fileattr");
   pid_t child = fork();
   if (!child) {
     char *arguments[] = {"/policy-broker", (char *)mode, NULL};
@@ -869,6 +869,7 @@ int main(void)
     }
     if (!result) result = policy_measure("--runtime-bun");
     if (!result) result = policy_measure("--runtime-node");
+    if (!result) result = policy_measure("--fileattr");
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

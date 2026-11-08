@@ -90,7 +90,9 @@ const runtime =
       ? "node"
       : undefined;
 const capsule = process.argv[2] === "--bubblewrap" || runtime !== undefined;
-const root = "/tmp/octant-policy-broker";
+const fileattr = process.argv[2] === "--fileattr";
+const workload = fileattr ? "/fileattr-workload" : "/policy-workload";
+const root = fileattr ? "/octant-fileattr" : "/tmp/octant-policy-broker";
 const home = `${root}/home`;
 const key = `${home}/.ssh/deployment`;
 const owner = new AbortController();
@@ -110,16 +112,17 @@ try {
   // after it prepares startup covers, then change the companion during the run.
   // This measures the absent-file gap rather than an already-present mask.
   process.env.HOME = home;
-  const launch = capsule
-    ? buildBubblewrapLaunch({
-        executable: runtime === undefined ? "/policy-workload" : `/usr/bin/${runtime}`,
-        args: runtime === undefined ? [] : [`${root}/runtime.mjs`, root],
-        boundRoot: root,
-        temporaryDirectory: `${root}/tmp`,
-        networkEgress: "none",
-        ownAccountAccess: "none",
-      })
-    : { command: "/policy-workload", args: [] };
+  const launch =
+    capsule || fileattr
+      ? buildBubblewrapLaunch({
+          executable: runtime === undefined ? workload : `/usr/bin/${runtime}`,
+          args: runtime === undefined ? [] : [`${root}/runtime.mjs`, root],
+          boundRoot: root,
+          temporaryDirectory: `${root}/tmp`,
+          networkEgress: "none",
+          ownAccountAccess: "none",
+        })
+      : { command: workload, args: [] };
   await writeFile(key, "synthetic original-policy bytes", { mode: 0o600 });
   await link(key, `${root}/alias`);
   await writeFile(`${root}/ordinary`, "permitted before", { mode: 0o600 });
@@ -176,8 +179,10 @@ try {
   ended = await running;
   metadataVerified =
     runtime !== undefined ||
-    spawnSync("/policy-workload", ["--verify-metadata"], { stdio: "inherit", timeout: 2_000 })
-      .status === 0;
+    spawnSync(workload, [fileattr ? "--verify-fileattr" : "--verify-metadata"], {
+      stdio: "inherit",
+      timeout: 2_000,
+    }).status === 0;
   result =
     ready &&
     ended.status === "exited" &&
@@ -200,11 +205,17 @@ try {
 result = result && cleaned;
 console.log(
   JSON.stringify({
-    status: result ? "measured-original-policy-broker" : "failed",
+    status: fileattr
+      ? result
+        ? "measured-fileattr-broker"
+        : "failed-fileattr-broker"
+      : result
+        ? "measured-original-policy-broker"
+        : "failed",
     ended,
     productionReady: false,
     lateCompanion: ready,
-    actualBubblewrapBuilder: capsule,
+    actualBubblewrapBuilder: capsule || fileattr,
     runtime: runtime ?? "native",
     ...(runtime === undefined ? { metadataUnchanged: metadataVerified } : {}),
     ownedCommandJoined: ended?.status === "exited",
