@@ -61,6 +61,25 @@ describe("the sandbox at Full access in the mode picker", () => {
     expect(item).toHaveTextContent("can't keep the sandbox");
   });
 
+  it("lets an inherited sandbox be turned off on a provider that cannot keep it", async () => {
+    const onFullAccessSandboxChange = vi.fn();
+    render(
+      <PermissionModePicker
+        autoSupported
+        onChange={() => undefined}
+        onFullAccessSandboxChange={onFullAccessSandboxChange}
+        fullAccessSandbox
+        fullAccessSandboxSupported={false}
+        value="full-access"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Mode" }));
+    const item = await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ });
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(item);
+    expect(onFullAccessSandboxChange).toHaveBeenCalledWith(false);
+  });
+
   it("offers no sandbox choice below Full access", async () => {
     render(
       <PermissionModePicker

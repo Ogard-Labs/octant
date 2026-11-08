@@ -2406,7 +2406,16 @@ export function threadWithActiveTurnPosture(
     requested: active.thread.executionPolicy,
     thread: thread.executionPolicy,
   });
-  return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+  // A turn that started sandboxed stays sandboxed: turning the sandbox off
+  // takes effect from the next turn, as a wider posture does.
+  const keepsSandbox =
+    active.thread.fullAccessSandbox === true && thread.fullAccessSandbox !== true;
+  if (executionPolicy === thread.executionPolicy && !keepsSandbox) return thread;
+  return {
+    ...thread,
+    executionPolicy,
+    ...(keepsSandbox ? { fullAccessSandbox: true } : {}),
+  };
 }
 
 /** The Code thread whose running turn holds this provider session, if any. */

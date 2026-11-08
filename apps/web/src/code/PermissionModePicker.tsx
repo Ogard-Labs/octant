@@ -212,7 +212,13 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   <OctantMenuCheckboxItem
                     aria-describedby={`${idPrefix}-sandbox-note`}
                     checked={props.fullAccessSandbox === true}
-                    disabled={props.disabled === true || !sandboxSupported}
+                    // Turning the sandbox on is refused where the runtime can't
+                    // keep it; turning an inherited one off is always allowed,
+                    // because that is what a refused turn asks the person to do.
+                    disabled={
+                      props.disabled === true ||
+                      (!sandboxSupported && props.fullAccessSandbox !== true)
+                    }
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
                       props.onFullAccessSandboxChange?.(checked === true);

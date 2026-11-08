@@ -443,6 +443,7 @@ export function startOctantServer(
     });
     const {
       runningWorkTurnAccess,
+      runningWorkTurnSandbox,
       runningWorkTurns,
       workRequestRuntime,
       workRequestService,
@@ -581,6 +582,7 @@ export function startOctantServer(
       persistence,
       providerDataDirectory,
       runningWorkTurnAccess,
+      runningWorkTurnSandbox,
       sideTasks,
       threadFollowUpSuggestions,
       toolEgressRules,

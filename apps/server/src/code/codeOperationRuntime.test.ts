@@ -3552,6 +3552,27 @@ describe("CodeOperationRuntime", () => {
     expect(threadWithActiveTurnPosture(plan, activeTurns)).toEqual(
       fixture.runtime.threadWithActiveTurnPosture?.(plan),
     );
+    // A turn that started sandboxed keeps the sandbox when it is turned off
+    // mid-turn; the change takes effect from the next turn.
+    const started = activeTurns.get(String(threadId));
+    if (started !== undefined) {
+      activeTurns.set(String(threadId), {
+        ...started,
+        thread: decodeCodeThread({
+          ...started.thread,
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+          fullAccessSandbox: true,
+        }),
+      });
+      const openNow = decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      });
+      expect(threadWithActiveTurnPosture(openNow, activeTurns).fullAccessSandbox).toBe(true);
+      activeTurns.set(String(threadId), started);
+    }
     await fixture.runtime.execute(windowId, {
       kind: "cancel-provider-turn",
       operationId: operationId(906),

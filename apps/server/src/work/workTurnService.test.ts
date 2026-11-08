@@ -966,6 +966,32 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("starts a sandboxed Full access turn with the sandbox, and records it for the turn's commands", async () => {
+    const release = deferred<void>();
+    const seen: Array<unknown> = [];
+    const runningAccess: RunningWorkTurnAccess = new Map();
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      fullAccessSandbox: true,
+      runningAccess,
+      turnRuntime: {
+        run: async (input) => {
+          seen.push(
+            input.fullAccessSandbox,
+            runningAccess.get(String(ids.thread))?.fullAccessSandbox,
+          );
+          await release.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+    release.resolve();
+    await fixture.waitForIdle();
+    expect(seen).toEqual([true, true]);
+  });
+
   it("offers the runtime's artifact tool only to a thread that chose it, and keeps Canvas for the rest", async () => {
     const seen: Array<{ readonly nativeArtifacts: boolean; readonly context: string }> = [];
     for (const documentDelivery of [undefined, "canvas", "native-artifacts"] as const) {
@@ -5217,6 +5243,7 @@ function serviceFixture(
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly threadAccess?: WorkAccess;
+    readonly fullAccessSandbox?: boolean;
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
@@ -5344,6 +5371,7 @@ function serviceFixture(
         bindingRevisionId: ids.binding,
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
+        ...(options.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
         ...(options.documentDelivery === undefined
           ? {}
