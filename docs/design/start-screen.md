@@ -391,9 +391,9 @@ with a count of 0, and its list says so in one line. Only All also shows the
 assigned GitHub and Linear work, and a due follow-up shows under All only. The
 waiting items are grouped under their Project (a folder mark, the Project name,
 its count, and "N urgent" when any), with waits that belong to no Project under
-"No Project". A group holding an urgent item comes first, then the group that
+"No Project". A group holding an urgent item that is not deferred comes first, then the group that
 has waited longest; inside a group urgent items lead, then the oldest, then
-deferred ones. The choice lives in the open Inbox and is not remembered. A
+deferred ones, urgent or not. The choice lives in the open Inbox and is not remembered. A
 finished turn is never counted by the Inbox's tile or the dock badge, and All
 does not list it; it belongs to To review (the Finished chip is the one place the
 Inbox lists it), and its one-shot banner is unchanged. The list is read at a local

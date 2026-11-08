@@ -243,4 +243,23 @@ describe("groupInboxByProject", () => {
       "deferred",
     ]);
   });
+
+  it("drops a deferred urgent wait below the active ones and lets it lead no group", () => {
+    const groups = groupInboxByProject(
+      [
+        item({
+          key: "deferred-urgent",
+          projectKey: "p1",
+          since: 5000,
+          urgent: true,
+          deferred: true,
+        }),
+        item({ key: "active", projectKey: "p1", since: 3000 }),
+        item({ key: "older-project", projectKey: "p2", since: 1000 }),
+      ],
+      names,
+    );
+    expect(groups.map((group) => group.name)).toEqual(["Beta", "Alpha"]);
+    expect(groups[1]?.items.map((entry) => entry.key)).toEqual(["active", "deferred-urgent"]);
+  });
 });
