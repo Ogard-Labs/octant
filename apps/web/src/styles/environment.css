@@ -843,7 +843,7 @@ html[data-octant-increased-contrast="true"] .environment-card__rows {
   height: 4px;
   overflow: hidden;
   background: var(--environment-tile-fill);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
 }
 
 .environment-move__bar > span {
